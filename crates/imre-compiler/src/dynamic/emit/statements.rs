@@ -457,18 +457,6 @@ impl<'p> Function<'_, 'p> {
                 self.mixed_class_definition(class);
                 continue;
             }
-            if let Some(operation) = self.source.namespace_operations.get(&stmt.range()) {
-                let value = self.registered_value(operation);
-                if let crate::ir::ExprKind::Builtin(
-                    crate::ir::Builtin::RegisteredTypeAlias(site),
-                    _,
-                ) = &operation.kind
-                {
-                    self.frame
-                        .bind(&self.source.type_aliases[site].name, &value);
-                }
-                continue;
-            }
             if !stmt.is_assign_stmt()
                 && let Some(effect) = crate::frontend::attribute_write(stmt)
             {
@@ -482,7 +470,6 @@ impl<'p> Function<'_, 'p> {
                 continue;
             }
             match stmt {
-                ast::Stmt::Pass(_) | ast::Stmt::Global(_) | ast::Stmt::Nonlocal(_) => {}
                 ast::Stmt::AnnAssign(v) => {
                     if let Some(value) = &v.value {
                         let value = self.expr(value);

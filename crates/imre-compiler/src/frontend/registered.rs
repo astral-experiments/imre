@@ -2648,7 +2648,13 @@ impl SourceScope<'_> {
             }
             return self.statement(stmt, body);
         }
-        if stmt.is_return_stmt()
+        if self.operations.contains_key(&stmt.range())
+            || matches!(
+                stmt,
+                ast::Stmt::Pass(_) | ast::Stmt::Global(_) | ast::Stmt::Nonlocal(_)
+            )
+            || stmt.is_class_def_stmt()
+            || stmt.is_return_stmt()
             || stmt.is_expr_stmt()
             || stmt.is_delete_stmt()
             || stmt
