@@ -46,8 +46,8 @@ impl Function<'_, '_> {
         } else {
             crate::frontend::registered_value(expr, source)
         }?;
-        let sites = self.prepare_checked_value(&value);
-        Some(self.frame.registered_expression(&value, &sites, condition))
+        self.prepare_checked_value(&value);
+        Some(self.frame.registered_expression(&value, &self.sites, condition))
     }
 
     pub(super) fn with_expression_range(
