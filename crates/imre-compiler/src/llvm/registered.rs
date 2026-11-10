@@ -186,6 +186,7 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
                 uses_python_protocol = true;
                 args.len() == 2
             }
+            ExprKind::Builtin(Builtin::RegisteredInput(_), args) => args.is_empty(),
             ExprKind::Builtin(Builtin::RegisteredStatement(..) | Builtin::RegisteredDiscard, _) => {
                 true
             }
@@ -349,18 +350,27 @@ pub(crate) fn emit_prepared_suite<'a, 'p>(
     owner: &mut dyn PreparedSuiteEmitter<'a, 'p>,
     suite: &'p crate::frontend::RegisteredSuite,
 ) {
-    let Some(enclosing) = owner.enter_checked_slots(suite.checked.region()) else {
+    emit_checked_region(owner, &suite.checked, &suite.residual, FrameInputs::Handles(&[]));
+}
+
+fn emit_checked_region<'a, 'p>(
+    owner: &mut dyn PreparedSuiteEmitter<'a, 'p>,
+    checked: &'p RegisteredFunction,
+    steps: &'p [crate::frontend::SuiteOperation],
+    inputs: FrameInputs<'_, 'p>,
+) {
+    let Some(enclosing) = owner.enter_checked_slots(checked.region()) else {
         return;
     };
     let mut frame = Frame {
         code: FrameOwner::Prepared(owner),
-        names: Some(&suite.checked.local_names),
-        inputs: FrameInputs::Handles(&[]),
+        names: Some(&checked.local_names),
+        inputs,
         fixed_sites: None,
     };
-    let body = &suite.checked.function.body;
+    let body = &checked.function.body;
     let mut offset = 0;
-    for step in &suite.residual {
+    for step in steps {
         frame.checked_statements(&body[offset..step.at]);
         offset = step.at;
         if !frame.next_statement() {
@@ -518,7 +528,6 @@ impl<'f, 'a, 'p> Frame<'f, 'a, 'p> {
         inputs: &[crate::frontend::PhysicalOperand],
     ) {
         let mut statement_frame = self.reborrow();
-        statement_frame.names = None;
         statement_frame.inputs = FrameInputs::Statement(inputs);
         CheckedBody::registered(statement_frame).emit_statement(statement);
     }
@@ -527,13 +536,7 @@ impl<'f, 'a, 'p> Frame<'f, 'a, 'p> {
         owner: &'f mut dyn PreparedSuiteEmitter<'a, 'p>,
         region: &'p crate::frontend::PreparedRegion,
     ) {
-        let mut frame = Self {
-            code: FrameOwner::Prepared(owner),
-            names: None,
-            fixed_sites: None,
-            inputs: FrameInputs::Region(region),
-        };
-        frame.emit_suite(&region.body);
+        emit_checked_region(owner, &region.checked, &[], FrameInputs::Region(region));
     }
 
     /// Bind the owned occurrence slots used by the checked operation.
@@ -699,25 +702,32 @@ impl Frame<'_, '_, '_> {
     }
 
     pub(super) fn bound_condition(&mut self, expr: &Expr) -> Option<String> {
-        let (FrameInputs::Region(region), ExprKind::Local(slot)) = (self.inputs, &expr.kind) else {
+        let ExprKind::Builtin(Builtin::RegisteredInput(index), _) = &expr.kind else {
             return None;
         };
-        Some(prepared_condition(
-            self.code.prepared_owner(),
-            &region.guards[*slot],
-        ))
+        Some(self.registered_input(*index, true))
+    }
+
+    fn registered_input(&mut self, index: usize, condition: bool) -> String {
+        let operand = match self.inputs {
+            FrameInputs::Statement(inputs) => &inputs[index],
+            FrameInputs::Region(region) => &region.operands[index],
+            _ => unreachable!("bound operand outside its owning checked region"),
+        };
+        let owner = self.code.prepared_owner();
+        if condition {
+            prepared_condition(owner, operand)
+        } else {
+            emit_physical_operand(owner, operand)
+        }
     }
 
     pub(crate) fn lookup_local(&mut self, slot: usize) -> String {
         match self.inputs {
-            FrameInputs::Region(_) => unreachable!("control region slots are tested as conditions"),
-            FrameInputs::Handles([]) => {}
+            FrameInputs::Region(_) | FrameInputs::Statement(_) | FrameInputs::Handles([]) => {}
             FrameInputs::Handles(inputs) => return inputs[slot].clone(),
             FrameInputs::Prepared(inputs) => {
                 return emit_operand(self.code.prepared(), inputs.operand(slot), false);
-            }
-            FrameInputs::Statement(inputs) => {
-                return emit_physical_operand(self.code.prepared(), &inputs[slot]);
             }
         }
         if self
@@ -1076,6 +1086,7 @@ impl Frame<'_, '_, '_> {
 
     pub(crate) fn builtin(&mut self, op: &Builtin, operands: &[Expr]) -> CheckedValue {
         let handle = match (op, operands) {
+            (Builtin::RegisteredInput(index), []) => self.registered_input(*index, false),
             (op, args) if let Some(iteration) = op.iteration_operands(args) => {
                 use ir::IterationOperands::*;
                 match iteration.expect("checked iteration operands") {

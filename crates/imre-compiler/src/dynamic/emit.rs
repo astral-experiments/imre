@@ -2017,7 +2017,7 @@ mod tests {
             panic!("expected the prepared while");
         };
         assert!(matches!(
-            region.body.as_slice(),
+            region.checked.function.body.as_slice(),
             [crate::ir::Statement::While(..)]
         ));
         let suite = &mut region.suites[0];
@@ -2043,7 +2043,7 @@ mod tests {
             panic!("expected the if at the start of the while body");
         };
         use crate::ir::{Builtin, ExprKind, Statement};
-        let [Statement::Expr(mark), Statement::If(..)] = branch.body.as_slice() else {
+        let [Statement::Expr(mark), Statement::If(..)] = branch.checked.function.body.as_slice() else {
             panic!("expected the checkpoint and checked conditional");
         };
         assert!(matches!(&mark.kind,
@@ -3434,11 +3434,11 @@ mod tests {
         let Ok(SourceEffect::Region(branch)) = &run.effect else {
             panic!("expected a prepared conditional");
         };
-        assert!(matches!(branch.body.as_slice(),
+        assert!(matches!(branch.checked.function.body.as_slice(),
             [_, Statement::If(_, _, no)] if matches!(no.as_slice(), [Statement::If(..)])
         ));
         assert!(matches!(
-            branch.guards.as_slice(),
+            branch.operands.as_slice(),
             [PhysicalOperand::Checked(_), PhysicalOperand::Residual(_)]
         ));
         let [first, middle, last] = branch.suites.as_slice() else {
@@ -3465,9 +3465,9 @@ mod tests {
             PhysicalOperand::Checked(Box::new(value))
         };
         let (guard, child) = (checked_none(), checked_none());
-        let saved = std::mem::replace(&mut region(&mut prepared).guards[1], guard);
+        let saved = std::mem::replace(&mut region(&mut prepared).operands[1], guard);
         assert_ne!(prepared.standalone().unwrap(), original);
-        region(&mut prepared).guards[1] = saved;
+        region(&mut prepared).operands[1] = saved;
         assert_eq!(prepared.standalone().unwrap(), original);
 
         let [run] = region(&mut prepared).suites[1].residual.as_mut_slice() else {
@@ -3484,7 +3484,7 @@ mod tests {
         assert_ne!(changed_child, original);
 
         // Removing the checked If disconnects all three still-bound child suites.
-        region(&mut prepared).body.pop();
+        region(&mut prepared).checked.function.body.pop();
         assert_ne!(prepared.standalone().unwrap(), changed_child);
     }
 
@@ -4886,7 +4886,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             assert!(module.standalone().unwrap() == original);
 
             fn else_block(region: &mut PreparedRegion) -> &mut Vec<Statement> {
-                let [Statement::While(_, _, otherwise)] = region.body.as_mut_slice() else {
+                let [Statement::While(_, _, otherwise)] = region.checked.function.body.as_mut_slice() else {
                     panic!("expected checked While with its ordered suites");
                 };
                 otherwise
@@ -4898,7 +4898,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             assert!(!residual.is_empty());
             assert!(module.standalone().unwrap() != original);
             region(&mut module).suites[0].residual = residual;
-            match &mut region(&mut module).guards[0] {
+            match &mut region(&mut module).operands[0] {
                 PhysicalOperand::Checked(operand) if checked => {
                     operand.value = crate::ir::Expr::integer(0);
                 }
@@ -4942,9 +4942,9 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             panic!("expected the prepared while");
         };
         assert!(
-            matches!(region.guards.as_slice(), [PhysicalOperand::Residual(test)] if test.range == guard_range)
+            matches!(region.operands.as_slice(), [PhysicalOperand::Residual(test)] if test.range == guard_range)
         );
-        let [crate::ir::Statement::While(condition, _, _)] = region.body.as_mut_slice() else {
+        let [crate::ir::Statement::While(condition, _, _)] = region.checked.function.body.as_mut_slice() else {
             panic!("expected the checked loop");
         };
         *condition = crate::ir::Expr::boolean(false);

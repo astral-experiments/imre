@@ -693,6 +693,7 @@ impl Builtin {
             | Self::RegisteredGenerator(..)
             | Self::RegisteredTypeAlias(_)
             | Self::RegisteredSuite(_)
+            | Self::RegisteredInput(_)
             | Self::RegisteredStatement(..)
             | Self::RegisteredDiscard
             | Self::RegisteredName(_)

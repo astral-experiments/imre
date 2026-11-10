@@ -697,6 +697,14 @@ impl Expr {
         }
     }
 
+    /// Read an operand at its original evaluation point in a prepared statement or region.
+    pub(crate) fn registered_input(index: usize, ty: Type) -> Self {
+        Self {
+            ty,
+            kind: ExprKind::Builtin(Builtin::RegisteredInput(index), Vec::new()),
+        }
+    }
+
     pub(crate) fn none() -> Self {
         Self {
             ty: Type::None,
@@ -2069,6 +2077,8 @@ pub(crate) enum Builtin {
     RegisteredStatement(ruff_text_size::TextRange, Option<ruff_text_size::TextRange>),
     /// Emit the ordered child suite bound at this index in a prepared control region.
     RegisteredSuite(usize),
+    /// The owning checked statement or region supplies this deferred operand.
+    RegisteredInput(usize),
     /// Evaluate each operand for its effects and release it before evaluating the next.
     RegisteredDiscard,
     /// The source position in effect while this registered operand is evaluated.
