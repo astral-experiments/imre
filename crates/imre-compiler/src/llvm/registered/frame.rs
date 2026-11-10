@@ -1462,6 +1462,17 @@ impl<'a, 'p, T> FrameEmitter<'a, 'p> for T where
 }
 
 impl RegisteredFrame<'_, '_> {
+    pub(crate) fn delete_name(&mut self, name: &str, range: TextRange) -> String {
+        let name = self.code_name(name);
+        let (line, start) = self.positions.line_and_column(range.start());
+        let (_, end) = self.positions.line_and_column(range.end());
+        self.op_at(
+            "delname",
+            &[&self.scope.clone(), &name],
+            Some([line, start, start, end]),
+        )
+    }
+
     pub(crate) fn declare_global(&mut self, name: &str) {
         let name = self.code_name(name);
         self.op("declare_global", &[&self.scope.clone(), &name]);
