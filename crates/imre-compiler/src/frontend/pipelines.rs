@@ -777,6 +777,9 @@ impl Checker<'_> {
             && self.class_reference(&attribute.value).is_none()
         {
             let raw = self.expr(&attribute.value)?;
+            if raw.ty == Type::PythonObject {
+                return self.object_method_iteration(call, raw).map(Some);
+            }
             if let Type::Class(class) = raw.ty {
                 let iterable = self.iteration_method_call(call, attribute, class, raw)?;
                 return self.iteration_value(iterable, false, call).map(Some);

@@ -4480,6 +4480,16 @@ impl<'a> Checker<'a> {
         })
     }
 
+    /// An object can override the view method and return any iterable.
+    fn object_method_iteration(
+        &mut self,
+        call: &ast::ExprCall,
+        receiver: Expr,
+    ) -> Result<Iteration, String> {
+        let value = self.call_on(call, Some(receiver))?;
+        self.iteration_value(value, false, call)
+    }
+
     /// Recognizes items views only at a loop boundary; no view value escapes.
     fn iteration_source(&mut self, expression: &ast::Expr) -> Result<Iteration, String> {
         if let ast::Expr::Call(call) = expression
@@ -4488,6 +4498,9 @@ impl<'a> Checker<'a> {
             && self.class_reference(&attribute.value).is_none()
         {
             let receiver = self.expr(&attribute.value)?;
+            if receiver.ty == Type::PythonObject {
+                return self.object_method_iteration(call, receiver);
+            }
             if let Type::Class(class) = receiver.ty {
                 let value = self.iteration_method_call(call, attribute, class, receiver)?;
                 return self.iteration_value(value, false, expression);
