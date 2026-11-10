@@ -1740,6 +1740,61 @@ mod tests {
     }
 
     #[test]
+    fn prepared_output_owns_binary_operands_after_erasure() {
+        assert_prepared_binary_output(
+            "async def difference():\n    return (await pause() - 1) - await right()\n",
+        );
+        assert_prepared_binary_output(
+            "def difference():\n    return ((yield pause()) - 1) - (yield from right())\n",
+        );
+    }
+
+    fn assert_prepared_binary_output(source: &str) {
+        use crate::ir::{Builtin, ExprKind, Statement, SuspendValue};
+
+        let mut prepared = PreparedBody::module(
+            "worker",
+            Path::new("worker.py"),
+            source,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let original = prepared.standalone().unwrap().unwrap();
+        let function = prepared.syntax.as_mut().unwrap().to_mut()[0]
+            .as_function_def_stmt_mut()
+            .unwrap();
+        let plan = &prepared.source.function_bodies[&function.start()];
+        let ret = function.body[0].as_return_stmt_mut().unwrap();
+        let value = ret.value.as_deref_mut().unwrap();
+        assert!(plan.fully_checked());
+        crate::verify::registered(plan.checked.region()).unwrap();
+        let Some(Statement::Return(result)) = plan.checked.function.body.last() else {
+            panic!("expected checked return");
+        };
+        let mut binary = 0;
+        let mut suspensions = Vec::new();
+        crate::ir::walk_operand_expressions(result, &mut |expr| match expr.kind {
+            ExprKind::Binary(..) => binary += 1,
+            ExprKind::Builtin(Builtin::RegisteredSuspend(kind, _), _) => {
+                suspensions.push(kind);
+            }
+            _ => {}
+        });
+        assert_eq!(binary, 2);
+        assert!(matches!(
+            (function.is_async, suspensions.as_slice()),
+            (true, [SuspendValue::Await, SuspendValue::Await])
+                | (false, [SuspendValue::Yield, SuspendValue::Delegate])
+        ));
+        *value = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
+            range: value.range(),
+            node_index: Default::default(),
+        });
+        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+    }
+
+    #[test]
     fn residual_with_reads_its_prepared_manager_after_erasing_the_call() {
         let text = "def read(open_stream, path, record):\n    with open_stream(path) as stream:\n        record(stream)\n";
         let mut prepared = PreparedBody::module(

@@ -1274,9 +1274,20 @@ impl<'a> SuitePreparation<'a> {
         let mut residual: Vec<SourceRun> = Vec::new();
         for (i, stmt) in stmts.iter().enumerate() {
             let slots_before = scope.locals.len();
-            let lowered = match select {
-                SuiteSelection::All => scope.statement(stmt, &mut body),
-                SuiteSelection::Physical => scope.physical_statement(stmt, &mut body),
+            let checked_output = match stmt {
+                ast::Stmt::Return(ret) => ret.value.as_deref(),
+                ast::Stmt::Expr(effect) => Some(effect.value.as_ref()),
+                _ => None,
+            }
+            .is_some_and(|value| value.is_bin_op_expr() || value.is_subscript_expr());
+            let lowered = match (select, checked_output) {
+                // A return or discard owns its complete operand in this activation,
+                // including values that must survive a later await.
+                (_, true) if matches!(kind, RegisteredScope::Function { .. }) => {
+                    scope.with_suspending_operands(|scope| scope.statement(stmt, &mut body))
+                }
+                (SuiteSelection::Physical, false) => scope.physical_statement(stmt, &mut body),
+                _ => scope.statement(stmt, &mut body),
             };
             if lowered.is_ok() {
                 continue;
