@@ -2,7 +2,7 @@ use crate::frontend::{PhysicalOperand, SourceEffect, SourceGuard};
 mod declarations;
 use super::sites::{CompiledDefinition, CompiledProvider};
 
-use super::{AnnotationScope, FrameEmitter};
+use super::{AnnotationScope, FrameEmitter, Output, RegisteredFrame, SourceMap};
 use crate::ir::Statement;
 use crate::llvm::registered::Place;
 use crate::llvm::registered::context::{ContextEmitter, ContextRegion};
@@ -23,6 +23,59 @@ impl<'a, 'p> ContextEmitter<'a, 'p> for Function<'a, 'p> {
             unreachable!("active context region")
         };
         (context, outer)
+    }
+}
+
+impl SourceMap<'_> {
+    /// Publish a module's provider before its first statement. Every simple
+    /// annotation, including an unconditional one, becomes visible only after
+    /// execution reaches its assignment.
+    pub(super) fn define_module_annotations(
+        &self,
+        frame: &mut RegisteredFrame<'_, '_>,
+        sites: &[TextSize],
+    ) {
+        let entries: Vec<_> = sites
+            .iter()
+            .enumerate()
+            .map(|(index, site)| crate::ir::AnnotationOccurrence {
+                site: *site,
+                index: Some(index),
+            })
+            .collect();
+        let signature = frame.text(
+            &json!({
+                "posonly": ["format"], "scope_complete": true, "scope_locals_complete": true,
+                "code_flags": self.function_flags(None, false, false),
+            })
+            .to_string(),
+        );
+        let code = self.annotation_body(frame.output, &entries, None, self.module_start);
+        let name = frame.text("__annotate__");
+        let provider = frame.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {signature}, i64 0, i64 {name}, i64 0, i64 0, i1 true)", frame.scope));
+        frame.bind("__annotate__", &provider);
+    }
+
+    fn annotation_body(
+        &self,
+        output: &mut Output,
+        entries: &[crate::ir::AnnotationOccurrence],
+        globals: Option<&std::collections::BTreeSet<String>>,
+        start: TextSize,
+    ) -> String {
+        let plan = crate::frontend::DeferredAnnotation::prepare_body(&self.annotations, entries);
+        let scope = globals.map_or(AnnotationScope::Plain, |globals| AnnotationScope::Class {
+            globals: globals.clone(),
+            conditional: entries.iter().any(|entry| entry.index.is_some()),
+        });
+        self.definition(
+            output,
+            String::new(),
+            Body::AnnotationProvider(&plan, entries, scope),
+            start,
+            false,
+            Entry::Compiled,
+        )
     }
 }
 
@@ -921,35 +974,6 @@ impl<'p> Function<'_, 'p> {
         }
     }
 
-    /// Publish a module's provider before its first statement. Every simple
-    /// annotation, including an unconditional one, becomes visible only after
-    /// execution reaches its assignment.
-    pub(super) fn setup_deferred_module_annotations(&mut self, sites: &[TextSize]) {
-        if !sites.is_empty() {
-            let entries: Vec<_> = sites
-                .iter()
-                .enumerate()
-                .map(|(index, site)| crate::ir::AnnotationOccurrence {
-                    site: *site,
-                    index: Some(index),
-                })
-                .collect();
-            let signature = self.frame.text(
-                &json!({
-                    "posonly": ["format"], "scope_complete": true, "scope_locals_complete": true,
-                    "code_flags": self.source.function_flags(None, false, false),
-                })
-                .to_string(),
-            );
-            let code = self.annotation_body(&entries, None, self.source.module_start);
-            let name = self.text("__annotate__");
-            let provider = self.frame.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {signature}, i64 0, i64 {name}, i64 0, i64 0, i1 true)", self.scope));
-            self.bind("__annotate__", &provider);
-        }
-        self.frame
-            .op("setup_module_annotations", &[&self.scope.clone()]);
-    }
-
     pub(in crate::dynamic::emit) fn finish_class_annotations(
         &mut self,
         plan: &crate::frontend::ClassAnnotations,
@@ -975,7 +999,9 @@ impl<'p> Function<'_, 'p> {
             "posonly": ["format"], "scope_complete": !plan.incomplete, "scope_reads": plan.reads,
             "code_flags": self.source.function_flags(None, self.in_function, false),
         }).to_string());
-        let code = self.annotation_body(&plan.sites, Some(globals), first.site);
+        let code =
+            self.source
+                .annotation_body(self.frame.output, &plan.sites, Some(globals), first.site);
         let environment = self.frame.op(
             "class_annotation_environment",
             &[&self.scope.clone(), &offsets],
@@ -985,28 +1011,6 @@ impl<'p> Function<'_, 'p> {
         let defaults = self.op("dict", &[]);
         let function = self.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {environment}, i64 {name}, i64 {signature}, i64 {defaults}, i64 {qualname}, i64 0, i64 0, i1 false)"));
         self.bind("__annotate_func__", &function);
-    }
-
-    fn annotation_body(
-        &mut self,
-        entries: &[crate::ir::AnnotationOccurrence],
-        globals: Option<&std::collections::BTreeSet<String>>,
-        start: TextSize,
-    ) -> String {
-        let plan =
-            crate::frontend::DeferredAnnotation::prepare_body(&self.source.annotations, entries);
-        let scope = globals.map_or(AnnotationScope::Plain, |globals| AnnotationScope::Class {
-            globals: globals.clone(),
-            conditional: entries.iter().any(|entry| entry.index.is_some()),
-        });
-        self.source.definition(
-            self.frame.output,
-            String::new(),
-            Body::AnnotationProvider(&plan, entries, scope),
-            start,
-            false,
-            Entry::Compiled,
-        )
     }
 
     pub(super) fn unprepared_annotation(&mut self, occurrence: crate::ir::AnnotationOccurrence) {
