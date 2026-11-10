@@ -167,6 +167,7 @@ def choose(debug: bool) -> str:
             &options,
             Default::default(),
             &mut None,
+            &mut Default::default(),
         )
         .unwrap();
         let (module, service) = graph

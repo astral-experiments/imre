@@ -199,8 +199,15 @@ impl CompileOptions {
             )
             .map(Some);
         }
-        modules::SourceGraph::load_with(path, module_root, self, filesystem, import_failure)
-            .map(Some)
+        modules::SourceGraph::load_with(
+            path,
+            module_root,
+            self,
+            filesystem,
+            import_failure,
+            site_probes,
+        )
+        .map(Some)
     }
 }
 
@@ -724,6 +731,13 @@ fn object_fallback(
             }
         }
         Ok(())
+    };
+    // The checked loader can discover the package before an import requires object lowering.
+    let entry = match entry {
+        ProgramEntry::File(path, None) => {
+            ProgramEntry::File(path, site_probes.package_root.as_deref())
+        }
+        entry => entry,
     };
     match dynamic::compile(
         (entry, filesystem, &mut site_probes.wheel_records),

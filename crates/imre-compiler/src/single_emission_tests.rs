@@ -44,6 +44,29 @@ fn bound_wrapper_emits_native_only_if_registration_declines() {
 }
 
 #[test]
+fn a_file_build_records_the_root_of_its_registered_package() {
+    let project = tempfile::tempdir().unwrap();
+    let root = project.path().canonicalize().unwrap();
+    let package = root.join("parcel");
+    std::fs::create_dir(&package).unwrap();
+    let initializer = package.join("__init__.py");
+    std::fs::write(&initializer, "def program(): return 'printf'\n").unwrap();
+    let entry = package.join("__main__.py");
+    std::fs::write(
+        &entry,
+        "import os, sys\nfrom parcel import program\nif __name__ == '__main__':\n    cmd = program()\n    os.execvp(cmd, [cmd, *sys.argv[1:]])\n",
+    )
+    .unwrap();
+
+    let compilation = compile_file(&entry, None, &CompileOptions::default()).unwrap();
+    let inputs = compilation.source_inputs;
+    assert!(inputs.files.iter().any(|(path, _, _)| path == &initializer));
+    assert!(inputs.fresh());
+    std::fs::write(root.join("__init__.py"), "").unwrap();
+    assert!(!inputs.fresh());
+}
+
+#[test]
 fn fixed_file_selects_its_product_for_the_requested_startup() {
     let project = tempfile::tempdir().unwrap();
     let path = project.path().join("app.py");
