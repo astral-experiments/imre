@@ -225,7 +225,7 @@ impl Function<'_, '_> {
         if self.sites.generators.contains_key(&site) {
             return;
         }
-        let body = &self.source.generators[&site].body;
+        let body = &self.source.generators[&site];
         let definition = self.compile_definition(
             site.start(),
             DefinitionName::Plain("<genexpr>"),

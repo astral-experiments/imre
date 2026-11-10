@@ -96,17 +96,20 @@ impl SourceScope<'_> {
     }
 }
 
+pub(super) fn async_pull(clause: &ast::Comprehension) -> Option<ir::AsyncPull> {
+    clause.is_async.then(|| ir::AsyncPull {
+        range: clause.target.range(),
+        header: None,
+    })
+}
+
 impl EagerDisplay for SourceScope<'_> {
     type Input = pipelines::Prepared;
     type Destination = ();
     type Error = ();
 
     fn input(&mut self, clause: &ast::Comprehension) -> StdResult<pipelines::Prepared, ()> {
-        let pull = clause.is_async.then(|| ir::AsyncPull {
-            range: clause.target.range(),
-            header: None,
-        });
-        self.iteration_input(&clause.iter, pull).ok_or(())
+        self.iteration_input(&clause.iter, async_pull(clause)).ok_or(())
     }
 
     fn with_target(

@@ -1225,9 +1225,29 @@ pub(crate) enum NamespaceAnnotation {
     },
 }
 
+/// Acquisition and adaptation are separate when a generator stores its Python iterator in `.0`.
+#[derive(Clone, Copy)]
+pub(crate) enum IteratorOp {
+    Loop,
+    Async(ruff_text_size::TextRange),
+    Get(ruff_text_size::TextRange),
+    LoopCursor,
+}
+
+impl IteratorOp {
+    pub(crate) fn runtime_op(self) -> &'static str {
+        match self {
+            Self::Loop => "iter",
+            Self::Async(_) => "async_iter",
+            Self::Get(_) => "get_iter",
+            Self::LoopCursor => "loop_cursor",
+        }
+    }
+}
+
 /// Borrow the operands consumed by registered iteration without changing their evaluation order.
 pub(crate) enum IterationOperands<'a> {
-    Iter(&'a Expr, Option<ruff_text_size::TextRange>),
+    Iter(&'a Expr, IteratorOp),
     Truth(&'a Expr),
     Get(&'a [Expr; 2]),
     Insert(&'a [Expr; 2]),
@@ -1250,8 +1270,7 @@ impl Builtin {
                 .map_err(|_| "registered iteration operation needs two operands")
         };
         Some(match self {
-            Self::RegisteredIter => one().map(|value| Iter(value, None)),
-            Self::RegisteredAsyncIter(range) => one().map(|value| Iter(value, Some(*range))),
+            Self::RegisteredIter(op) => one().map(|value| Iter(value, *op)),
             Self::Bool => one().map(Truth),
             Self::ListGet => two().map(Get),
             Self::Append | Self::SetAdd => two().map(Insert),
@@ -2025,10 +2044,8 @@ pub(crate) enum Builtin {
         expression: String,
         conversion: Option<char>,
     },
-    /// Acquire an iterator through the Python protocol on the original heap object.
-    RegisteredIter,
-    /// Acquire a Python async iterator at the iterable expression.
-    RegisteredAsyncIter(ruff_text_size::TextRange),
+    /// Acquire or adapt an iterator through its corresponding Python protocol.
+    RegisteredIter(IteratorOp),
     /// Snapshot a sequence for ordered target stores, including the optional starred remainder.
     RegisteredUnpack {
         count: usize,
