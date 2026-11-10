@@ -270,13 +270,7 @@ impl<'p> Function<'_, 'p> {
         match output {
             ValueStatement::Checked(stmt) => self.checked_statement(&stmt),
             ValueStatement::ReturnOperand(expr) | ValueStatement::DiscardOperand(expr) => {
-                // Ordinary preparation already declined this operand. A suspended frame
-                // can still lower the whole expression, including its yield or await.
-                let handle = if self.native_suspension {
-                    self.expr(expr)
-                } else {
-                    self.with_expression_range(expr.range(), |code| code.located_expr(expr))
-                };
+                let handle = self.expr(expr);
                 if matches!(output, ValueStatement::ReturnOperand(_)) {
                     self.return_from_scope(handle);
                 } else {

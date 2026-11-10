@@ -5,7 +5,6 @@ use ast::visitor::{self, Visitor};
 use ir::control::{BranchShape, Context, Depth, Edges, Split, edges};
 use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange};
-use std::borrow::Cow;
 use std::collections::HashMap;
 
 impl BranchShape for ast::Expr {
@@ -40,6 +39,8 @@ pub(crate) struct ExpressionSites {
 
 pub(crate) enum Selection {
     Checked(ir::Expr),
+    Operand(Box<super::RegisteredOperand>),
+    Refused(TextRange, &'static str),
     Inputs(Box<PhysicalInputs>),
     Comparison(Vec<Option<CheckedChild>>),
     Mixed {
@@ -90,7 +91,7 @@ impl PhysicalInputs {
         let mut physical = None;
         self.children.iter().enumerate().map(move |(i, child)| {
             if let Some(value) = child.as_ref().and_then(|child| child.value(suspended)) {
-                SourceOperand::Checked(Cow::Borrowed(value))
+                SourceOperand::Checked(value)
             } else {
                 SourceOperand::Residual(physical.get_or_insert_with(|| physical_children(node, self.split_slice))[i])
             }
@@ -179,17 +180,16 @@ impl ExpressionSites {
     pub(crate) fn value<'a>(
         &'a self,
         node: &'a ast::Expr,
-        source: RegisteredSource<'_>,
     ) -> Option<(Edges, Vec<SourceOperand<'a>>)> {
         matches!(node.split(Context::Value), Split::Operands(..))
-            .then(|| prepare_boolean(node, Context::Value, source, self))
+            .then(|| prepare_boolean(node, Context::Value, self))
     }
 
     pub(crate) fn conditional<'a>(&'a self, node: &'a ast::Expr) -> Option<[SourceOperand<'a>; 3]> {
         let children = conditional_parts(node)?;
         Some(match self.selected.get(&site(node)) {
             Some(Selection::Checked(value)) => {
-                conditional_parts(value)?.map(|v| SourceOperand::Checked(Cow::Borrowed(v)))
+                conditional_parts(value)?.map(SourceOperand::Checked)
             }
             Some(Selection::Mixed {
                 parts: Some(parts), ..
@@ -229,12 +229,24 @@ impl ExpressionSites {
     }
 
     /// Nested suites and fully checked declaration bodies have their own plans.
-    pub(super) fn prepare_inputs(&mut self, stmt: &ast::Stmt, source: RegisteredSource<'_>) {
-        PhysicalPreparation(self, source).visit_stmt(stmt);
+    pub(super) fn prepare_inputs(
+        &mut self,
+        stmt: &ast::Stmt,
+        source: RegisteredSource<'_>,
+        scope: super::RegisteredScope,
+        suspended: bool,
+    ) {
+        PhysicalPreparation { sites: self, source, scope, suspended }.visit_stmt(stmt);
     }
 
-    pub(super) fn prepare_input(&mut self, expr: &ast::Expr, source: RegisteredSource<'_>) {
-        PhysicalPreparation(self, source).visit_expr(expr);
+    pub(crate) fn prepare_input(
+        &mut self,
+        expr: &ast::Expr,
+        source: RegisteredSource<'_>,
+        scope: super::RegisteredScope,
+        suspended: bool,
+    ) {
+        PhysicalPreparation { sites: self, source, scope, suspended }.visit_expr(expr);
     }
 
     pub(crate) fn visit(&mut self, node: &ast::Expr, source: RegisteredSource<'_>) {
@@ -285,73 +297,101 @@ impl ExpressionSites {
     }
 }
 
-struct PhysicalPreparation<'a, 's>(&'a mut ExpressionSites, RegisteredSource<'s>);
+struct PhysicalPreparation<'a, 's> {
+    sites: &'a mut ExpressionSites,
+    source: RegisteredSource<'s>,
+    scope: super::RegisteredScope,
+    suspended: bool,
+}
 
 impl<'a> Visitor<'a> for PhysicalPreparation<'_, '_> {
     fn visit_body(&mut self, _body: &'a [ast::Stmt]) {}
 
     fn visit_expr(&mut self, node: &'a ast::Expr) {
-        if matches!(
-            self.0.selected.get(&site(node)),
-            Some(Selection::Checked(_) | Selection::Inputs(_))
-        ) {
+        // Store and delete targets consume their receivers, keys or unpacked children.
+        // They have no value to emit for the target itself.
+        let target = match node {
+            ast::Expr::Name(v) => Some(v.ctx),
+            ast::Expr::Attribute(v) => Some(v.ctx),
+            ast::Expr::Subscript(v) => Some(v.ctx),
+            ast::Expr::List(v) => Some(v.ctx),
+            ast::Expr::Tuple(v) => Some(v.ctx),
+            ast::Expr::Starred(v) => Some(v.ctx),
+            _ => None,
+        };
+        if target.is_some_and(|ctx| ctx != ast::ExprContext::Load) {
+            visitor::walk_expr(self, node);
+            return;
+        }
+        let selected = self.sites.get(node);
+        match selected {
+            Some(Selection::Comparison(_)) => {
+                visitor::walk_expr(self, node);
+                return;
+            }
+            Some(Selection::Mixed { .. }) if !self.suspended => {
+                visitor::walk_expr(self, node);
+                return;
+            }
+            Some(Selection::Mixed { .. }) | None => {}
+            Some(_) => return,
+        }
+        let region = if self.suspended { values::Region::SuspendedOperand } else { values::Region::Residual };
+        if !node.is_t_string_expr() && let Some(value) = region.operand(node, self.source) {
+            self.sites.selected.insert(site(node), Selection::Checked(value));
+            return;
+        }
+        match super::inline_operand(node, self.source, self.scope, self.suspended) {
+            Ok(Some(operand)) => {
+                self.sites.selected.insert(site(node), Selection::Operand(Box::new(operand)));
+                return;
+            }
+            Err((range, reason)) => {
+                self.sites.selected.insert(site(node), Selection::Refused(range, reason));
+                return;
+            }
+            Ok(None) => {}
+        }
+        if let ast::Expr::Lambda(lambda) = node {
+            // The lambda body has its own compiled activation. Defaults run here.
+            for default in values::lambda_defaults(lambda) {
+                self.visit_expr(default);
+            }
             return;
         }
         let Some((op, physical)) = values::binary_operands(node) else {
             if let Some(selected) = self.index(node) {
-                self.0.selected.insert(site(node), selected);
+                self.sites.selected.insert(site(node), selected);
             } else {
                 visitor::walk_expr(self, node);
             }
             return;
         };
-        let inputs = physical.map(|child| CheckedChild::prepare(child, self.1));
-        let selected = match inputs {
-            [Some(left), Some(right)]
-                if !left.requires_suspension && !right.requires_suspension =>
-            {
-                Selection::Checked(
-                    self.1
-                        .located(node, values::binary(op, left.value, right.value)),
-                )
+        let children = physical.map(|child| CheckedChild::prepare(child, self.source));
+        for (child, checked) in physical.into_iter().zip(&children) {
+            if checked.as_ref().is_none_or(|value| value.requires_suspension) {
+                self.visit_expr(child);
             }
-            children => {
-                for (child, checked) in physical.into_iter().zip(&children) {
-                    if checked.as_ref().is_none_or(|v| v.requires_suspension) {
-                        self.visit_expr(child);
-                    }
-                }
-                Selection::Inputs(Box::new(PhysicalInputs {
-                    operation: values::binary(
-                        op,
-                        ir::Expr::local(0, ir::Type::PythonObject),
-                        ir::Expr::local(1, ir::Type::PythonObject),
-                    ),
-                    children: Box::new(children),
-                    split_slice: false,
-                }))
-            }
-        };
-        self.0.selected.insert(site(node), selected);
+        }
+        let selected = Selection::Inputs(Box::new(PhysicalInputs {
+            operation: values::binary(
+                op,
+                ir::Expr::local(0, ir::Type::PythonObject),
+                ir::Expr::local(1, ir::Type::PythonObject),
+            ),
+            children: Box::new(children),
+            split_slice: false,
+        }));
+        self.sites.selected.insert(site(node), selected);
     }
 }
 
 impl PhysicalPreparation<'_, '_> {
     fn index(&mut self, node: &ast::Expr) -> Option<Selection> {
-        let checked = match node {
-            ast::Expr::Subscript(index) if index.ctx == ast::ExprContext::Load => {
-                values::registered_value(node, self.1)
-            }
-            ast::Expr::Slice(_) => values::registered_index_key(node, self.1),
-            _ => return None,
-        };
-        if let Some(value) = checked {
-            return Some(Selection::Checked(value));
-        }
-        let index = values::index_operands(node, self.1)?;
+        let index = values::index_operands(node, self.source)?;
         let mut children = Vec::with_capacity(index.inputs.len());
         for (child, ordinary) in index.inputs {
-            let checked = CheckedChild::from_ordinary(child, self.1, ordinary);
+            let checked = CheckedChild::from_ordinary(child, self.source, ordinary);
             if checked.as_ref().is_none_or(|value| value.requires_suspension) {
                 self.visit_expr(child);
             }
@@ -366,14 +406,14 @@ impl PhysicalPreparation<'_, '_> {
 }
 
 pub(crate) enum SourceOperand<'a> {
-    Checked(Cow<'a, ir::Expr>),
+    Checked(&'a ir::Expr),
     Residual(&'a ast::Expr),
 }
 
 impl<'a> SourceOperand<'a> {
     fn prepared(node: &'a ast::Expr, value: Option<&'a ir::Expr>) -> Self {
         match value {
-            Some(value) => Self::Checked(Cow::Borrowed(value)),
+            Some(value) => Self::Checked(value),
             None => Self::Residual(node),
         }
     }
@@ -384,7 +424,6 @@ impl<'a> SourceOperand<'a> {
 pub(crate) fn prepare_boolean<'a>(
     expression: &'a ast::Expr,
     context: Context,
-    source: RegisteredSource<'_>,
     sites: &'a ExpressionSites,
 ) -> (Edges, Vec<SourceOperand<'a>>) {
     if let Some(Selection::Mixed { branch, value, .. }) = sites.get(expression) {
@@ -402,11 +441,8 @@ pub(crate) fn prepare_boolean<'a>(
     let leaves = leaves
         .into_iter()
         .map(|leaf| match sites.get(leaf) {
-            Some(Selection::Comparison(_)) => SourceOperand::Residual(leaf),
-            _ => match values::registered_value(leaf, source) {
-                Some(operand) => SourceOperand::Checked(Cow::Owned(operand)),
-                None => SourceOperand::Residual(leaf),
-            },
+            Some(Selection::Checked(value)) => SourceOperand::Checked(value),
+            _ => SourceOperand::Residual(leaf),
         })
         .collect();
     (edges, leaves)

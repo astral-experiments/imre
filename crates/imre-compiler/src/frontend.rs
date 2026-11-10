@@ -126,11 +126,15 @@ pub(crate) use registered::booleans::{
 };
 pub(crate) use registered::patterns::{MatchGuard, SourceMatch};
 pub(crate) use registered::type_alias_body;
+#[cfg(test)]
+pub(crate) use registered::values::registered_value;
+#[cfg(test)]
+pub(crate) use registered::inline_operand;
 pub(crate) use registered::values::{
     RegisteredSource, ValueStatement, display_elements,
     literal_replacements, module_literal_replacements, packed_arguments,
     push_codepoints, registered_argument_at, registered_arguments, registered_index_key,
-    registered_value, suspended_operand, value_statement,
+    value_statement,
 };
 pub(crate) use registered::{
     AnnotationValue, DeferredAnnotation, ParameterAnnotations, PhysicalOperand, PreparedStrings, RegisteredFunction,
@@ -141,7 +145,7 @@ pub(crate) use registered::{
 pub(crate) use registered::{ContextTarget, LoopBinding, LoopSuite, PreparedFor, SourceGuard};
 pub(crate) use registered::{
     LambdaBinding, LambdaDefault, LocalBinding, PreparedTemplate, RegisteredClass, RegisteredOperand,
-    RegisteredRegion, TemplateField, inline_operand,
+    RegisteredRegion, TemplateField,
 };
 mod sequences;
 mod shutil;
