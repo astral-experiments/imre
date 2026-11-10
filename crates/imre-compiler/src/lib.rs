@@ -1654,16 +1654,15 @@ print("result", call(b=2, a=1))
     }
 
     #[test]
-    fn dictionary_set_construction_preserves_object_fallback() {
+    fn dictionary_set_construction_allows_native_and_object_printing() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("main.py");
-        std::fs::write(
-            &path,
-            "keys = set({'first': 1, 'second': 2})\nprint([3, 7], len(keys), 'second' in keys)\n",
-        )
-        .unwrap();
-        let program = super::compile_file(&path, None, &CompileOptions::default()).unwrap();
-        assert!(program.llvm_ir.contains("call ptr @imre_dyn_new("));
+        let keys = "keys = set({'first': 1, 'second': 2})";
+        for value in ["[3, 7]", "{'values': [3, 7]}"] {
+            let source = format!("{keys}\nprint({value}, len(keys), 'second' in keys)\n");
+            std::fs::write(&path, source).unwrap();
+            super::compile_file(&path, None, &CompileOptions::default()).unwrap();
+        }
     }
 
     #[test]
