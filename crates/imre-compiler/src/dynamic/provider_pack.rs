@@ -23,8 +23,7 @@ pub(crate) fn write(directory: &Path) -> Result<(), String> {
             emit::ModuleOrigin::Bundled,
             |body| body.standalone(),
         ) {
-            Ok(Some((symbol, ir))) => fs::write(directory.join(format!("{symbol}.ll")), ir),
-            Ok(None) => Ok(()),
+            Ok((symbol, ir)) => fs::write(directory.join(format!("{symbol}.ll")), ir),
             Err(reason) => {
                 // The ordinary compiler still diagnoses a module it cannot lower when selected.
                 eprintln!("skipping bundled provider {name}: {reason}");
