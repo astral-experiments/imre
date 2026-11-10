@@ -2198,7 +2198,7 @@ impl SourceScope<'_> {
             let binding = self.lambda_binding(lambda)?;
             // A generator expression retains its own clause cursors across an awaited default.
             if self.loop_scope != LoopScope::Outside
-                && (!self.generator_expression || self.comprehension.is_some())
+                && !self.generator_expression
             {
                 let mut suspends = false;
                 ir::walk_operand_expressions(&binding, &mut |child| {
