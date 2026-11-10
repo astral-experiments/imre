@@ -129,7 +129,7 @@ pub(crate) use registered::booleans::{
 };
 #[cfg(test)]
 pub(crate) use registered::inline_operand;
-pub(crate) use registered::patterns::{MatchGuard, SourceMatch};
+pub(crate) use registered::patterns::SourceMatch;
 pub(crate) use registered::type_alias_body;
 #[cfg(test)]
 pub(crate) use registered::values::registered_value;

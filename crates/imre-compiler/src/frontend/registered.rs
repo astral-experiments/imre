@@ -980,6 +980,8 @@ pub(crate) enum SourceEffect {
         range: TextRange,
         arms: Vec<(Option<PhysicalOperand>, PhysicalSuite)>,
     },
+    /// Patterns, guards and case suites belong to the same evaluation of the subject.
+    Match(TextRange, Option<Box<patterns::SourceMatch>>),
     /// Exception matchers and all control-flow children belong to this protected region.
     Try(Box<PreparedTry>),
     /// The manager, binding and protected child are prepared together.
@@ -1032,6 +1034,7 @@ impl PhysicalSuite {
                     SourceEffect::Class(_)
                         | SourceEffect::If { .. }
                         | SourceEffect::For(_)
+                        | SourceEffect::Match(..)
                         | SourceEffect::Context(_)
                         | SourceEffect::Try(_)
                         | SourceEffect::LoopTransfer(..)
@@ -1140,7 +1143,6 @@ impl AssertionSite {
 pub(crate) struct StatementSites {
     pub(crate) expressions: booleans::ExpressionSites,
     omit_assertions: bool,
-    pub(crate) matches: HashMap<TextRange, Option<patterns::SourceMatch>>,
     pub(crate) contexts: HashMap<TextRange, Vec<ir::ContextSite>>,
 }
 
@@ -1227,12 +1229,6 @@ fn statement_sites(
                     .map(|item| context_site(self.source.text, &item.context_expr, with.is_async))
                     .collect();
                 self.sites.contexts.insert(stmt.range(), inputs);
-            }
-            if let ast::Stmt::Match(branch) = stmt {
-                self.sites.matches.insert(
-                    stmt.range(),
-                    patterns::SourceMatch::prepare(branch, self.source),
-                );
             }
             walk_stmt(self, stmt);
         }
@@ -1561,53 +1557,16 @@ impl<'a> SuitePreparation<'a> {
                     });
                     continue;
                 }
-                SourceRun::record(&mut plan.residual, index, run.at);
-                if let ast::Stmt::Match(branch) = stmt
-                    && let Some(mut site) = children
-                        .prepare
-                        .sites
-                        .matches
-                        .get_mut(&branch.range())
-                        .and_then(Option::take)
-                {
-                    site.subject =
-                        RegisteredOperand::prepare_with(children.prepare.source, kind, |scope| {
-                            scope.frame_value(&branch.subject)
-                        });
-                    if site.subject.is_none() {
-                        children.prepare.sites.expressions.prepare_input(
-                            &branch.subject,
-                            children.prepare.source,
-                            kind,
-                            suspended,
-                        );
-                    }
-                    for (case, input) in site.cases.iter_mut().zip(&branch.cases) {
-                        if matches!(case.guard, Some(patterns::MatchGuard::Residual))
-                            && let Some(guard) = &input.guard
-                        {
-                            children.prepare.sites.expressions.prepare_input(
-                                guard,
-                                children.prepare.source,
-                                kind,
-                                suspended,
-                            );
-                        }
-                        case.body = Some(children.prepare.selected_suite(
-                            &input.body,
-                            kind,
-                            SuiteSelection::All,
-                            SuiteSelection::All,
-                            suspended,
-                        ));
-                    }
-                    children
-                        .prepare
-                        .sites
-                        .matches
-                        .insert(branch.range(), Some(site));
+                if let ast::Stmt::Match(branch) = stmt {
+                    let site = children.prepare.prepare_match(branch, kind, suspended);
+                    plan.residual.push(SourceRun {
+                        at: run.at,
+                        statements: index..index + 1,
+                        effect: Some(SourceEffect::Match(branch.range(), site.map(Box::new))),
+                    });
                     continue;
                 }
+                SourceRun::record(&mut plan.residual, index, run.at);
                 // A declaration opens a separate activation with its own scope and admission.
                 if !matches!(stmt, ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_)) {
                     walk_stmt(&mut children, stmt);
@@ -1624,13 +1583,20 @@ impl<'a> SuitePreparation<'a> {
         selection: SuiteSelection<'_>,
         suspended: bool,
     ) -> PhysicalOperand {
-        let operand =
-            RegisteredOperand::prepare_with(self.source, kind, |scope| match (kind, selection) {
-                (RegisteredScope::Function { .. }, SuiteSelection::Physical(_)) => {
-                    scope.operand(expr)
-                }
-                _ => scope.ordinary_operand(expr),
-            });
+        self.owned_operand(expr, kind, suspended, |scope| match (kind, selection) {
+            (RegisteredScope::Function { .. }, SuiteSelection::Physical(_)) => scope.operand(expr),
+            _ => scope.ordinary_operand(expr),
+        })
+    }
+
+    fn owned_operand(
+        &mut self,
+        expr: &ast::Expr,
+        kind: RegisteredScope,
+        suspended: bool,
+        lower: impl FnOnce(&mut SourceScope<'_>) -> Option<Expr>,
+    ) -> PhysicalOperand {
+        let operand = RegisteredOperand::prepare_with(self.source, kind, lower);
         self.retain_operand(expr, kind, suspended, operand)
     }
 
@@ -2968,18 +2934,11 @@ impl SourceScope<'_> {
         let mut cases = Vec::with_capacity(branch.cases.len());
         let mut falls = false;
         let mut exhaustive = false;
-        let patterns = &self
-            .sites
-            .matches
-            .get(&branch.range())
-            .and_then(Option::as_ref)
-            .ok_or(())?
-            .cases;
-        for (case, planned) in branch.cases.iter().zip(patterns) {
+        let patterns = patterns::prepare_patterns(branch, self.source).ok_or(())?;
+        for (case, pattern) in branch.cases.iter().zip(patterns) {
             if exhaustive {
                 return Err(());
             }
-            let pattern = planned.pattern.clone();
             let captures = pattern.names.iter().map(|name| self.slot(name)).collect();
             let guard = case
                 .guard
