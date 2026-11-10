@@ -7887,6 +7887,16 @@ impl<'a> Checker<'a> {
                     {
                         return Err(self.scoped_builtin_error(name, expression));
                     }
+                    if matches!(
+                        self.resolve(expression),
+                        Some(Binding::IntrinsicModule(
+                            crate::modules::IntrinsicModule::Builtins
+                        ))
+                    ) {
+                        return Err(
+                            self.scoped_builtin_error("the builtin module as a value", expression)
+                        );
+                    }
                     if let Some(Binding::Definition(_)) = self.resolve(expression) {
                         return Err(self.classified_error(
                             Kind::ScopedObject,
