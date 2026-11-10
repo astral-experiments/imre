@@ -11,9 +11,7 @@ impl BranchShape for ast::Expr {
     fn split(&self, context: Context) -> Split<'_, Self> {
         match self {
             Self::BoolOp(op) => Split::Operands(op.op == ast::BoolOp::And, &op.values),
-            Self::If(test) if context == Context::Condition => {
-                Split::Conditional(&test.test, &test.body, &test.orelse)
-            }
+            Self::If(test) => Split::Conditional(&test.test, &test.body, &test.orelse),
             Self::UnaryOp(op) if context == Context::Condition && op.op == ast::UnaryOp::Not => {
                 Split::Not(&op.operand)
             }

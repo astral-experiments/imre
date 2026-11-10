@@ -26,9 +26,7 @@ impl BranchShape for Expr {
         match &self.kind {
             ExprKind::BooleanValue(and, left, right) => Split::Pair(*and, left, right),
             ExprKind::Boolean(and, operands) => Split::Operands(*and, operands),
-            ExprKind::Conditional(test, yes, no) if context == Context::Condition => {
-                Split::Conditional(test, yes, no)
-            }
+            ExprKind::Conditional(test, yes, no) => Split::Conditional(test, yes, no),
             ExprKind::Not(operand) if context == Context::Condition => Split::Not(operand),
             ExprKind::Builtin(Builtin::RegisteredUnary(ObjectUnary::Not), operands)
                 if context == Context::Condition =>
@@ -122,8 +120,18 @@ impl Edges {
             Split::Not(operand) => child(operand, no, yes),
             Split::Conditional(test, body, otherwise) => {
                 let no_arm = child(otherwise, yes, no);
-                let yes_arm = child(body, yes, no);
-                child(test, yes_arm, no_arm)
+                // The else arm falls through into the enclosing Boolean expression.
+                // The then arm jumps over it with a materialized result.
+                let yes_arm = match context {
+                    Context::Condition => child(body, yes, no),
+                    Context::Value => self.leaf(inputs, body, yes, no),
+                };
+                match depth {
+                    Depth::Root => self.leaf(inputs, test, yes_arm, no_arm),
+                    Depth::All => {
+                        self.lower(inputs, test, Context::Condition, depth, yes_arm, no_arm)
+                    }
+                }
             }
             Split::Leaf => self.leaf(inputs, expr, yes, no),
         }
