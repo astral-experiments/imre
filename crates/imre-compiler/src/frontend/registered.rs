@@ -1027,7 +1027,6 @@ pub(crate) enum WhileGuard {
 
 pub(crate) struct PreparedFor {
     pub(crate) range: TextRange,
-    pub(crate) iterable_range: TextRange,
     pub(crate) acquire: ir::IteratorOp,
     pub(crate) pull: ir::IterNextKind,
     pub(crate) iterable: PhysicalOperand,
@@ -1117,7 +1116,7 @@ fn iteration_protocol(
             ir::IteratorOp::Async(iterable),
             ir::IterNextKind::Async(pull),
         ),
-        None => (ir::IteratorOp::Loop, ir::IterNextKind::Generic),
+        None => (ir::IteratorOp::Loop(iterable), ir::IterNextKind::Generic),
     }
 }
 
@@ -1581,7 +1580,6 @@ impl<'a> SuitePreparation<'a> {
         let target = self.physical_binding(&loop_.target, kind, pull == ir::IterNextKind::Generic);
         PreparedFor {
             range: loop_.range(),
-            iterable_range: loop_.iter.range(),
             acquire,
             pull,
             iterable,
@@ -2096,7 +2094,7 @@ impl statements::StatementLowering for SourceScope<'_> {
 
     fn for_loop(&mut self, loop_: &ast::StmtFor) -> StdResult<statements::Block, ()> {
         let input = self
-            .iteration_input(&loop_.iter, for_pull(loop_))
+            .creating_iterable(|scope| scope.iteration_input(&loop_.iter, for_pull(loop_)))
             .ok_or(())?;
         let (binding, body) =
             self.iteration_body(&loop_.target, &input, |scope| scope.suite(&loop_.body))?;
@@ -5052,6 +5050,18 @@ mod tests {
     }
 
     #[test]
+    fn for_iterable_can_suspend_before_acquiring_the_checked_cursor() {
+        let source = concat!(
+            "async def visit(make, left, right, record):\n",
+            "    for key, value in make(left(), await right(), strict=False):\n",
+            "        record(key, value)\n",
+            "    else:\n",
+            "        record('done')\n",
+        );
+        assert_cursor_suspensions(source, &["await right()"]);
+    }
+
+    #[test]
     fn awaited_subscription_binds_its_result_in_the_checked_loop() {
         let source = concat!(
             "async def visit(rows, key):\n",
@@ -5177,7 +5187,7 @@ mod tests {
         let mut opens = 0;
         let mut calls = 0;
         ir::walk_expressions(&function.body, &mut |expr| match &expr.kind {
-            ExprKind::Builtin(Builtin::RegisteredIter(ir::IteratorOp::Loop), _) => opens += 1,
+            ExprKind::Builtin(Builtin::RegisteredIter(ir::IteratorOp::Loop(_)), _) => opens += 1,
             ExprKind::Invoke { .. } => calls += 1,
             _ => {}
         });

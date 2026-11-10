@@ -1262,7 +1262,7 @@ pub(crate) enum NamespaceAnnotation {
 /// Acquisition and adaptation are separate when a generator stores its Python iterator in `.0`.
 #[derive(Clone, Copy)]
 pub(crate) enum IteratorOp {
-    Loop,
+    Loop(ruff_text_size::TextRange),
     Async(ruff_text_size::TextRange),
     Get(ruff_text_size::TextRange),
     LoopCursor,
@@ -1271,7 +1271,7 @@ pub(crate) enum IteratorOp {
 impl IteratorOp {
     pub(crate) fn runtime_op(self) -> &'static str {
         match self {
-            Self::Loop => "iter",
+            Self::Loop(_) => "iter",
             Self::Async(_) => "async_iter",
             Self::Get(_) => "get_iter",
             Self::LoopCursor => "loop_cursor",

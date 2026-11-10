@@ -1534,6 +1534,33 @@ pub(crate) trait FrameEmitter<'a, 'p>:
         self.checked(&format!("call i64 @imre_dyn_contains_literal_tuple(ptr %ctx, i64 {value}, ptr {array}, i64 {count}, i32 {negate})"))
     }
 
+    /// Acquire the cursor at the iterable's source position. A suspended activation
+    /// releases its operands once the cursor owns everything needed for the first pull.
+    fn acquire_iterator(
+        &mut self,
+        op: ir::IteratorOp,
+        evaluate: impl FnOnce(&mut Self) -> String,
+    ) -> String {
+        let range = match op {
+            ir::IteratorOp::Loop(_) if !self.native_suspension || self.iteration.in_expression => {
+                None
+            }
+            ir::IteratorOp::Loop(range)
+            | ir::IteratorOp::Get(range)
+            | ir::IteratorOp::Async(range) => Some(range),
+            ir::IteratorOp::LoopCursor => None,
+        };
+        let Some(range) = range else {
+            let value = evaluate(self);
+            return self.op(op.runtime_op(), &[&value]);
+        };
+        self.iteration_result(|frame| {
+            let value = evaluate(frame);
+            frame.call_position(range);
+            frame.op(op.runtime_op(), &[&value])
+        })
+    }
+
     /// The activation keeps its live handles until the next Python statement.
     /// Release the iterable when its cursor exists, and the cursor and local scope
     /// when the comprehension delivers its result to the enclosing expression.
