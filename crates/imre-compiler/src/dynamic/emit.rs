@@ -3206,6 +3206,50 @@ mod tests {
     }
 
     #[test]
+    fn mixed_async_if_owns_its_awaited_guards() {
+        use crate::frontend::{PhysicalOperand, SourceEffect};
+
+        let source = concat!(
+            "async def choose(flag, predicate):\n",
+            "    if flag and await predicate(1):\n        raise await failure()\n",
+            "    elif not await predicate(2):\n        return 2\n",
+            "state: int\n",
+        );
+        let mut prepared = PreparedBody::module(
+            "example",
+            Path::new("example.py"),
+            source,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let original = prepared.standalone().unwrap();
+        let def = prepared.syntax.as_mut().unwrap().to_mut()[0]
+            .as_function_def_stmt_mut()
+            .unwrap();
+        let suite = prepared.source.function_bodies[&def.start()]
+            .suite()
+            .unwrap();
+        let Some(SourceEffect::If { arms, .. }) = &suite.residual[0].effect else {
+            panic!("expected a mixed if");
+        };
+        assert!(matches!(
+            arms.as_slice(),
+            [
+                (Some(PhysicalOperand::Checked(_)), _),
+                (Some(PhysicalOperand::Checked(_)), _)
+            ]
+        ));
+        let branch = def.body[0].as_if_stmt_mut().unwrap();
+        *branch.test = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
+            range: branch.test.range(),
+            node_index: Default::default(),
+        });
+        branch.elif_else_clauses.clear();
+        assert_eq!(prepared.standalone().unwrap(), original);
+    }
+
+    #[test]
     fn mixed_if_owns_its_guards_and_residual_arm_after_source_erasure() {
         use crate::frontend::{PhysicalOperand, PhysicalSuite, SourceEffect};
 

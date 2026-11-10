@@ -1680,6 +1680,12 @@ impl<'a> SuitePreparation<'a> {
                     }
                     None
                 }
+                Some(expr) if suspended => {
+                    let operand = RegisteredOperand::prepare_with(self.source, kind, |scope| {
+                        scope.condition_operand(expr)
+                    });
+                    Some(self.retain_operand(expr, kind, suspended, operand))
+                }
                 test => test.map(|expr| self.physical_operand(expr, kind, selection, suspended)),
             };
             let unconditional = test.is_none();
@@ -2005,7 +2011,7 @@ impl<'a> SuitePreparation<'a> {
                 let condition = match &*loop_.test {
                     ast::Expr::BooleanLiteral(value) => SourceGuard::Literal(value.value),
                     test => RegisteredOperand::prepare_with(self.source, kind, |scope| {
-                        scope.while_condition(test)
+                        scope.condition_operand(test)
                     })
                     .map_or(SourceGuard::Residual, |operand| {
                         SourceGuard::Checked(Box::new(operand))
@@ -2410,7 +2416,7 @@ impl statements::StatementLowering for SourceScope<'_> {
                 true,
             )),
             ast::Stmt::While(loop_) => {
-                let condition = self.while_condition(&loop_.test).ok_or(())?;
+                let condition = self.condition_operand(&loop_.test).ok_or(())?;
                 let body = if matches!(&*loop_.test, ast::Expr::BooleanLiteral(value) if !value.value)
                 {
                     Vec::new()
@@ -3043,7 +3049,7 @@ impl SourceScope<'_> {
         self.lower_operand(expr, true)
     }
 
-    fn while_condition(&mut self, test: &ast::Expr) -> Option<Expr> {
+    fn condition_operand(&mut self, test: &ast::Expr) -> Option<Expr> {
         self.with_suspending_operands(|scope| scope.operand(test))
     }
 
