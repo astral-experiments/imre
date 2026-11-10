@@ -1025,27 +1025,31 @@ impl RegisteredFrame<'_, '_> {
         }
     }
 
-    /// Enter the item block, or transfer to the exhaustion edge before binding a target.
-    /// A fused two-target pull leaves both items in the frame's scratch slots.
-    pub(crate) fn enter_sync_iteration(
+    /// Branch before binding the target. An async pull delivers its item while awaiting.
+    pub(crate) fn iteration_edge(
         &mut self,
         cursor: &str,
+        kind: ir::IterNextKind,
+        header: TextSize,
         has_else: bool,
-        unpack_pair: bool,
         item: &str,
         exhausted: &str,
-    ) {
-        let more = if unpack_pair {
-            self.max_live = self.max_live.max(2);
-            self.checked(&format!(
-                "call i64 @imre_dyn_next_pair(ptr %ctx, i64 {cursor}, ptr %live, i1 {has_else})"
-            ))
-        } else {
-            self.op(if has_else { "more_else" } else { "more" }, &[cursor])
-        };
-        let ready = self.value(&format!("icmp eq i64 {more}, {}", permanent::TRUE));
-        self.branch(&ready, item, exhausted);
-        self.label(item);
+    ) -> Option<String> {
+        match kind {
+            ir::IterNextKind::Generic => {
+                self.retained_loop_header(header);
+                let more = self.op(if has_else { "more_else" } else { "more" }, &[cursor]);
+                let ready = self.value(&format!("icmp eq i64 {more}, {}", permanent::TRUE));
+                self.branch(&ready, item, exhausted);
+                None
+            }
+            ir::IterNextKind::Async(pull) => Some(self.async_pull(cursor, pull, item, exhausted)),
+            _ => unreachable!("registered iterator kind"),
+        }
+    }
+
+    pub(crate) fn iteration_item(&mut self, cursor: &str, pulled: Option<String>) -> String {
+        pulled.unwrap_or_else(|| self.op("next", &[cursor]))
     }
 
     /// Only the implicit __anext__ call and its await can exhaust an async for.

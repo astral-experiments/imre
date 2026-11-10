@@ -139,7 +139,7 @@ pub(crate) use registered::{
     annotation_expression, attribute_write, prepare_expression_sites, registered_index_target,
     registered_sites, registered_type_alias, registered_type_parameters, template_operands,
 };
-pub(crate) use registered::{ContextTarget, SourceGuard};
+pub(crate) use registered::{ContextTarget, LoopBinding, LoopSuite, PreparedFor, SourceGuard};
 pub(crate) use registered::{
     LambdaBinding, LambdaDefault, LocalBinding, RegisteredClass, RegisteredOperand, RegisteredRegion, inline_operand,
 };

@@ -1633,6 +1633,60 @@ mod tests {
     }
 
     #[test]
+    fn mixed_for_emits_after_its_source_statement_is_erased() {
+        let source = concat!(
+            "def capture(rows):\n",
+            "    for item in rows:\n",
+            "        return t'pre{(yield item)}'\n",
+            "    else:\n",
+            "        return 42\n",
+        );
+        let mut module = PreparedBody::module(
+            "example",
+            Path::new("example.py"),
+            source,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let def = module.syntax.as_ref().unwrap()[0]
+            .as_function_def_stmt()
+            .unwrap();
+        let plan = module
+            .source
+            .function_bodies
+            .get(&def.start())
+            .and_then(|entry| entry.suite())
+            .or_else(|| module.source.nested_bodies.get(&def.body[0].start()))
+            .unwrap();
+        let [run] = plan.residual.as_slice() else {
+            panic!("expected a mixed for")
+        };
+        let Some(crate::frontend::SourceEffect::For(region)) = &run.effect else {
+            panic!("missing prepared loop");
+        };
+        assert!(matches!(
+            region.iterable,
+            crate::frontend::PhysicalOperand::Checked(_)
+        ));
+        assert!(matches!(
+            region.target,
+            crate::frontend::LoopBinding::Checked { .. }
+        ));
+        assert!(!region.body.plan.fully_checked());
+        let original = module.standalone().unwrap().unwrap();
+        let def = module.syntax.as_mut().unwrap().to_mut()[0]
+            .as_function_def_stmt_mut()
+            .unwrap();
+        def.body[0] = ast::StmtPass {
+            range: def.body[0].range(),
+            node_index: Default::default(),
+        }
+        .into();
+        assert_eq!(module.standalone().unwrap().unwrap(), original);
+    }
+
+    #[test]
     fn mixed_coroutine_emits_sync_for_without_its_source() {
         let mut module = PreparedBody::module(
             "async_groups",

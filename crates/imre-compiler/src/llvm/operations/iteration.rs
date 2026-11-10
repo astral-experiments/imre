@@ -11,13 +11,13 @@ pub(crate) struct LoopEdges {
 }
 
 /// Wire the test, body, exhaustion, and break edges for either a complete or mixed loop.
-pub(crate) fn loop_region<C>(
+pub(crate) fn loop_region<C, T>(
     context: &mut C,
     output: fn(&mut C) -> &mut super::FunctionBody,
     label: fn(&mut C) -> String,
     enter: impl FnOnce(&mut C, &LoopEdges),
-    test: impl FnOnce(&mut C, &str, &str),
-    body: impl FnOnce(&mut C, &LoopEdges),
+    test: impl FnOnce(&mut C, &str, &str) -> T,
+    body: impl FnOnce(&mut C, &LoopEdges, T),
     otherwise: Option<impl FnOnce(&mut C)>,
 ) {
     let step = label(context);
@@ -35,9 +35,9 @@ pub(crate) fn loop_region<C>(
     };
     enter(context, &edges);
     output(context).start(&edges.step);
-    test(context, &body_label, &edges.exhausted);
+    let item = test(context, &body_label, &edges.exhausted);
     output(context).start(&body_label);
-    body(context, &edges);
+    body(context, &edges, item);
     let out = output(context);
     if !out.terminated {
         out.jump(&edges.step);
@@ -210,7 +210,7 @@ impl CheckedBody<'_, '_, '_, '_> {
                     this.branch_condition(test, yes, no);
                 }
             },
-            |this, edges| {
+            |this, edges, ()| {
                 match &mut this.0 {
                     Entry::Native(e) => e.loops.push(LoopTarget {
                         end: edges.done.clone(),
