@@ -95,7 +95,7 @@ impl Function<'_, '_> {
         prepared: &crate::frontend::RegisteredSuite,
         mut emit_source: impl FnMut(&mut Self, std::ops::Range<usize>),
     ) {
-        with_checked_slots(self, &prepared.checked, |code| {
+        with_checked_slots(self, prepared.checked.region(), |code| {
             let body = &prepared.checked.function.body;
             let mut offset = 0;
             for run in &prepared.residual {
@@ -195,7 +195,7 @@ impl Function<'_, '_> {
                 continue;
             }
             if let Some(checked) = self.source.checked_deletions.get(&stmt.range()) {
-                with_checked_slots(self, checked, |code| {
+                with_checked_slots(self, checked.region(), |code| {
                     code.checked_block(&checked.function.body, checked);
                 });
                 continue;

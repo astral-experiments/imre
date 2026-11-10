@@ -4,6 +4,7 @@ use super::*;
 
 pub(super) mod booleans;
 mod eager;
+pub(crate) use eager::eager_operand;
 mod lambdas;
 pub(crate) use lambdas::RegisteredLambda;
 mod templates;
@@ -35,6 +36,87 @@ pub(crate) fn registered_type_parameters(
             }
         })
         .collect()
+}
+
+/// An expression can own private slots without introducing another Python function.
+pub(crate) struct RegisteredOperand {
+    pub(crate) value: Expr,
+    #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
+    locals: Vec<Type>,
+    pub(crate) local_names: HashMap<usize, LocalBinding>,
+}
+
+#[derive(Clone, Copy)]
+enum RegionRoot<'a> {
+    Suite(&'a [Statement]),
+    Operand(&'a Expr),
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct RegisteredRegion<'a> {
+    #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
+    pub(crate) locals: &'a [Type],
+    #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
+    pub(crate) params: &'a [usize],
+    pub(crate) local_names: &'a HashMap<usize, LocalBinding>,
+    root: RegionRoot<'a>,
+}
+
+impl<'a> RegisteredRegion<'a> {
+    pub(crate) fn walk(self, visit: &mut impl FnMut(ir::Node<'a>, Option<&'a Expr>)) {
+        match self.root {
+            RegionRoot::Suite(body) => ir::walk_nodes(body, visit),
+            RegionRoot::Operand(value) => ir::walk_operand_nodes(value, visit),
+        }
+    }
+
+    pub(crate) fn private_slots(self) -> std::collections::BTreeSet<usize> {
+        let mut slots = std::collections::BTreeSet::new();
+        self.walk(&mut |node, _| match node {
+            ir::Node::Statement(Statement::Scope { clear, .. })
+            | ir::Node::Expression(Expr {
+                kind: ExprKind::Scope { clear, .. },
+                ..
+            }) => {
+                slots.extend(clear);
+            }
+            _ => {}
+        });
+        slots.retain(|slot| !self.local_names.contains_key(slot));
+        slots
+    }
+}
+
+impl RegisteredOperand {
+    /// Lower an inline value with its lexical bindings and compiler-owned slots.
+    pub(crate) fn prepare(
+        expr: &ast::Expr,
+        source: values::RegisteredSource<'_>,
+        kind: RegisteredScope,
+    ) -> Option<Self> {
+        let operations = HashMap::new();
+        let sites = StatementSites::default();
+        let mut scope = SourceScope::new(kind, source, &operations, &sites);
+        let value = scope.ordinary_operand(expr)?;
+        let (_locals, local_names) = scope.bindings();
+        Some(Self {
+            value,
+            #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
+            locals: _locals,
+            local_names,
+        })
+    }
+
+    pub(crate) fn region(&self) -> RegisteredRegion<'_> {
+        RegisteredRegion {
+            #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
+            locals: &self.locals,
+            #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
+            params: &[],
+            local_names: &self.local_names,
+            root: RegionRoot::Operand(&self.value),
+        }
+    }
 }
 
 pub(crate) struct RegisteredFunction {
@@ -71,22 +153,15 @@ impl RegisteredFunction {
         }
     }
 
-    /// Only IR scopes name compiler-owned storage. User-visible names stay in the Python frame.
-    pub(crate) fn private_slots(&self) -> std::collections::BTreeSet<usize> {
-        let body = &self.function.body;
-        let mut slots = std::collections::BTreeSet::new();
-        ir::walk_statements(body, &mut |stmt| {
-            if let Statement::Scope { clear, .. } = stmt {
-                slots.extend(clear);
-            }
-        });
-        ir::walk_expressions(body, &mut |expr| {
-            if let ExprKind::Scope { clear, .. } = &expr.kind {
-                slots.extend(clear);
-            }
-        });
-        slots.retain(|slot| !self.local_names.contains_key(slot));
-        slots
+    pub(crate) fn region(&self) -> RegisteredRegion<'_> {
+        RegisteredRegion {
+            #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
+            locals: &self.function.locals,
+            #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
+            params: &self.function.params,
+            local_names: &self.local_names,
+            root: RegionRoot::Suite(&self.function.body),
+        }
     }
 }
 
@@ -772,17 +847,7 @@ impl<'a> SuitePreparation<'a> {
     }
 
     fn lower(&self, stmts: &[ast::Stmt], kind: RegisteredScope) -> RegisteredSuite {
-        let mut scope = SourceScope {
-            kind,
-            operations: self.operations,
-            source: self.source,
-            sites: &self.sites,
-            names: HashMap::new(),
-            namespaces: HashMap::new(),
-            comprehension: None,
-            locals: Vec::new(),
-            loop_depth: 0,
-        };
+        let mut scope = SourceScope::new(kind, self.source, self.operations, &self.sites);
         let mut body = Vec::new();
         let mut residual: Vec<SourceRun> = Vec::new();
         for (i, stmt) in stmts.iter().enumerate() {
@@ -797,30 +862,8 @@ impl<'a> SuitePreparation<'a> {
                 SourceRun::record(&mut residual, i, body.len());
             }
         }
-        let locals = scope.locals;
         RegisteredSuite {
-            checked: RegisteredFunction {
-                function: ir::Function {
-                    params: Vec::new(),
-                    returns: Type::PythonObject,
-                    locals,
-                    body,
-                },
-                local_names: scope
-                    .names
-                    .into_iter()
-                    .map(|(name, slot)| {
-                        (
-                            slot,
-                            LocalBinding {
-                                name,
-                                namespace: None,
-                            },
-                        )
-                    })
-                    .chain(scope.namespaces)
-                    .collect(),
-            },
+            checked: scope.finish(body),
             residual,
         }
     }
@@ -1319,6 +1362,58 @@ impl unpacking::PatternBinder for SourceScope<'_> {
     }
 
     fn multiple_stars(&self, _: &ast::Expr) {}
+}
+
+impl<'a> SourceScope<'a> {
+    fn new(
+        kind: RegisteredScope,
+        source: values::RegisteredSource<'a>,
+        operations: &'a HashMap<TextRange, Expr>,
+        sites: &'a StatementSites,
+    ) -> Self {
+        Self {
+            kind,
+            source,
+            operations,
+            sites,
+            names: HashMap::new(),
+            namespaces: HashMap::new(),
+            comprehension: None,
+            locals: Vec::new(),
+            loop_depth: 0,
+        }
+    }
+
+    fn bindings(self) -> (Vec<Type>, HashMap<usize, LocalBinding>) {
+        let names = self
+            .names
+            .into_iter()
+            .map(|(name, slot)| {
+                (
+                    slot,
+                    LocalBinding {
+                        name,
+                        namespace: None,
+                    },
+                )
+            })
+            .chain(self.namespaces)
+            .collect();
+        (self.locals, names)
+    }
+
+    fn finish(self, body: Vec<Statement>) -> RegisteredFunction {
+        let (locals, local_names) = self.bindings();
+        RegisteredFunction {
+            function: ir::Function {
+                params: Vec::new(),
+                returns: Type::PythonObject,
+                locals,
+                body,
+            },
+            local_names,
+        }
+    }
 }
 
 impl SourceScope<'_> {
@@ -1936,7 +2031,10 @@ mod tests {
     fn name_updates_compile_to_a_load_and_an_inplace_operation() {
         let graph = SourceGraph::single("result += operand()\n").unwrap();
         let entry = &graph.modules[graph.entry];
-        for scope in [RegisteredScope::Module, RegisteredScope::Function { is_async: false }] {
+        for scope in [
+            RegisteredScope::Module,
+            RegisteredScope::Function { is_async: false },
+        ] {
             let plan = registered_suite(
                 &entry.parsed.syntax().body,
                 scope,
@@ -1945,7 +2043,9 @@ mod tests {
             .expect("the whole update has a checked representation");
             let mut operations = Vec::new();
             ir::walk_expressions(&plan.function.body, &mut |expr| {
-                if let ExprKind::Builtin(Builtin::RegisteredInPlace(operator), operands) = &expr.kind {
+                if let ExprKind::Builtin(Builtin::RegisteredInPlace(operator), operands) =
+                    &expr.kind
+                {
                     operations.push((*operator, operands.len()));
                 }
             });

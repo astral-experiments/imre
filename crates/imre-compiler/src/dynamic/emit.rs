@@ -2020,7 +2020,7 @@ second = t'{client.lookup(*args)}{(v for v in values)}'",
         assert_eq!(sites.len(), 1);
         assert!(!sites.contains_key(&rejected));
         let checked = &sites[&admitted];
-        crate::verify::registered(checked).unwrap();
+        crate::verify::registered(checked.region()).unwrap();
 
         let initializer = prepared.source.initializer.take().unwrap();
         let [gap] = initializer.residual.as_slice() else {

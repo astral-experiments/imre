@@ -8,7 +8,7 @@ pub(crate) mod patterns;
 mod sequences;
 pub(crate) mod sites;
 pub(crate) mod suspension;
-use crate::frontend::RegisteredFunction;
+use crate::frontend::{LocalBinding, RegisteredFunction, RegisteredOperand, RegisteredRegion};
 use crate::ir::DisplayKind;
 use crate::ir::{self, Binary, Builtin, Expr, ExprKind, Statement, Type};
 use crate::llvm::body::FunctionBody;
@@ -19,13 +19,13 @@ use sites::CheckedSites;
 
 use crate::llvm::operations::{CheckedBody, CheckedValue, LoopEdges};
 use context::Region;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
 /// Only take a body when all its operations have a lowering for the registered calling convention.
 pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
     let body = &checked.function.body;
     let mut uses_python_protocol = false;
-    let private = checked.private_slots();
+    let private = checked.region().private_slots();
     let has_slot = |slot: &usize| private.contains(slot) || checked.local_names.contains_key(slot);
     let mut supported = true;
     let mut cause_wrapper = None;
@@ -239,7 +239,7 @@ pub(super) struct IterationState {
 pub(crate) struct Frame<'f, 'a, 'p> {
     code: &'f mut RegisteredFrame<'a, 'p>,
     sites: &'f CheckedSites,
-    names: Option<&'f RegisteredFunction>,
+    names: Option<&'f HashMap<usize, LocalBinding>>,
 }
 
 impl<'a, 'p> std::ops::Deref for Frame<'_, 'a, 'p> {
@@ -341,7 +341,7 @@ impl Frame<'_, '_, '_> {
         {
             return self.load_private(slot);
         }
-        let binding = &self.names.expect("registered local names").local_names[&slot];
+        let binding = &self.names.expect("registered local names")[&slot];
         if let Some(slot) = binding.namespace {
             let scope = self.load_private(slot);
             self.code.named_op("lookup", &scope, &binding.name, "0")
@@ -369,7 +369,7 @@ impl Frame<'_, '_, '_> {
     }
 
     fn assignment_name(&mut self, slot: usize) -> (String, String) {
-        let binding = &self.names.expect("registered local names").local_names[&slot];
+        let binding = &self.names.expect("registered local names")[&slot];
         let scope = if let Some(slot) = binding.namespace {
             self.load_private(slot)
         } else {
@@ -502,10 +502,7 @@ impl Frame<'_, '_, '_> {
     }
     pub(crate) fn clear_slots(&mut self, slots: &[usize]) {
         for &slot in slots {
-            if self
-                .names
-                .is_some_and(|n| n.local_names.contains_key(&slot))
-            {
+            if self.names.is_some_and(|n| n.contains_key(&slot)) {
                 continue;
             }
             if self.code.iteration.cursors.contains(&slot) {
@@ -847,7 +844,7 @@ impl Frame<'_, '_, '_> {
             (Builtin::RegisteredDeleteName(name, range), []) => self.code.delete_name(name, *range),
             (Builtin::GlobalSet(slot), [value]) => {
                 let value = self.evaluate_handle(value);
-                let name = self.names.expect("registered local names").local_names[slot]
+                let name = self.names.expect("registered local names")[slot]
                     .name
                     .clone();
                 self.bind(&name, &value);
@@ -1074,7 +1071,7 @@ impl RegisteredFrame<'_, '_> {
 /// Residual source can enter another prepared suite before returning to this one.
 pub(crate) fn with_checked_slots<'a, 'p, E: FrameEmitter<'a, 'p>>(
     code: &mut E,
-    checked: &RegisteredFunction,
+    checked: RegisteredRegion<'_>,
     emit: impl FnOnce(&mut E),
 ) {
     #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
@@ -1092,8 +1089,8 @@ pub(crate) fn with_checked_slots<'a, 'p, E: FrameEmitter<'a, 'p>>(
     let end = first + code.iteration.private_slots.len();
     code.private_slot_count = end;
     code.live_slots.extend(first..end);
-    ir::walk_statements(&checked.function.body, &mut |stmt| {
-        if let Statement::IterNext { iterator, .. } = stmt {
+    checked.walk(&mut |node, _| {
+        if let ir::Node::Statement(Statement::IterNext { iterator, .. }) = node {
             code.iteration.cursors.insert(*iterator);
         }
     });
@@ -1107,13 +1104,14 @@ impl RegisteredFrame<'_, '_> {
     fn with_checked_frame<R>(
         &mut self,
         sites: &CheckedSites,
+        names: Option<&HashMap<usize, LocalBinding>>,
         emit: impl FnOnce(Frame<'_, '_, '_>) -> R,
     ) -> R {
         let first = self.integer_owners;
         let outer = self.expression_integer_start.replace(first);
         let result = emit(Frame {
             code: self,
-            names: None,
+            names,
             sites,
         });
         self.expression_integer_start = outer;
@@ -1121,13 +1119,13 @@ impl RegisteredFrame<'_, '_> {
     }
 
     pub(crate) fn checked_statement(&mut self, stmt: &Statement, sites: &CheckedSites) {
-        self.with_checked_frame(sites, |frame| {
+        self.with_checked_frame(sites, None, |frame| {
             CheckedBody::registered(frame).emit_statement(stmt)
         })
     }
 
     pub(crate) fn unary_handle(&mut self, op: ir::ObjectUnary, operand: String) -> CheckedValue {
-        self.with_checked_frame(&CheckedSites::default(), |frame| {
+        self.with_checked_frame(&CheckedSites::default(), None, |frame| {
             CheckedBody::registered(frame).unary_value(op, CheckedValue::handle(operand), false)
         })
     }
@@ -1139,7 +1137,7 @@ impl RegisteredFrame<'_, '_> {
         yes: &str,
         no: &str,
     ) {
-        self.with_checked_frame(sites, |frame| {
+        self.with_checked_frame(sites, None, |frame| {
             CheckedBody::registered(frame).branch_condition(test, yes, no)
         })
     }
@@ -1150,7 +1148,7 @@ impl RegisteredFrame<'_, '_> {
         step: usize,
         operand: super::operations::branches::LogicalOperand,
     ) {
-        self.with_checked_frame(&CheckedSites::default(), |frame| {
+        self.with_checked_frame(&CheckedSites::default(), None, |frame| {
             plan.accept(&mut CheckedBody::registered(frame), step, operand)
         });
     }
@@ -1161,17 +1159,46 @@ impl RegisteredFrame<'_, '_> {
 
     pub(crate) fn registered_expression(
         &mut self,
-        expression: &Expr,
+        value: &Expr,
         sites: &CheckedSites,
         condition: bool,
     ) -> String {
-        self.with_checked_frame(sites, |mut frame| {
+        self.registered_operand(value, sites, condition, None)
+    }
+
+    fn registered_operand(
+        &mut self,
+        value: &Expr,
+        sites: &CheckedSites,
+        condition: bool,
+        names: Option<&HashMap<usize, LocalBinding>>,
+    ) -> String {
+        self.with_checked_frame(sites, names, |mut frame| {
             if condition {
-                frame.evaluate_test(expression)
+                frame.evaluate_test(value)
             } else {
-                frame.evaluate_handle(expression)
+                frame.evaluate_handle(value)
             }
         })
+    }
+
+    pub(crate) fn prepared_operand(
+        &mut self,
+        operand: &RegisteredOperand,
+        sites: &CheckedSites,
+        condition: bool,
+    ) -> String {
+        let mut result = String::from("0");
+        let mut code = self;
+        with_checked_slots(&mut code, operand.region(), |code| {
+            result = code.registered_operand(
+                &operand.value,
+                sites,
+                condition,
+                Some(&operand.local_names),
+            );
+        });
+        result
     }
 
     pub(crate) fn checked_block(
@@ -1182,7 +1209,7 @@ impl RegisteredFrame<'_, '_> {
     ) {
         CheckedBody::registered(Frame {
             code: self,
-            names: Some(checked),
+            names: Some(&checked.local_names),
             sites,
         })
         .emit_block(statements);
@@ -1193,10 +1220,10 @@ impl RegisteredFrame<'_, '_> {
         checked: &RegisteredFunction,
         sites: &CheckedSites,
     ) {
-        with_checked_slots(&mut code, checked, |code| {
+        with_checked_slots(&mut code, checked.region(), |code| {
             CheckedBody::registered(Frame {
                 code,
-                names: Some(checked),
+                names: Some(&checked.local_names),
                 sites,
             })
             .emit_function(&checked.function);

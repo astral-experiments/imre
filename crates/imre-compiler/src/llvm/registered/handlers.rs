@@ -238,9 +238,7 @@ impl Frame<'_, '_, '_> {
                                 f.checkpoint(*site);
                                 let matcher = f.evaluate_handle(class);
                                 let name = handler.name.map(|slot| {
-                                    f.names.expect("registered scope").local_names[&slot]
-                                        .name
-                                        .clone()
+                                    f.names.expect("registered scope")[&slot].name.clone()
                                 });
                                 (matcher, name, handler.body.as_slice())
                             },
@@ -249,11 +247,9 @@ impl Frame<'_, '_, '_> {
                         return;
                     }
                     for handler in handlers {
-                        let name = handler.name.map(|slot| {
-                            f.names.expect("registered scope").local_names[&slot]
-                                .name
-                                .as_str()
-                        });
+                        let name = handler
+                            .name
+                            .map(|slot| f.names.expect("registered scope")[&slot].name.as_str());
                         arm(
                             f,
                             exc,

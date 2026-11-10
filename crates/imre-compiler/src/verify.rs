@@ -68,24 +68,25 @@ pub(crate) fn module(module: &Module) -> Result<(), String> {
 /// Registered frames resolve slots by their original Python names and can carry either a
 /// checked native scalar or a Python handle as a display operand. They have no native
 /// container layout table. Validate this handoff before the emitter indexes its operands.
-pub(crate) fn registered(frame: &crate::frontend::RegisteredFunction) -> Result<(), String> {
-    let function = &frame.function;
+pub(crate) fn registered(
+    frame: crate::frontend::RegisteredRegion<'_>,
+) -> Result<(), String> {
     let private = frame.private_slots();
     let local = |slot: usize| {
         require(
-            slot < function.locals.len()
+            slot < frame.locals.len()
                 && (frame.local_names.contains_key(&slot) || private.contains(&slot)),
             "invalid registered frame slot or missing Python name",
         )
     };
-    for &slot in &function.params {
+    for &slot in frame.params {
         local(slot)?;
     }
     for &slot in frame.local_names.keys() {
         local(slot)?;
     }
     let mut result = Ok(());
-    ir::walk_nodes(&function.body, &mut |node, parent| {
+    frame.walk(&mut |node, parent| {
         if result.is_err() {
             return;
         }
@@ -808,9 +809,9 @@ mod tests {
             frontend::RegisteredScope::Function { is_async: false },
         ] {
             let mut frame = prepare.complete(body, scope).unwrap().checked;
-            registered(&frame).unwrap();
+            registered(frame.region()).unwrap();
             frame.local_names.clear();
-            assert!(registered(&frame).unwrap_err().contains("frame slot"));
+            assert!(registered(frame.region()).unwrap_err().contains("frame slot"));
         }
     }
 
@@ -830,10 +831,10 @@ mod tests {
                 ),
             })];
             if count < 2 {
-                registered(&frame).unwrap();
+                registered(frame.region()).unwrap();
             } else {
                 assert_eq!(
-                    registered(&frame).unwrap_err(),
+                    registered(frame.region()).unwrap_err(),
                     "registered namespace takes at most one parent"
                 );
             }
@@ -851,12 +852,12 @@ mod tests {
             kind: ExprKind::Builtin(Builtin::RegisteredSpread, args),
         };
         frame.function.body = vec![Statement::Expr(spread(vec![Expr::integer(42)]))];
-        assert!(registered(&frame).unwrap_err().contains("spread"));
+        assert!(registered(frame.region()).unwrap_err().contains("spread"));
         frame.function.body = vec![Statement::Expr(Expr {
             ty: Type::PythonObject,
             kind: ExprKind::Tuple(vec![Expr::integer(42), spread(vec![])]),
         })];
-        assert!(registered(&frame).unwrap_err().contains("spread"));
+        assert!(registered(frame.region()).unwrap_err().contains("spread"));
     }
 
     #[test]

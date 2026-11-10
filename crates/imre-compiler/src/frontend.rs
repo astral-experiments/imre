@@ -136,6 +136,7 @@ pub(crate) use registered::{
     delete_targets, module_annotations, prepare_strings, registered_index_target,
     registered_sites, registered_type_alias, registered_type_parameters,
 };
+pub(crate) use registered::{LocalBinding, RegisteredOperand, RegisteredRegion, eager_operand};
 mod sequences;
 mod shutil;
 mod sign_parameters;
