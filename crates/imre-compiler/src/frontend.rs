@@ -1150,6 +1150,28 @@ fn lower_graph(
             &helpers,
             &globals,
         );
+        // Both calling conventions can diagnose the same body. Named startup uses the
+        // ordinary binder to check which physical function the entry actually calls.
+        let called_body = |report: Diagnostic| {
+            let id = callable_definitions[signature.id];
+            if graph.registered_startup
+                && module.checks_source_contracts()
+                && signature.method.is_none()
+                && let Some(operand) = report.exact_operand()
+                && let Some(function) =
+                    module.parsed.syntax().body[id.statement].as_function_def_stmt()
+                && function.decorator_list.is_empty()
+                && !function.is_async
+                && !imre_ast::code_flags::is_generator(&function.body)
+                && graph
+                    .session
+                    .unconditional_function_operand(*module_id, function, operand)
+            {
+                Ok((id, report))
+            } else {
+                Err(report)
+            }
+        };
         let original = registered_parameters.get(&signature.id);
         if registered_generators.contains(&signature.id) {
             continue;
@@ -1176,24 +1198,8 @@ fn lower_graph(
                 Err(error) if error.is_object() => {}
                 Err(error) => {
                     let report = error.terminal_in(graph, *module_id);
-                    let id = callable_definitions[signature.id];
-                    if graph.registered_startup
-                        && module.checks_source_contracts()
-                        && signature.method.is_none()
-                        && let Some(operand) = report.exact_operand()
-                        && let Some(function) =
-                            module.parsed.syntax().body[id.statement].as_function_def_stmt()
-                        && function.decorator_list.is_empty()
-                        && !function.is_async
-                        && !imre_ast::code_flags::is_generator(&function.body)
-                        && graph
-                            .session
-                            .unconditional_function_operand(*module_id, function, operand)
-                    {
-                        refused_body = Some((id, report));
-                        break;
-                    }
-                    return Err(report);
+                    refused_body = Some(called_body(report)?);
+                    break;
                 }
             }
             continue;
@@ -1219,14 +1225,18 @@ fn lower_graph(
             Some(cache) if signature.method.is_none() => cache.body(checker, definition, signature),
             _ => lower_body(checker, definition, signature),
         };
-        let Some((body, sums)) = checked_region(
+        let (body, sums) = match checked_region(
             result.inspect_err(capture_on_object),
             graph,
             *module_id,
             &mut unavailable,
-        )?
-        else {
-            continue;
+        ) {
+            Ok(Some(body)) => body,
+            Ok(None) => continue,
+            Err(report) => {
+                refused_body = Some(called_body(report)?);
+                break;
+            }
         };
         if needs_registered_entry {
             // The fixed-layout checks have supplied their diagnostics. Registered
