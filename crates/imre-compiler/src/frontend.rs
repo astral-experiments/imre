@@ -8596,6 +8596,18 @@ impl<'a> Checker<'a> {
                         | Type::SourceModule
                         | Type::BytesIO
                         | Type::BinaryIO => true,
+                        Type::PythonObject
+                            if matches!(
+                                compare.ops.as_ref(),
+                                [ast::CmpOp::Eq | ast::CmpOp::NotEq]
+                            ) =>
+                        {
+                            return Err(self.classified_error(
+                                Kind::ScopedObject,
+                                expression,
+                                "comparison requires Python object dispatch",
+                            ));
+                        }
                         _ => {
                             return Err(error(
                                 self.source,
@@ -13466,6 +13478,21 @@ mod tests {
             let error = super::lower(&graph).err().expect("invalid fixed open");
             assert!(error.contains(expected), "{source}: {error}");
         }
+    }
+
+    #[test]
+    fn opaque_equality_still_checks_a_later_annotation() {
+        let fixture = include_str!("../../../tests/fixtures/classes/local_super_subclass.py");
+        let source = format!("{fixture}\nresult: int = 'wrong'\n");
+        let mut graph = crate::modules::SourceGraph::single(&source).unwrap();
+        let Err(error) = super::lower_with_caller_cache(&mut graph, None) else {
+            panic!("expected to reject the later annotation");
+        };
+        assert_eq!(
+            error.exact_operand().map(|range| &source[range]),
+            Some("'wrong'"),
+            "{error}"
+        );
     }
 
     #[test]
