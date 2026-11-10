@@ -42,3 +42,65 @@ fn bound_wrapper_emits_native_only_if_registration_declines() {
         assert_eq!(compilation.source_inputs.boxed_imports, registered);
     }
 }
+
+#[test]
+fn fixed_file_selects_its_product_for_the_requested_startup() {
+    let project = tempfile::tempdir().unwrap();
+    let path = project.path().join("app.py");
+    std::fs::write(
+        &path,
+        "def add(a: int, b: int) -> int:\n    return a + b\n\nprint(add(int(input()), 2))\n",
+    )
+    .unwrap();
+
+    for sitecustomize in [false, true] {
+        let options = CompileOptions {
+            sitecustomize,
+            ..Default::default()
+        };
+        let observed = Cell::new(false);
+        object_fallback(
+            BoxedLayout::Check,
+            ProgramEntry::File(&path, None),
+            &options,
+            Default::default(),
+            |graph, call_error| {
+                let product = checked_lower_with(graph, None, call_error)?;
+                if sitecustomize {
+                    assert!(matches!(product, CheckedProgram::Registered(None)));
+                } else {
+                    assert!(matches!(product, CheckedProgram::Native(_)));
+                }
+                observed.set(true);
+                Ok(product)
+            },
+            |_, _, _| unreachable!("checking does not emit LLVM"),
+        )
+        .unwrap();
+        assert!(observed.get());
+    }
+}
+
+#[test]
+fn required_object_call_keeps_its_admission_reason() {
+    let project = tempfile::tempdir().unwrap();
+    let path = project.path().join("app.py");
+    std::fs::write(
+        &path,
+        "def render(data: bytes, spec: str) -> str:\n    return f'{data:{spec}}'\n\nprint(render(b'ok', input()))\n",
+    )
+    .unwrap();
+    let mut graph = modules::SourceGraph::load(&path, None, &[]).unwrap();
+    let reason = match checked_lower(&mut graph).unwrap() {
+        CheckedProgram::Registered(Some(reason)) => reason,
+        CheckedProgram::Runtime(reason) => panic!("unexpected lowering refusal: {reason}"),
+        _ => panic!("the checked formatting operation requires a registered entry"),
+    };
+    let expected = format!(
+        "{}:2:14: Imre: this f-string field requires native Python object operations",
+        path.display()
+    );
+    assert_eq!(reason.kind, LoweringKind::Ordinary);
+    assert_eq!(reason.to_string(), expected);
+    assert_eq!(check_file(&path, None).unwrap_err(), expected);
+}

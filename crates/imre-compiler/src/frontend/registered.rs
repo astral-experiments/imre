@@ -3714,7 +3714,7 @@ mod tests {
         let graph = SourceGraph::single(positive).unwrap();
         let selected = super::super::lower_current(&graph, None, &mut HashSet::new());
         match selected {
-            Ok(crate::CheckedProgram::Registered) => {}
+            Ok(crate::CheckedProgram::Registered(None)) => {}
             Err(error) | Ok(crate::CheckedProgram::Runtime(error)) => {
                 assert!(
                     matches!(error.kind, Kind::UnresolvedParameter(owner, start)

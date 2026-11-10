@@ -32,14 +32,14 @@ impl IntRange {
     }
 }
 
-/// Expression identities remain valid while this immutable module borrow lives.
+/// Expression identities remain valid while the analyzed functions are borrowed.
 /// Missing facts, including unreachable or arbitrary-precision expressions, must
 /// use the ordinary checked lowering path.
 pub(crate) struct RangeFacts<'ir> {
     intervals: IntegerFacts,
     cursors: HashMap<*const Statement, Interval>,
     guarded_entries: HashMap<*const Statement, Vec<bool>>,
-    module: PhantomData<&'ir Module>,
+    ir: PhantomData<&'ir Function>,
 }
 
 pub(crate) struct IntegerFacts(HashMap<*const Expr, Interval>);
@@ -169,15 +169,21 @@ impl RangeFacts<'_> {
 /// Computes facts after ownership-preserving IR rewrites have finished. Loop
 /// bodies are recorded only after their entry invariant reaches a fixed point.
 pub(crate) fn analyze(module: &Module) -> RangeFacts<'_> {
+    analyze_functions(module.functions.iter().chain([&module.entry]))
+}
+
+pub(crate) fn analyze_functions<'ir>(
+    functions: impl Iterator<Item = &'ir Function>,
+) -> RangeFacts<'ir> {
     let mut analyzer = Analyzer::default();
-    for function in module.functions.iter().chain([&module.entry]) {
+    for function in functions {
         analyzer.function(function);
     }
     RangeFacts {
         intervals: IntegerFacts(analyzer.intervals),
         cursors: analyzer.cursors,
         guarded_entries: analyzer.guarded_entries,
-        module: PhantomData,
+        ir: PhantomData,
     }
 }
 

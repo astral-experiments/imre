@@ -308,7 +308,7 @@ print(fixed(2.75), render('é', input()))
 ";
         let graph = SourceGraph::single(source).unwrap();
         let module = super::super::lower(&graph).unwrap();
-        assert!(ir::required_object_call(&module).is_none());
+        assert!(ir::required_object_call(module.functions.iter().chain([&module.entry])).is_none());
         let mut fixed = false;
         let mut field = false;
         for function in &module.functions {
