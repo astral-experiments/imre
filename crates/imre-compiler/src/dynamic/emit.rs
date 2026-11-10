@@ -1145,7 +1145,7 @@ use crate::llvm::registered::context::ContextExit;
 enum Cleanup {
     With(ContextExit),
     ExceptionName(String),
-    PendingValue {
+    RetainedValue {
         value: String,
         enclosing_exception: Option<String>,
     },
@@ -1157,10 +1157,8 @@ enum Cleanup {
 }
 
 struct LoopTarget {
-    step: String,
-    done: String,
-    iterator: Option<String>,
-    cleanup_depth: usize,
+    step: (String, usize),
+    done: (String, usize),
 }
 
 impl Function<'_, '_> {

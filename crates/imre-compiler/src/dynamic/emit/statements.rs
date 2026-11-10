@@ -50,7 +50,7 @@ impl Function<'_, '_> {
 
     fn checked_statement(&mut self, statement: &Statement) {
         self.prepare_checked_sites(std::slice::from_ref(statement));
-        self.frame.checked_statement(statement, &self.sites);
+        self.checked_region(|code| code.frame.checked_statement(statement, &code.sites));
     }
 
     fn checked_block(
@@ -59,12 +59,17 @@ impl Function<'_, '_> {
         checked: &crate::frontend::RegisteredFunction,
     ) {
         self.prepare_checked_sites(statements);
+        self.checked_region(|code| code.frame.checked_block(statements, checked, &code.sites));
+    }
+
+    /// Route checked returns through the exits surrounding this mixed region.
+    fn checked_region(&mut self, emit: impl FnOnce(&mut Self)) {
         if self.exits.is_empty() {
-            self.frame.checked_block(statements, checked, &self.sites);
+            emit(self);
             return;
         }
         self.cleanup_returns = Some(Vec::new());
-        self.frame.checked_block(statements, checked, &self.sites);
+        emit(self);
         let returns = self.cleanup_returns.take().expect("active cleanup region");
         if returns.is_empty() {
             return;
@@ -436,17 +441,12 @@ impl Function<'_, '_> {
                 }
                 ast::Stmt::Break(_) | ast::Stmt::Continue(_) => {
                     if let Some(target) = self.loops.last() {
-                        let (dest, iterator) = if matches!(stmt, ast::Stmt::Break(_)) {
-                            (target.done.clone(), target.iterator.clone())
+                        let (dest, cleanup_depth) = if matches!(stmt, ast::Stmt::Break(_)) {
+                            target.done.clone()
                         } else {
-                            (target.step.clone(), None)
+                            target.step.clone()
                         };
-                        self.run_cleanups(target.cleanup_depth, None);
-                        if let Some(iter) = iterator
-                            && !self.body.terminated
-                        {
-                            self.op("break_iter", &[&iter]);
-                        }
+                        self.run_cleanups(cleanup_depth, None);
                         self.jump(&dest);
                     } else {
                         self.unsupported("loop control outside a loop");
@@ -1238,24 +1238,35 @@ impl Function<'_, '_> {
         let body_label = self.name("b");
         let exhausted = self.name("b");
         let done = self.name("b");
-        if let Some(iterator) = iterator {
-            self.live.push(iterator.to_owned());
-        }
+        let done_depth = self.exits.len();
+        let cursor_unwind = iterator.map(|cursor| {
+            // Continue retains the cursor. Every transfer out of the loop releases its owner.
+            self.live.push(cursor.to_owned());
+            self.exits.push((
+                Cleanup::RetainedValue {
+                    value: cursor.to_owned(),
+                    enclosing_exception: None,
+                },
+                self.body.error_target.clone(),
+            ));
+            self.open_operand_unwind()
+        });
         self.jump(&step);
         self.label(&step);
         enter_body(self, &body_label, &exhausted);
         self.loops.push(LoopTarget {
-            step: step.clone(),
-            done: done.clone(),
-            iterator: iterator.map(str::to_owned),
-            cleanup_depth: self.exits.len(),
+            step: (step.clone(), self.exits.len()),
+            done: (done.clone(), done_depth),
         });
         self.statements(body);
         self.loops.pop();
         self.jump(&step);
         self.label(&exhausted);
-        if iterator.is_some() {
+        if let Some(edge) = cursor_unwind {
+            self.exits.pop();
             self.live.pop();
+            self.close_unwind(edge, |frame| frame.release_target(None));
+            self.release_target(None);
         }
         self.statements(otherwise);
         self.jump(&done);
@@ -1343,7 +1354,7 @@ impl Function<'_, '_> {
             |code, pending| {
                 if let Some((value, enclosing)) = pending {
                     code.exits.push((
-                        Cleanup::PendingValue {
+                        Cleanup::RetainedValue {
                             value: value.into(),
                             enclosing_exception: Some(enclosing.into()),
                         },
@@ -1390,7 +1401,7 @@ impl Function<'_, '_> {
                     self.exit_context(context, None);
                 }
                 Cleanup::ExceptionName(name) => self.clear_exception_name(name),
-                Cleanup::PendingValue {
+                Cleanup::RetainedValue {
                     value,
                     enclosing_exception,
                 } => {
@@ -1411,7 +1422,7 @@ impl Function<'_, '_> {
                     let protected_handlers = self.caught.split_off(*caught_depth);
                     if let Some(value) = pending.filter(|value| *value != "0") {
                         self.exits.push((
-                            Cleanup::PendingValue {
+                            Cleanup::RetainedValue {
                                 value: value.into(),
                                 enclosing_exception: None,
                             },
