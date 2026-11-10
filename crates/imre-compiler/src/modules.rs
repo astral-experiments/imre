@@ -3174,6 +3174,8 @@ pub(crate) struct SourceGraph {
     pub(crate) doctest_imports: Vec<String>,
 }
 
+pub(crate) const MEMORY_SOURCE_PATH: &str = "/input.py";
+
 impl SourceGraph {
     pub(crate) fn lowering_baseline(&self) -> LoweringBaseline {
         LoweringBaseline {
@@ -3882,6 +3884,7 @@ impl SourceGraph {
 
     /// An isolated source API supports sealed imports only; first-party imports
     /// require the path API and its filesystem search root.
+    #[cfg(test)]
     pub(crate) fn single(source: &str) -> Result<Self, String> {
         Self::single_with_mode(source, false)
     }
@@ -3890,7 +3893,7 @@ impl SourceGraph {
         let mut loader = Loader::new(PathBuf::from("/"), &[], &[], None, FileSystem::default())?;
         loader.allow_imports = false;
         loader.reachable_only = reachable_only;
-        let filename = PathBuf::from("/input.py");
+        let filename = PathBuf::from(MEMORY_SOURCE_PATH);
         let entry = loader.add(
             filename.clone(),
             filename.clone(),
