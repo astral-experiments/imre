@@ -28,18 +28,22 @@ impl Function<'_, '_> {
     fn source_lambda(&mut self, lambda: &ast::ExprLambda) -> String {
         let site = lambda.start();
         let plan = &self.source.lambdas[&site];
-        let source_defaults = std::cell::LazyCell::new(|| {
-            crate::frontend::lambda_defaults(lambda).collect::<Vec<_>>()
-        });
         let defaults = plan
             .defaults
             .iter()
-            .enumerate()
-            .map(|(index, operand)| match operand {
-                Some(value) => self.with_operand_source(value, |code| code.registered_value(value)),
-                None => {
-                    let operand = source_defaults[index];
-                    self.with_source_range(operand.range(), |code| code.expr(operand))
+            .map(|default| match default {
+                crate::frontend::LambdaDefault::Value(value) => {
+                    self.with_operand_source(value, |code| code.registered_value(value))
+                }
+                crate::frontend::LambdaDefault::Operand(operand) => {
+                    self.prepare_checked_value(&operand.value);
+                    self.with_operand_source(&operand.value, |code| {
+                        code.frame.prepared_operand(operand, &code.sites, false)
+                    })
+                }
+                crate::frontend::LambdaDefault::Source(parameter) => {
+                    let value = parameter.source(lambda);
+                    self.with_source_range(value.range(), |code| code.expr(value))
                 }
             })
             .collect::<Vec<_>>();
@@ -47,9 +51,10 @@ impl Function<'_, '_> {
             Some(body) => Body::CheckedExpression(body),
             None => Body::Expression(&lambda.body),
         };
-        let definition = self.compile_lambda(site, body);
+        self.place_lambda(site, body, false);
         let scope = self.scope.clone();
-        definition.bind_defaults(&mut self.frame, &scope, &defaults)
+        self.sites
+            .bind_lambda(&mut self.frame, site, &scope, &defaults)
     }
 
     fn registered_region(&mut self, expr: &ast::Expr, condition: bool) -> Option<String> {

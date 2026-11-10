@@ -11,7 +11,7 @@ use ruff_text_size::{Ranged, TextRange, TextSize};
 /// The compiled-site tables read by checked operations in a registered frame.
 pub(in crate::dynamic::emit) enum RequiredSite {
     Definition(TextSize),
-    Lambda(TextSize),
+    Lambda(TextSize, bool),
     Generator(TextRange),
     Alias(TextSize),
     AnnotationString(TextSize),
@@ -24,7 +24,7 @@ fn visit_expression_site(expr: &Expr, visit: &mut impl FnMut(RequiredSite)) {
     };
     visit(match op {
         Builtin::RegisteredDefinition(site) => RequiredSite::Definition(site.start()),
-        Builtin::RegisteredLambda(site, _) => RequiredSite::Lambda(*site),
+        Builtin::RegisteredLambda(site, scoped) => RequiredSite::Lambda(*site, *scoped),
         Builtin::RegisteredGenerator(site, _) => RequiredSite::Generator(*site),
         Builtin::RegisteredTypeAlias(site) => RequiredSite::Alias(*site),
         Builtin::BindAnnotationExpression(site) => RequiredSite::AnnotationString(*site),
@@ -161,11 +161,15 @@ impl Function<'_, '_> {
 
     /// Python creates a fresh callable at each execution of the binding while the
     /// underlying code object belongs to one lexical lambda.
-    pub(in crate::dynamic::emit) fn compile_lambda(
+    pub(in crate::dynamic::emit) fn place_lambda(
         &mut self,
         site: TextSize,
         body: Body<'_>,
-    ) -> CompiledDefinition {
+        comprehension: bool,
+    ) {
+        if self.sites.lambdas.contains_key(&site) {
+            return;
+        }
         let metadata = &self.source.lambdas[&site].metadata;
         let qualname = format!("{}<lambda>", self.prefix);
         let existing = self.source.lambda_code.borrow().get(&site).cloned();
@@ -182,10 +186,19 @@ impl Function<'_, '_> {
             self.source.lambda_code.borrow_mut().insert(site, code.clone());
             code
         });
-        let method = self.class_locals.is_some() && self.annotation_values.is_none();
-        let signature = metadata.signature(self.in_function, method, self.source.future_flags());
-        self.output.interned_identifiers.extend(metadata.parameter_names().map(str::to_owned));
-        CompiledDefinition {
+        // A lambda bound inside a display captures its iteration namespace, including
+        // when the display itself is evaluated directly in a class body.
+        let method =
+            !comprehension && self.class_locals.is_some() && self.annotation_values.is_none();
+        let signature = metadata.signature(
+            self.in_function || comprehension,
+            method,
+            self.source.future_flags(),
+        );
+        self.output
+            .interned_identifiers
+            .extend(metadata.parameter_names().map(str::to_owned));
+        let definition = CompiledDefinition {
             code,
             signature: signature.to_string(),
             name: "<lambda>".to_owned(),
@@ -195,7 +208,8 @@ impl Function<'_, '_> {
             default_names: metadata.defaults.clone(),
             type_alias: false,
             header: false,
-        }
+        };
+        self.sites.lambdas.insert(site, definition);
     }
 
     pub(super) fn compile_type_alias(
@@ -258,15 +272,9 @@ impl Function<'_, '_> {
                 }
                 return;
             }
-            RequiredSite::Lambda(site) => {
-                if !self.sites.lambdas.contains_key(&site) {
-                    let body = self.source.lambdas[&site]
-                        .body
-                        .as_ref()
-                        .expect("checked lambda body");
-                    let lambda = self.compile_lambda(site, Body::CheckedExpression(body));
-                    self.sites.lambdas.insert(site, lambda);
-                }
+            RequiredSite::Lambda(site, scoped) => {
+                let body = self.source.lambdas[&site].body.as_ref().expect("checked lambda body");
+                self.place_lambda(site, Body::CheckedExpression(body), scoped);
                 return;
             }
             RequiredSite::AnnotationString(site) => {

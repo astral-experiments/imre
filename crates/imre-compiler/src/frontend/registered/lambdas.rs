@@ -101,10 +101,56 @@ impl LambdaMetadata {
     }
 }
 
+/// An inline default can also be embedded in a larger checked expression. Defaults
+/// with their own locals must be evaluated as complete regions in the binding frame.
+pub(crate) enum LambdaDefault {
+    Value(Expr),
+    Operand(Box<RegisteredOperand>),
+    Source(DefaultParameter),
+}
+
+impl LambdaDefault {
+    pub(super) fn inline(&self) -> Option<&Expr> {
+        match self {
+            Self::Value(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+
+/// Only a genuinely residual default needs its source operand. Record its physical
+/// parameter during preparation so the adapter never scans a signature to find it.
+#[derive(Clone, Copy)]
+pub(crate) struct DefaultParameter {
+    group: usize,
+    index: usize,
+}
+
+impl DefaultParameter {
+    fn groups(parameters: &ast::Parameters) -> [&[ast::ParameterWithDefault]; 3] {
+        [
+            &parameters.posonlyargs,
+            &parameters.args,
+            &parameters.kwonlyargs,
+        ]
+    }
+
+    pub(crate) fn source(self, lambda: &ast::ExprLambda) -> &ast::Expr {
+        let parameters = lambda
+            .parameters
+            .as_deref()
+            .expect("lambda default has parameters");
+        Self::groups(parameters)[self.group][self.index]
+            .default
+            .as_deref()
+            .expect("prepared default parameter")
+    }
+}
+
 pub(crate) struct RegisteredLambda {
     pub(crate) metadata: LambdaMetadata,
     pub(crate) body: Option<RegisteredFunction>,
-    pub(crate) defaults: Vec<Option<Expr>>,
+    pub(crate) defaults: Vec<LambdaDefault>,
 }
 
 impl RegisteredLambda {
@@ -117,33 +163,70 @@ impl RegisteredLambda {
         if scopes.is_empty() {
             return HashMap::new();
         }
-        use ast::visitor::{Visitor, walk_expr};
+        use ast::visitor::{Visitor, walk_body, walk_expr, walk_stmt};
         struct Collector<'a> {
             source: values::RegisteredSource<'a>,
             scopes: HashMap<TextSize, FunctionScope>,
             sites: HashMap<TextSize, RegisteredLambda>,
+            owner: RegisteredScope,
+            suite_owner: Option<RegisteredScope>,
         }
         impl<'a> Visitor<'a> for Collector<'_> {
-            fn visit_expr(&mut self, expr: &'a ast::Expr) {
-                // Nested callables own their bodies before the enclosing operand binds them.
-                walk_expr(self, expr);
-                if let ast::Expr::Lambda(lambda) = expr {
-                    let plan = RegisteredLambda::prepare(
-                        lambda,
-                        values::RegisteredSource {
-                            lambdas: Some(&self.sites),
-                            ..self.source
-                        },
-                        &self.scopes[&lambda.start()],
-                    );
-                    self.sites.insert(lambda.start(), plan);
+            fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
+                // Ruff visits the entire header before calling visit_body for the suite.
+                self.suite_owner = match stmt {
+                    ast::Stmt::FunctionDef(def) => Some(RegisteredScope::Function {
+                        is_async: def.is_async,
+                    }),
+                    ast::Stmt::ClassDef(_) => Some(RegisteredScope::Class),
+                    _ => None,
+                };
+                walk_stmt(self, stmt);
+            }
+
+            fn visit_body(&mut self, stmts: &'a [ast::Stmt]) {
+                let parent = self.owner;
+                if let Some(owner) = self.suite_owner.take() {
+                    self.owner = owner;
                 }
+                walk_body(self, stmts);
+                self.owner = parent;
+            }
+
+            fn visit_expr(&mut self, expr: &'a ast::Expr) {
+                let ast::Expr::Lambda(lambda) = expr else {
+                    walk_expr(self, expr);
+                    return;
+                };
+                if let Some(parameters) = &lambda.parameters {
+                    self.visit_parameters(parameters);
+                }
+                let parent = std::mem::replace(
+                    &mut self.owner,
+                    RegisteredScope::Function { is_async: false },
+                );
+                self.visit_expr(&lambda.body);
+                self.owner = parent;
+
+                // Bind only after nested callable sites in the defaults and body are prepared.
+                let plan = RegisteredLambda::prepare(
+                    lambda,
+                    values::RegisteredSource {
+                        lambdas: Some(&self.sites),
+                        ..self.source
+                    },
+                    &self.scopes[&lambda.start()],
+                    self.owner,
+                );
+                self.sites.insert(lambda.start(), plan);
             }
         }
         let mut collector = Collector {
             source,
             scopes,
             sites: HashMap::new(),
+            owner: RegisteredScope::Module,
+            suite_owner: None,
         };
         collector.visit_body(body);
         collector.sites
@@ -153,9 +236,26 @@ impl RegisteredLambda {
         lambda: &ast::ExprLambda,
         source: values::RegisteredSource<'_>,
         scope: &FunctionScope,
+        owner: RegisteredScope,
     ) -> Self {
         let operand = |node: &ast::Expr| values::Region::Lambda.operand(node, source);
-        let defaults = values::lambda_defaults(lambda).map(operand).collect();
+        let mut defaults = Vec::new();
+        if let Some(parameters) = lambda.parameters.as_deref() {
+            for (group, params) in DefaultParameter::groups(parameters).into_iter().enumerate() {
+                for (index, param) in params.iter().enumerate() {
+                    if let Some(node) = param.default.as_deref() {
+                        defaults.push(if let Some(value) = operand(node) {
+                            LambdaDefault::Value(value)
+                        } else if let Some(value) = RegisteredOperand::prepare(node, source, owner)
+                        {
+                            LambdaDefault::Operand(Box::new(value))
+                        } else {
+                            LambdaDefault::Source(DefaultParameter { group, index })
+                        });
+                    }
+                }
+            }
+        }
         let body = operand(&lambda.body)
             .map(|value| RegisteredFunction::expression(lambda.body.range(), value));
         Self {
@@ -169,6 +269,115 @@ impl RegisteredLambda {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mixed_defaults_own_comprehension_slots_in_the_binding_scope() {
+        let text = "\
+async def factory(seed, rows, mark):
+    checked = lambda first=mark(seed), snap=[mark(row[0]) for row in rows], *, last=mark(seed + 1): (first, snap, last, seed)
+    residual = lambda first=mark(seed), snap=[row[0] for row in rows], stream=(row for row in rows), /, *, skip, deferred=(row async for row in rows), thunk=lambda: [item for item in rows], last=mark(seed): stream
+";
+        let mut body = ruff_python_parser::parse_module(text)
+            .unwrap()
+            .into_syntax()
+            .body;
+        let names = imre_ast::lower(&mut body);
+        let scopes =
+            crate::frontend::function_scope::ScopeFacts::prepare(&body, &names, |_| {}, |_| {});
+        let source = values::RegisteredSource {
+            text,
+            method_imports: &Default::default(),
+            replacements: &Default::default(),
+            has_templates: false,
+            template_fields: None,
+            generators: None,
+            lambdas: None,
+            private_names: Some(&names),
+        };
+        let (_, generators) = prepare_expression_sites(&body, source);
+        let source = values::RegisteredSource {
+            generators: Some(&generators),
+            ..source
+        };
+        let sites = RegisteredLambda::collect(&body, source, scopes.lambdas);
+        let factory = body[0].as_function_def_stmt().unwrap();
+        let lambda = |index: usize| {
+            factory.body[index]
+                .as_assign_stmt()
+                .unwrap()
+                .value
+                .as_lambda_expr()
+                .unwrap()
+        };
+
+        let checked = &sites[&lambda(0).start()];
+        let [
+            LambdaDefault::Value(_),
+            LambdaDefault::Operand(display),
+            LambdaDefault::Value(_),
+        ] = checked.defaults.as_slice()
+        else {
+            panic!("expected the checked comprehension between two inline defaults");
+        };
+        let row = display
+            .local_names
+            .values()
+            .find(|binding| binding.name == "row")
+            .unwrap();
+        assert!(
+            display
+                .region()
+                .private_slots()
+                .contains(&row.namespace.unwrap())
+        );
+        let child = checked.body.as_ref().unwrap();
+        assert!(child.region().private_slots().is_empty() && child.local_names.is_empty());
+        assert_eq!(
+            checked.metadata.signature(true, false, 0)["scope_reads"],
+            json!(["seed"])
+        );
+
+        let residual = lambda(1);
+        let [
+            LambdaDefault::Value(_),
+            LambdaDefault::Operand(_),
+            LambdaDefault::Value(sync_generator),
+            LambdaDefault::Value(async_generator),
+            LambdaDefault::Source(parameter),
+            LambdaDefault::Value(_),
+        ] = sites[&residual.start()].defaults.as_slice()
+        else {
+            panic!("only the lambda with an unprepared body should need its physical parameter");
+        };
+        let parameters = residual.parameters.as_ref().unwrap();
+        let stream = parameters.posonlyargs[2].default.as_deref().unwrap();
+        let deferred = parameters.kwonlyargs[1].default.as_deref().unwrap();
+        for (value, site, is_async) in [
+            (sync_generator, stream.range(), false),
+            (async_generator, deferred.range(), true),
+        ] {
+            let mut children = Vec::new();
+            ir::walk_operand_expressions(value, &mut |node| {
+                if let ExprKind::Builtin(Builtin::RegisteredGenerator(range, false), _) = &node.kind
+                {
+                    children.push(*range);
+                }
+            });
+            assert_eq!(children, [site]);
+            assert_eq!(generators[&site].is_async, is_async);
+        }
+        let thunk = parameters.kwonlyargs[2].default.as_deref().unwrap();
+        assert!(std::ptr::eq(parameter.source(residual), thunk));
+
+        let source = values::RegisteredSource {
+            lambdas: Some(&sites),
+            ..source
+        };
+        let owner = RegisteredScope::Function { is_async: true };
+        let binding = |index: usize| &*factory.body[index].as_assign_stmt().unwrap().value;
+        assert!(RegisteredOperand::prepare(binding(0), source, owner).is_some());
+        assert!(RegisteredOperand::prepare(binding(1), source, owner).is_none());
+    }
 
     #[test]
     fn binding_and_invocation_have_separate_checked_operands() {
@@ -190,7 +399,12 @@ mod tests {
             lambdas: None,
             private_names: None,
         };
-        let plan = RegisteredLambda::prepare(lambda, source, &FunctionScope::lambda(lambda, false));
+        let plan = RegisteredLambda::prepare(
+            lambda,
+            source,
+            &FunctionScope::lambda(lambda, false),
+            RegisteredScope::Module,
+        );
         let sites = HashMap::from([(lambda.start(), plan)]);
         let source = values::RegisteredSource {
             lambdas: Some(&sites),
@@ -259,7 +473,12 @@ mod tests {
             lambdas: None,
             private_names: None,
         };
-        let plan = RegisteredLambda::prepare(lambda, source, &FunctionScope::lambda(lambda, false));
+        let plan = RegisteredLambda::prepare(
+            lambda,
+            source,
+            &FunctionScope::lambda(lambda, false),
+            RegisteredScope::Module,
+        );
         let nested = values::lambda_defaults(lambda)
             .nth(1)
             .unwrap()
@@ -271,7 +490,7 @@ mod tests {
         assert_eq!(
             plan.defaults
                 .iter()
-                .map(Option::is_some)
+                .map(|default| default.inline().is_some())
                 .collect::<Vec<_>>(),
             [true, child_checked, true]
         );
