@@ -2050,11 +2050,22 @@ fn signature(
                 && only_compares_zero(&function.body, parameter.name().as_str()),
         });
     }
+    let pack_element = |annotation: &ast::Expr| match annotation_in_class(
+        annotation, graph, module, classes, types, owner,
+    ) {
+        Err(_)
+            if graph.resolve_type(module, annotation)
+                == Some(Binding::Intrinsic(Intrinsic::Any)) =>
+        {
+            Ok(Type::ObjectValue)
+        }
+        layout => layout,
+    };
     if let Some(pack) = function.parameters.vararg.as_deref() {
         // Annotated packs use homogeneous storage. Without an annotation a direct
         // call can instead determine the exact (possibly heterogeneous) tuple.
         let ty = if let Some(annotation) = pack.annotation() {
-            let element = annotation_in_class(annotation, graph, module, classes, types, owner)?;
+            let element = pack_element(annotation)?;
             sequences::check_pack_reads(function, pack.name.as_str(), graph, module, source)?;
             Some(types.list(element))
         } else {
@@ -2077,7 +2088,7 @@ fn signature(
                 "keyword rest parameters need an element annotation",
             )
         })?;
-        let element = annotation_in_class(element, graph, module, classes, types, owner)?;
+        let element = pack_element(element)?;
         let ty = types.dict(Type::Str, element);
         params.push(Parameter {
             name: keyword.name.to_string(),
