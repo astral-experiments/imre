@@ -1514,10 +1514,15 @@ pub(crate) trait FrameEmitter<'a, 'p>:
         &mut self,
         op: &Builtin,
         target: &'e T,
-        args: impl Iterator<Item = &'e T>,
-        evaluate: impl FnMut(&mut Self, &T) -> String,
+        mut args: impl Iterator<Item = &'e T>,
+        mut evaluate: impl FnMut(&mut Self, &T) -> String,
     ) -> String {
         match op {
+            Builtin::RegisteredDeleteItem => {
+                let receiver = evaluate(self, target);
+                let key = evaluate(self, args.next().expect("indexed deletion key"));
+                self.delete_item(&receiver, &key)
+            }
             Builtin::RegisteredCall(call) => self.call_value(call, target, args, evaluate),
             Builtin::RegisteredAttribute {
                 action,

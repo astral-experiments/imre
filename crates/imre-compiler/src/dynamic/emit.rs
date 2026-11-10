@@ -2976,9 +2976,12 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             panic!("expected a residual RHS followed by a residual statement");
         };
         assert_eq!(rhs.statements, 2..3);
-        assert!(rhs.assignment_input.is_some());
+        assert!(matches!(
+            rhs.effect,
+            Some(crate::frontend::SourceEffect::AssignmentInput(_))
+        ));
         assert_eq!(whole.statements, 3..4);
-        assert!(whole.assignment_input.is_none());
+        assert!(whole.effect.is_none());
 
         let emit = |prepared: &PreparedBody<'_, '_>| {
             let mut output = Output::default();
@@ -3001,6 +3004,47 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
     }
 
     #[test]
+    fn finally_match_keeps_its_prepared_delete_targets() {
+        let source = concat!(
+            "try:\n    work()\n",
+            "finally:\n    match subject():\n",
+            "        case target:\n            del first, target[(lambda: key)()], target[last]\n",
+        );
+        let mut prepared = PreparedBody::module(
+            "example",
+            Path::new("example.py"),
+            source,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        inject_residual_child_module(&mut prepared);
+        let before = prepared.standalone().unwrap().unwrap();
+        let protected = prepared.syntax.as_mut().unwrap().to_mut()[0]
+            .as_try_stmt_mut()
+            .unwrap();
+        let branch = protected.finalbody[0].as_match_stmt_mut().unwrap();
+        let site = prepared.source.statement_sites.matches[&branch.range()]
+            .as_ref()
+            .unwrap();
+        let suite = site.cases[0].body.as_ref().unwrap();
+        let [run] = suite.residual.as_slice() else {
+            panic!("expected one external deletion operand");
+        };
+        assert!(matches!(
+            run.effect,
+            Some(crate::frontend::SourceEffect::ObjectOperation(..))
+        ));
+        assert!(run.at > 0 && run.at < suite.checked.function.body.len());
+        branch.cases[0].body[0]
+            .as_delete_stmt_mut()
+            .unwrap()
+            .targets
+            .clear();
+        assert_eq!(prepared.standalone().unwrap().unwrap(), before);
+    }
+
+    #[test]
     fn physical_deletion_uses_the_complete_checked_statement_after_targets_are_dropped() {
         let source = concat!(
             "del first, [(owner := obj).field, obj[lo:hi]], obj[[key for key in keys if key]], last\n",
@@ -3014,19 +3058,43 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        assert!(prepared.source.initializer.as_ref().unwrap().fully_checked());
+        assert!(
+            prepared
+                .source
+                .initializer
+                .as_ref()
+                .unwrap()
+                .fully_checked()
+        );
         inject_residual_child_module(&mut prepared);
-        let admitted = prepared.syntax.as_ref().unwrap()[0].range();
-        let rejected = prepared.syntax.as_ref().unwrap()[1].range();
-        assert_eq!(&source[admitted], source.lines().next().unwrap());
-        assert_eq!(&source[rejected], source.lines().nth(1).unwrap());
+        let targets = &prepared.syntax.as_ref().unwrap()[1]
+            .as_delete_stmt()
+            .unwrap()
+            .targets;
+        let key_range = targets[1].as_subscript_expr().unwrap().slice.range();
         let suite = prepared.source.initializer.as_ref().unwrap();
         crate::verify::registered(suite.checked.region()).unwrap();
         let [gap] = suite.residual.as_slice() else {
-            panic!("expected the second deletion to remain physical");
+            panic!("only the target with the injected key needs a source input");
         };
         assert_eq!(gap.statements, 1..2);
         assert_eq!(gap.at, suite.checked.function.body.len());
+        let Some(crate::frontend::SourceEffect::ObjectOperation(op, operands)) = &gap.effect else {
+            panic!("expected a prepared item deletion");
+        };
+        assert!(matches!(
+            op.as_ref(),
+            crate::ir::Builtin::RegisteredDeleteItem
+        ));
+        let [
+            crate::frontend::PhysicalOperand::Checked(_),
+            crate::frontend::PhysicalOperand::Source(key),
+        ] = operands.as_slice()
+        else {
+            panic!("expected a checked base and an opaque key");
+        };
+        assert_eq!(key.range(), key_range);
+        assert_eq!(&source[key_range], "(lambda: key)()");
 
         let emit = |prepared: &PreparedBody<'_, '_>| {
             let mut output = Output::default();
@@ -3042,16 +3110,9 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             (output.functions, output.constants)
         };
         let before = emit(&prepared);
-        let stmt = prepared.syntax.as_mut().unwrap().to_mut()[0]
-            .as_delete_stmt_mut()
-            .unwrap();
-        stmt.targets.clear();
-        assert_eq!(stmt.range(), admitted);
+        for stmt in prepared.syntax.as_mut().unwrap().to_mut() {
+            stmt.as_delete_stmt_mut().unwrap().targets.clear();
+        }
         assert_eq!(emit(&prepared), before);
-        let residual = prepared.syntax.as_mut().unwrap().to_mut()[1]
-            .as_delete_stmt_mut()
-            .unwrap();
-        residual.targets.pop().unwrap();
-        assert_ne!(emit(&prepared), before);
     }
 }
