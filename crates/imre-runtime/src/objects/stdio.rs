@@ -248,11 +248,11 @@ fn write_piece(
     }
 }
 
-/// Print already-evaluated scalars to a single destination, committing each piece before
+/// Print already-evaluated values to a single destination, committing each piece before
 /// formatting the next value so conversion and encoding failures preserve earlier writes.
 ///
 /// # Safety
-/// Both arrays cover `count` elements. Each word is rooted and has the scalar or tagged scalar union kind at its index.
+/// Both arrays cover `count` elements. Each word is rooted and matches the non-nullable kind at its index.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_print_scalars(kinds: *const u8, words: *const usize, count: usize) {
     let stream = match binding() {
@@ -276,7 +276,7 @@ pub unsafe extern "C" fn imre_print_scalars(kinds: *const u8, words: *const usiz
             if i > 0 {
                 write(" ", None)?;
             }
-            // SAFETY: the caller roots the scalar or tagged union until the write returns.
+            // SAFETY: the caller roots the argument until the write returns.
             let (kind, word) = unsafe {
                 super::boxed_values::concrete(super::words::WordKind::new(kind.into()), word)
             };
