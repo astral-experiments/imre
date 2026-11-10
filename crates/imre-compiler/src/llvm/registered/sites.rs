@@ -17,7 +17,7 @@ pub(crate) struct CompiledDefinition {
     pub(crate) doc: Option<String>,
     pub(crate) provider: Option<Box<Self>>,
     pub(crate) annotation_scope: bool,
-    pub(crate) default_names: Vec<String>,
+    pub(crate) default_names: std::sync::Arc<[String]>,
     pub(crate) type_alias: bool,
     pub(crate) class_header: Option<TextRange>,
 }
@@ -52,7 +52,7 @@ impl CompiledDefinition {
             annotation_scope,
             doc: None,
             provider: None,
-            default_names: Vec::new(),
+            default_names: Default::default(),
             type_alias: false,
             class_header: None,
         }

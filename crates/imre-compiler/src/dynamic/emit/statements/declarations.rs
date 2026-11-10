@@ -22,7 +22,7 @@ impl SourceInfo<'_> {
         {
             Body::Suite(suite)
         } else {
-            let globals = self.scopes.functions[&site].lexical.globals();
+            let globals = &self.scopes.functions[&site].globals;
             Body::Checked(plan.checked(), Some(globals))
         }
     }
@@ -85,11 +85,9 @@ impl SourceMap<'_> {
 
     fn is_checked_ordinary_function(&self, site: TextSize) -> bool {
         self.scopes.functions.get(&site).is_some_and(|scope| {
-            scope.suspension_flags == 0
-                && !scope.header.generic
-                && !self
-                    .parameter_annotations
-                    .contains_key(&scope.header.parameters)
+            scope.metadata.suspension_flags() == 0
+                && !scope.generic
+                && !self.parameter_annotations.contains_key(&scope.parameters)
                 && !self.thread_entries.contains_key(&site)
                 && self
                     .function_bodies
@@ -216,22 +214,15 @@ impl CallableSites<'_, '_> {
                 (header.name.as_str(), qualname, doc, &header.metadata, false)
             }
         };
-        let (suspension, generic, provider) = match callable {
+        let (generic, class_cell, provider) = match callable {
             Callable::Named(header) => (
-                source.scopes.functions[&site].suspension_flags,
                 header.generic,
+                !header.generic || header.type_params.is_empty(),
                 self.parameter_provider(header, &qualname),
             ),
-            Callable::Lambda { .. } => (
-                if metadata.generator {
-                    imre_ast::code_flags::GENERATOR
-                } else {
-                    0
-                },
-                false,
-                None,
-            ),
+            Callable::Lambda { .. } => (false, true, None),
         };
+        let suspension = metadata.suspension_flags();
         // Several expression regions can place the same lexical lambda.
         let cache = match callable {
             Callable::Lambda { .. } => Some(&source.callable_code),
@@ -258,21 +249,15 @@ impl CallableSites<'_, '_> {
         });
         // A lambda inside a display captures the iteration namespace even in a class body.
         let method = !comprehension && self.method_scope;
-        let mut flags = source.future_flags();
+        let mut flags = source.function_flags(
+            self.in_function || comprehension || generic,
+            method && !generic,
+        );
         if doc.is_some() {
             flags |= imre_ast::code_flags::HAS_DOCSTRING;
         }
-        let mut signature = metadata.signature(
-            self.in_function || comprehension || generic,
-            method && !generic,
-            flags | suspension,
-        );
+        let mut signature = metadata.signature(flags, method && class_cell);
         if let Callable::Named(header) = callable {
-            if method && generic && header.type_params.is_empty() {
-                // Without a type-parameter frame this method still captures from the class.
-                signature["method_class_cell"] =
-                    json!(source.scopes.functions[&site].lexical.captures_class);
-            }
             self.named_signature(site, header, suspension, &mut signature);
         }
         self.output
@@ -317,7 +302,7 @@ impl CallableSites<'_, '_> {
             return;
         }
         let source = self.source;
-        let header = &source.scopes.functions[&site].header;
+        let header = &source.scopes.functions[&site];
         let definition =
             self.compile_callable(site, Callable::Named(header), source.function_body(site));
         let decorator_lines = header
@@ -347,7 +332,7 @@ impl CallableSites<'_, '_> {
         let reads = source.scopes.annotations.parameter_reads(start, class);
         let mut metadata = json!({
             "posonly": ["format"],
-            "code_flags": source.function_flags(None, self.in_function || header.generic, false),
+            "code_flags": source.function_flags(self.in_function || header.generic, false),
             "scope_reads": reads,
             "scope_complete": true,
             "scope_locals_complete": true,
@@ -723,7 +708,7 @@ mod tests {
                 assert_eq!(bindings, 1);
                 assert!(module.source.function_bodies[&start].fully_checked());
                 assert_eq!(
-                    module.source.scopes.functions[&start].header.type_params[0].binding,
+                    module.source.scopes.functions[&start].type_params[0].binding,
                     "T"
                 );
                 Ok(())

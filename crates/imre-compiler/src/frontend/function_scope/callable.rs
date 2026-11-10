@@ -1,4 +1,4 @@
-//! Parameter binding and code metadata shared by lambdas and ordinary functions.
+//! Parameter binding and code metadata shared by lambdas and named functions.
 
 use super::FunctionScope;
 use imre_ast::code_flags;
@@ -46,6 +46,7 @@ pub(crate) struct NamedFunction {
     pub(crate) decorator_offsets: Vec<TextSize>,
     pub(crate) doc: Option<String>,
     pub(crate) metadata: CallableMetadata,
+    pub(crate) globals: std::collections::BTreeSet<String>,
     /// Source position shared with the prepared parameter annotation provider.
     pub(crate) parameters: TextSize,
     pub(crate) generic: bool,
@@ -57,7 +58,8 @@ impl NamedFunction {
     pub(super) fn prepare(
         def: &ast::StmtFunctionDef,
         names: &imre_ast::Names,
-        lexical: &FunctionScope,
+        lexical: FunctionScope,
+        suspension_flags: u32,
     ) -> Self {
         Self {
             name: names.definition(&def.name).to_owned(),
@@ -68,7 +70,8 @@ impl NamedFunction {
                 .map(|d| d.expression.start())
                 .collect(),
             doc: crate::frontend::docstring(&def.body),
-            metadata: CallableMetadata::new(Some(&def.parameters), lexical, false),
+            metadata: CallableMetadata::new(Some(&def.parameters), &lexical, suspension_flags),
+            globals: lexical.names.globals,
             parameters: def.parameters.start(),
             generic: def.type_params.is_some(),
             type_params: Vec::new(),
@@ -82,16 +85,15 @@ pub(crate) struct CallableMetadata {
     layout: serde_json::Value,
     flags: u32,
     captures_class: bool,
-    pub(crate) generator: bool,
     /// Keys for the default values evaluated in order by the enclosing expression.
-    pub(crate) defaults: Vec<String>,
+    pub(crate) defaults: std::sync::Arc<[String]>,
 }
 
 impl CallableMetadata {
     pub(crate) fn new(
         parameters: Option<&ast::Parameters>,
         scope: &FunctionScope,
-        generator: bool,
+        suspension_flags: u32,
     ) -> Self {
         let mut layout = json!({});
         let defaults =
@@ -99,21 +101,36 @@ impl CallableMetadata {
         let captures_class = scope.captures_class;
         scope.write_signature(&mut layout);
 
-        let mut flags = code_flags::function_flags(parameters, false, false);
-        if generator {
-            flags |= code_flags::GENERATOR;
-            layout["generator_lambda"] = json!(true);
-        }
         if captures_class {
             layout["class_cell"] = json!(true);
         }
         Self {
             layout,
-            flags,
-            generator,
+            flags: code_flags::function_flags(parameters, false, false) | suspension_flags,
             captures_class,
-            defaults,
+            defaults: if defaults.is_empty() {
+                Default::default()
+            } else {
+                defaults.into()
+            },
         }
+    }
+
+    pub(crate) fn lambda(
+        parameters: Option<&ast::Parameters>,
+        scope: &FunctionScope,
+        generator: bool,
+    ) -> Self {
+        let flags = if generator { code_flags::GENERATOR } else { 0 };
+        let mut metadata = Self::new(parameters, scope, flags);
+        if generator {
+            metadata.layout["generator_lambda"] = json!(true);
+        }
+        metadata
+    }
+
+    pub(crate) fn suspension_flags(&self) -> u32 {
+        self.flags & (code_flags::GENERATOR | code_flags::COROUTINE | code_flags::ASYNC_GENERATOR)
     }
 
     pub(crate) fn non_variadic_parameter_names(&self) -> impl Iterator<Item = &str> {
@@ -133,20 +150,14 @@ impl CallableMetadata {
 
     pub(crate) fn signature(
         &self,
-        nested: bool,
-        method: bool,
-        extra_flags: u32,
+        placement_flags: u32,
+        method_class_cell: bool,
     ) -> serde_json::Value {
         let mut signature = self.layout.clone();
-        let mut flags = self.flags | extra_flags;
-        if nested {
-            flags |= code_flags::NESTED;
-        }
-        if method {
-            flags |= code_flags::METHOD;
+        if method_class_cell {
             signature["method_class_cell"] = json!(self.captures_class);
         }
-        signature["code_flags"] = json!(flags);
+        signature["code_flags"] = json!(self.flags | placement_flags);
         signature
     }
 }
@@ -175,22 +186,25 @@ mod tests {
         let facts = ScopeFacts::prepare(&body, &names, |_| {}, |_| {});
         let class = body[0].as_class_def_stmt().unwrap();
         let method = class.body[0].as_function_def_stmt().unwrap();
-        let ordinary = &facts.function(method).header;
+        let ordinary = facts.function(method);
         assert_eq!(ordinary.name, "__method");
         assert_eq!(ordinary.binding, "_Owner__method");
         assert_eq!(ordinary.doc.as_deref(), Some("method doc"));
-        assert_eq!(ordinary.metadata.defaults, ["value", "flag"]);
+        assert_eq!(ordinary.metadata.defaults.as_ref(), ["value", "flag"]);
         assert_eq!(
             ordinary.decorator_offsets,
             [method.decorator_list[0].expression.start()]
         );
         let signature = ordinary
             .metadata
-            .signature(false, true, code_flags::HAS_DOCSTRING);
+            .signature(code_flags::METHOD | code_flags::HAS_DOCSTRING, true);
         assert_eq!(signature["class_cell"], true);
         assert_eq!(signature["method_class_cell"], true);
         let stream = facts.function(class.body[1].as_function_def_stmt().unwrap());
-        assert_eq!(stream.header.name, "stream");
-        assert_eq!(stream.suspension_flags, code_flags::ASYNC_GENERATOR);
+        assert_eq!(stream.name, "stream");
+        assert_eq!(
+            stream.metadata.suspension_flags(),
+            code_flags::ASYNC_GENERATOR
+        );
     }
 }
