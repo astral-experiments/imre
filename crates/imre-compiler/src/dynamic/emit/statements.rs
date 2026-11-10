@@ -128,7 +128,7 @@ impl<'p> Function<'_, 'p> {
         }
     }
 
-    pub(super) fn source_run(&mut self, suite: &[ast::Stmt], run: &crate::frontend::SourceRun) {
+    pub(super) fn source_run(&mut self, suite: &'p [ast::Stmt], run: &crate::frontend::SourceRun) {
         let statements = &suite[run.statements.clone()];
         if let Some(slot) = run.assignment_input {
             if self.start_statement() {
