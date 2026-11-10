@@ -2156,6 +2156,37 @@ second = t'{client.lookup(*args)}{(v async for v in values)}'",
     }
 
     #[test]
+    fn nested_finally_after_return_only_emits_reachable_cleanup() {
+        let source = concat!(
+            "def wait(work, release, reacquire):\n",
+            "    try:\n",
+            "        try:\n",
+            "            return work()\n",
+            "        finally:\n",
+            "            release()\n",
+            "    finally:\n",
+            "        reacquire()\n",
+        );
+        let (_, ir) = PreparedBody::module(
+            "locks",
+            Path::new("locks.py"),
+            source,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap()
+        .standalone()
+        .unwrap()
+        .unwrap();
+        let reacquire = ir.lines().filter(|line| {
+            line.contains("call void @imre_dyn_statement_with_exception(")
+                && line.contains(", i32 8, i64 ")
+        });
+        // The pending return and the pending exception each enter the outer finally.
+        assert_eq!(reacquire.count(), 2);
+    }
+
+    #[test]
     fn exception_group_handlers_in_nested_generators_have_native_entries() {
         let source = "def supported():\n    yield 1\ndef handled():\n    def nested():\n        yield 2\n    try:\n        yield 3\n    except* ValueError:\n        pass\ndef outer():\n    def inner():\n        try:\n            yield 4\n        except* ValueError:\n            pass\n    yield 5\n";
         let (_, ir) = PreparedBody::module(

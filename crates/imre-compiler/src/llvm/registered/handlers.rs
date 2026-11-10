@@ -38,8 +38,11 @@ pub(crate) fn finalized<'a, 'p, E: FrameEmitter<'a, 'p>>(
     let enclosing = std::mem::replace(&mut code.body.error_target, failed.clone());
     protected(code, &enclosing);
     code.body.error_target = enclosing;
-    if !code.body.terminated || code.module_annotation_sites.is_some() {
+    // Module providers also visit unreachable annotation sites in source order.
+    let mut needs_join = code.module_annotation_sites.is_some();
+    if !code.body.terminated || needs_join {
         cleanup(code, None);
+        needs_join |= !code.body.terminated;
         code.jump(&done);
     }
 
@@ -54,7 +57,9 @@ pub(crate) fn finalized<'a, 'p, E: FrameEmitter<'a, 'p>>(
     if !code.body.terminated {
         code.raise(&exception, None, true);
     }
-    code.label(&done);
+    if needs_join {
+        code.label(&done);
+    }
 }
 
 /// A named arm clears its binding on fallthrough, handler failure and abrupt
