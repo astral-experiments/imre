@@ -1,7 +1,7 @@
 //! Emit native functions and control flow for closed modules using boxed Python values.
 
 use std::borrow::Cow;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
@@ -12,7 +12,8 @@ use crate::CodegenUnit;
 use crate::frontend::module_source::{self, ParsedModule};
 use crate::frontend::{RegisteredGenerator, RegisteredLambda};
 use crate::llvm::registered::{
-    ABI, FrameEmitter, Output, RegisteredFrame, SourcePositions, permanent, sites, suspension,
+    ABI, AnnotationScope, FrameEmitter, Output, RegisteredFrame, SourcePositions, permanent, sites,
+    suspension,
 };
 
 mod expressions;
@@ -590,6 +591,7 @@ impl<'a> PreparedBody<'a, '_> {
             namespace_operations: operations,
             type_aliases,
             annotations: sites.annotations,
+            parameter_annotations: sites.parameter_annotations,
             function_bodies,
             class_bodies,
             initializer,
@@ -837,14 +839,10 @@ enum Body<'a> {
     ClassParameters(&'a ast::StmtClassDef),
     /// A function suite and its suspension flags, shared by complete and mixed frames.
     Function(&'a [ast::Stmt], u32),
-    NamespaceAnnotations(
+    AnnotationProvider(
         &'a crate::frontend::RegisteredSuite,
         &'a [crate::ir::AnnotationOccurrence],
-        Option<&'a BTreeSet<String>>,
-    ),
-    Annotations(
-        Vec<(&'a str, &'a ast::Expr)>,
-        Option<crate::frontend::function_scope::ClassBindings>,
+        AnnotationScope,
     ),
     Checked(&'a crate::frontend::RegisteredFunction),
     AnnotationOperand(
@@ -926,6 +924,7 @@ struct SourceInfo<'a> {
     statement_sites: crate::frontend::StatementSites,
     namespace_operations: HashMap<ruff_text_size::TextRange, crate::ir::Expr>,
     annotations: HashMap<ruff_text_size::TextSize, crate::frontend::DeferredAnnotation>,
+    parameter_annotations: HashMap<ruff_text_size::TextSize, crate::frontend::ParameterAnnotations>,
     nested_bodies: HashMap<ruff_text_size::TextSize, crate::frontend::RegisteredSuite>,
     function_bodies: HashMap<ruff_text_size::TextSize, crate::frontend::RegisteredSuite>,
     class_bodies: HashMap<ruff_text_size::TextSize, crate::frontend::RegisteredClass>,
@@ -1086,12 +1085,6 @@ impl SourceMap<'_> {
                     .clone(),
             );
         }
-        if let Body::NamespaceAnnotations(_, entries, Some(globals)) = &body {
-            frame.annotation_class = Some((
-                (*globals).clone(),
-                entries.iter().any(|entry| entry.index.is_some()),
-            ));
-        }
         let prepared = match body {
             Body::Namespace(_) => Some(&self.class_bodies[&start.expect("class definition")].body),
             Body::Function(..) => start.and_then(|key| self.function_bodies.get(&key)),
@@ -1102,20 +1095,12 @@ impl SourceMap<'_> {
             suspension,
             imre_ast::code_flags::COROUTINE | imre_ast::code_flags::ASYNC_GENERATOR
         );
-        match &body {
-            Body::Annotations(entries, _) => {
-                for (_, expression) in entries {
-                    f.place_annotation_string(expression.start());
-                }
+        if matches!(body, Body::Namespace(_))
+            && let Some(entries) = self.namespace_annotations.get(&start)
+        {
+            for site in entries {
+                f.place_annotation_string(*site);
             }
-            Body::Namespace(_) => {
-                if let Some(entries) = self.namespace_annotations.get(&start) {
-                    for site in entries {
-                        f.place_annotation_string(*site);
-                    }
-                }
-            }
-            _ => {}
         }
         if let Some(checked) = checked {
             for name in self.scopes.functions[&start.expect("checked function")]
@@ -1157,8 +1142,8 @@ impl SourceMap<'_> {
                 }
             }
             Body::ClassParameters(class) => f.parameterized_class(class),
-            Body::Annotations(entries, class) => f.annotations(&entries, class),
-            Body::NamespaceAnnotations(plan, entries, _) => {
+            Body::AnnotationProvider(plan, entries, scope) => {
+                f.frame.annotation_scope = scope;
                 f.prepared_function(plan, |code, run| {
                     for index in run.statements.clone() {
                         code.unprepared_annotation(entries[index]);
@@ -1250,10 +1235,6 @@ impl Function<'_, '_> {
     fn checkpoint(&mut self, node: &impl Ranged) {
         self.current_range = node.range();
         self.frame.checkpoint(node.range());
-    }
-
-    fn annotation_string(&mut self, site: ruff_text_size::TextSize) -> String {
-        self.sites.annotation_string(&mut self.frame, site)
     }
 
     fn build_diagnostic(&mut self, reason: &str) -> String {
