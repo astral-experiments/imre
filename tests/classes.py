@@ -116,8 +116,14 @@ class Child(Base):
     "incompatible_subclass_class_string": 'class C:\n    label = "first"\nclass D(C):\n    label = 2\n',
     "inherited_name_in_class_expression": 'class C:\n    words = ("a",)\nclass D(C):\n    longer = words + ("b",)\n',
     "copy_hook_wrong_arity": 'import copy\nclass C:\n    def __copy__(self, extra: int) -> int: return extra\ncopy.copy(C())\n',
-    "inherited_copy_reduction": 'import copy\nclass Base:\n    def __reduce_ex__(self, protocol: int) -> int: return 0\nclass Child(Base): pass\ncopy.copy(Child())\n',
-    "copy_custom_getstate": 'import copy\nclass C:\n    def __getstate__(self) -> int: return 0\ncopy.copy(C())\n',
+    "inherited_copy_setstate": """import copy
+class Base:
+    value: int
+    def __init__(self, value: int) -> None: self.value = value
+    def __setstate__(self, state: dict[str, int]) -> None: self.value = state["value"] + 1
+class Child(Base): pass
+copy.copy(Child(1))
+""",
     "overridden_static_binding": "import hashlib\nclass Base:\n    make = staticmethod(hashlib.sha256)\nclass Child(Base):\n    def make(self, x: int) -> int:\n        return x\n",
     "literal_unknown_value": 'from typing import Literal\ndef f(s: Literal["a", "b"]) -> str:\n    return s\nf("c")\n',
     "literal_unproven_string": 'from typing import Literal\ndef f(s: str) -> Literal["a"]:\n    return s\n',
@@ -326,11 +332,15 @@ def main() -> None:
         shutil.copytree(FIXTURES, project, ignore=shutil.ignore_patterns("__pycache__"))
         verify_upstream_definitions()
         class_sources = write_class_data_sources(project, PROJECT / "benchmarks/cpython_stdlib/full")
-        for relative in ["ownership.py", "record_reuse.py", "record_reuse_list.py", "imported/main.py", "string_literals.py", "constant_strings.py", "class_namespace.py", "nested_class_body.py", "class_data_setup.py", "string_enum_members.py", "string_enum_storage.py", "ordinary_enums.py", "enum_exhaustion.py", "conditional_lists.py", "conditional_methods/main.py", "uv_variant.py", "fixed_lineage.py", "object_base.py", "super_subclass.py", "local_super_subclass.py", "instance_layout.py", "subclass_guard_fields.py", "property_setters.py", "initializer_hook.py", "constructor_fields.py", "constructor_locals.py", "direct_base_initializer.py", "weak_proxy.py", "shallow_copy_protocol.py", "implicit_copy.py", "plain_shallow_copy.py", "abstract_context_manager.py", "abc_metaclass.py", "mapping_abc.py", "mapping_alias.py", "mapping_class_values.py", "collections_storage_bases.py", "local_collections_storage.py", "nested_class_with_type_params.py", "generic_parameter_tuple.py", *class_sources]:
+        copy_reconstruction_fixtures = ("inherited_copy_reduction.py", "copy_custom_getstate.py")
+        for relative in ["ownership.py", "record_reuse.py", "record_reuse_list.py", "imported/main.py", "string_literals.py", "constant_strings.py", "class_namespace.py", "nested_class_body.py", "class_data_setup.py", "string_enum_members.py", "string_enum_storage.py", "ordinary_enums.py", "enum_exhaustion.py", "conditional_lists.py", "conditional_methods/main.py", "uv_variant.py", "fixed_lineage.py", "object_base.py", "super_subclass.py", "local_super_subclass.py", "instance_layout.py", "subclass_guard_fields.py", "property_setters.py", "initializer_hook.py", "constructor_fields.py", "constructor_locals.py", "direct_base_initializer.py", "weak_proxy.py", "shallow_copy_protocol.py", *copy_reconstruction_fixtures, "implicit_copy.py", "plain_shallow_copy.py", "abstract_context_manager.py", "abc_metaclass.py", "mapping_abc.py", "mapping_alias.py", "mapping_class_values.py", "collections_storage_bases.py", "local_collections_storage.py", "nested_class_with_type_params.py", "generic_parameter_tuple.py", *class_sources]:
             source = project / relative
             reference = run([python, "-E", str(source)], temporary)
             require_success(reference)
-            require_success(run([compiler, "check", str(source)], temporary))
+            check = [compiler, "check", str(source)]
+            require_success(run(check, temporary))
+            if relative in copy_reconstruction_fixtures:
+                require_success(run(check + ["--reachable-only"], temporary))
             for level in args.opt_levels:
                 executable = temporary / f"{source.parent.name}-{source.stem}-O{level}"
                 command = [compiler, "build", str(source), "-o", str(executable),
@@ -361,7 +371,7 @@ def main() -> None:
                 reachable = run([compiler, "check", str(case / "main.py"), "--reachable-only"], temporary)
                 for rejection in (result, reachable):
                     assert rejection.returncode and "the base must be a known fixed-layout class" in rejection.stderr, (name, rejection.stderr)
-            if name in {"inherited_copy_reduction", "copy_custom_getstate"}:
+            if name == "inherited_copy_setstate":
                 reachable = run([compiler, "check", str(case / "main.py"), "--reachable-only"], temporary)
                 assert reachable.returncode > 0 and "unsupported reconstruction protocol" in reachable.stderr, (name, reachable.stderr)
             if name in {"direct_field_cycle", "mutual_field_cycle"}:
