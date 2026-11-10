@@ -133,7 +133,7 @@ pub(crate) use registered::values::{
     registered_value, suspended_operand, value_statement,
 };
 pub(crate) use registered::{
-    AnnotationValue, DeferredAnnotation, PhysicalOperand, PreparedStrings, RegisteredFunction,
+    AnnotationValue, DeferredAnnotation, ParameterAnnotations, PhysicalOperand, PreparedStrings, RegisteredFunction,
     RegisteredGenerator, RegisteredLambda, RegisteredScope, RegisteredSites, RegisteredSuite,
     ResidualField, SourceEffect, SourceRun, StatementSites, SuitePreparation,
     annotation_expression, attribute_write, prepare_expression_sites, registered_index_target,

@@ -1,9 +1,8 @@
-use crate::frontend::function_scope::ClassBindings;
 use crate::frontend::{PhysicalOperand, SourceEffect};
 mod declarations;
 use super::sites::{CompiledDefinition, CompiledProvider};
 
-use super::FrameEmitter;
+use super::{AnnotationScope, FrameEmitter};
 use crate::ir::{ItemUpdate, IteratorOp, Statement};
 use crate::llvm::registered::Place;
 use crate::llvm::registered::context::{ContextEmitter, ContextRegion};
@@ -659,7 +658,6 @@ impl<'p> Function<'_, 'p> {
         } else {
             format!("{}{name}", self.prefix)
         };
-        let returns = function.and_then(|f| f.returns.as_deref());
         // A generic function's immediate lexical parent is its type-parameter scope,
         // even when lowering does not materialize a separate parameter frame.
         let generic = function.is_some_and(|f| f.type_params.is_some());
@@ -710,21 +708,14 @@ impl<'p> Function<'_, 'p> {
                 Some(flags | generator_flags)
             }
         };
-        let entries = params.map_or_else(Vec::new, |p| {
-            crate::frontend::parameter_annotations(p, returns)
-        });
-        let provider = if entries.is_empty() {
-            None
-        } else {
+        let annotations = params.and_then(|p| self.source.parameter_annotations.get(&p.start()));
+        let provider = annotations.map(|annotations| {
             let class = self
                 .class_locals
                 .as_ref()
-                .filter(|_| !self.source.string_annotations)
-                .cloned();
-            let reads = self.source.scopes.annotations.parameter_reads(
-                params.expect("annotated function parameters").start(),
-                class.as_ref(),
-            );
+                .filter(|_| !self.source.string_annotations);
+            let start = params.expect("annotated function parameters").start();
+            let reads = self.source.scopes.annotations.parameter_reads(start, class);
             let mut metadata = json!({
                 "posonly": ["format"],
                 "code_flags": self.source.function_flags(None, nested, false),
@@ -734,32 +725,29 @@ impl<'p> Function<'_, 'p> {
                 "annotation_class": class.is_some(),
             });
             if !self.source.python_annotations && type_params.is_none() {
-                for (slot, expr) in &entries {
-                    if let Some(reference) = scalar_reference(expr) {
-                        let root = reference.split('.').next().unwrap();
-                        if class
-                            .as_ref()
-                            .is_some_and(|class| class.globals.contains(root))
-                        {
-                            continue;
-                        }
+                for (slot, reference) in &annotations.references {
+                    let root = reference.split('.').next().unwrap();
+                    if !class.is_some_and(|class| class.globals.contains(root)) {
                         metadata["annotation_references"][slot] = json!(reference);
                     }
                 }
             }
+            let scope = class
+                .cloned()
+                .map_or(AnnotationScope::Plain, AnnotationScope::Method);
             let code = self.source.definition(
                 self.frame.output,
                 String::new(),
-                Body::Annotations(entries, class),
-                params.map_or(start, Ranged::start),
+                Body::AnnotationProvider(&annotations.body, &annotations.entries, scope),
+                start,
                 false,
                 Entry::Compiled,
             );
-            Some(CompiledProvider {
+            CompiledProvider {
                 code,
                 signature: metadata.to_string(),
-            })
-        };
+            }
+        });
         let mut signature = json!({});
         if let Some(flags) = flags {
             signature["code_flags"] = json!(flags);
@@ -832,16 +820,16 @@ impl<'p> Function<'_, 'p> {
         let mut default_names = Vec::new();
         let in_function = self.in_function || !matches!(body, Body::Namespace(..));
         // A generator call returns a suspended frame, before it yields or returns a value.
-        let scalar = |expr: &ast::Expr| {
+        let scalar = |slot: &str| {
             if self.source.python_annotations {
                 return None;
             }
-            scalar_reference(expr).filter(|name| {
-                !type_params.is_some_and(|params| params.iter().any(|p| p.name().as_str() == name))
-            })
+            let name = annotations?.references.get(slot)?;
+            (!type_params.is_some_and(|params| params.iter().any(|p| p.name().as_str() == name)))
+                .then_some(name)
         };
         if matches!(entry, Entry::Compiled)
-            && let Some(ty) = returns.and_then(scalar)
+            && let Some(ty) = scalar("return")
         {
             signature["return_type"] = json!(ty);
         }
@@ -860,7 +848,7 @@ impl<'p> Function<'_, 'p> {
                 let mut names = Vec::with_capacity(args.len());
                 for arg in args {
                     let name = arg.parameter.name.as_str();
-                    if let Some(ty) = arg.parameter.annotation.as_deref().and_then(scalar) {
+                    if let Some(ty) = scalar(name) {
                         signature["types"][name] = json!(ty);
                         if ty == "float"
                             && statements
@@ -971,10 +959,14 @@ impl<'p> Function<'_, 'p> {
     ) -> String {
         let plan =
             crate::frontend::DeferredAnnotation::prepare_body(&self.source.annotations, entries);
+        let scope = globals.map_or(AnnotationScope::Plain, |globals| AnnotationScope::Class {
+            globals: globals.clone(),
+            conditional: entries.iter().any(|entry| entry.index.is_some()),
+        });
         self.source.definition(
             self.frame.output,
             String::new(),
-            Body::NamespaceAnnotations(&plan, entries, globals),
+            Body::AnnotationProvider(&plan, entries, scope),
             start,
             false,
             Entry::Compiled,
@@ -989,45 +981,16 @@ impl<'p> Function<'_, 'p> {
         let target = self
             .frame
             .annotation_target(occurrence.index, &decl.name, decl.range);
-        self.place_annotation_string(expression.start());
-        let value = self.annotation_value(expression);
+        let value = if let ast::Expr::Starred(starred) = expression {
+            let value = self.expr(&starred.value);
+            let count = self.integer(1);
+            let items = self.op("unpack", &[&value, &count, "0"]);
+            let index = self.integer(0);
+            self.op("get", &[&items, &index])
+        } else {
+            self.expr(expression)
+        };
         self.frame.store_annotation(target, &value);
-    }
-
-    pub(super) fn annotations(
-        &mut self,
-        entries: &[(&str, &ast::Expr)],
-        class: Option<ClassBindings>,
-    ) {
-        self.begin_annotations();
-        self.frame.class_locals = class;
-        for &(name, expression) in entries {
-            let target = self.frame.annotation_target(None, name, expression.range());
-            let value = self.annotation_value(expression);
-            self.frame.store_annotation(target, &value);
-        }
-        let values = self.take_annotation_result();
-        self.return_value(&values);
-    }
-
-    fn annotation_value(&mut self, expression: &ast::Expr) -> String {
-        match self.source.annotation_operands.get(&expression.start()) {
-            Some(crate::frontend::PreparedAnnotation::String { .. }) => {
-                self.annotation_string(expression.start())
-            }
-            Some(crate::frontend::PreparedAnnotation::Value(value)) => self.registered_value(value),
-            None => {
-                if let ast::Expr::Starred(starred) = expression {
-                    let value = self.expr(&starred.value);
-                    let count = self.integer(1);
-                    let items = self.op("unpack", &[&value, &count, "0"]);
-                    let index = self.integer(0);
-                    self.op("get", &[&items, &index])
-                } else {
-                    self.expr(expression)
-                }
-            }
-        }
     }
 
     fn apply_decorators(
@@ -1507,19 +1470,5 @@ impl<'p> Function<'_, 'p> {
             },
             |code| code.statements(&source.body),
         );
-    }
-}
-
-/// Names that can refer directly to a type without calling Python.
-fn scalar_reference(expr: &ast::Expr) -> Option<String> {
-    match expr {
-        ast::Expr::NoneLiteral(_) => Some("None".to_owned()),
-        ast::Expr::Name(name) if !name.id.starts_with("__") => Some(name.id.to_string()),
-        ast::Expr::Attribute(attr) => {
-            let module = attr.value.as_name_expr()?;
-            (!module.id.starts_with("__") && !attr.attr.starts_with("__"))
-                .then(|| format!("{}.{}", module.id, attr.attr))
-        }
-        _ => None,
     }
 }

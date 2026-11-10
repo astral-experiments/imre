@@ -499,6 +499,58 @@ pub(crate) struct DeferredAnnotation {
     pub(crate) value: AnnotationValue,
 }
 
+pub(crate) struct ParameterAnnotations {
+    pub(crate) entries: Vec<ir::AnnotationOccurrence>,
+    pub(crate) body: RegisteredSuite,
+    pub(crate) references: HashMap<String, String>,
+}
+
+impl ParameterAnnotations {
+    fn prepare<R>(
+        def: &ast::StmtFunctionDef,
+        operands: &HashMap<TextSize, PreparedAnnotation<R>>,
+        sites: &mut HashMap<TextSize, DeferredAnnotation>,
+    ) -> Option<Self> {
+        let annotations = parameter_annotations(&def.parameters, def.returns.as_deref());
+        if annotations.is_empty() {
+            return None;
+        }
+        let mut entries = Vec::with_capacity(annotations.len());
+        let mut references = HashMap::new();
+        for (name, expression) in annotations {
+            let site = expression.start();
+            if let Some(reference) = scalar_reference(expression) {
+                references.insert(name.to_owned(), reference);
+            }
+            sites.insert(
+                site,
+                DeferredAnnotation::new(name.to_owned(), expression, operands),
+            );
+            entries.push(ir::AnnotationOccurrence { site, index: None });
+        }
+        let body = DeferredAnnotation::prepare_body(sites, &entries);
+        Some(Self {
+            entries,
+            body,
+            references,
+        })
+    }
+}
+
+/// Names that can refer directly to a type without calling Python.
+fn scalar_reference(expr: &ast::Expr) -> Option<String> {
+    match expr {
+        ast::Expr::NoneLiteral(_) => Some("None".to_owned()),
+        ast::Expr::Name(name) if !name.id.starts_with("__") => Some(name.id.to_string()),
+        ast::Expr::Attribute(attr) => {
+            let module = attr.value.as_name_expr()?;
+            (!module.id.starts_with("__") && !attr.attr.starts_with("__"))
+                .then(|| format!("{}.{}", module.id, attr.attr))
+        }
+        _ => None,
+    }
+}
+
 pub(crate) enum AnnotationValue {
     Checked(Expr),
     Source(ast::Expr),
@@ -599,6 +651,7 @@ pub(crate) struct RegisteredSites<'a> {
     pub(crate) functions: Vec<FunctionSite<'a>>,
     pub(crate) classes: Vec<ClassSite<'a>>,
     pub(crate) annotations: HashMap<TextSize, DeferredAnnotation>,
+    pub(crate) parameter_annotations: HashMap<TextSize, ParameterAnnotations>,
 }
 
 pub(crate) fn registered_sites<'a, R>(
@@ -634,6 +687,15 @@ pub(crate) fn registered_sites<'a, R>(
                     self.scope = outer;
                 }
                 ast::Stmt::FunctionDef(def) => {
+                    if let Some(provider) = ParameterAnnotations::prepare(
+                        def,
+                        self.operands,
+                        &mut self.output.annotations,
+                    ) {
+                        self.output
+                            .parameter_annotations
+                            .insert(def.parameters.start(), provider);
+                    }
                     let generic_binding = !matches!(self.scope, RegisteredScope::Function { .. })
                         && super::function_scope::type_parameter_scope(
                             def,
@@ -2467,6 +2529,39 @@ mod tests {
             });
             assert_eq!(calls, 1);
         }
+    }
+
+    #[test]
+    fn parameter_annotation_callback_preserves_field_order_and_string_operands() {
+        let text =
+            "def f(a: mod.T, /, b: 'list[T]', *args: int, c: bool, **kw: bytes) -> None: pass\n";
+        let graph = SourceGraph::single(text).unwrap();
+        let module = &graph.modules[graph.entry];
+        let stmts = &module.parsed.syntax().body;
+        let sites = prepared_sites(
+            stmts,
+            values::ModuleSource::new(module).context(text),
+            false,
+        );
+        let def = stmts[0].as_function_def_stmt().unwrap();
+        let provider = &sites.parameter_annotations[&def.parameters.start()];
+        assert!(provider.body.fully_checked());
+        let fields: Vec<_> = provider
+            .entries
+            .iter()
+            .map(|entry| &sites.annotations[&entry.site])
+            .collect();
+        let names: Vec<_> = fields.iter().map(|field| field.name.as_str()).collect();
+        assert_eq!(names, ["b", "a", "args", "c", "kw", "return"]);
+        assert!(matches!(
+            &fields[0].value,
+            AnnotationValue::Checked(Expr {
+                kind: ExprKind::Builtin(Builtin::BindAnnotationExpression(site), _), ..
+            }) if *site == fields[0].range.start()
+        ));
+        assert_eq!(provider.references["a"], "mod.T");
+        assert_eq!(provider.references["return"], "None");
+        assert!(!provider.references.contains_key("b"));
     }
 
     #[test]

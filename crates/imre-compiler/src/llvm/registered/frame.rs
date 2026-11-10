@@ -68,6 +68,17 @@ impl SourcePosition {
     }
 }
 
+#[derive(Default)]
+pub(crate) enum AnnotationScope {
+    #[default]
+    Plain,
+    Method(ClassBindings),
+    Class {
+        globals: BTreeSet<String>,
+        conditional: bool,
+    },
+}
+
 /// The registered calling convention supplies object handles, scoped roots and pending errors.
 pub(crate) struct RegisteredFrame<'a, 'p> {
     pub(crate) output: &'a mut Output,
@@ -80,7 +91,7 @@ pub(crate) struct RegisteredFrame<'a, 'p> {
     pub(crate) async_generator: bool,
     pub(crate) class_locals: Option<ClassBindings>,
     pub(crate) annotation_values: Option<String>,
-    pub(crate) annotation_class: Option<(BTreeSet<String>, bool)>,
+    pub(crate) annotation_scope: AnnotationScope,
     annotation_active: Option<String>,
     pub(crate) module_annotation_sites: Option<Vec<TextSize>>,
     pub(crate) body: FunctionBody,
@@ -131,7 +142,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
             async_generator: false,
             class_locals: None,
             annotation_values: None,
-            annotation_class: None,
+            annotation_scope: AnnotationScope::Plain,
             annotation_active: None,
             module_annotation_sites: None,
             id,
@@ -953,17 +964,23 @@ impl RegisteredFrame<'_, '_> {
         ))
     }
 
-    pub(crate) fn check_annotation_format(&mut self) {
+    pub(crate) fn begin_annotations(&mut self) {
+        // The format argument belongs to this callback, even if the class also defines it.
         let format = self.lookup("format");
         self.op("annotation_format", &[&format]);
-    }
-
-    pub(crate) fn begin_annotations(&mut self) {
-        self.check_annotation_format();
-        let Some((globals, conditional)) = self.annotation_class.clone() else {
-            self.annotation_values = Some(self.op("dict", &[]));
-            self.scope = self.op("annotation_scope", &[&self.scope.clone()]);
-            return;
+        let (globals, conditional) = match &self.annotation_scope {
+            AnnotationScope::Class {
+                globals,
+                conditional,
+            } => (globals.clone(), *conditional),
+            scope => {
+                if let AnnotationScope::Method(class) = scope {
+                    self.class_locals = Some(class.clone());
+                }
+                self.annotation_values = Some(self.op("dict", &[]));
+                self.scope = self.op("annotation_scope", &[&self.scope.clone()]);
+                return;
+            }
         };
         if conditional {
             self.annotation_active = Some(self.lookup("__conditional_annotations__"));
@@ -1116,7 +1133,7 @@ impl RegisteredFrame<'_, '_> {
             after
         });
         let key = self.code_name(name);
-        if self.annotation_class.is_some() {
+        if matches!(self.annotation_scope, AnnotationScope::Class { .. }) {
             self.checkpoint(range);
         }
         AnnotationTarget { key, after }
