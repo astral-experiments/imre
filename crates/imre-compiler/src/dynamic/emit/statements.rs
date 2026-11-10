@@ -1,5 +1,5 @@
 use crate::frontend::{ExpressionInput, PhysicalOperand, SourceEffect, SourceOperand};
-use crate::llvm::registered::{PreparedSuiteEmitter, emit_operand, emit_prepared_suite};
+use crate::llvm::registered::{PreparedSuiteEmitter, emit_operand, emit_physical_operand, emit_prepared_suite};
 mod declarations;
 use super::sites::{CheckedSites, CompiledDefinition};
 
@@ -38,7 +38,10 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
         self.callable_sites().place_statements(body);
     }
 
-    fn emit_effect(&mut self, effect: &'p SourceEffect) {
+    fn emit_effect(
+        &mut self,
+        effect: &'p SourceEffect,
+    ) -> Option<(&'p crate::ir::Statement, &'p [PhysicalOperand])> {
         match effect {
             SourceEffect::Assertion(site) => self.emit_assertion_inputs(site),
             SourceEffect::Class {
@@ -79,46 +82,15 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
             SourceEffect::Refused(range, reason) => {
                 self.refuse_at(*range, reason);
             }
-            SourceEffect::Value(output, inputs) => match output {
-                crate::frontend::ValueStatement::Store(slot) => {
-                    let value = self.physical_operand(&inputs[0]);
-                    self.frame.store_private(*slot, &value);
-                }
-                crate::frontend::ValueStatement::Return => {
-                    let value = inputs.first().map_or_else(
-                        || super::permanent::NONE.to_string(),
-                        |input| self.physical_operand(input),
-                    );
-                    self.return_from_regions(value);
-                }
-                crate::frontend::ValueStatement::Expression => {
-                    let value = self.physical_operand(&inputs[0]);
-                    self.discard_handle(&value);
-                }
-                crate::frontend::ValueStatement::Raise => {
-                    self.raise_operands(inputs.first(), inputs.get(1), Self::physical_operand);
-                }
-                crate::frontend::ValueStatement::AugmentName(name, op) => {
-                    let left = self.physical_operand(&inputs[0]);
-                    let right = self.physical_operand(&inputs[1]);
-                    let value = self.inplace(op, &left, &right);
-                    self.bind(name, &value);
-                }
-                crate::frontend::ValueStatement::AugmentItem(op) => {
-                    self.augment_item(
-                        op,
-                        &inputs[0],
-                        &inputs[1],
-                        &inputs[2],
-                        Self::physical_operand,
-                    );
-                }
-            },
+            SourceEffect::Value(statement, inputs) => {
+                return Some((statement, inputs));
+            }
             SourceEffect::ObjectOperation(op, inputs) => {
                 let (receiver, args) = inputs.split_first().expect("object operation receiver");
                 self.object_operation(op, receiver, args.iter(), Self::physical_operand);
             }
         }
+        None
     }
 
     fn refuse_at(&mut self, range: ruff_text_size::TextRange, reason: &str) {
@@ -291,15 +263,7 @@ impl<'p> Function<'_, 'p> {
     }
 
     pub(super) fn physical_operand(&mut self, input: &PhysicalOperand) -> String {
-        match input {
-            PhysicalOperand::Checked(value) => {
-                self.prepare_checked_value(&value.value);
-                self.frame.prepared_operand(value, &self.sites, false)
-            }
-            PhysicalOperand::Residual(input) => {
-                emit_operand(self, SourceOperand::Residual(input.as_input()), false)
-            }
-        }
+        emit_physical_operand(self, input)
     }
 
     fn prepared_match(&mut self, site: &'p crate::frontend::SourceMatch) {

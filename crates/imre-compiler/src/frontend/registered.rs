@@ -994,16 +994,6 @@ struct LoweredSuite<'s> {
     checked_exit: Option<usize>,
 }
 
-pub(crate) enum ValueStatement {
-    /// Retain the RHS once for the checked assignment targets that follow.
-    Store(usize),
-    Return,
-    Expression,
-    Raise,
-    AugmentName(String, &'static str),
-    AugmentItem(&'static str),
-}
-
 pub(crate) enum SourceEffect {
     /// An ordinary class interleaves argument expansion with its remaining physical operands.
     Class {
@@ -1011,8 +1001,8 @@ pub(crate) enum SourceEffect {
         layout: ir::PackedArguments,
         inputs: Vec<PhysicalOperand>,
     },
-    /// Consume this statement's value operands in the frame that owns them.
-    Value(ValueStatement, Vec<PhysicalOperand>),
+    /// The statement reads each prepared operand by its position in the input list.
+    Value(Box<Statement>, Vec<PhysicalOperand>),
     /// The enclosing suite owns any source inputs on their test or failure edge.
     Assertion(Box<AssertionSite>),
     /// A refused operation retains its diagnostic and original source range.
@@ -1429,7 +1419,9 @@ impl<'a> SuitePreparation<'a> {
             let operation = self.refusal.take().or(selected);
             self.refusal = preceding.or(operation.filter(|_| live));
             live &= match &effect {
-                SourceEffect::Value(ValueStatement::Raise | ValueStatement::Return, _) => false,
+                SourceEffect::Value(statement, _) => {
+                    !matches!(statement.as_ref(), Statement::Return(_) | Statement::Raise(_))
+                }
                 SourceEffect::Try(region) => try_continues(
                     region.body.falls_through,
                     !region.handlers.is_empty(),
@@ -1758,6 +1750,13 @@ impl<'a> SuitePreparation<'a> {
             });
             self.retain_operand(expr, kind, suspended, checked)
         };
+        let input_slot = |slot| Expr::local(slot, Type::PythonObject);
+        let store_input = |slot, input| {
+            SourceEffect::Value(
+                Box::new(Statement::Assign(slot, input_slot(0))),
+                vec![input],
+            )
+        };
         let target_input = |input: TargetInput<'_>| {
             let checked =
                 RegisteredOperand::prepare_with(self.source, kind, |scope| input.lower(scope));
@@ -1839,10 +1838,7 @@ impl<'a> SuitePreparation<'a> {
                         residual.push(PendingStatement {
                             at: body.len(),
                             source: stmt,
-                            effect: Some(SourceEffect::Value(
-                                ValueStatement::Store(slot),
-                                vec![input],
-                            )),
+                            effect: Some(store_input(slot, input)),
                         });
                         unpacking::take_pattern_temporary(
                             Expr::local(slot, Type::PythonObject),
@@ -1853,27 +1849,36 @@ impl<'a> SuitePreparation<'a> {
                 body.push(scope.bind_definition(name, site, header));
                 continue;
             }
+            let mut inputs = Vec::new();
+            let mut operand = |expr: &ast::Expr| {
+                let slot = input_slot(inputs.len());
+                inputs.push(frame_value(expr));
+                slot
+            };
             let output = match stmt {
-                ast::Stmt::Return(ret) => {
-                    Some((ValueStatement::Return, [ret.value.as_deref(), None]))
+                ast::Stmt::Return(ret) => Some(Statement::Return(
+                    ret.value
+                        .as_deref()
+                        .map(&mut operand)
+                        .unwrap_or_else(Expr::none),
+                )),
+                ast::Stmt::Expr(value) if !value.value.is_string_literal_expr() => {
+                    Some(Statement::Expr(operand(&value.value)))
                 }
-                ast::Stmt::Expr(value) if !value.value.is_string_literal_expr() => Some((
-                    ValueStatement::Expression,
-                    [Some(value.value.as_ref()), None],
-                )),
-                ast::Stmt::Raise(raise) => Some((
-                    ValueStatement::Raise,
-                    [raise.exc.as_deref(), raise.cause.as_deref()],
-                )),
+                ast::Stmt::Raise(raise) => {
+                    let Ok(statement) = raised(raise, |expr| {
+                        Ok::<_, std::convert::Infallible>(operand(expr))
+                    });
+                    Some(statement)
+                }
                 _ => None,
             };
-            if let Some((output, inputs)) = output {
-                let inputs = inputs.into_iter().flatten().map(frame_value).collect();
+            if let Some(output) = output {
                 body.push(checkpoint(stmt));
                 residual.push(PendingStatement {
                     at: body.len(),
                     source: stmt,
-                    effect: Some(SourceEffect::Value(output, inputs)),
+                    effect: Some(SourceEffect::Value(Box::new(output), inputs)),
                 });
                 continue;
             }
@@ -1893,7 +1898,7 @@ impl<'a> SuitePreparation<'a> {
                         at: body.len(),
                         source: stmt,
                         effect: Some(SourceEffect::Value(
-                            ValueStatement::Expression,
+                            Box::new(Statement::Expr(input_slot(0))),
                             vec![PhysicalOperand::Residual(target)],
                         )),
                     });
@@ -1916,13 +1921,33 @@ impl<'a> SuitePreparation<'a> {
             }
             if let ast::Stmt::AugAssign(assign) = stmt {
                 let op = assign.op.as_str();
+                let mut binding = None;
                 let (output, inputs) = match assign.target.as_ref() {
-                    ast::Expr::Name(name) => (
-                        ValueStatement::AugmentName(name.id.to_string(), op),
-                        vec![frame_value(&assign.target), frame_value(&assign.value)],
-                    ),
+                    ast::Expr::Name(name) => {
+                        // The suite owns the name binding. Transfer the in-place result to it
+                        // after the original target and RHS have both been evaluated.
+                        let slot = scope.hidden(Type::PythonObject);
+                        let result = unpacking::take_pattern_temporary(input_slot(slot), slot);
+                        binding = Some(scope.store(name.id.as_str(), result));
+                        (
+                            Statement::Assign(
+                                slot,
+                                operation(
+                                    Builtin::RegisteredInPlace(op),
+                                    Type::PythonObject,
+                                    vec![input_slot(0), input_slot(1)],
+                                ),
+                            ),
+                            vec![frame_value(&assign.target), frame_value(&assign.value)],
+                        )
+                    }
                     ast::Expr::Subscript(target) => (
-                        ValueStatement::AugmentItem(op),
+                        Statement::AugmentItem(
+                            input_slot(0),
+                            input_slot(1),
+                            ir::ItemUpdate::Protocol(op),
+                            input_slot(2),
+                        ),
                         vec![
                             frame_value(&target.value),
                             target_input(TargetInput::Index(&target.slice)),
@@ -1935,8 +1960,9 @@ impl<'a> SuitePreparation<'a> {
                 residual.push(PendingStatement {
                     at: body.len(),
                     source: stmt,
-                    effect: Some(SourceEffect::Value(output, inputs)),
+                    effect: Some(SourceEffect::Value(Box::new(output), inputs)),
                 });
+                body.extend(binding);
                 continue;
             }
             let assignment = match stmt {
@@ -1960,10 +1986,7 @@ impl<'a> SuitePreparation<'a> {
                 let targets = scope.assignment_targets(targets, value);
                 scope.report_child_refusals = false;
                 let (effect, targets) = match targets {
-                    Ok(targets) => (
-                        SourceEffect::Value(ValueStatement::Store(input), vec![frame_value(rhs)]),
-                        targets,
-                    ),
+                    Ok(targets) => (store_input(input, frame_value(rhs)), targets),
                     Err(()) => {
                         scope.truncate_locals(slots_before);
                         let (range, reason) = scope.refusal.or(first_refusal).unwrap_or((
@@ -3331,9 +3354,9 @@ mod tests {
         assert!(matches!(
             suite.residual.as_slice(),
             [SuiteOperation {
-                effect: SourceEffect::Value(ValueStatement::Store(_), _),
+                effect: SourceEffect::Value(statement, _),
                 ..
-            }]
+            }] if matches!(statement.as_ref(), Statement::Assign(_, _))
         ));
         crate::verify::registered(suite.checked.region()).unwrap();
     }
@@ -3707,8 +3730,8 @@ mod tests {
         // Only the generator RHS needs an external operand. After storing it, the
         // namespace records y's annotation before executing the final import.
         assert!(matches!(
-            run.effect,
-            SourceEffect::Value(ValueStatement::Store(_), _)
+            &run.effect,
+            SourceEffect::Value(statement, _) if matches!(statement.as_ref(), Statement::Assign(_, _))
         ));
 
         let (before, after) = plan.checked.function.body.split_at(run.at);

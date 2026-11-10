@@ -1347,7 +1347,7 @@ mod tests {
 
     #[test]
     fn mixed_function_header_keeps_its_binding_after_erasing_the_declaration() {
-        use crate::frontend::{PhysicalOperand, SourceEffect, ValueStatement};
+        use crate::frontend::{PhysicalOperand, SourceEffect};
         let text = "@decorate\ndef choose[T: bound() = fallback()](first=checked(), *, last=(lambda: item)()):\n    return T, first, last\n";
         let mut module = PreparedBody::module_with_syntax(
             "case",
@@ -1364,9 +1364,13 @@ mod tests {
             .residual
             .iter()
             .map(|run| {
-                let SourceEffect::Value(ValueStatement::Store(_), input) = &run.effect else {
+                let SourceEffect::Value(statement, input) = &run.effect else {
                     panic!("expected a mixed header operand");
                 };
+                assert!(matches!(
+                    statement.as_ref(),
+                    crate::ir::Statement::Assign(..)
+                ));
                 matches!(input.as_slice(), [PhysicalOperand::Checked(_)])
             })
             .collect();
@@ -3179,13 +3183,12 @@ mod tests {
         let crate::frontend::SourceEffect::Context(context) = &mut suite.residual[0].effect else {
             panic!("expected the mixed context");
         };
-        let crate::frontend::SourceEffect::Value(
-            crate::frontend::ValueStatement::Expression,
-            inputs,
-        ) = &mut context.body.residual[0].effect
+        let crate::frontend::SourceEffect::Value(statement, inputs) =
+            &mut context.body.residual[0].effect
         else {
             panic!("expected a prepared expression statement");
         };
+        assert!(matches!(statement.as_ref(), crate::ir::Statement::Expr(_)));
         let [crate::frontend::PhysicalOperand::Residual(call)] = inputs.as_mut_slice() else {
             panic!("expected the residual call");
         };
@@ -5681,8 +5684,9 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             panic!("expected a residual RHS followed by a mixed attribute store");
         };
         assert!(matches!(
-            rhs.effect,
-            crate::frontend::SourceEffect::Value(crate::frontend::ValueStatement::Store(_), _)
+            &rhs.effect,
+            crate::frontend::SourceEffect::Value(statement, _)
+                if matches!(statement.as_ref(), crate::ir::Statement::Assign(..))
         ));
         assert!(matches!(&attribute.effect,
             crate::frontend::SourceEffect::ObjectOperation(op, inputs)
