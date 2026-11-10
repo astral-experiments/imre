@@ -796,6 +796,7 @@ fn definition_sites(body: &[ast::Stmt]) -> HashMap<ruff_text_size::TextSize, Def
                 }
                 ast::Stmt::ClassDef(class) => {
                     self.0.insert(class.start(), DefinitionSite::Class(class));
+                    self.visit_body(&class.body);
                 }
                 _ => walk_stmt(self, stmt),
             }
@@ -1296,6 +1297,21 @@ second = t'{client.lookup(*args)}{v ** 2}'",
                 .unwrap()
                 .fully_checked()
         );
+    }
+
+    #[test]
+    fn bundled_class_methods_have_their_own_checked_suite() {
+        let prepared = PreparedBody::module(
+            "reader",
+            Path::new("reader.py"),
+            "class Reader:\n    def read(self):\n        value = self.source()\n        return value\n",
+            0,
+            ModuleOrigin::Bundled,
+        )
+        .unwrap();
+        let methods = &prepared.source.function_bodies;
+        assert_eq!(methods.len(), 1);
+        assert!(methods.values().all(crate::frontend::RegisteredSuite::fully_checked));
     }
 
     #[test]
