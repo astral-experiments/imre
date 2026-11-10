@@ -981,10 +981,18 @@ impl Checker<'_> {
         signature: &Signature,
     ) -> Option<(TextSize, ruff_text_size::TextRange)> {
         let seen = self.observed_definition.as_ref()?;
+        let imported = seen.definition.module != self.module;
+        let valid_target = call.func.is_name_expr()
+            || imported
+                && call.func.as_attribute_expr().is_some_and(|attr| {
+                    !attr.attr.starts_with("__")
+                        && self.resolve(&attr.value)
+                            == Some(Binding::Module(seen.definition.module))
+                });
         if seen.entry_site.is_some()
             || self.ordinary_entry().is_none()
             || !self.module_namespace.is_unexposed()
-            || !call.func.is_name_expr()
+            || !valid_target
             || self.graph.deferred_object_error.borrow().is_some()
             || self
                 .functions
@@ -996,10 +1004,13 @@ impl Checker<'_> {
         }
         let module = &self.graph.modules[self.module];
         let mut executable = module.executable.iter().copied().peekable();
+        let mut passive_prefix = true;
+        let mut loaded = !imported;
         for (index, statement) in module.parsed.syntax().body.iter().enumerate() {
             let checked = executable.next_if_eq(&index).is_some();
             if statement.range().contains_range(call.range()) {
-                return (checked
+                return (loaded
+                    && checked
                     && self.graph.session.unconditional_module_operand(
                         self.module,
                         statement.start(),
@@ -1007,9 +1018,28 @@ impl Checker<'_> {
                     ))
                 .then_some((statement.start(), call.range()));
             }
-            // An earlier initializer can have run Python outside this checked block.
-            if !checked && !crate::analysis::inert_declaration(statement) {
-                return None;
+            if crate::analysis::inert_declaration(statement) {
+                continue;
+            }
+            if imported && (statement.is_import_stmt() || statement.is_import_from_stmt()) {
+                let owner = &self.graph.modules[seen.definition.module];
+                if !passive_prefix
+                    || !self.graph.session.passive_selected_import(
+                        self.module,
+                        statement,
+                        seen.definition.module,
+                        &owner.name,
+                        &owner.path,
+                    )
+                {
+                    return None;
+                }
+                loaded = true;
+            } else {
+                if !checked {
+                    return None;
+                }
+                passive_prefix = false;
             }
         }
         None

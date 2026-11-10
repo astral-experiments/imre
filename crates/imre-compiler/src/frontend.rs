@@ -1098,7 +1098,7 @@ fn lower_graph(
                     let report = error.terminal_in(graph, *module_id);
                     let id = callable_definitions[signature.id];
                     if graph.registered_startup
-                        && *module_id == graph.entry
+                        && module.checks_source_contracts()
                         && signature.method.is_none()
                         && let Some(operand) = report.exact_operand()
                         && let Some(function) =
@@ -1228,7 +1228,7 @@ fn lower_graph(
             if let Some((statement, call)) =
                 checker.observed_definition.and_then(|seen| seen.entry_site)
             {
-                report.reached_in_entry(module_id, statement, call);
+                report.reached_in_entry(module_id, definition.module, statement, call);
             }
             return Err(report);
         }
