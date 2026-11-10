@@ -1307,6 +1307,52 @@ impl Function<'_, '_> {
 mod tests {
     use super::*;
 
+    /// Plan the consuming suites without their lambda descriptors. The physical
+    /// emitter still has the real, checked children when it reads a residual operand.
+    fn inject_residual_child_module(prepared: &mut PreparedBody) {
+        use crate::frontend::{RegisteredScope, RegisteredSource, SuitePreparation};
+
+        let parsed = ruff_python_parser::parse_module(&prepared.source.text).unwrap();
+        let fields =
+            imre_ast::strings::template_fields(&prepared.source.text, parsed.tokens(), parsed.syntax());
+        let body = prepared.syntax.as_deref().expect("retained child sites");
+        let missing = HashMap::new();
+        let source = RegisteredSource {
+            lambdas: Some(&missing),
+            template_fields: Some(&fields),
+            ..prepared.source.registered_source()
+        };
+        let (strings, generators) = crate::frontend::prepare_expression_sites(body, source);
+        let source = RegisteredSource {
+            generators: Some(&generators),
+            ..source
+        };
+        let mut logicals = crate::frontend::LogicalSites::default();
+        crate::frontend::function_scope::ScopeFacts::prepare(
+            body,
+            &prepared.source.private_names,
+            |_| {},
+            |expr| logicals.visit(expr, source),
+        );
+        let classes = crate::frontend::registered_sites(
+            body,
+            &prepared.source.private_names,
+            &prepared.source.annotation_operands,
+        )
+        .classes;
+        let mut suites =
+            SuitePreparation::new(&prepared.source.namespace_operations, source, body, true);
+        let initializer = suites.suite(body, RegisteredScope::Module);
+        let class_bodies = suites.class_suites(&classes);
+        let (sites, nested) = (suites.sites, suites.nested);
+        prepared.source.initializer = Some(initializer);
+        prepared.source.class_bodies = class_bodies;
+        prepared.source.statement_sites = sites;
+        prepared.source.nested_bodies.extend(nested);
+        prepared.source.strings = strings;
+        prepared.source.logicals = logicals;
+    }
+
     #[test]
     fn physical_coroutine_emits_sync_for_without_its_source() {
         let mut module = PreparedBody::module(
@@ -1630,11 +1676,13 @@ mod tests {
         let mut prepared = PreparedBody::module(
             "program",
             Path::new("program.py"),
-            "result = yes() if flag() else ((lambda: (value := make(x)))() async for x in rows())\n",
+            "result = yes() if flag() else ((lambda: make(x))() async for x in rows())\n",
             0,
             ModuleOrigin::Program(None),
         )
         .unwrap();
+        assert!(prepared.source.initializer.as_ref().unwrap().fully_checked());
+        inject_residual_child_module(&mut prepared);
         let suite = prepared.source.initializer.as_ref().unwrap();
         assert!(!suite.fully_checked());
         let original = prepared.standalone().unwrap().unwrap();
@@ -1669,7 +1717,7 @@ mod tests {
         let source = concat!(
             "match subject():\n",
             "    case 1 as item if allow(item):\n        keep(item)\n",
-            "    case other:\n        before(other)\n        consume((lambda: (value := x))() async for x in other)\n        after(other)\n",
+            "    case other:\n        before(other)\n        consume((lambda: x)() async for x in other)\n        after(other)\n",
         );
         let mut prepared = PreparedBody::module(
             "example",
@@ -1685,6 +1733,8 @@ mod tests {
             prepared.emit(&mut out, 0, &file).unwrap();
             out.functions
         }
+        assert!(prepared.source.initializer.as_ref().unwrap().fully_checked());
+        inject_residual_child_module(&mut prepared);
         let original = emit(&prepared);
         let ast::Stmt::Match(branch) = &mut prepared.syntax.as_mut().unwrap().to_mut()[0] else {
             panic!("expected match")
@@ -1764,9 +1814,11 @@ mod tests {
     #[test]
     fn residual_source_supplies_only_the_interpolation_value() {
         let path = Path::new("field.py");
-        let original = r#"q = t"left{((lambda: (value := v))() async for v in xs)!r:>4}right""#;
+        let original = r#"q = t"left{(lambda v: v)(xs)!r:>4}right""#;
         let mut prepared =
             PreparedBody::module("field", path, original, 0, ModuleOrigin::Program(None)).unwrap();
+        assert_eq!(prepared.source.strings.templates.len(), 1);
+        inject_residual_child_module(&mut prepared);
         assert!(prepared.source.strings.templates.is_empty());
         assert_eq!(prepared.source.strings.residual_templates.len(), 1);
         let emit = |prepared: &PreparedBody<'_, '_>| {
@@ -1785,9 +1837,9 @@ mod tests {
                 .into_syntax()
                 .body
         };
-        prepared.syntax = Some(Cow::Owned(replace_body(r#"q = t"xxxx{((lambda: (value := v))() async for v in xs)!s:^9}yyyyy""#)));
+        prepared.syntax = Some(Cow::Owned(replace_body(r#"q = t"xxxx{(lambda v: v)(xs)!s:^9}yyyyy""#)));
         assert_eq!(emit(&prepared), expected);
-        prepared.syntax = Some(Cow::Owned(replace_body(r#"q = t"xxxx{((lambda: (value := v))() async for v in ys)!s:^9}yyyyy""#)));
+        prepared.syntax = Some(Cow::Owned(replace_body(r#"q = t"xxxx{(lambda v: v)(ys)!s:^9}yyyyy""#)));
         assert_ne!(emit(&prepared), expected);
     }
 
@@ -1972,15 +2024,17 @@ mod tests {
 
     #[test]
     fn a_residual_operand_keeps_its_entire_template_at_the_source_boundary() {
-        let prepared = PreparedBody::module(
+        let mut prepared = PreparedBody::module(
             "query",
             Path::new("query.py"),
             "first = t'{client.lookup(*args)}{v * 2}'
-second = t'{client.lookup(*args)}{((lambda: (value := v))() async for v in values)}'",
+second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             0,
             ModuleOrigin::Program(None),
         )
         .unwrap();
+        assert_eq!(prepared.source.strings.templates.len(), 2);
+        inject_residual_child_module(&mut prepared);
         let checked: Vec<_> = prepared
             .source
             .strings
@@ -2692,8 +2746,8 @@ second = t'{client.lookup(*args)}{((lambda: (value := v))() async for v in value
             "    class Example:\n",
             "        member: int\n",
             "        receiver().field = [item.copy() for item in items]\n",
-            "        saved = [receiver().field, (table()[key()], *tail)] = ((lambda: (value := item))() async for item in items)\n",
-            "        select((lambda: (value := row))() async for row in rows).field = fallback()\n",
+            "        saved = [receiver().field, (table()[key()], *tail)] = (lambda: items)()\n",
+            "        select(lambda: rows).field = fallback()\n",
             "        del receiver().field\n",
             "        saved = (first, [receiver().field, table()[key()], *rest]) = rows()\n",
             "        def read(self): return self.member\n",
@@ -2707,6 +2761,8 @@ second = t'{client.lookup(*args)}{((lambda: (value := v))() async for v in value
             ModuleOrigin::Program(None),
         )
         .unwrap();
+        assert!(prepared.source.class_bodies.values().all(|suite| suite.fully_checked()));
+        inject_residual_child_module(&mut prepared);
         let outer = prepared.syntax.as_ref().unwrap()[0]
             .as_function_def_stmt()
             .unwrap();
@@ -2753,7 +2809,7 @@ second = t'{client.lookup(*args)}{((lambda: (value := v))() async for v in value
     fn physical_deletion_uses_the_complete_checked_statement_after_targets_are_dropped() {
         let source = concat!(
             "del first, [(owner := obj).field, obj[lo:hi]], obj[[key for key in keys if key]], last\n",
-            "del rejected, (orphan := obj)[((lambda: (value := key))() async for key in keys if key)]\n",
+            "del rejected, (orphan := obj)[(lambda: key)()]\n",
         );
         let mut prepared = PreparedBody::module(
             "remove",
@@ -2763,6 +2819,8 @@ second = t'{client.lookup(*args)}{((lambda: (value := v))() async for v in value
             ModuleOrigin::Program(None),
         )
         .unwrap();
+        assert!(prepared.source.initializer.as_ref().unwrap().fully_checked());
+        inject_residual_child_module(&mut prepared);
         let admitted = prepared.syntax.as_ref().unwrap()[0].range();
         let rejected = prepared.syntax.as_ref().unwrap()[1].range();
         assert_eq!(&source[admitted], source.lines().next().unwrap());
@@ -2795,5 +2853,10 @@ second = t'{client.lookup(*args)}{((lambda: (value := v))() async for v in value
         stmt.targets.clear();
         assert_eq!(stmt.range(), admitted);
         assert_eq!(emit(&prepared), before);
+        let residual = prepared.syntax.as_mut().unwrap().to_mut()[1]
+            .as_delete_stmt_mut()
+            .unwrap();
+        residual.targets.pop().unwrap();
+        assert_ne!(emit(&prepared), before);
     }
 }
