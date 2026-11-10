@@ -11,7 +11,9 @@ use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange, TextSize};
 use serde_json::json;
 
-use super::{Body, Cleanup, DefinitionName, Entry, FinallySuite, Function, LoopTarget};
+use super::{
+    Body, CheckedHeader, Cleanup, DefinitionName, Entry, FinallySuite, Function, LoopTarget,
+};
 
 impl<'a, 'p> ContextEmitter<'a, 'p> for Function<'a, 'p> {
     fn push_context(&mut self, exit: ContextRegion, outer: String) {
@@ -404,13 +406,7 @@ impl<'p> Function<'_, 'p> {
                     }
                 }
                 ast::Stmt::FunctionDef(v) => {
-                    let decorators = v
-                        .decorator_list
-                        .iter()
-                        .map(|d| self.expr(&d.expression))
-                        .collect::<Vec<_>>();
                     let function = self.function_definition(v);
-                    let function = self.apply_decorators(&decorators, &v.decorator_list, function);
                     self.bind(v.name.as_str(), &function);
                 }
                 ast::Stmt::For(v) => {
@@ -608,6 +604,24 @@ impl<'p> Function<'_, 'p> {
     }
 
     fn function_definition(&mut self, v: &ast::StmtFunctionDef) -> String {
+        let mut header: Vec<_> = v
+            .decorator_list
+            .iter()
+            .map(|d| self.expr(&d.expression))
+            .collect();
+        if self.prepare_ordinary_function(v.start()) {
+            // Residual decorators and defaults run in the enclosing scope, in source order.
+            for default in v
+                .parameters
+                .iter_non_variadic_params()
+                .filter_map(|p| p.default.as_deref())
+            {
+                header.push(self.with_source_range(default.range(), |code| code.expr(default)));
+            }
+            return self
+                .sites
+                .definition(&mut self.frame, v.start(), &header, None);
+        }
         // A method's lazy annotations also need its defining class namespace.
         let type_params =
             if self.module || (self.class_locals.is_some() && !self.source.string_annotations) {
@@ -620,14 +634,15 @@ impl<'p> Function<'_, 'p> {
                     Some(&self.source.private_names),
                 )
             };
-        self.define(
+        let function = self.define(
             v.decorator_list.first().map_or(v.start(), Ranged::start),
             DefinitionName::Binding(&v.name),
             Some(&v.parameters),
             Some(v),
             type_params,
             self.source.function_body(v),
-        )
+        );
+        self.apply_decorators(&header, &v.decorator_list, function)
     }
 
     pub(super) fn define(
@@ -709,18 +724,31 @@ impl<'p> Function<'_, 'p> {
         } else {
             format!("{qualname}.<locals>.")
         };
+        let named_scope = function.map(|def| self.source.scopes.function(def));
         let statements = match &body {
             Body::Function(stmts, _) => Some(*stmts),
             _ => None,
         };
-        let doc = statements
-            .filter(|_| self.output.keep_docstrings)
-            .and_then(|stmts| self.source.docstring(&qualname, stmts));
+        let declaration = function
+            .and_then(|def| self.source.checked_function_header(def.start()))
+            .map(|header| match header {
+                CheckedHeader::Declaration { docstring, integer_sign_parameters, .. } => {
+                    (docstring, integer_sign_parameters)
+                }
+                CheckedHeader::Ordinary => unreachable!("ordinary header uses its callable metadata"),
+            });
+        let doc = if !self.output.keep_docstrings {
+            None
+        } else if let Some((docstring, _)) = declaration {
+            docstring.clone().or_else(|| self.source.bundled_docstring(&qualname))
+        } else {
+            statements.and_then(|stmts| self.source.docstring(&qualname, stmts))
+        };
         let generator_flags = match (&body, generator) {
             (Body::Function(_, flags), _) => *flags,
             (_, Some(site)) if self.source.generators[&site].is_async => code_flags::ASYNC_GENERATOR,
             (_, Some(_)) => code_flags::GENERATOR,
-            _ => 0,
+            _ => named_scope.map_or(0, |scope| scope.suspension_flags),
         };
         let flags = match &body {
             Body::Namespace(..) => None,
@@ -773,6 +801,7 @@ impl<'p> Function<'_, 'p> {
                 start,
                 false,
                 Entry::Compiled,
+                None,
             );
             CompiledProvider {
                 code,
@@ -793,7 +822,6 @@ impl<'p> Function<'_, 'p> {
         };
         let scopes = &self.source.scopes;
         let scope_facts = match &body {
-            Body::Function(..) => Some(&scopes.functions[&start].lexical),
             Body::Namespace(_) => {
                 let class = &scopes.classes[&start];
                 signature["postponed_annotations"] = json!(class.postponed_annotations);
@@ -807,11 +835,12 @@ impl<'p> Function<'_, 'p> {
                 Some(&class.namespace)
             }
             _ if type_alias => Some(&scopes.aliases[&start]),
-            _ => generator.map(|site| &scopes.generators[&site]),
+            _ => named_scope.map(|scope| &scope.lexical)
+                .or_else(|| generator.map(|site| &scopes.generators[&site])),
         };
         if let Some(facts) = scope_facts {
             facts.write_signature(&mut signature);
-            let callable = matches!(body, Body::Function(..));
+            let callable = named_scope.is_some();
             if callable && facts.captures_class {
                 signature["class_cell"] = json!(true);
             }
@@ -863,42 +892,31 @@ impl<'p> Function<'_, 'p> {
         {
             signature["return_type"] = json!(ty);
         }
-        let code =
-            self.source
-                .definition(self.frame.output, prefix, body, start, in_function, entry);
+        let globals = named_scope.map(|scope| scope.lexical.globals());
+        let code = self.source.definition(
+            self.frame.output, prefix, body, start, in_function, entry, globals,
+        );
         if let Some(p) = params {
             self.output
                 .interned_identifiers
                 .extend(p.iter().map(|p| p.name().to_string()));
-            for (group, args) in [
-                ("posonly", &p.posonlyargs),
-                ("positional", &p.args),
-                ("kwonly", &p.kwonlyargs),
-            ] {
-                let mut names = Vec::with_capacity(args.len());
-                for arg in args {
-                    let name = arg.parameter.name.as_str();
-                    if let Some(ty) = scalar(name) {
-                        signature["types"][name] = json!(ty);
-                        if ty == "float"
-                            && statements
-                                .is_some_and(|body| crate::frontend::only_compares_zero(body, name))
-                        {
-                            signature["integer_sign_parameters"][name] = json!(true);
-                        }
+            default_names = crate::frontend::function_scope::parameter_layout(p, &mut signature);
+            for arg in p.iter_non_variadic_params() {
+                let name = arg.parameter.name.as_str();
+                if let Some(ty) = scalar(name) {
+                    signature["types"][name] = json!(ty);
+                    if ty == "float"
+                        && declaration.map_or_else(
+                            || {
+                                statements.is_some_and(|body| {
+                                    crate::frontend::only_compares_zero(body, name)
+                                })
+                            },
+                            |(_, names)| names.iter().any(|p| p == name),
+                        )
+                    {
+                        signature["integer_sign_parameters"][name] = json!(true);
                     }
-                    names.push(name);
-                    if arg.default.is_some() {
-                        default_names.push(name.to_owned());
-                    }
-                }
-                if !names.is_empty() {
-                    signature[group] = json!(names);
-                }
-            }
-            for (key, parameter) in [("varargs", &p.vararg), ("kwargs", &p.kwarg)] {
-                if let Some(parameter) = parameter {
-                    signature[key] = json!(parameter.name.as_str());
                 }
             }
         }
@@ -1000,6 +1018,7 @@ impl<'p> Function<'_, 'p> {
             start,
             false,
             Entry::Compiled,
+            None,
         )
     }
 

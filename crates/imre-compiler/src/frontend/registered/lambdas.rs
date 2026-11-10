@@ -1,105 +1,8 @@
 //! Prepare the binding expression in the enclosing scope and the return in its own frame.
 
 use super::*;
-use crate::frontend::function_scope::FunctionScope;
+use crate::frontend::function_scope::{CallableMetadata, FunctionScope};
 use imre_ast::code_flags;
-use serde_json::json;
-
-/// Lambda code metadata independent of the frame in which its definition executes.
-pub(crate) struct LambdaMetadata {
-    layout: serde_json::Value,
-    flags: u32,
-    captures_class: bool,
-    pub(crate) generator: bool,
-    /// Keys for the default values evaluated in order by the enclosing expression.
-    pub(crate) defaults: Vec<String>,
-}
-
-impl LambdaMetadata {
-    fn new(lambda: &ast::ExprLambda, scope: &FunctionScope) -> Self {
-        let parameters = lambda.parameters.as_deref();
-        let mut layout = json!({});
-        let mut defaults = Vec::new();
-        if let Some(parameters) = parameters {
-            for (group, args) in [
-                ("posonly", &parameters.posonlyargs),
-                ("positional", &parameters.args),
-                ("kwonly", &parameters.kwonlyargs),
-            ] {
-                if !args.is_empty() {
-                    layout[group] = json!(
-                        args.iter()
-                            .map(|p| p.parameter.name.as_str())
-                            .collect::<Vec<_>>()
-                    );
-                    defaults.extend(
-                        args.iter()
-                            .filter(|p| p.default.is_some())
-                            .map(|p| p.parameter.name.to_string()),
-                    );
-                }
-            }
-            for (key, param) in [
-                ("varargs", &parameters.vararg),
-                ("kwargs", &parameters.kwarg),
-            ] {
-                if let Some(param) = param {
-                    layout[key] = json!(param.name.as_str());
-                }
-            }
-        }
-        let captures_class = scope.captures_class;
-        scope.write_signature(&mut layout);
-
-        let mut flags = code_flags::function_flags(parameters, false, false);
-        let generator = code_flags::yields_in_expression(&lambda.body);
-        if generator {
-            flags |= code_flags::GENERATOR;
-            layout["generator_lambda"] = json!(true);
-        }
-        if captures_class {
-            layout["class_cell"] = json!(true);
-        }
-        LambdaMetadata {
-            layout,
-            flags,
-            generator,
-            captures_class,
-            defaults,
-        }
-    }
-
-    pub(crate) fn parameter_names(&self) -> impl Iterator<Item = &str> {
-        ["posonly", "positional", "kwonly"]
-            .into_iter()
-            .flat_map(|group| self.layout[group].as_array().into_iter().flatten())
-            .filter_map(serde_json::Value::as_str)
-            .chain(
-                ["varargs", "kwargs"]
-                    .into_iter()
-                    .filter_map(|group| self.layout[group].as_str()),
-            )
-    }
-
-    pub(crate) fn signature(
-        &self,
-        nested: bool,
-        method: bool,
-        future_flags: u32,
-    ) -> serde_json::Value {
-        let mut signature = self.layout.clone();
-        let mut flags = self.flags | future_flags;
-        if nested {
-            flags |= code_flags::NESTED;
-        }
-        if method {
-            flags |= code_flags::METHOD;
-            signature["method_class_cell"] = json!(self.captures_class);
-        }
-        signature["code_flags"] = json!(flags);
-        signature
-    }
-}
 
 /// An inline default can also be embedded in a larger checked expression. Defaults
 /// with their own locals must be evaluated as complete regions in the binding frame.
@@ -150,7 +53,7 @@ impl DefaultParameter {
 }
 
 pub(crate) struct RegisteredLambda {
-    pub(crate) metadata: LambdaMetadata,
+    pub(crate) metadata: CallableMetadata,
     pub(crate) body: Option<RegisteredFunction>,
     pub(crate) binding: LambdaBinding,
 }
@@ -257,7 +160,11 @@ impl RegisteredLambda {
         let body = Self::body(lambda, source);
         let binding = Self::binding(lambda, source, owner, body.is_some());
         Self {
-            metadata: LambdaMetadata::new(lambda, scope),
+            metadata: CallableMetadata::new(
+                lambda.parameters.as_deref(),
+                scope,
+                code_flags::yields_in_expression(&lambda.body),
+            ),
             binding,
             body,
         }
@@ -319,6 +226,7 @@ impl RegisteredLambda {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn mixed_defaults_own_comprehension_slots_in_the_binding_scope() {

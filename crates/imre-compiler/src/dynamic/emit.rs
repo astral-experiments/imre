@@ -1,7 +1,7 @@
 //! Emit native functions and control flow for closed modules using boxed Python values.
 
 use std::borrow::Cow;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
@@ -563,20 +563,39 @@ impl<'a> PreparedBody<'a, '_> {
             if let Some(entry) = site.thread_entry {
                 thread_entries.insert(start, entry);
             }
-            if program_bodies.is_some_and(|bodies| bodies.contains_key(&start)) {
-                continue;
-            }
-            let kind = crate::frontend::RegisteredScope::Function {
-                is_async: def.is_async,
-            };
-            if site.prepare_entry {
-                let suspends = scopes.function(def).suspension_flags != 0;
-                function_bodies.insert(start, prepare.function_suite(&def.body, kind, suspends));
+            let scope = scopes
+                .functions
+                .get_mut(&start)
+                .expect("named function scope");
+            let suspended = scope.suspension_flags != 0;
+            let body = if let Some(checked) = program_bodies.and_then(|bodies| bodies.get(&start)) {
+                FunctionBody::Program(checked)
             } else {
-                prepare.physical_body(&def.body, kind);
-            }
+                let kind = crate::frontend::RegisteredScope::Function {
+                    is_async: def.is_async,
+                };
+                if !site.prepare_entry {
+                    prepare.physical_body(&def.body, kind);
+                    continue;
+                }
+                FunctionBody::Suite(prepare.function_suite(&def.body, kind, suspended))
+            };
+            let complete = match &body {
+                FunctionBody::Program(_) => true,
+                FunctionBody::Suite(plan) => plan.fully_checked(),
+            };
+            let header = complete.then(|| {
+                CheckedHeader::prepare(
+                    def,
+                    &mut scope.ordinary,
+                    sites.parameter_annotations.get(&def.parameters.start()),
+                    thread_entries.contains_key(&start),
+                    keep_docstrings,
+                )
+            });
+            function_bodies.insert(start, PreparedFunction { body, header });
         }
-        let source = SourceInfo {
+        let mut source = SourceInfo {
             annotation_operands,
             namespace_annotations,
             scopes,
@@ -595,7 +614,6 @@ impl<'a> PreparedBody<'a, '_> {
             class_bodies,
             initializer,
             initializer_sites,
-            program_bodies,
             bundled,
             path,
             // These CPython providers implement their own call semantics in Python.
@@ -620,6 +638,18 @@ impl<'a> PreparedBody<'a, '_> {
             !suite.fully_checked()
                 || source.scopes.module_annotations
                 || !source.initializer_sites.is_empty()
+                    && (declarations.is_empty()
+                        || declarations.keys().any(|site| {
+                            if source.ordinary_function(*site).is_some() {
+                                return false;
+                            }
+                            source
+                                .function_bodies
+                                .get(site)
+                                .and_then(PreparedFunction::graph_header)
+                                .is_none()
+                                || body.binary_search_by_key(site, Ranged::start).is_err()
+                        }))
         });
         if retain_syntax {
             use_module(PreparedBody {
@@ -631,7 +661,27 @@ impl<'a> PreparedBody<'a, '_> {
             })
         } else {
             drop(declarations);
-            let syntax = expression.then_some(Cow::Owned(body));
+            let syntax = if expression {
+                Some(Cow::Owned(body))
+            } else {
+                if !source.initializer_sites.is_empty() {
+                    // A direct graph definition retains its signature and its checked executable body.
+                    for stmt in body {
+                        if let ast::Stmt::FunctionDef(mut def) = stmt
+                            && let Some(CheckedHeader::Declaration { syntax, .. }) = source
+                                .function_bodies
+                                .get_mut(&def.start())
+                                .and_then(PreparedFunction::graph_header_mut)
+                        {
+                            def.body = Default::default();
+                            *syntax = Some(Box::new(def));
+                        }
+                    }
+                } else {
+                    drop(body);
+                }
+                None
+            };
             use_module(PreparedBody {
                 name,
                 syntax,
@@ -720,17 +770,15 @@ impl<'a> PreparedBody<'a, '_> {
             .initializer
             .as_ref()
             .expect("module initializer");
-        let location;
-        let declarations;
-        if let Some(stmts) = &self.syntax {
-            declarations = self.linked_declarations();
-            location = SourceMap {
-                info: &self.source,
-                lambda_code: Default::default(),
-                definitions: Some(&declarations),
-                unit,
-                positions: &positions,
-            };
+        let declarations = self.linked_declarations();
+        let location = SourceMap {
+            info: &self.source,
+            callable_code: Default::default(),
+            definitions: Some(&declarations),
+            unit,
+            positions: &positions,
+        };
+        let code = if self.syntax.is_some() || !self.source.initializer_sites.is_empty() {
             let mut function = location.function(frame, String::new(), false, true);
             if let Some(entries) = self.source.namespace_annotations.get(&None) {
                 for site in entries {
@@ -747,6 +795,7 @@ impl<'a> PreparedBody<'a, '_> {
                 }
                 function.frame.checked_body(&suite.checked, &function.sites);
             } else {
+                let stmts = self.syntax.as_deref().expect("physical module statements");
                 function.checked_runs(suite, |code, run| code.source_run(stmts, run));
             }
             if let Some(sites) = function.module_annotation_sites.take() {
@@ -755,12 +804,12 @@ impl<'a> PreparedBody<'a, '_> {
                 function.setup_deferred_module_annotations(&sites);
                 function.jump("module_body");
             }
-            frame = function.frame;
+            function.frame.finish(true)
         } else {
             self.begin_module(&mut frame);
             frame.checked_body(&suite.checked, &sites::CheckedSites::default());
-        }
-        let code = frame.finish(true);
+            frame.finish(true)
+        };
         match output.diagnostic.take() {
             Some(diagnostic) => Err(diagnostic),
             None => Ok(code),
@@ -878,7 +927,7 @@ fn source_declarations<'a>(sites: &crate::frontend::RegisteredSites<'a>) -> Defi
 struct SourceMap<'a> {
     info: &'a SourceInfo<'a>,
     /// A duplicated cleanup path still evaluates the same lexical definition.
-    lambda_code: std::cell::RefCell<HashMap<ruff_text_size::TextSize, String>>,
+    callable_code: std::cell::RefCell<HashMap<ruff_text_size::TextSize, String>>,
     definitions: Option<&'a Definitions<'a>>,
     unit: usize,
     positions: &'a SourcePositions<'a>,
@@ -899,6 +948,99 @@ struct TypeAliasDefinition {
     parameters: Option<Vec<crate::ir::RegisteredTypeParameter>>,
 }
 
+/// Graph analysis owns program entries; physical preparation owns the other function suites.
+enum FunctionBody<'a> {
+    Program(&'a crate::frontend::RegisteredFunction),
+    Suite(crate::frontend::RegisteredSuite),
+}
+
+struct PreparedFunction<'a> {
+    body: FunctionBody<'a>,
+    header: Option<CheckedHeader>,
+}
+
+impl PreparedFunction<'_> {
+    fn graph_header(&self) -> Option<&CheckedHeader> {
+        match self.body {
+            FunctionBody::Program(_) => self.header.as_ref(),
+            FunctionBody::Suite(_) => None,
+        }
+    }
+
+    fn graph_header_mut(&mut self) -> Option<&mut CheckedHeader> {
+        match self.body {
+            FunctionBody::Program(_) => self.header.as_mut(),
+            FunctionBody::Suite(_) => None,
+        }
+    }
+
+    fn suite(&self) -> Option<&crate::frontend::RegisteredSuite> {
+        match &self.body {
+            FunctionBody::Program(_) => None,
+            FunctionBody::Suite(suite) => Some(suite),
+        }
+    }
+
+    fn checked(&self) -> &crate::frontend::RegisteredFunction {
+        match &self.body {
+            FunctionBody::Program(checked) => checked,
+            FunctionBody::Suite(suite) => &suite.checked,
+        }
+    }
+}
+
+enum CheckedHeader {
+    /// The lexical scope owns OrdinaryFunction's complete declaration metadata.
+    Ordinary,
+    /// Other declarations use the source header. A released unit moves it here without its body.
+    Declaration {
+        syntax: Option<Box<ast::StmtFunctionDef>>,
+        docstring: Option<String>,
+        integer_sign_parameters: Vec<String>,
+    },
+}
+
+impl CheckedHeader {
+    fn prepare(
+        def: &ast::StmtFunctionDef,
+        ordinary: &mut Option<crate::frontend::function_scope::OrdinaryFunction>,
+        annotations: Option<&crate::frontend::ParameterAnnotations>,
+        worker: bool,
+        keep_docstrings: bool,
+    ) -> Self {
+        if ordinary.is_some() && !worker {
+            return Self::Ordinary;
+        }
+        // Workers bind through their specialized declaration and need only its docstring.
+        let lexical = ordinary.take();
+        let docstring = keep_docstrings
+            .then(|| {
+                lexical.map_or_else(
+                    || crate::frontend::docstring(&def.body),
+                    |header| header.doc,
+                )
+            })
+            .flatten();
+        let integer_sign_parameters = def
+            .parameters
+            .iter_non_variadic_params()
+            .map(|arg| arg.parameter.name.as_str())
+            .filter(|name| {
+                annotations
+                    .and_then(|provider| provider.references.get(*name))
+                    .is_some_and(|reference| reference == "float")
+            })
+            .filter(|name| crate::frontend::only_compares_zero(&def.body, name))
+            .map(str::to_owned)
+            .collect();
+        Self::Declaration {
+            syntax: None,
+            docstring,
+            integer_sign_parameters,
+        }
+    }
+}
+
 struct SourceInfo<'a> {
     annotation_operands: HashMap<
         ruff_text_size::TextSize,
@@ -917,12 +1059,11 @@ struct SourceInfo<'a> {
     annotations: HashMap<ruff_text_size::TextSize, crate::frontend::DeferredAnnotation>,
     parameter_annotations: HashMap<ruff_text_size::TextSize, crate::frontend::ParameterAnnotations>,
     nested_bodies: HashMap<ruff_text_size::TextSize, crate::frontend::RegisteredSuite>,
-    function_bodies: HashMap<ruff_text_size::TextSize, crate::frontend::RegisteredSuite>,
+    function_bodies: HashMap<ruff_text_size::TextSize, PreparedFunction<'a>>,
     class_bodies: HashMap<ruff_text_size::TextSize, crate::frontend::RegisteredClass>,
     initializer: Option<crate::frontend::RegisteredSuite>,
     // Module admission and each output layout use the same ordered site references.
     initializer_sites: Vec<sites::RequiredSite>,
-    program_bodies: Option<&'a super::CheckedFunctions>,
     bundled: bool,
     path: &'a Path,
     python_annotations: bool,
@@ -940,14 +1081,42 @@ struct SourceInfo<'a> {
 }
 
 impl SourceInfo<'_> {
+    fn ordinary_function(
+        &self,
+        site: ruff_text_size::TextSize,
+    ) -> Option<(&crate::frontend::function_scope::OrdinaryFunction, Body<'_>)> {
+        let plan = self.function_bodies.get(&site)?;
+        if !matches!(plan.header, Some(CheckedHeader::Ordinary)) {
+            return None;
+        }
+        let scope = &self.scopes.functions[&site];
+        Some((
+            scope.ordinary.as_ref().expect("ordinary function header"),
+            Body::Checked(plan.checked()),
+        ))
+    }
+
+    fn checked_function_header(&self, site: ruff_text_size::TextSize) -> Option<&CheckedHeader> {
+        self.function_bodies.get(&site)?.header.as_ref()
+    }
+
+    fn function_header(&self, site: ruff_text_size::TextSize) -> Option<&ast::StmtFunctionDef> {
+        match self.checked_function_header(site)? {
+            CheckedHeader::Ordinary => None,
+            CheckedHeader::Declaration { syntax, .. } => syntax.as_deref(),
+        }
+    }
+
     /// Keep documentation attached to the bundled definition, even when callers rebind its name.
     fn docstring(&self, qualname: &str, body: &[ast::Stmt]) -> Option<String> {
-        crate::frontend::docstring(body).or_else(|| {
-            self.docs
-                .as_ref()?
-                .object_docstring(qualname)
-                .map(str::to_owned)
-        })
+        crate::frontend::docstring(body).or_else(|| self.bundled_docstring(qualname))
+    }
+
+    fn bundled_docstring(&self, qualname: &str) -> Option<String> {
+        self.docs
+            .as_ref()?
+            .object_docstring(qualname)
+            .map(str::to_owned)
     }
 
     fn class(&self, class: &ast::StmtClassDef) -> &crate::frontend::RegisteredClass {
@@ -1022,6 +1191,7 @@ impl SourceMap<'_> {
         start: ruff_text_size::TextSize,
         in_function: bool,
         entry: Entry,
+        globals: Option<&BTreeSet<String>>,
     ) -> String {
         let site = format!("@code_site{}", output.count);
         let suspended = matches!(entry, Entry::Suspended(_));
@@ -1034,7 +1204,13 @@ impl SourceMap<'_> {
         } else {
             0
         };
-        let entry = self.code(output, prefix, body, in_function, Some((start, entry)));
+        let entry = self.code(
+            output,
+            prefix,
+            body,
+            in_function,
+            Some((start, entry, globals)),
+        );
         writeln!(
             output.constants,
             "{site} = private constant %code_site {{ ptr {entry}, ptr {}, i32 {}, i32 {tag} }}",
@@ -1051,16 +1227,14 @@ impl SourceMap<'_> {
         prefix: String,
         body: Body<'_>,
         in_function: bool,
-        definition: Option<(ruff_text_size::TextSize, Entry)>,
+        definition: Option<(ruff_text_size::TextSize, Entry, Option<&BTreeSet<String>>)>,
     ) -> String {
         let suspension = match definition {
-            Some((_, Entry::Suspended(flags))) => flags,
+            Some((_, Entry::Suspended(flags), _)) => flags,
             _ => 0,
         };
-        let start = definition.map(|(start, _)| start);
-        let checked = start
-            .filter(|_| matches!(body, Body::Function(..)))
-            .and_then(|key| self.program_bodies?.get(&key));
+        let globals = definition.as_ref().and_then(|(_, _, globals)| *globals);
+        let start = definition.map(|(start, _, _)| start);
         let mut frame = RegisteredFrame::new(
             output,
             self.positions,
@@ -1078,7 +1252,7 @@ impl SourceMap<'_> {
         }
         let prepared = match body {
             Body::Namespace(_) => Some(&self.class_bodies[&start.expect("class definition")].body),
-            Body::Function(..) => start.and_then(|key| self.function_bodies.get(&key)),
+            Body::Function(..) => start.and_then(|key| self.function_bodies.get(&key)?.suite()),
             _ => None,
         };
         let mut f = self.function(frame, prefix, in_function, false);
@@ -1092,16 +1266,6 @@ impl SourceMap<'_> {
             for site in entries {
                 f.place_annotation_string(*site);
             }
-        }
-        if let Some(checked) = checked {
-            for name in self.scopes.functions[&start.expect("checked function")]
-                .lexical
-                .globals()
-            {
-                f.frame.declare_global(name);
-            }
-            f.checked_function(checked);
-            return f.frame.finish(false);
         }
         match body {
             Body::Namespace(stmts) | Body::Function(stmts, _) => {
@@ -1148,7 +1312,12 @@ impl SourceMap<'_> {
                 let value = f.frame.prepared_operand(operand, &f.sites, false);
                 f.return_value(&value);
             }
-            Body::Checked(checked) => f.checked_function(checked),
+            Body::Checked(checked) => {
+                if let Some(globals) = globals {
+                    f.declare_globals(globals);
+                }
+                f.checked_function(checked);
+            }
         }
         f.frame.finish(false)
     }
@@ -1290,6 +1459,180 @@ mod tests {
     }
 
     #[test]
+    fn nested_function_emits_without_parsed_declarations() {
+        let source = concat!(
+            "def factory(local):\n",
+            "    @decorate('outer')\n",
+            "    @decorate('inner')\n",
+            "    def callback(value=local, /):\n",
+            "        return local, value\n",
+            "    return callback\n",
+        );
+        PreparedBody::with_module(
+            "callbacks",
+            Path::new("callbacks.py"),
+            source,
+            0,
+            ModuleOrigin::Program(None),
+            |mut module| {
+                let initializer = module.source.initializer.as_ref().unwrap();
+                let mut headers = Vec::new();
+                for suite in std::iter::once(initializer).chain(
+                    module
+                        .source
+                        .function_bodies
+                        .values()
+                        .filter_map(PreparedFunction::suite),
+                ) {
+                    assert!(suite.fully_checked());
+                    crate::ir::walk_expressions(&suite.checked.function.body, &mut |value| {
+                        if let crate::ir::ExprKind::Builtin(
+                            crate::ir::Builtin::RegisteredDefinition(site),
+                            operands,
+                        ) = &value.kind
+                        {
+                            headers.push((site.start().to_usize(), operands.len()));
+                        }
+                    });
+                }
+                headers.sort_unstable();
+                assert_eq!(headers, [(0, 0), (source.find("@decorate").unwrap(), 3)]);
+                let expected = module.standalone()?.unwrap();
+                assert_eq!(
+                    expected.1.matches(" = private constant %code_site").count(),
+                    2
+                );
+                let retained = (module.syntax.take().is_some(), module.declarations.len());
+                module.declarations.clear();
+                assert!(module.standalone()?.unwrap() == expected);
+                assert_eq!(retained, (false, 0));
+                Ok(())
+            },
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn paired_module_registers_its_checked_bodies_without_executable_syntax() {
+        let source = include_str!("../../../../tests/fixtures/registered_reduction_callback.py");
+        let mut graph = crate::modules::SourceGraph::single(source).unwrap();
+        assert!(matches!(
+            crate::checked_lower(&mut graph).unwrap(),
+            crate::CheckedProgram::Registered
+        ));
+        let bodies = graph.registered_functions();
+        let functions = &bodies[&graph.entry];
+        let prepared = PreparedBody::module(
+            "example",
+            Path::new("example.py"),
+            source,
+            0,
+            ModuleOrigin::Program(Some(functions)),
+        )
+        .unwrap();
+        assert!(prepared.syntax.is_none());
+        assert!(prepared.declarations.is_empty());
+        assert_eq!(prepared.source.initializer_sites.len(), 4);
+        assert_eq!(prepared.source.function_bodies.len(), 4);
+
+        let (_, llvm) = prepared.standalone().unwrap().unwrap();
+        let mut ordinary = Vec::new();
+        let mut annotated = Vec::new();
+        for (start, plan) in &prepared.source.function_bodies {
+            let name = if let Some((header, _)) = prepared.source.ordinary_function(*start) {
+                assert!(prepared.source.function_header(*start).is_none());
+                ordinary.push(header.name.as_str());
+                header.name.as_str()
+            } else {
+                let def = prepared.source.function_header(*start).unwrap();
+                assert!(def.body.is_empty());
+                annotated.push(def.name.as_str());
+                def.name.as_str()
+            };
+            assert!(std::ptr::eq(plan.checked(), &functions[start]));
+            let def_line = source[..usize::from(*start)].lines().count() + 1;
+            let first_statement = format!(", i32 {}, i64 0)", def_line + 1);
+            let (symbol, body) = llvm
+                .split("\ndefine internal i64 ")
+                .skip(1)
+                .filter_map(|function| {
+                    let (symbol, code) = function.split_once("(ptr %ctx, i64 %scope)")?;
+                    Some((symbol, code.split_once("\n}").unwrap().0))
+                })
+                .find(|(_, body)| {
+                    body.lines().any(|line| {
+                        line.contains("call void @imre_dyn_statement_with_exception(")
+                            && line.ends_with(&first_statement)
+                    })
+                })
+                .unwrap();
+            let site = llvm
+                .lines()
+                .filter_map(|line| line.split_once(" = private constant %code_site "))
+                .find(|(_, addr)| {
+                    addr.starts_with(&format!("{{ ptr {symbol},"))
+                        && addr.ends_with(&format!(", i32 {def_line}, i32 0 }}"))
+                })
+                .unwrap()
+                .0;
+            assert!(llvm.contains(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {site},")));
+            if name == "publish" {
+                assert_eq!(
+                    body.matches("call i64 @imre_dyn_exact_int_word(").count(),
+                    2
+                );
+                assert_eq!(body.matches("call i64 @int_add(").count(), 1);
+                assert_eq!(
+                    body.matches("call i64 @imre_dyn_positional_call_at(")
+                        .count(),
+                    1
+                );
+            }
+        }
+        ordinary.sort_unstable();
+        annotated.sort_unstable();
+        assert_eq!(ordinary, ["first", "second"]);
+        assert_eq!(annotated, ["publish", "successor_sum"]);
+    }
+
+    #[test]
+    fn named_checked_function_publishes_after_its_source_body_is_erased() {
+        let source = concat!(
+            "def publish(a: int, b: int, send):\n",
+            "    \"Send the sum.\"\n",
+            "    total = a + b\n",
+            "    send(total)\n",
+            "state: int = 0\n",
+        );
+        let graph = crate::modules::SourceGraph::single(source).unwrap();
+        let _ = crate::frontend::lower(&graph);
+        let bodies = graph.registered_functions();
+        let mut prepared = PreparedBody::module(
+            "example",
+            Path::new("example.py"),
+            source,
+            0,
+            ModuleOrigin::Program(Some(&bodies[&graph.entry])),
+        )
+        .unwrap();
+        let entry = prepared.standalone().unwrap().unwrap();
+        assert!(entry.1.contains("call i64 @int_add("));
+        assert!(entry.1.contains("call i64 @imre_dyn_positional_call_at("));
+        assert!(entry.1.contains("Send the sum."));
+        let def = prepared.syntax.as_mut().unwrap().to_mut()[0]
+            .as_function_def_stmt_mut()
+            .unwrap();
+        let plan = &prepared.source.function_bodies[&def.start()];
+        assert!(prepared.source.function_header(def.start()).is_none());
+        assert!(std::ptr::eq(
+            plan.checked(),
+            &bodies[&graph.entry][&def.start()]
+        ));
+        def.body.clear();
+        assert_eq!(prepared.standalone().unwrap().unwrap(), entry);
+    }
+
+    #[test]
     fn mixed_coroutine_emits_sync_for_without_its_source() {
         let mut module = PreparedBody::module(
             "async_groups",
@@ -1308,7 +1651,9 @@ mod tests {
             })
             .unwrap();
         let main = syntax[definition].as_function_def_stmt().unwrap();
-        let suite = &module.source.function_bodies[&main.start()];
+        let suite = module.source.function_bodies[&main.start()]
+            .suite()
+            .unwrap();
         let index = main
             .body
             .iter()
@@ -1349,6 +1694,8 @@ mod tests {
             "    transform = lambda x: x + 1\n",
             "    for item in (1, 2): yield transform(choose(item))\n",
             "for item in values(): print(item)\n",
+            // Keep this module mixed so the test can erase the original suite.
+            "state: int\n",
         );
         let graph = crate::modules::SourceGraph::single(source).unwrap();
         let _ = crate::frontend::lower(&graph);
@@ -1395,7 +1742,7 @@ mod tests {
                 PreparedBody::module(name, Path::new("module.py"), text, 0, ModuleOrigin::Bundled)
                     .unwrap();
             let start = ruff_text_size::TextSize::try_from(text.find(definition).unwrap()).unwrap();
-            let suite = &module.source.function_bodies[&start];
+            let suite = module.source.function_bodies[&start].suite().unwrap();
             assert!(suite.fully_checked(), "{name}");
             crate::verify::registered(suite.checked.region()).unwrap();
             let mut suspends = false;
@@ -1521,7 +1868,7 @@ mod tests {
         )
         .unwrap();
         let start = ruff_text_size::TextSize::try_from(source.find("async def").unwrap()).unwrap();
-        let suite = &module.source.function_bodies[&start];
+        let suite = module.source.function_bodies[&start].suite().unwrap();
         let mut pulls = 0;
         crate::ir::walk_statements(&suite.checked.function.body, &mut |stmt| {
             if matches!(
@@ -1581,8 +1928,12 @@ mod tests {
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        let def = prepared.syntax.as_ref().unwrap()[0].as_function_def_stmt().unwrap();
-        let suite = &prepared.source.function_bodies[&def.start()];
+        let def = prepared.syntax.as_ref().unwrap()[0]
+            .as_function_def_stmt()
+            .unwrap();
+        let suite = prepared.source.function_bodies[&def.start()]
+            .suite()
+            .unwrap();
         crate::verify::registered(suite.checked.region()).unwrap();
         assert!(suite.residual.is_empty());
         for name in ["selected", "suspended"] {
@@ -1595,7 +1946,7 @@ mod tests {
             );
         }
         let def = prepared.syntax.as_ref().unwrap()[1].as_function_def_stmt().unwrap();
-        let suite = &prepared.source.function_bodies[&def.start()];
+        let suite = prepared.source.function_bodies[&def.start()].suite().unwrap();
         assert!(suite.fully_checked());
         crate::verify::registered(suite.checked.region()).unwrap();
         let mut suspensions = Vec::new();
@@ -1657,9 +2008,9 @@ mod tests {
         let original = prepared.standalone().unwrap().unwrap();
         let syntax = prepared.syntax.as_mut().unwrap().to_mut();
         let unpack = syntax[1].as_function_def_stmt().unwrap();
-        assert!(!prepared.source.function_bodies[&unpack.start()].fully_checked());
+        assert!(!prepared.source.function_bodies[&unpack.start()].suite().unwrap().fully_checked());
         let receive = syntax[0].as_function_def_stmt_mut().unwrap();
-        assert!(prepared.source.function_bodies[&receive.start()].fully_checked());
+        assert!(prepared.source.function_bodies[&receive.start()].suite().unwrap().fully_checked());
         receive.body.clear();
         assert_eq!(prepared.standalone().unwrap().unwrap(), original);
     }
@@ -1678,7 +2029,7 @@ mod tests {
         let function = prepared.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
             .unwrap();
-        let suite = &prepared.source.function_bodies[&function.start()];
+        let suite = prepared.source.function_bodies[&function.start()].suite().unwrap();
         assert!(suite.fully_checked());
         assert!(suite.checked.function.body.iter().any(|statement| matches!(
             statement,
@@ -1726,7 +2077,7 @@ mod tests {
             |prepared| {
                 let bodies = &prepared.source.function_bodies;
                 assert_eq!(bodies.len(), 1);
-                let suite = bodies.values().next().unwrap();
+                let suite = bodies.values().next().unwrap().suite().unwrap();
                 assert!(suite.fully_checked());
                 crate::verify::registered(suite.checked.region()).unwrap();
                 assert!(suite.checked.function.body.iter().any(|stmt| {
@@ -1796,7 +2147,8 @@ mod tests {
 
     #[test]
     fn residual_with_reads_its_prepared_manager_after_erasing_the_call() {
-        let text = "def read(open_stream, path, record):\n    with open_stream(path) as stream:\n        record(stream)\n";
+        // The module annotation retains the physical suite for this residual-input test.
+        let text = "def read(open_stream, path, record):\n    with open_stream(path) as stream:\n        record(stream)\nstate: int\n";
         let mut prepared = PreparedBody::module(
             "scan",
             Path::new("scan.py"),
@@ -2134,6 +2486,56 @@ mod tests {
     }
 
     #[test]
+    fn checked_named_entries_keep_their_registration_after_their_bodies_are_dropped() {
+        let mut module = PreparedBody::module(
+            "entries",
+            Path::new("entries.py"),
+            concat!(
+                "def sign(value: float, /):\n",
+                "    'Record the sign.'\n",
+                "    global positive\n",
+                "    positive = value > 0\n",
+                "    return positive\n",
+                "def closure(value):\n",
+                "    return lambda: value\n",
+            ),
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let before = module.standalone().unwrap().unwrap();
+        let defs = module.syntax.as_mut().unwrap().to_mut();
+        for (i, stmt) in defs.iter_mut().enumerate() {
+            let def = stmt.as_function_def_stmt_mut().unwrap();
+            let Body::Checked(body) = module.source.function_body(def) else {
+                panic!("named activation still needs source");
+            };
+            let mut required = Vec::new();
+            sites::CheckedSites::visit(&body.function.body, &mut |site| required.push(site));
+            if i == 0 {
+                assert!(required.is_empty());
+                let CheckedHeader::Declaration {
+                    docstring,
+                    integer_sign_parameters,
+                    ..
+                } = module.source.checked_function_header(def.start()).unwrap()
+                else {
+                    panic!("missing annotated header");
+                };
+                assert_eq!(docstring.as_deref(), Some("Record the sign."));
+                assert_eq!(integer_sign_parameters.as_slice(), ["value"]);
+            } else {
+                assert!(matches!(
+                    required.as_slice(),
+                    [sites::RequiredSite::Lambda(..)]
+                ));
+            }
+            def.body.clear();
+        }
+        assert!(module.standalone().unwrap().unwrap() == before);
+    }
+
+    #[test]
     fn independent_module_keeps_its_registered_entry_after_releasing_syntax() {
         let path = Path::new("state.py");
         let source = concat!(
@@ -2354,7 +2756,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             |prepared| {
                 let methods = &prepared.source.function_bodies;
                 assert_eq!(methods.len(), 1);
-                assert!(methods.values().all(crate::frontend::RegisteredSuite::fully_checked));
+                assert!(methods.values().all(|plan| plan.suite().unwrap().fully_checked()));
                 assert!(matches!(prepared.syntax, Some(Cow::Borrowed(_))));
                 prepared.standalone()
             },
@@ -2406,7 +2808,9 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             let entries = &prepared.source.thread_entries;
             assert_eq!(entries.get(&start(target)), Some(&entry));
             assert!(!entries.contains_key(&start(excluded)));
-            let suite = &prepared.source.function_bodies[&start(target)];
+            let suite = prepared.source.function_bodies[&start(target)]
+                .suite()
+                .unwrap();
             assert!(suite.fully_checked());
             let mut methods = Vec::new();
             ir::walk_expressions(&suite.checked.function.body, &mut |expr| {
@@ -2716,7 +3120,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
                     .filter_map(ast::Stmt::as_function_def_stmt)
                     .find(|def| def.name.as_str() == name)
                     .unwrap();
-                let suite = &prepared.source.function_bodies[&def.start()];
+                let suite = prepared.source.function_bodies[&def.start()].suite().unwrap();
                 assert!(suite.fully_checked(), "{name}");
                 crate::verify::registered(suite.checked.region()).unwrap();
             }
@@ -3084,7 +3488,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         let def = prepared.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
             .unwrap();
-        assert!(prepared.source.function_bodies[&def.start()].fully_checked());
+        assert!(prepared.source.function_bodies[&def.start()].suite().unwrap().fully_checked());
         let assignment = def.body[0].as_assign_stmt_mut().unwrap();
         assignment.value.as_dict_expr_mut().unwrap().items.clear();
         assert_eq!(prepared.standalone().unwrap().unwrap(), before);
@@ -3108,7 +3512,12 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         let def = prepared.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
             .unwrap();
-        assert!(prepared.source.function_bodies[&def.start()].fully_checked());
+        assert!(
+            prepared.source.function_bodies[&def.start()]
+                .suite()
+                .unwrap()
+                .fully_checked()
+        );
         def.body[0].as_assign_stmt_mut().unwrap().targets.clear();
         assert_eq!(prepared.standalone().unwrap().unwrap(), before);
     }
