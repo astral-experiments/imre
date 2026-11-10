@@ -119,10 +119,16 @@ impl Function<'_, '_> {
     }
 
     fn located_operand(&mut self, expr: &ast::Expr, condition: bool) -> String {
-        let position = imre_ast::expression_position(
-            expr,
-            &self.source.method_imports,
-            Some(&self.source.private_names),
+        let physical = self.source.statement_sites.expressions.physical(expr);
+        let position = physical.map_or_else(
+            || {
+                imre_ast::expression_position(
+                    expr,
+                    &self.source.method_imports,
+                    Some(&self.source.private_names),
+                )
+            },
+            |inputs| inputs.position,
         );
         let previous = self.enter_expression(expr.range(), position);
         let comparison = self
@@ -144,13 +150,8 @@ impl Function<'_, '_> {
             } else {
                 result.into_handle()
             }
-        } else if let Some(inputs) = self.source.statement_sites.expressions.physical(expr) {
-            let handles = inputs
-                .operands(expr, self.native_suspension)
-                .map(|child| self.source_operand(child))
-                .collect::<Vec<_>>();
-            self.frame
-                .registered_with_inputs(&inputs.operation, &handles, &self.sites)
+        } else if let Some(inputs) = physical {
+            self.physical_value(expr, inputs)
         } else if let Some((edges, inputs)) = self.source.statement_sites.expressions.value(expr) {
             let value = Logical::value(&mut self.frame.body, edges, crate::ir::Type::PythonObject)
                 .emit(self, &inputs)
@@ -178,25 +179,43 @@ impl Function<'_, '_> {
             )
             .expect("value-producing conditional")
             .into_handle()
-        } else if let Some(operation) = self.source.registered_source().object_operation(expr) {
-            if let crate::ir::Builtin::RegisteredUnary(op) = operation.opcode {
-                let scope = self.begin_unary();
-                let operand = self.expr(operation.target);
-                let result = self.frame.unary_handle(op, operand);
-                self.finish_unary(scope, op, result).into_handle()
-            } else {
-                self.object_operation(
-                    &operation.opcode,
-                    operation.target,
-                    operation.arguments(),
-                    Self::expr,
-                )
-            }
         } else {
             self.expr_inner(expr)
         };
         self.leave_expression(previous);
         value
+    }
+
+    fn physical_value(
+        &mut self,
+        node: &ast::Expr,
+        inputs: &crate::frontend::PhysicalInputs,
+    ) -> String {
+        use crate::ir::{Builtin, ExprKind};
+        let mut operands = inputs.operands(node, self.native_suspension);
+        match &inputs.operation.kind {
+            ExprKind::Builtin(Builtin::RegisteredUnary(op), _) => {
+                let scope = self.begin_unary();
+                let operand = self.source_operand(operands.next().expect("unary operand"));
+                let result = self.frame.unary_handle(*op, operand);
+                self.finish_unary(scope, *op, result).into_handle()
+            }
+            ExprKind::Builtin(
+                op @ (Builtin::RegisteredCall(_) | Builtin::RegisteredAttribute { .. }),
+                _,
+            ) => {
+                let target = operands.next().expect("object operation target");
+                let args: Vec<_> = operands.collect();
+                self.object_operation(op, &target, args.iter(), |code, child| {
+                    code.source_operand(*child)
+                })
+            }
+            _ => {
+                let handles: Vec<_> = operands.map(|child| self.source_operand(child)).collect();
+                self.frame
+                    .registered_with_inputs(&inputs.operation, &handles, &self.sites)
+            }
+        }
     }
 
     fn expr_inner(&mut self, expr: &ast::Expr) -> String {
