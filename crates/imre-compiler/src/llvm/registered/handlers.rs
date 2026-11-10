@@ -88,7 +88,7 @@ impl<'f, 'p> Frame<'f, '_, 'p> {
             self.label(&matched);
         }
         if let Some(name) = name {
-            self.bind(name, exception);
+            self.code.bind(name, exception);
             let failed = self.name("b");
             let enclosing = std::mem::replace(&mut self.body.error_target, failed.clone());
             self.regions.push(Region::ExceptionName {
@@ -174,7 +174,7 @@ impl<'f, 'p> Frame<'f, '_, 'p> {
             self.label(&body);
             self.op("restore_caught", &[&matched]);
             if let Some(name) = name {
-                self.bind(name, &matched);
+                self.code.bind(name, &matched);
             }
             let outer = std::mem::replace(&mut self.body.error_target, failed.clone());
             self.emit_handler_suite(&handler.body);
