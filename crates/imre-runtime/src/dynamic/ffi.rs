@@ -980,7 +980,6 @@ pub(super) fn new_context_with_heap<S: Into<crate::Str>>(
         finalizing: Default::default(),
         contexts: Vec::new(),
         buffer_exports: Vec::new(),
-        sorting_lists: Vec::new(),
         repr_ancestors: Vec::new(),
         repr_spare_stack: false,
         // Measure the execution thread before entering the native Python evaluator.
