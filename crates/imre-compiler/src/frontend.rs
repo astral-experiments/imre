@@ -1457,27 +1457,8 @@ fn lower_graph(
     if let Some(cache) = cache {
         cache.finish(&types);
     }
-    if needs_object_string_order(&functions, &entry) {
-        graph.needs_object_runtime.set(true);
-        let diagnostic = Diagnostic::plain(
-            " Imre: ordering strings from chr() with possible surrogate values requires native Python object operations".to_owned(),
-        )
-        .with_path(&graph.modules[graph.entry].path)
-        .classified(Kind::ScopedObject);
-        return Err(diagnostic);
-    }
-    // The checked functions and module statements have supplied their graph diagnostics.
-    // Only the fixed startup links initializer calls and allocates native module metadata.
-    if graph.registered_startup {
-        return Ok(crate::CheckedProgram::Registered(None));
-    }
-    if let Some(reason) = graph
-        .runtime_initializer
-        .clone()
-        .map(Into::into)
-        .or_else(|| required_object_diagnostic(graph, &functions, &entry))
-    {
-        return Ok(crate::CheckedProgram::Registered(Some(reason)));
+    if let Some(registered) = registered_entry(graph, &functions, &entry)? {
+        return Ok(registered);
     }
     // Checkpoints above refer to the source operations. Insert native startup
     // bookkeeping into these same bodies only after their source order is checked.
@@ -1568,36 +1549,25 @@ fn lower_graph(
     )))
 }
 
-fn required_object_diagnostic(
+/// Decide the entry representation from the checked operations before native startup
+/// inserts any instructions. All source, call graph and initializer checks precede this.
+fn registered_entry(
     graph: &SourceGraph,
     functions: &[ir::Function],
     entry: &ir::Function,
-) -> Option<Diagnostic> {
-    let (id, operand, call) = ir::required_object_call(functions.iter().chain([entry]))?;
-    let (name, kind) = match call {
-        ir::ObjectCall::ExecText => ("exec", Kind::ScopedObject),
-        ir::ObjectCall::FormatField => ("this f-string field", Kind::Ordinary),
-        ir::ObjectCall::SocketSendfile => ("socket.sendfile", Kind::Object),
-    };
-    let source = &graph.modules[id];
-    Some(
-        Diagnostic::at(
-            &source.source,
-            &operand,
-            format!("{name} requires native Python object operations"),
-        )
-        .with_path(&source.path)
-        .classified(kind),
-    )
-}
-
-/// Native text is UTF-8. Use object comparisons when a call to `chr` could
-/// construct a lone surrogate.
-fn needs_object_string_order(functions: &[ir::Function], entry: &ir::Function) -> bool {
+) -> StdResult<Option<crate::CheckedProgram>, Diagnostic> {
+    let mut first: Option<(ir::ObjectCall, usize, TextRange)> = None;
     let mut orders_strings = false;
     let mut code_points = Vec::new();
     for function in functions.iter().chain([entry]) {
         ir::walk_expressions(&function.body, &mut |expr| match &expr.kind {
+            ExprKind::Builtin(Builtin::ObjectCall(call, module, span), _)
+                if first.is_none_or(|(kind, id, range)| {
+                    (*call, *module, span.start()) < (kind, id, range.start())
+                }) =>
+            {
+                first = Some((*call, *module, *span));
+            }
             ExprKind::Builtin(Builtin::Chr, args) => code_points.push(&args[0]),
             ExprKind::Compare(values, operators) => {
                 orders_strings |= values.iter().zip(operators).any(|(value, op)| {
@@ -1608,15 +1578,45 @@ fn needs_object_string_order(functions: &[ir::Function], entry: &ir::Function) -
             _ => {}
         });
     }
-    if !orders_strings || code_points.is_empty() {
-        return false;
+    // Native text is UTF-8. A possible lone surrogate has priority over a
+    // registered initializer or another operation in this graph.
+    if orders_strings && !code_points.is_empty() {
+        let ranges = crate::ranges::analyze_functions(functions.iter().chain([entry]));
+        if code_points.into_iter().any(|value| {
+            ranges
+                .integer(value)
+                .is_none_or(|range| range.min <= 0xdfff && range.max >= 0xd800)
+        }) {
+            graph.needs_object_runtime.set(true);
+            return Err(Diagnostic::plain(
+                " Imre: ordering strings from chr() with possible surrogate values requires native Python object operations".to_owned(),
+            )
+            .with_path(&graph.modules[graph.entry].path)
+            .classified(Kind::ScopedObject));
+        }
     }
-    let ranges = crate::ranges::analyze_functions(functions.iter().chain([entry]));
-    code_points.into_iter().any(|value| {
-        ranges
-            .integer(value)
-            .is_none_or(|range| range.min <= 0xdfff && range.max >= 0xd800)
-    })
+    if graph.registered_startup {
+        return Ok(Some(crate::CheckedProgram::Registered(None)));
+    }
+    let reason = graph.runtime_initializer.clone().map(Into::into).or_else(|| {
+        let (call, id, operand) = first?;
+        let (name, kind) = match call {
+            ir::ObjectCall::ExecText => ("exec", Kind::ScopedObject),
+            ir::ObjectCall::FormatField => ("this f-string field", Kind::Ordinary),
+            ir::ObjectCall::SocketSendfile => ("socket.sendfile", Kind::Object),
+        };
+        let source = &graph.modules[id];
+        Some(
+            Diagnostic::at(
+                &source.source,
+                &operand,
+                format!("{name} requires native Python object operations"),
+            )
+            .with_path(&source.path)
+            .classified(kind),
+        )
+    });
+    Ok(reason.map(|reason| crate::CheckedProgram::Registered(Some(reason))))
 }
 
 #[derive(Clone)]

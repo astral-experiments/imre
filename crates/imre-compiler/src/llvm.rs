@@ -370,7 +370,6 @@ pub(crate) fn analyze_program(
     let mut function_link_types = HashSet::new();
     let mut link_owners = BTreeMap::<usize, Vec<&Expr>>::new();
     let mut declared_caches = HashSet::new();
-    let mut object_call = None;
     let mut targets = crate::callables::TargetCollector::default();
     for (id, function) in module.functions.iter().chain([&module.entry]).enumerate() {
         // The tags are needed only for this post-specialization inventory.
@@ -394,11 +393,6 @@ pub(crate) fn analyze_program(
                 return;
             };
             match builtin {
-                Builtin::ObjectCall(kind, ..)
-                    if object_call.is_none_or(|previous| *kind < previous) =>
-                {
-                    object_call = Some(*kind);
-                }
                 Builtin::FunctionWrappedSet | Builtin::FunctionWrappedGet => {
                     let owner = &args[0];
                     function_link_types.insert(owner.ty);
@@ -429,17 +423,6 @@ pub(crate) fn analyze_program(
         return Err(Unsupported(
             "Imre: wrapper links require a callable signature with known native functions or source methods",
         ));
-    }
-    if let Some(call) = object_call {
-        return Err(Unsupported(match call {
-            ir::ObjectCall::ExecText => "Imre: native execution requires linked code",
-            ir::ObjectCall::FormatField => {
-                "Imre: this f-string field requires registered Python formatting"
-            }
-            ir::ObjectCall::SocketSendfile => {
-                "Imre: socket.sendfile requires native Python object operations"
-            }
-        }));
     }
     let mut prefer_objects = false;
     for (id, mut owners) in link_owners {
@@ -6100,7 +6083,7 @@ impl Emitter<'_, '_> {
                 small_integer: false,
             },
             Builtin::Bool => self.truth(&args[0].value),
-            Builtin::ObjectCall(..) => unreachable!("emit_program checks object-only operations"),
+            Builtin::ObjectCall(..) => unreachable!("object calls require a registered entry"),
             Builtin::Input => self.call("imre_input", Type::Str, &[]),
             Builtin::InputSelectStdout => self.call("imre_input_select_stdout", Type::TextIO, &[]),
             Builtin::InputFinish => self.call(

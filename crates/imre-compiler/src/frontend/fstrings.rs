@@ -366,11 +366,11 @@ print(fixed(2.75), render('é', input()))
 ";
         let graph = SourceGraph::single(source).unwrap();
         let module = super::super::lower(&graph).unwrap();
-        assert!(ir::required_object_call(module.functions.iter().chain([&module.entry])).is_none());
         let mut fixed = false;
         let mut field = false;
-        for function in &module.functions {
+        for function in module.functions.iter().chain([&module.entry]) {
             ir::walk_expressions(&function.body, &mut |expr| match expr.kind {
+                ExprKind::Builtin(Builtin::ObjectCall(..), _) => panic!("unexpected object call"),
                 ExprKind::Builtin(Builtin::FloatFormat { .. }, _) => fixed = true,
                 ExprKind::Builtin(Builtin::FormatField(_), _) => field = true,
                 _ => {}
