@@ -12459,11 +12459,17 @@ impl<'a> Checker<'a> {
                 value.ty,
                 Type::Int | Type::ListInt | Type::Bytes | Type::ByteArray
             ) {
-                return Err(error(
-                    self.source,
-                    call,
-                    "bytes expects an int, bytes, bytearray, integer list, or integer tuple",
-                ));
+                let needs_object_conversion = value.ty == Type::PythonObject
+                    || self.types.element(value.ty) == Some(Type::PythonObject);
+                if !needs_object_conversion
+                    || !self.missing_operation(&self.scoped_builtin_error("bytes", call))
+                {
+                    return Err(error(
+                        self.source,
+                        call,
+                        "bytes expects an int, bytes, bytearray, integer list, or integer tuple",
+                    ));
+                }
             }
             return Ok(Expr {
                 ty: Type::Bytes,

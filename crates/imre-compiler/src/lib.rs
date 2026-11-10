@@ -1592,6 +1592,31 @@ print("result", call(b=2, a=1))
     }
 
     #[test]
+    fn bytes_of_a_boxed_sorted_list_keeps_its_return_type() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("main.py");
+        std::fs::write(
+            &path,
+            r#"def numbers(data):
+    found = set()
+    for value in data:
+        found.add(value)
+    return sorted(found)
+
+
+def packed(data) -> int:
+    return bytes(numbers(data))
+
+
+print(packed(b"ba"))
+"#,
+        )
+        .unwrap();
+        let error = super::check_file(&path, None).unwrap_err();
+        assert!(error.contains("Imre: expected int, got bytes"), "{error}");
+    }
+
+    #[test]
     fn unsupported_handle_comparisons_are_diagnosed_before_lowering() {
         for source in [
             "import tomli\nv = tomli.loads('x = 1')\nprint(v == v != v)\n",

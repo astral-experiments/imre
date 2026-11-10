@@ -634,7 +634,10 @@ impl Checker<'_> {
     }
 
     fn sortable_key(&self, ty: Type, node: &impl Ranged) -> Result<(), String> {
-        if self.types.ordered_key(ty) {
+        if self.types.ordered_key(ty)
+            || (ty == Type::PythonObject
+                && self.missing_operation(&self.scoped_builtin_error("sorted", node)))
+        {
             Ok(())
         } else {
             Err(error(
