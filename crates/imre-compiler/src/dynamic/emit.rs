@@ -574,7 +574,9 @@ impl<'a> PreparedBody<'a, '_> {
             scopes.functions[&start].suspension_flags != 0
         });
         let mut thread_entries = HashMap::new();
-        for site in sites.functions {
+        // The collector visits a definition before its children. Prepare the children first
+        // so a physical enclosing suite can bind their already checked declarations.
+        for site in sites.functions.into_iter().rev() {
             let def = site.def;
             let start = def.start();
             if let Some(entry) = site.thread_entry {
@@ -591,11 +593,21 @@ impl<'a> PreparedBody<'a, '_> {
                 let kind = crate::frontend::RegisteredScope::Function {
                     is_async: def.is_async,
                 };
+                let has_ordinary_header = |site| {
+                    function_bodies
+                        .get(&site)
+                        .is_some_and(PreparedFunction::has_ordinary_header)
+                };
                 if !site.prepare_entry {
-                    prepare.physical_body(&def.body, kind, suspended);
+                    prepare.physical_body(&def.body, kind, suspended, &has_ordinary_header);
                     continue;
                 }
-                FunctionBody::Suite(prepare.function_suite(&def.body, kind, suspended))
+                FunctionBody::Suite(prepare.function_suite(
+                    &def.body,
+                    kind,
+                    suspended,
+                    &has_ordinary_header,
+                ))
             };
             let complete = match &body {
                 FunctionBody::Program(_) => true,
@@ -975,6 +987,10 @@ struct PreparedFunction<'a> {
 }
 
 impl PreparedFunction<'_> {
+    fn has_ordinary_header(&self) -> bool {
+        matches!(self.header, Some(CheckedHeader::Ordinary))
+    }
+
     fn graph_header(&self) -> Option<&CheckedHeader> {
         match self.body {
             FunctionBody::Program(_) => self.header.as_ref(),
@@ -1100,7 +1116,7 @@ impl SourceInfo<'_> {
         site: ruff_text_size::TextSize,
     ) -> Option<(&crate::frontend::function_scope::OrdinaryFunction, Body<'_>)> {
         let plan = self.function_bodies.get(&site)?;
-        if !matches!(plan.header, Some(CheckedHeader::Ordinary)) {
+        if !plan.has_ordinary_header() {
             return None;
         }
         let scope = &self.scopes.functions[&site];
@@ -1191,7 +1207,6 @@ impl SourceMap<'_> {
             module,
             declared_globals: Default::default(),
             prefix,
-            loops: Vec::new(),
             exits: Vec::new(),
         }
     }
@@ -1338,7 +1353,6 @@ struct Function<'a, 'p> {
     in_function: bool,
     is_async: bool,
     module: bool,
-    loops: Vec<LoopTarget>,
     exits: Vec<(Cleanup<'p>, String)>,
 }
 
@@ -1377,11 +1391,6 @@ enum Cleanup<'p> {
         loop_depth: usize,
         caught_depth: usize,
     },
-}
-
-struct LoopTarget {
-    step: (String, usize),
-    done: (String, usize),
 }
 
 impl Function<'_, '_> {
@@ -1746,6 +1755,7 @@ mod tests {
             &def.body,
             crate::frontend::RegisteredScope::Function { is_async: false },
             false,
+            &|_| false,
         );
         let (sites, nested) = (physical.sites, physical.nested);
         module.source.statement_sites = sites;
@@ -1777,6 +1787,93 @@ mod tests {
         }
         .into();
         assert_eq!(module.standalone().unwrap().unwrap(), original);
+    }
+
+    #[test]
+    fn mixed_loop_transfers_emit_after_erasing_their_keywords() {
+        use crate::frontend::{RegisteredScope, RegisteredSource, SourceEffect, SuitePreparation};
+        let text = concat!(
+            "def run(ready, decide, callback):\n",
+            "    while ready():\n",
+            "        if decide():\n",
+            "            callback(lambda: 1)\n",
+            "            continue\n",
+            "        callback(lambda: 2)\n",
+            "        break\n",
+        );
+        let mut module = PreparedBody::module(
+            "worker",
+            Path::new("worker.py"),
+            text,
+            0,
+            ModuleOrigin::Bundled,
+        )
+        .unwrap();
+        // The ordinary compilation can already discard this function's syntax.
+        // Supply the original tree to the intentionally mixed preparation below.
+        let parsed = ruff_python_parser::parse_module(text).unwrap();
+        module.syntax = Some(Cow::Owned(parsed.into_syntax().body));
+        let function = module.syntax.as_ref().unwrap()[0]
+            .as_function_def_stmt()
+            .unwrap();
+        // Keep both suites mixed by withholding only the callback descriptors.
+        let missing = HashMap::new();
+        let source = RegisteredSource {
+            lambdas: Some(&missing),
+            ..module.source.registered_source()
+        };
+        let mut plan = SuitePreparation::new(
+            &module.source.namespace_operations,
+            source,
+            &function.body,
+            true,
+        );
+        plan.physical_body(
+            &function.body,
+            RegisteredScope::Function { is_async: false },
+            false,
+            &|_| false,
+        );
+        let (sites, nested) = (plan.sites, plan.nested);
+        module.source.statement_sites = sites;
+        module.source.nested_bodies.extend(nested);
+        module.source.function_bodies.remove(&function.start());
+
+        let original = module.standalone().unwrap().unwrap();
+        let def = module.syntax.as_mut().unwrap().to_mut()[0]
+            .as_function_def_stmt_mut()
+            .unwrap();
+        let body = &mut def.body[0].as_while_stmt_mut().unwrap().body;
+        let (branch, tail) = body.split_at_mut(1);
+        let skip = &mut branch[0].as_if_stmt_mut().unwrap().body[1];
+        for keyword in [skip, &mut tail[1]] {
+            let range = keyword.range();
+            assert!(module.source.nested_bodies.values().any(|suite| suite.residual.iter().any(
+                |run| matches!(run.effect, Some(SourceEffect::LoopTransfer(site, _)) if site == range)
+            )));
+            *keyword = ast::StmtPass {
+                range,
+                node_index: Default::default(),
+            }
+            .into();
+        }
+        assert_eq!(module.standalone().unwrap().unwrap(), original);
+        let transfer = module
+            .source
+            .nested_bodies
+            .values_mut()
+            .flat_map(|suite| &mut suite.residual)
+            .find_map(|run| match &mut run.effect {
+                Some(SourceEffect::LoopTransfer(_, op))
+                    if matches!(op, crate::ir::Statement::Continue) =>
+                {
+                    Some(op)
+                }
+                _ => None,
+            })
+            .unwrap();
+        *transfer = &crate::ir::Statement::Break;
+        assert_ne!(module.standalone().unwrap().unwrap(), original);
     }
 
     #[test]
@@ -2662,6 +2759,7 @@ mod tests {
             &function.body,
             crate::frontend::RegisteredScope::Function { is_async: false },
             false,
+            &|_| false,
         );
         (
             prepared.source.statement_sites,
@@ -3677,6 +3775,49 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
     }
 
     #[test]
+    fn both_finally_paths_bind_the_same_function_after_withdrawing_its_declaration() {
+        let source = concat!(
+            "def closing(seed):\n",
+            "    try:\n",
+            "        seed.marker: int\n",
+            "        yield 'open'\n",
+            "    finally:\n",
+            "        @decorate('outer')\n",
+            "        @decorate('inner')\n",
+            "        def cleanup(first=mark(seed), *, last=mark(seed + 1)):\n",
+            "            return first, last, seed\n",
+            "        yield cleanup\n",
+        );
+        let mut prepared = PreparedBody::module(
+            "closing",
+            Path::new("closing.py"),
+            source,
+            0,
+            ModuleOrigin::Provider,
+        )
+        .unwrap();
+        let original = prepared.standalone().unwrap().unwrap();
+        // One binding creates closing. Normal and exceptional exits each bind cleanup.
+        assert_eq!(
+            original.1.matches(" = private constant %code_site").count(),
+            2
+        );
+        assert_eq!(original.1.matches("call i64 @imre_dyn_define(").count(), 3);
+        let closing = prepared.syntax.as_mut().unwrap().to_mut()[0]
+            .as_function_def_stmt_mut()
+            .unwrap();
+        let cleanup = &mut closing.body[0].as_try_stmt_mut().unwrap().finalbody[0];
+        let site = cleanup.start();
+        *cleanup = ast::StmtPass {
+            range: cleanup.range(),
+            node_index: Default::default(),
+        }
+        .into();
+        assert!(!prepared.linked_declarations().contains_key(&site));
+        assert!(prepared.standalone().unwrap().unwrap() == original);
+    }
+
+    #[test]
     fn nested_finally_after_return_only_emits_reachable_cleanup() {
         let source = concat!(
             "def wait(work, release, reacquire):\n",
@@ -3814,6 +3955,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             &def.body,
             crate::frontend::RegisteredScope::Function { is_async: false },
             true,
+            &|_| false,
         );
         let message = def.body[0]
             .as_assert_stmt()
@@ -4464,6 +4606,41 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
     }
 
     #[test]
+    fn grouped_assignment_keeps_its_starred_comprehension_key_after_target_erasure() {
+        let source = concat!(
+            "def run(ok, xs, table):\n",
+            r#"    earlier = first, [receiver()[key((saved := (17 if ok else t"{[*x for x in xs]=}")))], *rest] = rhs()"#,
+            "\n",
+            r#"    a = table[(saved := 17 if ok else t"{(*x for x in xs)=}")] = 41"#,
+            "\n    return earlier, first, saved, rest, a\n",
+            // Retain the module syntax so the assignment targets can be withdrawn.
+            "state: int = 0\n",
+        );
+        let mut prepared = PreparedBody::module(
+            "example",
+            Path::new("example.py"),
+            source,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let before = prepared.standalone().unwrap().unwrap();
+        let def = prepared.syntax.as_mut().unwrap().to_mut()[0]
+            .as_function_def_stmt_mut()
+            .unwrap();
+        assert!(
+            prepared.source.function_bodies[&def.start()]
+                .suite()
+                .unwrap()
+                .fully_checked()
+        );
+        for assignment in &mut def.body[..2] {
+            assignment.as_assign_stmt_mut().unwrap().targets.clear();
+        }
+        assert_eq!(prepared.standalone().unwrap().unwrap(), before);
+    }
+
+    #[test]
     fn annotated_class_interleaves_checked_targets_with_physical_statements() {
         let source = concat!(
             "def outer[T]():\n",
@@ -4471,7 +4648,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             "        member: int\n",
             "        receiver().field = [item.copy() for item in items]\n",
             "        saved = [receiver().field, (table()[key()], *tail)] = (lambda: items)()\n",
-            "        select(lambda: rows).field = fallback()\n",
+            "        select(lambda: rows).field: int = fallback()\n",
             "        del receiver().field\n",
             "        saved = (first, [receiver().field, table()[key()], *rest]) = rows()\n",
             "        def read(self): return self.member\n",
@@ -4498,7 +4675,8 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             .unwrap();
         let class = outer.body[0].as_class_def_stmt().unwrap();
         assert!(!prepared.source.function_bodies.contains_key(&outer.start()));
-        let suite = &prepared.source.class_bodies[&class.start()].body;
+        let class_start = class.start();
+        let suite = &prepared.source.class_bodies[&class_start].body;
         assert!(
             !prepared
                 .source
@@ -4513,7 +4691,10 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         assert_eq!(rhs.statements, 2..3);
         assert!(matches!(
             rhs.effect,
-            Some(crate::frontend::SourceEffect::AssignmentInput(_))
+            Some(crate::frontend::SourceEffect::Value(
+                crate::frontend::ValueStatement::Store(_),
+                _
+            ))
         ));
         assert_eq!(whole.statements, 3..4);
         assert!(whole.effect.is_none());
@@ -4533,9 +4714,22 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         let target = store.targets[0].as_attribute_expr_mut().unwrap();
         std::mem::swap(&mut target.value, &mut store.value);
         store.targets.clear();
-        class.body[2].as_assign_stmt_mut().unwrap().targets.clear();
+        // Neither the checked targets nor their residual input need the assignment syntax.
+        class.body[2] = class.body[4].clone();
         class.body[5].as_assign_stmt_mut().unwrap().targets.clear();
         assert_eq!(emit(&prepared), before);
+
+        let class = prepared.source.class_bodies.get_mut(&class_start).unwrap();
+        let Some(crate::frontend::SourceEffect::Value(_, inputs)) =
+            &mut class.body.residual[0].effect
+        else {
+            panic!("expected the retained assignment value");
+        };
+        let [crate::frontend::PhysicalOperand::Source(value)] = &mut inputs[..] else {
+            panic!("expected the residual lambda call");
+        };
+        *value = value.as_call_expr().unwrap().func.clone();
+        assert_ne!(emit(&prepared), before);
     }
 
     #[test]

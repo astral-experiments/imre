@@ -303,7 +303,7 @@ impl Frame<'_, '_, '_> {
                 f.code.iteration.scopes.push(Region::Finally {
                     body: finalbody.into(),
                     outer: outer.into(),
-                    loops: f.code.iteration.loops.len(),
+                    loops: f.code.loops.len(),
                     caught: f.code.caught.len(),
                 });
                 run(f);
