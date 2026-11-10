@@ -381,15 +381,24 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         left: &Expr,
         right: &Expr,
         expr: &Expr,
+        fixed_site: bool,
     ) -> CheckedValue {
         if let Entry::Native(emitter) = &mut self.0
             && let Some(value) = emitter.specialized_binary(op, left, right, expr)
         {
             return value;
         }
+        // A body placed from a native definition now receives Python handles.
+        let op = match (fixed_site, op) {
+            (true, Binary::Concat) => Binary::Add,
+            (true, Binary::Repeat) => Binary::Multiply,
+            _ => op,
+        };
         let (a, b) = (self.operand(left), self.operand(right));
         let result = if matches!(op, Binary::Add | Binary::Subtract | Binary::Multiply)
-            && (expr.ty == Type::PythonObject || left.ty == Type::Int && right.ty == Type::Int)
+            && (fixed_site
+                || expr.ty == Type::PythonObject
+                || left.ty == Type::Int && right.ty == Type::Int)
         {
             if matches!(op, Binary::Multiply) || a.can_use_integer_arithmetic(left.ty, &b, right.ty)
             {
@@ -408,6 +417,17 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
     }
 
     pub(crate) fn emit_value(&mut self, expr: &Expr) -> CheckedValue {
+        if let Entry::Registered(frame) = &mut self.0
+            && let Some(range) = frame.next_fixed_site()
+        {
+            return frame.located_value(range, range.start(), |frame| {
+                CheckedBody::registered(frame.reborrow()).emit_operation(expr, true)
+            });
+        }
+        self.emit_operation(expr, false)
+    }
+
+    fn emit_operation(&mut self, expr: &Expr, fixed_site: bool) -> CheckedValue {
         match &expr.kind {
             ExprKind::Int(text) => {
                 let integer = text.parse::<i64>().ok();
@@ -514,7 +534,9 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                     self.predicate(value, false)
                 }
             },
-            ExprKind::Binary(op, left, right) => self.binary_expression(*op, left, right, expr),
+            ExprKind::Binary(op, left, right) => {
+                self.binary_expression(*op, left, right, expr, fixed_site)
+            }
             ExprKind::Builtin(Builtin::FormatJoin, parts) => match &mut self.0 {
                 Entry::Native(emitter) => CheckedValue::owned(emitter.concat(expr)),
                 Entry::Registered(frame) => frame.builtin(&Builtin::FormatJoin, parts),
@@ -544,6 +566,11 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
     }
 
     pub(crate) fn emit_statement(&mut self, stmt: &Statement) {
+        if let Entry::Registered(frame) = &mut self.0
+            && let Some(range) = frame.next_fixed_site()
+        {
+            frame.statement_site(range, None);
+        }
         match stmt {
             Statement::Assign(slot, expr) => {
                 let previous_small = match &mut self.0 {

@@ -966,7 +966,7 @@ pub(crate) enum ExprKind {
     Builtin(Builtin, Vec<Expr>),
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Binary {
     Add,
     Subtract,

@@ -21,7 +21,10 @@ use sites::CheckedSites;
 
 use crate::llvm::operations::{CheckedBody, CheckedValue, LoopEdges};
 use context::Region;
+use std::cell::Cell;
 use std::collections::HashMap;
+
+use ruff_text_size::{TextRange, TextSize};
 
 /// Only take a body when all its operations have a lowering for the registered calling convention.
 pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
@@ -271,6 +274,7 @@ pub(crate) struct Frame<'f, 'a, 'p> {
     sites: &'f CheckedSites,
     names: Option<&'f HashMap<usize, LocalBinding>>,
     inputs: &'f [String],
+    fixed_sites: Option<(&'f [TextRange], &'f Cell<usize>)>,
 }
 
 impl<'a, 'p> std::ops::Deref for Frame<'_, 'a, 'p> {
@@ -303,6 +307,7 @@ impl<'f, 'a, 'p> Frame<'f, 'a, 'p> {
             code,
             sites,
             names: None,
+            fixed_sites: None,
             inputs: &[],
         }
     }
@@ -312,12 +317,40 @@ impl<'f, 'a, 'p> Frame<'f, 'a, 'p> {
             code: self.code,
             sites: self.sites,
             names: self.names,
+            fixed_sites: self.fixed_sites,
             inputs: self.inputs,
         }
     }
 }
 
 impl Frame<'_, '_, '_> {
+    pub(super) fn next_fixed_site(&self) -> Option<TextRange> {
+        let (sites, next) = self.fixed_sites?;
+        let i = next.get();
+        next.set(i + 1);
+        Some(sites[i])
+    }
+
+    pub(super) fn statement_site(&mut self, range: TextRange, simple: Option<TextRange>) {
+        self.code.current_range = range;
+        self.code.checkpoint(range);
+        self.code.simple_call = simple;
+    }
+
+    pub(super) fn located_value(
+        &mut self,
+        range: TextRange,
+        position: TextSize,
+        emit: impl FnOnce(&mut Self) -> CheckedValue,
+    ) -> CheckedValue {
+        let previous_range = std::mem::replace(&mut self.code.current_range, range);
+        let previous_line = self.code.enter_expression(range, position);
+        let result = emit(self);
+        self.code.leave_expression(previous_line);
+        self.code.current_range = previous_range;
+        result
+    }
+
     fn evaluate(&mut self, expr: &Expr) -> CheckedValue {
         CheckedBody::registered(self.reborrow()).emit_value(expr)
     }
@@ -684,9 +717,7 @@ impl Frame<'_, '_, '_> {
             true
         } else if let ExprKind::Builtin(Builtin::RegisteredStatement(range, simple), _) = &expr.kind
         {
-            self.code.current_range = *range;
-            self.code.checkpoint(*range);
-            self.code.simple_call = *simple;
+            self.statement_site(*range, *simple);
             true
         } else if matches!(
             expr.kind,
@@ -886,12 +917,7 @@ impl Frame<'_, '_, '_> {
                     .interpolation(&value, expression, *conversion, &spec)
             }),
             (Builtin::RegisteredLocation(range, position), [value]) => {
-                let previous_range = std::mem::replace(&mut self.code.current_range, *range);
-                let previous_line = self.code.enter_expression(*range, *position);
-                let value = self.evaluate(value);
-                self.code.leave_expression(previous_line);
-                self.code.current_range = previous_range;
-                return value;
+                return self.located_value(*range, *position, |frame| frame.evaluate(value));
             }
             (Builtin::RegisteredLambda(site, scoped), operands) => {
                 let mut operands = operands.iter();
@@ -1290,6 +1316,7 @@ impl RegisteredFrame<'_, '_> {
             code: self,
             names,
             sites,
+            fixed_sites: None,
             inputs: &[],
         });
         self.expression_integer_start = outer;
@@ -1400,6 +1427,7 @@ impl RegisteredFrame<'_, '_> {
             code: self,
             names: Some(&checked.local_names),
             sites,
+            fixed_sites: None,
             inputs: &[],
         };
         frame.store_private(entered, value);
@@ -1417,6 +1445,7 @@ impl RegisteredFrame<'_, '_> {
             code: self,
             names: Some(&checked.local_names),
             sites,
+            fixed_sites: None,
             inputs: &[],
         })
         .emit_block(statements);
@@ -1426,10 +1455,12 @@ impl RegisteredFrame<'_, '_> {
         let Some(enclosing) = self.enter_checked_slots(checked.region()) else {
             return;
         };
+        let next = Cell::new(0);
         CheckedBody::registered(Frame {
             code: self,
             names: Some(&checked.local_names),
             sites,
+            fixed_sites: (!checked.fixed_sites.is_empty()).then_some((&checked.fixed_sites, &next)),
             inputs: &[],
         })
         .emit_function(&checked.function);

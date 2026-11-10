@@ -64,6 +64,8 @@ mod errno;
 mod exception_forwarders;
 mod expandtabs;
 mod expansions;
+mod fixed_body_source;
+pub(crate) use fixed_body_source::{FixedBodySource, FixedNode};
 mod fixed_tuples;
 mod fnmatch;
 mod format_cursors;
@@ -138,7 +140,7 @@ pub(crate) use registered::{
     AnnotationValue, AssertionSite, DeferredAnnotation, ParameterAnnotations, PhysicalOperand,
     PreparedStrings, RegisteredFunction, RegisteredGenerator, RegisteredLambda, RegisteredScope,
     RegisteredSites, RegisteredSuite, SourceEffect, SourceRun, StatementSites, SuitePreparation,
-    ValueStatement, annotation_expression, attribute_write, registered_sites,
+    ValueStatement, annotation_expression, attribute_write, place_fixed_function, registered_sites,
     registered_type_alias, registered_type_parameters,
 };
 pub(crate) use registered::{
@@ -683,6 +685,10 @@ fn lower_graph(
     let inference = inference::Inference::default();
     let mut definitions = Vec::new();
     let mut callable_definitions = Vec::new();
+    // Native wrapper links can prefer registered frames only when a bound
+    // callable has a Type::Class receiver. Without classes no definition transfers.
+    let can_transfer_frames = !classes.declarations.definitions.is_empty();
+    let mut frame_declarations = HashMap::new();
     for (module_id, module) in graph.modules.iter().enumerate() {
         for (name, binding) in &module.bindings {
             if reserved(name)
@@ -721,6 +727,19 @@ fn lower_graph(
                         continue;
                     }
                     let cached = function_caches::policy(graph, module_id, function)?;
+                    let physical_entry = (can_transfer_frames
+                        && module.is_program_source()
+                        && module.archive.is_none()
+                        && !function.is_async
+                        && function.decorator_list.is_empty()
+                        && function.type_params.is_none()
+                        && function.parameters.vararg.is_none()
+                        && function.parameters.kwarg.is_none()
+                        && function
+                            .parameters
+                            .iter_non_variadic_params()
+                            .all(|p| p.default.is_none()))
+                        .then(|| function.start());
                     let mut function = function.clone();
                     if module.overloads.contains(&statement_id) {
                         graph.runtime_overload(module_id, function.name.range());
@@ -750,6 +769,8 @@ fn lower_graph(
                     } else {
                         keyword_forwarding::prepare(graph, module_id, &mut function)
                     };
+                    let frame_entry = physical_entry
+                        .filter(|_| element.is_none() && defaults.forwarded.is_none());
                     let signature = signature(
                         &function,
                         graph,
@@ -787,6 +808,9 @@ fn lower_graph(
                         },
                         signature.clone(),
                     );
+                    if let Some(start) = frame_entry {
+                        frame_declarations.insert(signature.id, start);
+                    }
                     definitions.push((module_id, function.clone(), signature));
                     callable_definitions.push(DefinitionId {
                         module: module_id,
@@ -951,9 +975,13 @@ fn lower_graph(
     if closed_calls::has_keyword_displays(graph) {
         inference.discover_packed_arguments();
     }
-    for (module, function, _) in &mut definitions {
-        assignments::alias_builtin_parameters(function, graph, *module);
-        if closed_calls::prepare(function, graph, *module) {
+    for (module, function, signature) in &mut definitions {
+        let renamed = assignments::alias_builtin_parameters(function, graph, *module);
+        let (dispatch, packed) = closed_calls::prepare(function, graph, *module);
+        if renamed || dispatch || packed {
+            frame_declarations.remove(&signature.id);
+        }
+        if packed {
             inference.discover_packed_arguments();
         }
     }
@@ -1095,6 +1123,7 @@ fn lower_graph(
         cache.validate_abi(&definitions, &globals);
     }
     let mut functions = Vec::new();
+    let mut frame_sources = HashMap::new();
     let mut refused_body = None;
     let mut zip_sums = Vec::new();
     let mut owners = Vec::new();
@@ -1103,7 +1132,7 @@ fn lower_graph(
     let mut recursion_errors = Vec::new();
     for (module_id, definition, signature) in &definitions {
         let module = &graph.modules[*module_id];
-        let checker = Checker::new(
+        let mut checker = Checker::new(
             graph,
             *module_id,
             &signatures,
@@ -1171,6 +1200,9 @@ fn lower_graph(
         {
             continue;
         }
+        checker.fixed_sites = (!needs_registered_entry
+            && frame_declarations.contains_key(&signature.id))
+        .then(Default::default);
         let result = match cache.as_deref_mut() {
             Some(cache) if signature.method.is_none() => cache.body(checker, definition, signature),
             _ => lower_body(checker, definition, signature),
@@ -1195,6 +1227,11 @@ fn lower_graph(
             class_reads: mut reads,
             ..
         } = body;
+        if let Some(source) = body.source
+            && let Some(&start) = frame_declarations.get(&signature.id)
+        {
+            frame_sources.insert(functions.len(), (start, source));
+        }
         graph.ordered_reads(*module_id, &definition.body, true, &mut reads);
         let (function, calls, reads) = if let Some(&policy) = classes.cached.get(&signature.id) {
             let raw = helpers.reserve();
@@ -1508,7 +1545,10 @@ fn lower_graph(
         },
         owners,
     );
-    Ok(crate::CheckedProgram::Native(Box::new(lowered)))
+    Ok(crate::CheckedProgram::Native(Box::new(crate::FixedProgram {
+        ir: lowered,
+        frame_sources,
+    })))
 }
 
 fn required_object_diagnostic(
@@ -1565,6 +1605,7 @@ fn needs_object_string_order(functions: &[ir::Function], entry: &ir::Function) -
 #[derive(Clone)]
 struct LoweredBody {
     function: ir::Function,
+    source: Option<FixedBodySource>,
     calls: HashSet<usize>,
     class_reads: HashSet<DefinitionId>,
     default_reads: Option<Vec<caller_cache::DefaultId>>,
@@ -1699,6 +1740,7 @@ fn lower_function(
         body = checker.generator_body(body);
     }
     checker.finish_region(Ok(()))?;
+    let mut source = None;
     if let Some(names) = registered_locals {
         names.extend(checker.namespace_bindings);
         names.extend(checker.names.into_iter().map(|(name, slot)| {
@@ -1712,9 +1754,13 @@ fn lower_function(
         }));
     } else if module.archive.is_none() {
         checker.fault_frame(&mut body, definition.name.as_str(), definition.start());
+        if let Some(sites) = checker.fixed_sites {
+            source = sites.finish(definition.body.len(), &body, checker.names, &checker.locals);
+        }
     }
     Ok((
         LoweredBody {
+            source,
             function: ir::Function {
                 params,
                 returns: signature.returns,
@@ -2774,6 +2820,7 @@ struct CalledDefinition {
 }
 
 struct Checker<'a> {
+    fixed_sites: Option<fixed_body_source::SourceSites>,
     observed_definition: Option<Box<CalledDefinition>>,
     /// Locals in this body are bound in an existing Python activation.
     registered: Option<&'a registered::values::ModuleSource>,
@@ -2863,6 +2910,7 @@ impl<'a> Checker<'a> {
         globals: &'a ModuleValues,
     ) -> Self {
         Self {
+            fixed_sites: None,
             observed_definition: None,
             registered: None,
             checked_callback_effects: false,
@@ -5208,6 +5256,7 @@ impl<'a> Checker<'a> {
             previous_sum = sum.is_some();
             let tuple = length_guard.and_then(|guard| self.guarded_tuple(statement, guard));
             let enclosing_tuple = std::mem::replace(&mut self.fixed_tuple, tuple);
+            let parent = self.fixed_sites.as_mut().and_then(|sites| sites.enter(statement.range()));
             let (mut lowered, continues) = if !self.module_scope
                 && self.block_depth == 1
                 && fresh.is_some()
@@ -5232,6 +5281,11 @@ impl<'a> Checker<'a> {
                 unbound_locals::assigned(statement).and_then(|n| self.bound_flags.get(n))
             {
                 lowered.push(Statement::Assign(*flag, Expr::boolean(true)));
+            }
+            if let Some(sites) = &mut self.fixed_sites
+                && !sites.leave(parent)
+            {
+                self.fixed_sites = None;
             }
             if let Some(body) = output.as_deref_mut() {
                 if self.registered.is_some() {
@@ -6894,7 +6948,7 @@ impl<'a> Checker<'a> {
     }
 
     fn binary_expr(
-        &self,
+        &mut self,
         op: ast::Operator,
         left: Expr,
         right: Expr,
@@ -6958,6 +7012,9 @@ impl<'a> Checker<'a> {
         let left = Self::integer_addend(op, left, right.ty);
         let right = Self::integer_addend(op, right, left.ty);
         let (op, ty) = self.binary_op(op, left.ty, right.ty, node)?;
+        if let Some(sites) = &mut self.fixed_sites {
+            sites.expression(node.range(), FixedNode::Binary(op, ty));
+        }
         Ok(Expr {
             ty,
             kind: ExprKind::Binary(op, Box::new(left), Box::new(right)),
@@ -7215,10 +7272,17 @@ impl<'a> Checker<'a> {
     }
 
     fn typed_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
-        match self.lower_expression(expression) {
-            Err(failure) if self.missing_operation(&failure) => Ok(Expr::unrepresented()),
-            result => result,
+        let parent = self.fixed_sites.as_mut().and_then(|sites| sites.enter(expression.range()));
+        let value = match self.lower_expression(expression) {
+            Err(failure) if self.missing_operation(&failure) => Expr::unrepresented(),
+            result => result?,
+        };
+        if let Some(sites) = &mut self.fixed_sites
+            && !sites.leave(parent)
+        {
+            self.fixed_sites = None;
         }
+        Ok(value)
     }
 
     fn lower_expression(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
@@ -7969,7 +8033,14 @@ impl<'a> Checker<'a> {
                         "local may be uninitialized on this path",
                     ));
                 }
-                return Ok(self.read_local(slot));
+                let value = self.read_local(slot);
+                if let Some(sites) = &mut self.fixed_sites
+                    && matches!(value.kind, ExprKind::Local(read) if read == slot)
+                    && value.ty == self.locals[slot]
+                {
+                    sites.expression(expression.range(), FixedNode::Read(slot, value.ty));
+                }
+                return Ok(value);
             }
             ast::Expr::List(list) => {
                 if list

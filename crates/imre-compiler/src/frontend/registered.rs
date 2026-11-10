@@ -11,6 +11,8 @@ pub(crate) use lambdas::{LambdaBinding, LambdaDefault, RegisteredLambda};
 mod templates;
 pub(crate) use templates::{PreparedStrings, PreparedTemplate, TemplateField};
 pub(super) mod patterns;
+mod placement;
+pub(crate) use placement::place_fixed_function;
 pub(super) mod values;
 
 /// Prepare the bindings installed by the existing type-parameter frame constructor.
@@ -132,6 +134,8 @@ impl RegisteredOperand {
 }
 
 pub(crate) struct RegisteredFunction {
+    /// Physical positions for the unchanged fixed operations, in checked node order.
+    pub(crate) fixed_sites: Vec<TextRange>,
     pub(crate) function: ir::Function,
     pub(crate) local_names: HashMap<usize, LocalBinding>,
 }
@@ -145,6 +149,7 @@ impl RegisteredFunction {
         );
         let body = vec![Statement::Expr(checkpoint), Statement::Return(value)];
         Self {
+            fixed_sites: Vec::new(),
             function: ir::Function {
                 params: vec![],
                 returns: Type::PythonObject,
@@ -168,7 +173,7 @@ impl RegisteredFunction {
 }
 
 /// Storage in the function frame or in a lexically nested Python namespace.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct LocalBinding {
     pub(crate) name: String,
     pub(crate) namespace: Option<usize>,
@@ -226,6 +231,7 @@ pub(super) fn lower_definition<'a>(
         .classify(Kind::ScopedObject));
     }
     let function = RegisteredFunction {
+        fixed_sites: Vec::new(),
         function: body.function,
         local_names,
     };
@@ -625,6 +631,7 @@ impl DeferredAnnotation {
         )));
         RegisteredSuite {
             checked: RegisteredFunction {
+                fixed_sites: Vec::new(),
                 function: ir::Function {
                     params: vec![],
                     returns: Type::PythonObject,
@@ -2455,6 +2462,7 @@ impl<'a> SourceScope<'a> {
     fn finish(self, body: Vec<Statement>) -> RegisteredFunction {
         let (locals, local_names) = self.bindings();
         RegisteredFunction {
+            fixed_sites: Vec::new(),
             function: ir::Function {
                 params: Vec::new(),
                 returns: Type::PythonObject,
