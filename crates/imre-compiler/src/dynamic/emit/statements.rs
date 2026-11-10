@@ -501,7 +501,7 @@ impl<'p> Function<'_, 'p> {
             .iter()
             .map(|d| self.expr(&d.expression))
             .collect();
-        if self.prepare_ordinary_function(v.start()) {
+        if self.callable_sites().prepare_ordinary_function(v.start()) {
             // Residual decorators and defaults run in the enclosing scope, in source order.
             for default in v
                 .parameters

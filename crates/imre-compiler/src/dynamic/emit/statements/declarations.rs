@@ -35,6 +35,33 @@ enum Callable<'a> {
 }
 
 impl SourceMap<'_> {
+    /// Place the checked callable prefix in order. The first richer declaration and
+    /// its successors keep their original order and their existing placement service.
+    pub(in crate::dynamic::emit) fn place_module_callables<'s>(
+        &self,
+        output: &mut Output,
+        sites: &mut CheckedSites,
+        required: &'s [RequiredSite],
+    ) -> &'s [RequiredSite] {
+        let mut callables = CallableSites {
+            source: self,
+            output,
+            sites,
+            prefix: "",
+            declared_globals: &self.scopes.module_globals,
+            in_function: false,
+            method_scope: false,
+        };
+        for (index, &site) in required.iter().enumerate() {
+            match site {
+                RequiredSite::Lambda(site, scoped) => callables.place_checked_lambda(site, scoped),
+                RequiredSite::Definition(site) if callables.prepare_ordinary_function(site) => {}
+                _ => return &required[index..],
+            }
+        }
+        &[]
+    }
+
     pub(in crate::dynamic::emit) fn place_annotation_string(
         &self,
         output: &mut Output,
@@ -85,17 +112,42 @@ impl Function<'_, '_> {
         CheckedSites::visit(statements, &mut |site| self.prepare_site(site));
     }
 
+    pub(in crate::dynamic::emit) fn callable_sites(&mut self) -> CallableSites<'_, '_> {
+        CallableSites {
+            source: self.source,
+            sites: &mut self.sites,
+            output: self.frame.output,
+            prefix: &self.prefix,
+            declared_globals: &self.declared_globals,
+            in_function: self.in_function,
+            method_scope: self.frame.class_locals.is_some()
+                && self.frame.annotation_values.is_none(),
+        }
+    }
+}
+
+/// The enclosing lexical scope and the existing address table used to place checked callables.
+pub(in crate::dynamic::emit) struct CallableSites<'a, 'p> {
+    source: &'a SourceMap<'p>,
+    output: &'a mut Output,
+    sites: &'a mut CheckedSites,
+    prefix: &'a str,
+    declared_globals: &'a std::collections::BTreeSet<String>,
+    in_function: bool,
+    method_scope: bool,
+}
+
+impl CallableSites<'_, '_> {
     /// Python creates a fresh callable at each execution of the binding while the
     /// underlying code object belongs to one lexical lambda.
-    pub(in crate::dynamic::emit) fn place_lambda(
-        &mut self,
-        site: TextSize,
-        body: &crate::frontend::RegisteredFunction,
-        comprehension: bool,
-    ) {
+    fn place_checked_lambda(&mut self, site: TextSize, comprehension: bool) {
         if self.sites.lambdas.contains_key(&site) {
             return;
         }
+        let body = self.source.lambdas[&site]
+            .body
+            .as_ref()
+            .expect("checked lambda body");
         let definition = self.compile_callable(
             site,
             Callable::Lambda { comprehension },
@@ -150,7 +202,7 @@ impl Function<'_, '_> {
                 Entry::Compiled
             };
             let code = source.definition(
-                self.frame.output,
+                self.output,
                 format!("{qualname}.<locals>."),
                 body,
                 site,
@@ -163,8 +215,7 @@ impl Function<'_, '_> {
             code
         });
         // A lambda inside a display captures the iteration namespace even in a class body.
-        let method =
-            !comprehension && self.class_locals.is_some() && self.annotation_values.is_none();
+        let method = !comprehension && self.method_scope;
         let mut flags = source.future_flags();
         if doc.is_some() {
             flags |= imre_ast::code_flags::HAS_DOCSTRING;
@@ -209,7 +260,9 @@ impl Function<'_, '_> {
         }
         true
     }
+}
 
+impl Function<'_, '_> {
     fn compile_type_alias(&mut self, site: TextSize) -> Result<CompiledAlias, String> {
         let alias = &self.source.type_aliases[&site];
         // Placement can visit children of a suite that exits before the alias binds.
@@ -279,11 +332,7 @@ impl Function<'_, '_> {
                 return;
             }
             RequiredSite::Lambda(site, scoped) => {
-                let body = self.source.lambdas[&site]
-                    .body
-                    .as_ref()
-                    .expect("checked lambda body");
-                self.place_lambda(site, body, scoped);
+                self.callable_sites().place_checked_lambda(site, scoped);
                 return;
             }
             RequiredSite::AnnotationString(site) => {
@@ -316,7 +365,9 @@ impl Function<'_, '_> {
     }
 
     pub(super) fn prepare_definition(&mut self, start: TextSize) {
-        if self.prepare_ordinary_function(start) || self.sites.definitions.contains_key(&start) {
+        if self.callable_sites().prepare_ordinary_function(start)
+            || self.sites.definitions.contains_key(&start)
+        {
             return;
         }
         let declaration = if let Some(class) = self.source.class_bodies.get(&start) {
@@ -383,6 +434,67 @@ impl Function<'_, '_> {
 mod tests {
     use crate::dynamic::emit::{ModuleOrigin, Output, PreparedBody};
     use std::path::Path;
+
+    #[test]
+    fn checked_module_callables_stop_at_the_first_class() {
+        use super::{CheckedSites, RequiredSite, SourceMap};
+        use crate::dynamic::emit::SourcePositions;
+
+        let text = concat!(
+            "def read(value, offset=1):\n    return value + offset\n",
+            "first = lambda: read(3)\n",
+            "class C: pass\n",
+            "last = lambda: 2\n",
+        );
+        let module = PreparedBody::module(
+            "children",
+            Path::new("children.py"),
+            text,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        assert!(module.source.initializer.as_ref().unwrap().fully_checked());
+        let mut output = Output::default();
+        let file = output.data(b"children.py");
+        let location = SourceMap {
+            info: &module.source,
+            callable_code: Default::default(),
+            definitions: Some(&module.linked_declarations()),
+            unit: 0,
+            positions: &SourcePositions::new(text, &file),
+        };
+        let mut sites = CheckedSites::default();
+        let required = &module.source.initializer_sites;
+        let [
+            RequiredSite::Definition(read),
+            RequiredSite::Lambda(first, _),
+            ..,
+        ] = required.as_slice()
+        else {
+            panic!("expected the ordinary function and lambda");
+        };
+        assert!(module.source.ordinary_function(*read).is_some());
+        let rest = location.place_module_callables(&mut output, &mut sites, required);
+        assert!(matches!(
+            rest,
+            [RequiredSite::Definition(_), RequiredSite::Lambda(_, _)]
+        ));
+        assert_eq!(sites.definitions.len(), 1);
+        assert_eq!(sites.lambdas.len(), 1);
+        assert_eq!(sites.definitions[read].definition.name, "read");
+        assert_eq!(
+            sites.lambdas[first].code,
+            location.callable_code.borrow()[first]
+        );
+        let count = output.count;
+        assert!(
+            location
+                .place_module_callables(&mut output, &mut sites, &required[..2])
+                .is_empty()
+        );
+        assert_eq!(output.count, count);
+    }
 
     #[test]
     fn typing_initializer_binds_the_checked_reveal_type_definition() {
