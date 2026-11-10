@@ -13504,6 +13504,21 @@ impl<'a> Checker<'a> {
         })
     }
 
+    /// The first argument is already checked. Bind the remaining positional and
+    /// keyword arguments in the original call layout.
+    fn registered_iterable_call(
+        &mut self,
+        call: &ast::ExprCall,
+        name: &str,
+        iterable: Expr,
+    ) -> Result<Expr, String> {
+        let mut args = vec![iterable];
+        for argument in imre_ast::argument_values(&call.arguments).skip(1) {
+            args.push(self.expr(argument)?);
+        }
+        Ok(self.registered_builtin_call(call, name, args))
+    }
+
     fn registered_builtin_call(&self, call: &ast::ExprCall, name: &str, args: Vec<Expr>) -> Expr {
         // A fixed-only caller can check the remaining operands and source
         // operations. The actual call requires its registered Python frame.
