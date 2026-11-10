@@ -1,8 +1,8 @@
 //! Exception handlers entered through a registered Python frame.
 
 use super::{
-    Frame, FrameEmitter, RegisteredFrame,
-    context::{Finally, Region, RegionEmitter},
+    Frame, RegisteredFrame,
+    context::{Finally, Region},
 };
 use crate::ir::{ExceptHandler, ExceptionMatcher, Statement};
 use crate::llvm::operations::CheckedBody;
@@ -27,221 +27,217 @@ impl RegisteredFrame<'_, '_> {
     }
 }
 
-/// Install the prepared suite for abrupt exits and emit it on the normal and error edges.
-fn finalized<'a, 'p, E: RegionEmitter<'a, 'p>>(
-    code: &mut E,
-    body: Finally<'p>,
-    protected: impl FnOnce(&mut E),
-) {
-    let failed = code.name("b");
-    let done = code.name("b");
-    let enclosing = std::mem::replace(&mut code.body.error_target, failed.clone());
-    let region = Region::Finally {
-        body,
-        outer: enclosing.clone(),
-        loops: code.loops.len(),
-        caught: code.caught.len(),
-    };
-    code.regions.push(region);
-    protected(code);
-    let Some(Region::Finally { body, .. }) = code.regions.pop() else {
-        unreachable!("active finally region")
-    };
-    code.body.error_target = enclosing;
-    // Module providers also visit unreachable annotation sites in source order.
-    let mut needs_join = code.module_annotation_sites.is_some();
-    if !code.body.terminated || needs_join {
-        code.emit_finally(&body);
-        needs_join |= !code.body.terminated;
-        code.jump(&done);
-    }
-
-    code.label(&failed);
-    let exception = code.op("take_error", &[]);
-    let outer = code.caught.last().cloned().unwrap_or_else(|| "0".into());
-    code.live.push(exception.clone());
-    code.caught.push(exception.clone());
-    let pending = Region::Pending {
-        value: exception.clone(),
-        enclosing: Some(outer),
-        outer: code.body.error_target.clone(),
-    };
-    code.regions.push(pending);
-    code.emit_finally(&body);
-    code.regions.pop();
-    code.caught.pop();
-    code.live.pop();
-    if !code.body.terminated {
-        code.raise(&exception, None, true);
-    }
-    if needs_join {
-        code.label(&done);
-    }
-}
-
-/// A named arm clears its binding on fallthrough, handler failure and abrupt
-/// transfer. The binding remains live while the handler body executes.
-fn arm<'a, 'p, E: RegionEmitter<'a, 'p>, S, N: AsRef<str>>(
-    code: &mut E,
-    exception: &str,
-    done: &str,
-    describe: impl FnOnce(&mut E) -> (Option<String>, Option<N>, S),
-    emit_suite: impl FnOnce(&mut E, S),
-) {
-    let next = code.name("b");
-    let (class, name, body) = describe(code);
-    if let Some(class) = class {
-        let matches = code.op("matches", &[exception, &class]);
-        let matches = code.value(&format!("icmp eq i64 {matches}, 2"));
-        let matched = code.name("b");
-        code.branch(&matches, &matched, &next);
-        code.label(&matched);
-    }
-    if let Some(name) = name.as_ref().map(AsRef::as_ref) {
-        code.bind(name, exception);
-        let failed = code.name("b");
-        let enclosing = std::mem::replace(&mut code.body.error_target, failed.clone());
-        code.regions.push(Region::ExceptionName {
-            name: name.into(),
+impl<'f, 'p> Frame<'f, '_, 'p> {
+    /// Install the final suite before entering the body so an abrupt exit can find it.
+    fn finalized(&mut self, body: Finally<'p>, protected: impl FnOnce(&mut Self)) {
+        let failed = self.name("b");
+        let done = self.name("b");
+        let enclosing = std::mem::replace(&mut self.body.error_target, failed.clone());
+        let region = Region::Finally {
+            body,
             outer: enclosing.clone(),
-        });
-        emit_suite(code, body);
-        code.regions.pop();
-        code.body.error_target = enclosing;
-        if !code.body.terminated {
-            code.clear_exception_name(name);
+            loops: self.loops.len(),
+            caught: self.caught.len(),
+        };
+        self.regions.push(region);
+        protected(self);
+        let Some(Region::Finally { body, .. }) = self.regions.pop() else {
+            unreachable!("active finally region")
+        };
+        self.body.error_target = enclosing;
+        // Module providers also visit unreachable annotation sites in source order.
+        let mut needs_join = self.module_annotation_sites.is_some();
+        if !self.body.terminated || needs_join {
+            self.emit_finally(&body);
+            needs_join |= !self.body.terminated;
+            self.jump(&done);
         }
-        code.jump(done);
-        code.label(&failed);
-        let error = code.op("take_error", &[]);
-        code.clear_exception_name(name);
-        code.raise(&error, None, true);
-    } else {
-        emit_suite(code, body);
-        code.jump(done);
-    }
-    code.label(&next);
-}
 
-/// Run else outside the protected body, then dispatch the pending exception.
-fn protected<'a, 'p, 'h, E, H, S, N>(
-    code: &mut E,
-    body: S,
-    handlers: &'h [H],
-    otherwise: S,
-    is_star: bool,
-    mut describe: impl FnMut(&mut E, &'h H) -> (Option<String>, Option<N>, S),
-    mut suite: impl FnMut(&mut E, S),
-) where
-    E: RegionEmitter<'a, 'p>,
-    N: AsRef<str>,
-{
-    if handlers.is_empty() {
-        suite(code, body);
-        return;
+        self.label(&failed);
+        let exception = self.op("take_error", &[]);
+        let outer = self.caught.last().cloned().unwrap_or_else(|| "0".into());
+        self.live.push(exception.clone());
+        self.caught.push(exception.clone());
+        let pending = Region::Pending {
+            value: exception.clone(),
+            enclosing: Some(outer),
+            outer: self.body.error_target.clone(),
+        };
+        self.regions.push(pending);
+        self.emit_finally(&body);
+        self.regions.pop();
+        self.caught.pop();
+        self.live.pop();
+        if !self.body.terminated {
+            self.raise(&exception, None, true);
+        }
+        if needs_join {
+            self.label(&done);
+        }
     }
-    let (handler, enclosing) = code.begin_operand_scope();
-    suite(code, body);
-    code.body.error_target = enclosing;
-    suite(code, otherwise);
-    let (exception, done) = code.enter_handlers(&handler);
-    if is_star {
-        groups(code, handlers, &exception, &done, describe, suite);
-    } else {
+
+    /// A named handler clears its binding on every path out of the body.
+    fn arm(&mut self, handler: &ExceptHandler, exception: &str, done: &str) {
+        let next = self.name("b");
+        let (class, name) = self.handler_header(handler);
+        if let Some(class) = class {
+            let matches = self.op("matches", &[exception, &class]);
+            let matches = self.value(&format!("icmp eq i64 {matches}, 2"));
+            let matched = self.name("b");
+            self.branch(&matches, &matched, &next);
+            self.label(&matched);
+        }
+        if let Some(name) = name {
+            self.bind(name, exception);
+            let failed = self.name("b");
+            let enclosing = std::mem::replace(&mut self.body.error_target, failed.clone());
+            self.regions.push(Region::ExceptionName {
+                name: name.into(),
+                outer: enclosing.clone(),
+            });
+            self.emit_handler_suite(&handler.body);
+            self.regions.pop();
+            self.body.error_target = enclosing;
+            if !self.body.terminated {
+                self.clear_exception_name(name);
+            }
+            self.jump(done);
+            self.label(&failed);
+            let error = self.op("take_error", &[]);
+            self.clear_exception_name(name);
+            self.raise(&error, None, true);
+        } else {
+            self.emit_handler_suite(&handler.body);
+            self.jump(done);
+        }
+        self.label(&next);
+    }
+
+    /// Run the else suite outside the protected body, then dispatch any pending exception.
+    fn protected(
+        &mut self,
+        body: &[Statement],
+        handlers: &[ExceptHandler],
+        otherwise: &[Statement],
+        is_star: bool,
+    ) {
+        if handlers.is_empty() {
+            self.emit_handler_suite(body);
+            return;
+        }
+        let (handler, enclosing) = self.begin_operand_scope();
+        self.emit_handler_suite(body);
+        self.body.error_target = enclosing;
+        self.emit_handler_suite(otherwise);
+        let (exception, done) = self.enter_handlers(&handler);
+        if is_star {
+            self.groups(handlers, &exception, &done);
+        } else {
+            for handler in handlers {
+                self.arm(handler, &exception, &done);
+            }
+            self.raise(&exception, None, true);
+        }
+        self.leave_handlers(&done);
+    }
+
+    /// Split a pending group in source order and retain both halves until the handlers finish.
+    fn groups(&mut self, handlers: &[ExceptHandler], exc: &str, done: &str) {
+        let raised = self.op("list", &[]);
+        self.live.push(raised.clone());
+        let roots = self.live.len();
+        let mut remainder = exc.to_owned();
+        let mut active = exc.to_owned();
         for handler in handlers {
-            arm(
-                code,
-                &exception,
-                &done,
-                |code| describe(code, handler),
-                &mut suite,
-            );
+            self.live.extend([remainder.clone(), active.clone()]);
+            let (matcher, name) = self.handler_header(handler);
+            let matcher = matcher.expect("except* requires a type");
+            let pair = self.op("except_star_split", &[&remainder, &matcher]);
+            let zero = self.code.integer(0);
+            let matched = self.op("get", &[&pair, &zero]);
+            let one = self.code.integer(1);
+            remainder = self.op("get", &[&pair, &one]);
+
+            let has_match = self.value(&format!("icmp ne i64 {matched}, 0"));
+            // Later match expressions see the last subgroup handled, even across an empty match.
+            active = self.value(&format!(
+                "select i1 {has_match}, i64 {matched}, i64 {active}"
+            ));
+            *self.caught.last_mut().unwrap() = active.clone();
+            self.live.truncate(roots);
+            self.live.extend([remainder.clone(), active.clone()]);
+
+            let body = self.name("b");
+            let failed = self.name("b");
+            let next = self.name("b");
+            self.branch(&has_match, &body, &next);
+            self.label(&body);
+            self.op("restore_caught", &[&matched]);
+            if let Some(name) = name {
+                self.bind(name, &matched);
+            }
+            let outer = std::mem::replace(&mut self.body.error_target, failed.clone());
+            self.emit_handler_suite(&handler.body);
+            self.body.error_target = outer;
+            if !self.body.terminated
+                && let Some(name) = name
+            {
+                self.clear_star_target(name);
+            }
+            self.jump(&next);
+            self.label(&failed);
+            let error = self.op("take_error", &[]);
+            if let Some(name) = name {
+                self.clear_star_target(name);
+            }
+            self.op("append", &[&raised, &error]);
+            self.jump(&next);
+            self.label(&next);
+            self.live.truncate(roots);
         }
-        code.raise(&exception, None, true);
+
+        self.op("append", &[&raised, &remainder]);
+        let merged = self.op("except_star_merge", &[exc, &raised]);
+        self.live.pop();
+        let enclosing = self
+            .caught
+            .iter()
+            .rev()
+            .nth(1)
+            .cloned()
+            .unwrap_or_else(|| "0".into());
+        self.op("restore_caught", &[&enclosing]);
+        let propagate = self.name("b");
+        let handled = self.value(&format!("icmp eq i64 {merged}, 0"));
+        self.branch(&handled, done, &propagate);
+        self.label(&propagate);
+        self.raise(&merged, None, true);
     }
-    code.leave_handlers(&done);
-}
 
-/// Split a pending group in source order, retaining its matched and unhandled parts
-/// across callbacks before merging the outcomes back into the enclosing exception.
-fn groups<'a, 'p, 'h, F: FrameEmitter<'a, 'p>, H, S, N: AsRef<str>>(
-    code: &mut F,
-    handlers: &'h [H],
-    exc: &str,
-    done: &str,
-    mut describe: impl FnMut(&mut F, &'h H) -> (Option<String>, Option<N>, S),
-    mut emit_suite: impl FnMut(&mut F, S),
-) {
-    let raised = code.op("list", &[]);
-    code.live.push(raised.clone());
-    let roots = code.live.len();
-    let mut remainder = exc.to_owned();
-    let mut active = exc.to_owned();
-    for handler in handlers {
-        code.live.extend([remainder.clone(), active.clone()]);
-        let (matcher, name, suite) = describe(code, handler);
-        let name = name.as_ref().map(AsRef::as_ref);
-        let matcher = matcher.expect("except* requires a type");
-        let pair = code.op("except_star_split", &[&remainder, &matcher]);
-        let zero = code.integer(0);
-        let matched = code.op("get", &[&pair, &zero]);
-        let one = code.integer(1);
-        remainder = code.op("get", &[&pair, &one]);
+    fn handler_header(&mut self, handler: &ExceptHandler) -> (Option<String>, Option<&'f str>) {
+        let class = match &handler.matcher {
+            ExceptionMatcher::Categories(_) => None,
+            ExceptionMatcher::Object(site, class) | ExceptionMatcher::Subgroup(site, class) => {
+                self.checkpoint(*site);
+                Some(self.evaluate_handle(class))
+            }
+        };
+        let name = handler
+            .name
+            .map(|slot| self.names.expect("registered scope")[&slot].name.as_str());
+        (class, name)
+    }
 
-        let has_match = code.value(&format!("icmp ne i64 {matched}, 0"));
-        // Later match expressions see the last subgroup handled, even across an empty match.
-        active = code.value(&format!(
-            "select i1 {has_match}, i64 {matched}, i64 {active}"
-        ));
-        *code.caught.last_mut().unwrap() = active.clone();
-        code.live.truncate(roots);
-        code.live.extend([remainder.clone(), active.clone()]);
-
-        let body = code.name("b");
-        let failed = code.name("b");
-        let next = code.name("b");
-        code.branch(&has_match, &body, &next);
-        code.label(&body);
-        code.op("restore_caught", &[&matched]);
-        if let Some(name) = name {
-            code.bind(name, &matched);
-        }
-        let outer = std::mem::replace(&mut code.body.error_target, failed.clone());
-        emit_suite(code, suite);
-        code.body.error_target = outer;
-        if !code.body.terminated
-            && let Some(name) = name
+    fn emit_handler_suite(&mut self, body: &[Statement]) {
+        // Module providers retain annotation sites even in an unentered else.
+        if self.body.terminated
+            && let Some(child) = self.prepared_child(body)
         {
-            code.clear_star_target(name);
+            super::emit_prepared_suite(self.code.prepared_owner(), child);
+        } else {
+            self.emit_suite(body);
         }
-        code.jump(&next);
-        code.label(&failed);
-        let error = code.op("take_error", &[]);
-        if let Some(name) = name {
-            code.clear_star_target(name);
-        }
-        code.op("append", &[&raised, &error]);
-        code.jump(&next);
-        code.label(&next);
-        code.live.truncate(roots);
     }
-
-    code.op("append", &[&raised, &remainder]);
-    let merged = code.op("except_star_merge", &[exc, &raised]);
-    code.live.pop();
-    let enclosing = code
-        .caught
-        .iter()
-        .rev()
-        .nth(1)
-        .cloned()
-        .unwrap_or_else(|| "0".into());
-    code.op("restore_caught", &[&enclosing]);
-    let propagate = code.name("b");
-    let handled = code.value(&format!("icmp eq i64 {merged}, 0"));
-    code.branch(&handled, done, &propagate);
-    code.label(&propagate);
-    code.raise(&merged, None, true);
 }
 
 impl RegisteredFrame<'_, '_> {
@@ -283,43 +279,10 @@ impl<'p> Frame<'_, '_, 'p> {
         otherwise: &[Statement],
         finalbody: &[Statement],
     ) {
-        let names = self.names;
         let stars = handlers
             .first()
             .is_some_and(|handler| matches!(handler.matcher, ExceptionMatcher::Subgroup(..)));
-        let run = |f: &mut Self| {
-            protected(
-                f,
-                body,
-                handlers,
-                otherwise,
-                stars,
-                |f, handler| {
-                    let class = match &handler.matcher {
-                        ExceptionMatcher::Categories(_) => None,
-                        ExceptionMatcher::Object(site, class)
-                        | ExceptionMatcher::Subgroup(site, class) => {
-                            f.checkpoint(*site);
-                            Some(f.evaluate_handle(class))
-                        }
-                    };
-                    let name = handler
-                        .name
-                        .map(|slot| names.expect("registered scope")[&slot].name.as_str());
-                    (class, name, handler.body.as_slice())
-                },
-                |f, body| {
-                    // Module providers retain annotation sites even in an unentered else.
-                    if f.body.terminated
-                        && let Some(child) = f.prepared_child(body)
-                    {
-                        super::emit_prepared_suite(f.code.prepared_owner(), child);
-                    } else {
-                        f.emit_suite(body);
-                    }
-                },
-            );
-        };
+        let run = |frame: &mut Self| frame.protected(body, handlers, otherwise, stars);
         if finalbody.is_empty() {
             run(self);
             return;
@@ -329,7 +292,7 @@ impl<'p> Frame<'_, '_, 'p> {
         let cleanup = self
             .prepared_child(finalbody)
             .map_or_else(|| Finally::Checked(finalbody.into()), Finally::Prepared);
-        finalized(self, cleanup, run);
+        self.finalized(cleanup, run);
     }
 
     pub(crate) fn emit_suite(&mut self, suite: &[Statement]) {

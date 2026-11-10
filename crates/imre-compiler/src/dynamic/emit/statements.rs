@@ -4,7 +4,6 @@ mod declarations;
 use super::sites::{CheckedSites, CompiledDefinition};
 
 use super::{AnnotationScope, FrameEmitter, Output, RegisteredFrame, SourceMap};
-use crate::llvm::registered::context::{Finally, RegionEmitter};
 use ruff_text_size::TextSize;
 use serde_json::json;
 
@@ -54,16 +53,6 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
             }
         }
         None
-    }
-}
-
-impl<'a, 'p> RegionEmitter<'a, 'p> for Function<'a, 'p> {
-    fn emit_finally(&mut self, suite: &Finally<'p>) {
-        // Checked final suites are nested inside the checked run that owns their bindings.
-        let Finally::Prepared(suite) = suite else {
-            unreachable!("checked finally outside its checked run")
-        };
-        emit_prepared_suite(self, suite);
     }
 }
 
