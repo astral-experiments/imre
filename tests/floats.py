@@ -46,7 +46,6 @@ REJECTED = {
     "integer_inplace_true_division": "value = 1\nvalue /= 2\n",
     "float_none": "print(float(None))\n",
     "float_keyword": "print(float(value=1))\n",
-    "unsupported_exponential_format": 'print(f"{1.0:.2e}")\n',
     "optional_float_unchecked": "def bad(value: float | None) -> float:\n    return value + 1.0\n",
 }
 
@@ -126,11 +125,12 @@ def generated() -> dict[str, str]:
         if math.isfinite(value):
             random_floats.append(value)
     formatting = (
+        'print(f"{1.0:.2e}")\n'
         "values: list[float] = ["
         + ", ".join(map(literal, floats + [900719925474099.25] + random_floats))
         + "]\n"
     )
-    formatting += "for value in values:\n    print(value)\n    print(str(value))\n    print(f'{value!s}:{value:}')\n    print(+value)\n    print(-value)\n    print(float(value))\n    print(float(str(value)))\n    try:\n        print(int(value))\n    except ValueError:\n        print('nan')\n    except OverflowError:\n        print('infinite')\n"
+    formatting += "for value in values:\n    print(value)\n    print(str(value))\n    print(f'{value!s}:{value:}:{value:.2e}')\n    print(+value)\n    print(-value)\n    print(float(value))\n    print(float(str(value)))\n    try:\n        print(int(value))\n    except ValueError:\n        print('nan')\n    except OverflowError:\n        print('infinite')\n"
     formatting += "print(float())\nprint(float(True))\nprint(float(False))\n"
 
     max_integer = int(sys.float_info.max)
