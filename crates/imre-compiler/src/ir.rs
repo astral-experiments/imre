@@ -633,9 +633,9 @@ impl Expr {
             return false;
         };
         self.ty == Type::PythonObject
-            && callable.ty == Type::PythonObject
             && args.python_site.as_ref().is_some_and(|site| {
-                site.range.start() < site.callee_end
+                callable.registered_invoke_target(site)
+                    && site.range.start() < site.callee_end
                     && site.callee_end < site.range.end()
                     && site.suspended_name.is_none_or(|name| {
                         site.range.contains_range(name) && name.end() == site.callee_end
@@ -643,6 +643,20 @@ impl Expr {
                     && site.scope.as_ref().is_none_or(|scope| scope.ty == Type::PythonObject)
             })
             && args.order.iter().copied().eq(0..args.values.len())
+    }
+
+    fn registered_invoke_target(&self, site: &InvokeSite) -> bool {
+        if self.ty == Type::PythonObject {
+            return true;
+        }
+        let ExprKind::Builtin(Builtin::RegisteredLocation(range, _), parts) = &self.kind else {
+            return false;
+        };
+        let [local] = parts.as_slice() else { return false };
+        matches!(self.ty, Type::Callable(_))
+            && local.ty == self.ty
+            && matches!(local.kind, ExprKind::Local(_))
+            && site.suspended_name == Some(*range)
     }
 
     pub(crate) fn unrepresented() -> Self {

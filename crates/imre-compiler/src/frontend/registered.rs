@@ -300,6 +300,12 @@ pub(super) fn selected_operands(and: bool, mut operands: Vec<Expr>) -> Expr {
     result
 }
 
+pub(super) enum Capture<'a> {
+    Solved,
+    IncludeLive,
+    Entry(&'a HashSet<usize>),
+}
+
 pub(super) fn capture(
     graph: &SourceGraph,
     signatures: &HashMap<DefinitionId, Signature>,
@@ -307,7 +313,7 @@ pub(super) fn capture(
     types: &Types,
     inference: &inference::Inference,
     globals: &ModuleValues,
-    retain_live_parameters: bool,
+    mode: Capture<'_>,
 ) {
     let mut sources = HashMap::new();
     let mut checks = SourceChecks::default();
@@ -339,7 +345,7 @@ pub(super) fn capture(
         }
         let (signature, solved) = if let Some(signature) = inference.registered_signature(signature)
         {
-            if !retain_live_parameters {
+            if !matches!(mode, Capture::IncludeLive) {
                 return true;
             }
             (signature, false)
@@ -357,7 +363,7 @@ pub(super) fn capture(
         // A solved definition reads names from the Python namespace. Its trial
         // must not establish a native caller or consume a missing binding.
         let private = solved.then(ModuleValues::default);
-        let checker = Checker::new(
+        let mut checker = Checker::new(
             graph,
             id,
             signatures,
@@ -366,6 +372,9 @@ pub(super) fn capture(
             &helpers,
             private.as_ref().unwrap_or(globals),
         );
+        // The fixed checker validated this physical signature in the settled round.
+        checker.checked_callback_effects =
+            solved && matches!(mode, Capture::Entry(checked) if checked.contains(&signature.id));
         let literals = sources
             .entry(id)
             .or_insert_with(|| values::ModuleSource::new(module));
@@ -3394,7 +3403,11 @@ mod tests {
                     &types,
                     &inference,
                     &globals,
-                    live,
+                    if live {
+                        Capture::IncludeLive
+                    } else {
+                        Capture::Solved
+                    },
                 )
             })
             .1

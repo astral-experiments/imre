@@ -1382,6 +1382,15 @@ impl Types {
         Type::Callable(self.intern(Shape::Callable(params, returns)))
     }
 
+    pub(crate) fn plain_callable_signature(&self, ty: Type) -> Option<(Vec<Type>, Type)> {
+        let Type::Callable(id) = ty else { return None };
+        let shapes = self.0.borrow();
+        let Shape::Callable(params, returns) = &shapes.shapes[id] else {
+            return None;
+        };
+        Some((params.clone(), *returns))
+    }
+
     /// A subscription method accepts booleans in its first positional integer slot.
     pub(crate) fn index_callable(&self, callable: Type) -> Type {
         Type::Callable(self.intern(Shape::IndexCallable(callable)))

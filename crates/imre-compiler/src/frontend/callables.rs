@@ -647,6 +647,46 @@ impl Checker<'_> {
                 "an indirect call requires a nonoptional exact Callable value",
             )
         })?;
+        self.positional_invoke(call, callable, params, returns, None)
+    }
+
+    pub(super) fn registered_callback_effect(
+        &mut self,
+        expr: &ast::Expr,
+    ) -> Result<Option<Expr>, String> {
+        let Some(call) = expr.as_call_expr() else {
+            return Ok(None);
+        };
+        let Some(slot) = call
+            .func
+            .as_name_expr()
+            .and_then(|name| self.names.get(name.id.as_str()))
+            .copied()
+        else {
+            return Ok(None);
+        };
+        let ty = self.locals[slot];
+        let Some((params, returns)) = self.types.plain_callable_signature(ty) else {
+            return Ok(None);
+        };
+        if !self.assigned.contains(&slot)
+            || matches!(returns, Type::Coroutine(_))
+            || !registered::values::fixed_positional_arguments(call)
+        {
+            return Ok(None);
+        }
+        self.positional_invoke(call, self.local(slot), params, returns, Some(expr))
+            .map(Some)
+    }
+
+    fn positional_invoke(
+        &mut self,
+        call: &ast::ExprCall,
+        callable: Expr,
+        params: Vec<Type>,
+        returns: Type,
+        registered_effect: Option<&ast::Expr>,
+    ) -> Result<Expr, String> {
         if !call.arguments.keywords.is_empty() || call.arguments.args.len() != params.len() {
             return Err(error(
                 self.source,
@@ -668,6 +708,18 @@ impl Checker<'_> {
             .zip(params)
             .enumerate()
             .map(|(slot, (argument, ty))| {
+                if registered_effect.is_some() {
+                    // A Python activation passes the source object, including its identity.
+                    // A native conversion or expected display layout cannot supply that handle.
+                    let value = self.expr(argument)?;
+                    if value.ty != ty {
+                        return Err(self.scoped_builtin_error(
+                            "a converted callable argument",
+                            argument,
+                        ));
+                    }
+                    return Ok(value);
+                }
                 if slot == 0 && index_callable {
                     self.integer_index(argument)
                 } else {
@@ -692,6 +744,9 @@ impl Checker<'_> {
                 }
             })
             .collect::<std::result::Result<Vec<_>, _>>()?;
+        if let Some(expr) = registered_effect {
+            return Ok(self.located_callback_effect(expr, call, callable, values));
+        }
         if let Type::Coroutine(_) = returns {
             return Ok(self.indirect_coroutine(callable, values, returns));
         }
@@ -707,6 +762,57 @@ impl Checker<'_> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn registered_entry_reuses_the_typed_callback_body() {
+        use crate::frontend::caller_cache::observe_lowerings;
+        use crate::ir::{self, ExprKind, Type};
+        use crate::modules::SourceGraph;
+        use ruff_text_size::Ranged;
+
+        let source = concat!(
+            "from typing import Callable\n",
+            "def report(n: int, sink: Callable[[int], None]) -> None:\n",
+            "    sink(n + 1)\n",
+            "def first(n): print(n)\n",
+            "def second(n): print(n)\n",
+            "def publish(sink): sink(3)\n",
+            "def marker(n: int) -> None: print(n)\n",
+            "report(7, marker)\n",
+            "handlers = {'first': first, 'second': second}\n",
+            "publish(handlers[input()])\n",
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.py");
+        std::fs::write(&path, source).unwrap();
+        let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
+        let (program, lowered) = observe_lowerings(|| crate::checked_lower(&mut graph).unwrap());
+        assert!(matches!(program, crate::CheckedProgram::Registered(_)));
+        let site = graph.modules[graph.entry].parsed.syntax().body[1].start();
+        let bodies = graph.registered_functions();
+        let body = &bodies[&graph.entry][&site].function;
+        assert_eq!(lowered.iter().filter(|name| *name == "report").count(), 1);
+        assert!(matches!(body.locals[body.params[1]], Type::Callable(_)));
+        let mut invokes = 0;
+        ir::walk_expressions(&body.body, &mut |expr| {
+            if let ExprKind::Invoke { callable, args } = &expr.kind {
+                assert!(expr.is_registered_invoke());
+                assert!(matches!(callable.ty, Type::Callable(_)));
+                assert_eq!(args.values[0].ty, Type::Int);
+                let range = args.python_site.as_ref().unwrap().range;
+                assert_eq!(&source[range], "sink(n + 1)");
+                invokes += 1;
+            }
+        });
+        assert_eq!(invokes, 1);
+
+        std::fs::write(&path, source.replace("sink(n + 1)", "sink('bad')")).unwrap();
+        let error = crate::check_file(&path, None).unwrap_err();
+        assert!(
+            error.contains("app.py:3:10: Imre: expected int, got str"),
+            "{error}"
+        );
+    }
+
     #[test]
     fn callable_parameter_owns_its_argument_in_a_checked_file() {
         let dir = tempfile::tempdir().unwrap();
