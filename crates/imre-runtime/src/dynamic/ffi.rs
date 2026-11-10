@@ -673,7 +673,6 @@ impl Context {
             }
             "truth" => Ok(flag(self.truth(a)?)),
             "generator" => self.generator(a, b, c),
-            "yielded" => Ok(self.alloc(Value::Yielded(a))),
             "iter" => self.loop_iterator(a),
             "get_iter" => self.iterator(a),
             "loop_cursor" => Ok(self.loop_cursor(a)),

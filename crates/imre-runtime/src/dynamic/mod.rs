@@ -1791,19 +1791,10 @@ impl Context {
                     self.next_zip_or_map(id)
                 });
             }
-            Value::Generator { code, .. } => {
-                let code = *code;
+            Value::Generator { .. } => {
                 // Delegated generators resume their children on the native stack.
                 return stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
-                    match self.code_object(code).body {
-                        value::Body::Native(..) => self.next_generator_item(id),
-                        value::Body::Suspended(_) => self.resume_native(
-                            id,
-                            id,
-                            generator_protocol::GeneratorInput::Send(NONE),
-                        ),
-                        value::Body::Parsed { .. } => self.missing_compiled_body(code),
-                    }
+                    self.resume_native(id, id, generator_protocol::GeneratorInput::Send(NONE))
                 });
             }
             Value::LoopIterator { peeked, .. } => return Ok(peeked.take()),

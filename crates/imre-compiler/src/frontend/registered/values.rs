@@ -715,11 +715,16 @@ pub(super) fn operation<E>(
     }
     let kind = match node {
         ast::Expr::Generator(generator)
-            if let Some(site) = source.generators.and_then(|sites| sites.get(&generator.range())) =>
+            if source.generators.is_some_and(|sites| sites.contains_key(&generator.range())) =>
         {
             let outer = imre_ast::comprehension::outer_clause(&generator.generators);
+            let acquire = if outer.is_async {
+                ir::IteratorOp::Async(outer.iter.range())
+            } else {
+                ir::IteratorOp::Get(outer.iter.range())
+            };
             let iterator = super::operation(
-                Builtin::RegisteredIter(site.outer_operation(outer)),
+                Builtin::RegisteredIter(acquire),
                 Type::PythonObject,
                 vec![child(&outer.iter)?],
             );
