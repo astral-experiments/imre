@@ -1037,8 +1037,6 @@ pub(crate) enum SourceEffect {
     Value(Box<Statement>, Vec<PhysicalOperand>),
     /// Checked control flow with guards and child suites bound in their lexical frame.
     Region(Box<PreparedRegion>),
-    /// Patterns, guards and case suites belong to the same evaluation of the subject.
-    Match(TextRange, Box<patterns::SourceMatch>),
 }
 
 fn loop_transfer(stmt: &ast::Stmt) -> Option<Statement> {
@@ -1397,7 +1395,7 @@ impl<'a> SuitePreparation<'a> {
                     }
                     ast::Stmt::Match(branch) => self
                         .prepare_match(branch, kind, suspended)
-                        .map(|site| SourceEffect::Match(branch.range(), Box::new(site))),
+                        .map(|region| SourceEffect::Region(Box::new(region))),
                     _ => Err((stmt.range(), "cannot compile this statement ahead of time")),
                 },
             };
@@ -2981,6 +2979,10 @@ impl SourceScope<'_> {
         slot
     }
 
+    fn match_slots(&mut self, pattern: &ir::MatchPattern) -> Vec<usize> {
+        pattern.names.iter().map(|name| self.slot(name)).collect()
+    }
+
     fn match_statement(&mut self, branch: &ast::StmtMatch) -> StdResult<statements::Block, ()> {
         let mut cases = Vec::with_capacity(branch.cases.len());
         let mut exhaustive = false;
@@ -2989,7 +2991,7 @@ impl SourceScope<'_> {
             if exhaustive {
                 return Err(());
             }
-            let captures = pattern.names.iter().map(|name| self.slot(name)).collect();
+            let captures = self.match_slots(&pattern);
             let guard = case
                 .guard
                 .as_deref()

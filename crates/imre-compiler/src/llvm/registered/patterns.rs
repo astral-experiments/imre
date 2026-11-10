@@ -1,12 +1,11 @@
 //! Native structural matching on semantic operands in the live registered namespace.
-use super::{Frame, FrameEmitter, RegisteredFrame, sites::CheckedSites};
-use crate::frontend::SourceMatch;
-use crate::ir::{Expr, MatchCase, MatchPattern, MatchTest};
+use super::{Frame, FrameEmitter, RegisteredFrame};
+use crate::ir::{Expr, MatchCase, MatchTest};
 use crate::llvm::operations::{CheckedBody, CheckedValue};
 use imre_ast::{SequencePatternItems, SequencePatternPlan};
 
 /// Tests, captures and successor edges for one evaluation of a match subject.
-pub(crate) struct MatchRegions {
+struct MatchRegions {
     done: String,
     cases: Vec<CaseBlock>,
     index: usize,
@@ -26,7 +25,7 @@ struct GuardBlock {
     subject: Option<String>,
 }
 
-pub(crate) enum MatchRegion<'a> {
+enum MatchRegion<'a> {
     Guard {
         case: usize,
         matched: &'a str,
@@ -35,51 +34,9 @@ pub(crate) enum MatchRegion<'a> {
     Body(usize),
 }
 
-/// Both representations borrow their operands directly from their declaring case.
-enum MatchCases<'a> {
-    Checked(&'a [MatchCase]),
-    Physical(&'a SourceMatch),
-}
-
-struct CaseInput<'a> {
-    pattern: &'a MatchPattern,
-    slots: Option<&'a [usize]>,
-    has_guard: bool,
-}
-
-impl<'a> MatchCases<'a> {
-    fn len(&self) -> usize {
-        match self {
-            Self::Checked(cases) => cases.len(),
-            Self::Physical(site) => site.cases.len(),
-        }
-    }
-
-    fn get(&self, index: usize) -> CaseInput<'a> {
-        match self {
-            Self::Checked(cases) => {
-                let case = &cases[index];
-                CaseInput {
-                    pattern: &case.pattern,
-                    slots: Some(&case.captures),
-                    has_guard: case.guard.is_some(),
-                }
-            }
-            Self::Physical(site) => {
-                let case = &site.cases[index];
-                CaseInput {
-                    pattern: &case.pattern,
-                    slots: None,
-                    has_guard: case.guard.is_some(),
-                }
-            }
-        }
-    }
-}
-
 impl MatchRegions {
     /// Resume on the same live frame after the owner filled the previous operand.
-    pub(crate) fn next(&mut self, frame: &mut RegisteredFrame<'_, '_>) -> Option<MatchRegion<'_>> {
+    fn next(&mut self, frame: &mut RegisteredFrame<'_, '_>) -> Option<MatchRegion<'_>> {
         let index = self.index;
         if let Some(outer) = self.guard_unwind.take() {
             self.cases[index]
@@ -128,18 +85,6 @@ impl GuardBlock {
 }
 
 impl RegisteredFrame<'_, '_> {
-    pub(crate) fn registered_match(
-        &mut self,
-        subject: &str,
-        mark: &str,
-        site: &SourceMatch,
-        sites: &CheckedSites,
-    ) -> MatchRegions {
-        self.with_checked_frame(sites, None, |mut frame| {
-            frame.start_match(subject, mark, MatchCases::Physical(site))
-        })
-    }
-
     fn pattern_check(&mut self, condition: &str, failed: &str) {
         let matched = self.name("b");
         self.branch(condition, &matched, failed);
@@ -156,9 +101,7 @@ impl CheckedBody<'_, '_, '_, '_> {
     pub(crate) fn emit_prepared_match(&mut self, expr: &Expr, cases: &[MatchCase]) {
         let mark = self.python().temporary_mark();
         let subject = self.python().pattern_value(expr);
-        let mut regions = self
-            .python()
-            .start_match(&subject, &mark, MatchCases::Checked(cases));
+        let mut regions = self.python().start_match(&subject, &mark, cases);
         while let Some(region) = regions.next(self.python()) {
             match region {
                 MatchRegion::Body(case) => self.emit_block(&cases[case].body),
@@ -198,18 +141,14 @@ impl Frame<'_, '_, '_> {
         f.pattern_check(&bit, failed);
     }
 
-    fn start_match(&mut self, subject: &str, mark: &str, cases: MatchCases<'_>) -> MatchRegions {
+    fn start_match(&mut self, subject: &str, mark: &str, cases: &[MatchCase]) -> MatchRegions {
         let count = cases.len();
-        let default = count > 1 && matches!(cases.get(count - 1).pattern.test, MatchTest::Always);
+        let default = count > 1 && matches!(cases[count - 1].pattern.test, MatchTest::Always);
         let tested = count - usize::from(default);
         let done = self.name("b");
         let mut blocks = Vec::with_capacity(count);
-        for index in 0..count {
-            let CaseInput {
-                pattern,
-                slots,
-                has_guard,
-            } = cases.get(index);
+        for (index, case) in cases.iter().enumerate() {
+            let pattern = &case.pattern;
             let again = index + 1 < tested;
             let next = self.name("b");
             let case_mark = if again {
@@ -235,18 +174,14 @@ impl Frame<'_, '_, '_> {
                 for (i, name) in pattern.names.iter().enumerate() {
                     let key = self.code_name(name);
                     let val = self.op("get", &[&captures, &key]);
-                    if let Some(slots) = slots {
-                        self.assign(slots[i], CheckedValue::handle(val));
-                    } else {
-                        self.code.bind(name, &val);
-                    }
+                    self.assign(case.captures[i], CheckedValue::handle(val));
                 }
                 if !again {
                     self.live.pop();
                 }
                 self.discard_truth(&case_mark);
             }
-            let guard = has_guard.then(|| {
+            let guard = case.guard.is_some().then(|| {
                 let entry = self.name("b");
                 let matched = self.name("b");
                 self.jump(&entry);

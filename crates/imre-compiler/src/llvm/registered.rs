@@ -1713,22 +1713,6 @@ impl RegisteredFrame<'_, '_> {
         result
     }
 
-    pub(crate) fn prepared_branch(
-        &mut self,
-        operand: &RegisteredOperand,
-        sites: &CheckedSites,
-        yes: &str,
-        no: &str,
-    ) {
-        let Some(enclosing) = self.enter_checked_slots(operand.region()) else {
-            return;
-        };
-        self.with_checked_frame(sites, Some(&operand.local_names), |frame| {
-            CheckedBody::registered(frame).branch_condition(&operand.value, yes, no)
-        });
-        self.restore_checked_slots(enclosing);
-    }
-
     fn store_item_pair(&mut self, items: [usize; 2]) {
         let key = self.value("load i64, ptr %live");
         let slot = self.value("getelementptr i64, ptr %live, i64 1");

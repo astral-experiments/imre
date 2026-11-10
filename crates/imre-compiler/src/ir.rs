@@ -3363,11 +3363,11 @@ pub(crate) struct MatchPattern {
 }
 
 #[derive(Clone)]
-pub(crate) struct MatchCase<G = Expr, B = Vec<Statement>, C = Vec<usize>> {
+pub(crate) struct MatchCase {
     pub(crate) pattern: MatchPattern,
-    pub(crate) captures: C,
-    pub(crate) guard: Option<G>,
-    pub(crate) body: B,
+    pub(crate) captures: Vec<usize>,
+    pub(crate) guard: Option<Expr>,
+    pub(crate) body: Vec<Statement>,
 }
 
 #[derive(Clone)]

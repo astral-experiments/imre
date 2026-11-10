@@ -4,34 +4,50 @@ use ir::MatchTest;
 
 type PatternResult<T> = std::result::Result<T, (TextRange, &'static str)>;
 
-pub(crate) struct SourceMatch {
-    pub(crate) subject: PhysicalOperand,
-    pub(crate) cases: Vec<ir::MatchCase<PhysicalOperand, RegisteredSuite, ()>>,
-}
-
 impl SuitePreparation<'_> {
     pub(super) fn prepare_match(
         &mut self,
         branch: &ast::StmtMatch,
         kind: RegisteredScope,
         suspended: bool,
-    ) -> PatternResult<SourceMatch> {
+    ) -> PatternResult<PreparedRegion> {
         let patterns = prepare_patterns(branch, self.source)?;
         let operand = |prepare: &mut Self, expr: &ast::Expr| {
             prepare.owned_operand(expr, kind, suspended, |scope| scope.frame_value(expr))
         };
-        let subject = operand(self, &branch.subject);
-        let cases = patterns
+        let mut region = self.region(kind);
+        let subject = region.operand(operand(self, &branch.subject), Type::PythonObject);
+        let mut cases = patterns
             .into_iter()
             .zip(&branch.cases)
             .map(|(pattern, case)| ir::MatchCase {
                 pattern,
-                captures: (),
-                guard: case.guard.as_deref().map(|guard| operand(self, guard)),
-                body: self.physical_suite(&case.body, kind, SuiteSelection::All, suspended),
+                captures: Vec::new(),
+                guard: case
+                    .guard
+                    .as_deref()
+                    .map(|guard| region.operand(operand(self, guard), Type::Bool)),
+                body: region.child(self.physical_suite(
+                    &case.body,
+                    kind,
+                    SuiteSelection::All,
+                    suspended,
+                )),
             })
-            .collect();
-        Ok(SourceMatch { subject, cases })
+            .collect::<Vec<_>>();
+        let mut scope = SourceScope::new(kind, self.source, self.operations, &self.sites);
+        for case in &mut cases {
+            case.captures = scope.match_slots(&case.pattern);
+        }
+        region.checked = scope.finish(vec![
+            Statement::Expr(operation(
+                Builtin::RegisteredStatement(branch.range(), None),
+                Type::None,
+                vec![],
+            )),
+            Statement::Match(subject, cases),
+        ]);
+        Ok(region)
     }
 }
 

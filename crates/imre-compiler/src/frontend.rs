@@ -126,11 +126,11 @@ mod regex;
 mod registered;
 mod required_sites;
 pub(crate) use registered::PreparedRegion;
+#[cfg(test)]
+pub(crate) use registered::booleans::ExpressionInput;
 pub(crate) use registered::booleans::{
-    BorrowedOperand, ExpressionInput, ExpressionSites, PhysicalInputs,
-    Selection as ExpressionSelection, SourceOperand,
+    BorrowedOperand, ExpressionSites, PhysicalInputs, Selection as ExpressionSelection, SourceOperand,
 };
-pub(crate) use registered::patterns::SourceMatch;
 pub(crate) use registered::type_alias_body;
 #[cfg(test)]
 pub(crate) use registered::values::registered_value;

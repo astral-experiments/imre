@@ -1,7 +1,5 @@
-use crate::frontend::{ExpressionInput, PhysicalOperand, SourceEffect, SourceOperand};
-use crate::llvm::registered::{
-    PreparedSuiteEmitter, emit_operand, emit_physical_operand, emit_prepared_suite,
-};
+use crate::frontend::{PhysicalOperand, SourceEffect};
+use crate::llvm::registered::emit_prepared_suite;
 mod declarations;
 use super::sites::{CheckedSites, CompiledDefinition};
 
@@ -48,11 +46,6 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
         effect: &'p SourceEffect,
     ) -> Option<(&'p crate::ir::Statement, &'p [PhysicalOperand])> {
         match effect {
-            SourceEffect::Match(range, site) => {
-                self.checkpoint(range);
-                self.simple_call = None;
-                self.prepared_match(site);
-            }
             SourceEffect::Region(region) => {
                 crate::llvm::registered::Frame::emit_region(self, region)
             }
@@ -176,44 +169,6 @@ impl<'p> Function<'_, 'p> {
         for name in globals {
             self.declared_globals.insert(name.to_owned());
             self.frame.declare_global(name);
-        }
-    }
-
-    fn branch_input(&mut self, input: ExpressionInput<'_>, yes: &str, no: &str) {
-        let bit = self
-            .test_with_temporaries(|code| emit_operand(code, SourceOperand::Residual(input), true));
-        self.branch(&bit, yes, no);
-    }
-
-    pub(super) fn physical_operand(&mut self, input: &PhysicalOperand) -> String {
-        emit_physical_operand(self, input)
-    }
-
-    fn prepared_match(&mut self, site: &'p crate::frontend::SourceMatch) {
-        use crate::llvm::registered::patterns::MatchRegion;
-
-        let mark = self.temporary_mark();
-        let subject = self.physical_operand(&site.subject);
-        let mut regions = self
-            .frame
-            .registered_match(&subject, &mark, site, &self.sites);
-        while let Some(region) = regions.next(&mut self.frame) {
-            match region {
-                MatchRegion::Guard {
-                    case,
-                    matched,
-                    failed,
-                } => match site.cases[case].guard.as_ref().expect("match guard") {
-                    PhysicalOperand::Checked(operand) => {
-                        let (frame, sites) = self.frame_and_sites(Some(&operand.value));
-                        frame.prepared_branch(operand, sites, matched, failed);
-                    }
-                    PhysicalOperand::Residual(input) => {
-                        self.branch_input(input.as_input(), matched, failed)
-                    }
-                },
-                MatchRegion::Body(case) => emit_prepared_suite(self, &site.cases[case].body),
-            }
         }
     }
 }
