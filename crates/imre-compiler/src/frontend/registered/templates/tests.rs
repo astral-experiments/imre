@@ -171,12 +171,11 @@ fn template_default_and_body_suspend_in_their_defining_frames() {
             method_imports: &Default::default(),
         };
         let mut templates = HashMap::new();
-        RegisteredLambda::collect(
-            &parsed.syntax().body,
-            source,
-            HashMap::new(),
-            &mut templates,
-        );
+        let mut body = parsed.into_syntax().body;
+        let names = imre_ast::lower(&mut body);
+        let mut scopes =
+            crate::frontend::function_scope::ScopeFacts::prepare(&body, &names, |_| {}, |_| {});
+        RegisteredLambda::collect(&body, source, &mut scopes, &mut templates);
         templates
     };
     let mut sites: Vec<_> = templates.iter().collect();

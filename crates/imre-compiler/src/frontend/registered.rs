@@ -7,7 +7,7 @@ mod eager;
 mod generators;
 pub(crate) use generators::RegisteredGenerator;
 mod lambdas;
-pub(crate) use lambdas::{LambdaBinding, LambdaDefault, RegisteredLambda};
+pub(crate) use lambdas::RegisteredLambda;
 mod templates;
 pub(crate) use templates::{PreparedStrings, PreparedTemplate, TemplateField};
 pub(super) mod patterns;
@@ -893,7 +893,12 @@ pub(crate) enum SourceEffect {
     /// The enclosing loop supplies the destination and cleanup depth.
     LoopTransfer(TextRange, &'static Statement),
     /// A mixed loop needs its source suites. A literal false test runs only the else suite.
-    While(SourceGuard<Box<RegisteredOperand>>),
+    While(SourceGuard),
+    /// Each test and its child suite are prepared in their enclosing frame.
+    If {
+        range: TextRange,
+        arms: Vec<(Option<PhysicalOperand>, PhysicalSuite)>,
+    },
     /// Exception matchers and all control-flow children belong to this protected region.
     Try(Box<PreparedTry>),
     /// The manager, binding and protected child are prepared together.
@@ -942,7 +947,8 @@ impl PhysicalSuite {
             if !matches!(
                 run.effect,
                 Some(
-                    SourceEffect::For(_)
+                    SourceEffect::If { .. }
+                        | SourceEffect::For(_)
                         | SourceEffect::Context(_)
                         | SourceEffect::Try(_)
                         | SourceEffect::LoopTransfer(..)
@@ -1051,7 +1057,6 @@ impl AssertionSite {
 pub(crate) struct StatementSites {
     pub(crate) expressions: booleans::ExpressionSites,
     omit_assertions: bool,
-    pub(crate) ifs: HashMap<TextRange, SourceConditional>,
     pub(crate) matches: HashMap<TextRange, Option<patterns::SourceMatch>>,
     pub(crate) contexts: HashMap<TextRange, Vec<ir::ContextSite>>,
 }
@@ -1103,55 +1108,10 @@ fn iteration_protocol(
     }
 }
 
-/// Source sites for a statement which could not be lowered as a complete checked block.
-pub(crate) struct SourceConditional(Vec<SourceIfArm>);
-
-pub(crate) struct SourceIfArm {
-    clause: Option<usize>,
-    pub(crate) body_start: Option<TextSize>,
-    guard: Option<SourceGuard>,
-}
-
-pub(crate) enum SourceGuard<T = Expr> {
+pub(crate) enum SourceGuard {
     Literal(bool),
-    Checked(T),
+    Checked(Box<RegisteredOperand>),
     Residual,
-}
-
-impl SourceIfArm {
-    pub(crate) fn test<'a>(&self, source: &'a ast::StmtIf) -> &'a ast::Expr {
-        match self.clause {
-            Some(index) => source.elif_else_clauses[index]
-                .test
-                .as_ref()
-                .expect("conditional guard"),
-            None => &source.test,
-        }
-    }
-
-    pub(crate) fn body<'a>(&self, source: &'a ast::StmtIf) -> &'a [ast::Stmt] {
-        match self.clause {
-            Some(index) => &source.elif_else_clauses[index].body,
-            None => &source.body,
-        }
-    }
-}
-
-impl SourceConditional {
-    /// Dead literal arms in a suspended frame have no resume entry.
-    pub(crate) fn arms(
-        &self,
-        suspended: bool,
-    ) -> impl Iterator<Item = (Option<&SourceGuard>, &SourceIfArm)> {
-        self.0.iter().filter_map(move |arm| {
-            let test = match &arm.guard {
-                Some(SourceGuard::Literal(false)) if suspended => return None,
-                Some(SourceGuard::Literal(true)) if suspended => None,
-                guard => guard.as_ref(),
-            };
-            Some((test, arm))
-        })
-    }
 }
 
 fn if_clauses(branch: &ast::StmtIf) -> impl Iterator<Item = (Option<&ast::Expr>, &[ast::Stmt])> {
@@ -1190,25 +1150,6 @@ fn statement_sites(
                     stmt.range(),
                     patterns::SourceMatch::prepare(branch, self.source),
                 );
-            }
-            if let ast::Stmt::If(branch) = stmt {
-                let guard = |expr: &ast::Expr| {
-                    if let ast::Expr::BooleanLiteral(literal) = expr {
-                        SourceGuard::Literal(literal.value)
-                    } else {
-                        values::registered_value(expr, self.source)
-                            .map_or(SourceGuard::Residual, SourceGuard::Checked)
-                    }
-                };
-                let arms = if_clauses(branch)
-                    .enumerate()
-                    .map(|(index, (test, body))| SourceIfArm {
-                        clause: index.checked_sub(1),
-                        body_start: body.first().map(Ranged::start),
-                        guard: test.map(guard),
-                    })
-                    .collect();
-                self.sites.ifs.insert(stmt.range(), SourceConditional(arms));
             }
             walk_stmt(self, stmt);
         }
@@ -1444,7 +1385,8 @@ impl<'a> SuitePreparation<'a> {
                     }
                     None if !matches!(
                         stmt,
-                        ast::Stmt::Match(_)
+                        ast::Stmt::If(_)
+                            | ast::Stmt::Match(_)
                             | ast::Stmt::With(_)
                             | ast::Stmt::For(_)
                             | ast::Stmt::Try(_)
@@ -1466,6 +1408,18 @@ impl<'a> SuitePreparation<'a> {
             }
             for index in run.statements {
                 let stmt = &stmts[index];
+                if let ast::Stmt::If(branch) = stmt {
+                    let effect =
+                        children
+                            .prepare
+                            .prepare_if(branch, kind, child_selection, suspended);
+                    plan.residual.push(SourceRun {
+                        at: run.at,
+                        statements: index..index + 1,
+                        effect: Some(effect),
+                    });
+                    continue;
+                }
                 if let ast::Stmt::For(loop_) = stmt {
                     let region =
                         children
@@ -1617,6 +1571,37 @@ impl<'a> SuitePreparation<'a> {
             self.selected_suite(stmts, kind, selection, selection, suspended),
             stmts,
         )
+    }
+
+    fn prepare_if(
+        &mut self,
+        branch: &ast::StmtIf,
+        kind: RegisteredScope,
+        selection: SuiteSelection<'_>,
+        suspended: bool,
+    ) -> SourceEffect {
+        let mut arms = Vec::new();
+        for (test, suite) in if_clauses(branch) {
+            // A dead literal arm in a suspended frame has no resume entry.
+            let test = match test {
+                Some(ast::Expr::BooleanLiteral(literal)) if suspended => {
+                    if !literal.value {
+                        continue;
+                    }
+                    None
+                }
+                test => test.map(|expr| self.physical_operand(expr, kind, selection, suspended)),
+            };
+            let unconditional = test.is_none();
+            arms.push((test, self.physical_suite(suite, kind, selection, suspended)));
+            if unconditional {
+                break;
+            }
+        }
+        SourceEffect::If {
+            range: branch.range(),
+            arms,
+        }
     }
 
     fn prepare_try(
@@ -2128,19 +2113,21 @@ impl statements::StatementLowering for SourceScope<'_> {
                 return Ok(Some(self.store(def.name.as_str(), binding.clone())));
             }
         }
-        let decorators = def.decorator_list.iter().map(|d| &d.expression);
-        let defaults = def
-            .parameters
-            .posonlyargs
-            .iter()
-            .chain(&def.parameters.args)
-            .chain(&def.parameters.kwonlyargs)
-            .filter_map(|p| p.default.as_deref());
-        let header = decorators
-            .chain(defaults)
-            .map(|e| self.ordinary_operand(e))
-            .collect::<Option<_>>()
-            .ok_or(())?;
+        let prepare_header = |scope: &mut Self| {
+            def.decorator_list
+                .iter()
+                .map(|decorator| &decorator.expression)
+                .chain(values::parameter_defaults(&def.parameters))
+                .map(|expr| scope.ordinary_operand(expr))
+                .collect::<Option<Vec<_>>>()
+        };
+        // Ordinary decorators and defaults can suspend in the enclosing frame.
+        let header = if def.type_params.is_none() {
+            self.with_binding_operands(prepare_header)
+        } else {
+            prepare_header(self)
+        }
+        .ok_or(())?;
         let function = operation(
             Builtin::RegisteredDefinition(ir::DefinitionSite::Function(def.start())),
             Type::PythonObject,
@@ -2424,8 +2411,8 @@ struct SourceScope<'a> {
     loop_scope: LoopScope,
     suspending_operands: bool,
     refusal: Option<(TextRange, &'static str)>,
-    // A dictionary reports its first unprepared comprehension. Named expressions and assignment
-    // targets preserve terminal operand errors in their enclosing frame.
+    // A dictionary reports its first unprepared comprehension. Named expressions, assignment
+    // targets, and lambda bindings preserve terminal operand errors in their enclosing frame.
     diagnostic_suspension: Option<bool>,
 }
 
@@ -2437,14 +2424,18 @@ pub(crate) fn inline_operand(
     native_suspension: bool,
 ) -> StdResult<Option<RegisteredOperand>, (TextRange, &'static str)> {
     match expr {
-        ast::Expr::Dict(_) | ast::Expr::Named(_) => {
-            let is_dict = expr.is_dict_expr();
+        ast::Expr::List(_)
+        | ast::Expr::Tuple(_)
+        | ast::Expr::Set(_)
+        | ast::Expr::Dict(_)
+        | ast::Expr::Named(_) => {
+            let is_named = expr.is_named_expr();
             let mut refusal = None;
             let operand = RegisteredOperand::prepare_with(source, kind, |scope| {
-                if is_dict {
-                    scope.suspending_operands = native_suspension;
-                } else {
+                if is_named {
                     scope.diagnostic_suspension = Some(native_suspension);
+                } else {
+                    scope.suspending_operands = native_suspension;
                 }
                 let value = scope.operand(expr);
                 refusal = scope.refusal;
@@ -2454,10 +2445,14 @@ pub(crate) fn inline_operand(
                 refusal.unwrap_or_else(|| {
                     (
                         expr.range(),
-                        if is_dict {
-                            "cannot compile this dictionary display ahead of time"
-                        } else {
-                            "cannot compile this assignment expression ahead of time"
+                        match expr {
+                            ast::Expr::Dict(_) => {
+                                "cannot compile this dictionary display ahead of time"
+                            }
+                            ast::Expr::Named(_) => {
+                                "cannot compile this assignment expression ahead of time"
+                            }
+                            _ => "cannot compile this collection display ahead of time",
                         },
                     )
                 })
@@ -2628,10 +2623,10 @@ impl SourceScope<'_> {
         targets: &[ast::Expr],
         value: Expr,
     ) -> StdResult<Vec<Statement>, ()> {
-        self.with_assignment_operands(|scope| unpacking::bind_assignment(scope, targets, value))
+        self.with_binding_operands(|scope| unpacking::bind_assignment(scope, targets, value))
     }
 
-    fn with_assignment_operands<T>(&mut self, lower: impl FnOnce(&mut Self) -> T) -> T {
+    fn with_binding_operands<T>(&mut self, lower: impl FnOnce(&mut Self) -> T) -> T {
         if self.loop_scope == LoopScope::WithCursor
             && matches!(self.kind, RegisteredScope::Function { is_async: true })
         {
@@ -2653,7 +2648,13 @@ impl SourceScope<'_> {
             }
             return self.statement(stmt, body);
         }
-        if stmt.is_return_stmt()
+        if self.operations.contains_key(&stmt.range())
+            || matches!(
+                stmt,
+                ast::Stmt::Pass(_) | ast::Stmt::Global(_) | ast::Stmt::Nonlocal(_)
+            )
+            || stmt.is_class_def_stmt()
+            || stmt.is_return_stmt()
             || stmt.is_expr_stmt()
             || stmt.is_delete_stmt()
             || stmt
@@ -2899,7 +2900,7 @@ impl SourceScope<'_> {
     /// Its temporary roots keep earlier arguments live across a later suspension.
     fn frame_value(&mut self, expr: &ast::Expr) -> Option<Expr> {
         if matches!(self.kind, RegisteredScope::Function { .. }) {
-            self.with_assignment_operands(|scope| scope.operand(expr))
+            self.with_binding_operands(|scope| scope.operand(expr))
         } else {
             self.operand(expr)
         }
@@ -2920,11 +2921,21 @@ impl SourceScope<'_> {
         value
     }
 
-    fn lambda_binding(&mut self, lambda: &ast::ExprLambda) -> Option<Expr> {
+    fn lambda_binding(
+        &mut self,
+        lambda: &ast::ExprLambda,
+    ) -> StdResult<Expr, (TextRange, &'static str)> {
         let defaults = values::lambda_defaults(lambda)
-            .map(|default| self.ordinary_operand(default))
-            .collect::<Option<_>>()?;
-        Some(values::lambda_binding(lambda, defaults))
+            .map(|default| {
+                self.ordinary_operand(default).ok_or_else(|| {
+                    self.refusal.unwrap_or((
+                        default.range(),
+                        "cannot compile this lambda default ahead of time",
+                    ))
+                })
+            })
+            .collect::<StdResult<_, _>>()?;
+        Ok(values::lambda_binding(lambda, defaults))
     }
 
     fn ordinary_operand(&mut self, expr: &ast::Expr) -> Option<Expr> {
@@ -3031,7 +3042,10 @@ impl SourceScope<'_> {
                 }
                 return None;
             }
-            let binding = self.lambda_binding(lambda)?;
+            let binding = self
+                .lambda_binding(lambda)
+                .inspect_err(|&error| self.refusal = Some(error))
+                .ok()?;
             // A generator expression retains its own clause cursors across an awaited default.
             if self.loop_scope != LoopScope::Outside && !self.generator_expression {
                 let mut suspends = false;
@@ -3049,7 +3063,7 @@ impl SourceScope<'_> {
         } else if let ast::Expr::Named(named) = expr {
             let target = named.target.as_name_expr()?;
             let value =
-                self.with_assignment_operands(|scope| scope.lower_operand(&named.value, whole))?;
+                self.with_binding_operands(|scope| scope.lower_operand(&named.value, whole))?;
             Expr {
                 ty: value.ty,
                 kind: ExprKind::Bind(self.slot(&target.id), Box::new(value)),
@@ -4905,9 +4919,14 @@ mod tests {
                 let mut attrs = 0;
                 let mut items = 0;
                 ir::walk_expressions(&body.function.body, &mut |expr| match &expr.kind {
-                    ExprKind::Builtin(Builtin::RegisteredUnpack { count, star }, _) => {
-                        snapshots.push((*count, *star))
-                    }
+                    ExprKind::Builtin(
+                        Builtin::RegisteredUnpack {
+                            count,
+                            star,
+                            target: Some(target),
+                        },
+                        _,
+                    ) => snapshots.push((*count, *star, &source[*target])),
                     ExprKind::Builtin(
                         Builtin::RegisteredAttribute {
                             action: ir::AttributeAction::Store,
@@ -4921,7 +4940,13 @@ mod tests {
                 ir::walk_statements(&body.function.body, &mut |stmt| {
                     items += usize::from(matches!(stmt, Statement::SetItem(..)));
                 });
-                assert_eq!(snapshots, [(2, None), (2, Some(1))]);
+                assert_eq!(
+                    snapshots,
+                    [
+                        (2, None, "owners[0], (sink.field, *rest)"),
+                        (2, Some(1), "(sink.field, *rest)")
+                    ]
+                );
                 assert_eq!((items, attrs), (1, 1));
             }
         }
@@ -5056,7 +5081,8 @@ mod tests {
                     ExprKind::Builtin(
                         Builtin::RegisteredUnpack {
                             count: 2,
-                            star: None
+                            star: None,
+                            ..
                         },
                         _
                     )
