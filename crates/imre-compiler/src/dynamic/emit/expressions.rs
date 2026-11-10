@@ -134,13 +134,20 @@ impl Function<'_, '_> {
                 is_async: self.is_async,
             }
         };
-        if let Some(operand) =
-            crate::frontend::inline_operand(expr, self.source.registered_source(), kind)
-        {
-            self.prepare_checked_value(&operand.value);
-            return self
-                .frame
-                .prepared_operand(&operand, &self.sites, condition);
+        match crate::frontend::inline_operand(
+            expr,
+            self.source.registered_source(),
+            kind,
+            self.native_suspension,
+        ) {
+            Ok(Some(operand)) => {
+                self.prepare_checked_value(&operand.value);
+                return self.frame.prepared_operand(&operand, &self.sites, condition);
+            }
+            Err((range, reason)) => {
+                return self.with_expression_range(range, |code| code.build_diagnostic(reason));
+            }
+            Ok(None) => {}
         }
         let position = imre_ast::expression_position(
             expr,
@@ -256,10 +263,6 @@ impl Function<'_, '_> {
             });
         }
         match expr {
-            ast::Expr::Dict(v) => self.dict_display(
-                v.items.iter().map(|item| (item.key.as_ref(), &item.value)),
-                Self::expr,
-            ),
             ast::Expr::Named(v) => {
                 let ast::Expr::Name(target) = &*v.target else {
                     return self.unsupported("assignment expression target");

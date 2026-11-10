@@ -1996,6 +1996,7 @@ struct SourceScope<'a> {
     locals: Vec<Type>,
     loop_scope: LoopScope,
     suspending_operands: bool,
+    refused_comprehension: Option<TextRange>,
 }
 
 /// Prepare an inline expression that can require private slots in the enclosing activation.
@@ -2003,20 +2004,29 @@ pub(crate) fn inline_operand(
     expr: &ast::Expr,
     source: values::RegisteredSource<'_>,
     kind: RegisteredScope,
-) -> Option<RegisteredOperand> {
-    if !matches!(
-        expr,
+    native_suspension: bool,
+) -> StdResult<Option<RegisteredOperand>, (TextRange, &'static str)> {
+    match expr {
+        ast::Expr::Dict(_) => {
+            let mut refusal = (expr.range(), "cannot compile this dictionary display ahead of time");
+            let operand = RegisteredOperand::prepare_with(source, kind, |scope| {
+                scope.suspending_operands = native_suspension;
+                let value = scope.operand(expr);
+                if let Some(range) = scope.refused_comprehension {
+                    refusal = (range, "cannot compile this comprehension ahead of time");
+                }
+                value
+            });
+            operand.map(Some).ok_or(refusal)
+        }
         ast::Expr::Named(_)
-            | ast::Expr::Dict(_)
-            | ast::Expr::ListComp(_)
-            | ast::Expr::SetComp(_)
-            | ast::Expr::DictComp(_)
-            | ast::Expr::Generator(_)
-            | ast::Expr::FString(_)
-    ) {
-        return None;
+        | ast::Expr::ListComp(_)
+        | ast::Expr::SetComp(_)
+        | ast::Expr::DictComp(_)
+        | ast::Expr::Generator(_)
+        | ast::Expr::FString(_) => Ok(RegisteredOperand::prepare(expr, source, kind)),
+        _ => Ok(None),
     }
-    RegisteredOperand::prepare(expr, source, kind)
 }
 
 impl unpacking::PatternBinder for SourceScope<'_> {
@@ -2073,6 +2083,7 @@ impl<'a> SourceScope<'a> {
             locals: Vec::new(),
             loop_scope: LoopScope::Outside,
             suspending_operands: false,
+            refused_comprehension: None,
         }
     }
 
@@ -2471,7 +2482,11 @@ impl SourceScope<'_> {
             })
             .ok()?
         } else if matches!(expr, ast::Expr::ListComp(_) | ast::Expr::SetComp(_) | ast::Expr::DictComp(_)) {
-            self.eager_comprehension(expr)?
+            let value = self.eager_comprehension(expr);
+            if value.is_none() {
+                self.refused_comprehension = Some(expr.range());
+            }
+            value?
         } else if (self.comprehension.is_some() || self.generator_expression)
             && matches!(self.kind, RegisteredScope::Function { is_async: true })
             && let ast::Expr::Await(awaited) = expr
@@ -3190,7 +3205,9 @@ mod tests {
             let def = module.parsed.syntax().body[0].as_function_def_stmt().unwrap();
             let expr = def.body[0].as_return_stmt().unwrap().value.as_deref().unwrap();
             let literals = values::ModuleSource::new(module);
-            inline_operand(expr, literals.context(&text), RegisteredScope::Function { is_async })
+            inline_operand(expr, literals.context(&text), RegisteredScope::Function { is_async }, true)
+                .ok()
+                .flatten()
         };
         let operand = prepare("(saved := (inner := await value))", true).unwrap();
         crate::verify::registered(operand.region()).unwrap();
@@ -3208,9 +3225,9 @@ mod tests {
     #[test]
     fn standalone_dictionary_uses_the_current_async_scope() {
         let text = concat!(
-            "async def gather(stream, first, second, mapping):\n",
+            "async def gather(stream, first, second, nested, mapping):\n",
             "    return {0: (saved := [item async for item in stream]),\n",
-            "            1: {await first, await second}, **await mapping}\n",
+            "            1: {await first, await second}, 2: keep([await nested]), **await mapping}\n",
         );
         let graph = SourceGraph::single(text).unwrap();
         let module = &graph.modules[graph.entry];
@@ -3225,9 +3242,12 @@ mod tests {
             .unwrap();
         let literals = values::ModuleSource::new(module);
         let source = literals.context(text);
-        let prepare = |is_async| inline_operand(value, source, RegisteredScope::Function { is_async });
-        assert!(prepare(false).is_none());
-        let operand = prepare(true).unwrap();
+        let prepare = |is_async, suspended| {
+            inline_operand(value, source, RegisteredScope::Function { is_async }, suspended)
+        };
+        assert!(prepare(false, true).is_err());
+        assert!(prepare(true, false).is_err());
+        let operand = prepare(true, true).unwrap().unwrap();
         crate::verify::registered(operand.region()).unwrap();
         assert!(operand.local_names.values().any(|binding| binding.name == "saved"));
         let mut awaits = Vec::new();
@@ -3238,7 +3258,7 @@ mod tests {
                 awaits.push(&text[*range]);
             }
         });
-        assert_eq!(awaits, ["await first", "await second", "await mapping"]);
+        assert_eq!(awaits, ["await first", "await second", "await nested", "await mapping"]);
     }
 
     #[test]
@@ -3250,11 +3270,12 @@ mod tests {
         let expr = function.body[0].as_return_stmt().unwrap().value.as_deref().unwrap();
         let literals = values::ModuleSource::new(module);
         let source = literals.context(text);
-        let value = inline_operand(expr, source, RegisteredScope::Function { is_async: false })
+        let prepare = |kind, suspended| inline_operand(expr, source, kind, suspended).unwrap();
+        let value = prepare(RegisteredScope::Function { is_async: false }, true)
             .expect("the creating generator owns the outer yield");
         crate::verify::registered(value.region()).unwrap();
-        assert!(inline_operand(expr, source, RegisteredScope::Module).is_none());
-        assert!(inline_operand(expr, source, RegisteredScope::Function { is_async: true }).is_none());
+        assert!(prepare(RegisteredScope::Module, false).is_none());
+        assert!(prepare(RegisteredScope::Function { is_async: true }, true).is_none());
     }
 
     #[test]
