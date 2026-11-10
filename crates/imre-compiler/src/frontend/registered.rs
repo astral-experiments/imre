@@ -1030,20 +1030,19 @@ fn loop_transfer(stmt: &ast::Stmt) -> Option<Statement> {
     }
 }
 
-#[derive(Default)]
 pub(crate) struct PreparedRegion {
     /// A disabled loop can only leave through its else suite.
     terminates: bool,
-    pub(crate) body: Vec<Statement>,
-    pub(crate) guards: Vec<PhysicalOperand>,
+    pub(crate) checked: RegisteredFunction,
+    pub(crate) operands: Vec<PhysicalOperand>,
     pub(crate) suites: Vec<RegisteredSuite>,
 }
 
 impl PreparedRegion {
-    fn guard(&mut self, operand: PhysicalOperand) -> Expr {
-        let index = self.guards.len();
-        self.guards.push(operand);
-        Expr::local(index, Type::Bool)
+    pub(crate) fn operand(&mut self, operand: PhysicalOperand, ty: Type) -> Expr {
+        let index = self.operands.len();
+        self.operands.push(operand);
+        Expr::registered_input(index, ty)
     }
 
     fn child(&mut self, suite: RegisteredSuite) -> Vec<Statement> {
@@ -1568,6 +1567,16 @@ impl<'a> SuitePreparation<'a> {
         child
     }
 
+    fn region(&self, kind: RegisteredScope) -> PreparedRegion {
+        let scope = SourceScope::new(kind, self.source, self.operations, &self.sites);
+        PreparedRegion {
+            checked: scope.finish(Vec::new()),
+            operands: Vec::new(),
+            suites: Vec::new(),
+            terminates: false,
+        }
+    }
+
     fn prepare_if(
         &mut self,
         branch: &ast::StmtIf,
@@ -1575,7 +1584,7 @@ impl<'a> SuitePreparation<'a> {
         selection: SuiteSelection,
         suspended: bool,
     ) -> SourceEffect {
-        let mut region = PreparedRegion::default();
+        let mut region = self.region(kind);
         let mut arms = Vec::new();
         let mut otherwise = Vec::new();
         for (test, suite) in if_clauses(branch) {
@@ -1596,18 +1605,18 @@ impl<'a> SuitePreparation<'a> {
             };
             let child = region.child(self.physical_suite(suite, kind, selection, suspended));
             if let Some(test) = test {
-                arms.push((region.guard(test), child));
+                arms.push((region.operand(test, Type::Bool), child));
             } else {
                 otherwise = child;
                 break;
             }
         }
-        region.body.push(Statement::Expr(operation(
+        region.checked.function.body.push(Statement::Expr(operation(
             Builtin::RegisteredStatement(branch.range(), None),
             Type::None,
             vec![],
         )));
-        region.body.extend(statements::if_arms(arms, otherwise));
+        region.checked.function.body.extend(statements::if_arms(arms, otherwise));
         SourceEffect::Region(Box::new(region))
     }
 
@@ -1696,11 +1705,12 @@ impl<'a> SuitePreparation<'a> {
         selection: SuiteSelection,
         suspended: bool,
     ) -> SourceEffect {
-        let mut region = PreparedRegion::default();
+        let mut region = self.region(kind);
         let test = match loop_.test.as_ref() {
             ast::Expr::BooleanLiteral(literal) => Expr::boolean(literal.value),
-            expr => region.guard(
+            expr => region.operand(
                 self.owned_operand(expr, kind, suspended, |scope| scope.condition_operand(expr)),
+                Type::Bool,
             ),
         };
         // A dead body has no resume entry, even when its syntax declares a generator.
@@ -1717,7 +1727,7 @@ impl<'a> SuitePreparation<'a> {
             region.terminates = disabled && !suite.falls_through;
             region.child(suite)
         };
-        region.body.push(Statement::While(test, body, otherwise));
+        region.checked.function.body.push(Statement::While(test, body, otherwise));
         SourceEffect::Region(Box::new(region))
     }
 
@@ -1764,7 +1774,7 @@ impl<'a> SuitePreparation<'a> {
             });
             self.retain_operand(expr, kind, suspended, checked)
         };
-        let input_slot = |slot| Expr::local(slot, Type::PythonObject);
+        let input_slot = |slot| Expr::registered_input(slot, Type::PythonObject);
         let store_input = |slot, input| {
             SourceEffect::Value(
                 Box::new(Statement::Assign(slot, input_slot(0))),
@@ -1933,7 +1943,7 @@ impl<'a> SuitePreparation<'a> {
                         // The suite owns the name binding. Transfer the in-place result to it
                         // after the original target and RHS have both been evaluated.
                         let slot = scope.hidden(Type::PythonObject);
-                        let result = unpacking::take_pattern_temporary(input_slot(slot), slot);
+                        let result = unpacking::take_pattern_temporary(Expr::local(slot, Type::PythonObject), slot);
                         binding = Some(scope.store(name.id.as_str(), result));
                         (
                             Statement::Assign(
@@ -3698,11 +3708,11 @@ mod tests {
         let Ok(SourceEffect::Region(region)) = &run.effect else {
             panic!("expected the conditional to bind its child suite")
         };
-        assert!(matches!(region.body.as_slice(),
+        assert!(matches!(region.checked.function.body.as_slice(),
             [Statement::Expr(mark), Statement::If(..)] if matches!(mark.kind, ExprKind::Builtin(Builtin::RegisteredStatement(range, None), _) if range == stmts[1].range())
         ));
         assert!(matches!(
-            region.guards.as_slice(),
+            region.operands.as_slice(),
             [PhysicalOperand::Checked(_)]
         ));
     }
