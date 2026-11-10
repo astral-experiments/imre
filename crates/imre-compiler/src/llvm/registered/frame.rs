@@ -83,8 +83,7 @@ pub(crate) struct RegisteredFrame<'a, 'p> {
     pub(super) iteration: super::IterationState,
     pub(crate) loops: Vec<super::LoopTarget>,
     pub(crate) current_range: TextRange,
-    /// A mixed block branches to its enclosing finally/with cleanup in the syntax visitor.
-    pub(crate) cleanup_returns: Option<Vec<(String, String, TextRange)>>,
+    pub(crate) regions: Vec<super::context::Region<'p>>,
     pub(crate) async_generator: bool,
     pub(crate) class_locals: Option<ClassBindings>,
     pub(crate) annotation_values: Option<String>,
@@ -138,7 +137,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
             iteration: Default::default(),
             loops: Vec::new(),
             current_range: TextRange::empty(start),
-            cleanup_returns: None,
+            regions: Vec::new(),
             async_generator: false,
             class_locals: None,
             annotation_values: None,

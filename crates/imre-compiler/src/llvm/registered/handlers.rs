@@ -2,7 +2,7 @@
 
 use super::{
     Frame, FrameEmitter, RegisteredFrame,
-    context::{Region, RegionEmitter},
+    context::{Finally, Region, RegionEmitter},
 };
 use crate::ir::{ExceptHandler, ExceptionMatcher, Statement};
 use crate::llvm::operations::CheckedBody;
@@ -30,7 +30,7 @@ impl RegisteredFrame<'_, '_> {
 /// Install the prepared suite for abrupt exits and emit it on the normal and error edges.
 pub(crate) fn finalized<'a, 'p, E: RegionEmitter<'a, 'p>>(
     code: &mut E,
-    body: E::Finally,
+    body: Finally<'p>,
     protected: impl FnOnce(&mut E),
 ) {
     let failed = code.name("b");
@@ -42,9 +42,9 @@ pub(crate) fn finalized<'a, 'p, E: RegionEmitter<'a, 'p>>(
         loops: code.loops.len(),
         caught: code.caught.len(),
     };
-    code.regions().push(region);
+    code.regions.push(region);
     protected(code);
-    let Some(Region::Finally { body, .. }) = code.regions().pop() else {
+    let Some(Region::Finally { body, .. }) = code.regions.pop() else {
         unreachable!("active finally region")
     };
     code.body.error_target = enclosing;
@@ -66,9 +66,9 @@ pub(crate) fn finalized<'a, 'p, E: RegionEmitter<'a, 'p>>(
         enclosing: Some(outer),
         outer: code.body.error_target.clone(),
     };
-    code.regions().push(pending);
+    code.regions.push(pending);
     code.emit_finally(&body);
-    code.regions().pop();
+    code.regions.pop();
     code.caught.pop();
     code.live.pop();
     if !code.body.terminated {
@@ -101,12 +101,12 @@ fn arm<'a, 'p, E: RegionEmitter<'a, 'p>, S, N: AsRef<str>>(
         code.bind(name, exception);
         let failed = code.name("b");
         let enclosing = std::mem::replace(&mut code.body.error_target, failed.clone());
-        code.regions().push(Region::ExceptionName {
+        code.regions.push(Region::ExceptionName {
             name: name.into(),
             outer: enclosing.clone(),
         });
         emit_suite(code, body);
-        code.regions().pop();
+        code.regions.pop();
         code.body.error_target = enclosing;
         if !code.body.terminated {
             code.clear_exception_name(name);
@@ -308,10 +308,10 @@ impl Frame<'_, '_, '_> {
             run(self);
             return;
         }
-        finalized(self, finalbody.into(), run);
+        finalized(self, Finally::Checked(finalbody.into()), run);
     }
 
-    pub(super) fn emit_suite(&mut self, suite: &[Statement]) {
+    pub(crate) fn emit_suite(&mut self, suite: &[Statement]) {
         CheckedBody::registered(self.reborrow()).emit_block(suite);
     }
 }

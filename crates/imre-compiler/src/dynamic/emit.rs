@@ -902,7 +902,6 @@ impl SourceMap<'_> {
             in_function,
             declared_globals: Default::default(),
             prefix,
-            exits: Vec::new(),
         }
     }
 
@@ -1114,10 +1113,9 @@ struct Function<'a, 'p> {
     prefix: String,
     declared_globals: std::collections::BTreeSet<String>,
     in_function: bool,
-    exits: Vec<crate::llvm::registered::context::Region<&'p crate::frontend::RegisteredSuite>>,
 }
 
-/// A prepared suite adds its lexical scope and pending exits to the registered frame.
+/// A prepared suite uses the activation's roots, exception state and lexical exits.
 impl<'a, 'p> std::ops::Deref for Function<'a, 'p> {
     type Target = RegisteredFrame<'a, 'p>;
     fn deref(&self) -> &Self::Target {
