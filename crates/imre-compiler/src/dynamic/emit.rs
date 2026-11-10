@@ -1705,13 +1705,20 @@ mod tests {
 
     #[test]
     fn only_mixed_fixed_pair_loops_test_the_acquired_cursor() {
-        // An annotated subscript store leaves a physical child in the loop body.
-        let mixed = "        sink[0]: int = 1";
+        let mixed = concat!(
+            "        try:\n",
+            "            raise (yield 'send-error')\n",
+            "        except ValueError:\n",
+            "            pass",
+        );
+        let annotated = "        sink[0]: int = 1";
         let checked_default = "        def resume(answer=(yield 1)):\n            return answer";
         let checked = "        publish(x, y)";
         let pair_header = "def f(rows):\n    for x, y in rows:";
         for (header, body, guarded) in [
             (pair_header, mixed, true),
+            ("def f():\n    for x, y in (yield 'rows'):", checked, true),
+            (pair_header, annotated, false),
             (pair_header, checked, false),
             (pair_header, checked_default, false),
             ("def f(table):\n    for x in table.items():", mixed, false),
@@ -1732,21 +1739,20 @@ mod tests {
                 ModuleOrigin::Program(None),
             )
             .unwrap();
+            let plan = module.source.function_bodies[&ruff_text_size::TextSize::new(0)]
+                .suite()
+                .expect("prepared function suite");
+            if body == annotated {
+                assert!(plan.fully_checked() && module.syntax.is_none(), "{source}");
+            }
             if guarded {
-                let def = module.syntax.as_ref().unwrap()[0]
-                    .as_function_def_stmt()
-                    .unwrap();
-                let plan = module
-                    .source
-                    .function_bodies
-                    .get(&def.start())
-                    .and_then(|entry| entry.suite())
-                    .or_else(|| module.source.nested_bodies.get(&def.body[0].start()))
-                    .unwrap();
-                let Some(crate::frontend::SourceEffect::For(region)) = &plan.residual[0].effect
-                else {
-                    panic!("expected prepared for");
+                let [run] = plan.residual.as_slice() else {
+                    panic!("expected one mixed loop in {source}");
                 };
+                let Some(crate::frontend::SourceEffect::For(region)) = &run.effect else {
+                    panic!("expected a prepared for in {source}");
+                };
+                assert!(matches!(region.acquire, crate::ir::IteratorOp::Loop));
                 let crate::frontend::PhysicalBinding::Checked {
                     entered,
                     binding,
