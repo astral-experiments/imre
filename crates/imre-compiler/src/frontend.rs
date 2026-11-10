@@ -13454,6 +13454,7 @@ impl<'a> Checker<'a> {
                             )
                         };
                         scalar(arg.ty)
+                            || (args.len() > 1 && self.types.element(arg.ty).is_some_and(scalar))
                             || self
                                 .types
                                 .members(arg.ty)

@@ -9435,9 +9435,7 @@ impl Emitter<'_, '_> {
                     args.iter()
                         .map(|arg| {
                             u8::try_from(representation_kind(arg.value.ty, &self.module.types))
-                                .expect(
-                                    "checked print operands have non-nullable scalar or union tags",
-                                )
+                                .expect("checked print operands have non-nullable word kinds")
                         })
                         .collect(),
                 );
