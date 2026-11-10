@@ -2,7 +2,7 @@ use ruff_python_ast as ast;
 use ruff_text_size::Ranged;
 
 use super::FrameEmitter;
-use super::{Body, Function, permanent};
+use super::{Function, permanent};
 use crate::frontend::{RegisteredScope, SourceOperand, prepare_boolean};
 use crate::ir::control::Context as BooleanContext;
 use crate::llvm::operations::branches::{Logical, LogicalEmitter, LogicalInput};
@@ -53,6 +53,11 @@ impl Function<'_, '_> {
     fn source_lambda(&mut self, lambda: &ast::ExprLambda) -> String {
         let site = lambda.start();
         let plan = &self.source.lambdas[&site];
+        let Some(body) = &plan.body else {
+            return self.with_source_range(lambda.body.range(), |code| {
+                code.build_diagnostic("cannot compile this lambda body ahead of time")
+            });
+        };
         let defaults = plan
             .defaults
             .iter()
@@ -72,10 +77,6 @@ impl Function<'_, '_> {
                 }
             })
             .collect::<Vec<_>>();
-        let body = match &plan.body {
-            Some(body) => Body::CheckedExpression(body),
-            None => Body::Expression(&lambda.body),
-        };
         self.place_lambda(site, body, false);
         let scope = self.scope.clone();
         self.sites

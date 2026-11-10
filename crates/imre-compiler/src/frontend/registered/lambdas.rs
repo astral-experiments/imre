@@ -237,10 +237,6 @@ impl RegisteredLambda {
         source: values::RegisteredSource<'_>,
     ) -> Option<RegisteredFunction> {
         let expr = &lambda.body;
-        if let Some(value) = values::Region::Lambda.operand(expr, source) {
-            return Some(RegisteredFunction::expression(expr.range(), value));
-        }
-        // Eager displays and named expressions need storage in the lambda's own activation.
         let operations = HashMap::new();
         let sites = StatementSites::default();
         let mut scope = SourceScope::new(RegisteredScope::Lambda, source, &operations, &sites);
