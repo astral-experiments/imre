@@ -181,7 +181,9 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
                 uses_python_protocol = true;
                 args.len() == 2
             }
-            ExprKind::Builtin(Builtin::RegisteredStatement(..), _) => true,
+            ExprKind::Builtin(Builtin::RegisteredStatement(..) | Builtin::RegisteredDiscard, _) => {
+                true
+            }
             ExprKind::Builtin(Builtin::RegisteredLocation(..), operands) => operands.len() == 1,
             ExprKind::Builtin(Builtin::RegisteredAttribute { action, .. }, operands) => {
                 use ir::AttributeAction;
@@ -710,6 +712,7 @@ impl Frame<'_, '_, '_> {
                     | Builtin::RegisteredImport(_)
                     | Builtin::RegisteredDeleteName(..)
                     | Builtin::RegisteredNamespaceAnnotation(_)
+                    | Builtin::RegisteredDiscard
                     | Builtin::RegisteredAnnotationStart
                     | Builtin::RegisteredAnnotationFormat
                     | Builtin::RegisteredAnnotationInsert(_)
@@ -970,6 +973,12 @@ impl Frame<'_, '_, '_> {
             (Builtin::RegisteredAnnotationFormat, [format]) => {
                 let format = self.evaluate_handle(format);
                 self.code.op("annotation_format", &[&format])
+            }
+            (Builtin::RegisteredDiscard, operands) => {
+                for operand in operands {
+                    self.discard_operand(|frame| frame.evaluate_handle(operand));
+                }
+                "0".to_owned()
             }
             (Builtin::RegisteredAnnotationStart, []) => {
                 self.code.begin_annotations();

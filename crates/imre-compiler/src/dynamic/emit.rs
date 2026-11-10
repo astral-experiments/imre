@@ -2368,6 +2368,76 @@ mod tests {
     }
 
     #[test]
+    fn bare_annotation_targets_emit_after_erasing_their_syntax() {
+        use crate::ir::{self, Builtin, ExprKind, Node};
+
+        let mut module = PreparedBody::module(
+            "targets",
+            Path::new("targets.py"),
+            "owner.field: Unused\nvalues[(left, right):stop:step, (one, two)]: Unused\n",
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let suite = module.source.initializer.as_ref().unwrap();
+        assert!(suite.fully_checked());
+        let mut reads = Vec::new();
+        let mut discarded = 0;
+        let mut tuples = 0;
+        ir::walk_nodes(&suite.checked.function.body, &mut |node, _| {
+            if let Node::Expression(expr) = node {
+                match &expr.kind {
+                    ExprKind::Builtin(Builtin::RegisteredName(name), _) => {
+                        reads.push(name.as_str())
+                    }
+                    ExprKind::Builtin(Builtin::RegisteredDiscard, operands) => {
+                        discarded += operands.len();
+                    }
+                    ExprKind::Tuple(_) => tuples += 1,
+                    _ => {}
+                }
+            }
+        });
+        assert_eq!(
+            reads,
+            [
+                "owner", "values", "left", "right", "stop", "step", "one", "two"
+            ]
+        );
+        // The tuple used as a slice bound is evaluated as one operand.
+        assert_eq!(tuples, 1);
+        assert_eq!(discarded, 7);
+        let before = module.standalone().unwrap().unwrap();
+        module.syntax.as_mut().unwrap().to_mut().clear();
+        assert_eq!(module.standalone().unwrap().unwrap(), before);
+    }
+
+    #[test]
+    fn an_indexed_store_retains_its_code_constant_key() {
+        let mut module = PreparedBody::module(
+            "store",
+            Path::new("store.py"),
+            "target()[1000, -0.0, 'key']: int = rhs()\n",
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let before = module.standalone().unwrap().unwrap();
+        let stmt = module.syntax.as_mut().unwrap().to_mut()[0]
+            .as_ann_assign_stmt_mut()
+            .unwrap();
+        let key = &mut stmt.target.as_subscript_expr_mut().unwrap().slice;
+        let Some(crate::frontend::ExpressionSelection::Checked(value)) =
+            module.source.statement_sites.expressions.get(key)
+        else {
+            panic!("expected the checked store key")
+        };
+        assert!(crate::ir::Constant::from_expr(value).is_some());
+        key.as_tuple_expr_mut().unwrap().elts.clear();
+        assert_eq!(module.standalone().unwrap().unwrap(), before);
+    }
+
+    #[test]
     fn a_physical_subscript_retains_its_receiver_and_individual_slice_bounds() {
         use crate::frontend::SourceOperand::{Checked, Residual};
 

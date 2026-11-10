@@ -324,10 +324,22 @@ impl<'a> Visitor<'a> for PhysicalPreparation<'_, '_> {
     fn visit_expr(&mut self, node: &'a ast::Expr) {
         // Store and delete targets consume their receivers, keys or unpacked children.
         // They have no value to emit for the target itself.
+        if let ast::Expr::Subscript(index) = node
+            && index.ctx != ast::ExprContext::Load
+        {
+            self.visit_expr(&index.value);
+            if let Some(key) = values::registered_index_key(&index.slice, self.source) {
+                self.sites
+                    .selected
+                    .insert(site(&index.slice), Selection::Checked(key));
+            } else {
+                self.visit_expr(&index.slice);
+            }
+            return;
+        }
         let target = match node {
             ast::Expr::Name(v) => Some(v.ctx),
             ast::Expr::Attribute(v) => Some(v.ctx),
-            ast::Expr::Subscript(v) => Some(v.ctx),
             ast::Expr::List(v) => Some(v.ctx),
             ast::Expr::Tuple(v) => Some(v.ctx),
             ast::Expr::Starred(v) => Some(v.ctx),
