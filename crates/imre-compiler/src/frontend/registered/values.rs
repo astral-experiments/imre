@@ -749,15 +749,17 @@ pub(super) fn lambda_binding(lambda: &ast::ExprLambda, defaults: Vec<Expr>) -> E
     )
 }
 
-/// Check the body and defaults in their defining region. The caller may lower the
-/// defaults with its own local slots, namespace or suspension state.
-pub(super) fn can_bind(lambda: &ast::ExprLambda, source: RegisteredSource<'_>) -> bool {
-    if let Some(sites) = source.lambdas {
-        return sites
+/// The caller lowers each default in its enclosing lexical scope.
+pub(super) fn has_checked_lambda_body(
+    lambda: &ast::ExprLambda,
+    source: RegisteredSource<'_>,
+) -> bool {
+    match source.lambdas {
+        Some(sites) => sites
             .get(&lambda.start())
-            .is_some_and(|site| site.body.is_some() && site.defaults.iter().all(Option::is_some));
+            .is_some_and(|site| site.body.is_some()),
+        None => Region::Lambda.operand(&lambda.body, source).is_some(),
     }
-    checked_binding(lambda, source).is_some()
 }
 
 pub(super) fn checked_binding(
@@ -954,7 +956,7 @@ impl Checker<'_> {
     ) -> Result<Option<Expr>, String> {
         let source = module.context(self.source);
         if let ast::Expr::Lambda(lambda) = node {
-            if !can_bind(lambda, source) {
+            if checked_binding(lambda, source).is_none() {
                 return Ok(None);
             }
             let defaults = lambda_defaults(lambda)
