@@ -209,7 +209,7 @@ pub(crate) struct CheckedSites {
     pub(crate) definitions: HashMap<TextSize, Declaration>,
     pub(crate) lambdas: HashMap<TextSize, CompiledDefinition>,
     pub(crate) generators: HashMap<TextRange, CompiledGenerator>,
-    pub(crate) aliases: HashMap<TextSize, CompiledAlias>,
+    pub(crate) aliases: HashMap<TextSize, Result<CompiledAlias, String>>,
     pub(crate) annotation_fields: HashMap<TextSize, (String, TextRange)>,
 }
 

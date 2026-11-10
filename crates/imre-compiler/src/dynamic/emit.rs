@@ -503,35 +503,12 @@ impl<'a> PreparedBody<'a, '_> {
         let sites = crate::frontend::registered_sites(&body, &private_names, &annotation_operands);
         let declarations = source_declarations(&sites);
         let mut operations = sites.operations;
-        let mut type_aliases = HashMap::new();
+        let mut aliases = Vec::new();
         let mut logicals = crate::frontend::LogicalSites::default();
         let mut scopes = crate::frontend::function_scope::ScopeFacts::prepare(
             &body,
             &private_names,
-            |alias| {
-                let Some(name) = alias.name.as_name_expr() else {
-                    return;
-                };
-                let body = crate::frontend::type_alias_body(alias, values);
-                let parameters = alias.type_params.as_deref().map(|params| {
-                    crate::frontend::registered_type_parameters(params, &private_names)
-                });
-                if body.is_some() {
-                    operations.insert(
-                        alias.range(),
-                        crate::frontend::registered_type_alias(alias.start()),
-                    );
-                }
-                type_aliases.insert(
-                    alias.start(),
-                    TypeAliasDefinition {
-                        range: alias.range(),
-                        name: name.id.to_string(),
-                        body,
-                        parameters,
-                    },
-                );
-            },
+            |alias| aliases.push(alias),
             |expr| logicals.visit(expr, values),
         );
         let lambdas = RegisteredLambda::collect(&body, values, std::mem::take(&mut scopes.lambdas));
@@ -539,6 +516,28 @@ impl<'a> PreparedBody<'a, '_> {
             lambdas: Some(&lambdas),
             ..values
         };
+        let mut type_aliases = HashMap::new();
+        for alias in aliases {
+            let Some(name) = alias.name.as_name_expr() else {
+                continue;
+            };
+            operations.insert(
+                alias.range(),
+                crate::frontend::registered_type_alias(alias.start()),
+            );
+            type_aliases.insert(
+                alias.start(),
+                TypeAliasDefinition {
+                    range: alias.range(),
+                    name: name.id.to_string(),
+                    body: crate::frontend::type_alias_body(&alias.value, values)
+                        .ok_or(alias.value.range()),
+                    parameters: alias.type_params.as_deref().map(|params| {
+                        crate::frontend::registered_type_parameters(params, &private_names)
+                    }),
+                },
+            );
+        }
         let mut prepare = crate::frontend::SuitePreparation::new(
             &operations,
             values,
@@ -832,6 +831,7 @@ enum DefinitionName<'a> {
     Binding(&'a ast::Identifier),
     Plain(&'a str),
     Generator(TextRange),
+    TypeAlias(&'a str),
 }
 
 enum Body<'a> {
@@ -845,11 +845,7 @@ enum Body<'a> {
         AnnotationScope,
     ),
     Checked(&'a crate::frontend::RegisteredFunction),
-    AnnotationOperand(
-        ruff_text_size::TextRange,
-        &'a crate::frontend::RegisteredOperand,
-    ),
-    AliasEvaluator(AliasValue<'a>),
+    AnnotationOperand(&'a crate::frontend::AnnotationCode),
 }
 
 enum Entry {
@@ -896,15 +892,10 @@ impl<'a> std::ops::Deref for SourceMap<'a> {
     }
 }
 
-enum AliasValue<'a> {
-    Checked(&'a crate::frontend::RegisteredFunction),
-    Residual(&'a ast::Expr),
-}
-
 struct TypeAliasDefinition {
     range: ruff_text_size::TextRange,
     name: String,
-    body: Option<crate::frontend::RegisteredFunction>,
+    body: Result<crate::frontend::AnnotationCode, TextRange>,
     parameters: Option<Vec<crate::ir::RegisteredTypeParameter>>,
 }
 
@@ -1150,22 +1141,14 @@ impl SourceMap<'_> {
                     }
                 });
             }
-            Body::AnnotationOperand(range, operand) => {
-                f.checkpoint(&range);
+            Body::AnnotationOperand(code) => {
+                let operand = &code.operand;
+                f.checkpoint(&code.range);
                 f.prepare_checked_value(&operand.value);
                 let value = f.frame.prepared_operand(operand, &f.sites, false);
                 f.return_value(&value);
             }
-            Body::Checked(checked) | Body::AliasEvaluator(AliasValue::Checked(checked)) => {
-                f.checked_function(checked);
-            }
-            Body::AliasEvaluator(AliasValue::Residual(expr)) => {
-                f.checkpoint(expr);
-                let format = f.lookup(".format");
-                f.op("annotation_format", &[&format]);
-                let value = f.expr(expr);
-                f.return_value(&value);
-            }
+            Body::Checked(checked) => f.checked_function(checked),
         }
         f.frame.finish(false)
     }
@@ -2402,16 +2385,14 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             .iter()
             .filter_map(ast::Stmt::as_type_alias_stmt)
         {
-            let shared = crate::frontend::registered_value(
+            let shared = crate::frontend::AnnotationCode::prepare(
                 &alias.value,
                 prepared.source.registered_source(),
             );
-            let checked = prepared.source.type_aliases[&alias.start()].body.is_some();
+            let checked = prepared.source.type_aliases[&alias.start()].body.is_ok();
             let name = alias.name.as_name_expr().unwrap().id.as_str();
             assert_eq!(checked, shared.is_some(), "{name}");
-            if name != "Completer" {
-                assert!(checked, "expected checked operands for {name}");
-            }
+            assert!(checked, "expected checked operands for {name}");
             assert_eq!(
                 checked,
                 prepared
@@ -2421,6 +2402,41 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             );
         }
         prepared.standalone().unwrap().expect("native initializer");
+    }
+
+    #[test]
+    fn boxed_type_alias_values_emit_after_withdrawing_the_alias_statements() {
+        use ast::visitor::transformer::{self, Transformer};
+
+        struct WithdrawAliases(std::cell::Cell<usize>);
+        impl Transformer for WithdrawAliases {
+            fn visit_stmt(&self, stmt: &mut ast::Stmt) {
+                if let ast::Stmt::TypeAlias(alias) = stmt {
+                    self.0.set(self.0.get() + 1);
+                    *stmt = ast::StmtPass {
+                        range: alias.range(),
+                        node_index: Default::default(),
+                    }
+                    .into();
+                } else {
+                    transformer::walk_stmt(self, stmt);
+                }
+            }
+        }
+
+        let mut prepared = PreparedBody::module(
+            "boxed_type_alias_values",
+            Path::new("boxed_type_alias_values.py"),
+            include_str!("../../../../tests/fixtures/boxed_type_alias_values.py"),
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let original = prepared.standalone().unwrap().unwrap();
+        let withdraw = WithdrawAliases(Default::default());
+        withdraw.visit_body(prepared.syntax.as_mut().unwrap().to_mut());
+        assert_eq!(withdraw.0.get(), 4);
+        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
     }
 
     #[test]
@@ -2496,9 +2512,14 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         )
         .unwrap();
         let alias = &prepared.source.type_aliases[&prepared.syntax.as_ref().unwrap()[0].start()];
-        let body = &alias.body.as_ref().expect("checked alias value").function.body;
+        let body = &alias
+            .body
+            .as_ref()
+            .expect("checked alias value")
+            .operand
+            .value;
         let mut sites = Vec::new();
-        crate::ir::walk_expressions(body, &mut |expr| {
+        crate::ir::walk_operand_expressions(body, &mut |expr| {
             if let ExprKind::Builtin(Builtin::RegisteredLambda(site, _), _) = &expr.kind {
                 sites.push(*site);
             }
@@ -2541,9 +2562,12 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             .body
             .as_ref()
             .unwrap()
-            .function
-            .body;
-        let [_, Statement::Expr(format), Statement::Return(value)] = callback.as_slice() else {
+            .operand
+            .value;
+        let ExprKind::Scope { body, value, .. } = &callback.kind else {
+            panic!("expected a guarded alias value");
+        };
+        let [Statement::Expr(format)] = body.as_slice() else {
             panic!("expected the format check before the alias value");
         };
         assert!(

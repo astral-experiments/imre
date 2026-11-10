@@ -1006,9 +1006,16 @@ impl Frame<'_, '_, '_> {
                 self.sites
                     .definition(self.code, site.start(), &header, class_arguments)
             }
-            (Builtin::RegisteredTypeAlias(site), []) => {
-                self.sites.aliases[site].instantiate(self.code)
-            }
+            (Builtin::RegisteredTypeAlias(site), []) => match &self.sites.aliases[site] {
+                Ok(alias) => alias.instantiate(self.code),
+                Err(error) => {
+                    self.code
+                        .output
+                        .diagnostic
+                        .get_or_insert_with(|| error.clone());
+                    "0".to_owned()
+                }
+            },
             (Builtin::RegisteredImport(import), []) => {
                 self.code.namespace_import(import);
                 "0".to_owned()

@@ -379,10 +379,10 @@ impl ScopeFacts {
             .map_or(def.start(), Ranged::start)]
     }
 
-    pub(crate) fn prepare(
-        body: &[ast::Stmt],
+    pub(crate) fn prepare<'a>(
+        body: &'a [ast::Stmt],
         names: &imre_ast::Names,
-        alias_site: impl FnMut(&ast::StmtTypeAlias),
+        alias_site: impl FnMut(&'a ast::StmtTypeAlias),
         expression_site: impl FnMut(&ast::Expr),
     ) -> Self {
         let mut scopes = Self::default();
@@ -413,7 +413,9 @@ struct Collector<'a, A, E> {
     expression_site: E,
 }
 
-impl<'a, A: FnMut(&ast::StmtTypeAlias), E: FnMut(&ast::Expr)> Visitor<'a> for Collector<'_, A, E> {
+impl<'a, A: FnMut(&'a ast::StmtTypeAlias), E: FnMut(&ast::Expr)> Visitor<'a>
+    for Collector<'_, A, E>
+{
     fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
         let strings = self.names.string_annotations;
         let parent = self.scope;
