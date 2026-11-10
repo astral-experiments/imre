@@ -8652,7 +8652,7 @@ impl<'a> Checker<'a> {
                     return Ok(registered::values::located(
                         expression.range(),
                         expression.start(),
-                        registered::values::subscript(subscript, list, key),
+                        registered::values::subscript(subscript, list, key, self.source),
                     ));
                 }
                 if self.dict_or_record(list.ty).is_some() {

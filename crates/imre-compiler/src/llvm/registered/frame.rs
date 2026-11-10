@@ -4,7 +4,7 @@ use super::sequences::{permanent_handle, spread};
 use super::{
     CallArguments, GUARDED_LIT, GUARDED_NAMED_OP, NAMED_OP, Output, permanent, suspension,
 };
-use super::{IndexKey, suspension::Suspension};
+use super::{ReadKey, suspension::Suspension};
 use crate::frontend::function_scope::ClassBindings;
 use crate::frontend::push_codepoints;
 use crate::ir;
@@ -954,39 +954,25 @@ pub(crate) trait FrameEmitter<'a, 'p>:
         })
     }
 
-    fn slice_object<T>(
-        &mut self,
-        bounds: [Option<&T>; 3],
-        mut evaluate: impl FnMut(&mut Self, &T) -> String,
-    ) -> String {
-        let [start, stop, step] =
-            bounds.map(|bound| bound.map_or_else(|| "0".into(), |bound| evaluate(self, bound)));
+    fn slice_object(&mut self, [start, stop, step]: [String; 3]) -> String {
         self.op("slice_object", &[&start, &stop, &step])
     }
 
-    fn subscript<T>(
+    fn read_item(
         &mut self,
         base: &str,
-        key: IndexKey<'_, T>,
+        key: ReadKey,
         range: TextRange,
         base_end: TextSize,
-        mut evaluate: impl FnMut(&mut Self, &T) -> String,
     ) -> String {
         let span = self.expression_range_span(range, base_end, b'[');
         match key {
-            IndexKey::Object(key) => {
-                let key = evaluate(self, key);
-                self.op_at("get", &[base, &key], span)
-            }
-            IndexKey::Prepared(key) => self.op_at("get", &[base, &key], span),
-            IndexKey::Bounds(lower, upper, constant) => {
-                let [start, stop] = [lower, upper]
-                    .map(|bound| bound.map_or_else(|| "0".into(), |bound| evaluate(self, bound)));
+            ReadKey::Object(key) => self.op_at("get", &[base, &key], span),
+            ReadKey::Bounds { start, stop, slot } => {
                 self.take_matching_check();
                 let position =
                     span.map_or_else(|| "null".into(), |span| self.output.position(span));
-                if let Some(key) = constant {
-                    let slot = self.constant_slot(key.clone());
+                if let Some(slot) = slot {
                     self.checked(&format!("call i64 @imre_dyn_get_linked_slice_at(ptr %ctx, i64 {base}, i64 {start}, i64 {stop}, ptr {slot}, ptr {position})"))
                 } else {
                     self.checked(&format!("call i64 @imre_dyn_get_slice_at(ptr %ctx, i64 {base}, i64 {start}, i64 {stop}, ptr {position})"))
@@ -1115,7 +1101,7 @@ pub(crate) trait FrameEmitter<'a, 'p>:
         evaluate: impl FnMut(&mut Self, &T) -> String,
     ) -> String {
         match op {
-            Builtin::RegisteredCall(call) => self.call_value(call, target, args, None, evaluate),
+            Builtin::RegisteredCall(call) => self.call_value(call, target, args, evaluate),
             Builtin::RegisteredAttribute {
                 action,
                 name,
@@ -1160,7 +1146,6 @@ pub(crate) trait FrameEmitter<'a, 'p>:
         call: &ir::RegisteredCall,
         target: &T,
         mut args: impl Iterator<Item = &'e T>,
-        partition: Option<(u32, String)>,
         mut evaluate: impl FnMut(&mut Self, &T) -> String,
     ) -> String {
         use ir::{RegisteredArguments, RegisteredCallTarget};
@@ -1198,7 +1183,10 @@ pub(crate) trait FrameEmitter<'a, 'p>:
                     .chain(args.map(|a| evaluate(self, a)))
                     .collect();
                 let (array, count) = self.handle_array(&values);
-                if let Some((index, get_position)) = partition {
+                if let Some((index, range)) = call.partition_field {
+                    let span = self.expression_range_span(range, call.range.end(), b'[');
+                    let get_position =
+                        span.map_or_else(|| "null".into(), |span| self.output.position(span));
                     debug_assert!(receiver_slot && count == 2);
                     CallArguments::PartitionField {
                         array,

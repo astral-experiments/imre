@@ -1,4 +1,4 @@
-use crate::llvm::registered::IndexKey;
+use crate::llvm::registered::ReadKey;
 use ruff_python_ast as ast;
 use ruff_text_size::Ranged;
 
@@ -128,46 +128,34 @@ impl Function<'_, '_> {
         }
         match expr {
             ast::Expr::Subscript(v) => {
-                if let Some(index) = self.source.registered_source().partition_index(v) {
-                    let span = self.expression_span(expr, &v.value, b'[');
-                    let position =
-                        span.map_or_else(|| "null".into(), |span| self.output.position(span));
-                    let call = v.value.as_call_expr().expect("selected partition call");
-                    let (site, target) = self.source.registered_source().call(call);
-                    return self.call_value(
-                        &site,
-                        target,
-                        crate::frontend::registered_arguments(&call.arguments),
-                        Some((index, position)),
-                        Self::expr,
-                    );
-                }
-                let constant = crate::frontend::registered_constant_key(
-                    &v.slice,
-                    self.source.registered_source(),
-                );
                 let base = self.expr(&v.value);
-                let key = match v.slice.as_ref() {
-                    ast::Expr::Slice(slice) if slice.step.is_none() => IndexKey::Bounds(
-                        slice.lower.as_deref(),
-                        slice.upper.as_deref(),
-                        constant.as_ref().map(|(k, _)| k),
-                    ),
-                    _ if let Some((_, value)) = &constant => {
-                        IndexKey::Prepared(self.registered_value(value))
-                    }
-                    key => IndexKey::Object(key),
+                let key = if let ast::Expr::Slice(slice) = &*v.slice
+                    && slice.step.is_none()
+                {
+                    let [start, stop] =
+                        [slice.lower.as_deref(), slice.upper.as_deref()].map(|bound| {
+                            bound.map_or_else(|| "0".into(), |bound| self.index_operand(bound))
+                        });
+                    let slot = crate::frontend::registered_constant_key(
+                        &v.slice,
+                        self.source.registered_source(),
+                    )
+                    .map(|(key, _)| self.constant_slot(key));
+                    ReadKey::Bounds { start, stop, slot }
+                } else {
+                    ReadKey::Object(self.index_operand(&v.slice))
                 };
-                self.subscript(&base, key, v.range(), v.value.end(), Self::index_operand)
+                self.read_item(&base, key, v.range(), v.value.end())
             }
-            ast::Expr::Slice(slice) => self.slice_object(
-                [
+            ast::Expr::Slice(slice) => {
+                let bounds = [
                     slice.lower.as_deref(),
                     slice.upper.as_deref(),
                     slice.step.as_deref(),
-                ],
-                Self::expr,
-            ),
+                ]
+                .map(|bound| bound.map_or_else(|| "0".into(), |bound| self.expr(bound)));
+                self.slice_object(bounds)
+            }
             ast::Expr::Dict(v) => self.dict_display(
                 v.items.iter().map(|item| (item.key.as_ref(), &item.value)),
                 Self::expr,
