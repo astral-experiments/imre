@@ -984,7 +984,13 @@ impl Inference {
                 if let Some(primary) = reports.next() {
                     if primary.kind.is_object() {
                         registered::capture(
-                            graph, signatures, classes, types, self, &globals, false,
+                            graph,
+                            signatures,
+                            classes,
+                            types,
+                            self,
+                            &globals,
+                            registered::Capture::Solved,
                         );
                     }
                     return Err(primary.with_following(reports));
@@ -1000,7 +1006,13 @@ impl Inference {
                         || matches!(unresolved.kind, Kind::UnresolvedParameter(..))
                     {
                         registered::capture(
-                            graph, signatures, classes, types, self, &globals, true,
+                            graph,
+                            signatures,
+                            classes,
+                            types,
+                            self,
+                            &globals,
+                            registered::Capture::IncludeLive,
                         );
                     }
                     return Err(unresolved);

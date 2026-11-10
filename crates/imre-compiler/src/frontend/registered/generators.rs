@@ -10,7 +10,41 @@ pub(crate) struct RegisteredGenerator {
 }
 
 impl RegisteredGenerator {
-    pub(super) fn prepare(
+    /// Bind inner generator activations before any enclosing operand refers to them.
+    pub(crate) fn collect(
+        body: &[ast::Stmt],
+        source: values::RegisteredSource<'_>,
+    ) -> HashMap<TextRange, Self> {
+        use ast::visitor::{Visitor, walk_expr};
+        struct Collector<'a> {
+            source: values::RegisteredSource<'a>,
+            sites: HashMap<TextRange, RegisteredGenerator>,
+        }
+        impl<'a> Visitor<'a> for Collector<'_> {
+            fn visit_expr(&mut self, expr: &'a ast::Expr) {
+                stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || walk_expr(self, expr));
+                if let ast::Expr::Generator(generator) = expr
+                    && let Some(child) = RegisteredGenerator::prepare(
+                        generator,
+                        values::RegisteredSource {
+                            generators: Some(&self.sites),
+                            ..self.source
+                        },
+                    )
+                {
+                    self.sites.insert(generator.range(), child);
+                }
+            }
+        }
+        let mut collector = Collector {
+            source,
+            sites: HashMap::new(),
+        };
+        collector.visit_body(body);
+        collector.sites
+    }
+
+    fn prepare(
         generator: &ast::ExprGenerator,
         source: values::RegisteredSource<'_>,
     ) -> Option<Self> {
@@ -40,21 +74,35 @@ impl RegisteredGenerator {
                 ir::IterNextKind::Generic,
             ),
         };
-        let input = pipelines::Prepared::pull_cursor(
-            cursor,
-            Type::PythonObject,
-            kind,
-            |ty| scope.hidden(ty),
-        );
+        let input = pipelines::Prepared::pull_cursor(cursor, Type::PythonObject, kind, |ty| {
+            scope.hidden(ty)
+        });
         let mut body = scope
             .comprehension_loop(&plan, 0, None, input, &mut |scope, output, _| {
                 let item = output.value();
-                let value = scope.ordinary_operand(item).ok_or(())?;
-                Ok(vec![Statement::Expr(operation(
-                    Builtin::RegisteredSuspend(ir::SuspendValue::Yield, item.range()),
-                    Type::PythonObject,
-                    vec![value],
-                ))])
+                let yield_item = |value| {
+                    Statement::Expr(operation(
+                        Builtin::RegisteredSuspend(ir::SuspendValue::Yield, item.range()),
+                        Type::PythonObject,
+                        vec![value],
+                    ))
+                };
+                if let ast::Expr::Starred(star) = item {
+                    let input = scope.iteration_input(&star.value, None).ok_or(())?;
+                    return Ok(loop_clause(
+                        input,
+                        item.range(),
+                        true,
+                        |mut input, boundary| {
+                            let projection = input.pull_expression(Type::PythonObject);
+                            input
+                                .next
+                                .extend([boundary.clone(), yield_item(projection)]);
+                            input.loop_suite(Vec::new(), Vec::new())
+                        },
+                    ));
+                }
+                Ok(vec![yield_item(scope.ordinary_operand(item).ok_or(())?)])
             })
             .ok()?;
         body.push(Statement::Return(Expr::none()));
@@ -67,30 +115,41 @@ impl RegisteredGenerator {
 
 /// Emit one lazy clause using the checked iterator scope and the registered unwind edges.
 pub(super) fn clause(
-    mut input: pipelines::Prepared,
+    input: pipelines::Prepared,
     binding: Vec<Statement>,
     mut body: Vec<Statement>,
     site: TextRange,
     nested: bool,
 ) -> Vec<Statement> {
-    // Publish the acquired cursor before each pull. Release unpack temporaries
-    // once targets are bound, before evaluating filters or opening another loop.
+    loop_clause(input, site, nested, |mut input, boundary| {
+        // Publish the cursor before each pull, then publish its successful bindings.
+        input.next.insert(0, boundary.clone());
+        body.insert(0, boundary.clone());
+        input.for_suite(binding, body, Vec::new(), Vec::new())
+    })
+}
+
+fn loop_clause(
+    input: pipelines::Prepared,
+    site: TextRange,
+    nested: bool,
+    emit: impl FnOnce(pipelines::Prepared, &Statement) -> Vec<Statement>,
+) -> Vec<Statement> {
     let boundary = Statement::Expr(operation(
         Builtin::RegisteredStatement(site, None),
         Type::None,
         vec![],
     ));
-    input.next.insert(0, boundary.clone());
-    body.insert(0, boundary.clone());
     if !nested {
-        return input.for_suite(binding, body, Vec::new(), Vec::new());
+        return emit(input, &boundary);
     }
     // Close and throw reach this final suite while the enclosing cursors are
     // still live. An inner cursor's last reference must go first.
     let mut finalbody: Vec<_> = input.clear.iter().copied().map(Statement::Clear).collect();
+    let body = emit(input, &boundary);
     finalbody.push(boundary);
     vec![Statement::Try {
-        body: input.for_suite(binding, body, Vec::new(), Vec::new()),
+        body,
         handlers: Vec::new(),
         orelse: Vec::new(),
         finalbody,
@@ -103,10 +162,11 @@ mod tests {
 
     #[test]
     fn async_child_pulls_the_outer_iterator_without_reacquiring_it() {
-        let graph = SourceGraph::single("result = (item async for item in rows if item)\n").unwrap();
+        let graph =
+            SourceGraph::single("result = (item async for item in rows if item)\n").unwrap();
         let module = &graph.modules[graph.entry];
         let literals = values::ModuleSource::new(module);
-        let (_, sites) = prepare_expression_sites(
+        let sites = RegisteredGenerator::collect(
             &module.parsed.syntax().body,
             literals.context(&module.source),
         );
@@ -117,14 +177,26 @@ mod tests {
         let body = &child.body.function.body;
         let mut pulls = 0;
         ir::walk_statements(body, &mut |statement| {
-            if matches!(statement, Statement::IterNext { kind: ir::IterNextKind::Async(_), .. }) {
+            if matches!(
+                statement,
+                Statement::IterNext {
+                    kind: ir::IterNextKind::Async(_),
+                    ..
+                }
+            ) {
                 pulls += 1;
             }
         });
         let mut yields = 0;
         ir::walk_expressions(body, &mut |expr| {
-            assert!(!matches!(expr.kind, ExprKind::Builtin(Builtin::RegisteredIter(ir::IteratorOp::Async(_)), _)));
-            if matches!(expr.kind, ExprKind::Builtin(Builtin::RegisteredSuspend(ir::SuspendValue::Yield, _), _)) {
+            assert!(!matches!(
+                expr.kind,
+                ExprKind::Builtin(Builtin::RegisteredIter(ir::IteratorOp::Async(_)), _)
+            ));
+            if matches!(
+                expr.kind,
+                ExprKind::Builtin(Builtin::RegisteredSuspend(ir::SuspendValue::Yield, _), _)
+            ) {
                 yields += 1;
             }
         });
@@ -139,7 +211,7 @@ mod tests {
         .unwrap();
         let module = &graph.modules[graph.entry];
         let literals = values::ModuleSource::new(module);
-        let (_, sites) = prepare_expression_sites(
+        let sites = RegisteredGenerator::collect(
             &module.parsed.syntax().body,
             literals.context(&module.source),
         );
@@ -173,7 +245,7 @@ mod tests {
         .unwrap();
         let module = &graph.modules[graph.entry];
         let literals = values::ModuleSource::new(module);
-        let (_, sites) = prepare_expression_sites(
+        let sites = RegisteredGenerator::collect(
             &module.parsed.syntax().body,
             literals.context(&module.source),
         );
@@ -217,7 +289,7 @@ mod tests {
         let graph = SourceGraph::single("list((y for y in x) for x in rows)\n").unwrap();
         let module = &graph.modules[graph.entry];
         let literals = values::ModuleSource::new(module);
-        let (_, sites) = prepare_expression_sites(
+        let sites = RegisteredGenerator::collect(
             &module.parsed.syntax().body,
             literals.context(&module.source),
         );

@@ -68,9 +68,7 @@ pub(crate) fn module(module: &Module) -> Result<(), String> {
 /// Registered frames resolve slots by their original Python names and can carry either a
 /// checked native scalar or a Python handle as a display operand. They have no native
 /// container layout table. Validate this handoff before the emitter indexes its operands.
-pub(crate) fn registered(
-    frame: crate::frontend::RegisteredRegion<'_>,
-) -> Result<(), String> {
+pub(crate) fn registered(frame: crate::frontend::RegisteredRegion<'_>) -> Result<(), String> {
     let private = frame.private_slots();
     let local = |slot: usize| {
         require(
@@ -164,15 +162,16 @@ pub(crate) fn registered(
                     _ => Err("registered location needs one operand".into()),
                 },
                 ExprKind::Builtin(Builtin::RegisteredSpread, args) => {
-                    let display = parent.is_some_and(|parent| {
-                        matches!(
-                            parent.kind,
-                            ExprKind::List(_) | ExprKind::Tuple(_) | ExprKind::Set { .. }
-                        )
+                    let collection = parent.is_some_and(|parent| match &parent.kind {
+                        ExprKind::List(_) | ExprKind::Tuple(_) | ExprKind::Set { .. } => true,
+                        ExprKind::Builtin(Builtin::Append | Builtin::SetAdd, args) => {
+                            matches!(args.as_slice(), [out, item] if out.ty == Type::PythonObject && std::ptr::eq(item, value))
+                        }
+                        _ => false,
                     });
                     require(
-                        display && value.ty == Type::PythonObject && args.len() == 1,
-                        "registered spread needs one operand inside a Python display",
+                        collection && value.ty == Type::PythonObject && args.len() == 1,
+                        "registered spread needs one operand in a Python collection",
                     )
                 }
                 ExprKind::Builtin(Builtin::RegisteredGenerator(_, scoped), args) => {
@@ -688,6 +687,10 @@ impl Verifier<'_> {
                 same(native_result, callee.returns)
             }
             ExprKind::Invoke { callable, args } => {
+                require(
+                    args.python_site.is_none(),
+                    "fixed invocation cannot use a Python call site",
+                )?;
                 let (params, returns) = types
                     .signature(callable.ty)
                     .ok_or("indirect call needs a callable")?;
@@ -853,13 +856,18 @@ mod tests {
             let mut frame = prepare.complete(body, scope).unwrap().checked;
             registered(frame.region()).unwrap();
             frame.local_names.clear();
-            assert!(registered(frame.region()).unwrap_err().contains("frame slot"));
+            assert!(
+                registered(frame.region())
+                    .unwrap_err()
+                    .contains("frame slot")
+            );
         }
     }
 
     #[test]
     fn registered_namespace_checks_the_optional_parent_before_emission() {
         let mut frame = crate::frontend::RegisteredFunction {
+            fixed_sites: Vec::new(),
             function: empty().entry,
             local_names: Default::default(),
         };
@@ -886,6 +894,7 @@ mod tests {
     #[test]
     fn registered_display_handoff_rejects_a_misplaced_or_malformed_spread() {
         let mut frame = crate::frontend::RegisteredFunction {
+            fixed_sites: Vec::new(),
             function: empty().entry,
             local_names: Default::default(),
         };
@@ -1007,6 +1016,15 @@ mod tests {
         };
         module.entry.body = vec![invoke(CallArgs::positional(vec![Expr::integer(1)]))];
         super::module(&module).unwrap();
+        let mut frame_args = CallArgs::positional(vec![Expr::integer(1)]);
+        frame_args.python_site = Some(ir::InvokeSite {
+            range: ruff_text_size::TextRange::new(0.into(), 4.into()),
+            callee_end: 1.into(),
+            suspended_name: None,
+            scope: None,
+        });
+        module.entry.body = vec![invoke(frame_args)];
+        reject(&module, "fixed invocation cannot use a Python call site");
         module.entry.body = vec![invoke(CallArgs::positional(Vec::new()))];
         reject(&module, "argument count");
         module.functions[0].locals[0] = Type::Float;

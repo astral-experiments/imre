@@ -1,9 +1,11 @@
 //! Resolve declaration and annotation code sites before emitting the checked block.
 use super::super::sites::{
-    AnnotationString, CheckedSites, CompiledAlias, CompiledDefinition, CompiledGenerator, Declaration,
-    RequiredSite,
+    AnnotationString, CheckedSites, CompiledAlias, CompiledDefinition, CompiledGenerator,
+    Declaration, RequiredSite,
 };
-use super::super::{Body, DefinitionName, DefinitionSite, Entry, Function, SourceInfo};
+use super::super::{
+    Body, DefinitionName, DefinitionSite, Entry, Function, Output, SourceInfo, SourceMap,
+};
 use crate::frontend::PreparedAnnotation;
 use crate::frontend::function_scope::OrdinaryFunction;
 use crate::ir::{Expr, Statement};
@@ -15,10 +17,12 @@ impl SourceInfo<'_> {
         &'s self,
         def: &'s ast::StmtFunctionDef,
     ) -> Body<'s> {
-        if let Some(plan) = self.function_bodies.get(&def.start())
+        let start = def.start();
+        if let Some(plan) = self.function_bodies.get(&start)
             && plan.header.is_some()
         {
-            Body::Checked(plan.checked())
+            let globals = self.scopes.functions[&start].lexical.globals();
+            Body::Checked(plan.checked(), Some(globals))
         } else {
             Body::Function(&def.body, self.scopes.function(def).suspension_flags)
         }
@@ -30,22 +34,23 @@ enum Callable<'a> {
     Ordinary(&'a OrdinaryFunction),
 }
 
-impl Function<'_, '_> {
+impl SourceMap<'_> {
     pub(in crate::dynamic::emit) fn place_annotation_string(
-        &mut self,
+        &self,
+        output: &mut Output,
+        sites: &mut CheckedSites,
         site: ruff_text_size::TextSize,
     ) {
-        let Some(PreparedAnnotation::String { text, body }) =
-            self.source.annotation_operands.get(&site)
+        let Some(PreparedAnnotation::String { text, body }) = self.annotation_operands.get(&site)
         else {
             return;
         };
-        if self.sites.annotation_strings.contains_key(&site) {
+        if sites.annotation_strings.contains_key(&site) {
             return;
         }
         let code = body.as_ref().map(|body| {
-            let unit = self.source.unit;
-            let file = self.frame.output.data(b"<string>");
+            let unit = self.unit;
+            let file = output.data(b"<string>");
             let location = super::super::SourceMap {
                 info: &body.scope,
                 callable_code: Default::default(),
@@ -54,14 +59,14 @@ impl Function<'_, '_> {
                 positions: &super::super::SourcePositions::new(text, &file),
             };
             location.code(
-                self.frame.output,
+                output,
                 String::new(),
                 Body::AnnotationOperand(&body.code),
                 false,
                 None,
             )
         });
-        self.sites.annotation_strings.insert(
+        sites.annotation_strings.insert(
             site,
             AnnotationString {
                 text: text.clone(),
@@ -69,7 +74,9 @@ impl Function<'_, '_> {
             },
         );
     }
+}
 
+impl Function<'_, '_> {
     pub(in crate::dynamic::emit) fn prepare_checked_value(&mut self, value: &Expr) {
         CheckedSites::visit_operand(value, &mut |site| self.prepare_site(site));
     }
@@ -89,8 +96,11 @@ impl Function<'_, '_> {
         if self.sites.lambdas.contains_key(&site) {
             return;
         }
-        let definition =
-            self.compile_callable(site, Callable::Lambda { comprehension }, Body::Checked(body));
+        let definition = self.compile_callable(
+            site,
+            Callable::Lambda { comprehension },
+            Body::Checked(body, None),
+        );
         self.sites.lambdas.insert(site, definition);
     }
 
@@ -139,10 +149,6 @@ impl Function<'_, '_> {
             } else {
                 Entry::Compiled
             };
-            let globals = match callable {
-                Callable::Ordinary(_) => Some(source.scopes.functions[&site].lexical.globals()),
-                Callable::Lambda { .. } => None,
-            };
             let code = source.definition(
                 self.frame.output,
                 format!("{qualname}.<locals>."),
@@ -150,7 +156,6 @@ impl Function<'_, '_> {
                 site,
                 true,
                 entry,
-                globals,
             );
             if let Some(cache) = cache {
                 cache.borrow_mut().insert(site, code.clone());
@@ -248,12 +253,15 @@ impl Function<'_, '_> {
             None,
             None,
             None,
-            Body::Checked(&body.body),
+            Body::Checked(&body.body, None),
         );
         let targets = self.source.scopes.comprehension_targets[&site].clone();
         self.sites.generators.insert(
             site,
-            CompiledGenerator { definition, targets },
+            CompiledGenerator {
+                definition,
+                targets,
+            },
         );
     }
 
@@ -271,12 +279,16 @@ impl Function<'_, '_> {
                 return;
             }
             RequiredSite::Lambda(site, scoped) => {
-                let body = self.source.lambdas[&site].body.as_ref().expect("checked lambda body");
+                let body = self.source.lambdas[&site]
+                    .body
+                    .as_ref()
+                    .expect("checked lambda body");
                 self.place_lambda(site, body, scoped);
                 return;
             }
             RequiredSite::AnnotationString(site) => {
-                self.place_annotation_string(site);
+                self.source
+                    .place_annotation_string(self.frame.output, &mut self.sites, site);
                 return;
             }
             RequiredSite::AnnotationField(site) => {

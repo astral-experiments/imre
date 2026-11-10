@@ -164,9 +164,17 @@ impl StatementLowering for Checker<'_> {
                 _ => {}
             }
         }
+        if self.checked_callback_effects
+            && let Some(value) = self.registered_callback_effect(expr)?
+        {
+            return Ok((Some(Statement::Expr(value)), true));
+        }
         let value = self.expr(expr)?;
         // Only a direct call selects one implementation; a dispatched override may return.
         let continues = !matches!(&value.kind, ExprKind::Call(id, _) if self.classes.raising_methods.contains(id));
+        if let Some(sites) = &mut self.fixed_sites {
+            sites.statement(expr.range(), FixedNode::Effect);
+        }
         Ok((Some(Statement::Expr(value)), continues))
     }
 
@@ -197,7 +205,11 @@ impl StatementLowering for Checker<'_> {
             types.push(value.ty);
             Ok(value)
         } else {
-            self.coerce_return(value, self.returns, ret)
+            let value = self.coerce_return(value, self.returns, ret)?;
+            if let (Some(sites), Some(operand)) = (&mut self.fixed_sites, &ret.value) {
+                sites.statement(operand.range(), FixedNode::Return);
+            }
+            Ok(value)
         }
     }
 

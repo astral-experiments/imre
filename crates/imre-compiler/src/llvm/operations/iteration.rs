@@ -10,6 +10,49 @@ pub(crate) struct LoopEdges {
     pub(crate) done: String,
 }
 
+/// Wire the test, body, exhaustion, and break edges for either a complete or mixed loop.
+pub(crate) fn loop_region<C, T>(
+    context: &mut C,
+    output: fn(&mut C) -> &mut super::FunctionBody,
+    label: fn(&mut C) -> String,
+    enter: impl FnOnce(&mut C, &LoopEdges),
+    test: impl FnOnce(&mut C, &str, &str) -> T,
+    body: impl FnOnce(&mut C, &LoopEdges, T),
+    otherwise: Option<impl FnOnce(&mut C)>,
+) {
+    let step = label(context);
+    let body_label = label(context);
+    let done = label(context);
+    let exhausted = if otherwise.is_some() {
+        label(context)
+    } else {
+        done.clone()
+    };
+    let edges = LoopEdges {
+        step,
+        exhausted,
+        done,
+    };
+    enter(context, &edges);
+    output(context).start(&edges.step);
+    let item = test(context, &body_label, &edges.exhausted);
+    output(context).start(&body_label);
+    body(context, &edges, item);
+    let out = output(context);
+    if !out.terminated {
+        out.jump(&edges.step);
+    }
+    if let Some(emit_else) = otherwise {
+        output(context).start(&edges.exhausted);
+        emit_else(context);
+        let out = output(context);
+        if !out.terminated {
+            out.jump(&edges.done);
+        }
+    }
+    output(context).start(&edges.done);
+}
+
 impl Emitter<'_, '_> {
     /// A specialized pull uses the same guarded-success edge as the Python iterator.
     pub(in crate::llvm) fn when(&mut self, condition: &str, success: impl FnOnce(&mut Self)) {
@@ -41,40 +84,6 @@ impl CheckedBody<'_, '_, '_, '_> {
         yes(self);
         self.jump_open(&end);
         self.body().start(&end);
-    }
-
-    fn emit_loop(
-        &mut self,
-        otherwise: &[Statement],
-        enter: impl FnOnce(&mut Self, &LoopEdges),
-        test: impl FnOnce(&mut Self, &str, &str),
-        body: impl FnOnce(&mut Self, &LoopEdges),
-    ) {
-        let step = self.block_name();
-        let body_label = self.block_name();
-        let done = self.block_name();
-        let exhausted = if otherwise.is_empty() {
-            done.clone()
-        } else {
-            self.block_name()
-        };
-        let edges = LoopEdges {
-            step,
-            exhausted,
-            done,
-        };
-        enter(self, &edges);
-        self.body().start(&edges.step);
-        test(self, &body_label, &edges.exhausted);
-        self.body().start(&body_label);
-        body(self, &edges);
-        self.jump_open(&edges.step);
-        if !otherwise.is_empty() {
-            self.body().start(&edges.exhausted);
-            self.emit_block(otherwise);
-            self.jump_open(&edges.done);
-        }
-        self.body().start(&edges.done);
     }
 
     pub(super) fn clear_iteration_slots(&mut self, slots: &[usize]) {
@@ -174,8 +183,10 @@ impl CheckedBody<'_, '_, '_, '_> {
             Entry::Registered(f) => f.target_mark(),
             _ => None,
         };
-        self.emit_loop(
-            otherwise,
+        loop_region(
+            self,
+            Self::body,
+            Self::block_name,
             |this, edges| {
                 if let Entry::Native(e) = &mut this.0
                     && e.struct_run_loop(test, body, &edges.step, &edges.exhausted)
@@ -199,7 +210,7 @@ impl CheckedBody<'_, '_, '_, '_> {
                     this.branch_condition(test, yes, no);
                 }
             },
-            |this, edges| {
+            |this, edges, ()| {
                 match &mut this.0 {
                     Entry::Native(e) => e.loops.push(LoopTarget {
                         end: edges.done.clone(),
@@ -218,6 +229,7 @@ impl CheckedBody<'_, '_, '_, '_> {
                     Entry::Registered(f) => f.leave_loop(),
                 }
             },
+            (!otherwise.is_empty()).then_some(|this: &mut Self| this.emit_block(otherwise)),
         );
         if let Some((lengths, buffers, _)) = optimized {
             let e = self.fixed();

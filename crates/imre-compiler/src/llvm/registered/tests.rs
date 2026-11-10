@@ -89,6 +89,71 @@ fn checked_subtraction_selects_integer_arithmetic_in_both_calling_conventions() 
 }
 
 #[test]
+fn captured_float_product_uses_the_registered_multiply_protocol() {
+    let mut output =
+        emit_captured_body("def deliver(a: float, b: float, send):\n    send(a * b)\n");
+    let star = output.data(b"*");
+    let body = &output.functions;
+    assert_eq!(
+        body.matches(&format!("call i64 @imre_dyn_op_at(ptr %ctx, ptr {star},"))
+            .count(),
+        1
+    );
+    assert!(!body.contains("call i64 @imre_dyn_exact_int_word("));
+    assert!(!body.contains("call i64 @int_mul("));
+}
+
+#[test]
+fn placed_multiplication_keeps_the_exact_integer_guard_and_python_protocol() {
+    use crate::ir::{Binary, ExprKind, Statement};
+
+    for (signature, result, call, sequence) in [
+        ("a: float, b: float", "float", "2.5, 3.0", false),
+        ("a: str, b: int", "str", "'a', 3", true),
+    ] {
+        let source = format!(
+            "class Receiver:\n    def read(self, value: int) -> int:\n        return value\n\
+             def product({signature}) -> {result}:\n    return a * b\nprint(product({call}))\n"
+        );
+        let mut graph = SourceGraph::single(&source).unwrap();
+        let crate::CheckedProgram::Native(mut fixed) = crate::checked_lower(&mut graph).unwrap()
+        else {
+            panic!("expected a fixed function");
+        };
+        crate::llvm::analyze_program(&fixed.ir.0, &mut fixed.frame_sources).unwrap();
+        let (_, frame) = fixed.frame_sources.remove(&0).unwrap();
+        let function = fixed.ir.0.functions.remove(0);
+        let [Statement::Return(value)] = function.body.as_slice() else {
+            panic!()
+        };
+        assert!(matches!(
+            (&value.kind, sequence),
+            (ExprKind::Binary(Binary::Repeat, ..), true)
+                | (ExprKind::Binary(Binary::Multiply, ..), false)
+        ));
+        let placed = crate::frontend::place_fixed_function(function, frame);
+        let mut output = Output::default();
+        let file = output.data(b"product.py");
+        let positions = SourcePositions::new(&source, &file);
+        let mut frame = RegisteredFrame::new(&mut output, &positions, false, 0, 0.into());
+        frame.checked_body(&placed, &CheckedSites::default());
+        frame.finish(false);
+        let star = output.data(b"*");
+        let body = &output.functions;
+        assert_eq!(
+            body.matches("call i64 @imre_dyn_exact_int_word(").count(),
+            2
+        );
+        assert_eq!(body.matches("call i64 @int_mul(").count(), 1);
+        assert_eq!(
+            body.matches(&format!("call i64 @imre_dyn_op_at(ptr %ctx, ptr {star},"))
+                .count(),
+            1
+        );
+    }
+}
+
+#[test]
 fn captured_unpack_roots_its_private_slot_in_the_function_frame() {
     let output =
         emit_captured_body("def post(row, book, read):\n    book[0], book[read()] = row\n");

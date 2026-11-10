@@ -104,12 +104,12 @@ fn arm<'a, 'p, E: FrameEmitter<'a, 'p>, S, N: AsRef<str>>(
 /// Run else outside the protected body, then dispatch the pending exception.
 pub(crate) fn protected<'a, 'p, 'h, E, H, S, N>(
     code: &mut E,
-    body: &'h [S],
+    body: S,
     handlers: &'h [H],
-    otherwise: &'h [S],
+    otherwise: S,
     is_star: bool,
-    mut describe: impl FnMut(&mut E, &'h H) -> (Option<String>, Option<N>, &'h [S]),
-    mut suite: impl FnMut(&mut E, &'h [S], Option<(&str, &str)>),
+    mut describe: impl FnMut(&mut E, &'h H) -> (Option<String>, Option<N>, S),
+    mut suite: impl FnMut(&mut E, S, Option<(&str, &str)>),
 ) where
     E: FrameEmitter<'a, 'p>,
     N: AsRef<str>,
@@ -142,13 +142,13 @@ pub(crate) fn protected<'a, 'p, 'h, E, H, S, N>(
 
 /// Split a pending group in source order, retaining its matched and unhandled parts
 /// across callbacks before merging the outcomes back into the enclosing exception.
-fn groups<'a, 'p, 'h, F: FrameEmitter<'a, 'p>, H, S: 'h, N: AsRef<str>>(
+fn groups<'a, 'p, 'h, F: FrameEmitter<'a, 'p>, H, S, N: AsRef<str>>(
     code: &mut F,
     handlers: &'h [H],
     exc: &str,
     done: &str,
-    mut describe: impl FnMut(&mut F, &'h H) -> (Option<String>, Option<N>, &'h [S]),
-    mut emit_suite: impl FnMut(&mut F, &'h [S], Option<(&str, &str)>),
+    mut describe: impl FnMut(&mut F, &'h H) -> (Option<String>, Option<N>, S),
+    mut emit_suite: impl FnMut(&mut F, S, Option<(&str, &str)>),
 ) {
     let raised = code.op("list", &[]);
     code.live.push(raised.clone());
@@ -303,7 +303,7 @@ impl Frame<'_, '_, '_> {
                 f.code.iteration.scopes.push(Region::Finally {
                     body: finalbody.into(),
                     outer: outer.into(),
-                    loops: f.code.iteration.loops.len(),
+                    loops: f.code.loops.len(),
                     caught: f.code.caught.len(),
                 });
                 run(f);

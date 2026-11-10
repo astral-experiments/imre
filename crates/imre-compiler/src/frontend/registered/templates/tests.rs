@@ -123,7 +123,13 @@ fn template_async_comprehension_uses_its_enclosing_activation() {
         generators: None,
         method_imports: &Default::default(),
     };
-    assert!(RegisteredOperand::prepare(result, source, RegisteredScope::Module).is_none());
+    for owner in [
+        RegisteredScope::Module,
+        RegisteredScope::Class,
+        RegisteredScope::Function { is_async: false },
+    ] {
+        assert!(RegisteredOperand::prepare(result, source, owner).is_none());
+    }
     let operand =
         RegisteredOperand::prepare(result, source, RegisteredScope::Function { is_async: true })
             .unwrap();
@@ -141,4 +147,150 @@ fn template_async_comprehension_uses_its_enclosing_activation() {
         _ => {}
     });
     assert_eq!((awaits, pulls), (1, 1));
+}
+
+#[test]
+fn template_default_and_body_suspend_in_their_defining_frames() {
+    let text = concat!(
+        "async def factory():\n",
+        "    def inner(p=t'{await fetch()}'):\n",
+        "        return t'pre{(yield p)!r:>{(yield from widths)}}post'\n",
+        "    return inner\n",
+    );
+    let templates = {
+        let parsed = ruff_python_parser::parse_module(text).unwrap();
+        let fields = imre_ast::strings::template_fields(text, parsed.tokens(), parsed.syntax());
+        let source = RegisteredSource {
+            text,
+            private_names: None,
+            replacements: &Default::default(),
+            has_templates: true,
+            template_fields: Some(&fields),
+            lambdas: None,
+            generators: None,
+            method_imports: &Default::default(),
+        };
+        let mut templates = HashMap::new();
+        RegisteredLambda::collect(
+            &parsed.syntax().body,
+            source,
+            HashMap::new(),
+            &mut templates,
+        );
+        templates
+    };
+    let mut sites: Vec<_> = templates.iter().collect();
+    sites.sort_by_key(|(range, _)| range.start());
+    assert_eq!(sites.len(), 2);
+
+    let mut captures = Vec::new();
+    let mut suspensions = Vec::new();
+    let mut formats = 0;
+    for (_, operand) in sites {
+        let PreparedTemplate::Checked(operand) = operand else {
+            panic!("expected a complete template operand");
+        };
+        crate::verify::registered(operand.region()).unwrap();
+        ir::walk_operand_expressions(&operand.value, &mut |node| match &node.kind {
+            ExprKind::Builtin(
+                Builtin::RegisteredInterpolation {
+                    expression,
+                    conversion,
+                },
+                _,
+            ) => {
+                captures.push((expression.as_str(), *conversion));
+            }
+            ExprKind::Builtin(Builtin::RegisteredSuspend(kind, range), _) => {
+                let op = match kind {
+                    ir::SuspendValue::Await => "await",
+                    ir::SuspendValue::Yield => "yield",
+                    ir::SuspendValue::Delegate => "yield from",
+                };
+                suspensions.push((op, &text[*range]));
+            }
+            ExprKind::Builtin(Builtin::FormatField(_), _) => formats += 1,
+            _ => {}
+        });
+    }
+    assert_eq!(
+        captures,
+        [("await fetch()", None), ("(yield p)", Some('r'))]
+    );
+    assert_eq!(
+        suspensions,
+        [
+            ("await", "await fetch()"),
+            ("yield", "yield p"),
+            ("yield from", "yield from widths"),
+        ]
+    );
+    assert_eq!(formats, 1);
+}
+
+#[test]
+fn incomplete_field_preserves_the_checked_prefix_and_child_admission() {
+    let text = concat!(
+        "def report(rows, fetch):\n",
+        "    return t'{mark()}{([lambda v=await fetch(x): v for x in rows] for _ in rows)=}', ",
+        "t'{mark()}{([lambda v=await fetch(x): v for x in rows] for _ in rows)}'\n",
+    );
+    let parsed = ruff_python_parser::parse_module(text).unwrap();
+    let module = parsed.syntax();
+    let fields = imre_ast::strings::template_fields(text, parsed.tokens(), module);
+    let source = RegisteredSource {
+        text,
+        private_names: None,
+        replacements: &Default::default(),
+        has_templates: true,
+        template_fields: Some(&fields),
+        lambdas: None,
+        generators: None,
+        method_imports: &Default::default(),
+    };
+    // Withhold this child descriptor to exercise a partially prepared template.
+    let missing = HashMap::new();
+    let source = RegisteredSource {
+        generators: Some(&missing),
+        ..source
+    };
+    let function = module.body[0].as_function_def_stmt().unwrap();
+    let values = function.body[0]
+        .as_return_stmt()
+        .unwrap()
+        .value
+        .as_deref()
+        .unwrap();
+    let templates = &values.as_tuple_expr().unwrap().elts;
+    for (i, template) in templates.iter().enumerate() {
+        let Some(PreparedTemplate::Mixed { fields, .. }) = PreparedTemplate::prepare(
+            template,
+            source,
+            RegisteredScope::Function { is_async: false },
+        ) else {
+            panic!("the generator has no checked activation");
+        };
+        let [TemplateField::Checked(prefix), tail] = fields.as_slice() else {
+            panic!("expected the supported first field to run");
+        };
+        assert!(matches!(&prefix.value.kind,
+            ExprKind::Builtin(Builtin::RegisteredInterpolation { expression, .. }, _)
+                if expression == "mark()"));
+        match (i, tail) {
+            (0, TemplateField::Unsupported("debug t-string interpolation")) => {}
+            (
+                1,
+                TemplateField::External {
+                    value,
+                    interpolation,
+                },
+            ) => {
+                assert!(matches!(value.as_ref(), ast::Expr::Generator(_)));
+                assert!(matches!(&interpolation.kind,
+                    ExprKind::Builtin(Builtin::RegisteredInterpolation { .. }, inputs)
+                        if matches!(inputs[0].kind, ExprKind::Local(0))));
+            }
+            _ => panic!("unexpected incomplete field"),
+        }
+    }
 }

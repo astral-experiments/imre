@@ -488,25 +488,25 @@ fn object_fallback(
             let refusal = loop {
                 let error = match lower(&mut graph, call_error.as_ref())? {
                     CheckedProgram::Registered(reason) => break reason,
-                    CheckedProgram::Native(ir) => {
-                        let (mut module, mut owners) = *ir;
+                    CheckedProgram::Native(mut fixed) => {
+                        let (module, owners) = &mut fixed.ir;
                         if checking {
-                            verify_after(&module, "lowering")?;
+                            verify_after(module, "lowering")?;
                             return native_result(graph, Vec::new());
                         }
-                        for original in specialize(&mut module)? {
+                        for original in specialize(module)? {
                             owners.push(owners[original]);
                         }
-                        let reason = match llvm::analyze_program(&module) {
+                        let reason = match llvm::analyze_program(module, &mut fixed.frame_sources) {
                             Ok(program)
                                 if program.prefer_objects && options.entry_profile.is_none() =>
                             {
                                 // Registration can preserve the Python exception locations. Keep the
                                 // checked native representation until registration decides admission.
-                                deferred_native = Some(((module, owners), program));
+                                deferred_native = Some((fixed, program));
                                 "Imre: native bound wrapper links use checked exception locations"
                             }
-                            Ok(program) => match native(&graph, (module, owners), program) {
+                            Ok(program) => match native(&graph, fixed.into_ir(), program) {
                                 Ok(units) => return native_result(graph, units),
                                 Err(refusal) => refusal.0,
                             },
@@ -557,25 +557,28 @@ fn object_fallback(
     };
     // A newly found checked provider can lower normally. If lowering fails, its
     // dependencies alone do not admit the caller to the object importer.
-    let fallback = |graph| match (graph, deferred_native, kind) {
-        (Some(graph), Some((ir, program)), _) => {
-            let units = native(&graph, ir, program).map_err(|error| error.0.to_owned())?;
-            native_result(graph, units)
-        }
-        (Some(graph), None, LoweringKind::ExecutionOperand(id))
-            if graph.modules[id].is_program_source() =>
-        {
-            // Native lowering can fail before the file has a runtime registration.
-            // Check its existing contracts before diagnosing the failed call's source.
-            if let Some(contract) = &graph.source_contract {
-                contract.clone()?;
+    let fallback = |graph, deferred: Option<(Box<FixedProgram>, llvm::NativeProgram)>| {
+        match (graph, deferred, kind) {
+            (Some(graph), Some((fixed, program)), _) => {
+                let units = native(&graph, fixed.into_ir(), program)
+                    .map_err(|error| error.0.to_owned())?;
+                native_result(graph, units)
             }
-            graph
-                .session
-                .check_execution_escapes(std::iter::once((id, graph.modules[id].path.as_path())))?;
-            Err(refusal_message())
+            (Some(graph), None, LoweringKind::ExecutionOperand(id))
+                if graph.modules[id].is_program_source() =>
+            {
+                // Native lowering can fail before the file has a runtime registration.
+                // Check its existing contracts before diagnosing the failed call's source.
+                if let Some(contract) = &graph.source_contract {
+                    contract.clone()?;
+                }
+                graph
+                    .session
+                    .check_execution_escapes(std::iter::once((id, graph.modules[id].path.as_path())))?;
+                Err(refusal_message())
+            }
+            _ => Err(refusal_message()),
         }
-        _ => Err(refusal_message()),
     };
     let checked_graph = graph;
     let graph = checked_graph
@@ -590,7 +593,7 @@ fn object_fallback(
                 ) || g.imports_struct_decorator()
             }))
     {
-        return fallback(checked_graph);
+        return fallback(checked_graph, deferred_native);
     }
     let operation = graph.as_ref().and_then(|g| {
         if checked_entry {
@@ -673,6 +676,13 @@ fn object_fallback(
         Ok(())
     };
     let check = |entry_requests_objects, registered: Option<dynamic::RegisteredSources<'_>>| {
+        // Admission commits to the Python ABI. Keep only bodies with a valid frame
+        // map and release the deferred native program before checking its providers.
+        if registered.is_some()
+            && let (Some(graph), Some((fixed, _))) = (&checked_graph, deferred_native.take())
+        {
+            fixed.register_definitions(graph);
+        }
         check_returns(entry_requests_objects)?;
         if let Some(registered) = registered {
             analysis::check_registered_project(
@@ -728,7 +738,7 @@ fn object_fallback(
             site_probes.record(&mut compilation.source_inputs);
             Ok(compilation)
         }
-        None => fallback(checked_graph),
+        None => fallback(checked_graph, deferred_native),
     }
 }
 
@@ -963,12 +973,47 @@ fn compile_file_units_with(
 
 type CheckedIr = (ir::Module, Vec<modules::ModuleId>);
 
+type FixedFrameSources =
+    std::collections::HashMap<usize, (ruff_text_size::TextSize, frontend::FixedBodySource)>;
+
+pub(crate) struct FixedProgram {
+    ir: CheckedIr,
+    /// Original binder and operation sites indexed by checked function ID.
+    frame_sources: FixedFrameSources,
+}
+
+impl FixedProgram {
+    /// Native emission consumes the checked module and releases pending Python frame maps.
+    fn into_ir(self) -> CheckedIr {
+        self.ir
+    }
+
+    fn register_definitions(self, graph: &modules::SourceGraph) {
+        let (module, owners) = self.ir;
+        let mut sources = self.frame_sources;
+        for (id, function) in module.functions.into_iter().enumerate() {
+            let Some((start, source)) = sources.remove(&id) else {
+                continue;
+            };
+            let owner = owners[id];
+            if graph
+                .registered_functions()
+                .get(&owner)
+                .is_some_and(|entries| entries.contains_key(&start))
+            {
+                continue;
+            }
+            graph.register_function(owner, start, frontend::place_fixed_function(function, source));
+        }
+    }
+}
+
 /// A checked entry selects its startup. A representation refusal still needs runtime admission.
 pub(crate) enum CheckedProgram {
     /// A checked Python frame or launcher can enter directly. A specific operation or
     /// unresolved import retains its own admission policy and diagnostic.
     Registered(Option<LoweringDiagnostic>),
-    Native(Box<CheckedIr>),
+    Native(Box<FixedProgram>),
     Runtime(LoweringDiagnostic),
 }
 
@@ -976,7 +1021,7 @@ pub(crate) enum CheckedProgram {
 impl CheckedProgram {
     fn into_native(self) -> Result<CheckedIr, String> {
         match self {
-            Self::Native(ir) => Ok(*ir),
+            Self::Native(fixed) => Ok(fixed.into_ir()),
             Self::Runtime(reason) => Err(reason.to_string()),
             Self::Registered(Some(reason)) => Err(reason.to_string()),
             Self::Registered(None) => Err("the checked program requires a registered entry".into()),

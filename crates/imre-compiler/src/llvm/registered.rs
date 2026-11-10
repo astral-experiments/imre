@@ -8,9 +8,7 @@ pub(crate) mod patterns;
 mod sequences;
 pub(crate) mod sites;
 pub(crate) mod suspension;
-use crate::frontend::{
-    LocalBinding, RegisteredFunction, RegisteredOperand, RegisteredRegion, ResidualField,
-};
+use crate::frontend::{LocalBinding, RegisteredFunction, RegisteredOperand, RegisteredRegion};
 use crate::ir::DisplayKind;
 use crate::ir::{self, Binary, Builtin, Expr, ExprKind, Statement, Type};
 use crate::llvm::body::FunctionBody;
@@ -23,7 +21,10 @@ use sites::CheckedSites;
 
 use crate::llvm::operations::{CheckedBody, CheckedValue, LoopEdges};
 use context::Region;
+use std::cell::Cell;
 use std::collections::HashMap;
+
+use ruff_text_size::{TextRange, TextSize};
 
 /// Only take a body when all its operations have a lowering for the registered calling convention.
 pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
@@ -83,7 +84,9 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
                     }
                     Statement::Clear(slot) => private.contains(slot),
                     Statement::If(..) => true,
-                    Statement::Match(_, cases) => cases.iter().flat_map(|case| &case.captures).all(has_slot),
+                    Statement::Match(_, cases) => {
+                        cases.iter().flat_map(|case| &case.captures).all(has_slot)
+                    }
                     Statement::IterNext {
                         kind: ir::IterNextKind::Generic | ir::IterNextKind::Async(_),
                         iterator,
@@ -139,7 +142,7 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
                 iteration.is_ok()
             }
             ExprKind::Builtin(Builtin::FormatConversion(_), args) => args.len() == 1,
-            ExprKind::Builtin(Builtin::FormatField, args) => {
+            ExprKind::Builtin(Builtin::FormatField(_), args) => {
                 uses_python_protocol |= args
                     .first()
                     .is_some_and(|value| value.ty == Type::PythonObject);
@@ -181,7 +184,9 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
                 uses_python_protocol = true;
                 args.len() == 2
             }
-            ExprKind::Builtin(Builtin::RegisteredStatement(..), _) => true,
+            ExprKind::Builtin(Builtin::RegisteredStatement(..) | Builtin::RegisteredDiscard, _) => {
+                true
+            }
             ExprKind::Builtin(Builtin::RegisteredLocation(..), operands) => operands.len() == 1,
             ExprKind::Builtin(Builtin::RegisteredAttribute { action, .. }, operands) => {
                 use ir::AttributeAction;
@@ -247,8 +252,14 @@ pub(super) struct IterationState {
     first_slot: usize,
     cursors: HashMap<usize, ir::IterNextKind>,
     scopes: Vec<Region>,
-    loops: Vec<(LoopEdges, usize)>,
     in_expression: bool,
+}
+
+/// Branches to the next pull and to exhaustion keep the loop's cursor live.
+pub(crate) struct LoopTarget {
+    edges: LoopEdges,
+    step_depth: usize,
+    exit_depth: usize,
 }
 
 pub(super) struct ExpressionScope {
@@ -257,61 +268,13 @@ pub(super) struct ExpressionScope {
     error_targets: (String, String),
 }
 
-/// Live objects under construction at a single template literal.
-pub(crate) struct TemplateBuilder {
-    strings: String,
-    parts: String,
-}
-
-/// The spec is loaded before the physical owner evaluates the interpolation value.
-pub(crate) struct ReadyInterpolation<'a> {
-    template: &'a TemplateBuilder,
-    field: &'a ResidualField,
-    spec: String,
-}
-
-impl ReadyInterpolation<'_> {
-    pub(crate) fn capture(self, frame: &mut RegisteredFrame<'_, '_>, value: &str) {
-        let interpolation = frame.interpolation(
-            value,
-            &self.field.expression,
-            self.field.conversion,
-            &self.spec,
-        );
-        self.template.push(frame, &interpolation);
-    }
-}
-
-impl TemplateBuilder {
-    pub(crate) fn field<'a>(
-        &'a self,
-        frame: &mut RegisteredFrame<'_, '_>,
-        metadata: &'a Result<ResidualField, &'static str>,
-        sites: &CheckedSites,
-    ) -> Result<ReadyInterpolation<'a>, &'static str> {
-        let field = metadata.as_ref().map_err(|&reason| reason)?;
-        Ok(ReadyInterpolation {
-            template: self,
-            field,
-            spec: frame.registered_value(&field.spec, sites),
-        })
-    }
-
-    fn push(&self, frame: &mut RegisteredFrame<'_, '_>, interpolation: &str) {
-        frame.op("append", &[&self.parts, interpolation]);
-    }
-
-    pub(crate) fn finish(self, frame: &mut RegisteredFrame<'_, '_>) -> String {
-        frame.op("build_template", &[&self.strings, &self.parts])
-    }
-}
-
 /// The registered binder owns the scope, argument identities and frame.
 pub(crate) struct Frame<'f, 'a, 'p> {
     code: &'f mut RegisteredFrame<'a, 'p>,
     sites: &'f CheckedSites,
     names: Option<&'f HashMap<usize, LocalBinding>>,
     inputs: &'f [String],
+    fixed_sites: Option<(&'f [TextRange], &'f Cell<usize>)>,
 }
 
 impl<'a, 'p> std::ops::Deref for Frame<'_, 'a, 'p> {
@@ -344,6 +307,7 @@ impl<'f, 'a, 'p> Frame<'f, 'a, 'p> {
             code,
             sites,
             names: None,
+            fixed_sites: None,
             inputs: &[],
         }
     }
@@ -353,12 +317,40 @@ impl<'f, 'a, 'p> Frame<'f, 'a, 'p> {
             code: self.code,
             sites: self.sites,
             names: self.names,
+            fixed_sites: self.fixed_sites,
             inputs: self.inputs,
         }
     }
 }
 
 impl Frame<'_, '_, '_> {
+    pub(super) fn next_fixed_site(&self) -> Option<TextRange> {
+        let (sites, next) = self.fixed_sites?;
+        let i = next.get();
+        next.set(i + 1);
+        Some(sites[i])
+    }
+
+    pub(super) fn statement_site(&mut self, range: TextRange, simple: Option<TextRange>) {
+        self.code.current_range = range;
+        self.code.checkpoint(range);
+        self.code.simple_call = simple;
+    }
+
+    pub(super) fn located_value(
+        &mut self,
+        range: TextRange,
+        position: TextSize,
+        emit: impl FnOnce(&mut Self) -> CheckedValue,
+    ) -> CheckedValue {
+        let previous_range = std::mem::replace(&mut self.code.current_range, range);
+        let previous_line = self.code.enter_expression(range, position);
+        let result = emit(self);
+        self.code.leave_expression(previous_line);
+        self.code.current_range = previous_range;
+        result
+    }
+
     fn evaluate(&mut self, expr: &Expr) -> CheckedValue {
         CheckedBody::registered(self.reborrow()).emit_value(expr)
     }
@@ -463,8 +455,10 @@ impl Frame<'_, '_, '_> {
     /// Retain the original RHS across a replaced owner's finalizer.
     pub(crate) fn bind_expression(&mut self, slot: usize, mark: &str, handle: &str) {
         let (scope, name) = self.assignment_name(slot);
-        self.code
-            .assign_expression_name(&scope, &name, handle, mark);
+        let replaced = self
+            .code
+            .op("assign_named_target", &[&scope, &name, handle]);
+        self.code.release_replaced(&replaced, Some((mark, handle)));
     }
 
     pub(crate) fn body(&mut self) -> &mut FunctionBody {
@@ -632,21 +626,13 @@ impl Frame<'_, '_, '_> {
     }
     pub(crate) fn enter_loop(&mut self, edges: &LoopEdges) {
         let depth = self.code.iteration.scopes.len();
-        self.code.iteration.loops.push((edges.clone(), depth));
+        self.push_loop(edges.clone(), depth, depth);
     }
     pub(crate) fn leave_loop(&mut self) {
-        self.code.iteration.loops.pop();
+        self.code.loops.pop();
     }
     pub(crate) fn transfer_loop(&mut self, stmt: &Statement) {
-        let (edges, depth) = self.code.iteration.loops.last().expect("loop transfer");
-        let dest = match stmt {
-            Statement::Break => &edges.done,
-            Statement::Continue => &edges.step,
-            _ => &edges.exhausted,
-        }
-        .clone();
-        self.exit_regions(*depth, None);
-        self.code.jump(&dest);
+        self.unwind_loop(stmt, |frame, depth| frame.exit_regions(depth, None));
     }
     pub(crate) fn begin_step(&mut self, mark: &str) {
         self.code.line(&format!(
@@ -664,27 +650,17 @@ impl Frame<'_, '_, '_> {
         let item_block = self.code.name("b");
         let done = self.code.name("b");
         self.store_private(ready, &permanent::FALSE.to_string());
-        let item = match kind {
-            ir::IterNextKind::Generic => {
-                let header = self.code.current_range.start();
-                self.code.retained_loop_header(header);
-                let has_else = self
-                    .code
-                    .iteration
-                    .loops
-                    .last()
-                    .is_some_and(|(edges, _)| edges.exhausted != edges.done);
-                self.code
-                    .enter_sync_iteration(&cursor, has_else, false, &item_block, &done);
-                self.code.op("next", &[&cursor])
-            }
-            ir::IterNextKind::Async(pull) => {
-                let item = self.code.async_pull(&cursor, pull, &item_block, &done);
-                self.code.label(&item_block);
-                item
-            }
-            _ => unreachable!("registered iterator kind"),
-        };
+        let header = self.code.current_range.start();
+        let has_else = self
+            .code
+            .loops
+            .last()
+            .is_some_and(|target| target.edges.exhausted != target.edges.done);
+        let pulled = self
+            .code
+            .iteration_edge(&cursor, kind, header, has_else, &item_block, &done);
+        self.code.label(&item_block);
+        let item = self.code.iteration_item(&cursor, pulled);
         self.store_private(key, &item);
         self.store_private(ready, &permanent::TRUE.to_string());
         self.code.jump(&done);
@@ -741,9 +717,7 @@ impl Frame<'_, '_, '_> {
             true
         } else if let ExprKind::Builtin(Builtin::RegisteredStatement(range, simple), _) = &expr.kind
         {
-            self.code.current_range = *range;
-            self.code.checkpoint(*range);
-            self.code.simple_call = *simple;
+            self.statement_site(*range, *simple);
             true
         } else if matches!(
             expr.kind,
@@ -766,6 +740,7 @@ impl Frame<'_, '_, '_> {
                     | Builtin::RegisteredImport(_)
                     | Builtin::RegisteredDeleteName(..)
                     | Builtin::RegisteredNamespaceAnnotation(_)
+                    | Builtin::RegisteredDiscard
                     | Builtin::RegisteredAnnotationStart
                     | Builtin::RegisteredAnnotationFormat
                     | Builtin::RegisteredAnnotationInsert(_)
@@ -835,13 +810,12 @@ impl Frame<'_, '_, '_> {
                 use ir::IterationOperands::*;
                 match iteration.expect("checked iteration operands") {
                     Iter(value, op) => match op {
-                        ir::IteratorOp::Get(range) | ir::IteratorOp::Async(range) => {
-                            self.iteration_result(|frame| {
+                        ir::IteratorOp::Get(range) | ir::IteratorOp::Async(range) => self
+                            .iteration_result(|frame| {
                                 let value = frame.evaluate_handle(value);
                                 frame.call_position(range);
                                 frame.op(op.runtime_op(), &[&value])
-                            })
-                        }
+                            }),
                         ir::IteratorOp::Loop | ir::IteratorOp::LoopCursor => {
                             let value = self.evaluate_handle(value);
                             self.code.op(op.runtime_op(), &[&value])
@@ -858,8 +832,12 @@ impl Frame<'_, '_, '_> {
                     }
                     Insert([out, item]) => {
                         let out = self.evaluate_handle(out);
+                        let (op, item) = match sequences::spread(item) {
+                            Some(iterable) => ("extend", iterable),
+                            None => ("append", item),
+                        };
                         let item = self.evaluate_handle(item);
-                        self.code.op("append", &[&out, &item])
+                        self.code.op(op, &[&out, &item])
                     }
                     Unpack(value, count, star) => {
                         let value = self.evaluate_handle(value);
@@ -879,7 +857,7 @@ impl Frame<'_, '_, '_> {
                     .collect::<Vec<_>>();
                 self.contains_literal(&needle, &items, *negate)
             }
-            (Builtin::FormatConversion(_) | Builtin::FormatField | Builtin::FormatJoin, _) => {
+            (Builtin::FormatConversion(_) | Builtin::FormatField(_) | Builtin::FormatJoin, _) => {
                 let mark = self.temporary_mark();
                 self.unwind_stack_operands(&mark, |frame| {
                     let result = match (op, operands) {
@@ -888,7 +866,7 @@ impl Frame<'_, '_, '_> {
                             frame.keep_operands(&mark, &value, "0");
                             frame.format_conversion(&value, *conversion)
                         }
-                        (Builtin::FormatField, [value, spec]) => {
+                        (Builtin::FormatField(_), [value, spec]) => {
                             let value = frame.evaluate_handle(value);
                             frame.keep_operands(&mark, &value, "0");
                             let spec = frame.evaluate_handle(spec);
@@ -921,12 +899,9 @@ impl Frame<'_, '_, '_> {
                 .lit(4, &[real.to_le_bytes(), imag.to_le_bytes()].concat()),
             (Builtin::RegisteredString(points), []) => self.code.linked_string(points.clone()),
             (Builtin::RegisteredTemplate(segments), fields) => {
-                let template = self.code.begin_template(segments.clone());
-                for field in fields {
-                    let part = self.evaluate_handle(field);
-                    template.push(self.code, &part);
-                }
-                template.finish(self.code)
+                self.template(segments, fields, |frame, field| {
+                    std::ops::ControlFlow::Continue(frame.evaluate_handle(field))
+                })
             }
             (
                 Builtin::RegisteredInterpolation {
@@ -934,19 +909,15 @@ impl Frame<'_, '_, '_> {
                     conversion,
                 },
                 [value, spec],
-            ) => {
-                let value = self.evaluate_handle(value);
-                let spec = self.evaluate_handle(spec);
-                self.code
+            ) => self.with_operand_source(value, |frame| {
+                let value = frame.evaluate_handle(value);
+                let spec = frame.evaluate_handle(spec);
+                frame
+                    .code
                     .interpolation(&value, expression, *conversion, &spec)
-            }
+            }),
             (Builtin::RegisteredLocation(range, position), [value]) => {
-                let previous_range = std::mem::replace(&mut self.code.current_range, *range);
-                let previous_line = self.code.enter_expression(*range, *position);
-                let value = self.evaluate(value);
-                self.code.leave_expression(previous_line);
-                self.code.current_range = previous_range;
-                return value;
+                return self.located_value(*range, *position, |frame| frame.evaluate(value));
             }
             (Builtin::RegisteredLambda(site, scoped), operands) => {
                 let mut operands = operands.iter();
@@ -970,7 +941,9 @@ impl Frame<'_, '_, '_> {
                 self.unwind_operands(&mark, |frame| {
                     let cursor = frame.evaluate_handle(cursor);
                     frame.keep_operands(&mark, &cursor, "0");
-                    let result = frame.sites.bind_generator(frame.code, *site, &scope, &cursor);
+                    let result = frame
+                        .sites
+                        .bind_generator(frame.code, *site, &scope, &cursor);
                     frame.keep_operands(&mark, &result, "0");
                     result
                 })
@@ -1023,6 +996,12 @@ impl Frame<'_, '_, '_> {
             (Builtin::RegisteredAnnotationFormat, [format]) => {
                 let format = self.evaluate_handle(format);
                 self.code.op("annotation_format", &[&format])
+            }
+            (Builtin::RegisteredDiscard, operands) => {
+                for operand in operands {
+                    self.discard_operand(|frame| frame.evaluate_handle(operand));
+                }
+                "0".to_owned()
             }
             (Builtin::RegisteredAnnotationStart, []) => {
                 self.code.begin_annotations();
@@ -1204,7 +1183,10 @@ impl Frame<'_, '_, '_> {
     pub(crate) fn augment_item(&mut self, receiver: &Expr, key: &Expr, op: &str, rhs: &Expr) {
         let receiver = self.evaluate_handle(receiver);
         let key = self.evaluate_handle(key);
-        self.update_item(receiver, key, op, |code| code.evaluate_handle(rhs));
+        let left = self.op("get", &[&receiver, &key]);
+        let right = self.evaluate_handle(rhs);
+        let value = self.inplace(op, &left, &right);
+        self.put_item(&receiver, &key, &value);
     }
 }
 
@@ -1222,13 +1204,6 @@ impl RegisteredFrame<'_, '_> {
         self.line(&format!(
             "call void @imre_dyn_discard_expression(ptr %ctx, i64 {handle})"
         ));
-    }
-
-    pub(crate) fn begin_template(&mut self, segments: Vec<Vec<u8>>) -> TemplateBuilder {
-        TemplateBuilder {
-            strings: self.emit_string_tuple(segments),
-            parts: self.op("list", &[]),
-        }
     }
 
     /// Construct an interpolation from evaluated handles and its constant source spelling.
@@ -1341,6 +1316,7 @@ impl RegisteredFrame<'_, '_> {
             code: self,
             names,
             sites,
+            fixed_sites: None,
             inputs: &[],
         });
         self.expression_integer_start = outer;
@@ -1348,8 +1324,17 @@ impl RegisteredFrame<'_, '_> {
     }
 
     pub(crate) fn checked_statement(&mut self, stmt: &Statement, sites: &CheckedSites) {
+        self.checked_statement_with_inputs(stmt, sites, &[]);
+    }
+
+    pub(crate) fn checked_statement_with_inputs(
+        &mut self,
+        stmt: &Statement,
+        sites: &CheckedSites,
+        inputs: &[String],
+    ) {
         self.with_checked_frame(sites, None, |frame| {
-            CheckedBody::registered(frame).emit_statement(stmt)
+            CheckedBody::registered(Frame { inputs, ..frame }).emit_statement(stmt)
         })
     }
 
@@ -1442,6 +1427,7 @@ impl RegisteredFrame<'_, '_> {
             code: self,
             names: Some(&checked.local_names),
             sites,
+            fixed_sites: None,
             inputs: &[],
         };
         frame.store_private(entered, value);
@@ -1459,6 +1445,7 @@ impl RegisteredFrame<'_, '_> {
             code: self,
             names: Some(&checked.local_names),
             sites,
+            fixed_sites: None,
             inputs: &[],
         })
         .emit_block(statements);
@@ -1468,10 +1455,12 @@ impl RegisteredFrame<'_, '_> {
         let Some(enclosing) = self.enter_checked_slots(checked.region()) else {
             return;
         };
+        let next = Cell::new(0);
         CheckedBody::registered(Frame {
             code: self,
             names: Some(&checked.local_names),
             sites,
+            fixed_sites: (!checked.fixed_sites.is_empty()).then_some((&checked.fixed_sites, &next)),
             inputs: &[],
         })
         .emit_function(&checked.function);

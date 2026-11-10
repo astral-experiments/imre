@@ -417,24 +417,19 @@ impl<'a> PreparedBody<'a, '_> {
             ModuleOrigin::Program(bodies) => bodies,
             _ => None,
         };
-        let (syntax, tokens, replacements, template_fields) = match &input {
+        let (syntax, tokens, replacements) = match &input {
             Input::Module(parsed) => (
                 parsed.syntax(),
                 parsed.tokens(),
                 check_parsed_source(path, source, parsed, keep_docstrings)?,
-                Cow::Owned(imre_ast::strings::template_fields(
-                    source,
-                    parsed.tokens(),
-                    parsed.syntax(),
-                )),
             ),
-            Input::Expression(syntax, tokens, fields) => (
+            Input::Expression(syntax, tokens) => (
                 syntax,
                 *tokens,
                 crate::frontend::literal_replacements(source, tokens),
-                Cow::Borrowed(*fields),
             ),
         };
+        let template_fields = imre_ast::strings::template_fields(source, tokens, syntax);
         let docs = if keep_docstrings && name == "collections" && bundled {
             crate::modules::doctest::sealed(crate::modules::IntrinsicModule::Collections)
         } else {
@@ -486,7 +481,7 @@ impl<'a> PreparedBody<'a, '_> {
             generators: None,
             lambdas: None,
         };
-        let (strings, generators) = crate::frontend::prepare_expression_sites(&body, values);
+        let generators = RegisteredGenerator::collect(&body, values);
         let values = crate::frontend::RegisteredSource {
             generators: Some(&generators),
             ..values
@@ -500,18 +495,25 @@ impl<'a> PreparedBody<'a, '_> {
             |text, parsed| Self::prepare_annotation(text, parsed, python_optimization),
             &mut namespace_annotations,
         );
-        let sites = crate::frontend::registered_sites(&body, &private_names, &annotation_operands);
+        let sites =
+            crate::frontend::registered_sites(&body, &private_names, values, &annotation_operands);
         let declarations = source_declarations(&sites);
         let mut operations = sites.operations;
         let mut aliases = Vec::new();
-        let mut logicals = crate::frontend::LogicalSites::default();
+        let mut logicals = crate::frontend::ExpressionSites::default();
         let mut scopes = crate::frontend::function_scope::ScopeFacts::prepare(
             &body,
             &private_names,
             |alias| aliases.push(alias),
             |expr| logicals.visit(expr, values),
         );
-        let lambdas = RegisteredLambda::collect(&body, values, std::mem::take(&mut scopes.lambdas));
+        let mut templates = HashMap::new();
+        let lambdas = RegisteredLambda::collect(
+            &body,
+            values,
+            std::mem::take(&mut scopes.lambdas),
+            &mut templates,
+        );
         let values = crate::frontend::RegisteredSource {
             lambdas: Some(&lambdas),
             ..values
@@ -544,6 +546,7 @@ impl<'a> PreparedBody<'a, '_> {
             &body,
             python_optimization == 0,
         );
+        prepare.sites.expressions = logicals;
         let initializer =
             (!expression).then(|| prepare.suite(&body, crate::frontend::RegisteredScope::Module));
         let mut initializer_sites = Vec::new();
@@ -554,10 +557,27 @@ impl<'a> PreparedBody<'a, '_> {
                 initializer_sites.push(site);
             });
         }
+        for annotation in sites.annotations.values() {
+            if let crate::frontend::AnnotationValue::Source(value) = &annotation.value {
+                let value = value
+                    .as_starred_expr()
+                    .map_or(value, |star| star.value.as_ref());
+                prepare.sites.expressions.prepare_input(
+                    value,
+                    values,
+                    crate::frontend::RegisteredScope::Function { is_async: false },
+                    false,
+                );
+            }
+        }
         let mut function_bodies = HashMap::new();
-        let class_bodies = prepare.class_suites(sites.classes);
+        let class_bodies = prepare.class_suites(sites.classes, |start| {
+            scopes.functions[&start].suspension_flags != 0
+        });
         let mut thread_entries = HashMap::new();
-        for site in sites.functions {
+        // The collector visits a definition before its children. Prepare the children first
+        // so a physical enclosing suite can bind their already checked declarations.
+        for site in sites.functions.into_iter().rev() {
             let def = site.def;
             let start = def.start();
             if let Some(entry) = site.thread_entry {
@@ -574,11 +594,21 @@ impl<'a> PreparedBody<'a, '_> {
                 let kind = crate::frontend::RegisteredScope::Function {
                     is_async: def.is_async,
                 };
+                let has_ordinary_header = |site| {
+                    function_bodies
+                        .get(&site)
+                        .is_some_and(PreparedFunction::has_ordinary_header)
+                };
                 if !site.prepare_entry {
-                    prepare.physical_body(&def.body, kind);
+                    prepare.physical_body(&def.body, kind, suspended, &has_ordinary_header);
                     continue;
                 }
-                FunctionBody::Suite(prepare.function_suite(&def.body, kind, suspended))
+                FunctionBody::Suite(prepare.function_suite(
+                    &def.body,
+                    kind,
+                    suspended,
+                    &has_ordinary_header,
+                ))
             };
             let complete = match &body {
                 FunctionBody::Program(_) => true,
@@ -600,7 +630,6 @@ impl<'a> PreparedBody<'a, '_> {
             namespace_annotations,
             scopes,
             thread_entries,
-            logicals,
             statement_sites: prepare.sites,
             python_optimization,
             nested_bodies: prepare.nested,
@@ -623,7 +652,10 @@ impl<'a> PreparedBody<'a, '_> {
             class_keywords,
             docs,
             has_templates,
-            strings,
+            strings: crate::frontend::PreparedStrings {
+                fields: template_fields,
+                templates,
+            },
             replacements,
             method_imports,
             barry_as_flufl: imre_ast::future_import(&body, "barry_as_FLUFL"),
@@ -636,7 +668,6 @@ impl<'a> PreparedBody<'a, '_> {
             .flatten();
         let retain_syntax = source.initializer.as_ref().is_some_and(|suite| {
             !suite.fully_checked()
-                || source.scopes.module_annotations
                 || !source.initializer_sites.is_empty()
                     && (declarations.is_empty()
                         || declarations.keys().any(|site| {
@@ -709,14 +740,13 @@ impl<'a> PreparedBody<'a, '_> {
             range: expression.range(),
             body: std::iter::once(stmt).collect(),
         };
-        let fields = imre_ast::strings::template_fields(text, parsed.tokens(), expression);
         PreparedBody::prepare(
             "",
             Path::new("<string>"),
             Cow::Owned(text.to_owned()),
             python_optimization,
             ModuleOrigin::Program(None),
-            Input::Expression(syntax, parsed.tokens(), &fields),
+            Input::Expression(syntax, parsed.tokens()),
             |prepared| {
                 let Some(ast::Stmt::Expr(statement)) =
                     prepared.syntax.as_deref().and_then(|body| body.first())
@@ -725,10 +755,7 @@ impl<'a> PreparedBody<'a, '_> {
                 };
                 let code = crate::frontend::AnnotationCode::prepare(
                     &statement.value,
-                    crate::frontend::RegisteredSource {
-                        template_fields: Some(&fields),
-                        ..prepared.source.registered_source()
-                    },
+                    prepared.source.registered_source(),
                 );
                 Ok(code.map(|code| crate::frontend::AnnotationBody {
                     code,
@@ -747,6 +774,7 @@ impl<'a> PreparedBody<'a, '_> {
             return Cow::Owned(source_declarations(&crate::frontend::registered_sites(
                 stmts,
                 &self.source.private_names,
+                self.source.registered_source(),
                 &self.source.annotation_operands,
             )));
         }
@@ -778,63 +806,46 @@ impl<'a> PreparedBody<'a, '_> {
             unit,
             positions: &positions,
         };
-        let code = if self.syntax.is_some() || !self.source.initializer_sites.is_empty() {
-            let mut function = location.function(frame, String::new(), false, true);
-            if let Some(entries) = self.source.namespace_annotations.get(&None) {
-                for site in entries {
-                    function.place_annotation_string(*site);
-                }
+        let mut sites = sites::CheckedSites::default();
+        if let Some(entries) = self.source.namespace_annotations.get(&None) {
+            for &site in entries {
+                location.place_annotation_string(frame.output, &mut sites, site);
             }
-            self.begin_module(&mut function.frame);
+        }
+        frame.begin_module(
+            self.source.scopes.module_annotations,
+            self.source.string_annotations,
+            self.docstring.as_deref(),
+            &self.source.scopes.module_globals,
+        );
+        let module_function = |frame, sites| {
+            let mut function = location.function(frame, String::new(), false, true);
+            function.sites = sites;
             function
                 .declared_globals
                 .clone_from(&self.source.scopes.module_globals);
-            if suite.fully_checked() {
+            function
+        };
+        if suite.fully_checked() {
+            if !self.source.initializer_sites.is_empty() {
+                let mut function = module_function(frame, sites);
                 for &site in &self.source.initializer_sites {
                     function.prepare_site(site);
                 }
-                function.frame.checked_body(&suite.checked, &function.sites);
-            } else {
-                let stmts = self.syntax.as_deref().expect("physical module statements");
-                function.checked_runs(suite, |code, run| code.source_run(stmts, run));
+                (frame, sites) = (function.frame, function.sites);
             }
-            if let Some(sites) = function.module_annotation_sites.take() {
-                function.end("ret i64 0");
-                function.label("annotations_init");
-                function.setup_deferred_module_annotations(&sites);
-                function.jump("module_body");
-            }
-            function.frame.finish(true)
+            frame.checked_body(&suite.checked, &sites);
         } else {
-            self.begin_module(&mut frame);
-            frame.checked_body(&suite.checked, &sites::CheckedSites::default());
-            frame.finish(true)
-        };
+            let stmts = self.syntax.as_deref().expect("physical module statements");
+            let mut function = module_function(frame, sites);
+            function.checked_runs(suite, |code, run| code.source_run(stmts, run));
+            frame = function.frame;
+        }
+        let code =
+            frame.finish_module(|frame, sites| location.define_module_annotations(frame, sites));
         match output.diagnostic.take() {
             Some(diagnostic) => Err(diagnostic),
             None => Ok(code),
-        }
-    }
-
-    fn begin_module(&self, frame: &mut RegisteredFrame<'_, '_>) {
-        if self.source.scopes.module_annotations {
-            if self.source.string_annotations {
-                frame.op("setup_module_string_annotations", &[&frame.scope.clone()]);
-            } else {
-                // Lower the provider after collecting the body, but run its setup first.
-                frame.module_annotation_sites = Some(Vec::new());
-                frame.jump("annotations_init");
-                frame.label("module_body");
-            }
-        }
-        if frame.output.keep_docstrings
-            && let Some(doc) = &self.docstring
-        {
-            let value = frame.text(doc);
-            frame.bind("__doc__", &value);
-        }
-        for name in &self.source.scopes.module_globals {
-            frame.declare_global(name);
         }
     }
 
@@ -869,11 +880,7 @@ impl<'a> PreparedBody<'a, '_> {
 
 enum Input<'a> {
     Module(Cow<'a, ruff_python_parser::Parsed<ast::ModModule>>),
-    Expression(
-        ast::ModModule,
-        &'a ast::token::Tokens,
-        &'a HashMap<ruff_text_size::TextSize, imre_ast::strings::TemplateFieldText>,
-    ),
+    Expression(ast::ModModule, &'a ast::token::Tokens),
 }
 
 enum DefinitionName<'a> {
@@ -893,7 +900,11 @@ enum Body<'a> {
         &'a [crate::ir::AnnotationOccurrence],
         AnnotationScope,
     ),
-    Checked(&'a crate::frontend::RegisteredFunction),
+    /// Named bodies carry their lexical global declarations into the checked frame.
+    Checked(
+        &'a crate::frontend::RegisteredFunction,
+        Option<&'a BTreeSet<String>>,
+    ),
     AnnotationOperand(&'a crate::frontend::AnnotationCode),
 }
 
@@ -960,6 +971,10 @@ struct PreparedFunction<'a> {
 }
 
 impl PreparedFunction<'_> {
+    fn has_ordinary_header(&self) -> bool {
+        matches!(self.header, Some(CheckedHeader::Ordinary))
+    }
+
     fn graph_header(&self) -> Option<&CheckedHeader> {
         match self.body {
             FunctionBody::Program(_) => self.header.as_ref(),
@@ -1047,7 +1062,6 @@ struct SourceInfo<'a> {
         crate::frontend::PreparedAnnotation<Box<SourceInfo<'static>>>,
     >,
     namespace_annotations: HashMap<Option<ruff_text_size::TextSize>, Vec<ruff_text_size::TextSize>>,
-    logicals: crate::frontend::LogicalSites,
     scopes: crate::frontend::function_scope::ScopeFacts,
     thread_entries: HashMap<ruff_text_size::TextSize, imre_ast::ThreadEntry>,
     lambdas: HashMap<ruff_text_size::TextSize, RegisteredLambda>,
@@ -1086,13 +1100,13 @@ impl SourceInfo<'_> {
         site: ruff_text_size::TextSize,
     ) -> Option<(&crate::frontend::function_scope::OrdinaryFunction, Body<'_>)> {
         let plan = self.function_bodies.get(&site)?;
-        if !matches!(plan.header, Some(CheckedHeader::Ordinary)) {
+        if !plan.has_ordinary_header() {
             return None;
         }
         let scope = &self.scopes.functions[&site];
         Some((
             scope.ordinary.as_ref().expect("ordinary function header"),
-            Body::Checked(plan.checked()),
+            Body::Checked(plan.checked(), Some(scope.lexical.globals())),
         ))
     }
 
@@ -1132,7 +1146,7 @@ impl SourceInfo<'_> {
             text: &self.text,
             replacements: &self.replacements,
             has_templates: self.has_templates,
-            template_fields: None,
+            template_fields: Some(&self.strings.fields),
             lambdas: Some(&self.lambdas),
             generators: Some(&self.generators),
             method_imports: &self.method_imports,
@@ -1177,7 +1191,6 @@ impl SourceMap<'_> {
             module,
             declared_globals: Default::default(),
             prefix,
-            loops: Vec::new(),
             exits: Vec::new(),
         }
     }
@@ -1191,7 +1204,6 @@ impl SourceMap<'_> {
         start: ruff_text_size::TextSize,
         in_function: bool,
         entry: Entry,
-        globals: Option<&BTreeSet<String>>,
     ) -> String {
         let site = format!("@code_site{}", output.count);
         let suspended = matches!(entry, Entry::Suspended(_));
@@ -1204,13 +1216,7 @@ impl SourceMap<'_> {
         } else {
             0
         };
-        let entry = self.code(
-            output,
-            prefix,
-            body,
-            in_function,
-            Some((start, entry, globals)),
-        );
+        let entry = self.code(output, prefix, body, in_function, Some((start, entry)));
         writeln!(
             output.constants,
             "{site} = private constant %code_site {{ ptr {entry}, ptr {}, i32 {}, i32 {tag} }}",
@@ -1227,14 +1233,13 @@ impl SourceMap<'_> {
         prefix: String,
         body: Body<'_>,
         in_function: bool,
-        definition: Option<(ruff_text_size::TextSize, Entry, Option<&BTreeSet<String>>)>,
+        definition: Option<(ruff_text_size::TextSize, Entry)>,
     ) -> String {
         let suspension = match definition {
-            Some((_, Entry::Suspended(flags), _)) => flags,
+            Some((_, Entry::Suspended(flags))) => flags,
             _ => 0,
         };
-        let globals = definition.as_ref().and_then(|(_, _, globals)| *globals);
-        let start = definition.map(|(start, _, _)| start);
+        let start = definition.map(|(start, _)| start);
         let mut frame = RegisteredFrame::new(
             output,
             self.positions,
@@ -1264,7 +1269,7 @@ impl SourceMap<'_> {
             && let Some(entries) = self.namespace_annotations.get(&start)
         {
             for site in entries {
-                f.place_annotation_string(*site);
+                self.place_annotation_string(f.frame.output, &mut f.sites, *site);
             }
         }
         match body {
@@ -1312,7 +1317,7 @@ impl SourceMap<'_> {
                 let value = f.frame.prepared_operand(operand, &f.sites, false);
                 f.return_value(&value);
             }
-            Body::Checked(checked) => {
+            Body::Checked(checked, globals) => {
                 if let Some(globals) = globals {
                     f.declare_globals(globals);
                 }
@@ -1332,7 +1337,6 @@ struct Function<'a, 'p> {
     in_function: bool,
     is_async: bool,
     module: bool,
-    loops: Vec<LoopTarget>,
     exits: Vec<(Cleanup<'p>, String)>,
 }
 
@@ -1352,13 +1356,6 @@ impl std::ops::DerefMut for Function<'_, '_> {
 
 use crate::llvm::registered::context::ContextRegion;
 
-/// The lexical cleanup selected at try entry, valid on every edge leaving the body.
-#[derive(Clone, Copy)]
-enum FinallySuite<'p> {
-    Checked(&'p crate::frontend::RegisteredFunction),
-    Residual(&'p [ast::Stmt]),
-}
-
 enum Cleanup<'p> {
     With(ContextRegion),
     ExceptionName(String),
@@ -1367,15 +1364,10 @@ enum Cleanup<'p> {
         enclosing_exception: Option<String>,
     },
     Finally {
-        body: FinallySuite<'p>,
+        body: &'p crate::frontend::PhysicalSuite,
         loop_depth: usize,
         caught_depth: usize,
     },
-}
-
-struct LoopTarget {
-    step: (String, usize),
-    done: (String, usize),
 }
 
 impl Function<'_, '_> {
@@ -1390,18 +1382,30 @@ impl Function<'_, '_> {
     }
 
     fn build_diagnostic(&mut self, reason: &str) -> String {
-        let (line, col) = self.source.positions.line_and_column(self.current_range.start());
-        let (end_line, end_col) = self.source.positions.line_and_column(self.current_range.end());
-        self.frame.output.diagnostic.get_or_insert_with(|| format!(
-            "{}:{line}:{}: {reason} (through {end_line}:{})",
-            self.source.path.display(), col + 1, end_col + 1
-        ));
+        let (line, col) = self
+            .source
+            .positions
+            .line_and_column(self.current_range.start());
+        let (end_line, end_col) = self
+            .source
+            .positions
+            .line_and_column(self.current_range.end());
+        self.frame.output.diagnostic.get_or_insert_with(|| {
+            format!(
+                "{}:{line}:{}: {reason} (through {end_line}:{})",
+                self.source.path.display(),
+                col + 1,
+                end_col + 1
+            )
+        });
         "0".into()
     }
 
     fn unsupported(&mut self, what: &str) -> String {
         if self.native_suspension {
-            return self.build_diagnostic(&format!("unsupported {what} in a compiled suspended function"));
+            return self.build_diagnostic(&format!(
+                "unsupported {what} in a compiled suspended function"
+            ));
         }
         let what = self.text(what);
         self.op("unsupported", &[&what])
@@ -1417,22 +1421,18 @@ mod tests {
     fn inject_residual_child_module(prepared: &mut PreparedBody) {
         use crate::frontend::{RegisteredScope, RegisteredSource, SuitePreparation};
 
-        let parsed = ruff_python_parser::parse_module(&prepared.source.text).unwrap();
-        let fields =
-            imre_ast::strings::template_fields(&prepared.source.text, parsed.tokens(), parsed.syntax());
         let body = prepared.syntax.as_deref().expect("retained child sites");
         let missing = HashMap::new();
         let source = RegisteredSource {
             lambdas: Some(&missing),
-            template_fields: Some(&fields),
             ..prepared.source.registered_source()
         };
-        let (strings, generators) = crate::frontend::prepare_expression_sites(body, source);
+        let generators = RegisteredGenerator::collect(body, source);
         let source = RegisteredSource {
             generators: Some(&generators),
             ..source
         };
-        let mut logicals = crate::frontend::LogicalSites::default();
+        let mut logicals = crate::frontend::ExpressionSites::default();
         crate::frontend::function_scope::ScopeFacts::prepare(
             body,
             &prepared.source.private_names,
@@ -1442,20 +1442,22 @@ mod tests {
         let classes = crate::frontend::registered_sites(
             body,
             &prepared.source.private_names,
+            source,
             &prepared.source.annotation_operands,
         )
         .classes;
         let mut suites =
             SuitePreparation::new(&prepared.source.namespace_operations, source, body, true);
+        suites.sites.expressions = logicals;
         let initializer = suites.suite(body, RegisteredScope::Module);
-        let class_bodies = suites.class_suites(classes);
+        let class_bodies = suites.class_suites(classes, |start| {
+            prepared.source.scopes.functions[&start].suspension_flags != 0
+        });
         let (sites, nested) = (suites.sites, suites.nested);
         prepared.source.initializer = Some(initializer);
         prepared.source.class_bodies = class_bodies;
         prepared.source.statement_sites = sites;
         prepared.source.nested_bodies.extend(nested);
-        prepared.source.strings = strings;
-        prepared.source.logicals = logicals;
     }
 
     #[test]
@@ -1518,7 +1520,7 @@ mod tests {
         let mut graph = crate::modules::SourceGraph::single(source).unwrap();
         assert!(matches!(
             crate::checked_lower(&mut graph).unwrap(),
-            crate::CheckedProgram::Registered
+            crate::CheckedProgram::Registered(_)
         ));
         let bodies = graph.registered_functions();
         let functions = &bodies[&graph.entry];
@@ -1596,6 +1598,65 @@ mod tests {
     }
 
     #[test]
+    fn detached_header_default_can_reuse_the_prepared_template_spelling() {
+        use crate::frontend::{RegisteredScope, inline_operand};
+
+        let source =
+            "def read(rows=[t'{ (v) = !r}' for v in (1, 2)]) -> object:\n    return rows\n";
+        let path = Path::new("header.py");
+        let site = ruff_text_size::TextSize::default();
+        let mut initial =
+            PreparedBody::module("header", path, source, 0, ModuleOrigin::Program(None)).unwrap();
+        let FunctionBody::Suite(suite) = initial.source.function_bodies.remove(&site).unwrap().body
+        else {
+            panic!("expected a prepared function suite");
+        };
+        let bodies = HashMap::from([(site, suite.checked)]);
+        let module = PreparedBody::module(
+            "header",
+            path,
+            source,
+            0,
+            ModuleOrigin::Program(Some(&bodies)),
+        )
+        .unwrap();
+        assert!(module.syntax.is_none());
+        assert!(module.source.initializer.as_ref().unwrap().fully_checked());
+        let header = module.source.function_header(site).unwrap();
+        assert!(header.body.is_empty());
+
+        let default = header.parameters.args[0].default.as_deref().unwrap();
+        let context = module.source.registered_source();
+        let spelling = context.template_fields.unwrap().values().next().unwrap();
+        assert_eq!(spelling.expression, " (v)");
+        assert_eq!(spelling.debug_prefix.as_deref(), Some(" (v) = "));
+        let operand = inline_operand(default, context, RegisteredScope::Module, false)
+            .unwrap()
+            .unwrap();
+        assert!(
+            operand
+                .local_names
+                .values()
+                .any(|binding| { binding.name == "v" && binding.namespace.is_some() })
+        );
+        let mut captures = Vec::new();
+        crate::ir::walk_operand_expressions(&operand.value, &mut |expr| {
+            if let crate::ir::ExprKind::Builtin(
+                crate::ir::Builtin::RegisteredInterpolation {
+                    expression,
+                    conversion,
+                },
+                _,
+            ) = &expr.kind
+            {
+                captures.push((expression.as_str(), *conversion));
+            }
+        });
+        assert_eq!(captures, [(" (v)", Some('r'))]);
+        assert!(module.standalone().unwrap().is_some());
+    }
+
+    #[test]
     fn named_checked_function_publishes_after_its_source_body_is_erased() {
         let source = concat!(
             "def publish(a: int, b: int, send):\n",
@@ -1619,17 +1680,183 @@ mod tests {
         assert!(entry.1.contains("call i64 @int_add("));
         assert!(entry.1.contains("call i64 @imre_dyn_positional_call_at("));
         assert!(entry.1.contains("Send the sum."));
+        assert!(prepared.syntax.is_none());
+        prepared.syntax = Some(Cow::Owned(
+            graph.modules[graph.entry].parsed.syntax().body.clone(),
+        ));
         let def = prepared.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
             .unwrap();
         let plan = &prepared.source.function_bodies[&def.start()];
-        assert!(prepared.source.function_header(def.start()).is_none());
+        let header = prepared.source.function_header(def.start()).unwrap();
+        assert!(header.body.is_empty());
         assert!(std::ptr::eq(
             plan.checked(),
             &bodies[&graph.entry][&def.start()]
         ));
         def.body.clear();
         assert_eq!(prepared.standalone().unwrap().unwrap(), entry);
+    }
+
+    #[test]
+    fn mixed_for_emits_after_its_source_statement_is_erased() {
+        let source = concat!(
+            "def capture(rows):\n",
+            "    for item in rows:\n",
+            "        rows[item]: object\n",
+            "        return t'pre{(yield item)}'\n",
+            "    else:\n",
+            "        return 42\n",
+        );
+        let mut module = PreparedBody::module(
+            "example",
+            Path::new("example.py"),
+            source,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let def = module.syntax.as_ref().unwrap()[0]
+            .as_function_def_stmt()
+            .unwrap();
+        let start = def.start();
+        let body_start = def.body[0].start();
+        // Withhold template spelling from the suite planner. The physical child can
+        // still read the real prepared template, even after its enclosing loop is erased.
+        let missing = HashMap::new();
+        let source = crate::frontend::RegisteredSource {
+            template_fields: Some(&missing),
+            ..module.source.registered_source()
+        };
+        let mut physical = crate::frontend::SuitePreparation::new(
+            &module.source.namespace_operations,
+            source,
+            &def.body,
+            true,
+        );
+        physical.physical_body(
+            &def.body,
+            crate::frontend::RegisteredScope::Function { is_async: false },
+            false,
+            &|_| false,
+        );
+        let (sites, nested) = (physical.sites, physical.nested);
+        module.source.statement_sites = sites;
+        module.source.nested_bodies.extend(nested);
+        module.source.function_bodies.remove(&start);
+        let plan = &module.source.nested_bodies[&body_start];
+        let [run] = plan.residual.as_slice() else {
+            panic!("expected a mixed for")
+        };
+        let Some(crate::frontend::SourceEffect::For(region)) = &run.effect else {
+            panic!("missing prepared loop");
+        };
+        assert!(matches!(
+            region.iterable,
+            crate::frontend::PhysicalOperand::Checked(_)
+        ));
+        assert!(matches!(
+            region.target,
+            crate::frontend::PhysicalBinding::Checked { .. }
+        ));
+        assert!(!region.body.plan.fully_checked());
+        let original = module.standalone().unwrap().unwrap();
+        let def = module.syntax.as_mut().unwrap().to_mut()[0]
+            .as_function_def_stmt_mut()
+            .unwrap();
+        def.body[0] = ast::StmtPass {
+            range: def.body[0].range(),
+            node_index: Default::default(),
+        }
+        .into();
+        assert_eq!(module.standalone().unwrap().unwrap(), original);
+    }
+
+    #[test]
+    fn mixed_loop_transfers_emit_after_erasing_their_keywords() {
+        use crate::frontend::{RegisteredScope, RegisteredSource, SourceEffect, SuitePreparation};
+        let text = concat!(
+            "def run(ready, decide, callback):\n",
+            "    while ready():\n",
+            "        if decide():\n",
+            "            callback(lambda: 1)\n",
+            "            continue\n",
+            "        callback(lambda: 2)\n",
+            "        break\n",
+        );
+        let mut module = PreparedBody::module(
+            "worker",
+            Path::new("worker.py"),
+            text,
+            0,
+            ModuleOrigin::Bundled,
+        )
+        .unwrap();
+        // The ordinary compilation can already discard this function's syntax.
+        // Supply the original tree to the intentionally mixed preparation below.
+        let parsed = ruff_python_parser::parse_module(text).unwrap();
+        module.syntax = Some(Cow::Owned(parsed.into_syntax().body));
+        let function = module.syntax.as_ref().unwrap()[0]
+            .as_function_def_stmt()
+            .unwrap();
+        // Keep both suites mixed by withholding only the callback descriptors.
+        let missing = HashMap::new();
+        let source = RegisteredSource {
+            lambdas: Some(&missing),
+            ..module.source.registered_source()
+        };
+        let mut plan = SuitePreparation::new(
+            &module.source.namespace_operations,
+            source,
+            &function.body,
+            true,
+        );
+        plan.physical_body(
+            &function.body,
+            RegisteredScope::Function { is_async: false },
+            false,
+            &|_| false,
+        );
+        let (sites, nested) = (plan.sites, plan.nested);
+        module.source.statement_sites = sites;
+        module.source.nested_bodies.extend(nested);
+        module.source.function_bodies.remove(&function.start());
+
+        let original = module.standalone().unwrap().unwrap();
+        let def = module.syntax.as_mut().unwrap().to_mut()[0]
+            .as_function_def_stmt_mut()
+            .unwrap();
+        let body = &mut def.body[0].as_while_stmt_mut().unwrap().body;
+        let (branch, tail) = body.split_at_mut(1);
+        let skip = &mut branch[0].as_if_stmt_mut().unwrap().body[1];
+        for keyword in [skip, &mut tail[1]] {
+            let range = keyword.range();
+            assert!(module.source.nested_bodies.values().any(|suite| suite.residual.iter().any(
+                |run| matches!(run.effect, Some(SourceEffect::LoopTransfer(site, _)) if site == range)
+            )));
+            *keyword = ast::StmtPass {
+                range,
+                node_index: Default::default(),
+            }
+            .into();
+        }
+        assert_eq!(module.standalone().unwrap().unwrap(), original);
+        let transfer = module
+            .source
+            .nested_bodies
+            .values_mut()
+            .flat_map(|suite| &mut suite.residual)
+            .find_map(|run| match &mut run.effect {
+                Some(SourceEffect::LoopTransfer(_, op))
+                    if matches!(op, crate::ir::Statement::Continue) =>
+                {
+                    Some(op)
+                }
+                _ => None,
+            })
+            .unwrap();
+        *transfer = &crate::ir::Statement::Break;
+        assert_ne!(module.standalone().unwrap().unwrap(), original);
     }
 
     #[test]
@@ -1694,7 +1921,6 @@ mod tests {
             "    transform = lambda x: x + 1\n",
             "    for item in (1, 2): yield transform(choose(item))\n",
             "for item in values(): print(item)\n",
-            // Keep this module mixed so the test can erase the original suite.
             "state: int\n",
         );
         let graph = crate::modules::SourceGraph::single(source).unwrap();
@@ -1719,6 +1945,10 @@ mod tests {
         )
         .unwrap();
         let before = module.standalone().unwrap().unwrap();
+        assert!(module.syntax.is_none());
+        module.syntax = Some(Cow::Owned(
+            graph.modules[graph.entry].parsed.syntax().body.clone(),
+        ));
         let def = module.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
             .unwrap();
@@ -1789,7 +2019,9 @@ mod tests {
         use crate::ir::{Builtin, DefinitionSite, ExprKind};
 
         let source = include_str!("../../stdlib/typing.py");
-        let syntax = ruff_python_parser::parse_module(source).unwrap().into_syntax();
+        let syntax = ruff_python_parser::parse_module(source)
+            .unwrap()
+            .into_syntax();
         let typing = PreparedBody::module(
             "typing",
             Path::new("<imre stdlib>/typing.py"),
@@ -1896,7 +2128,6 @@ mod tests {
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        assert!(!prepared.source.strings.literals.is_empty());
         let before = prepared.standalone().unwrap().unwrap();
         assert!(!prepared.source.replacements.is_empty());
         prepared.source.replacements.clear();
@@ -1945,14 +2176,20 @@ mod tests {
                     .any(|binding| binding.name == name)
             );
         }
-        let def = prepared.syntax.as_ref().unwrap()[1].as_function_def_stmt().unwrap();
-        let suite = prepared.source.function_bodies[&def.start()].suite().unwrap();
+        let def = prepared.syntax.as_ref().unwrap()[1]
+            .as_function_def_stmt()
+            .unwrap();
+        let suite = prepared.source.function_bodies[&def.start()]
+            .suite()
+            .unwrap();
         assert!(suite.fully_checked());
         crate::verify::registered(suite.checked.region()).unwrap();
         let mut suspensions = Vec::new();
         crate::ir::walk_expressions(&suite.checked.function.body, &mut |expr| {
-            if let crate::ir::ExprKind::Builtin(crate::ir::Builtin::RegisteredSuspend(_, range), _) =
-                &expr.kind
+            if let crate::ir::ExprKind::Builtin(
+                crate::ir::Builtin::RegisteredSuspend(_, range),
+                _,
+            ) = &expr.kind
             {
                 suspensions.push(&source[*range]);
             }
@@ -1963,8 +2200,6 @@ mod tests {
 
     #[test]
     fn residual_with_emits_its_region_after_dropping_the_prepared_items() {
-        use crate::frontend::ContextTarget;
-
         let text = "def entries(path, stream):\n    with guard(), scandir(path) as stream:\n        with (yield stream):\n            pass\n";
         let mut prepared = PreparedBody::module(
             "scan",
@@ -1978,17 +2213,16 @@ mod tests {
         let function = prepared.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
             .unwrap();
-        let context = function.body[0].as_with_stmt_mut().unwrap();
-        let inputs = &prepared.source.statement_sites.contexts[&context.range()];
-        assert!(inputs.iter().all(|input| input.manager.is_some()));
-        assert!(matches!(&inputs[0].target, ContextTarget::Absent));
-        assert!(matches!(&inputs[1].target, ContextTarget::Checked { .. }));
-        context.items.clear();
+        function.body[0] = ast::StmtPass {
+            range: function.body[0].range(),
+            node_index: Default::default(),
+        }
+        .into();
         assert_eq!(prepared.standalone().unwrap().unwrap(), original);
     }
 
     #[test]
-    fn checked_with_owns_its_single_yielding_target() {
+    fn checked_with_owns_single_and_grouped_yielding_targets() {
         let source = concat!(
             "def receive(cm, sink):\n",
             "    with cm as sink[(yield 'key')]:\n",
@@ -2007,11 +2241,16 @@ mod tests {
         .unwrap();
         let original = prepared.standalone().unwrap().unwrap();
         let syntax = prepared.syntax.as_mut().unwrap().to_mut();
-        let unpack = syntax[1].as_function_def_stmt().unwrap();
-        assert!(!prepared.source.function_bodies[&unpack.start()].suite().unwrap().fully_checked());
-        let receive = syntax[0].as_function_def_stmt_mut().unwrap();
-        assert!(prepared.source.function_bodies[&receive.start()].suite().unwrap().fully_checked());
-        receive.body.clear();
+        for statement in syntax {
+            let function = statement.as_function_def_stmt_mut().unwrap();
+            assert!(
+                prepared.source.function_bodies[&function.start()]
+                    .suite()
+                    .unwrap()
+                    .fully_checked()
+            );
+            function.body.clear();
+        }
         assert_eq!(prepared.standalone().unwrap().unwrap(), original);
     }
 
@@ -2029,7 +2268,9 @@ mod tests {
         let function = prepared.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
             .unwrap();
-        let suite = prepared.source.function_bodies[&function.start()].suite().unwrap();
+        let suite = prepared.source.function_bodies[&function.start()]
+            .suite()
+            .unwrap();
         assert!(suite.fully_checked());
         assert!(suite.checked.function.body.iter().any(|statement| matches!(
             statement,
@@ -2055,14 +2296,11 @@ mod tests {
         let function = prepared.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
             .unwrap();
-        let context = function.body[0].as_with_stmt_mut().unwrap();
-        let input = &prepared.source.statement_sites.contexts[&context.range()][0];
-        assert!(input.manager.is_some());
-        assert!(matches!(
-            &input.target,
-            crate::frontend::ContextTarget::Checked { .. }
-        ));
-        context.items.clear();
+        function.body[0] = ast::StmtPass {
+            range: function.body[0].range(),
+            node_index: Default::default(),
+        }
+        .into();
         assert_eq!(prepared.standalone().unwrap().unwrap(), original);
     }
 
@@ -2091,6 +2329,56 @@ mod tests {
     }
 
     #[test]
+    fn nested_call_values_keep_their_checked_operands() {
+        use crate::ir::{Builtin, ExprKind};
+
+        let source = concat!(
+            "async def collect(pause, sink, left, right, items):\n",
+            "    item = sink(await pause(), second=left() + (lambda: right())())\n",
+            "    return sink(await pause(), second=items[(lambda: item)()])\n",
+            "state: int\n",
+        );
+        let mut prepared = PreparedBody::module(
+            "worker",
+            Path::new("worker.py"),
+            source,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let function = prepared.syntax.as_ref().unwrap()[0]
+            .as_function_def_stmt()
+            .unwrap();
+        let suite = prepared.source.function_bodies[&function.start()]
+            .suite()
+            .unwrap();
+        assert!(suite.fully_checked());
+        crate::verify::registered(suite.checked.region()).unwrap();
+        let mut operations = Vec::new();
+        crate::ir::walk_expressions(&suite.checked.function.body, &mut |expr| match &expr.kind {
+            ExprKind::Binary(..) => operations.push("binary"),
+            ExprKind::Builtin(Builtin::RegisteredSubscript(..), _) => operations.push("index"),
+            ExprKind::Builtin(Builtin::RegisteredLambda(..), _) => operations.push("lambda"),
+            ExprKind::Builtin(Builtin::RegisteredSuspend(..), _) => operations.push("suspend"),
+            _ => {}
+        });
+        for (kind, expected) in [("binary", 1), ("index", 1), ("lambda", 2), ("suspend", 2)] {
+            assert_eq!(
+                operations.iter().filter(|op| **op == kind).count(),
+                expected
+            );
+        }
+
+        let original = prepared.standalone().unwrap().unwrap();
+        prepared.syntax.as_mut().unwrap().to_mut()[0]
+            .as_function_def_stmt_mut()
+            .unwrap()
+            .body
+            .clear();
+        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+    }
+
+    #[test]
     fn prepared_output_owns_binary_operands_after_erasure() {
         assert_prepared_binary_output(
             "async def difference():\n    return (await pause() - 1) - await right()\n",
@@ -2115,7 +2403,9 @@ mod tests {
         let function = prepared.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
             .unwrap();
-        let plan = &prepared.source.function_bodies[&function.start()];
+        let plan = prepared.source.function_bodies[&function.start()]
+            .suite()
+            .unwrap();
         let ret = function.body[0].as_return_stmt_mut().unwrap();
         let value = ret.value.as_deref_mut().unwrap();
         assert!(plan.fully_checked());
@@ -2146,63 +2436,376 @@ mod tests {
     }
 
     #[test]
-    fn residual_with_reads_its_prepared_manager_after_erasing_the_call() {
-        // The module annotation retains the physical suite for this residual-input test.
-        let text = "def read(open_stream, path, record):\n    with open_stream(path) as stream:\n        record(stream)\nstate: int\n";
-        let mut prepared = PreparedBody::module(
-            "scan",
-            Path::new("scan.py"),
-            text,
+    fn bare_annotation_targets_emit_after_erasing_their_syntax() {
+        use crate::ir::{self, Builtin, ExprKind, Node};
+
+        let path = Path::new("targets.py");
+        let source = "owner.field: Unused\nvalues[(left, right):stop:step, (one, two)]: Unused\n";
+        let mut module =
+            PreparedBody::module("targets", path, source, 0, ModuleOrigin::Program(None)).unwrap();
+        let suite = module.source.initializer.as_ref().unwrap();
+        assert!(suite.fully_checked());
+        let mut reads = Vec::new();
+        let mut discarded = 0;
+        let mut tuples = 0;
+        ir::walk_nodes(&suite.checked.function.body, &mut |node, _| {
+            if let Node::Expression(expr) = node {
+                match &expr.kind {
+                    ExprKind::Builtin(Builtin::RegisteredName(name), _) => {
+                        reads.push(name.as_str())
+                    }
+                    ExprKind::Builtin(Builtin::RegisteredDiscard, operands) => {
+                        discarded += operands.len();
+                    }
+                    ExprKind::Tuple(_) => tuples += 1,
+                    _ => {}
+                }
+            }
+        });
+        assert_eq!(
+            reads,
+            [
+                "owner", "values", "left", "right", "stop", "step", "one", "two"
+            ]
+        );
+        // The tuple used as a slice bound is evaluated as one operand.
+        assert_eq!(tuples, 1);
+        assert_eq!(discarded, 7);
+        assert!(module.source.initializer_sites.is_empty());
+        assert!(module.syntax.is_none());
+        let withdrawn = module.standalone().unwrap().unwrap();
+        assert!(withdrawn.1.contains("setup_module_annotations"));
+        let parsed = ParsedModule::parse(path, source.into()).unwrap();
+        module.syntax = Some(Cow::Owned(module_source::into_body(parsed.parsed)));
+        assert_eq!(module.standalone().unwrap().unwrap(), withdrawn);
+        module.syntax.as_mut().unwrap().to_mut().clear();
+        assert_eq!(module.standalone().unwrap().unwrap(), withdrawn);
+    }
+
+    #[test]
+    fn a_deferred_module_annotation_publishes_its_provider_without_syntax() {
+        let module = PreparedBody::module(
+            "annotations",
+            Path::new("annotations.py"),
+            "value: Later\n",
             0,
             ModuleOrigin::Program(None),
         )
         .unwrap();
+        assert!(module.syntax.is_none());
+        assert!(module.source.initializer_sites.is_empty());
+        let (_, llvm) = module.standalone().unwrap().unwrap();
+        assert!(llvm.contains("mark_module_annotation"));
+        assert!(llvm.contains("setup_module_annotations"));
+        assert!(llvm.contains("__annotate__"));
+        assert_eq!(llvm.matches(" = private constant %code_site").count(), 1);
+    }
+
+    #[test]
+    fn an_indexed_store_retains_its_code_constant_key() {
+        let mut module = PreparedBody::module(
+            "store",
+            Path::new("store.py"),
+            "target()[1000, -0.0, 'key']: int = rhs()\n",
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let before = module.standalone().unwrap().unwrap();
+        let stmt = module.syntax.as_mut().unwrap().to_mut()[0]
+            .as_ann_assign_stmt_mut()
+            .unwrap();
+        let key = &mut stmt.target.as_subscript_expr_mut().unwrap().slice;
+        let Some(crate::frontend::ExpressionSelection::Checked(value)) =
+            module.source.statement_sites.expressions.get(key)
+        else {
+            panic!("expected the checked store key")
+        };
+        assert!(crate::ir::Constant::from_expr(value).is_some());
+        key.as_tuple_expr_mut().unwrap().elts.clear();
+        assert_eq!(module.standalone().unwrap().unwrap(), before);
+    }
+
+    #[test]
+    fn physical_raise_retains_its_two_suspending_operands() {
+        use crate::frontend::{PhysicalOperand, SourceEffect, ValueStatement};
+
+        let mut prepared = PreparedBody::module(
+            "example",
+            Path::new("example.py"),
+            "async def throw_after(error, cause):\n    raise await error() from await cause()\nstate: int\n",
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let def = prepared.syntax.as_ref().unwrap()[0]
+            .as_function_def_stmt()
+            .unwrap();
+        let plan = prepared.source.function_bodies[&def.start()]
+            .suite()
+            .unwrap();
+        let Some(SourceEffect::Value(ValueStatement::Raise, inputs)) =
+            plan.residual.iter().find_map(|run| run.effect.as_ref())
+        else {
+            panic!("expected a physical exception and cause")
+        };
+        assert!(matches!(
+            inputs.as_slice(),
+            [PhysicalOperand::Checked(_), PhysicalOperand::Checked(_)]
+        ));
+        let before = prepared.standalone().unwrap().unwrap();
+        let def = prepared.syntax.as_mut().unwrap().to_mut()[0]
+            .as_function_def_stmt_mut()
+            .unwrap();
+        let raise = def.body[0].as_raise_stmt_mut().unwrap();
+        raise.exc = None;
+        raise.cause = None;
+        assert_eq!(prepared.standalone().unwrap().unwrap(), before);
+    }
+
+    #[test]
+    fn a_physical_subscript_retains_its_receiver_and_individual_slice_bounds() {
+        use crate::frontend::SourceOperand::{Checked, Residual};
+
+        let mut prepared = PreparedBody::module(
+            "store",
+            Path::new("store.py"),
+            "good = complete()[key()]\ntarget()[lo():receiver()[begin():(lambda v: v)(hi())]:step()]: int = rhs()\n",
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        fn slice(body: &mut [ast::Stmt]) -> &mut ast::Expr {
+            &mut body[1]
+                .as_ann_assign_stmt_mut()
+                .unwrap()
+                .target
+                .as_subscript_expr_mut()
+                .unwrap()
+                .slice
+        }
+        fn erase(node: &mut ast::Expr) {
+            *node = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
+                range: node.range(),
+                node_index: Default::default(),
+            });
+        }
+
+        let original = prepared.standalone().unwrap().unwrap();
+        let adjacent = &prepared.syntax.as_deref().unwrap()[0]
+            .as_assign_stmt()
+            .unwrap()
+            .value;
+        assert!(
+            prepared
+                .source
+                .statement_sites
+                .expressions
+                .get(adjacent)
+                .is_none()
+        );
+        let sites = &prepared.source.statement_sites.expressions;
+        let key = slice(prepared.syntax.as_mut().unwrap().to_mut());
+        assert!(matches!(
+            sites
+                .physical(key)
+                .unwrap()
+                .operands(key, false)
+                .collect::<Vec<_>>()
+                .as_slice(),
+            [Checked(_), Residual(_), Checked(_)]
+        ));
+        let key = key.as_slice_expr_mut().unwrap();
+        erase(key.lower.as_deref_mut().unwrap());
+        erase(key.step.as_deref_mut().unwrap());
+        let read = key.upper.as_deref_mut().unwrap();
+        assert!(matches!(
+            sites
+                .physical(read)
+                .unwrap()
+                .operands(read, false)
+                .collect::<Vec<_>>()
+                .as_slice(),
+            [Checked(_), Checked(_), Residual(_)]
+        ));
+        let read = read.as_subscript_expr_mut().unwrap();
+        erase(&mut read.value);
+        erase(
+            read.slice
+                .as_slice_expr_mut()
+                .unwrap()
+                .lower
+                .as_deref_mut()
+                .unwrap(),
+        );
+        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+
+        let key = slice(prepared.syntax.as_mut().unwrap().to_mut())
+            .as_slice_expr_mut()
+            .unwrap();
+        let read = key
+            .upper
+            .as_deref_mut()
+            .unwrap()
+            .as_subscript_expr_mut()
+            .unwrap();
+        let residual = read
+            .slice
+            .as_slice_expr_mut()
+            .unwrap()
+            .upper
+            .as_deref_mut()
+            .unwrap();
+        erase(&mut residual.as_call_expr_mut().unwrap().arguments.args[0]);
+        assert_ne!(prepared.standalone().unwrap().unwrap(), original);
+    }
+
+    #[test]
+    fn a_physical_binary_keeps_its_operation_and_checked_input() {
+        use crate::frontend::SourceOperand::{Checked, Residual};
+
+        let mut prepared = PreparedBody::module(
+            "store",
+            Path::new("store.py"),
+            "good = before() + after()\ntarget()[lo():(lambda v: v)(hi()) + more():step()]: int = rhs()\n",
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        fn bound(body: &mut [ast::Stmt]) -> &mut ast::Expr {
+            body[1]
+                .as_ann_assign_stmt_mut()
+                .unwrap()
+                .target
+                .as_subscript_expr_mut()
+                .unwrap()
+                .slice
+                .as_slice_expr_mut()
+                .unwrap()
+                .upper
+                .as_deref_mut()
+                .unwrap()
+        }
+        fn erase(node: &mut ast::Expr) {
+            *node = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
+                range: node.range(),
+                node_index: Default::default(),
+            });
+        }
+
+        let original = prepared.standalone().unwrap().unwrap();
+        let checked = &prepared.syntax.as_deref().unwrap()[0]
+            .as_assign_stmt()
+            .unwrap()
+            .value;
+        assert!(
+            prepared
+                .source
+                .statement_sites
+                .expressions
+                .get(checked)
+                .is_none()
+        );
+        let upper = bound(prepared.syntax.as_mut().unwrap().to_mut());
+        let inputs = prepared
+            .source
+            .statement_sites
+            .expressions
+            .physical(upper)
+            .unwrap();
+        assert!(matches!(
+            inputs.operands(upper, false).collect::<Vec<_>>().as_slice(),
+            [Residual(_), Checked(_)]
+        ));
+        let binary = upper.as_bin_op_expr_mut().unwrap();
+        binary.op = ast::Operator::Sub;
+        erase(&mut binary.right);
+        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+
+        let binary = bound(prepared.syntax.as_mut().unwrap().to_mut())
+            .as_bin_op_expr_mut()
+            .unwrap();
+        erase(&mut binary.left.as_call_expr_mut().unwrap().arguments.args[0]);
+        assert_ne!(prepared.standalone().unwrap().unwrap(), original);
+    }
+
+    #[test]
+    fn residual_with_reads_its_prepared_manager_after_erasing_the_call() {
+        let text = "def read(open_stream, path, record):\n    with open_stream(path) as stream:\n        record((lambda: stream)())\n";
+        let path = Path::new("scan.py");
+        let mut prepared =
+            PreparedBody::module("scan", path, text, 0, ModuleOrigin::Program(None)).unwrap();
+        let parsed = ParsedModule::parse(path, text.into()).unwrap();
+        prepared.syntax = Some(Cow::Owned(module_source::into_body(parsed.parsed)));
         let function = prepared.syntax.as_ref().unwrap()[0]
             .as_function_def_stmt()
             .unwrap();
         // Supply a physical function body explicitly so this test is independent of
         // which Python constructs still need that entry in an ordinary compilation.
+        let missing = HashMap::new();
+        let source = crate::frontend::RegisteredSource {
+            lambdas: Some(&missing),
+            ..prepared.source.registered_source()
+        };
         let mut physical = crate::frontend::SuitePreparation::new(
             &prepared.source.namespace_operations,
-            prepared.source.registered_source(),
+            source,
             &function.body,
             true,
         );
         physical.physical_body(
             &function.body,
             crate::frontend::RegisteredScope::Function { is_async: false },
+            false,
+            &|_| false,
         );
         (
             prepared.source.statement_sites,
             prepared.source.nested_bodies,
         ) = (physical.sites, physical.nested);
         prepared.source.function_bodies.remove(&function.start());
-        let context = function.body[0].as_with_stmt().unwrap();
-        let inputs = &prepared.source.statement_sites.contexts[&context.range()];
-        assert!(matches!(inputs.as_slice(), [input] if input.manager.is_some()));
+        let position = function.body[0].start();
+        let suite = &prepared.source.nested_bodies[&position];
+        let [run] = suite.residual.as_slice() else {
+            panic!("expected a mixed context")
+        };
+        let Some(crate::frontend::SourceEffect::Context(context)) = &run.effect else {
+            panic!("expected a prepared context")
+        };
+        assert!(
+            matches!(context.inputs.as_slice(), [input] if matches!(input.manager, crate::frontend::PhysicalOperand::Checked(_))
+            && matches!(input.target, Some(crate::frontend::PhysicalBinding::Checked { .. })))
+        );
+        assert!(context.body.sources.is_empty());
         let original = prepared.standalone().unwrap().unwrap();
 
-        fn with_statement(body: &mut [ast::Stmt]) -> &mut ast::StmtWith {
-            body[0].as_function_def_stmt_mut().unwrap().body[0]
-                .as_with_stmt_mut()
-                .unwrap()
-        }
-        let call = with_statement(prepared.syntax.as_mut().unwrap().to_mut()).items[0]
-            .context_expr
-            .as_call_expr_mut()
+        let function = prepared.syntax.as_mut().unwrap().to_mut()[0]
+            .as_function_def_stmt_mut()
             .unwrap();
-        *call.func = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
-            range: call.func.range(),
-            node_index: Default::default(),
-        });
-        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
-
-        let body = &mut with_statement(prepared.syntax.as_mut().unwrap().to_mut()).body[0];
-        *body = ast::StmtPass {
-            range: body.range(),
+        function.body[0] = ast::StmtPass {
+            range: function.body[0].range(),
             node_index: Default::default(),
         }
         .into();
+        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+
+        // The expression statement owns the one call that still needs its lambda child.
+        let suite = prepared.source.nested_bodies.get_mut(&position).unwrap();
+        let Some(crate::frontend::SourceEffect::Context(context)) = &mut suite.residual[0].effect
+        else {
+            panic!("expected the mixed context");
+        };
+        let Some(crate::frontend::SourceEffect::Value(
+            crate::frontend::ValueStatement::Expression,
+            inputs,
+        )) = &mut context.body.plan.residual[0].effect
+        else {
+            panic!("expected a prepared expression statement");
+        };
+        let [crate::frontend::PhysicalOperand::Source(call)] = inputs.as_mut_slice() else {
+            panic!("expected the residual call");
+        };
+        call.as_call_expr_mut().unwrap().arguments.args = Default::default();
         assert_ne!(prepared.standalone().unwrap().unwrap(), original);
     }
 
@@ -2234,8 +2837,12 @@ mod tests {
             panic!("expected assignment expression")
         };
         assert!(matches!(
-            prepared.source.logicals.get(&named.value),
-            Some(crate::frontend::LogicalSelection::Checked(_))
+            prepared
+                .source
+                .statement_sites
+                .expressions
+                .get(&named.value),
+            Some(crate::frontend::ExpressionSelection::Checked(_))
         ));
         let ast::Expr::If(choice) = named.value.as_mut() else {
             panic!("expected choice")
@@ -2255,39 +2862,57 @@ mod tests {
         let mut prepared = PreparedBody::module(
             "program",
             Path::new("program.py"),
-            "result = yes() if flag() else ((lambda: make(x))() async for x in rows())\n",
+            "target()[lo():(yes() if flag() else (lambda v: v)(make())):step()]: int = rhs()\n",
             0,
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        assert!(prepared.source.initializer.as_ref().unwrap().fully_checked());
-        inject_residual_child_module(&mut prepared);
-        let suite = prepared.source.initializer.as_ref().unwrap();
-        assert!(!suite.fully_checked());
-        let original = prepared.standalone().unwrap().unwrap();
-        let value = &mut prepared.syntax.as_mut().unwrap().to_mut()[0]
-            .as_assign_stmt_mut()
-            .unwrap()
-            .value;
-        assert!(matches!(
-            prepared.source.logicals.conditional(value),
-            Some([Checked(_), Checked(_), Residual(ast::Expr::Generator(_))])
-        ));
+        fn choice(body: &mut [ast::Stmt]) -> &mut ast::Expr {
+            body[0]
+                .as_ann_assign_stmt_mut()
+                .unwrap()
+                .target
+                .as_subscript_expr_mut()
+                .unwrap()
+                .slice
+                .as_slice_expr_mut()
+                .unwrap()
+                .upper
+                .as_deref_mut()
+                .unwrap()
+        }
         fn erase(child: &mut ast::Expr) {
             *child = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
                 range: child.range(),
                 node_index: Default::default(),
             });
         }
-        let choice = value.as_if_expr_mut().unwrap();
-        erase(&mut choice.test);
-        erase(&mut choice.body);
+        assert!(
+            !prepared
+                .source
+                .initializer
+                .as_ref()
+                .unwrap()
+                .fully_checked()
+        );
+        let original = prepared.standalone().unwrap().unwrap();
+        let value = choice(prepared.syntax.as_mut().unwrap().to_mut());
+        assert!(matches!(
+            prepared
+                .source
+                .statement_sites
+                .expressions
+                .conditional(value),
+            Some([Checked(_), Checked(_), Residual(_)])
+        ));
+        let branch = value.as_if_expr_mut().unwrap();
+        erase(&mut branch.test);
+        erase(&mut branch.body);
         assert_eq!(prepared.standalone().unwrap().unwrap(), original);
-        let value = &mut prepared.syntax.as_mut().unwrap().to_mut()[0]
-            .as_assign_stmt_mut()
-            .unwrap()
-            .value;
-        erase(&mut value.as_if_expr_mut().unwrap().orelse);
+
+        let value = choice(prepared.syntax.as_mut().unwrap().to_mut());
+        let residual = &mut value.as_if_expr_mut().unwrap().orelse;
+        erase(&mut residual.as_call_expr_mut().unwrap().arguments.args[0]);
         assert_ne!(prepared.standalone().unwrap().unwrap(), original);
     }
 
@@ -2308,9 +2933,9 @@ mod tests {
 
         let source = concat!(
             "if ready():\n    accepted()\n",
-            "elif probe((lambda: (value := x))() async for x in rows()):\n",
+            "elif probe((lambda v: v)(make())):\n",
             "    before()\n",
-            "    consume((lambda: (value := y))() async for y in rows())\n",
+            "    target()[lo():(lambda v: v)(hi()) + more():step()]: int = rhs()\n",
             "    after()\n",
             "else:\n    declined()\n",
         );
@@ -2322,8 +2947,14 @@ mod tests {
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        assert!(prepared.source.initializer.as_ref().unwrap().fully_checked());
-        inject_residual_child_module(&mut prepared);
+        assert!(
+            !prepared
+                .source
+                .initializer
+                .as_ref()
+                .unwrap()
+                .fully_checked()
+        );
         let original = prepared.standalone().unwrap().unwrap();
         let stmt = prepared.syntax.as_ref().unwrap()[0].as_if_stmt().unwrap();
         let suites = &prepared.source.nested_bodies;
@@ -2355,11 +2986,73 @@ mod tests {
     }
 
     #[test]
+    fn checked_and_physical_matches_own_their_suspended_subject() {
+        for (body, physical) in [("return item", false), ("raise await failure(item)", true)] {
+            let source = format!(
+                "async def evaluate(seed):\n    match sink(await gate(), second=left() + table()[(lambda: seed)()]):\n        case item: {body}\nstate: int\n"
+            );
+            let mut prepared = PreparedBody::module(
+                "example",
+                Path::new("example.py"),
+                &source,
+                0,
+                ModuleOrigin::Program(None),
+            )
+            .unwrap();
+            let function = prepared.syntax.as_ref().unwrap()[0]
+                .as_function_def_stmt()
+                .unwrap();
+            let site = function.body[0].range();
+            let suite = prepared.source.function_bodies[&function.start()]
+                .suite()
+                .unwrap();
+            assert_eq!(suite.fully_checked(), !physical);
+            let subject = prepared.source.statement_sites.matches[&site]
+                .as_ref()
+                .unwrap()
+                .subject
+                .as_ref();
+            if physical {
+                crate::verify::registered(subject.unwrap().region()).unwrap();
+            } else {
+                assert!(subject.is_none());
+                crate::verify::registered(suite.checked.region()).unwrap();
+            }
+            let original = prepared.standalone().unwrap().unwrap();
+            let function = prepared.syntax.as_mut().unwrap().to_mut()[0]
+                .as_function_def_stmt_mut()
+                .unwrap();
+            let branch = function.body[0].as_match_stmt_mut().unwrap();
+            *branch.subject = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
+                range: branch.subject.range(),
+                node_index: Default::default(),
+            });
+            assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+            if physical {
+                let subject = prepared
+                    .source
+                    .statement_sites
+                    .matches
+                    .get_mut(&site)
+                    .unwrap()
+                    .as_mut()
+                    .unwrap()
+                    .subject
+                    .as_mut()
+                    .unwrap();
+                subject.value = crate::ir::Expr::none();
+                crate::verify::registered(subject.region()).unwrap();
+                assert_ne!(prepared.standalone().unwrap().unwrap(), original);
+            }
+        }
+    }
+
+    #[test]
     fn a_registered_match_renders_after_its_checked_input_syntax_is_erased() {
         let source = concat!(
             "match subject():\n",
             "    case 1 as item if allow(item):\n        keep(item)\n",
-            "    case other:\n        before(other)\n        consume((lambda: x)() async for x in other)\n        after(other)\n",
+            "    case other:\n        before(other)\n        target()[lo():(lambda v: v)(hi()) + more():step()]: int = other\n        after(other)\n",
         );
         let mut prepared = PreparedBody::module(
             "example",
@@ -2375,8 +3068,14 @@ mod tests {
             prepared.emit(&mut out, 0, &file).unwrap();
             out.functions
         }
-        assert!(prepared.source.initializer.as_ref().unwrap().fully_checked());
-        inject_residual_child_module(&mut prepared);
+        assert!(
+            !prepared
+                .source
+                .initializer
+                .as_ref()
+                .unwrap()
+                .fully_checked()
+        );
         let original = emit(&prepared);
         let ast::Stmt::Match(branch) = &mut prepared.syntax.as_mut().unwrap().to_mut()[0] else {
             panic!("expected match")
@@ -2409,6 +3108,37 @@ mod tests {
         branch.cases[1].body[0] = pass.clone();
         branch.cases[1].body[2] = pass;
         assert_eq!(emit(&prepared), original);
+    }
+
+    #[test]
+    fn annotation_comprehensions_emit_after_their_clauses_are_erased() {
+        let mut prepared = PreparedBody::module(
+            "example",
+            Path::new("example.py"),
+            "class C:\n    def f(self, x: [outer for _ in (1,)], y: [item for item in [outer]]): pass\n",
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let provider = prepared
+            .source
+            .parameter_annotations
+            .values()
+            .next()
+            .unwrap();
+        assert!(provider.body.fully_checked());
+        assert_eq!(provider.entries.len(), 2);
+        assert!(!provider.body.checked.local_names.is_empty());
+        let original = prepared.standalone().unwrap().unwrap();
+        let class = prepared.syntax.as_mut().unwrap().to_mut()[0]
+            .as_class_def_stmt_mut()
+            .unwrap();
+        let method = class.body[0].as_function_def_stmt_mut().unwrap();
+        for parameter in &mut method.parameters.args[1..] {
+            let annotation = parameter.parameter.annotation.as_mut().unwrap();
+            *annotation = annotation.as_list_comp_expr().unwrap().elt.clone();
+        }
+        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
     }
 
     #[test]
@@ -2454,15 +3184,21 @@ mod tests {
     }
 
     #[test]
-    fn residual_source_supplies_only_the_interpolation_value() {
+    fn a_mixed_suite_uses_the_entire_prepared_template() {
         let path = Path::new("field.py");
         let original = r#"q = t"left{(lambda v: v)(xs)!r:>4}right""#;
         let mut prepared =
             PreparedBody::module("field", path, original, 0, ModuleOrigin::Program(None)).unwrap();
         assert_eq!(prepared.source.strings.templates.len(), 1);
         inject_residual_child_module(&mut prepared);
-        assert!(prepared.source.strings.templates.is_empty());
-        assert_eq!(prepared.source.strings.residual_templates.len(), 1);
+        assert!(
+            !prepared
+                .source
+                .initializer
+                .as_ref()
+                .unwrap()
+                .fully_checked()
+        );
         let emit = |prepared: &PreparedBody<'_, '_>| {
             let mut output = Output::default();
             let file = output.data(b"field.py");
@@ -2471,18 +3207,22 @@ mod tests {
         };
         let expected = emit(&prepared);
 
-        // Keep the original operand and its range. All literal parts, conversions
-        // and format specs used by the frame must already come from preparation.
+        // Keep the site range while changing both its metadata and its operand.
+        // The mixed suite must emit only the prepared operation.
         let replace_body = |text| {
             ruff_python_parser::parse_module(text)
                 .unwrap()
                 .into_syntax()
                 .body
         };
-        prepared.syntax = Some(Cow::Owned(replace_body(r#"q = t"xxxx{(lambda v: v)(xs)!s:^9}yyyyy""#)));
+        prepared.syntax = Some(Cow::Owned(replace_body(
+            r#"q = t"xxxx{(lambda v: v)(xs)!s:^9}yyyyy""#,
+        )));
         assert_eq!(emit(&prepared), expected);
-        prepared.syntax = Some(Cow::Owned(replace_body(r#"q = t"xxxx{(lambda v: v)(ys)!s:^9}yyyyy""#)));
-        assert_ne!(emit(&prepared), expected);
+        prepared.syntax = Some(Cow::Owned(replace_body(
+            r#"q = t"xxxx{(lambda v: v)(ys)!s:^9}yyyyy""#,
+        )));
+        assert_eq!(emit(&prepared), expected);
     }
 
     #[test]
@@ -2507,7 +3247,7 @@ mod tests {
         let defs = module.syntax.as_mut().unwrap().to_mut();
         for (i, stmt) in defs.iter_mut().enumerate() {
             let def = stmt.as_function_def_stmt_mut().unwrap();
-            let Body::Checked(body) = module.source.function_body(def) else {
+            let Body::Checked(body, Some(_)) = module.source.function_body(def) else {
                 panic!("named activation still needs source");
             };
             let mut required = Vec::new();
@@ -2585,8 +3325,6 @@ mod tests {
                 .fully_checked()
         );
         assert!(prepared.syntax.is_none());
-        assert!(prepared.source.strings.literals.is_empty());
-        assert!(prepared.source.strings.residual_templates.is_empty());
         prepared.source.strings.templates.clear();
 
         let mut output = Output::default();
@@ -2641,7 +3379,11 @@ mod tests {
         assert!(initializer.fully_checked());
         assert_eq!(prepared.source.generators.len(), 1);
         let (site, generator) = prepared.source.generators.iter().next().unwrap();
-        let template = prepared.source.strings.templates.values().next().unwrap();
+        let crate::frontend::PreparedTemplate::Checked(template) =
+            prepared.source.strings.templates.values().next().unwrap()
+        else {
+            panic!("expected a fully checked template");
+        };
         let mut references = Vec::new();
         let mut caller_names = Vec::new();
         crate::ir::walk_operand_expressions(&template.value, &mut |expr| match &expr.kind {
@@ -2663,7 +3405,10 @@ mod tests {
         let file = output.data(b"scan.py");
         prepared.emit(&mut output, 0, &file).unwrap();
         assert_eq!(
-            output.functions.matches("call i64 @imre_dyn_define(").count(),
+            output
+                .functions
+                .matches("call i64 @imre_dyn_define(")
+                .count(),
             1
         );
         assert_eq!(
@@ -2689,7 +3434,9 @@ mod tests {
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        let enclosing = prepared.syntax.as_ref().unwrap()[0].as_function_def_stmt().unwrap();
+        let enclosing = prepared.syntax.as_ref().unwrap()[0]
+            .as_function_def_stmt()
+            .unwrap();
         let site = enclosing.body[0].as_assign_stmt().unwrap().value.range();
         assert!(prepared.source.generators.contains_key(&site));
         let before = prepared.standalone().unwrap().unwrap();
@@ -2727,14 +3474,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         .unwrap();
         assert_eq!(prepared.source.strings.templates.len(), 2);
         inject_residual_child_module(&mut prepared);
-        let checked: Vec<_> = prepared
-            .source
-            .strings
-            .templates
-            .keys()
-            .map(|&range| &prepared.source.text[range])
-            .collect();
-        assert_eq!(checked, ["t'{client.lookup(*args)}{v * 2}'"]);
+        assert_eq!(prepared.source.strings.templates.len(), 2);
         assert!(
             !prepared
                 .source
@@ -2867,11 +3607,20 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
     fn boxed_type_alias_values_emit_after_withdrawing_the_alias_statements() {
         use ast::visitor::transformer::{self, Transformer};
 
-        struct WithdrawAliases(std::cell::Cell<usize>);
-        impl Transformer for WithdrawAliases {
+        struct WithdrawAliases<'a> {
+            definitions: &'a HashMap<ruff_text_size::TextSize, TypeAliasDefinition>,
+            count: std::cell::Cell<usize>,
+        }
+        impl Transformer for WithdrawAliases<'_> {
             fn visit_stmt(&self, stmt: &mut ast::Stmt) {
                 if let ast::Stmt::TypeAlias(alias) = stmt {
-                    self.0.set(self.0.get() + 1);
+                    let definition = &self.definitions[&alias.start()];
+                    assert_eq!(
+                        definition.name,
+                        alias.name.as_name_expr().unwrap().id.as_str()
+                    );
+                    assert!(definition.body.is_ok(), "{}", definition.name);
+                    self.count.set(self.count.get() + 1);
                     *stmt = ast::StmtPass {
                         range: alias.range(),
                         node_index: Default::default(),
@@ -2883,18 +3632,29 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             }
         }
 
+        let source = include_str!("../../../../tests/fixtures/boxed_type_alias_values.py");
+        let path = Path::new("boxed_type_alias_values.py");
         let mut prepared = PreparedBody::module(
             "boxed_type_alias_values",
-            Path::new("boxed_type_alias_values.py"),
-            include_str!("../../../../tests/fixtures/boxed_type_alias_values.py"),
+            path,
+            source,
             0,
             ModuleOrigin::Program(None),
         )
         .unwrap();
+        assert!(prepared.syntax.is_none());
         let original = prepared.standalone().unwrap().unwrap();
-        let withdraw = WithdrawAliases(Default::default());
-        withdraw.visit_body(prepared.syntax.as_mut().unwrap().to_mut());
-        assert_eq!(withdraw.0.get(), 4);
+
+        let parsed = ParsedModule::parse(path, source.into()).unwrap();
+        let mut body = module_source::into_body(parsed.parsed);
+        let withdraw = WithdrawAliases {
+            definitions: &prepared.source.type_aliases,
+            count: Default::default(),
+        };
+        withdraw.visit_body(&mut body);
+        assert_eq!(withdraw.count.get(), 4);
+        assert_eq!(withdraw.definitions.len(), 4);
+        prepared.syntax = Some(Cow::Owned(body));
         assert_eq!(prepared.standalone().unwrap().unwrap(), original);
     }
 
@@ -3044,6 +3804,143 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
     }
 
     #[test]
+    fn both_finally_paths_bind_the_same_function_after_withdrawing_its_declaration() {
+        let source = concat!(
+            "def closing(seed):\n",
+            "    try:\n",
+            "        seed.marker: int\n",
+            "        yield 'open'\n",
+            "    finally:\n",
+            "        @decorate('outer')\n",
+            "        @decorate('inner')\n",
+            "        def cleanup(first=mark(seed), *, last=mark(seed + 1)):\n",
+            "            return first, last, seed\n",
+            "        yield cleanup\n",
+        );
+        let mut prepared = PreparedBody::module(
+            "closing",
+            Path::new("closing.py"),
+            source,
+            0,
+            ModuleOrigin::Provider,
+        )
+        .unwrap();
+        let original = prepared.standalone().unwrap().unwrap();
+        // One binding creates closing. Normal and exceptional exits each bind cleanup.
+        assert_eq!(
+            original.1.matches(" = private constant %code_site").count(),
+            2
+        );
+        assert_eq!(original.1.matches("call i64 @imre_dyn_define(").count(), 3);
+        let closing = prepared.syntax.as_mut().unwrap().to_mut()[0]
+            .as_function_def_stmt_mut()
+            .unwrap();
+        let cleanup = &mut closing.body[0].as_try_stmt_mut().unwrap().finalbody[0];
+        let site = cleanup.start();
+        *cleanup = ast::StmtPass {
+            range: cleanup.range(),
+            node_index: Default::default(),
+        }
+        .into();
+        assert!(!prepared.linked_declarations().contains_key(&site));
+        assert!(prepared.standalone().unwrap().unwrap() == original);
+    }
+
+    #[test]
+    fn mixed_try_retains_its_matcher_and_suites_after_erasing_the_statement() {
+        use crate::frontend::{
+            PhysicalOperand, RegisteredScope, RegisteredSource, SourceEffect, SuitePreparation,
+        };
+
+        let source = concat!(
+            "async def run(matcher, record, finish):\n",
+            "    try:\n",
+            "        await record((lambda: 1)())\n",
+            "    except (lambda: matcher)() as caught:\n",
+            "        record(caught)\n",
+            "    else:\n",
+            "        record('clear')\n",
+            "    finally:\n",
+            "        await finish((lambda: 2)())\n",
+        );
+        let mut module = PreparedBody::module(
+            "example",
+            Path::new("example.py"),
+            source,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let parsed = ruff_python_parser::parse_module(source).unwrap();
+        module.syntax = Some(Cow::Owned(parsed.into_syntax().body));
+        let function = module.syntax.as_ref().unwrap()[0]
+            .as_function_def_stmt()
+            .unwrap();
+        let function_start = function.start();
+        let try_start = function.body[0].start();
+        // Withhold the descriptors from suite preparation alone so these operands
+        // still use their real compiled lambda children during emission.
+        let missing = HashMap::new();
+        let values = RegisteredSource {
+            lambdas: Some(&missing),
+            ..module.source.registered_source()
+        };
+        let mut plan = SuitePreparation::new(
+            &module.source.namespace_operations,
+            values,
+            &function.body,
+            true,
+        );
+        plan.physical_body(
+            &function.body,
+            RegisteredScope::Function { is_async: true },
+            true,
+            &|_| false,
+        );
+        let (sites, nested) = (plan.sites, plan.nested);
+        module.source.statement_sites = sites;
+        module.source.nested_bodies.extend(nested);
+        module.source.function_bodies.remove(&function_start);
+
+        let [run] = module.source.nested_bodies[&try_start].residual.as_slice() else {
+            panic!("expected a single mixed try");
+        };
+        let Some(SourceEffect::Try(region)) = &run.effect else {
+            panic!("expected a prepared try")
+        };
+        assert!(matches!(
+            region.handlers[0].matcher,
+            Some((_, PhysicalOperand::Source(_)))
+        ));
+        assert!(!region.body.plan.fully_checked());
+        assert!(region.otherwise.plan.fully_checked());
+        assert!(!region.finalbody.as_ref().unwrap().plan.fully_checked());
+        let original = module.standalone().unwrap().unwrap();
+        let function = module.syntax.as_mut().unwrap().to_mut()[0]
+            .as_function_def_stmt_mut()
+            .unwrap();
+        let stmt = &mut function.body[0];
+        *stmt = ast::StmtPass {
+            range: stmt.range(),
+            node_index: Default::default(),
+        }
+        .into();
+        assert_eq!(module.standalone().unwrap().unwrap(), original);
+
+        let run = &mut module
+            .source
+            .nested_bodies
+            .get_mut(&try_start)
+            .unwrap()
+            .residual[0];
+        let Some(SourceEffect::Try(region)) = &mut run.effect else {
+            unreachable!()
+        };
+        region.handlers[0].name = None;
+        assert_ne!(module.standalone().unwrap().unwrap(), original);
+    }
+
+    #[test]
     fn nested_finally_after_return_only_emits_reachable_cleanup() {
         let source = concat!(
             "def wait(work, release, reacquire):\n",
@@ -3098,6 +3995,212 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
     }
 
     #[test]
+    fn suspended_index_update_keeps_its_operands_after_source_erasure() {
+        let mut prepared = PreparedBody::module(
+            "example",
+            Path::new("example.py"),
+            "def update():\n    (yield 'receiver')[(yield 'key')] += (yield 'rhs')\n",
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let before = prepared.standalone().unwrap().unwrap();
+        let def = prepared.syntax.as_mut().unwrap().to_mut()[0]
+            .as_function_def_stmt_mut()
+            .unwrap();
+        let suite = prepared.source.function_bodies[&def.start()]
+            .suite()
+            .unwrap();
+        assert!(suite.fully_checked());
+        assert!(
+            suite
+                .checked
+                .function
+                .body
+                .iter()
+                .any(|statement| { matches!(statement, crate::ir::Statement::AugmentItem(..)) })
+        );
+        def.body[0] = ast::Stmt::Pass(ast::StmtPass {
+            range: def.body[0].range(),
+            node_index: Default::default(),
+        });
+        assert_eq!(prepared.standalone().unwrap().unwrap(), before);
+    }
+
+    #[test]
+    fn suspending_assertions_prepare_their_external_expression_children() {
+        let source = concat!(
+            "def verify(left, right):\n",
+            "    assert left() and (yield right()), 'failed'\n",
+            "def explain():\n",
+            "    assert (yield 'first') and (yield 'second'), 1 + (yield 'message')\n",
+        );
+        let module = PreparedBody::module(
+            "program",
+            Path::new("program.py"),
+            source,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        assert!(module.standalone().unwrap().is_some());
+    }
+
+    #[test]
+    fn physical_assertion_retains_its_test_before_a_suspending_message() {
+        let mut module = PreparedBody::module(
+            "proof",
+            Path::new("proof.py"),
+            "def verify(check, message):\n    assert check(), (yield (lambda: message())())\n",
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let def = module.syntax.as_ref().unwrap()[0]
+            .as_function_def_stmt()
+            .unwrap();
+        let function = def.start();
+        let body_start = def.body[0].start();
+        // Withhold the child descriptor only from suite lowering. The physical
+        // message still uses the real compiled child when the assertion fails.
+        let missing = HashMap::new();
+        let source = crate::frontend::RegisteredSource {
+            lambdas: Some(&missing),
+            ..module.source.registered_source()
+        };
+        let mut physical = crate::frontend::SuitePreparation::new(
+            &module.source.namespace_operations,
+            source,
+            &def.body,
+            true,
+        );
+        physical.physical_body(
+            &def.body,
+            crate::frontend::RegisteredScope::Function { is_async: false },
+            true,
+            &|_| false,
+        );
+        let message = def.body[0]
+            .as_assert_stmt()
+            .unwrap()
+            .msg
+            .as_deref()
+            .unwrap();
+        let replacement = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
+            range: message.range(),
+            node_index: Default::default(),
+        });
+        // The alternate physical input also needs an entry in the expression table.
+        physical.sites.expressions.prepare_input(
+            &replacement,
+            source,
+            crate::frontend::RegisteredScope::Function { is_async: false },
+            true,
+        );
+        let (sites, nested) = (physical.sites, physical.nested);
+        module.source.statement_sites = sites;
+        module.source.nested_bodies.extend(nested);
+        module.source.function_bodies.remove(&function);
+        let [run] = module.source.nested_bodies[&body_start].residual.as_slice() else {
+            panic!("expected the assertion's external message");
+        };
+        let Some(crate::frontend::SourceEffect::Assertion(site)) = &run.effect else {
+            panic!("expected a mixed assertion");
+        };
+        assert!(!site.external_test && site.external_message);
+        let original = module.standalone().unwrap().unwrap();
+        let def = module.syntax.as_mut().unwrap().to_mut()[0]
+            .as_function_def_stmt_mut()
+            .unwrap();
+
+        fn erase(value: &mut ast::Expr) {
+            *value = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
+                range: value.range(),
+                node_index: Default::default(),
+            });
+        }
+
+        let assertion = def.body[0].as_assert_stmt_mut().unwrap();
+        erase(&mut assertion.test);
+        assert_eq!(module.standalone().unwrap().unwrap(), original);
+
+        let def = module.syntax.as_mut().unwrap().to_mut()[0]
+            .as_function_def_stmt_mut()
+            .unwrap();
+        let assertion = def.body[0].as_assert_stmt_mut().unwrap();
+        *assertion.msg.as_deref_mut().unwrap() = replacement;
+        assert_ne!(module.standalone().unwrap().unwrap(), original);
+    }
+
+    #[test]
+    fn mixed_while_keeps_its_checked_guard_and_reads_its_physical_body() {
+        let mut prepared = PreparedBody::module(
+            "example",
+            Path::new("example.py"),
+            "while ready:\n    target()[lo():(lambda v: v)(hi()) + more():step()]: int = item\nelse:\n    finish()\n",
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let plan = prepared.source.initializer.as_ref().unwrap();
+        assert!(matches!(
+            plan.residual.as_slice(),
+            [run] if matches!(run.effect.as_ref(), Some(
+                crate::frontend::SourceEffect::While(crate::frontend::SourceGuard::Checked(_))
+            ))
+        ));
+        let original = prepared.standalone().unwrap().unwrap();
+        fn statement(body: &mut [ast::Stmt]) -> &mut ast::StmtWhile {
+            body[0].as_while_stmt_mut().unwrap()
+        }
+        let loop_ = statement(prepared.syntax.as_mut().unwrap().to_mut());
+        *loop_.test = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
+            range: loop_.test.range(),
+            node_index: Default::default(),
+        });
+        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+
+        let loop_ = statement(prepared.syntax.as_mut().unwrap().to_mut());
+        let child = &mut loop_.body[0];
+        *child = ast::Stmt::Pass(ast::StmtPass {
+            range: child.range(),
+            node_index: Default::default(),
+        });
+        assert_ne!(prepared.standalone().unwrap().unwrap(), original);
+    }
+
+    #[test]
+    fn suspended_while_keeps_its_condition_and_suites_after_erasure() {
+        let source = "def pump():\n    while (yield 'test'):\n        yield 'body'\n    else:\n        yield 'else'\n";
+        let mut prepared = PreparedBody::module(
+            "example",
+            Path::new("example.py"),
+            source,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let before = prepared.standalone().unwrap().unwrap();
+        let def = prepared.syntax.as_mut().unwrap().to_mut()[0]
+            .as_function_def_stmt_mut()
+            .unwrap();
+        assert!(
+            prepared.source.function_bodies[&def.start()]
+                .suite()
+                .unwrap()
+                .fully_checked()
+        );
+        let loop_ = def.body[0].as_while_stmt_mut().unwrap();
+        *loop_.test = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
+            range: loop_.test.range(),
+            node_index: Default::default(),
+        });
+        loop_.body.clear();
+        loop_.orelse.clear();
+        assert_eq!(prepared.standalone().unwrap().unwrap(), before);
+    }
+
+    #[test]
     fn suspended_definitions_use_native_entries_in_each_module_origin() {
         let source = "def items(xs):\n    yield 1\n    yield from xs\npark = lambda: (yield 2)\nresume = lambda: 1 + (yield 3)\nasync def more(xs):\n    async for x in xs:\n        yield x\nasync def consume(f):\n    return await f()\ndef defaults():\n    yield 0\n    def nested(first=1, second=(yield 4)):\n        return second\n    return nested\n";
         for bundled in [false, true] {
@@ -3120,7 +4223,9 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
                     .filter_map(ast::Stmt::as_function_def_stmt)
                     .find(|def| def.name.as_str() == name)
                     .unwrap();
-                let suite = prepared.source.function_bodies[&def.start()].suite().unwrap();
+                let suite = prepared.source.function_bodies[&def.start()]
+                    .suite()
+                    .unwrap();
                 assert!(suite.fully_checked(), "{name}");
                 crate::verify::registered(suite.checked.region()).unwrap();
             }
@@ -3471,6 +4576,102 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
     }
 
     #[test]
+    fn a_residual_statement_uses_its_prepared_call_and_inline_operand() {
+        use crate::frontend::ExpressionSelection;
+
+        let mut prepared = PreparedBody::module(
+            "store",
+            Path::new("store.py"),
+            "target()[lo():(lambda v: v)(hi()) + more():step()]: int = {'rows': [f(x) for x in xs]}\n",
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let original = prepared.standalone().unwrap().unwrap();
+        let stmt = prepared.syntax.as_mut().unwrap().to_mut()[0]
+            .as_ann_assign_stmt_mut()
+            .unwrap();
+        let receiver = &mut stmt.target.as_subscript_expr_mut().unwrap().value;
+        let value = stmt.value.as_deref_mut().unwrap();
+        let sites = &prepared.source.statement_sites.expressions;
+        assert!(matches!(
+            sites.get(receiver),
+            Some(ExpressionSelection::Checked(_))
+        ));
+        assert!(matches!(
+            sites.get(value),
+            Some(ExpressionSelection::Operand(_))
+        ));
+        let callee = &mut receiver.as_call_expr_mut().unwrap().func;
+        **callee = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
+            range: callee.range(),
+            node_index: Default::default(),
+        });
+        value.as_dict_expr_mut().unwrap().items.clear();
+        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+    }
+
+    #[test]
+    fn dictionary_reports_its_rejected_comprehension() {
+        let source = concat!(
+            "async def make():\n",
+            "    return {\"items\": [lambda v=await get(x): v for x in [1, 2]]}\n",
+        );
+        let mut prepared = PreparedBody::module(
+            "example",
+            Path::new("example.py"),
+            source,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let def = prepared.syntax.as_mut().unwrap().to_mut()[0]
+            .as_function_def_stmt_mut()
+            .unwrap();
+        let value = def.body[0]
+            .as_return_stmt_mut()
+            .unwrap()
+            .value
+            .as_deref_mut()
+            .unwrap();
+        let Some(crate::frontend::ExpressionSelection::Refused(range, _)) =
+            prepared.source.statement_sites.expressions.get(value)
+        else {
+            panic!("expected the checked child diagnostic");
+        };
+        assert_eq!(
+            &source[*range],
+            "[lambda v=await get(x): v for x in [1, 2]]"
+        );
+        value.as_dict_expr_mut().unwrap().items.clear();
+        assert_eq!(
+            prepared.standalone().unwrap_err(),
+            "example.py:2:22: cannot compile this comprehension ahead of time (through 2:64)",
+        );
+    }
+
+    #[test]
+    fn dictionary_method_default_prepares_its_template_in_class_scope() {
+        let source = concat!(
+            "class Outer[T]:\n",
+            "    item = 7\n",
+            "    @staticmethod\n",
+            "    def run[U](value={'spelling': t'{item}'}): return value\n",
+        );
+        let mut prepared = PreparedBody::module(
+            "example",
+            Path::new("example.py"),
+            source,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let before = prepared.standalone().unwrap().unwrap();
+        prepared.source.strings.templates.clear();
+        assert_eq!(prepared.standalone().unwrap().unwrap(), before);
+    }
+
+    #[test]
     fn suspended_dictionary_emits_after_its_entries_are_erased() {
         let mut prepared = PreparedBody::module(
             "example",
@@ -3488,7 +4689,12 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         let def = prepared.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
             .unwrap();
-        assert!(prepared.source.function_bodies[&def.start()].suite().unwrap().fully_checked());
+        assert!(
+            prepared.source.function_bodies[&def.start()]
+                .suite()
+                .unwrap()
+                .fully_checked()
+        );
         let assignment = def.body[0].as_assign_stmt_mut().unwrap();
         assignment.value.as_dict_expr_mut().unwrap().items.clear();
         assert_eq!(prepared.standalone().unwrap().unwrap(), before);
@@ -3523,6 +4729,44 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
     }
 
     #[test]
+    fn grouped_assignment_keeps_its_starred_comprehension_key_after_target_erasure() {
+        let source = concat!(
+            "def run(ok, xs, table):\n",
+            r#"    earlier = first, [receiver()[key((saved := (17 if ok else t"{[*x for x in xs]=}")))], *rest] = rhs()"#,
+            "\n",
+            r#"    a = table[(saved := 17 if ok else t"{(*x for x in xs)=}")] = 41"#,
+            "\n    return earlier, first, saved, rest, a\n",
+            "state: int = 0\n",
+        );
+        let mut prepared = PreparedBody::module(
+            "example",
+            Path::new("example.py"),
+            source,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let before = prepared.standalone().unwrap().unwrap();
+        assert!(prepared.syntax.is_none());
+        let mut syntax = ruff_python_parser::parse_module(source)
+            .unwrap()
+            .into_syntax()
+            .body;
+        let def = syntax[0].as_function_def_stmt_mut().unwrap();
+        assert!(
+            prepared.source.function_bodies[&def.start()]
+                .suite()
+                .unwrap()
+                .fully_checked()
+        );
+        for assignment in &mut def.body[..2] {
+            assignment.as_assign_stmt_mut().unwrap().targets.clear();
+        }
+        prepared.syntax = Some(Cow::Owned(syntax));
+        assert_eq!(prepared.standalone().unwrap().unwrap(), before);
+    }
+
+    #[test]
     fn annotated_class_interleaves_checked_targets_with_physical_statements() {
         let source = concat!(
             "def outer[T]():\n",
@@ -3530,7 +4774,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             "        member: int\n",
             "        receiver().field = [item.copy() for item in items]\n",
             "        saved = [receiver().field, (table()[key()], *tail)] = (lambda: items)()\n",
-            "        select(lambda: rows).field = fallback()\n",
+            "        select(lambda: rows).field: int = fallback()\n",
             "        del receiver().field\n",
             "        saved = (first, [receiver().field, table()[key()], *rest]) = rows()\n",
             "        def read(self): return self.member\n",
@@ -3544,14 +4788,21 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        assert!(prepared.source.class_bodies.values().all(|class| class.body.fully_checked()));
+        assert!(
+            prepared
+                .source
+                .class_bodies
+                .values()
+                .all(|class| class.body.fully_checked())
+        );
         inject_residual_child_module(&mut prepared);
         let outer = prepared.syntax.as_ref().unwrap()[0]
             .as_function_def_stmt()
             .unwrap();
         let class = outer.body[0].as_class_def_stmt().unwrap();
         assert!(!prepared.source.function_bodies.contains_key(&outer.start()));
-        let suite = &prepared.source.class_bodies[&class.start()].body;
+        let class_start = class.start();
+        let suite = &prepared.source.class_bodies[&class_start].body;
         assert!(
             !prepared
                 .source
@@ -3566,7 +4817,10 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         assert_eq!(rhs.statements, 2..3);
         assert!(matches!(
             rhs.effect,
-            Some(crate::frontend::SourceEffect::AssignmentInput(_))
+            Some(crate::frontend::SourceEffect::Value(
+                crate::frontend::ValueStatement::Store(_),
+                _
+            ))
         ));
         assert_eq!(whole.statements, 3..4);
         assert!(whole.effect.is_none());
@@ -3586,9 +4840,22 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         let target = store.targets[0].as_attribute_expr_mut().unwrap();
         std::mem::swap(&mut target.value, &mut store.value);
         store.targets.clear();
-        class.body[2].as_assign_stmt_mut().unwrap().targets.clear();
+        // Neither the checked targets nor their residual input need the assignment syntax.
+        class.body[2] = class.body[4].clone();
         class.body[5].as_assign_stmt_mut().unwrap().targets.clear();
         assert_eq!(emit(&prepared), before);
+
+        let class = prepared.source.class_bodies.get_mut(&class_start).unwrap();
+        let Some(crate::frontend::SourceEffect::Value(_, inputs)) =
+            &mut class.body.residual[0].effect
+        else {
+            panic!("expected the retained assignment value");
+        };
+        let [crate::frontend::PhysicalOperand::Source(value)] = &mut inputs[..] else {
+            panic!("expected the residual lambda call");
+        };
+        *value = value.as_call_expr().unwrap().func.clone();
+        assert_ne!(emit(&prepared), before);
     }
 
     #[test]

@@ -691,6 +691,7 @@ impl Builtin {
             | Self::RegisteredGenerator(..)
             | Self::RegisteredTypeAlias(_)
             | Self::RegisteredStatement(..)
+            | Self::RegisteredDiscard
             | Self::RegisteredName(_)
             | Self::RegisteredCompare(_)
             | Self::RegisteredContainsLiteral(_)
@@ -707,7 +708,7 @@ impl Builtin {
             | Self::RegisteredEllipsis
             | Self::RegisteredComplex(..)
             | Self::FormatConversion(_)
-            | Self::FormatField
+            | Self::FormatField(_)
             | Self::RegisteredString(_)
             | Self::RegisteredTemplate(_)
             | Self::RegisteredInterpolation { .. }

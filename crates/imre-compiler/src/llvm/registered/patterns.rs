@@ -36,11 +36,6 @@ pub(crate) enum MatchRegion<'a> {
     Body(usize),
 }
 
-pub(crate) enum MatchSubject<'a> {
-    Checked(&'a Expr),
-    Evaluated(String),
-}
-
 /// Both representations borrow their operands directly from their declaring case.
 enum MatchCases<'a> {
     Checked(&'a [MatchCase]),
@@ -156,7 +151,7 @@ impl GuardBlock<'_> {
 impl RegisteredFrame<'_, '_> {
     pub(crate) fn registered_match<'a>(
         &mut self,
-        subject: MatchSubject<'_>,
+        subject: &str,
         mark: &str,
         site: &'a SourceMatch,
         sites: &CheckedSites,
@@ -191,11 +186,10 @@ impl RegisteredFrame<'_, '_> {
 impl CheckedBody<'_, '_, '_, '_> {
     pub(crate) fn emit_prepared_match(&mut self, expr: &Expr, cases: &[MatchCase]) {
         let mark = self.python().temporary_mark();
-        let mut regions = self.python().start_match(
-            MatchSubject::Checked(expr),
-            &mark,
-            MatchCases::Checked(cases),
-        );
+        let subject = self.python().pattern_value(expr);
+        let mut regions = self
+            .python()
+            .start_match(&subject, &mark, MatchCases::Checked(cases));
         while let Some(region) = regions.next(self) {
             match region {
                 MatchRegion::Body(case) => self.emit_block(&cases[case].body),
@@ -228,15 +222,10 @@ impl Frame<'_, '_, '_> {
 
     fn start_match<'a>(
         &mut self,
-        subject: MatchSubject<'_>,
+        subject: &str,
         mark: &str,
         cases: MatchCases<'a>,
     ) -> MatchRegions<'a> {
-        let handle = match subject {
-            MatchSubject::Checked(expr) => self.pattern_value(expr),
-            MatchSubject::Evaluated(handle) => handle,
-        };
-        let subject = handle.as_str();
         let count = cases.len();
         let default = count > 1 && matches!(cases.get(count - 1).pattern.test, MatchTest::Always);
         let tested = count - usize::from(default);

@@ -4,6 +4,19 @@ use std::fs;
 use tempfile::tempdir;
 
 #[test]
+fn an_imported_function_can_read_a_registered_type_alias_as_a_value() {
+    let project = tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    fs::write(
+        project.path().join("aliases.py"),
+        include_str!("../../../../tests/fixtures/boxed_type_alias_values.py"),
+    )
+    .unwrap();
+    fs::write(&entry, "from aliases import current\ncurrent()\n").unwrap();
+    crate::check_file(&entry, None).unwrap();
+}
+
+#[test]
 fn registered_body_checks_its_declared_result() {
     let project = tempdir().unwrap();
     let entry = project.path().join("main.py");
@@ -865,7 +878,8 @@ fn a_builtin_namespace_lookup_only_requires_a_source_body_when_invoked() {
     fs::write(
         project.path().join("inspect_callback.py"),
         "def name(callback):\n    if False: eval(input())\n    return callback.__name__\n",
-    ).unwrap();
+    )
+    .unwrap();
     check("from inspect_callback import name\nprint(name(getattr(builtins,input())))").unwrap();
 }
 

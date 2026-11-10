@@ -1,9 +1,9 @@
-use crate::frontend::{PhysicalOperand, SourceEffect};
+use crate::frontend::{PhysicalOperand, SourceEffect, SourceGuard};
 mod declarations;
 use super::sites::{CompiledDefinition, CompiledProvider};
 
-use super::{AnnotationScope, FrameEmitter};
-use crate::ir::{ItemUpdate, IteratorOp, Statement};
+use super::{AnnotationScope, FrameEmitter, Output, RegisteredFrame, SourceMap};
+use crate::ir::Statement;
 use crate::llvm::registered::Place;
 use crate::llvm::registered::context::{ContextEmitter, ContextRegion};
 use imre_ast::code_flags;
@@ -11,9 +11,7 @@ use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange, TextSize};
 use serde_json::json;
 
-use super::{
-    Body, CheckedHeader, Cleanup, DefinitionName, Entry, FinallySuite, Function, LoopTarget,
-};
+use super::{Body, CheckedHeader, Cleanup, DefinitionName, Entry, Function};
 
 impl<'a, 'p> ContextEmitter<'a, 'p> for Function<'a, 'p> {
     fn push_context(&mut self, exit: ContextRegion, outer: String) {
@@ -25,6 +23,59 @@ impl<'a, 'p> ContextEmitter<'a, 'p> for Function<'a, 'p> {
             unreachable!("active context region")
         };
         (context, outer)
+    }
+}
+
+impl SourceMap<'_> {
+    /// Publish a module's provider before its first statement. Every simple
+    /// annotation, including an unconditional one, becomes visible only after
+    /// execution reaches its assignment.
+    pub(super) fn define_module_annotations(
+        &self,
+        frame: &mut RegisteredFrame<'_, '_>,
+        sites: &[TextSize],
+    ) {
+        let entries: Vec<_> = sites
+            .iter()
+            .enumerate()
+            .map(|(index, site)| crate::ir::AnnotationOccurrence {
+                site: *site,
+                index: Some(index),
+            })
+            .collect();
+        let signature = frame.text(
+            &json!({
+                "posonly": ["format"], "scope_complete": true, "scope_locals_complete": true,
+                "code_flags": self.function_flags(None, false, false),
+            })
+            .to_string(),
+        );
+        let code = self.annotation_body(frame.output, &entries, None, self.module_start);
+        let name = frame.text("__annotate__");
+        let provider = frame.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {signature}, i64 0, i64 {name}, i64 0, i64 0, i1 true)", frame.scope));
+        frame.bind("__annotate__", &provider);
+    }
+
+    fn annotation_body(
+        &self,
+        output: &mut Output,
+        entries: &[crate::ir::AnnotationOccurrence],
+        globals: Option<&std::collections::BTreeSet<String>>,
+        start: TextSize,
+    ) -> String {
+        let plan = crate::frontend::DeferredAnnotation::prepare_body(&self.annotations, entries);
+        let scope = globals.map_or(AnnotationScope::Plain, |globals| AnnotationScope::Class {
+            globals: globals.clone(),
+            conditional: entries.iter().any(|entry| entry.index.is_some()),
+        });
+        self.definition(
+            output,
+            String::new(),
+            Body::AnnotationProvider(&plan, entries, scope),
+            start,
+            false,
+            Entry::Compiled,
+        )
     }
 }
 
@@ -52,8 +103,8 @@ impl<'p> Function<'_, 'p> {
     /// frames interleave its checked blocks with only their unprepared source.
     pub(super) fn prepared_function(
         &mut self,
-        prepared: &crate::frontend::RegisteredSuite,
-        emit_source: impl FnMut(&mut Self, &crate::frontend::SourceRun),
+        prepared: &'p crate::frontend::RegisteredSuite,
+        emit_source: impl FnMut(&mut Self, &'p crate::frontend::SourceRun),
     ) {
         if prepared.fully_checked() {
             self.checked_function(&prepared.checked);
@@ -111,8 +162,8 @@ impl<'p> Function<'_, 'p> {
 
     pub(super) fn checked_runs(
         &mut self,
-        prepared: &crate::frontend::RegisteredSuite,
-        mut emit_source: impl FnMut(&mut Self, &crate::frontend::SourceRun),
+        prepared: &'p crate::frontend::RegisteredSuite,
+        mut emit_source: impl FnMut(&mut Self, &'p crate::frontend::SourceRun),
     ) {
         let Some(enclosing) = self.frame.enter_checked_slots(prepared.checked.region()) else {
             return;
@@ -132,18 +183,30 @@ impl<'p> Function<'_, 'p> {
         self.frame.restore_checked_slots(enclosing);
     }
 
-    pub(super) fn statements(&mut self, suite: &'p [ast::Stmt]) {
-        if let Some(plan) = suite
-            .first()
-            .and_then(|s| self.source.nested_bodies.get(&s.start()))
-        {
-            self.checked_runs(plan, |code, run| code.source_run(suite, run));
+    fn emit_suite(
+        &mut self,
+        plan: Option<&'p crate::frontend::RegisteredSuite>,
+        source: &'p [ast::Stmt],
+    ) {
+        if let Some(plan) = plan {
+            self.checked_runs(plan, |code, run| code.source_run(source, run));
         } else {
-            self.source_statements(suite);
+            self.source_statements(source);
         }
     }
 
-    pub(super) fn source_run(&mut self, suite: &'p [ast::Stmt], run: &crate::frontend::SourceRun) {
+    pub(super) fn statements(&mut self, source: &'p [ast::Stmt]) {
+        let plan = source
+            .first()
+            .and_then(|stmt| self.source.nested_bodies.get(&stmt.start()));
+        self.emit_suite(plan, source);
+    }
+
+    pub(super) fn source_run(
+        &mut self,
+        suite: &'p [ast::Stmt],
+        run: &'p crate::frontend::SourceRun,
+    ) {
         let Some(effect) = &run.effect else {
             self.source_statements(&suite[run.statements.clone()]);
             return;
@@ -152,41 +215,173 @@ impl<'p> Function<'_, 'p> {
             return;
         }
         match effect {
-            SourceEffect::AssignmentInput(slot) => {
-                let assignment = suite[run.statements.start]
-                    .as_assign_stmt()
-                    .expect("assignment RHS");
-                let value = self.expr(&assignment.value);
-                self.frame.store_private(*slot, &value);
+            SourceEffect::LoopTransfer(range, transfer) => {
+                self.checkpoint(range);
+                self.simple_call = None;
+                if self.loops.is_empty() {
+                    self.unsupported("loop control outside a loop");
+                } else {
+                    self.unwind_loop(transfer, |code, depth| code.run_cleanups(depth, None));
+                }
+            }
+            SourceEffect::Assertion(site) => {
+                let source = suite[run.statements.start]
+                    .as_assert_stmt()
+                    .expect("external assertion input");
+                self.emit_assertion_inputs(site, source);
+            }
+            SourceEffect::Context(context) => self.prepared_context(context),
+            SourceEffect::Try(region) => {
+                self.checkpoint(&region.range);
+                self.simple_call = None;
+                self.prepared_try(region);
+            }
+            SourceEffect::For(region) => self.prepared_for(region),
+            SourceEffect::While(condition) => {
+                let source = suite[run.statements.start]
+                    .as_while_stmt()
+                    .expect("prepared loop");
+                if matches!(condition, SourceGuard::Literal(false)) {
+                    self.statements(&source.orelse);
+                    return;
+                }
+                crate::llvm::operations::loop_region(
+                    self,
+                    |code| {
+                        code.flush_check();
+                        &mut code.frame.body
+                    },
+                    |code| code.name("b"),
+                    |code, edges| code.jump(&edges.step),
+                    |code, yes, no| match condition {
+                        SourceGuard::Literal(taken) => {
+                            code.branch(if *taken { "true" } else { "false" }, yes, no);
+                        }
+                        SourceGuard::Checked(operand) => {
+                            code.prepare_checked_value(&operand.value);
+                            let bit = code.test_with_temporaries(|code| {
+                                code.frame.prepared_operand(operand, &code.sites, true)
+                            });
+                            code.branch(&bit, yes, no);
+                        }
+                        SourceGuard::Residual => code.branch_expr(&source.test, yes, no),
+                    },
+                    |code, edges, ()| {
+                        let depth = code.exits.len();
+                        code.push_loop(edges.clone(), depth, depth);
+                        code.statements(&source.body);
+                        code.loops.pop();
+                    },
+                    (!source.orelse.is_empty())
+                        .then_some(|code: &mut Self| code.statements(&source.orelse)),
+                );
+            }
+            SourceEffect::RefusedTargetOperand(range, reason) => {
+                self.with_expression_range(*range, |code| code.build_diagnostic(reason));
+            }
+            SourceEffect::Value(output, inputs) => match output {
+                crate::frontend::ValueStatement::Store(slot) => {
+                    let value = self.physical_operand(&inputs[0]);
+                    self.frame.store_private(*slot, &value);
+                }
+                crate::frontend::ValueStatement::Return => {
+                    let value = inputs.first().map_or_else(
+                        || super::permanent::NONE.to_string(),
+                        |input| self.physical_operand(input),
+                    );
+                    self.return_from_scope(value);
+                }
+                crate::frontend::ValueStatement::Expression => {
+                    let value = self.physical_operand(&inputs[0]);
+                    self.discard_handle(&value);
+                }
+                crate::frontend::ValueStatement::Raise => {
+                    self.raise_operands(inputs.first(), inputs.get(1), Self::physical_operand);
+                }
+            },
+            SourceEffect::Discard(inputs) => {
+                for input in inputs {
+                    self.discard_operand(|code| code.physical_operand(input));
+                }
             }
             SourceEffect::ObjectOperation(op, inputs) => {
                 let (receiver, args) = inputs.split_first().expect("object operation receiver");
-                self.object_operation(op, receiver, args.iter(), |code, input| match input {
-                    PhysicalOperand::Checked(value) => {
-                        code.prepare_checked_value(&value.value);
-                        code.frame.prepared_operand(value, &code.sites, false)
-                    }
-                    PhysicalOperand::Source(expr) => code.expr(expr),
-                });
+                self.object_operation(op, receiver, args.iter(), Self::physical_operand);
             }
         }
     }
 
+    fn emit_assertion_inputs(
+        &mut self,
+        site: &crate::frontend::AssertionSite,
+        source: &'p ast::StmtAssert,
+    ) {
+        let [checkpoint, Statement::If(test, yes, no)] = site.body.as_slice() else {
+            unreachable!("prepared assertion")
+        };
+        self.checked_statement(checkpoint);
+        crate::llvm::operations::choose(
+            self,
+            |code| {
+                code.flush_check();
+                &mut code.frame.body
+            },
+            [(Some(test), yes), (None, no)],
+            |code, test, yes, no| {
+                if site.external_test {
+                    code.branch_expr(&source.test, yes, no);
+                } else {
+                    code.prepare_checked_value(test);
+                    code.frame.registered_branch(test, &code.sites, yes, no);
+                }
+            },
+            |code, statements| {
+                for statement in statements {
+                    if site.external_message {
+                        let message = code.expr(source.msg.as_deref().expect("external message"));
+                        code.frame.checked_statement_with_inputs(
+                            statement,
+                            &code.sites,
+                            &[message],
+                        );
+                    } else {
+                        code.checked_statement(statement);
+                    }
+                }
+            },
+            false,
+        );
+    }
+
+    fn physical_operand(&mut self, input: &PhysicalOperand) -> String {
+        match input {
+            PhysicalOperand::Checked(value) => {
+                self.prepare_checked_value(&value.value);
+                self.frame.prepared_operand(value, &self.sites, false)
+            }
+            PhysicalOperand::Source(expr) => self.expr(expr),
+        }
+    }
+
     /// Supply only the source operands requested by the registered matcher.
-    fn emit_match_inputs(&mut self, site: &crate::frontend::SourceMatch, source: &'p ast::StmtMatch) {
-        use crate::llvm::registered::patterns::{MatchRegion, MatchSubject};
+    fn emit_match_inputs(
+        &mut self,
+        site: &'p crate::frontend::SourceMatch,
+        source: &'p ast::StmtMatch,
+    ) {
+        use crate::llvm::registered::patterns::MatchRegion;
 
         let mark = self.temporary_mark();
         let subject = match &site.subject {
-            Some(expr) => {
-                self.prepare_checked_value(expr);
-                MatchSubject::Checked(expr)
+            Some(operand) => {
+                self.prepare_checked_value(&operand.value);
+                self.frame.prepared_operand(operand, &self.sites, false)
             }
-            None => MatchSubject::Evaluated(self.expr(&source.subject)),
+            None => self.expr(&source.subject),
         };
         let mut regions = self
             .frame
-            .registered_match(subject, &mark, site, &self.sites);
+            .registered_match(&subject, &mark, site, &self.sites);
         loop {
             if let Some(test) = regions.pending_checked_guard() {
                 self.prepare_checked_value(test);
@@ -214,43 +409,14 @@ impl<'p> Function<'_, 'p> {
         }
     }
 
-    fn emit_value_statement(&mut self, output: crate::frontend::ValueStatement<'_>) {
-        use crate::frontend::ValueStatement;
-        match output {
-            ValueStatement::Checked(stmt) => self.checked_statement(&stmt),
-            ValueStatement::ReturnOperand(expr) | ValueStatement::DiscardOperand(expr) => {
-                // Ordinary preparation already declined this operand. A suspended frame
-                // can still lower the whole expression, including its yield or await.
-                let handle = if self.native_suspension {
-                    self.expr(expr)
-                } else {
-                    self.with_expression_range(expr.range(), |code| code.located_expr(expr))
-                };
-                if matches!(output, ValueStatement::ReturnOperand(_)) {
-                    self.return_from_scope(handle);
-                } else {
-                    self.discard_handle(&handle);
-                }
-            }
-            ValueStatement::RaiseOperands(exception, cause) => {
-                self.raise_operands(exception, cause, Self::expr);
-            }
-            ValueStatement::Ignore => {}
-        }
-    }
-
     pub(super) fn source_statements(&mut self, suite: &'p [ast::Stmt]) {
         for stmt in suite {
             if !self.start_statement() {
                 break;
             }
-            let position = stmt
-                .as_assert_stmt()
-                .map_or_else(|| stmt.range(), |assertion| assertion.test.range());
-            self.checkpoint(&position);
+            self.checkpoint(&stmt.range());
             self.simple_call = imre_ast::unhighlighted_call(stmt);
             if let Some(site) = self.source.statement_sites.ifs.get(&stmt.range()) {
-                use crate::frontend::SourceGuard;
                 let source = stmt.as_if_stmt().expect("prepared conditional");
                 let arms = site
                     .arms(self.native_suspension)
@@ -305,14 +471,6 @@ impl<'p> Function<'_, 'p> {
                 self.mixed_class_definition(class);
                 continue;
             }
-            if let Some(output) = crate::frontend::value_statement(
-                stmt,
-                self.source.registered_source(),
-                &self.source.logicals,
-            ) {
-                self.emit_value_statement(output);
-                continue;
-            }
             if let Some(operation) = self.source.namespace_operations.get(&stmt.range()) {
                 let value = self.registered_value(operation);
                 if let crate::ir::ExprKind::Builtin(
@@ -325,7 +483,9 @@ impl<'p> Function<'_, 'p> {
                 }
                 continue;
             }
-            if let Some(effect) = crate::frontend::attribute_write(stmt) {
+            if !stmt.is_assign_stmt()
+                && let Some(effect) = crate::frontend::attribute_write(stmt)
+            {
                 self.attribute_operation(
                     effect.action,
                     effect.field.attr.as_str(),
@@ -337,42 +497,15 @@ impl<'p> Function<'_, 'p> {
             }
             match stmt {
                 ast::Stmt::Pass(_) | ast::Stmt::Global(_) | ast::Stmt::Nonlocal(_) => {}
-                ast::Stmt::Assign(v) => {
-                    let value = self.expr(&v.value);
-                    let chained = v.targets.len() > 1;
-                    if chained {
-                        self.live.push(value.clone());
-                    }
-                    for (index, target) in v.targets.iter().enumerate() {
-                        if chained && index + 1 == v.targets.len() {
-                            self.live.pop();
-                        }
-                        let owned = chained
-                            || matches!(
-                                target,
-                                ast::Expr::Name(_) | ast::Expr::List(_) | ast::Expr::Tuple(_)
-                            );
-                        self.assign_target(target, &value, owned);
-                    }
-                }
                 ast::Stmt::AnnAssign(v) => {
                     if let Some(value) = &v.value {
                         let value = self.expr(value);
-                        self.assign_target(
-                            &v.target,
-                            &value,
-                            matches!(&*v.target, ast::Expr::Name(_)),
-                        );
-                    } else {
-                        match &*v.target {
-                            ast::Expr::Attribute(attr) => {
-                                self.discard_annotation_operand(&attr.value);
-                            }
-                            ast::Expr::Subscript(subscript) => {
-                                self.discard_annotation_operand(&subscript.value);
-                                self.discard_annotation_slice(&subscript.slice);
-                            }
-                            _ => {}
+                        if let ast::Expr::Name(target) = &*v.target {
+                            let name = self.code_name(target.id.as_str());
+                            let scope = self.scope.clone();
+                            self.assign_owned_name(&scope, &name, &value, None);
+                        } else {
+                            self.assign_target(&v.target, &value);
                         }
                     }
                     if (self.module || self.class_locals.is_some())
@@ -382,96 +515,9 @@ impl<'p> Function<'_, 'p> {
                         self.registered_value(marker);
                     }
                 }
-                ast::Stmt::AugAssign(v) => {
-                    if let Some((receiver, key)) = self.checked_index_target(&v.target) {
-                        if let Some(rhs) = crate::frontend::registered_value(
-                            &v.value,
-                            self.source.registered_source(),
-                        ) {
-                            self.checked_statement(&Statement::AugmentItem(
-                                receiver,
-                                key,
-                                ItemUpdate::Protocol(v.op.as_str()),
-                                rhs,
-                            ));
-                            continue;
-                        }
-                        let receiver = self.registered_value(&receiver);
-                        let key = self.registered_value(&key);
-                        self.update_item(receiver, key, v.op.as_str(), |code| code.expr(&v.value));
-                        continue;
-                    }
-                    if let Some(target) = self.place(&v.target) {
-                        self.update_place(&target, v.op.as_str(), |code| code.expr(&v.value));
-                    }
-                }
                 ast::Stmt::FunctionDef(v) => {
                     let function = self.function_definition(v);
                     self.bind(v.name.as_str(), &function);
-                }
-                ast::Stmt::For(v) => {
-                    let iter = self.iteration_result(|code| {
-                        let value = code.expr(&v.iter);
-                        if code.native_suspension {
-                            code.call_position(v.iter.range());
-                        }
-                        let operation = if v.is_async {
-                            IteratorOp::Async(v.iter.range())
-                        } else {
-                            IteratorOp::Loop
-                        };
-                        code.op(operation.runtime_op(), &[&value])
-                    });
-                    self.loop_body(&v.body, &v.orelse, Some(&iter), |f, yes, no| {
-                        f.frame.retained_loop_header(v.start());
-                        f.enter_iteration(
-                            &iter,
-                            &v.target,
-                            v.is_async.then(|| v.iter.range()),
-                            !v.orelse.is_empty(),
-                            yes,
-                            no,
-                        );
-                    });
-                }
-                ast::Stmt::While(v) => {
-                    if self.native_suspension
-                        && matches!(&*v.test, ast::Expr::BooleanLiteral(lit) if !lit.value)
-                    {
-                        self.statements(&v.orelse);
-                        continue;
-                    }
-                    self.loop_body(&v.body, &v.orelse, None, |f, yes, no| {
-                        f.branch_expr(&v.test, yes, no);
-                        f.label(yes);
-                    });
-                }
-                ast::Stmt::Break(_) | ast::Stmt::Continue(_) => {
-                    if let Some(target) = self.loops.last() {
-                        let (dest, cleanup_depth) = if matches!(stmt, ast::Stmt::Break(_)) {
-                            target.done.clone()
-                        } else {
-                            target.step.clone()
-                        };
-                        self.run_cleanups(cleanup_depth, None);
-                        self.jump(&dest);
-                    } else {
-                        self.unsupported("loop control outside a loop");
-                    }
-                }
-                ast::Stmt::Try(v) => self.protected_statement(v),
-                ast::Stmt::With(v) if !v.is_async || self.native_suspension => {
-                    self.emit_with_inputs(v);
-                }
-                ast::Stmt::Assert(v) => {
-                    let pass = self.name("b");
-                    let fail = self.name("b");
-                    self.branch_expr(&v.test, &pass, &fail);
-                    self.label(&fail);
-                    let message = v.msg.as_deref().map(|expr| self.expr(expr));
-                    self.frame
-                        .assertion_failure(v.start(), v.test.start(), message.as_deref());
-                    self.label(&pass);
                 }
                 _ => {
                     self.unsupported(&format!("{:?}", ast::AnyNodeRef::from(stmt).kind()));
@@ -732,21 +778,29 @@ impl<'p> Function<'_, 'p> {
         let declaration = function
             .and_then(|def| self.source.checked_function_header(def.start()))
             .map(|header| match header {
-                CheckedHeader::Declaration { docstring, integer_sign_parameters, .. } => {
-                    (docstring, integer_sign_parameters)
+                CheckedHeader::Declaration {
+                    docstring,
+                    integer_sign_parameters,
+                    ..
+                } => (docstring, integer_sign_parameters),
+                CheckedHeader::Ordinary => {
+                    unreachable!("ordinary header uses its callable metadata")
                 }
-                CheckedHeader::Ordinary => unreachable!("ordinary header uses its callable metadata"),
             });
         let doc = if !self.output.keep_docstrings {
             None
         } else if let Some((docstring, _)) = declaration {
-            docstring.clone().or_else(|| self.source.bundled_docstring(&qualname))
+            docstring
+                .clone()
+                .or_else(|| self.source.bundled_docstring(&qualname))
         } else {
             statements.and_then(|stmts| self.source.docstring(&qualname, stmts))
         };
         let generator_flags = match (&body, generator) {
             (Body::Function(_, flags), _) => *flags,
-            (_, Some(site)) if self.source.generators[&site].is_async => code_flags::ASYNC_GENERATOR,
+            (_, Some(site)) if self.source.generators[&site].is_async => {
+                code_flags::ASYNC_GENERATOR
+            }
             (_, Some(_)) => code_flags::GENERATOR,
             _ => named_scope.map_or(0, |scope| scope.suspension_flags),
         };
@@ -801,7 +855,6 @@ impl<'p> Function<'_, 'p> {
                 start,
                 false,
                 Entry::Compiled,
-                None,
             );
             CompiledProvider {
                 code,
@@ -835,7 +888,8 @@ impl<'p> Function<'_, 'p> {
                 Some(&class.namespace)
             }
             _ if type_alias => Some(&scopes.aliases[&start]),
-            _ => named_scope.map(|scope| &scope.lexical)
+            _ => named_scope
+                .map(|scope| &scope.lexical)
                 .or_else(|| generator.map(|site| &scopes.generators[&site])),
         };
         if let Some(facts) = scope_facts {
@@ -892,10 +946,9 @@ impl<'p> Function<'_, 'p> {
         {
             signature["return_type"] = json!(ty);
         }
-        let globals = named_scope.map(|scope| scope.lexical.globals());
-        let code = self.source.definition(
-            self.frame.output, prefix, body, start, in_function, entry, globals,
-        );
+        let code =
+            self.source
+                .definition(self.frame.output, prefix, body, start, in_function, entry);
         if let Some(p) = params {
             self.output
                 .interned_identifiers
@@ -933,35 +986,6 @@ impl<'p> Function<'_, 'p> {
         }
     }
 
-    /// Publish a module's provider before its first statement. Every simple
-    /// annotation, including an unconditional one, becomes visible only after
-    /// execution reaches its assignment.
-    pub(super) fn setup_deferred_module_annotations(&mut self, sites: &[TextSize]) {
-        if !sites.is_empty() {
-            let entries: Vec<_> = sites
-                .iter()
-                .enumerate()
-                .map(|(index, site)| crate::ir::AnnotationOccurrence {
-                    site: *site,
-                    index: Some(index),
-                })
-                .collect();
-            let signature = self.frame.text(
-                &json!({
-                    "posonly": ["format"], "scope_complete": true, "scope_locals_complete": true,
-                    "code_flags": self.source.function_flags(None, false, false),
-                })
-                .to_string(),
-            );
-            let code = self.annotation_body(&entries, None, self.source.module_start);
-            let name = self.text("__annotate__");
-            let provider = self.frame.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {signature}, i64 0, i64 {name}, i64 0, i64 0, i1 true)", self.scope));
-            self.bind("__annotate__", &provider);
-        }
-        self.frame
-            .op("setup_module_annotations", &[&self.scope.clone()]);
-    }
-
     pub(in crate::dynamic::emit) fn finish_class_annotations(
         &mut self,
         plan: &crate::frontend::ClassAnnotations,
@@ -987,7 +1011,9 @@ impl<'p> Function<'_, 'p> {
             "posonly": ["format"], "scope_complete": !plan.incomplete, "scope_reads": plan.reads,
             "code_flags": self.source.function_flags(None, self.in_function, false),
         }).to_string());
-        let code = self.annotation_body(&plan.sites, Some(globals), first.site);
+        let code =
+            self.source
+                .annotation_body(self.frame.output, &plan.sites, Some(globals), first.site);
         let environment = self.frame.op(
             "class_annotation_environment",
             &[&self.scope.clone(), &offsets],
@@ -997,29 +1023,6 @@ impl<'p> Function<'_, 'p> {
         let defaults = self.op("dict", &[]);
         let function = self.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {environment}, i64 {name}, i64 {signature}, i64 {defaults}, i64 {qualname}, i64 0, i64 0, i1 false)"));
         self.bind("__annotate_func__", &function);
-    }
-
-    fn annotation_body(
-        &mut self,
-        entries: &[crate::ir::AnnotationOccurrence],
-        globals: Option<&std::collections::BTreeSet<String>>,
-        start: TextSize,
-    ) -> String {
-        let plan =
-            crate::frontend::DeferredAnnotation::prepare_body(&self.source.annotations, entries);
-        let scope = globals.map_or(AnnotationScope::Plain, |globals| AnnotationScope::Class {
-            globals: globals.clone(),
-            conditional: entries.iter().any(|entry| entry.index.is_some()),
-        });
-        self.source.definition(
-            self.frame.output,
-            String::new(),
-            Body::AnnotationProvider(&plan, entries, scope),
-            start,
-            false,
-            Entry::Compiled,
-            None,
-        )
     }
 
     pub(super) fn unprepared_annotation(&mut self, occurrence: crate::ir::AnnotationOccurrence) {
@@ -1054,53 +1057,12 @@ impl<'p> Function<'_, 'p> {
         self.frame.decorate(decorators, lines, value)
     }
 
-    fn discard_annotation_operand(&mut self, expr: &ast::Expr) {
-        let mark = self.temporary_mark();
-        self.expr(expr);
-        self.discard_truth(&mark);
-    }
-
-    // Without an assignment, CPython evaluates each subscript operand but
-    // neither constructs an extended slice nor invokes __getitem__.
-    fn discard_annotation_slice(&mut self, slice: &ast::Expr) {
-        match slice {
-            ast::Expr::Slice(s) => {
-                for bound in [&s.lower, &s.upper, &s.step].into_iter().flatten() {
-                    self.discard_annotation_operand(bound);
-                }
-            }
-            ast::Expr::Tuple(t) => {
-                for item in &t.elts {
-                    self.discard_annotation_slice(item);
-                }
-            }
-            expr => self.discard_annotation_operand(expr),
-        }
-    }
-
-    pub(super) fn index_operand(&mut self, key: &ast::Expr) -> String {
-        if let Some(key) =
-            crate::frontend::registered_index_key(key, self.source.registered_source())
-        {
-            self.registered_value(&key)
-        } else {
-            self.expr(key)
-        }
-    }
-
-    fn checked_index_target(
-        &self,
-        target: &ast::Expr,
-    ) -> Option<(crate::ir::Expr, crate::ir::Expr)> {
-        crate::frontend::registered_index_target(target, self.source.registered_source())
-    }
-
     fn place(&mut self, target: &ast::Expr) -> Option<Place> {
         Some(match target {
             ast::Expr::Name(n) => Place::Name(self.code_name(n.id.as_str())),
             ast::Expr::Subscript(s) => {
                 let obj = self.expr(&s.value);
-                Place::Item(obj, self.index_operand(&s.slice))
+                Place::Item(obj, self.expr(&s.slice))
             }
             _ => {
                 self.unsupported("assignment target");
@@ -1109,12 +1071,7 @@ impl<'p> Function<'_, 'p> {
         })
     }
 
-    pub(super) fn assign(&mut self, target: &ast::Expr, value: &str) {
-        self.assign_target(target, value, false);
-    }
-
-    /// Transfer unpacked items to their targets while retaining the outstanding operands.
-    fn assign_target(&mut self, target: &ast::Expr, value: &str, owned: bool) {
+    fn assign_target(&mut self, target: &ast::Expr, value: &str) {
         let elements = match target {
             ast::Expr::Tuple(t) => &t.elts,
             ast::Expr::List(l) => &l.elts,
@@ -1122,30 +1079,16 @@ impl<'p> Function<'_, 'p> {
                 self.store_attribute(field.attr.as_str(), field.range(), value, |code| {
                     code.expr(&field.value)
                 });
-                if owned {
-                    self.release_target(None);
-                }
                 return;
             }
             _ => {
                 if let Some(p) = self.place(target) {
-                    if owned {
-                        if let Place::Name(name) = &p {
-                            let scope = self.scope.clone();
-                            self.assign_owned_name(&scope, name, value, None);
-                        } else {
-                            self.write(&p, value);
-                            // An item setter may replace a writer.
-                            self.release_target(None);
-                        }
-                    } else {
-                        self.write(&p, value);
-                    }
+                    self.write(&p, value);
                 }
                 return;
             }
         };
-        if !owned && let Some([left, right]) = Self::pair_target(target) {
+        if let Some([left, right]) = Self::pair_target(target) {
             self.max_live = self.max_live.max(2);
             self.checked(&format!(
                 "call i64 @imre_dyn_unpack_pair(ptr %ctx, i64 {value}, ptr %live)"
@@ -1158,59 +1101,17 @@ impl<'p> Function<'_, 'p> {
             .iter()
             .position(|v| matches!(v, ast::Expr::Starred(_)))
             .map_or_else(|| "0".into(), |i| self.integer(i));
-        let operation = if owned { "unpack" } else { "unpack_read" };
-        let sequence = self.op(operation, &[value, &count, &star]);
-        if owned {
-            self.live.push(sequence.clone());
-        }
+        let sequence = self.op("unpack_read", &[value, &count, &star]);
         for (index, target) in elements.iter().enumerate() {
             let i = self.integer(index);
-            let item = self.op(if owned { "unpack_take" } else { "get" }, &[&sequence, &i]);
+            let item = self.op("get", &[&sequence, &i]);
             let target = if let ast::Expr::Starred(s) = target {
                 &s.value
             } else {
                 target
             };
-            self.assign_target(target, &item, owned);
+            self.assign_target(target, &item);
         }
-        if owned {
-            self.live.pop();
-        }
-    }
-
-    /// Enter the loop body with its target bound, or branch to the exhaustion successor.
-    pub(super) fn enter_iteration(
-        &mut self,
-        iter: &str,
-        target: &ast::Expr,
-        async_range: Option<ruff_text_size::TextRange>,
-        has_else: bool,
-        body: &str,
-        exhausted: &str,
-    ) {
-        let item = if let Some(range) = async_range {
-            let item = self.frame.async_pull(
-                iter,
-                crate::ir::AsyncPull {
-                    range,
-                    header: None,
-                },
-                body,
-                exhausted,
-            );
-            self.label(body);
-            item
-        } else {
-            let pair = Self::pair_target(target);
-            self.frame
-                .enter_sync_iteration(iter, has_else, pair.is_some(), body, exhausted);
-            if let Some([left, right]) = pair {
-                self.assign_pair_slots(left, right);
-                return;
-            }
-            self.op("next", &[iter])
-        };
-        self.assign(target, &item);
     }
 
     fn pair_target(target: &ast::Expr) -> Option<[&ast::Expr; 2]> {
@@ -1230,85 +1131,128 @@ impl<'p> Function<'_, 'p> {
         let first = self.value("load i64, ptr %live");
         let second_slot = self.value("getelementptr i64, ptr %live, i64 1");
         let second = self.value(&format!("load i64, ptr {second_slot}"));
-        self.assign(left, &first);
-        self.assign(right, &second);
+        self.assign_target(left, &first);
+        self.assign_target(right, &second);
     }
 
-    fn loop_body(
-        &mut self,
-        body: &'p [ast::Stmt],
-        otherwise: &'p [ast::Stmt],
-        iterator: Option<&str>,
-        enter_body: impl FnOnce(&mut Self, &str, &str),
-    ) {
-        let step = self.name("b");
-        let body_label = self.name("b");
-        let exhausted = self.name("b");
-        let done = self.name("b");
-        let done_depth = self.exits.len();
-        let cursor_unwind = iterator.map(|cursor| {
-            // Continue retains the cursor. Every transfer out of the loop releases its owner.
-            self.live.push(cursor.to_owned());
-            self.exits.push((
-                Cleanup::RetainedValue {
-                    value: cursor.to_owned(),
-                    enclosing_exception: None,
-                },
-                self.body.error_target.clone(),
-            ));
-            self.begin_operand_scope()
-        });
-        self.jump(&step);
-        self.label(&step);
-        enter_body(self, &body_label, &exhausted);
-        self.loops.push(LoopTarget {
-            step: (step.clone(), self.exits.len()),
-            done: (done.clone(), done_depth),
-        });
-        self.statements(body);
-        self.loops.pop();
-        self.jump(&step);
-        self.label(&exhausted);
-        if let Some(edge) = cursor_unwind {
-            self.exits.pop();
-            self.live.pop();
-            self.finish_unwind(edge, |frame| frame.release_target(None));
-            self.release_target(None);
+    fn physical_binding(&mut self, target: &'p crate::frontend::PhysicalBinding, value: &str) {
+        use crate::frontend::PhysicalBinding;
+        match target {
+            PhysicalBinding::Checked { entered, binding } => {
+                self.prepare_checked_sites(&binding.function.body);
+                self.frame
+                    .checked_binding(binding, *entered, value, &self.sites);
+            }
+            PhysicalBinding::Refused(range, reason) => {
+                self.with_expression_range(*range, |code| code.build_diagnostic(reason));
+            }
         }
-        self.statements(otherwise);
-        self.jump(&done);
-        self.label(&done);
     }
 
-    fn protected_suite(&mut self, stmt: &'p ast::StmtTry) {
+    fn prepared_context(&mut self, context: &'p crate::frontend::PreparedContext) {
+        self.checkpoint(&context.range);
+        self.simple_call = None;
+        let inputs = &context.inputs;
+        self.with_contexts(
+            inputs.iter().map(|input| input.site),
+            |code, i| {
+                code.with_expression_range(inputs[i].site.range, |code| {
+                    code.physical_operand(&inputs[i].manager)
+                })
+            },
+            |code, i, value| {
+                if let Some(target) = &inputs[i].target {
+                    code.physical_binding(target, value);
+                }
+            },
+            |code| code.physical_suite(&context.body),
+        );
+    }
+
+    fn prepared_for(&mut self, region: &'p crate::frontend::PreparedFor) {
+        self.checkpoint(&region.range);
+        self.simple_call = None;
+        let cursor = self.iteration_result(|code| {
+            let value = code.physical_operand(&region.iterable);
+            if code.native_suspension {
+                code.call_position(region.iterable_range);
+            }
+            code.op(region.acquire.runtime_op(), &[&value])
+        });
+
+        let enclosing = self.exits.len();
+        self.live.push(cursor.clone());
+        self.exits.push((
+            Cleanup::RetainedValue {
+                value: cursor.clone(),
+                enclosing_exception: None,
+            },
+            self.body.error_target.clone(),
+        ));
+        let unwind = self.begin_operand_scope();
+
+        crate::llvm::operations::loop_region(
+            self,
+            |code| {
+                code.flush_check();
+                &mut code.frame.body
+            },
+            |code| code.name("b"),
+            |code, edges| code.jump(&edges.step),
+            |code, item, exhausted| {
+                code.frame.iteration_edge(
+                    &cursor,
+                    region.pull,
+                    region.range.start(),
+                    region.otherwise.is_some(),
+                    item,
+                    exhausted,
+                )
+            },
+            |code, edges, pulled| {
+                let item = code.frame.iteration_item(&cursor, pulled);
+                code.physical_binding(&region.target, &item);
+                code.push_loop(edges.clone(), code.exits.len(), enclosing);
+                code.physical_suite(&region.body);
+                code.loops.pop();
+            },
+            // Even a loop without an else must release the cursor on exhaustion.
+            Some(|code: &mut Self| {
+                code.exits.pop();
+                code.live.pop();
+                code.finish_unwind(unwind, |frame| frame.release_target(None));
+                code.release_target(None);
+                if let Some(otherwise) = &region.otherwise {
+                    code.physical_suite(otherwise);
+                }
+            }),
+        );
+    }
+
+    fn physical_suite(&mut self, suite: &'p crate::frontend::PhysicalSuite) {
+        self.emit_suite(Some(&suite.plan), &suite.sources);
+    }
+
+    fn protected_suite(&mut self, region: &'p crate::frontend::PreparedTry) {
         crate::llvm::registered::handlers::protected(
             self,
-            &stmt.body,
-            &stmt.handlers,
-            &stmt.orelse,
-            stmt.is_star,
-            |code, ast::ExceptHandler::ExceptHandler(handler)| {
-                let class = handler.type_.as_deref().map(|class| {
-                    let site = if stmt.is_star {
-                        handler.range()
-                    } else {
-                        class.range()
-                    };
-                    code.checkpoint(&site);
-                    code.expr(class)
+            &region.body,
+            &region.handlers,
+            &region.otherwise,
+            region.is_star,
+            |code, handler| {
+                let class = handler.matcher.as_ref().map(|(range, input)| {
+                    code.checkpoint(range);
+                    code.physical_operand(input)
                 });
-                (
-                    class,
-                    handler.name.as_ref().map(|name| name.as_str()),
-                    handler.body.as_slice(),
-                )
+                (class, handler.name.as_deref(), &handler.body)
             },
             |code, body, cleanup| {
                 if let Some((name, outer)) = cleanup {
                     code.exits
                         .push((Cleanup::ExceptionName(name.into()), outer.into()));
                 }
-                code.statements(body);
+                code.physical_suite(body);
                 if cleanup.is_some() {
                     code.exits.pop();
                 }
@@ -1316,29 +1260,10 @@ impl<'p> Function<'_, 'p> {
         );
     }
 
-    fn emit_finally(&mut self, suite: FinallySuite<'p>) {
-        match suite {
-            FinallySuite::Checked(checked) => {
-                let Some(enclosing) = self.frame.enter_checked_slots(checked.region()) else {
-                    return;
-                };
-                if !checked.function.body.is_empty() && self.start_statement() {
-                    self.checked_block(&checked.function.body, checked);
-                }
-                self.frame.restore_checked_slots(enclosing);
-            }
-            FinallySuite::Residual(source) => self.statements(source),
-        }
-    }
-
-    fn protected_statement(&mut self, stmt: &'p ast::StmtTry) {
-        if stmt.finalbody.is_empty() {
-            self.protected_suite(stmt);
+    fn prepared_try(&mut self, region: &'p crate::frontend::PreparedTry) {
+        let Some(suite) = &region.finalbody else {
+            self.protected_suite(region);
             return;
-        }
-        let suite = match self.source.nested_bodies.get(&stmt.finalbody[0].start()) {
-            Some(plan) if plan.fully_checked() => FinallySuite::Checked(&plan.checked),
-            _ => FinallySuite::Residual(&stmt.finalbody),
         };
         crate::llvm::registered::handlers::finalized(
             self,
@@ -1351,7 +1276,7 @@ impl<'p> Function<'_, 'p> {
                     },
                     enclosing.into(),
                 ));
-                code.protected_suite(stmt);
+                code.protected_suite(region);
                 code.exits.pop();
             },
             |code, pending| {
@@ -1364,7 +1289,7 @@ impl<'p> Function<'_, 'p> {
                         code.body.error_target.clone(),
                     ));
                 }
-                code.emit_finally(suite);
+                code.physical_suite(suite);
                 if pending.is_some() {
                     code.exits.pop();
                 }
@@ -1420,7 +1345,7 @@ impl<'p> Function<'_, 'p> {
                             outer.clone(),
                         ));
                     }
-                    self.emit_finally(*body);
+                    self.physical_suite(body);
                     if pending.is_some() {
                         self.exits.pop();
                     }
@@ -1435,38 +1360,5 @@ impl<'p> Function<'_, 'p> {
             self.live.insert(slot, value);
         }
         self.exits.extend(left.into_iter().rev());
-    }
-
-    fn emit_with_inputs(&mut self, source: &'p ast::StmtWith) {
-        use crate::frontend::ContextTarget;
-
-        let inputs = &self.source.statement_sites.contexts[&source.range()];
-        self.with_contexts(
-            inputs.iter().map(|input| input.site),
-            |code, i| match &inputs[i].manager {
-                Some(manager) => code.with_expression_range(inputs[i].site.range, |code| {
-                    code.registered_value(manager)
-                }),
-                None => code.expr(&source.items[i].context_expr),
-            },
-            |code, i, value| match &inputs[i].target {
-                ContextTarget::Checked { entered, binding } => {
-                    code.prepare_checked_sites(&binding.function.body);
-                    code.frame
-                        .checked_binding(binding, *entered, value, &code.sites);
-                }
-                ContextTarget::Residual => {
-                    code.assign(
-                        source.items[i]
-                            .optional_vars
-                            .as_ref()
-                            .expect("context target"),
-                        value,
-                    );
-                }
-                ContextTarget::Absent => {}
-            },
-            |code| code.statements(&source.body),
-        );
     }
 }

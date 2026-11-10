@@ -11,8 +11,10 @@ pub(super) struct Namespace {
 
 impl SourceScope<'_> {
     pub(super) fn creating_iterable<T>(&mut self, lower: impl FnOnce(&mut Self) -> T) -> T {
-        if matches!(self.kind, RegisteredScope::Function { .. } | RegisteredScope::Lambda)
-            && self.loop_scope != LoopScope::WithCursor
+        if matches!(
+            self.kind,
+            RegisteredScope::Function { .. } | RegisteredScope::Lambda
+        ) && self.loop_scope != LoopScope::WithCursor
         {
             self.with_suspending_operands(lower)
         } else {
@@ -22,7 +24,9 @@ impl SourceScope<'_> {
 
     pub(super) fn eager_comprehension(&mut self, expression: &ast::Expr) -> Option<Expr> {
         let plan = Plan::from_expr(expression)?;
-        if plan.body_suspends() && !matches!(self.kind, RegisteredScope::Function { is_async: true }) {
+        if plan.body_suspends()
+            && !matches!(self.kind, RegisteredScope::Function { is_async: true })
+        {
             return None;
         }
 
@@ -112,7 +116,8 @@ impl EagerDisplay for SourceScope<'_> {
     type Error = ();
 
     fn input(&mut self, clause: &ast::Comprehension) -> StdResult<pipelines::Prepared, ()> {
-        self.iteration_input(&clause.iter, async_pull(clause)).ok_or(())
+        self.iteration_input(&clause.iter, async_pull(clause))
+            .ok_or(())
     }
 
     fn with_target(
@@ -156,10 +161,12 @@ impl EagerDisplay for SourceScope<'_> {
                 } else {
                     Builtin::Append
                 };
+                let item =
+                    values::collection_item(item, |value| self.ordinary_operand(value).ok_or(()))?;
                 vec![Statement::Expr(operation(
                     op,
                     Type::None,
-                    vec![collection, self.ordinary_operand(item).ok_or(())?],
+                    vec![collection, item],
                 ))]
             }
             Output::Dict(key, value) => {

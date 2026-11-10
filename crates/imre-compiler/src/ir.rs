@@ -633,16 +633,35 @@ impl Expr {
             return false;
         };
         self.ty == Type::PythonObject
-            && callable.ty == Type::PythonObject
             && args.python_site.as_ref().is_some_and(|site| {
-                site.range.start() < site.callee_end
+                callable.registered_invoke_target(site)
+                    && site.range.start() < site.callee_end
                     && site.callee_end < site.range.end()
                     && site.suspended_name.is_none_or(|name| {
                         site.range.contains_range(name) && name.end() == site.callee_end
                     })
-                    && site.scope.as_ref().is_none_or(|scope| scope.ty == Type::PythonObject)
+                    && site
+                        .scope
+                        .as_ref()
+                        .is_none_or(|scope| scope.ty == Type::PythonObject)
             })
             && args.order.iter().copied().eq(0..args.values.len())
+    }
+
+    fn registered_invoke_target(&self, site: &InvokeSite) -> bool {
+        if self.ty == Type::PythonObject {
+            return true;
+        }
+        let ExprKind::Builtin(Builtin::RegisteredLocation(range, _), parts) = &self.kind else {
+            return false;
+        };
+        let [local] = parts.as_slice() else {
+            return false;
+        };
+        matches!(self.ty, Type::Callable(_))
+            && local.ty == self.ty
+            && matches!(local.kind, ExprKind::Local(_))
+            && site.suspended_name == Some(*range)
     }
 
     pub(crate) fn unrepresented() -> Self {
@@ -947,7 +966,7 @@ pub(crate) enum ExprKind {
     Builtin(Builtin, Vec<Expr>),
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Binary {
     Add,
     Subtract,
@@ -1767,8 +1786,9 @@ pub(crate) enum Builtin {
     StringFormat,
     /// Convert the field value before evaluating its nested format specification.
     FormatConversion(char),
-    /// Format an already converted value with its checked specification.
-    FormatField,
+    /// Format an already converted value with its checked specification. The
+    /// targets are native repr methods that displaying this value can call.
+    FormatField(Box<[usize]>),
     /// Join formatted operands in order, without invoking a str subclass's addition.
     FormatJoin,
     StringReplace,
@@ -2010,6 +2030,8 @@ pub(crate) enum Builtin {
     FaultLine(u32),
     /// An original statement checkpoint and its optional call without a separate highlight.
     RegisteredStatement(ruff_text_size::TextRange, Option<ruff_text_size::TextRange>),
+    /// Evaluate each operand for its effects and release it before evaluating the next.
+    RegisteredDiscard,
     /// The source position in effect while this registered operand is evaluated.
     RegisteredLocation(ruff_text_size::TextRange, ruff_text_size::TextSize),
     /// Construct the native function at this physical definition site from its evaluated header.
@@ -3882,9 +3904,17 @@ macro_rules! expression_children {
             }
             ExprKind::Invoke {
                 callable,
-                args: CallArgs { python_site, values, .. },
+                args:
+                    CallArgs {
+                        python_site,
+                        values,
+                        ..
+                    },
             } => {
-                if let Some(InvokeSite { scope: Some(scope), .. }) = python_site {
+                if let Some(InvokeSite {
+                    scope: Some(scope), ..
+                }) = python_site
+                {
                     $visit(scope);
                 }
                 $visit(callable);

@@ -3,7 +3,7 @@
 mod comparisons;
 pub(crate) use comparisons::ComparisonChain;
 mod iteration;
-pub(crate) use iteration::LoopEdges;
+pub(crate) use iteration::{LoopEdges, loop_region};
 pub(crate) mod branches;
 mod join;
 pub(crate) mod sequences;
@@ -11,7 +11,7 @@ use crate::ir::{DisplayKind, ObjectUnary};
 pub(crate) use join::{ValueJoin, choose};
 
 use super::records;
-use super::{Binary, Builtin, Expr, ExprKind, Statement, Type};
+use super::{Binary, Builtin, CallArgs, Expr, ExprKind, Statement, Type};
 use super::{Emitter, Value, none, small};
 use crate::llvm::registered::{Frame as CheckedFrame, FrameEmitter};
 
@@ -113,6 +113,22 @@ fn exact_integer_literal(value: i64) -> Option<Value> {
         .then(|| small(value))
 }
 
+impl CallArgs {
+    /// Parameter order applies at the ABI boundary, after source-order evaluation.
+    pub(super) fn capture<T>(&self, operand: impl FnMut(&Expr) -> T) -> Vec<T> {
+        self.values.iter().map(operand).collect()
+    }
+
+    fn capture_invoke<T>(
+        &self,
+        callable: &Expr,
+        mut operand: impl FnMut(&Expr) -> T,
+    ) -> (T, Vec<T>) {
+        let callable = operand(callable);
+        (callable, self.capture(operand))
+    }
+}
+
 /// A checked body selects operations from each operand's representation.
 /// Its entry convention supplies local storage, retained owners and exception exits.
 pub(crate) struct CheckedBody<'f, 'a, 'p, 'module>(Entry<'f, 'a, 'p, 'module>);
@@ -168,63 +184,52 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         args: &crate::ir::CallArgs,
         returns: Type,
     ) -> CheckedValue {
-        fn operands<T>(
-            callable: &Expr,
-            args: &crate::ir::CallArgs,
-            mut evaluate: impl FnMut(&Expr) -> T,
-        ) -> (T, Vec<T>) {
-            let target = evaluate(callable);
-            let values = args.values.iter().map(evaluate).collect();
-            (target, values)
-        }
+        let Some(site) = &args.python_site else {
+            let native = self.fixed();
+            let (target, values) = args.capture_invoke(callable, |expr| native.operand(expr));
+            let target = super::callables::NativeCallTarget::Callable(target);
+            return CheckedValue::owned(native.native_call(target, args, values, returns));
+        };
 
-        match &mut self.0 {
-            Entry::Native(emitter) => {
-                let (target, values) = operands(callable, args, |expr| emitter.operand(expr));
-                CheckedValue::owned(emitter.invoke_callable(target, values, &args.order, returns))
+        let frame = self.python();
+        let mark = frame.temporary_mark();
+        let result = frame.unwind_stack_operands(&mark, |frame| {
+            if frame.native_suspension
+                && let Some(name) = site.suspended_name
+            {
+                frame.call_position(name);
             }
-            Entry::Registered(frame) => {
-                let site = args.python_site.as_ref().expect("checked Python call site");
-                let enclosing_scope = frame.scope.clone();
-                let mark = frame.temporary_mark();
-                let result = frame.unwind_stack_operands(&mark, |frame| {
-                    if frame.native_suspension
-                        && let Some(name) = site.suspended_name
-                    {
-                        frame.call_position(name);
-                    }
-                    // Each evaluation leaves just its result above the previous operands.
-                    // Release intermediate owners before the next argument can run Python.
-                    let mut next = mark.clone();
-                    let mut evaluate = |expr: &Expr| {
-                        let value = frame.evaluate_handle(expr);
-                        next = frame.keep_operands(&next, &value, "0");
-                        value
-                    };
-                    let scope = site
-                        .scope
-                        .as_deref()
-                        .map(&mut evaluate)
-                        .unwrap_or(enclosing_scope);
-                    let (target, values) = operands(callable, args, evaluate);
-                    let (array, count) = frame.handle_array(&values);
-                    let positional = super::registered::CallArguments::Positional {
-                        array,
-                        count,
-                        receiver_slot: false,
-                    };
-                    frame.positioned_call(
-                        &target,
-                        positional,
-                        &mark,
-                        site.range,
-                        site.callee_end,
-                        &scope,
-                    )
-                });
-                CheckedValue::handle(result)
-            }
-        }
+            // Each evaluation leaves just its result above the previous operands.
+            // Release intermediate owners before the next argument can run Python.
+            let mut next = mark.clone();
+            let enclosing_scope = frame.scope.clone();
+            let mut evaluate = |expr: &Expr| {
+                let value = frame.evaluate_handle(expr);
+                next = frame.keep_operands(&next, &value, "0");
+                value
+            };
+            let scope = site
+                .scope
+                .as_deref()
+                .map(&mut evaluate)
+                .unwrap_or(enclosing_scope);
+            let (target, values) = args.capture_invoke(callable, evaluate);
+            let (array, count) = frame.handle_array(&values);
+            let positional = super::registered::CallArguments::Positional {
+                array,
+                count,
+                receiver_slot: false,
+            };
+            frame.positioned_call(
+                &target,
+                positional,
+                &mark,
+                site.range,
+                site.callee_end,
+                &scope,
+            )
+        });
+        CheckedValue::handle(result)
     }
 
     fn evaluate(&mut self, expr: &Expr) -> CheckedValue {
@@ -376,15 +381,24 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         left: &Expr,
         right: &Expr,
         expr: &Expr,
+        fixed_site: bool,
     ) -> CheckedValue {
         if let Entry::Native(emitter) = &mut self.0
             && let Some(value) = emitter.specialized_binary(op, left, right, expr)
         {
             return value;
         }
+        // A body placed from a native definition now receives Python handles.
+        let op = match (fixed_site, op) {
+            (true, Binary::Concat) => Binary::Add,
+            (true, Binary::Repeat) => Binary::Multiply,
+            _ => op,
+        };
         let (a, b) = (self.operand(left), self.operand(right));
         let result = if matches!(op, Binary::Add | Binary::Subtract | Binary::Multiply)
-            && (expr.ty == Type::PythonObject || left.ty == Type::Int && right.ty == Type::Int)
+            && (fixed_site
+                || expr.ty == Type::PythonObject
+                || left.ty == Type::Int && right.ty == Type::Int)
         {
             if matches!(op, Binary::Multiply) || a.can_use_integer_arithmetic(left.ty, &b, right.ty)
             {
@@ -403,6 +417,17 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
     }
 
     pub(crate) fn emit_value(&mut self, expr: &Expr) -> CheckedValue {
+        if let Entry::Registered(frame) = &mut self.0
+            && let Some(range) = frame.next_fixed_site()
+        {
+            return frame.located_value(range, range.start(), |frame| {
+                CheckedBody::registered(frame.reborrow()).emit_operation(expr, true)
+            });
+        }
+        self.emit_operation(expr, false)
+    }
+
+    fn emit_operation(&mut self, expr: &Expr, fixed_site: bool) -> CheckedValue {
         match &expr.kind {
             ExprKind::Int(text) => {
                 let integer = text.parse::<i64>().ok();
@@ -509,7 +534,9 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                     self.predicate(value, false)
                 }
             },
-            ExprKind::Binary(op, left, right) => self.binary_expression(*op, left, right, expr),
+            ExprKind::Binary(op, left, right) => {
+                self.binary_expression(*op, left, right, expr, fixed_site)
+            }
             ExprKind::Builtin(Builtin::FormatJoin, parts) => match &mut self.0 {
                 Entry::Native(emitter) => CheckedValue::owned(emitter.concat(expr)),
                 Entry::Registered(frame) => frame.builtin(&Builtin::FormatJoin, parts),
@@ -539,6 +566,11 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
     }
 
     pub(crate) fn emit_statement(&mut self, stmt: &Statement) {
+        if let Entry::Registered(frame) = &mut self.0
+            && let Some(range) = frame.next_fixed_site()
+        {
+            frame.statement_site(range, None);
+        }
         match stmt {
             Statement::Assign(slot, expr) => {
                 let previous_small = match &mut self.0 {

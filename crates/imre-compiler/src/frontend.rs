@@ -64,6 +64,8 @@ mod errno;
 mod exception_forwarders;
 mod expandtabs;
 mod expansions;
+mod fixed_body_source;
+pub(crate) use fixed_body_source::{FixedBodySource, FixedNode};
 mod fixed_tuples;
 mod fnmatch;
 mod format_cursors;
@@ -122,26 +124,31 @@ mod records;
 mod regex;
 mod registered;
 pub(crate) use registered::booleans::{
-    LogicalSites, Selection as LogicalSelection, SourceOperand, prepare_boolean,
+    ExpressionSites, Selection as ExpressionSelection, SourceOperand, prepare_boolean,
 };
+#[cfg(test)]
+pub(crate) use registered::inline_operand;
 pub(crate) use registered::patterns::{MatchGuard, SourceMatch};
 pub(crate) use registered::type_alias_body;
+#[cfg(test)]
+pub(crate) use registered::values::registered_value;
 pub(crate) use registered::values::{
-    RegisteredSource, ValueStatement, binary_operands, display_elements, index_operands,
-    literal_replacements, module_literal_replacements, packed_arguments,
-    push_codepoints, registered_argument_at, registered_arguments, registered_index_key,
-    registered_value, suspended_operand, value_statement,
+    RegisteredSource, display_elements, literal_replacements, module_literal_replacements,
+    packed_arguments, push_codepoints, registered_argument_at, registered_arguments,
 };
 pub(crate) use registered::{
-    AnnotationValue, DeferredAnnotation, ParameterAnnotations, PhysicalOperand, PreparedStrings, RegisteredFunction,
-    RegisteredGenerator, RegisteredLambda, RegisteredScope, RegisteredSites, RegisteredSuite,
-    ResidualField, SourceEffect, SourceRun, StatementSites, SuitePreparation,
-    annotation_expression, attribute_write, prepare_expression_sites, registered_index_target,
-    registered_sites, registered_type_alias, registered_type_parameters, template_operands,
+    AnnotationValue, AssertionSite, DeferredAnnotation, ParameterAnnotations, PhysicalOperand,
+    PreparedStrings, RegisteredFunction, RegisteredGenerator, RegisteredLambda, RegisteredScope,
+    RegisteredSites, RegisteredSuite, SourceEffect, SourceRun, StatementSites, SuitePreparation,
+    ValueStatement, annotation_expression, attribute_write, place_fixed_function, registered_sites,
+    registered_type_alias, registered_type_parameters,
 };
-pub(crate) use registered::{ContextTarget, SourceGuard};
 pub(crate) use registered::{
-    LambdaBinding, LambdaDefault, LocalBinding, RegisteredClass, RegisteredOperand, RegisteredRegion, inline_operand,
+    LambdaBinding, LambdaDefault, LocalBinding, PreparedTemplate, RegisteredClass,
+    RegisteredOperand, RegisteredRegion, TemplateField,
+};
+pub(crate) use registered::{
+    PhysicalBinding, PhysicalSuite, PreparedContext, PreparedFor, PreparedTry, SourceGuard,
 };
 mod sequences;
 mod shutil;
@@ -678,6 +685,10 @@ fn lower_graph(
     let inference = inference::Inference::default();
     let mut definitions = Vec::new();
     let mut callable_definitions = Vec::new();
+    // Native wrapper links can prefer registered frames only when a bound
+    // callable has a Type::Class receiver. Without classes no definition transfers.
+    let can_transfer_frames = !classes.declarations.definitions.is_empty();
+    let mut frame_declarations = HashMap::new();
     for (module_id, module) in graph.modules.iter().enumerate() {
         for (name, binding) in &module.bindings {
             if reserved(name)
@@ -716,6 +727,19 @@ fn lower_graph(
                         continue;
                     }
                     let cached = function_caches::policy(graph, module_id, function)?;
+                    let physical_entry = (can_transfer_frames
+                        && module.is_program_source()
+                        && module.archive.is_none()
+                        && !function.is_async
+                        && function.decorator_list.is_empty()
+                        && function.type_params.is_none()
+                        && function.parameters.vararg.is_none()
+                        && function.parameters.kwarg.is_none()
+                        && function
+                            .parameters
+                            .iter_non_variadic_params()
+                            .all(|p| p.default.is_none()))
+                        .then(|| function.start());
                     let mut function = function.clone();
                     if module.overloads.contains(&statement_id) {
                         graph.runtime_overload(module_id, function.name.range());
@@ -745,6 +769,8 @@ fn lower_graph(
                     } else {
                         keyword_forwarding::prepare(graph, module_id, &mut function)
                     };
+                    let frame_entry = physical_entry
+                        .filter(|_| element.is_none() && defaults.forwarded.is_none());
                     let signature = signature(
                         &function,
                         graph,
@@ -782,6 +808,9 @@ fn lower_graph(
                         },
                         signature.clone(),
                     );
+                    if let Some(start) = frame_entry {
+                        frame_declarations.insert(signature.id, start);
+                    }
                     definitions.push((module_id, function.clone(), signature));
                     callable_definitions.push(DefinitionId {
                         module: module_id,
@@ -946,15 +975,19 @@ fn lower_graph(
     if closed_calls::has_keyword_displays(graph) {
         inference.discover_packed_arguments();
     }
-    for (module, function, _) in &mut definitions {
-        assignments::alias_builtin_parameters(function, graph, *module);
-        if closed_calls::prepare(function, graph, *module) {
+    for (module, function, signature) in &mut definitions {
+        let renamed = assignments::alias_builtin_parameters(function, graph, *module);
+        let (dispatch, packed) = closed_calls::prepare(function, graph, *module);
+        if renamed || dispatch || packed {
+            frame_declarations.remove(&signature.id);
+        }
+        if packed {
             inference.discover_packed_arguments();
         }
     }
     let inference::Solution {
         registered_parameters,
-        checked_bodies,
+        mut checked_bodies,
         registered_generators,
     } = inference.solve(
         graph,
@@ -1016,6 +1049,14 @@ fn lower_graph(
     let helpers = Helpers::new(definitions.len() + graph.initializers(entry_declarations).count());
     let needs_registered_entry =
         !registered_generators.is_empty() || signatures.values().any(Signature::registered_frame);
+    if needs_registered_entry {
+        checked_bodies.retain(|&id| {
+            let (module, definition, _) = &definitions[id];
+            graph.modules[*module].parsed.syntax().body[callable_definitions[id].statement]
+                .as_function_def_stmt()
+                == Some(definition)
+        });
+    }
     let globals = ModuleValues::for_initializers(needs_registered_entry);
     // Fixed FILE compilations need no secondary body. A registered launch or an
     // actual representation failure can still use functions whose signatures solved.
@@ -1029,7 +1070,11 @@ fn lower_graph(
                 &types,
                 &inference,
                 &globals,
-                false,
+                if needs_registered_entry {
+                    registered::Capture::Entry(&checked_bodies)
+                } else {
+                    registered::Capture::Solved
+                },
             );
         }
     };
@@ -1078,6 +1123,7 @@ fn lower_graph(
         cache.validate_abi(&definitions, &globals);
     }
     let mut functions = Vec::new();
+    let mut frame_sources = HashMap::new();
     let mut refused_body = None;
     let mut zip_sums = Vec::new();
     let mut owners = Vec::new();
@@ -1086,7 +1132,7 @@ fn lower_graph(
     let mut recursion_errors = Vec::new();
     for (module_id, definition, signature) in &definitions {
         let module = &graph.modules[*module_id];
-        let checker = Checker::new(
+        let mut checker = Checker::new(
             graph,
             *module_id,
             &signatures,
@@ -1147,13 +1193,16 @@ fn lower_graph(
         // definition with the settled signature; recovery owns its executable checked body.
         if needs_registered_entry
             && checked_bodies.contains(&signature.id)
-            && module.parsed.syntax().body[callable_definitions[signature.id].statement]
-                .as_function_def_stmt() == Some(definition)
-            && graph.registered_functions().get(module_id)
+            && graph
+                .registered_functions()
+                .get(module_id)
                 .is_some_and(|bodies| bodies.contains_key(&definition.start()))
         {
             continue;
         }
+        checker.fixed_sites = (!needs_registered_entry
+            && frame_declarations.contains_key(&signature.id))
+        .then(Default::default);
         let result = match cache.as_deref_mut() {
             Some(cache) if signature.method.is_none() => cache.body(checker, definition, signature),
             _ => lower_body(checker, definition, signature),
@@ -1178,6 +1227,11 @@ fn lower_graph(
             class_reads: mut reads,
             ..
         } = body;
+        if let Some(source) = body.source
+            && let Some(&start) = frame_declarations.get(&signature.id)
+        {
+            frame_sources.insert(functions.len(), (start, source));
+        }
         graph.ordered_reads(*module_id, &definition.body, true, &mut reads);
         let (function, calls, reads) = if let Some(&policy) = classes.cached.get(&signature.id) {
             let raw = helpers.reserve();
@@ -1491,7 +1545,10 @@ fn lower_graph(
         },
         owners,
     );
-    Ok(crate::CheckedProgram::Native(Box::new(lowered)))
+    Ok(crate::CheckedProgram::Native(Box::new(crate::FixedProgram {
+        ir: lowered,
+        frame_sources,
+    })))
 }
 
 fn required_object_diagnostic(
@@ -1548,6 +1605,7 @@ fn needs_object_string_order(functions: &[ir::Function], entry: &ir::Function) -
 #[derive(Clone)]
 struct LoweredBody {
     function: ir::Function,
+    source: Option<FixedBodySource>,
     calls: HashSet<usize>,
     class_reads: HashSet<DefinitionId>,
     default_reads: Option<Vec<caller_cache::DefaultId>>,
@@ -1682,6 +1740,7 @@ fn lower_function(
         body = checker.generator_body(body);
     }
     checker.finish_region(Ok(()))?;
+    let mut source = None;
     if let Some(names) = registered_locals {
         names.extend(checker.namespace_bindings);
         names.extend(checker.names.into_iter().map(|(name, slot)| {
@@ -1695,9 +1754,13 @@ fn lower_function(
         }));
     } else if module.archive.is_none() {
         checker.fault_frame(&mut body, definition.name.as_str(), definition.start());
+        if let Some(sites) = checker.fixed_sites {
+            source = sites.finish(definition.body.len(), &body, checker.names, &checker.locals);
+        }
     }
     Ok((
         LoweredBody {
+            source,
             function: ir::Function {
                 params,
                 returns: signature.returns,
@@ -2127,15 +2190,17 @@ fn annotation_with_aliases(
     }
     if let Some(Binding::TypeAlias(origin, index)) = graph.resolve_type(module, expression) {
         let module = &graph.modules[origin];
-        return annotation_with_aliases(
-            &module.aliases[index].value,
-            graph,
-            (origin, &module.source),
-            classes,
-            types,
-            owner,
-            alias_depth + 1,
-        );
+        if let Some(value) = module.aliases[index].annotation_value(module) {
+            return annotation_with_aliases(
+                value,
+                graph,
+                (origin, &module.source),
+                classes,
+                types,
+                owner,
+                alias_depth + 1,
+            );
+        }
     }
     if let ast::Expr::StringLiteral(value) = expression {
         check_string(value, source)?;
@@ -2755,9 +2820,11 @@ struct CalledDefinition {
 }
 
 struct Checker<'a> {
+    fixed_sites: Option<fixed_body_source::SourceSites>,
     observed_definition: Option<Box<CalledDefinition>>,
     /// Locals in this body are bound in an existing Python activation.
     registered: Option<&'a registered::values::ModuleSource>,
+    checked_callback_effects: bool,
     /// The first operation whose execution requires a different representation. All
     /// later source operations still see the facts from the ordinary checker.
     unrepresented: std::cell::RefCell<Option<Failure>>,
@@ -2843,8 +2910,10 @@ impl<'a> Checker<'a> {
         globals: &'a ModuleValues,
     ) -> Self {
         Self {
+            fixed_sites: None,
             observed_definition: None,
             registered: None,
+            checked_callback_effects: false,
             unrepresented: Default::default(),
             namespace_calls: HashSet::new(),
             module_namespace: Default::default(),
@@ -2914,7 +2983,7 @@ impl<'a> Checker<'a> {
     fn parameter_shadows_binding(&self, name: &str, ty: Type, bound: bool) -> bool {
         self.mapping_class_import(name)
             || match self.graph.modules[self.module].bindings.get(name) {
-                Some(Binding::Value(_)) => bound && !self.module_scope,
+                Some(Binding::Value(_) | Binding::TypeAlias(..)) => bound && !self.module_scope,
                 Some(Binding::Definition(id)) => {
                     matches!(ty, Type::Callable(_)) && self.functions.contains_key(id)
                 }
@@ -5187,6 +5256,7 @@ impl<'a> Checker<'a> {
             previous_sum = sum.is_some();
             let tuple = length_guard.and_then(|guard| self.guarded_tuple(statement, guard));
             let enclosing_tuple = std::mem::replace(&mut self.fixed_tuple, tuple);
+            let parent = self.fixed_sites.as_mut().and_then(|sites| sites.enter(statement.range()));
             let (mut lowered, continues) = if !self.module_scope
                 && self.block_depth == 1
                 && fresh.is_some()
@@ -5211,6 +5281,11 @@ impl<'a> Checker<'a> {
                 unbound_locals::assigned(statement).and_then(|n| self.bound_flags.get(n))
             {
                 lowered.push(Statement::Assign(*flag, Expr::boolean(true)));
+            }
+            if let Some(sites) = &mut self.fixed_sites
+                && !sites.leave(parent)
+            {
+                self.fixed_sites = None;
             }
             if let Some(body) = output.as_deref_mut() {
                 if self.registered.is_some() {
@@ -6753,21 +6828,27 @@ impl<'a> Checker<'a> {
         } else {
             (self.expr(&binary.left)?, self.expr(&binary.right)?)
         };
-        if self.registered.is_some() {
-            // Validate concrete layouts with the ordinary checker. The Python frame
-            // still sees the original operands (including subclasses) in source order.
-            let ty = if left.ty == Type::PythonObject || right.ty == Type::PythonObject {
-                Type::PythonObject
-            } else {
-                self.binary_operands(binary, left.clone(), right.clone())?
-                    .ty
-            };
-            return Ok(Expr {
-                ty,
-                kind: ExprKind::Binary(binary.op.into(), Box::new(left), Box::new(right)),
-            });
+        // Scalar arithmetic keeps both operands in the checked operation. The
+        // registered emitter guards their actual handles, including subclasses.
+        // Power has a distinct fixed operation selected from the exponent.
+        let scalar = binary.op != ast::Operator::Pow
+            && matches!(left.ty, Type::Int | Type::Float)
+            && matches!(right.ty, Type::Int | Type::Float);
+        if self.registered.is_none() || scalar {
+            return self.binary_operands(binary, left, right);
         }
-        self.binary_operands(binary, left, right)
+        // Other fixed layouts can convert operands or select a builtin. Check the
+        // contract and keep the original handles for the Python operation.
+        let ty = if left.ty == Type::PythonObject || right.ty == Type::PythonObject {
+            Type::PythonObject
+        } else {
+            self.binary_operands(binary, left.clone(), right.clone())?
+                .ty
+        };
+        Ok(Expr {
+            ty,
+            kind: ExprKind::Binary(binary.op.into(), Box::new(left), Box::new(right)),
+        })
     }
 
     fn binary_operands(
@@ -6867,7 +6948,7 @@ impl<'a> Checker<'a> {
     }
 
     fn binary_expr(
-        &self,
+        &mut self,
         op: ast::Operator,
         left: Expr,
         right: Expr,
@@ -6931,6 +7012,9 @@ impl<'a> Checker<'a> {
         let left = Self::integer_addend(op, left, right.ty);
         let right = Self::integer_addend(op, right, left.ty);
         let (op, ty) = self.binary_op(op, left.ty, right.ty, node)?;
+        if let Some(sites) = &mut self.fixed_sites {
+            sites.expression(node.range(), FixedNode::Binary(op, ty));
+        }
         Ok(Expr {
             ty,
             kind: ExprKind::Binary(op, Box::new(left), Box::new(right)),
@@ -7126,6 +7210,19 @@ impl<'a> Checker<'a> {
         }
     }
 
+    fn unsupported_comparison(&self, expression: &ast::Expr, left: Type, right: Type) -> Failure {
+        if left == Type::PythonObject || right == Type::PythonObject {
+            // The checked Python operation owns comparisons without a fixed operand layout.
+            self.scoped_builtin_error("comparing Python objects", expression)
+        } else {
+            error(
+                self.source,
+                expression,
+                "unsupported comparison for these types",
+            )
+        }
+    }
+
     /// Select the object provider only when this precise diagnostic reaches the driver.
     fn scoped_builtin_error(&self, name: &str, node: &impl Ranged) -> Failure {
         self.object_export_error(name, node)
@@ -7175,10 +7272,17 @@ impl<'a> Checker<'a> {
     }
 
     fn typed_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
-        match self.lower_expression(expression) {
-            Err(failure) if self.missing_operation(&failure) => Ok(Expr::unrepresented()),
-            result => result,
+        let parent = self.fixed_sites.as_mut().and_then(|sites| sites.enter(expression.range()));
+        let value = match self.lower_expression(expression) {
+            Err(failure) if self.missing_operation(&failure) => Expr::unrepresented(),
+            result => result?,
+        };
+        if let Some(sites) = &mut self.fixed_sites
+            && !sites.leave(parent)
+        {
+            self.fixed_sites = None;
         }
+        Ok(value)
     }
 
     fn lower_expression(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
@@ -7777,6 +7881,11 @@ impl<'a> Checker<'a> {
             ast::Expr::If(value) => return self.conditional(value, None),
             ast::Expr::NoneLiteral(_) => (Type::None, ExprKind::None),
             ast::Expr::Name(_) | ast::Expr::Attribute(_)
+                if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::Callable)) =>
+            {
+                return Err(self.scoped_builtin_error("the Callable object", expression));
+            }
+            ast::Expr::Name(_) | ast::Expr::Attribute(_)
                 if matches!(
                     self.resolve(expression),
                     Some(Binding::Intrinsic(Intrinsic::NamedHash(
@@ -7897,7 +8006,9 @@ impl<'a> Checker<'a> {
                             self.scoped_builtin_error("the builtin module as a value", expression)
                         );
                     }
-                    if let Some(Binding::Definition(_)) = self.resolve(expression) {
+                    if let Some(Binding::Definition(_) | Binding::TypeAlias(..)) =
+                        self.resolve(expression)
+                    {
                         return Err(self.classified_error(
                             Kind::ScopedObject,
                             expression,
@@ -7922,7 +8033,14 @@ impl<'a> Checker<'a> {
                         "local may be uninitialized on this path",
                     ));
                 }
-                return Ok(self.read_local(slot));
+                let value = self.read_local(slot);
+                if let Some(sites) = &mut self.fixed_sites
+                    && matches!(value.kind, ExprKind::Local(read) if read == slot)
+                    && value.ty == self.locals[slot]
+                {
+                    sites.expression(expression.range(), FixedNode::Read(slot, value.ty));
+                }
+                return Ok(value);
             }
             ast::Expr::List(list) => {
                 if list
@@ -8581,11 +8699,7 @@ impl<'a> Checker<'a> {
                         ast::CmpOp::Gt if ordered => Compare::Greater,
                         ast::CmpOp::GtE if ordered => Compare::GreaterEqual,
                         _ => {
-                            return Err(error(
-                                self.source,
-                                expression,
-                                "unsupported comparison for these types",
-                            ));
+                            return Err(self.unsupported_comparison(expression, ty, right));
                         }
                     };
                     if matches!(ty, Type::Patch(_)) {
@@ -8678,11 +8792,7 @@ impl<'a> Checker<'a> {
                         | Type::BytesIO
                         | Type::BinaryIO => true,
                         _ => {
-                            return Err(error(
-                                self.source,
-                                expression,
-                                "unsupported comparison for these types",
-                            ));
+                            return Err(self.unsupported_comparison(expression, ty, right));
                         }
                     };
                     if !comparable {
@@ -8727,6 +8837,12 @@ impl<'a> Checker<'a> {
                         });
                     }
                 }
+                if self.resolve(&subscript.value) == Some(Binding::Intrinsic(Intrinsic::Callable)) {
+                    return Err(self.object_builtin_error_with_checked_calls(
+                        "a parameterized Callable",
+                        subscript,
+                    ));
+                }
                 let list = Self::enum_text(self.expr(&subscript.value)?);
                 if list.ty == Type::PythonObject && !subscript.slice.is_slice_expr() {
                     let key = self.expr(&subscript.slice)?;
@@ -8756,12 +8872,9 @@ impl<'a> Checker<'a> {
                     });
                 }
                 if list.ty == Type::BuiltinClass {
-                    // Python evaluates type arguments before invoking __class_getitem__.
-                    self.expr(&subscript.slice)?;
-                    return Err(error(
-                        self.source,
+                    return Err(self.object_builtin_error_with_checked_calls(
+                        "a runtime generic alias",
                         subscript,
-                        "runtime generic aliases of builtin classes are unsupported",
                     ));
                 }
                 if list.ty == Type::Context {
@@ -10522,7 +10635,10 @@ impl<'a> Checker<'a> {
                 ));
             }
             Some(Binding::TypeAlias(module, index))
-                if self.graph.modules[module].aliases[index].constructor =>
+                if matches!(
+                    self.graph.modules[module].aliases[index],
+                    crate::modules::TypeAlias::NewType(_)
+                ) =>
             {
                 self.reject_builtin_keywords(call)?;
                 let [value] = call.arguments.args.as_ref() else {

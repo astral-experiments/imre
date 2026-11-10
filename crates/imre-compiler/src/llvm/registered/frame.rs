@@ -10,7 +10,7 @@ use crate::frontend::push_codepoints;
 use crate::ir;
 use crate::ir::{Builtin, Constant, DisplayKind, Expr};
 use crate::llvm::body::FunctionBody;
-use crate::llvm::operations::CheckedValue;
+use crate::llvm::operations::{CheckedValue, LoopEdges};
 use ruff_text_size::{TextRange, TextSize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -85,6 +85,7 @@ pub(crate) struct RegisteredFrame<'a, 'p> {
     pub(crate) positions: &'p SourcePositions<'p>,
     pub(crate) unit: usize,
     pub(super) iteration: super::IterationState,
+    pub(crate) loops: Vec<super::LoopTarget>,
     pub(crate) current_range: TextRange,
     /// A mixed block branches to its enclosing finally/with cleanup in the syntax visitor.
     pub(crate) cleanup_returns: Option<Vec<(String, String, TextRange)>>,
@@ -137,6 +138,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
             positions,
             unit,
             iteration: Default::default(),
+            loops: Vec::new(),
             current_range: TextRange::empty(start),
             cleanup_returns: None,
             async_generator: false,
@@ -162,6 +164,50 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
             position: SourcePosition::statement(0),
             native_suspension,
         }
+    }
+
+    pub(crate) fn begin_module(
+        &mut self,
+        has_annotations: bool,
+        string_annotations: bool,
+        docstring: Option<&str>,
+        globals: &BTreeSet<String>,
+    ) {
+        if has_annotations {
+            if string_annotations {
+                self.op("setup_module_string_annotations", &[&self.scope.clone()]);
+            } else {
+                // Lower the provider after collecting the body, but run its setup first.
+                self.module_annotation_sites = Some(Vec::new());
+                self.jump("annotations_init");
+                self.label("module_body");
+            }
+        }
+        if self.output.keep_docstrings
+            && let Some(doc) = docstring
+        {
+            let value = self.text(doc);
+            self.bind("__doc__", &value);
+        }
+        for name in globals {
+            self.declare_global(name);
+        }
+    }
+
+    pub(crate) fn finish_module(
+        mut self,
+        define_annotations: impl FnOnce(&mut Self, &[TextSize]),
+    ) -> String {
+        if let Some(sites) = self.module_annotation_sites.take() {
+            self.end("ret i64 0");
+            self.label("annotations_init");
+            if !sites.is_empty() {
+                define_annotations(&mut self, &sites);
+            }
+            self.op("setup_module_annotations", &[&self.scope.clone()]);
+            self.jump("module_body");
+        }
+        self.finish(true)
     }
 
     pub(crate) fn finish(mut self, module: bool) -> String {
@@ -859,18 +905,6 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         self.release_replaced(&replaced, mark.map(|mark| (mark, value)));
     }
 
-    /// Keep the expression result rooted while releasing the previous binding.
-    pub(crate) fn assign_expression_name(
-        &mut self,
-        scope: &str,
-        name: &str,
-        value: &str,
-        mark: &str,
-    ) {
-        let replaced = self.op("assign_named_target", &[scope, name, value]);
-        self.release_replaced(&replaced, Some((mark, value)));
-    }
-
     /// An item/attribute setter can replace an owner without reporting which object it dropped.
     pub(crate) fn release_target(&mut self, mark: Option<&str>) {
         self.release_replaced("2", mark.map(|mark| (mark, "0")));
@@ -1025,27 +1059,31 @@ impl RegisteredFrame<'_, '_> {
         }
     }
 
-    /// Enter the item block, or transfer to the exhaustion edge before binding a target.
-    /// A fused two-target pull leaves both items in the frame's scratch slots.
-    pub(crate) fn enter_sync_iteration(
+    /// Branch before binding the target. An async pull delivers its item while awaiting.
+    pub(crate) fn iteration_edge(
         &mut self,
         cursor: &str,
+        kind: ir::IterNextKind,
+        header: TextSize,
         has_else: bool,
-        unpack_pair: bool,
         item: &str,
         exhausted: &str,
-    ) {
-        let more = if unpack_pair {
-            self.max_live = self.max_live.max(2);
-            self.checked(&format!(
-                "call i64 @imre_dyn_next_pair(ptr %ctx, i64 {cursor}, ptr %live, i1 {has_else})"
-            ))
-        } else {
-            self.op(if has_else { "more_else" } else { "more" }, &[cursor])
-        };
-        let ready = self.value(&format!("icmp eq i64 {more}, {}", permanent::TRUE));
-        self.branch(&ready, item, exhausted);
-        self.label(item);
+    ) -> Option<String> {
+        match kind {
+            ir::IterNextKind::Generic => {
+                self.retained_loop_header(header);
+                let more = self.op(if has_else { "more_else" } else { "more" }, &[cursor]);
+                let ready = self.value(&format!("icmp eq i64 {more}, {}", permanent::TRUE));
+                self.branch(&ready, item, exhausted);
+                None
+            }
+            ir::IterNextKind::Async(pull) => Some(self.async_pull(cursor, pull, item, exhausted)),
+            _ => unreachable!("registered iterator kind"),
+        }
+    }
+
+    pub(crate) fn iteration_item(&mut self, cursor: &str, pulled: Option<String>) -> String {
+        pulled.unwrap_or_else(|| self.op("next", &[cursor]))
     }
 
     /// Only the implicit __anext__ call and its await can exhaust an async for.
@@ -1298,6 +1336,56 @@ impl<'a> ArgumentPack<'a> {
 pub(crate) trait FrameEmitter<'a, 'p>:
     std::ops::DerefMut<Target = RegisteredFrame<'a, 'p>> + Sized
 {
+    fn discard_operand(&mut self, evaluate: impl FnOnce(&mut Self) -> String) {
+        let mark = self.temporary_mark();
+        evaluate(self);
+        self.discard_truth(&mark);
+    }
+
+    /// Append each interpolation after its value and spec have been evaluated. An
+    /// unavailable field ends this path after the preceding Python operations.
+    fn template<T>(
+        &mut self,
+        segments: &[Vec<u8>],
+        fields: &[T],
+        mut field: impl FnMut(&mut Self, &T) -> std::ops::ControlFlow<String, String>,
+    ) -> String {
+        use std::ops::ControlFlow;
+
+        let strings = self.emit_string_tuple(segments.to_vec());
+        let parts = self.op("list", &[]);
+        for input in fields {
+            match field(self, input) {
+                ControlFlow::Continue(value) => {
+                    self.op("append", &[&parts, &value]);
+                }
+                ControlFlow::Break(exit) => return exit,
+            }
+        }
+        self.op("build_template", &[&strings, &parts])
+    }
+
+    fn push_loop(&mut self, edges: LoopEdges, step_depth: usize, exit_depth: usize) {
+        self.loops.push(super::LoopTarget {
+            edges,
+            step_depth,
+            exit_depth,
+        });
+    }
+
+    fn unwind_loop(&mut self, stmt: &ir::Statement, unwind: impl FnOnce(&mut Self, usize)) {
+        let target = self.loops.last().expect("loop transfer");
+        let (label, depth) = match stmt {
+            ir::Statement::Break => (&target.edges.done, target.exit_depth),
+            ir::Statement::Continue => (&target.edges.step, target.step_depth),
+            ir::Statement::Exhaust => (&target.edges.exhausted, target.step_depth),
+            _ => unreachable!("loop transfer"),
+        };
+        let label = label.clone();
+        unwind(self, depth);
+        self.jump(&label);
+    }
+
     /// A bare raise transfers the active exception immediately. An explicit raise
     /// roots its evaluated exception until the caller has evaluated the cause.
     fn raise_operands<T>(
@@ -1428,16 +1516,6 @@ pub(crate) trait FrameEmitter<'a, 'p>:
         }
     }
 
-    fn read(&mut self, place: &Place) -> String {
-        match place {
-            Place::Name(n) => {
-                let scope = self.scope.clone();
-                self.op("lookup", &[&scope, n])
-            }
-            Place::Item(v, k) => self.op("get", &[v, k]),
-        }
-    }
-
     fn write(&mut self, place: &Place, value: &str) {
         match place {
             Place::Name(n) => {
@@ -1450,23 +1528,6 @@ pub(crate) trait FrameEmitter<'a, 'p>:
 
     fn inplace(&mut self, op: &str, left: &str, right: &str) -> String {
         self.op(&format!("inplace:{op}"), &[left, right])
-    }
-
-    fn update_place(&mut self, place: &Place, op: &str, rhs: impl FnOnce(&mut Self) -> String) {
-        let left = self.read(place);
-        let right = rhs(self);
-        let value = self.inplace(op, &left, &right);
-        self.write(place, &value);
-    }
-
-    fn update_item(
-        &mut self,
-        receiver: String,
-        key: String,
-        op: &str,
-        rhs: impl FnOnce(&mut Self) -> String,
-    ) {
-        self.update_place(&Place::Item(receiver, key), op, rhs)
     }
 
     fn delete_item(&mut self, receiver: &str, key: &str) -> String {

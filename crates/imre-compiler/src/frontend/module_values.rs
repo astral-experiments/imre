@@ -904,6 +904,7 @@ fn collect(
         ExprKind::Builtin(Builtin::GlobalGet(slot), _) => {
             reads.insert(*slot);
         }
+        ExprKind::Builtin(Builtin::FormatField(reprs), _) => calls.extend(reprs.iter().copied()),
         ExprKind::Call(id, _)
         | ExprKind::Builtin(
             Builtin::Process(

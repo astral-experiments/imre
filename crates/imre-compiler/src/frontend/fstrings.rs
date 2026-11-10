@@ -26,22 +26,19 @@ struct Parts<'a> {
 
 struct Fields<C, E> {
     context: C,
-    native_module: Option<ModuleId>,
+    result: Type,
     literal: fn(&mut C, &[FStringLiteral<'_>]) -> StdResult<Expr, E>,
     operand: fn(&mut C, &ast::Expr) -> StdResult<Expr, E>,
     scalar:
         fn(&mut C, &ast::InterpolatedElement, ast::ConversionFlag) -> StdResult<Option<Expr>, E>,
     conversion: fn(&C, Expr, char) -> Expr,
+    format: fn(&mut C, &ast::InterpolatedElement, Type, Type) -> Builtin,
 }
 
 impl<C, E> Fields<C, E> {
     fn operation(&self, op: Builtin, operands: Vec<Expr>) -> Expr {
         Expr {
-            ty: if self.native_module.is_some() {
-                Type::Str
-            } else {
-                Type::PythonObject
-            },
+            ty: self.result,
             kind: ExprKind::Builtin(op, operands),
         }
     }
@@ -86,15 +83,10 @@ impl<C, E> Fields<C, E> {
                 self.elements(&mut spec, &elements.elements, raw)?;
             }
             let spec = self.finish(spec)?;
-            self.operation(Builtin::FormatField, vec![value, spec])
+            let op = (self.format)(&mut self.context, field, value.ty, spec.ty);
+            self.operation(op, vec![value, spec])
         };
-        if let Some(module) = self.native_module {
-            if let ExprKind::Builtin(op @ Builtin::FormatField, args) = &mut value.kind
-                && (!args[0].ty.is_format_scalar() || args[1].ty != Type::Str)
-            {
-                *op = Builtin::ObjectCall(ir::ObjectCall::FormatField, module, field.range());
-            }
-        } else {
+        if self.result == Type::PythonObject {
             value = self.operation(
                 Builtin::RegisteredLocation(field.range(), field.start()),
                 vec![value],
@@ -152,11 +144,12 @@ pub(super) fn registered_fstring<E>(
 ) -> StdResult<Expr, E> {
     Fields {
         context: (source, operand),
-        native_module: None,
+        result: Type::PythonObject,
         literal: |(source, _), pieces| Ok(source.string(pieces.iter().copied())),
         operand: |(_, child), expr| child(expr),
         scalar: |_, _, _| Ok(None),
         conversion: |_, value, flag| object_conversion(value, flag),
+        format: |_, _, _, _| Builtin::FormatField(Box::default()),
     }
     .lower(value)
 }
@@ -169,6 +162,70 @@ fn object_conversion(value: Expr, flag: char) -> Expr {
 }
 
 impl Checker<'_> {
+    fn field_format(
+        &mut self,
+        field: &ast::InterpolatedElement,
+        value: Type,
+        spec: Type,
+    ) -> Builtin {
+        if spec == Type::Str {
+            if value.is_format_scalar() {
+                return Builtin::FormatField(Box::default());
+            }
+            if self.inherits_object_format(value)
+                && let Some(methods) = self.field_repr_methods(value)
+            {
+                self.calls.extend(&methods);
+                return Builtin::FormatField(methods);
+            }
+        }
+        Builtin::ObjectCall(ir::ObjectCall::FormatField, self.module, field.range())
+    }
+
+    fn inherits_object_format(&self, ty: Type) -> bool {
+        matches!(ty, Type::None | Type::ListInt | Type::List(_)) || self.types.is_plain_tuple(ty)
+    }
+
+    /// The native str service calls repr on members. Each possible override must
+    /// have its actual checked body in the concrete record's display descriptor.
+    fn field_repr_methods(&self, root: Type) -> Option<Box<[usize]>> {
+        let mut pending = vec![root];
+        let mut seen = HashSet::new();
+        let mut methods = Vec::new();
+        while let Some(ty) = pending.pop() {
+            if !seen.insert(ty) {
+                continue;
+            }
+            if let Type::Class(id) = ty {
+                for layout in self.classes.concrete_layouts(id) {
+                    if self.types.is_value_struct(Type::Class(layout)) {
+                        return None;
+                    }
+                    let (owner, definition) = self.classes.repr_override(layout)?;
+                    let method = self.classes.methods[layout].get("__repr__")?;
+                    let context = method.method?;
+                    let class = &self.classes.declarations.definitions[context.class];
+                    if method.asynchronous
+                        || context.kind(&self.classes.declarations)
+                            != crate::classes::MethodKind::Instance
+                        || class.method_origins[context.index] != owner
+                        || class.methods[context.index].range() != definition.range()
+                    {
+                        return None;
+                    }
+                    methods.push(method.id);
+                }
+            } else if self.inherits_object_format(ty) || matches!(ty, Type::Optional(_)) {
+                pending.extend(self.types.children(ty));
+            } else if !ty.is_format_scalar() && !matches!(ty, Type::StrLiteral(_)) {
+                return None;
+            }
+        }
+        methods.sort_unstable();
+        methods.dedup();
+        Some(methods.into_boxed_slice())
+    }
+
     fn field_conversion(&self, value: Expr, flag: char) -> Expr {
         let op = match flag {
             's' if value.ty == Type::Str => return value,
@@ -203,7 +260,7 @@ impl Checker<'_> {
 
     pub(super) fn fstring(&mut self, value: &ast::ExprFString) -> Result<Expr, String> {
         Fields {
-            native_module: Some(self.module),
+            result: Type::Str,
             context: self,
             literal: |checker, pieces| {
                 let mut text = String::new();
@@ -225,6 +282,7 @@ impl Checker<'_> {
             operand: |checker, expression| checker.expr(expression),
             scalar: |checker, field, conversion| checker.formatted_scalar(field, conversion),
             conversion: |checker, value, flag| checker.field_conversion(value, flag),
+            format: |checker, field, value, spec| checker.field_format(field, value, spec),
         }
         .lower(value)
     }
@@ -314,7 +372,7 @@ print(fixed(2.75), render('é', input()))
         for function in &module.functions {
             ir::walk_expressions(&function.body, &mut |expr| match expr.kind {
                 ExprKind::Builtin(Builtin::FloatFormat { .. }, _) => fixed = true,
-                ExprKind::Builtin(Builtin::FormatField, _) => field = true,
+                ExprKind::Builtin(Builtin::FormatField(_), _) => field = true,
                 _ => {}
             });
         }
@@ -323,30 +381,40 @@ print(fixed(2.75), render('é', input()))
         crate::check(source).unwrap();
         crate::compile(source, &options).unwrap();
 
-        let bytes = "def render(data: bytes, spec: str) -> str:
-    return f'{data:{spec}}'
-
-print(render(b'ok', input()))
-";
         let directory = tempfile::tempdir().unwrap();
         let app = directory.path().join("app.py");
-        std::fs::write(&app, bytes).unwrap();
-        crate::check(bytes).unwrap();
-        crate::check_file(&app, None).unwrap();
-        for llvm in [
-            crate::compile(bytes, &options).unwrap(),
-            crate::compile_file(&app, None, &options).unwrap().llvm_ir,
+        for (ty, argument, operation) in [
+            ("bytes", "b'ok'", "call ptr @imre_format_scalar(i32 8,"),
+            ("list[int]", "[7]", "call ptr @imre_format_object("),
+            (
+                "tuple[int, str]",
+                "(7, 'word')",
+                "call ptr @imre_format_object(",
+            ),
         ] {
-            assert_eq!(
-                llvm.matches("call ptr @imre_format_scalar(i32 8,").count(),
-                1
+            let source = format!(
+                "def render(data: {ty}, spec: str) -> str:\n    return f'{{data:{{spec}}}}'\n\nprint(render({argument}, input()))\n"
             );
+            std::fs::write(&app, &source).unwrap();
+            crate::check(&source).unwrap();
+            crate::check_file(&app, None).unwrap();
+            for llvm in [
+                crate::compile(&source, &options).unwrap(),
+                crate::compile_file(&app, None, &options).unwrap().llvm_ir,
+            ] {
+                assert_eq!(llvm.matches(operation).count(), 1);
+                assert!(
+                    !llvm
+                        .lines()
+                        .any(|line| line.contains("call ") && line.contains("@imre_dyn_"))
+                );
+            }
         }
 
-        let unsupported = "def render(data: list[int], spec: str) -> str:
+        let unsupported = "def render(data: list[int] | None, spec: str) -> str:
     return f'{data:{spec}}'
 
-print(render([7], input()))
+print(render(None, input()))
 ";
         std::fs::write(&app, unsupported).unwrap();
         let message = "2:14: Imre: this f-string field requires native Python object operations";
@@ -358,5 +426,31 @@ print(render([7], input()))
         ] {
             assert!(error.ends_with(message), "{error}");
         }
+    }
+
+    #[test]
+    fn field_member_repr_checks_initializer_reads() {
+        let directory = tempfile::tempdir().unwrap();
+        let app = directory.path().join("app.py");
+        std::fs::write(&app, "from provider import printed\nprint(printed)\n").unwrap();
+        std::fs::write(
+            directory.path().join("provider.py"),
+            "class Member:
+    def __repr__(self) -> str:
+        return label
+
+def show(value: Member, spec: str) -> str:
+    return f'{[value]:{spec}}'
+
+printed: str = show(Member(), '')
+label: str = input()
+",
+        )
+        .unwrap();
+        let error = crate::check_file(&app, None).unwrap_err();
+        assert!(
+            error.ends_with("provider.py:8:1: Imre: module initialization may read a value before it is initialized"),
+            "{error}"
+        );
     }
 }

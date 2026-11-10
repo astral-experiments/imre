@@ -51,6 +51,11 @@ def class_closure(label):
         def explicit(self, __class__):
             return __class__
 
+        def reader(self):
+            def named(receiver):
+                yield super().label(), label
+            return named
+
     class Derived(Owner):
         pass
 
@@ -60,6 +65,12 @@ def class_closure(label):
     assert (cell.cell_contents, other.cell_contents) == identify(None) == (Owner, label)
     assert Owner.inherited.__closure__[0] is cell
     assert Owner.explicit.__closure__ is None
+    named = Owner().reader()
+    suspended = named(Derived())
+    assert suspended.gi_code is named.__code__
+    assert suspended.gi_code.co_freevars == ("__class__", "label")
+    assert named.__closure__[0] is cell and named.__closure__[1] is other
+    assert next(suspended) == ("base", label)
     # Reconstruct the method with a different starting point for super().
     def replacement():
         return Derived

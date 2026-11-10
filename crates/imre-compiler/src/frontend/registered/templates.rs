@@ -1,141 +1,69 @@
 //! Prepare interpolated string literals and checked template operands before code generation.
 use super::*;
-use ast::visitor::{self, Visitor};
 use imre_ast::strings::{TemplateFieldText, interpolation_conversion};
 
 #[derive(Default)]
 pub(crate) struct PreparedStrings {
-    pub(crate) templates: HashMap<TextRange, RegisteredOperand>,
-    pub(crate) literals: HashMap<TextRange, Expr>,
-    pub(crate) residual_templates: HashMap<TextRange, ResidualTemplate>,
+    pub(crate) fields: HashMap<TextSize, TemplateFieldText>,
+    pub(crate) templates: HashMap<TextRange, PreparedTemplate>,
 }
 
-pub(crate) struct ResidualTemplate {
-    pub(crate) segments: Vec<Vec<u8>>,
-    pub(crate) fields: Vec<StdResult<ResidualField, &'static str>>,
+pub(crate) enum PreparedTemplate {
+    Checked(RegisteredOperand),
+    Mixed {
+        segments: Vec<Vec<u8>>,
+        fields: Vec<TemplateField>,
+    },
 }
 
-pub(crate) struct ResidualField {
-    pub(crate) expression: String,
-    pub(crate) conversion: Option<char>,
-    pub(crate) spec: Expr,
+pub(crate) enum TemplateField {
+    Checked(RegisteredOperand),
+    External {
+        value: Box<ast::Expr>,
+        interpolation: Expr,
+    },
+    Unsupported(&'static str),
 }
 
-/// Only a residual expression borrows the original values at its physical site.
-pub(crate) fn template_operands(expr: &ast::Expr) -> Option<impl Iterator<Item = &ast::Expr>> {
-    let template = expr.as_t_string_expr()?;
-    Some(template.value.iter().flat_map(|part| {
-        part.elements
-            .interpolations()
-            .map(|field| field.expression.as_ref())
-    }))
-}
-
-struct ExpressionPreparation<'a> {
-    source: RegisteredSource<'a>,
-    prepared: PreparedStrings,
-    generators: HashMap<TextRange, RegisteredGenerator>,
-    // Template text is owned by its segments. Nested expressions can switch string kinds.
-    in_f_string: bool,
-}
-
-/// Prepare nested generator bodies before a parent expression binds or captures them.
-pub(crate) fn prepare_expression_sites(
-    body: &[ast::Stmt],
-    source: RegisteredSource<'_>,
-) -> (PreparedStrings, HashMap<TextRange, RegisteredGenerator>) {
-    let mut preparation = ExpressionPreparation {
-        source,
-        prepared: PreparedStrings::default(),
-        generators: HashMap::new(),
-        in_f_string: false,
-    };
-    preparation.visit_body(body);
-    (preparation.prepared, preparation.generators)
-}
-
-impl<'a> Visitor<'a> for ExpressionPreparation<'_> {
-    fn visit_expr(&mut self, expr: &'a ast::Expr) {
-        let enclosing =
-            std::mem::replace(&mut self.in_f_string, matches!(expr, ast::Expr::FString(_)));
-        stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
-            visitor::walk_expr(self, expr)
-        });
-        self.in_f_string = enclosing;
-        let source = RegisteredSource {
-            generators: Some(&self.generators),
-            ..self.source
-        };
-        match expr {
-            ast::Expr::Generator(generator) => {
-                if let Some(child) = RegisteredGenerator::prepare(generator, source) {
-                    self.generators.insert(generator.range(), child);
-                }
-            }
-            ast::Expr::TString(template) => {
-                if let Some(value) =
-                    RegisteredOperand::prepare(expr, source, RegisteredScope::Module)
-                {
-                    self.prepared.templates.insert(expr.range(), value);
-                } else if let Some(fields) = self.source.template_fields
-                    && let Some(segments) = template_segments(template, self.source, fields)
-                {
-                    let fields = template
-                        .value
-                        .iter()
-                        .flat_map(|part| part.elements.interpolations())
-                        .map(|field| {
-                            let spec = match imre_ast::strings::template_format_spec(field)? {
-                                Some(literal) => self.source.formatted_literal(literal),
-                                None => text(""),
-                            };
-                            Ok(ResidualField {
-                                expression: fields[&field.start()].expression.clone(),
-                                conversion: field.conversion.to_char(),
-                                spec,
-                            })
-                        })
-                        .collect();
-                    self.prepared
-                        .residual_templates
-                        .insert(expr.range(), ResidualTemplate { segments, fields });
-                }
-            }
-            ast::Expr::FString(formatted) => {
-                for part in formatted.value.iter() {
-                    if let ast::FStringPartRef::Literal(literal) = part
-                        && !literal.value.is_empty()
-                    {
-                        let value = self
-                            .source
-                            .string(std::iter::once(FStringLiteral::Adjacent(literal)));
-                        self.prepared.literals.insert(literal.range(), value);
-                    }
-                }
-            }
-            _ => {}
+impl PreparedTemplate {
+    /// Keep the checked fields in order when an input still needs its enclosing source entry.
+    pub(crate) fn prepare(
+        expr: &ast::Expr,
+        source: RegisteredSource<'_>,
+        owner: RegisteredScope,
+    ) -> Option<Self> {
+        if let Some(checked) = RegisteredOperand::prepare(expr, source, owner) {
+            return Some(Self::Checked(checked));
         }
-    }
-
-    fn visit_interpolated_string_element(&mut self, element: &'a ast::InterpolatedStringElement) {
-        if self.in_f_string {
-            match element {
-                ast::InterpolatedStringElement::Literal(literal) if !literal.value.is_empty() => {
-                    self.prepared
-                        .literals
-                        .insert(literal.range(), self.source.formatted_literal(literal));
-                }
-                ast::InterpolatedStringElement::Interpolation(field) => {
-                    if let Some(debug) = &field.debug_text {
-                        self.prepared
-                            .literals
-                            .insert(field.range(), text(debug.as_str()));
-                    }
-                }
-                _ => {}
+        let template = expr.as_t_string_expr()?;
+        let segments = template_segments(template, source, source.template_fields?)?;
+        let mut fields = Vec::new();
+        for field in template
+            .value
+            .iter()
+            .flat_map(|part| part.elements.interpolations())
+        {
+            // The incomplete-site entry rejected these specs before evaluating the value.
+            if let Err(reason) = imre_ast::strings::template_format_spec(field) {
+                fields.push(TemplateField::Unsupported(reason));
+                break;
             }
+            let checked = RegisteredOperand::prepare_with(source, owner, |scope| {
+                scope.with_suspending_operands(|scope| {
+                    source.interpolation(field, |child| scope.ordinary_operand(child))
+                })
+            });
+            fields.push(match checked {
+                Some(value) => TemplateField::Checked(value),
+                None => TemplateField::External {
+                    value: field.expression.clone(),
+                    // The only input of this literal-spec interpolation is its value.
+                    interpolation: source
+                        .interpolation(field, |_| Some(Expr::local(0, Type::PythonObject)))?,
+                },
+            });
         }
-        visitor::walk_interpolated_string_element(self, element);
+        Some(Self::Mixed { segments, fields })
     }
 }
 
@@ -203,26 +131,32 @@ impl RegisteredSource<'_> {
         template: &ast::ExprTString,
         in_function: bool,
         mut operand: impl FnMut(&ast::Expr) -> Option<Expr>,
-    ) -> Option<Expr> {
-        let fields = self.template_fields?;
-        let segments = template_segments(template, self, fields)?;
+    ) -> StdResult<Expr, Option<&'static str>> {
+        let fields = self.template_fields.ok_or(None)?;
+        let segments = template_segments(template, self, fields).ok_or(None)?;
         let mut captures = Vec::new();
+        let mut residual_error = None;
         for field in template
             .value
             .iter()
             .flat_map(|part| part.elements.interpolations())
         {
-            let expression = fields[&field.start()].expression.clone();
-            captures.push(object(
-                Builtin::RegisteredInterpolation {
-                    expression,
-                    conversion: interpolation_conversion(field),
-                },
-                vec![
-                    operand(&field.expression)?,
-                    self.template_spec(field, &mut operand)?,
-                ],
-            ));
+            // A residual field checks its spelling and format before evaluating its value.
+            residual_error = residual_error.or_else(|| {
+                match imre_ast::strings::template_format_spec(field).err()? {
+                    "debug t-string interpolation" => Some(
+                        "unsupported debug t-string interpolation in a compiled suspended function",
+                    ),
+                    "nested t-string format spec" => Some(
+                        "unsupported nested t-string format spec in a compiled suspended function",
+                    ),
+                    _ => None,
+                }
+            });
+            captures.push(
+                self.interpolation(field, &mut operand)
+                    .ok_or(residual_error)?,
+            );
         }
         let value = object(Builtin::RegisteredTemplate(segments), captures);
         if !in_function {
@@ -235,10 +169,32 @@ impl RegisteredSource<'_> {
                 );
             });
             if suspends {
-                return None;
+                return Err(None);
             }
         }
-        Some(value)
+        Ok(value)
+    }
+
+    fn interpolation(
+        self,
+        field: &ast::InterpolatedElement,
+        mut operand: impl FnMut(&ast::Expr) -> Option<Expr>,
+    ) -> Option<Expr> {
+        let expression = self
+            .template_fields?
+            .get(&field.start())?
+            .expression
+            .clone();
+        Some(object(
+            Builtin::RegisteredInterpolation {
+                expression,
+                conversion: interpolation_conversion(field),
+            },
+            vec![
+                operand(&field.expression)?,
+                self.template_spec(field, &mut operand)?,
+            ],
+        ))
     }
 
     fn template_spec(
@@ -266,7 +222,7 @@ impl RegisteredSource<'_> {
                         value = object(Builtin::FormatConversion(c), vec![value]);
                     }
                     let value = object(
-                        Builtin::FormatField,
+                        Builtin::FormatField(Box::default()),
                         vec![value, self.template_spec(nested, operand)?],
                     );
                     object(

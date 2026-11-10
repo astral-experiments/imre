@@ -375,29 +375,67 @@ pub(in crate::frontend) fn fixed_positional_arguments(call: &ast::ExprCall) -> b
 fn bound_call(call: ir::RegisteredCall, target: Expr, mut arguments: Vec<Expr>) -> Expr {
     if target.ty == Type::PythonObject
         && matches!(call.arguments, ir::RegisteredArguments::Positional)
-        && let ir::RegisteredCallTarget::Callable { end, suspended_name } = call.target
+        && let ir::RegisteredCallTarget::Callable {
+            end,
+            suspended_name,
+        } = call.target
     {
-        return Expr {
-            ty: Type::PythonObject,
-            kind: ExprKind::Invoke {
-                callable: Box::new(target),
-                args: ir::CallArgs {
-                    python_site: Some(ir::InvokeSite {
-                        range: call.range,
-                        callee_end: end,
-                        suspended_name,
-                        scope: None,
-                    }),
-                    ..ir::CallArgs::positional(arguments)
-                },
-            },
-        };
+        return positional_invoke(call.range, end, suspended_name, target, arguments);
     }
     arguments.insert(0, target);
     super::operation(Builtin::RegisteredCall(call), Type::PythonObject, arguments)
 }
 
+fn positional_invoke(
+    range: TextRange,
+    callee_end: TextSize,
+    suspended_name: Option<TextRange>,
+    target: Expr,
+    arguments: Vec<Expr>,
+) -> Expr {
+    Expr {
+        ty: Type::PythonObject,
+        kind: ExprKind::Invoke {
+            callable: Box::new(target),
+            args: ir::CallArgs {
+                python_site: Some(ir::InvokeSite {
+                    range,
+                    callee_end,
+                    suspended_name,
+                    scope: None,
+                }),
+                ..ir::CallArgs::positional(arguments)
+            },
+        },
+    }
+}
+
 impl Checker<'_> {
+    pub(in crate::frontend) fn located_callback_effect(
+        &self,
+        expr: &ast::Expr,
+        call: &ast::ExprCall,
+        callable: Expr,
+        arguments: Vec<Expr>,
+    ) -> Expr {
+        let source = self
+            .registered
+            .expect("registered callback frame")
+            .context(self.source);
+        let target = source.located(&call.func, callable);
+        let mut value = positional_invoke(
+            call.range(),
+            call.func.end(),
+            Some(call.func.range()),
+            target,
+            arguments,
+        );
+        if let Some(slot) = self.namespace {
+            in_namespace(&mut value, self.local(slot));
+        }
+        source.located(expr, value)
+    }
+
     pub(in crate::frontend) fn call_with_target(
         &mut self,
         call: &ast::ExprCall,
@@ -476,18 +514,7 @@ pub(in crate::frontend) fn index_key<E>(
             let values = tuple
                 .elts
                 .iter()
-                .map(|item| {
-                    if let Some(starred) = item.as_starred_expr() {
-                        let value = index_key(&starred.value, operand)?;
-                        Ok(super::operation(
-                            Builtin::RegisteredSpread,
-                            Type::PythonObject,
-                            vec![value],
-                        ))
-                    } else {
-                        index_key(item, operand)
-                    }
-                })
+                .map(|item| collection_item(item, |value| index_key(value, operand)))
                 .collect::<StdResult<Vec<_>, E>>()?;
             let value = Expr {
                 ty: Type::PythonObject,
@@ -552,6 +579,39 @@ fn literal_bound(bound: &ast::Expr, value: Option<&Expr>) -> Option<ir::Constant
     }
 }
 
+fn slice_bounds(slice: &ast::ExprSlice) -> [Option<&ast::Expr>; 3] {
+    [
+        slice.lower.as_deref(),
+        slice.upper.as_deref(),
+        slice.step.as_deref(),
+    ]
+}
+
+/// A bare annotated target evaluates its receiver and key expressions without accessing
+/// the final attribute or item. Each slice bound remains an ordinary expression.
+pub(super) fn bare_target_operands(target: &ast::Expr) -> Option<Vec<&ast::Expr>> {
+    fn key_operands<'a>(key: &'a ast::Expr, inputs: &mut Vec<&'a ast::Expr>) {
+        match key {
+            ast::Expr::Tuple(tuple) => {
+                for item in &tuple.elts {
+                    key_operands(item, inputs);
+                }
+            }
+            ast::Expr::Slice(slice) => inputs.extend(slice_bounds(slice).into_iter().flatten()),
+            value => inputs.push(value),
+        }
+    }
+    match target {
+        ast::Expr::Attribute(field) => Some(vec![&field.value]),
+        ast::Expr::Subscript(item) => {
+            let mut inputs = vec![item.value.as_ref()];
+            key_operands(&item.slice, &mut inputs);
+            Some(inputs)
+        }
+        _ => None,
+    }
+}
+
 fn slice_key<'a, E>(
     slice: &'a ast::ExprSlice,
     mut operand: impl FnMut(&'a ast::Expr) -> StdResult<(Expr, Option<ir::Constant>), E>,
@@ -559,10 +619,7 @@ fn slice_key<'a, E>(
     use ir::Constant as C;
     let mut bounds = Vec::with_capacity(3);
     let mut constants = Some([C::None, C::None, C::None]);
-    for (i, bound) in [&slice.lower, &slice.upper, &slice.step]
-        .into_iter()
-        .enumerate()
-    {
+    for (i, bound) in slice_bounds(slice).into_iter().enumerate() {
         if let Some(bound) = bound {
             let (value, constant) = operand(bound)?;
             bounds.push(value);
@@ -582,23 +639,20 @@ fn slice_key<'a, E>(
 
 /// Only the input producers may need the enclosing source adapter. The operation
 /// itself uses ordinary checked IR with positional inputs, independent of Python locals.
-pub(crate) struct IndexOperands<'a> {
-    pub(crate) value: Expr,
-    pub(crate) inputs: Vec<super::booleans::SourceOperand<'a>>,
+pub(super) struct IndexOperands<'a> {
+    pub(super) value: Expr,
+    pub(super) inputs: Vec<(&'a ast::Expr, Option<Expr>)>,
+    pub(super) split_slice: bool,
 }
 
-pub(crate) fn index_operands<'a>(
+pub(super) fn index_operands<'a>(
     node: &'a ast::Expr,
     source: RegisteredSource<'_>,
 ) -> Option<IndexOperands<'a>> {
-    use super::booleans::SourceOperand;
     let mut inputs = Vec::new();
     let mut input = |expr: &'a ast::Expr, value: Option<Expr>| {
         let slot = inputs.len();
-        inputs.push(match value {
-            Some(value) => SourceOperand::Checked(std::borrow::Cow::Owned(value)),
-            None => SourceOperand::Residual(expr),
-        });
+        inputs.push((expr, value));
         Expr::local(slot, Type::PythonObject)
     };
     let (read, key) = match node {
@@ -618,6 +672,7 @@ pub(crate) fn index_operands<'a>(
     } else {
         registered_index_key(key, source)
     };
+    let split_slice = read.is_some() && slice.is_some() && checked.is_none();
     let value = if let Some(checked) = checked {
         input(key, Some(checked))
     } else if let Some(slice) = slice {
@@ -634,7 +689,25 @@ pub(crate) fn index_operands<'a>(
         Some((index, receiver)) => subscript(index, receiver, value, source.text),
         None => value,
     };
-    Some(IndexOperands { value, inputs })
+    Some(IndexOperands {
+        value,
+        inputs,
+        split_slice,
+    })
+}
+
+pub(super) fn collection_item<E>(
+    item: &ast::Expr,
+    child: impl FnOnce(&ast::Expr) -> StdResult<Expr, E>,
+) -> StdResult<Expr, E> {
+    match item {
+        ast::Expr::Starred(star) => Ok(super::operation(
+            Builtin::RegisteredSpread,
+            Type::PythonObject,
+            vec![child(&star.value)?],
+        )),
+        item => child(item),
+    }
 }
 
 fn display_operands<E>(
@@ -645,12 +718,7 @@ fn display_operands<E>(
     items
         .iter()
         .map(|item| {
-            if let ast::Expr::Starred(star) = item {
-                Ok(Expr {
-                    ty: Type::PythonObject,
-                    kind: ExprKind::Builtin(Builtin::RegisteredSpread, vec![child(&star.value)?]),
-                })
-            } else if let ast::Expr::UnaryOp(op) = item
+            if let ast::Expr::UnaryOp(op) = item
                 && matches!(op.op, ast::UnaryOp::UAdd | ast::UnaryOp::USub)
                 && let ast::Expr::NumberLiteral(n) = &*op.operand
             {
@@ -667,7 +735,7 @@ fn display_operands<E>(
                     },
                 ))
             } else {
-                child(item)
+                collection_item(item, &mut *child)
             }
         })
         .collect()
@@ -689,9 +757,16 @@ fn literal_membership(cmp: &ast::ExprCompare) -> Option<(&ast::Expr, &[ast::Expr
 }
 
 /// The Python operand order is also used when a child still needs its source emitter.
-pub(crate) fn binary_operands(node: &ast::Expr) -> Option<(Binary, [&ast::Expr; 2])> {
+pub(super) fn binary_operands(node: &ast::Expr) -> Option<(Binary, [&ast::Expr; 2])> {
     let binary = node.as_bin_op_expr()?;
     Some((binary.op.into(), [&binary.left, &binary.right]))
+}
+
+pub(super) fn binary(op: Binary, left: Expr, right: Expr) -> Expr {
+    Expr {
+        ty: Type::PythonObject,
+        kind: ExprKind::Binary(op, Box::new(left), Box::new(right)),
+    }
 }
 
 /// Select one registered-frame operation before requesting its operands in source order.
@@ -704,10 +779,7 @@ pub(super) fn operation<E>(
     mut child: impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
 ) -> StdResult<Option<Expr>, E> {
     if let Some((op, [left, right])) = binary_operands(node) {
-        return Ok(Some(Expr {
-            ty: Type::PythonObject,
-            kind: ExprKind::Binary(op, Box::new(child(left)?), Box::new(child(right)?)),
-        }));
+        return Ok(Some(binary(op, child(left)?, child(right)?)));
     }
     if let Some((items, display)) = display_elements(node) {
         let values = display_operands(items, source, &mut child)?;
@@ -753,7 +825,9 @@ pub(super) fn operation<E>(
     }
     let kind = match node {
         ast::Expr::Generator(generator)
-            if source.generators.is_some_and(|sites| sites.contains_key(&generator.range())) =>
+            if source
+                .generators
+                .is_some_and(|sites| sites.contains_key(&generator.range())) =>
         {
             let outer = imre_ast::comprehension::outer_clause(&generator.generators);
             let acquire = if outer.is_async {
@@ -806,7 +880,9 @@ pub(super) fn operation<E>(
         }
         ast::Expr::NumberLiteral(lit) => number_literal(&lit.value, false),
         ast::Expr::StringLiteral(lit) => {
-            return Ok(Some(source.string(lit.value.iter().map(FStringLiteral::Adjacent))));
+            return Ok(Some(
+                source.string(lit.value.iter().map(FStringLiteral::Adjacent)),
+            ));
         }
         ast::Expr::BytesLiteral(lit) => ExprKind::Bytes(lit.value.bytes().collect()),
         ast::Expr::BooleanLiteral(lit) => ExprKind::Bool(lit.value),
@@ -914,11 +990,14 @@ impl Region {
             return index_key(node, &mut |child| self.operand(child, source).ok_or(())).ok();
         }
         let value = match node {
-            ast::Expr::TString(template) => {
-                source.template(template, false, |child| self.operand(child, source))?
-            }
+            ast::Expr::TString(template) => source
+                .template(template, false, |child| self.operand(child, source))
+                .ok()?,
             ast::Expr::FString(value) if matches!(self, Self::Suite | Self::Lambda) => {
-                fstrings::registered_fstring(value, source, |child| self.operand(child, source).ok_or(())).ok()?
+                fstrings::registered_fstring(value, source, |child| {
+                    self.operand(child, source).ok_or(())
+                })
+                .ok()?
             }
             ast::Expr::Lambda(lambda)
                 if !matches!(self, Self::Residual | Self::SuspendedOperand) =>
@@ -952,44 +1031,6 @@ impl Region {
     }
 }
 
-/// An output statement encountered in a source suite. Only a residual operand needs syntax.
-pub(crate) enum ValueStatement<'a> {
-    Checked(Statement),
-    RaiseOperands(Option<&'a ast::Expr>, Option<&'a ast::Expr>),
-    ReturnOperand(&'a ast::Expr),
-    DiscardOperand(&'a ast::Expr),
-    Ignore,
-}
-
-pub(crate) fn value_statement<'a>(
-    stmt: &'a ast::Stmt,
-    source: RegisteredSource<'_>,
-    logicals: &super::booleans::LogicalSites,
-) -> Option<ValueStatement<'a>> {
-    let operand = |value: &ast::Expr| match logicals.get(value) {
-        Some(super::booleans::Selection::Checked(value)) => Some(value.clone()),
-        Some(_) => None,
-        None => registered_value(value, source),
-    };
-    Some(match stmt {
-        ast::Stmt::Raise(raise) => {
-            ValueStatement::RaiseOperands(raise.exc.as_deref(), raise.cause.as_deref())
-        }
-        ast::Stmt::Return(ret) => match ret.value.as_deref() {
-            None => ValueStatement::Checked(Statement::Return(Expr::none())),
-            Some(value) => operand(value).map_or(ValueStatement::ReturnOperand(value), |value| {
-                ValueStatement::Checked(Statement::Return(value))
-            }),
-        },
-        ast::Stmt::Expr(expr) if expr.value.is_string_literal_expr() => ValueStatement::Ignore,
-        ast::Stmt::Expr(expr) => operand(&expr.value)
-            .map_or(ValueStatement::DiscardOperand(&expr.value), |value| {
-                ValueStatement::Checked(Statement::Expr(value))
-            }),
-        _ => return None,
-    })
-}
-
 pub(crate) fn suspended_operand(node: &ast::Expr, source: RegisteredSource<'_>) -> Option<Expr> {
     Region::SuspendedOperand.operand(node, source)
 }
@@ -998,7 +1039,12 @@ pub(crate) fn suspended_operand(node: &ast::Expr, source: RegisteredSource<'_>) 
 pub(super) fn in_namespace(value: &mut Expr, namespace: Expr) {
     match &mut value.kind {
         ExprKind::Invoke {
-            args: ir::CallArgs { python_site: Some(site), .. }, ..
+            args:
+                ir::CallArgs {
+                    python_site: Some(site),
+                    ..
+                },
+            ..
         } => site.scope = Some(Box::new(namespace)),
         ExprKind::Builtin(Builtin::RegisteredCall(call), args) => {
             args.insert(0, namespace);
@@ -1408,7 +1454,7 @@ mod tests {
                     assert_eq!(args.values.len(), count);
                 }
                 ExprKind::Builtin(Builtin::RegisteredCall(call), operands) => {
-                    assert!(count < 30 || count > 64);
+                    assert!(!(30..=64).contains(&count));
                     assert_eq!(operands.len(), count + 1);
                     assert_eq!(
                         matches!(call.target, ir::RegisteredCallTarget::Method { .. }),
@@ -1489,8 +1535,8 @@ mod index_constant_tests {
         let expr = &entry.parsed.syntax().body[0].as_expr_stmt().unwrap().value;
         let plan = index_operands(expr, module.context(source)).unwrap();
         let mut residual = Vec::new();
-        for input in &plan.inputs {
-            if let super::booleans::SourceOperand::Residual(child) = input {
+        for (child, value) in &plan.inputs {
+            if value.is_none() {
                 residual.push(&source[child.range()]);
             }
         }
