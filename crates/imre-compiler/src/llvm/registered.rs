@@ -67,10 +67,11 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
                                 })
                             })
                     }
-                    Statement::With { body, entered, .. } => {
+                    Statement::With { binding, body, .. } => {
                         uses_python_protocol = true;
-                        entered.as_ref().is_none_or(|slot| private.contains(slot))
-                            && !suspends(body)
+                        binding.as_ref().is_none_or(|binding| {
+                            private.contains(&binding.entered) && !suspends(&binding.body)
+                        }) && !suspends(body)
                     }
                     Statement::Scope { body, .. } => !suspends(body),
                     Statement::SetItem(receiver, _, _)

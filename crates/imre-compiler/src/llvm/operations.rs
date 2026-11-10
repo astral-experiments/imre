@@ -595,10 +595,11 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             Statement::With {
                 manager,
                 site,
-                entered,
+                binding,
                 body,
             } => {
-                self.python().with_manager(manager, *site, *entered, body);
+                self.python()
+                    .with_manager(manager, *site, binding.as_ref(), body);
             }
             Statement::Clear(slot) => self.clear_iteration_slots(&[*slot]),
             Statement::Scope { body, clear } => self.scoped_suite(body, clear),
