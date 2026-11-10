@@ -1,10 +1,36 @@
 use super::value::{Error, Id, Result, Value};
 use super::{Context, NONE};
 
+/// Keep the original callable for tracing and for rows that need Python dispatch.
+#[derive(Clone, Copy)]
+pub(super) enum MapFunction {
+    Python(Id),
+    IntCharacters(Id),
+}
+
+impl MapFunction {
+    pub(super) fn callable(self) -> Id {
+        match self {
+            Self::Python(id) | Self::IntCharacters(id) => id,
+        }
+    }
+
+    fn apply(self, ctx: &mut Context, values: Vec<Id>) -> Result<Id> {
+        if let Self::IntCharacters(_) = self
+            && let [value] = values.as_slice()
+            && let Value::Str(character) = ctx.heap.get(*value)
+            && let Some(digit) = crate::integer_text::single_decimal_digit(character)
+        {
+            return Ok(ctx.int(i64::from(digit)));
+        }
+        ctx.call(self.callable(), values, Vec::new())
+    }
+}
+
 /// One in-progress row of a possibly nested zip or map.
 struct PendingRow {
     inputs: std::rc::Rc<[Id]>,
-    function: Option<Id>,
+    function: Option<MapFunction>,
     strict: bool,
     index: usize,
     values: Vec<Id>,
@@ -89,7 +115,15 @@ impl Context {
         let inputs = inputs.into();
         let cursor = match function {
             Some(function) => Value::Map {
-                function,
+                function: if class == base
+                    && let [source] = sources
+                    && matches!(self.heap.get(*source), Value::Str(_))
+                    && self.builtins.get("int") == Some(&function)
+                {
+                    MapFunction::IntCharacters(function)
+                } else {
+                    MapFunction::Python(function)
+                },
                 inputs,
                 strict,
             },
@@ -155,7 +189,7 @@ impl Context {
                 result = if row.exhausted {
                     Ok(None)
                 } else if let Some(function) = row.function {
-                    self.call(function, row.values, Vec::new()).map(Some)
+                    function.apply(self, row.values).map(Some)
                 } else {
                     Ok(Some(self.alloc(Value::Tuple(row.values))))
                 };

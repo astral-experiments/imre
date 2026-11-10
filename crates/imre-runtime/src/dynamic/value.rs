@@ -1656,7 +1656,7 @@ pub(super) enum Value {
     },
     Repeat(crate::objects::Repeat<Id>),
     Map {
-        function: Id,
+        function: super::zip::MapFunction,
         inputs: std::rc::Rc<[Id]>,
         strict: bool,
     },
@@ -2235,7 +2235,7 @@ impl Value {
             Self::Map {
                 function, inputs, ..
             } => {
-                visit.push(*function);
+                visit.push(function.callable());
                 visit.extend(inputs.iter());
             }
             Self::Zip { inputs, .. } => visit.extend(inputs.iter()),
