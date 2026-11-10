@@ -1,4 +1,5 @@
-use crate::frontend::{BorrowedOperand, PhysicalOperand, SourceEffect, SourceOperand};
+use crate::frontend::{ExpressionInput, PhysicalOperand, SourceEffect, SourceOperand};
+use crate::llvm::registered::{PreparedSuiteEmitter, emit_operand};
 mod declarations;
 use super::sites::{CheckedSites, CompiledDefinition};
 
@@ -24,7 +25,13 @@ pub(in crate::dynamic::emit) struct CallableSites<'a, 'p> {
 }
 
 impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<'a, 'p> {
-    fn frame_and_sites(&mut self) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites) {
+    fn frame_and_sites(
+        &mut self,
+        operand: Option<&crate::ir::Expr>,
+    ) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites) {
+        if let Some(operand) = operand {
+            self.prepare_checked_value(operand);
+        }
         (&mut self.frame, &self.sites)
     }
 
@@ -32,11 +39,11 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
         self.physical_suite(suite);
     }
 
-    fn source_operand(&mut self, operand: BorrowedOperand<'_>) -> String {
-        match operand {
-            SourceOperand::Checked(value) => self.registered_value(value),
-            SourceOperand::Residual(input) => self.input_value(input),
-        }
+    fn refuse_at(&mut self, range: ruff_text_size::TextRange, reason: &str) {
+        self.frame
+            .output
+            .diagnostic
+            .get_or_insert_with(|| self.source.diagnostic_at(range, reason));
     }
 }
 
@@ -177,11 +184,6 @@ impl<'p> Function<'_, 'p> {
         crate::llvm::registered::Frame::in_suite(self, checked).emit_suite(statements);
     }
 
-    pub(super) fn registered_value(&mut self, value: &crate::ir::Expr) -> String {
-        self.prepare_checked_value(value);
-        self.frame.registered_value(value, &self.sites)
-    }
-
     pub(super) fn physical_suite(&mut self, prepared: &'p crate::frontend::RegisteredSuite) {
         let Some(enclosing) = self.frame.enter_checked_slots(prepared.checked.region()) else {
             return;
@@ -243,7 +245,7 @@ impl<'p> Function<'_, 'p> {
             }
             SourceEffect::While(region) => self.prepared_while(region),
             SourceEffect::Refused(range, reason) => {
-                self.with_expression_range(*range, |code| code.build_diagnostic(reason));
+                self.refuse_at(*range, reason);
             }
             SourceEffect::Value(output, inputs) => match output {
                 crate::frontend::ValueStatement::Store(slot) => {
@@ -331,13 +333,21 @@ impl<'p> Function<'_, 'p> {
         }
     }
 
+    fn branch_input(&mut self, input: ExpressionInput<'_>, yes: &str, no: &str) {
+        let bit = self
+            .test_with_temporaries(|code| emit_operand(code, SourceOperand::Residual(input), true));
+        self.branch(&bit, yes, no);
+    }
+
     pub(super) fn physical_operand(&mut self, input: &PhysicalOperand) -> String {
         match input {
             PhysicalOperand::Checked(value) => {
                 self.prepare_checked_value(&value.value);
                 self.frame.prepared_operand(value, &self.sites, false)
             }
-            PhysicalOperand::Residual(input) => self.input_value(input.as_input()),
+            PhysicalOperand::Residual(input) => {
+                emit_operand(self, SourceOperand::Residual(input.as_input()), false)
+            }
         }
     }
 
@@ -533,7 +543,7 @@ impl<'p> Function<'_, 'p> {
                 self.initialize_binding(binding, |frame| frame.store_private(*entered, value));
             }
             PhysicalBinding::Refused(range, reason) => {
-                self.with_expression_range(*range, |code| code.build_diagnostic(reason));
+                self.refuse_at(*range, reason);
             }
         }
     }
@@ -554,9 +564,10 @@ impl<'p> Function<'_, 'p> {
         self.with_contexts(
             inputs.iter().map(|input| input.site),
             |code, i| {
-                code.with_expression_range(inputs[i].site.range, |code| {
-                    code.physical_operand(&inputs[i].manager)
-                })
+                let previous = std::mem::replace(&mut code.current_range, inputs[i].site.range);
+                let manager = code.physical_operand(&inputs[i].manager);
+                code.current_range = previous;
+                manager
             },
             |code, i, value| {
                 if let Some(target) = &inputs[i].target {

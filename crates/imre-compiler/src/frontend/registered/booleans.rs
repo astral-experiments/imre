@@ -18,11 +18,10 @@ pub(crate) enum Selection {
     Operand(Box<super::RegisteredOperand>),
     Refused(TextRange, &'static str),
     Inputs(Box<PhysicalInputs>),
-    /// Only the child remains physical. It runs under the suspension's operand mark.
-    Suspension(ir::SuspendValue, OwnedExpression),
 }
 
 impl Selection {
+    #[cfg(test)]
     pub(crate) fn physical(&self) -> Option<&PhysicalInputs> {
         match self {
             Self::Inputs(inputs) => Some(inputs),
@@ -181,7 +180,6 @@ impl PhysicalPreparation<'_, '_> {
         };
         Occurrence {
             range: node.range(),
-            kind,
             selected,
         }
     }
@@ -217,7 +215,11 @@ impl PhysicalPreparation<'_, '_> {
                     scope.with_suspending_operands(|scope| scope.operand(node))
                 }) {
                     Some(operand) => Selection::Operand(Box::new(operand)),
-                    None => Selection::Suspension(kind, self.owned(child)),
+                    None => Selection::Inputs(self.slotted_operation(
+                        node,
+                        ir::Builtin::RegisteredSuspend(kind, node.range()),
+                        std::iter::once(child),
+                    )),
                 };
             return Some(selected);
         }
@@ -370,7 +372,6 @@ pub(crate) enum SourceOperand<C, S> {
 #[derive(Clone, Copy)]
 pub(crate) struct Occurrence<V> {
     pub(crate) range: TextRange,
-    pub(crate) kind: ast::NodeKind,
     pub(crate) selected: V,
 }
 
@@ -381,7 +382,6 @@ impl OwnedExpression {
     pub(crate) fn as_input(&self) -> ExpressionInput<'_> {
         Occurrence {
             range: self.range,
-            kind: self.kind,
             selected: self.selected.as_ref(),
         }
     }
