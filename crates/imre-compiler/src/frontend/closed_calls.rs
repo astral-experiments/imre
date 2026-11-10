@@ -139,9 +139,9 @@ pub(super) fn prepare(
     function: &mut ast::StmtFunctionDef,
     graph: &SourceGraph,
     module: ModuleId,
-) -> bool {
-    dispatch::specialize(function, graph, module);
-    keywords::scalarize(function, graph, module)
+) -> (bool, bool) {
+    let dispatch = dispatch::specialize(function, graph, module);
+    (dispatch, keywords::scalarize(function, graph, module))
 }
 
 #[derive(Default)]

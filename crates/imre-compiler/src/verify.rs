@@ -867,6 +867,7 @@ mod tests {
     #[test]
     fn registered_namespace_checks_the_optional_parent_before_emission() {
         let mut frame = crate::frontend::RegisteredFunction {
+            fixed_sites: Vec::new(),
             function: empty().entry,
             local_names: Default::default(),
         };
@@ -893,6 +894,7 @@ mod tests {
     #[test]
     fn registered_display_handoff_rejects_a_misplaced_or_malformed_spread() {
         let mut frame = crate::frontend::RegisteredFunction {
+            fixed_sites: Vec::new(),
             function: empty().entry,
             local_names: Default::default(),
         };
