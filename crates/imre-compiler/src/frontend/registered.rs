@@ -2047,7 +2047,7 @@ impl statements::StatementLowering for SourceScope<'_> {
         let mut falls = false;
         for (test, suite) in if_clauses(branch) {
             if let Some(test) = test {
-                let condition = truth(self.operand(test).ok_or(())?);
+                let condition = truth(self.condition_operand(test).ok_or(())?);
                 let (body, continues) = self.block(suite)?;
                 arms.push((condition, body));
                 falls |= continues;
