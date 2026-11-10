@@ -203,6 +203,20 @@ impl Session {
                 {
                     continue;
                 }
+                // The builtin namespace is resident when Python starts. Importing it
+                // in a passive prefix cannot execute an application's module body.
+                if let Stmt::Import(import) = stmt
+                    && import
+                        .names
+                        .iter()
+                        .all(|alias| alias.name.as_str() == "builtins")
+                    && model
+                        .resolve_module(Some("builtins"), 0)
+                        .and_then(|m| m.file(&self.db))
+                        .is_some_and(|file| file.path(&self.db).is_vendored_path())
+                {
+                    continue;
+                }
                 if let Some(owner) =
                     self.initializer_import(stmt, &model, entry.0, &application_module)
                 {
@@ -210,7 +224,7 @@ impl Session {
                         if let Some(captures) = captures.as_deref_mut()
                             && let Stmt::ImportFrom(import) = stmt
                         {
-                            self.capture_generator_sources(
+                            self.capture_function_sources(
                                 import,
                                 owner,
                                 resident,
@@ -325,7 +339,7 @@ impl Session {
         .then_some((id, path))
     }
 
-    fn capture_generator_sources(
+    fn capture_function_sources(
         &self,
         import: &ruff_python_ast::StmtImportFrom,
         owner: (usize, &Path),
@@ -344,12 +358,11 @@ impl Session {
                 continue;
             };
             let function = definition.node(&parsed);
-            if !function.is_async
-                && imre_ast::code_flags::is_generator(&function.body)
-                && let Some(error) =
-                    self.generator_execution_error(owner, &parsed, &model, function)
-            {
-                captures.insert(alias.range(), (owner.0, error));
+            if !function.is_async && function.decorator_list.is_empty() {
+                let source = imre_ast::code_flags::is_generator(&function.body)
+                    .then(|| self.generator_execution_error(owner, &parsed, &model, function))
+                    .flatten();
+                captures.insert(alias.range(), (owner.0, source));
             }
         }
     }

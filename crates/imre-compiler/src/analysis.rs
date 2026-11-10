@@ -68,6 +68,7 @@ pub(crate) struct Session {
     db: Database,
     files: Vec<File>,
     external_loader_declarations: File,
+    execution_names: File,
     tuple_spreads: Vec<HashMap<TextSize, usize>>,
     rules: Arc<RuleSelection>,
     pub(crate) root: PathBuf,
@@ -644,6 +645,13 @@ impl Session {
             )
             .map_err(|error| error.to_string())?;
         let vendored = ty_vendored::file_system().clone();
+        // Ask the same type checker whether each execution builtin's literal name can
+        // reach a namespace lookup, including names narrowed by the caller's guards.
+        let execution_names = intrinsic.join(".execution-names.pyi");
+        system
+            .fs()
+            .write_file_all(&execution_names, "(\"exec\", \"eval\")\n")
+            .map_err(|error| error.to_string())?;
         let external_loader_declarations = stdlib_stubs.join("_frozen_importlib_external.pyi");
         // Based on ty_vendored 0.0.15 (licenses/typeshed.txt). Retain the cache
         // helpers' object parameters when importing updated typeshed declarations.
@@ -727,12 +735,15 @@ impl Session {
         // Lowering queries types with lints disabled. Tracking the rules invalidates
         // these cached queries when the full check enables diagnostics.
         DiagnosticRules::new(&db, Arc::default());
+        let execution_names =
+            system_path_to_file(&db, &execution_names).map_err(|error| error.to_string())?;
         let external_loader_declarations = system_path_to_file(&db, &external_loader_declarations)
             .map_err(|error| error.to_string())?;
         Ok(Self {
             db,
             files: Vec::new(),
             external_loader_declarations,
+            execution_names,
             tuple_spreads: Vec::new(),
             rules: Arc::new(rules),
             root: PathBuf::from(root),

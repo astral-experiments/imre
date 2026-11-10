@@ -845,6 +845,26 @@ fn registered_generators_require_a_linked_source_body() {
 }
 
 #[test]
+fn a_builtin_namespace_lookup_only_requires_a_source_body_when_invoked() {
+    let project = tempdir().unwrap();
+    let path = project.path().join("main.py");
+    let check = |body: &str| {
+        fs::write(&path, format!("import builtins\n{body}\n")).unwrap();
+        crate::check_file(&path, None)
+    };
+    let error = check(
+        "def rows(f): yield f(input())\nfor row in rows(getattr(builtins, input())): print(row)",
+    )
+    .unwrap_err();
+    assert!(
+        error.contains("main.py:2:22") && error.contains("explicit table"),
+        "{error}"
+    );
+    check("name=input()\nif name in ('len', 'str'): print(getattr(builtins,name)('abc'))").unwrap();
+    check("print(getattr(builtins,input()).__name__)").unwrap();
+}
+
+#[test]
 fn captured_generator_keeps_its_source_requirement_through_a_helper() {
     let project = tempdir().unwrap();
     let provider = (
