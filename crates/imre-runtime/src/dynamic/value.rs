@@ -157,6 +157,8 @@ pub(super) struct GroupData {
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct Trace {
+    /// A supplied throw exception keeps its context until the receiving frame handles it.
+    pub(super) generator_input: bool,
     // Pending activations precede the already exposed, mutable Python traceback.
     pending_frames: Vec<(Location, Id)>,
     pub(super) source_position: Option<(u32, TracebackSpan)>,
@@ -370,6 +372,22 @@ impl Context {
             id
         } else {
             self.alloc(Value::Raised(error))
+        }
+    }
+
+    /// A resumed frame chains to its own handled exception, regardless of the caller's handler.
+    pub(super) fn chain_generator_input(&mut self, error: &mut Error) {
+        let frame = self.heap.frames.last().unwrap();
+        if frame.has_local_exception && frame.active != NONE {
+            if error
+                .trace
+                .as_ref()
+                .is_some_and(|trace| trace.instance.is_some())
+            {
+                self.chain_raised_instance(error);
+            } else {
+                error.context = frame.active;
+            }
         }
     }
 
@@ -632,7 +650,12 @@ impl Context {
                     span.anchor = TracebackAnchor::Uniform;
                 }
                 let active = self.heap.active_exception();
-                if error.context == NONE
+                let generator_input = error
+                    .trace
+                    .as_mut()
+                    .is_some_and(|trace| std::mem::take(&mut trace.generator_input));
+                if !generator_input
+                    && error.context == NONE
                     && active != NONE
                     && error.trace.as_ref().is_none_or(|trace| {
                         trace.head == NONE
