@@ -534,6 +534,7 @@ pub(crate) struct ParameterAnnotations {
 impl ParameterAnnotations {
     fn prepare<R>(
         def: &ast::StmtFunctionDef,
+        source: values::RegisteredSource<'_>,
         operands: &HashMap<TextSize, PreparedAnnotation<R>>,
         sites: &mut HashMap<TextSize, DeferredAnnotation>,
     ) -> Option<Self> {
@@ -543,18 +544,45 @@ impl ParameterAnnotations {
         }
         let mut entries = Vec::with_capacity(annotations.len());
         let mut references = HashMap::new();
+        let operations = HashMap::new();
+        let statement_sites = StatementSites::default();
+        // Each annotation is evaluated in the same provider activation.
+        let mut scope = SourceScope::new(
+            RegisteredScope::Function { is_async: false },
+            source,
+            &operations,
+            &statement_sites,
+        );
         for (name, expression) in annotations {
             let site = expression.start();
             if let Some(reference) = scalar_reference(expression) {
                 references.insert(name.to_owned(), reference);
             }
+            let value = operands
+                .get(&site)
+                .map(|operand| operand.operand(site))
+                .or_else(|| {
+                    if !matches!(
+                        expression,
+                        ast::Expr::ListComp(_) | ast::Expr::SetComp(_) | ast::Expr::DictComp(_)
+                    ) {
+                        return None;
+                    }
+                    let start = scope.locals.len();
+                    let value = scope.operand(expression);
+                    if value.is_none() {
+                        scope.truncate_locals(start);
+                    }
+                    value
+                });
             sites.insert(
                 site,
-                DeferredAnnotation::new(name.to_owned(), expression, operands),
+                DeferredAnnotation::new(name.to_owned(), expression, value),
             );
             entries.push(ir::AnnotationOccurrence { site, index: None });
         }
-        let body = DeferredAnnotation::prepare_body(sites, &entries);
+        let mut body = DeferredAnnotation::prepare_body(sites, &entries);
+        (body.checked.function.locals, body.checked.local_names) = scope.bindings();
         Some(Self {
             entries,
             body,
@@ -583,14 +611,10 @@ pub(crate) enum AnnotationValue {
 }
 
 impl DeferredAnnotation {
-    fn new<R>(
-        name: String,
-        expression: &ast::Expr,
-        operands: &HashMap<TextSize, super::PreparedAnnotation<R>>,
-    ) -> Self {
-        let value = operands.get(&expression.start()).map_or_else(
+    fn new(name: String, expression: &ast::Expr, checked: Option<Expr>) -> Self {
+        let value = checked.map_or_else(
             || AnnotationValue::Source(expression.clone()),
-            |operand| AnnotationValue::Checked(operand.operand(expression.start())),
+            AnnotationValue::Checked,
         );
         Self {
             name,
@@ -685,11 +709,13 @@ pub(crate) struct RegisteredSites<'a> {
 pub(crate) fn registered_sites<'a, R>(
     body: &'a [ast::Stmt],
     names: &imre_ast::Names,
+    source: values::RegisteredSource<'_>,
     operands: &HashMap<TextSize, PreparedAnnotation<R>>,
 ) -> RegisteredSites<'a> {
     use ast::statement_visitor::{StatementVisitor, walk_stmt};
     struct Collector<'s, 'a, R> {
         names: &'s imre_ast::Names,
+        source: values::RegisteredSource<'s>,
         operands: &'s HashMap<TextSize, PreparedAnnotation<R>>,
         scope: RegisteredScope,
         in_unprepared_generic: bool,
@@ -721,6 +747,7 @@ pub(crate) fn registered_sites<'a, R>(
                 ast::Stmt::FunctionDef(def) => {
                     if let Some(provider) = ParameterAnnotations::prepare(
                         def,
+                        self.source,
                         self.operands,
                         &mut self.output.annotations,
                     ) {
@@ -794,7 +821,13 @@ pub(crate) fn registered_sites<'a, R>(
                     } else {
                         self.output.annotations.insert(
                             ann.start(),
-                            DeferredAnnotation::new(name.clone(), &ann.annotation, self.operands),
+                            DeferredAnnotation::new(
+                                name.clone(),
+                                &ann.annotation,
+                                self.operands
+                                    .get(&ann.annotation.start())
+                                    .map(|operand| operand.operand(ann.annotation.start())),
+                            ),
                         );
                         (
                             ir::NamespaceAnnotation::Deferred {
@@ -819,6 +852,7 @@ pub(crate) fn registered_sites<'a, R>(
     }
     let mut sites = Collector {
         names,
+        source,
         operands,
         scope: RegisteredScope::Module,
         in_unprepared_generic: false,
@@ -3028,7 +3062,7 @@ mod tests {
             crate::frontend::annotation_operands::test_annotation_body,
             &mut HashMap::new(),
         );
-        registered_sites(stmts, names, &strings)
+        registered_sites(stmts, names, source, &strings)
     }
 
     pub(super) fn registered_suite(
@@ -3045,12 +3079,13 @@ mod tests {
     #[test]
     fn generic_method_closure_uses_ordinary_function_sites() {
         let source = "class Box:\n    def capture[T](self, __value: T):\n        def get():\n            return __value\n        return get\n";
-        let mut body = ruff_python_parser::parse_module(source)
-            .unwrap()
-            .into_syntax()
-            .body;
+        let graph = SourceGraph::single(source).unwrap();
+        let module = &graph.modules[graph.entry];
+        let mut body = module.parsed.syntax().body.clone();
         let names = imre_ast::lower(&mut body);
-        let sites = registered_sites::<()>(&body, &names, &HashMap::new());
+        let literals = values::ModuleSource::new(module);
+        let sites =
+            registered_sites::<()>(&body, &names, literals.context(source), &HashMap::new());
         let [method, closure] = sites.functions.as_slice() else {
             panic!("expected the method and its lexical function");
         };

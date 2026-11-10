@@ -495,7 +495,8 @@ impl<'a> PreparedBody<'a, '_> {
             |text, parsed| Self::prepare_annotation(text, parsed, python_optimization),
             &mut namespace_annotations,
         );
-        let sites = crate::frontend::registered_sites(&body, &private_names, &annotation_operands);
+        let sites =
+            crate::frontend::registered_sites(&body, &private_names, values, &annotation_operands);
         let declarations = source_declarations(&sites);
         let mut operations = sites.operations;
         let mut aliases = Vec::new();
@@ -773,6 +774,7 @@ impl<'a> PreparedBody<'a, '_> {
             return Cow::Owned(source_declarations(&crate::frontend::registered_sites(
                 stmts,
                 &self.source.private_names,
+                self.source.registered_source(),
                 &self.source.annotation_operands,
             )));
         }
@@ -1447,6 +1449,7 @@ mod tests {
         let classes = crate::frontend::registered_sites(
             body,
             &prepared.source.private_names,
+            source,
             &prepared.source.annotation_operands,
         )
         .classes;
@@ -3117,6 +3120,37 @@ mod tests {
         branch.cases[1].body[0] = pass.clone();
         branch.cases[1].body[2] = pass;
         assert_eq!(emit(&prepared), original);
+    }
+
+    #[test]
+    fn annotation_comprehensions_emit_after_their_clauses_are_erased() {
+        let mut prepared = PreparedBody::module(
+            "example",
+            Path::new("example.py"),
+            "class C:\n    def f(self, x: [outer for _ in (1,)], y: [item for item in [outer]]): pass\n",
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let provider = prepared
+            .source
+            .parameter_annotations
+            .values()
+            .next()
+            .unwrap();
+        assert!(provider.body.fully_checked());
+        assert_eq!(provider.entries.len(), 2);
+        assert!(!provider.body.checked.local_names.is_empty());
+        let original = prepared.standalone().unwrap().unwrap();
+        let class = prepared.syntax.as_mut().unwrap().to_mut()[0]
+            .as_class_def_stmt_mut()
+            .unwrap();
+        let method = class.body[0].as_function_def_stmt_mut().unwrap();
+        for parameter in &mut method.parameters.args[1..] {
+            let annotation = parameter.parameter.annotation.as_mut().unwrap();
+            *annotation = annotation.as_list_comp_expr().unwrap().elt.clone();
+        }
+        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
     }
 
     #[test]
