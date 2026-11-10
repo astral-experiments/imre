@@ -7,7 +7,6 @@ use super::sites::{CheckedSites, CompiledDefinition};
 
 use super::{AnnotationScope, FrameEmitter, Output, RegisteredFrame, SourceMap};
 use crate::llvm::registered::context::{Finally, RegionEmitter};
-use imre_ast::code_flags;
 use ruff_text_size::TextSize;
 use serde_json::json;
 
@@ -281,16 +280,14 @@ impl CallableSites<'_, '_> {
         };
         let class = matches!(name, DefinitionName::ClassHeader(_))
             .then(|| &self.source.class_bodies[&start]);
-        let (name, global, generator) = match name {
+        let (name, global) = match name {
             DefinitionName::Binding(identifier) => (
                 self.source.private_names.definition(identifier),
                 self.declared_globals.contains(identifier.as_str()),
-                None,
             ),
             DefinitionName::ClassHeader(name) | DefinitionName::Evaluator { name, .. } => {
-                (name, false, None)
+                (name, false)
             }
-            DefinitionName::Generator(site) => ("<genexpr>", false, Some(site)),
         };
         let qualname = if global {
             name.to_owned()
@@ -304,29 +301,17 @@ impl CallableSites<'_, '_> {
             } else {
                 self.prefix.to_owned()
             }
-        } else if matches!(body, Body::Namespace) || generator.is_some() {
-            // Nested code in a comprehension uses its name without a <locals> segment.
+        } else if matches!(body, Body::Namespace) {
             format!("{qualname}.")
         } else {
             format!("{qualname}.<locals>.")
         };
-        let generator_flags = generator.map_or(0, |site| {
-            if self.source.generators[&site].is_async {
-                code_flags::ASYNC_GENERATOR
-            } else {
-                code_flags::GENERATOR
-            }
-        });
         let mut signature = json!({});
         if !matches!(body, Body::Namespace) {
-            let nested = self.in_function || type_parameter_scope;
-            let method = self.method_scope && class_header.is_none() && evaluator_scope.is_none();
-            let flags = self.source.function_flags(nested, method);
-            signature["code_flags"] = json!(flags | generator_flags);
-        }
-        if generator.is_some() {
-            // The creating frame supplies the already-acquired iterator.
-            signature["positional"] = json!([".0"]);
+            signature["code_flags"] = json!(
+                self.source
+                    .function_flags(self.in_function || type_parameter_scope, false)
+            );
         }
         let scopes = &self.source.scopes;
         let scope_facts = match &body {
@@ -342,14 +327,10 @@ impl CallableSites<'_, '_> {
                 }
                 Some(&class.namespace)
             }
-            _ if evaluator_scope.is_some() => evaluator_scope,
-            _ => generator.map(|site| &scopes.generators[&site]),
+            _ => evaluator_scope,
         };
         if let Some(facts) = scope_facts {
             facts.write_signature(&mut signature);
-            if generator.is_some() && self.method_scope {
-                signature["method_class_cell"] = json!(facts.captures_class);
-            }
         } else {
             signature["scope_cellvars"] = serde_json::Value::Null;
             signature["scope_complete"] = json!(false);
@@ -362,13 +343,9 @@ impl CallableSites<'_, '_> {
             }
         }
         let in_function = self.in_function || !matches!(body, Body::Namespace);
-        let code = self.source.code(
-            self.output,
-            prefix,
-            body,
-            in_function,
-            Some((start, generator_flags)),
-        );
+        let code = self
+            .source
+            .code(self.output, prefix, body, in_function, Some((start, 0)));
         CompiledDefinition {
             class_header,
             format_evaluator: evaluator_scope.is_some(),

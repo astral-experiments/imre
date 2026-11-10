@@ -66,7 +66,14 @@ impl RegisteredLambda {
                         let plan = imre_ast::comprehension::Plan::generator(generator);
                         self.visit_expr(plan.outer);
                         let owner = RegisteredScope::Function {
-                            is_async: plan.body_suspends(),
+                            is_async: self
+                                .source
+                                .generators
+                                .and_then(|sites| sites.get(&generator.range()))
+                                .map_or_else(
+                                    || plan.body_suspends(),
+                                    RegisteredGenerator::is_async,
+                                ),
                         };
                         let parent = std::mem::replace(&mut self.owner, owner);
                         plan.visit_body(|child| self.visit_expr(child));
@@ -190,7 +197,8 @@ async def factory(seed, rows, mark):
             lambdas: None,
             private_names: Some(&names),
         };
-        let generators = RegisteredGenerator::collect(&body, source);
+        let generators =
+            RegisteredGenerator::collect(&body, source, std::mem::take(&mut scopes.generators));
         let source = values::RegisteredSource {
             generators: Some(&generators),
             ..source
@@ -266,7 +274,7 @@ async def factory(seed, rows, mark):
                 }
             });
             assert_eq!(children, [site]);
-            assert_eq!(generators[&site].is_async, is_async);
+            assert_eq!(generators[&site].is_async(), is_async);
         }
         // A missing child is diagnosed at its original site before LLVM.
         assert!(sites.get_mut(&thunk.start()).unwrap().body.take().is_some());

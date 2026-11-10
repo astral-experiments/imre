@@ -1,4 +1,4 @@
-//! Parameter binding and code metadata shared by lambdas and named functions.
+//! Parameter binding and code-object metadata for Python callables.
 
 use super::FunctionScope;
 use imre_ast::code_flags;
@@ -99,16 +99,38 @@ impl CallableMetadata {
         let mut layout = json!({});
         let defaults =
             parameters.map_or_else(Vec::new, |params| parameter_layout(params, &mut layout));
-        let captures_class = scope.captures_class;
-        scope.write_signature(&mut layout);
-
-        if captures_class {
+        if scope.captures_class {
             layout["class_cell"] = json!(true);
         }
+        Self::from_scope(
+            layout,
+            defaults,
+            scope,
+            code_flags::function_flags(parameters, false, false) | suspension_flags,
+        )
+    }
+
+    /// Generator expressions receive the iterator acquired by their enclosing frame.
+    pub(crate) fn generator(scope: &FunctionScope, is_async: bool) -> Self {
+        let flags = if is_async {
+            code_flags::ASYNC_GENERATOR
+        } else {
+            code_flags::GENERATOR
+        };
+        Self::from_scope(json!({"positional": [".0"]}), Vec::new(), scope, flags)
+    }
+
+    fn from_scope(
+        mut layout: Value,
+        defaults: Vec<String>,
+        scope: &FunctionScope,
+        flags: u32,
+    ) -> Self {
+        scope.write_signature(&mut layout);
         Self {
             layout,
-            flags: code_flags::function_flags(parameters, false, false) | suspension_flags,
-            captures_class,
+            flags,
+            captures_class: scope.captures_class,
             defaults: if defaults.is_empty() {
                 Default::default()
             } else {
