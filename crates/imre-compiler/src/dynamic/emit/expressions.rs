@@ -3,7 +3,9 @@ use ruff_text_size::Ranged;
 
 use super::FrameEmitter;
 use super::{Function, permanent};
-use crate::frontend::{RegisteredScope, SourceOperand, prepare_boolean};
+use crate::frontend::{
+    LambdaBinding, LambdaDefault, RegisteredScope, SourceOperand, prepare_boolean,
+};
 use crate::ir::control::Context as BooleanContext;
 use crate::llvm::operations::branches::{Logical, LogicalEmitter, LogicalInput};
 use crate::llvm::operations::{CheckedBody, CheckedValue, ComparisonChain, ValueJoin};
@@ -50,7 +52,12 @@ impl Function<'_, '_> {
         })
     }
 
-    fn source_lambda(&mut self, lambda: &ast::ExprLambda) -> String {
+    fn source_lambda(
+        &mut self,
+        lambda: &ast::ExprLambda,
+        operation: &crate::ir::Expr,
+        defaults: &[LambdaDefault],
+    ) -> String {
         let site = lambda.start();
         let plan = &self.source.lambdas[&site];
         let Some(body) = &plan.body else {
@@ -58,29 +65,27 @@ impl Function<'_, '_> {
                 code.build_diagnostic("cannot compile this lambda body ahead of time")
             });
         };
-        let defaults = plan
-            .defaults
+        let defaults = defaults
             .iter()
             .map(|default| match default {
-                crate::frontend::LambdaDefault::Value(value) => {
+                LambdaDefault::Value(value) => {
                     self.with_operand_source(value, |code| code.registered_value(value))
                 }
-                crate::frontend::LambdaDefault::Operand(operand) => {
+                LambdaDefault::Operand(operand) => {
                     self.prepare_checked_value(&operand.value);
                     self.with_operand_source(&operand.value, |code| {
                         code.frame.prepared_operand(operand, &code.sites, false)
                     })
                 }
-                crate::frontend::LambdaDefault::Source(parameter) => {
+                LambdaDefault::Source(parameter) => {
                     let value = parameter.source(lambda);
                     self.with_source_range(value.range(), |code| code.expr(value))
                 }
             })
             .collect::<Vec<_>>();
         self.place_lambda(site, body, false);
-        let scope = self.scope.clone();
-        self.sites
-            .bind_lambda(&mut self.frame, site, &scope, &defaults)
+        self.frame
+            .registered_with_inputs(operation, &defaults, &self.sites)
     }
 
     fn registered_region(&mut self, expr: &ast::Expr, condition: bool) -> Option<String> {
@@ -266,7 +271,16 @@ impl Function<'_, '_> {
                 self.assign_expression_name(&scope, &name, &value, &mark);
                 value
             }
-            ast::Expr::Lambda(lambda) => self.source_lambda(lambda),
+            ast::Expr::Lambda(lambda) => match &self.source.lambdas[&lambda.start()].binding {
+                LambdaBinding::Inline(value) => self.registered_value(value),
+                LambdaBinding::Operand(operand) => {
+                    self.prepare_checked_value(&operand.value);
+                    self.frame.prepared_operand(operand, &self.sites, false)
+                }
+                LambdaBinding::Residual { operation, defaults } => {
+                    self.source_lambda(lambda, operation, defaults)
+                }
+            },
             ast::Expr::FString(_) => {
                 self.build_diagnostic("cannot compile this formatted string ahead of time")
             }

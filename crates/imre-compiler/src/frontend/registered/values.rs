@@ -841,19 +841,18 @@ pub(super) fn checked_binding(
     lambda: &ast::ExprLambda,
     source: RegisteredSource<'_>,
 ) -> Option<Expr> {
-    let defaults = if let Some(sites) = source.lambdas {
+    if let Some(sites) = source.lambdas {
         let site = sites.get(&lambda.start())?;
         site.body.as_ref()?;
-        site.defaults
-            .iter()
-            .map(|default| default.inline().cloned())
-            .collect::<Option<_>>()?
-    } else {
-        RegisteredLambda::body(lambda, source)?;
-        lambda_defaults(lambda)
-            .map(|default| Region::Lambda.operand(default, source))
-            .collect::<Option<_>>()?
-    };
+        return match &site.binding {
+            LambdaBinding::Inline(binding) => Some(binding.clone()),
+            _ => None,
+        };
+    }
+    RegisteredLambda::body(lambda, source)?;
+    let defaults = lambda_defaults(lambda)
+        .map(|default| Region::Lambda.operand(default, source))
+        .collect::<Option<_>>()?;
     Some(lambda_binding(lambda, defaults))
 }
 
