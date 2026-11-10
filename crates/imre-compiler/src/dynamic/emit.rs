@@ -4834,8 +4834,45 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
     #[test]
     fn physical_assertion_retains_its_test_before_a_suspending_message() {
         use crate::frontend::{
-            PhysicalOperand, RegisteredScope, RegisteredSource, SourceEffect, SuitePreparation,
+            ExpressionSelection, OwnedExpression, PhysicalOperand, RegisteredScope,
+            RegisteredSource, RegisteredSuite, SourceEffect, SuitePreparation,
         };
+        use crate::ir::{Builtin, Expr, ExprKind, Statement, SuspendValue, Type};
+
+        fn held_input(suite: &mut RegisteredSuite, external_test: bool) -> &mut OwnedExpression {
+            let Ok(SourceEffect::Value(_, inputs)) = &mut suite.residual[0].effect else {
+                panic!("expected the mixed assertion's inputs");
+            };
+            let (checked, held) = match (external_test, inputs.as_mut_slice()) {
+                (
+                    true,
+                    [
+                        PhysicalOperand::Residual(held),
+                        PhysicalOperand::Checked(checked),
+                    ],
+                )
+                | (
+                    false,
+                    [
+                        PhysicalOperand::Checked(checked),
+                        PhysicalOperand::Residual(held),
+                    ],
+                ) => (checked, held),
+                _ => panic!("expected the test followed by the message"),
+            };
+            assert_eq!(checked.local_names[&0].name, "value");
+            held
+        }
+
+        fn suspend_modes(ir: &str) -> Vec<&str> {
+            ir.lines()
+                .filter(|line| {
+                    line.trim_start()
+                        .starts_with("call void @imre_dyn_suspend_operands(")
+                })
+                .map(|line| line.rsplit_once(", i32 ").unwrap().1)
+                .collect()
+        }
 
         for (text, external_test) in [
             (
@@ -4892,29 +4929,51 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             let [run] = suite.residual.as_slice() else {
                 panic!("expected one mixed assertion")
             };
-            let Ok(SourceEffect::Assertion(site)) = &run.effect else {
-                panic!("expected a prepared assertion")
+            let Ok(SourceEffect::Value(statement, _)) = &run.effect else {
+                panic!("expected a checked statement with prepared inputs")
             };
-            assert_eq!(site.statement, start);
-            assert_eq!(site.test_range, test_range);
-            let message = site.message.as_ref().unwrap();
-            let (owned, checked) = if external_test {
-                (&site.test, message)
-            } else {
-                (message, &site.test)
+            let Statement::If(test, success, failure) = statement.as_ref() else {
+                panic!("expected a conditional assertion")
             };
-            let PhysicalOperand::Residual(input) = owned else {
-                panic!("expected the retained suspension");
+            assert!(matches!(
+                test.kind,
+                ExprKind::Builtin(crate::ir::Builtin::RegisteredInput(0), _)
+            ));
+            assert_eq!(test.ty, Type::Bool);
+            assert!(success.is_empty());
+            let [Statement::Expr(raise)] = failure.as_slice() else {
+                panic!("expected only the checked assertion failure")
             };
+            let ExprKind::Builtin(
+                Builtin::RegisteredAssertionFailure {
+                    statement,
+                    test: position,
+                },
+                message,
+            ) = &raise.kind
+            else {
+                panic!("expected the checked assertion failure")
+            };
+            assert_eq!((*statement, *position), (start, test_range.start()));
+            assert!(matches!(
+                message.as_slice(),
+                [Expr {
+                    ty: Type::PythonObject,
+                    kind: ExprKind::Builtin(crate::ir::Builtin::RegisteredInput(1), _),
+                    ..
+                }]
+            ));
+            let input = held_input(suite, external_test);
+            assert_eq!(input.range, replacement.range());
             let inputs = input.selected.physical().unwrap();
-            assert!(matches!(&inputs.operation.kind,
-                crate::ir::ExprKind::Builtin(crate::ir::Builtin::RegisteredSuspend(crate::ir::SuspendValue::Yield, range), _) if *range == input.range));
+            assert!(matches!(
+                &inputs.operation.kind,
+                ExprKind::Builtin(Builtin::RegisteredSuspend(SuspendValue::Yield, range), _)
+                    if *range == input.range
+            ));
             assert_eq!(inputs.operands().count(), 1);
-            let PhysicalOperand::Checked(checked) = checked else {
-                panic!("expected a checked walrus")
-            };
-            assert_eq!(checked.local_names[&0].name, "value");
             let original = module.standalone().unwrap();
+            assert_eq!(suspend_modes(&original.1), ["0)"]);
             let def = module.syntax.as_mut().unwrap().to_mut()[0]
                 .as_function_def_stmt_mut()
                 .unwrap();
@@ -4937,22 +4996,10 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             .into();
             assert_eq!(module.standalone().unwrap(), original);
 
-            let Ok(SourceEffect::Assertion(site)) =
-                &mut test_function_suite(&mut module.source, function).residual[0].effect
-            else {
-                unreachable!()
-            };
-            let PhysicalOperand::Residual(input) = (if external_test {
-                &mut site.test
-            } else {
-                site.message.as_mut().unwrap()
-            }) else {
-                unreachable!()
-            };
-            input.selected = std::rc::Rc::new(crate::frontend::ExpressionSelection::Checked(
-                crate::ir::Expr::none(),
-            ));
-            assert_ne!(module.standalone().unwrap(), original);
+            let suite = test_function_suite(&mut module.source, function);
+            held_input(suite, external_test).selected =
+                std::rc::Rc::new(ExpressionSelection::Checked(crate::ir::Expr::none()));
+            assert!(suspend_modes(&module.standalone().unwrap().1).is_empty());
         }
     }
 

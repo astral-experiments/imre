@@ -48,7 +48,6 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
         effect: &'p SourceEffect,
     ) -> Option<(&'p crate::ir::Statement, &'p [PhysicalOperand])> {
         match effect {
-            SourceEffect::Assertion(site) => self.emit_assertion_inputs(site),
             SourceEffect::Match(range, site) => {
                 self.checkpoint(range);
                 self.simple_call = None;
@@ -178,39 +177,6 @@ impl<'p> Function<'_, 'p> {
             self.declared_globals.insert(name.to_owned());
             self.frame.declare_global(name);
         }
-    }
-
-    fn emit_assertion_inputs(&mut self, site: &'p crate::frontend::AssertionSite) {
-        self.checkpoint(&site.test_range);
-        self.simple_call = None;
-        crate::llvm::operations::choose(
-            self,
-            |code| {
-                code.flush_check();
-                &mut code.frame.body
-            },
-            [(Some(&site.test), false), (None, true)],
-            Self::branch_physical_operand,
-            |code, failed| {
-                if failed {
-                    let message = site
-                        .message
-                        .as_ref()
-                        .map(|input| code.physical_operand(input));
-                    code.frame.assertion_failure(
-                        site.statement,
-                        site.test_range.start(),
-                        message.as_deref(),
-                    );
-                }
-            },
-            false,
-        );
-    }
-
-    fn branch_physical_operand(&mut self, test: &PhysicalOperand, yes: &str, no: &str) {
-        let bit = crate::llvm::registered::prepared_condition(self, test);
-        self.branch(&bit, yes, no);
     }
 
     fn branch_input(&mut self, input: ExpressionInput<'_>, yes: &str, no: &str) {
