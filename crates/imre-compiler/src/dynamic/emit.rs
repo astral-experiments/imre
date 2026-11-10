@@ -520,45 +520,30 @@ impl<'a> PreparedBody<'a> {
             (!expression).then(|| prepare.suite(&body, crate::frontend::RegisteredScope::Module));
         let mut function_bodies = HashMap::new();
         let class_bodies = prepare.class_suites(&sites.classes);
-        if !expression {
-            for (start, site) in definition_sites(&body) {
-                let DefinitionSite::Function { def, in_generic } = site else {
-                    continue;
-                };
-                if program_bodies.is_some_and(|sites| sites.contains_key(&start)) {
-                    continue;
-                }
-                let kind = crate::frontend::RegisteredScope::Function {
-                    is_async: def.is_async,
-                };
-                let plan = if (in_generic || def.type_params.is_some())
-                    && !operations.contains_key(&def.name.range())
-                {
-                    None
-                } else if def.is_async || imre_ast::code_flags::is_generator(&def.body) {
-                    prepare.complete(&def.body, kind)
-                } else {
-                    Some(prepare.suite(&def.body, kind))
-                };
-                if let Some(plan) = plan {
-                    function_bodies.insert(start, plan);
-                } else {
-                    prepare.physical_body(&def.body, kind);
-                }
-            }
-        }
         let mut thread_entries = HashMap::new();
-        for (def, entry) in sites.workers {
+        for site in sites.functions {
+            let def = site.def;
             let start = def.start();
-            thread_entries.insert(start, entry);
-            if !program_bodies.is_some_and(|bodies| bodies.contains_key(&start)) {
-                // A method or a target nested inside a class may have no prepared body yet.
-                function_bodies.entry(start).or_insert_with(|| {
-                    prepare.suite(
-                        &def.body,
-                        crate::frontend::RegisteredScope::Function { is_async: false },
-                    )
-                });
+            if let Some(entry) = site.thread_entry {
+                thread_entries.insert(start, entry);
+            }
+            if program_bodies.is_some_and(|bodies| bodies.contains_key(&start)) {
+                continue;
+            }
+            let kind = crate::frontend::RegisteredScope::Function {
+                is_async: def.is_async,
+            };
+            let plan = if !site.prepare_entry {
+                None
+            } else if scopes.function(def).suspension_flags != 0 {
+                prepare.complete(&def.body, kind)
+            } else {
+                Some(prepare.suite(&def.body, kind))
+            };
+            if let Some(plan) = plan {
+                function_bodies.insert(start, plan);
+            } else {
+                prepare.physical_body(&def.body, kind);
             }
         }
         let source = SourceInfo {
@@ -745,10 +730,7 @@ enum Entry {
 
 #[derive(Clone, Copy)]
 enum DefinitionSite<'a> {
-    Function {
-        def: &'a ast::StmtFunctionDef,
-        in_generic: bool,
-    },
+    Function(&'a ast::StmtFunctionDef),
     Class(&'a ast::StmtClassDef),
 }
 
@@ -758,36 +740,25 @@ fn definition_sites(body: &[ast::Stmt]) -> HashMap<ruff_text_size::TextSize, Def
     use ast::statement_visitor::{StatementVisitor, walk_stmt};
 
     #[derive(Default)]
-    struct Sites<'a> {
-        definitions: HashMap<ruff_text_size::TextSize, DefinitionSite<'a>>,
-        in_generic: bool,
-    }
+    struct Sites<'a>(HashMap<ruff_text_size::TextSize, DefinitionSite<'a>>);
 
     impl<'a> StatementVisitor<'a> for Sites<'a> {
         fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
             match stmt {
                 ast::Stmt::FunctionDef(def) => {
-                    let in_generic = self.in_generic;
-                    self.definitions
-                        .insert(def.start(), DefinitionSite::Function { def, in_generic });
-                    // Declarations inside a generic function still need their definition sites
-                    // when a nested class prepares its own namespace.
-                    self.in_generic |= def.type_params.is_some();
-                    self.visit_body(&def.body);
-                    self.in_generic = in_generic;
+                    self.0.insert(def.start(), DefinitionSite::Function(def));
                 }
                 ast::Stmt::ClassDef(class) => {
-                    self.definitions
-                        .insert(class.start(), DefinitionSite::Class(class));
-                    self.visit_body(&class.body);
+                    self.0.insert(class.start(), DefinitionSite::Class(class));
                 }
-                _ => walk_stmt(self, stmt),
+                _ => {}
             }
+            walk_stmt(self, stmt);
         }
     }
     let mut sites = Sites::default();
     sites.visit_body(body);
-    sites.definitions
+    sites.0
 }
 
 struct SourceMap<'a> {
@@ -1007,7 +978,10 @@ impl SourceMap<'_> {
             _ => {}
         }
         if let Some(checked) = checked {
-            for name in self.scopes.functions[&start.expect("checked function")].globals() {
+            for name in self.scopes.functions[&start.expect("checked function")]
+                .lexical
+                .globals()
+            {
                 f.frame.declare_global(name);
             }
             f.prepare_checked_sites(&checked.function.body);
@@ -1043,7 +1017,9 @@ impl SourceMap<'_> {
                         .bindings
                         .globals
                 } else {
-                    self.scopes.functions[&start.expect("function definition")].globals()
+                    self.scopes.functions[&start.expect("function definition")]
+                        .lexical
+                        .globals()
                 };
                 f.declare_globals(globals);
                 if let Some(prepared) = prepared {
@@ -1730,7 +1706,7 @@ second = t'{client.lookup(*args)}{(v for v in values)}'",
     fn suspended_definitions_use_native_entries_in_each_module_origin() {
         let source = "def items(xs):\n    yield 1\n    yield from xs\npark = lambda: (yield 2)\nresume = lambda: 1 + (yield 3)\nasync def more(xs):\n    async for x in xs:\n        yield x\nasync def consume(f):\n    return await f()\ndef defaults():\n    yield 0\n    def nested(first=1, second=(yield 4)):\n        return second\n    return nested\n";
         for bundled in [false, true] {
-            let prepared = PreparedBody::module(
+            let mut prepared = PreparedBody::module(
                 "example",
                 Path::new("example.py"),
                 source,
@@ -1755,6 +1731,12 @@ second = t'{client.lookup(*args)}{(v for v in values)}'",
                 })
                 .collect();
             assert_eq!(selected, ["items", "consume"]);
+            // The prepared generator entry retains its flags and instructions across emission.
+            prepared.body[0]
+                .as_function_def_stmt_mut()
+                .unwrap()
+                .body
+                .clear();
             let (_, ir) = prepared.standalone().unwrap().unwrap();
             let tag = format!(", i32 {} }}", permanent::NATIVE_SUSPENDED_BODY);
             assert_eq!(ir.lines().filter(|line| line.ends_with(&tag)).count(), 6);
