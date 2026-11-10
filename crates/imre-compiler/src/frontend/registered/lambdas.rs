@@ -179,7 +179,7 @@ async def factory(seed, rows, mark):
             .body;
         let names = imre_ast::lower(&mut body);
         let mut scopes =
-            crate::frontend::function_scope::ScopeFacts::prepare(&body, &names, |_| {});
+            crate::frontend::function_scope::ScopeFacts::prepare(&body, &names, |_, _| {});
         let source = values::RegisteredSource {
             text,
             method_imports: &Default::default(),

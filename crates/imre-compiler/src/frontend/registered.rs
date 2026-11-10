@@ -732,11 +732,6 @@ pub(crate) struct FunctionSite<'a> {
     pub(crate) thread_entry: Option<imre_ast::ThreadEntry>,
 }
 
-pub(crate) struct ClassSite<'a> {
-    pub(crate) def: &'a ast::StmtClassDef,
-    parameters: Option<Vec<ir::RegisteredTypeParameter>>,
-}
-
 pub(crate) struct RegisteredClass {
     pub(crate) name: ast::Identifier,
     pub(crate) range: TextRange,
@@ -748,8 +743,32 @@ pub(crate) struct RegisteredClass {
 
 /// The type-parameter scope evaluates generic bases and keywords.
 pub(crate) struct ClassHeader {
-    pub(crate) parameters: Vec<ir::RegisteredTypeParameter>,
+    pub(crate) parameters: TypeParameterValues,
     pub(crate) body: CheckedProvider,
+}
+
+/// Parameter fields close over their declaration's peers and any enclosing class dictionary.
+pub(crate) struct TypeParameterValues {
+    pub(crate) declarations: Vec<ir::RegisteredTypeParameter<ParameterEvaluator>>,
+    pub(crate) enclosing_class: Option<TextSize>,
+}
+
+impl TypeParameterValues {
+    pub(crate) fn prepare(
+        params: &ast::TypeParams,
+        names: &imre_ast::Names,
+        source: values::RegisteredSource<'_>,
+        enclosing_class: Option<TextSize>,
+        scopes: &super::function_scope::ScopeFacts,
+    ) -> Self {
+        let class = enclosing_class.map(|site| &scopes.classes[&site].bindings);
+        Self {
+            declarations: registered_type_parameters(params, names, |rhs| {
+                ParameterEvaluator::prepare(rhs, source, class)
+            }),
+            enclosing_class,
+        }
+    }
 }
 
 /// The module retains its checked fields until its physical marker order is known.
@@ -775,7 +794,7 @@ impl ModuleAnnotations {
 pub(crate) struct RegisteredSites<'a> {
     pub(crate) operations: HashMap<TextRange, Expr>,
     pub(crate) functions: Vec<FunctionSite<'a>>,
-    pub(crate) classes: Vec<ClassSite<'a>>,
+    pub(crate) classes: Vec<&'a ast::StmtClassDef>,
     pub(crate) module_annotations: ModuleAnnotations,
     pub(crate) class_annotations: HashMap<TextSize, DeferredAnnotation>,
     pub(crate) class_annotation_bindings: HashMap<TextSize, RegisteredBindings>,
@@ -805,13 +824,7 @@ pub(crate) fn registered_sites<'a>(
             }
             match stmt {
                 ast::Stmt::ClassDef(class) => {
-                    self.output.classes.push(ClassSite {
-                        def: class,
-                        parameters: class
-                            .type_params
-                            .as_deref()
-                            .map(|params| registered_type_parameters(params, self.names, |_| ())),
-                    });
+                    self.output.classes.push(class);
                     let outer = std::mem::replace(&mut self.scope, RegisteredScope::Class);
                     let child = SourceScope::new(
                         self.annotations.kind,
@@ -1198,15 +1211,23 @@ impl<'a> SuitePreparation<'a> {
 
     pub(crate) fn class_suites(
         &mut self,
-        classes: Vec<ClassSite<'_>>,
+        classes: Vec<&ast::StmtClassDef>,
         class_keywords: &[TextSize],
+        names: &imre_ast::Names,
+        scopes: &super::function_scope::ScopeFacts,
     ) -> HashMap<TextSize, RegisteredClass> {
         classes
             .into_iter()
-            .map(|site| {
-                let class = site.def;
+            .map(|class| {
                 let start = class.start();
-                let header = site.parameters.map(|parameters| {
+                let header = class.type_params.as_deref().map(|params| {
+                    let parameters = TypeParameterValues::prepare(
+                        params,
+                        names,
+                        self.source,
+                        scopes.classes[&start].enclosing_class,
+                        scopes,
+                    );
                     let mut scope = SourceScope::new(
                         RegisteredScope::Function { is_async: false },
                         self.source,

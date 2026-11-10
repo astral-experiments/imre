@@ -1905,21 +1905,26 @@ pub(super) fn parameter_scope(ctx: &mut Context, outer: Id, names: Id, class: bo
         outer
     };
     let module = enclosing.module.clone();
-    let class_cell = enclosing.class_cell;
     let scope = ctx.scope(&module, Some(parent));
     if in_class && !class {
-        // A method body skips the class, but its annotation thunk observes that class's live dictionary.
-        let dictionary = ctx.class_annotation_dict_cell(outer);
-        let Value::Scope(parameters) = ctx.heap.get_mut(scope) else {
-            unreachable!()
-        };
-        parameters
-            .closure
-            .cells
-            .insert("__classdict__".to_owned(), dictionary);
-        parameters.class_cell = class_cell;
+        capture_parameter_class(ctx, scope, outer);
     }
     initialize_parameters(ctx, scope, names, class)
+}
+
+/// A delayed parameter expression can read the enclosing class dictionary after the
+/// class body has finished, even though ordinary lexical lookup skips that body.
+fn capture_parameter_class(ctx: &mut Context, scope: Id, outer: Id) {
+    let class_cell = ctx.scope_data(outer).class_cell;
+    let dictionary = ctx.class_annotation_dict_cell(outer);
+    let Value::Scope(parameters) = ctx.heap.get_mut(scope) else {
+        unreachable!()
+    };
+    parameters
+        .closure
+        .cells
+        .insert("__classdict__".to_owned(), dictionary);
+    parameters.class_cell = class_cell;
 }
 
 /// Bind the declared parameters directly in the compiled generic class header's activation.
@@ -1931,6 +1936,7 @@ pub(super) fn class_parameter_frame(ctx: &mut Context, scope: Id, names: Id) -> 
             unreachable!()
         };
         frame.parent = parent;
+        capture_parameter_class(ctx, scope, outer);
     }
     initialize_parameters(ctx, scope, names, true)
 }

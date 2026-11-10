@@ -48,7 +48,6 @@ impl<'p> SourceMap<'p> {
             prefix,
             declared_globals,
             in_function,
-            native_suspension: frame.native_suspension,
             class_locals: frame.class_locals.as_ref(),
             method_scope: frame.class_locals.is_some() && frame.annotation_values.is_none(),
         }
@@ -263,10 +262,11 @@ impl CallableSites<'_, '_> {
         }
         let namespace = self.compile_class_namespace(start);
         let class = &self.source.class_bodies[&start];
-        let parameters = &class.header.as_ref().expect("generic class").parameters;
+        let header = class.header.as_ref().expect("generic class");
+        let parameters = self.compile_scoped_type_parameters(&header.parameters);
         self.sites
             .class_namespaces
-            .insert(start, (namespace, parameters.clone(), class.range));
+            .insert(start, (namespace, parameters, class.range));
     }
 
     pub(super) fn place_definition(&mut self, start: TextSize) {
@@ -323,6 +323,16 @@ impl CallableSites<'_, '_> {
                 type_params,
             },
         );
+    }
+
+    fn compile_scoped_type_parameters(
+        &mut self,
+        parameters: &crate::frontend::TypeParameterValues,
+    ) -> CompiledTypeParameters {
+        let class = parameters
+            .enclosing_class
+            .map(|site| &self.source.scopes.classes[&site].bindings);
+        self.compile_type_parameters(&parameters.declarations, class)
     }
 
     fn compile_type_parameters(
@@ -479,17 +489,6 @@ impl CallableSites<'_, '_> {
         let alias = &self.source.type_aliases[&site];
         // Placement can visit children of a suite that exits before the alias binds.
         let outer_diagnostic = self.output.diagnostic.take();
-        if self.native_suspension
-            && alias
-                .parameters
-                .iter()
-                .flatten()
-                .any(|param| !param.fields.is_empty())
-        {
-            self.output.diagnostic = Some(self.source.diagnostic_at(
-                alias.range, "unsupported class type parameter bounds and defaults in a compiled suspended function",
-            ));
-        }
         let compiled = match &alias.body {
             Ok(code) => Some(CompiledAlias {
                 definition: self.compile_evaluator(
@@ -500,7 +499,10 @@ impl CallableSites<'_, '_> {
                     code,
                     self.class_locals.cloned(),
                 ),
-                parameters: alias.parameters.clone(),
+                parameters: alias
+                    .parameters
+                    .as_ref()
+                    .map(|parameters| self.compile_scoped_type_parameters(parameters)),
             }),
             Err(range) => {
                 self.output.diagnostic.get_or_insert_with(|| {
@@ -727,11 +729,9 @@ mod tests {
                 true,
             ),
         ] {
-            let source = format!("def stream():\n    yield 1\n{suite}\n").replace(
-                "ALIAS",
-                "type Dormant[T: int] = (item async for item in items)",
-            );
-            let module = PreparedBody::module(
+            let source = format!("def stream():\n    yield 1\n{suite}\n")
+                .replace("ALIAS", "type Dormant[T: int] = T");
+            let mut module = PreparedBody::module(
                 "stream",
                 Path::new("stream.py"),
                 &source,
@@ -739,12 +739,22 @@ mod tests {
                 ModuleOrigin::Provider,
             )
             .unwrap();
+            let alias = module.source.type_aliases.values_mut().next().unwrap();
+            let parameter = &mut alias.parameters.as_mut().unwrap().declarations[0].fields[0].1;
+            assert!(parameter.body.take().is_some());
+            let range = parameter.range;
             let outcome = module.standalone();
             if reachable {
-                assert!(
-                    outcome
-                        .unwrap_err()
-                        .contains("unsupported class type parameter bounds and defaults"),
+                let positions = crate::dynamic::emit::SourcePositions::new(&source, "stream.py");
+                let (line, col) = positions.line_and_column(range.start());
+                let (end_line, end_col) = positions.line_and_column(range.end());
+                assert_eq!(
+                    outcome.unwrap_err(),
+                    format!(
+                        "stream.py:{line}:{}: type parameter evaluator has no checked expression operand (through {end_line}:{})",
+                        col + 1,
+                        end_col + 1
+                    ),
                     "{suite}"
                 );
             } else {

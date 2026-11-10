@@ -127,6 +127,17 @@ impl<'a> Visitor<'a> for ClosureNames {
             ast::Stmt::ClassDef(c) => {
                 self.locals.insert(c.name.to_string());
                 self.incomplete = true;
+                if self.include_nested_reads
+                    && let Some(params) = &c.type_params
+                {
+                    // Delayed bound and default expressions see the sibling type parameters.
+                    let mut reads = self.child_reads(None, |child| child.visit_type_params(params));
+                    for param in params.iter() {
+                        reads.remove(param.name().as_str());
+                    }
+                    self.cell_reads.extend(reads.iter().cloned());
+                    self.reads.extend(reads);
+                }
                 // Only class header expressions can introduce names in this enclosing function.
                 for decorator in &c.decorator_list {
                     self.visit_decorator(decorator);
@@ -165,7 +176,12 @@ impl<'a> Visitor<'a> for ClosureNames {
                 self.visit_expr(&alias.name);
                 if self.include_nested_reads {
                     // The delayed callable closes over its own parameters before this frame.
-                    let mut reads = self.child_reads(None, |child| child.visit_expr(&alias.value));
+                    let mut reads = self.child_reads(None, |child| {
+                        child.visit_expr(&alias.value);
+                        if let Some(params) = &alias.type_params {
+                            child.visit_type_params(params);
+                        }
+                    });
                     if let Some(params) = &alias.type_params {
                         for param in params.iter() {
                             reads.remove(param.name().as_str());
@@ -375,7 +391,7 @@ impl ScopeFacts {
     pub(crate) fn prepare<'a>(
         body: &'a [ast::Stmt],
         names: &imre_ast::Names,
-        alias_site: impl FnMut(&'a ast::StmtTypeAlias),
+        alias_site: impl FnMut(&'a ast::StmtTypeAlias, Option<TextSize>),
     ) -> Self {
         let mut scopes = Self::default();
         Collector {
@@ -403,7 +419,7 @@ struct Collector<'a, A> {
     alias_site: A,
 }
 
-impl<'a, A: FnMut(&'a ast::StmtTypeAlias)> Visitor<'a> for Collector<'_, A> {
+impl<'a, A: FnMut(&'a ast::StmtTypeAlias, Option<TextSize>)> Visitor<'a> for Collector<'_, A> {
     fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
         let strings = self.names.string_annotations;
         let parent = self.scope;
@@ -431,18 +447,27 @@ impl<'a, A: FnMut(&'a ast::StmtTypeAlias)> Visitor<'a> for Collector<'_, A> {
                     .decorator_list
                     .first()
                     .map_or(class.start(), Ranged::start);
-                self.scopes
-                    .classes
-                    .insert(start, classes::ClassScope::prepare(class, self.names));
+                let enclosing_class = match parent {
+                    Scope::Class(site) => Some(site),
+                    _ => None,
+                };
+                self.scopes.classes.insert(
+                    start,
+                    classes::ClassScope::prepare(class, self.names, enclosing_class),
+                );
                 self.scope = Scope::Class(start);
             }
             ast::Stmt::TypeAlias(alias) => {
-                (self.alias_site)(alias);
+                let enclosing_class = match self.scope {
+                    Scope::Class(site) => Some(site),
+                    _ => None,
+                };
+                (self.alias_site)(alias, enclosing_class);
                 let mut names = ClosureNames {
                     string_annotations: strings,
                     ..Default::default()
                 };
-                if let Scope::Class(site) = self.scope {
+                if let Some(site) = enclosing_class {
                     let class = &self.scopes.classes[&site].bindings;
                     names.reads =
                         class_metadata::annotation_reads(&[("", &alias.value)], Some(class), false);

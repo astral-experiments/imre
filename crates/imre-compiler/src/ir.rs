@@ -1271,7 +1271,7 @@ pub(crate) enum DictEntryKind {
 
 /// A type parameter owns its binding and its lazy fields in declaration order.
 #[derive(Clone, Debug)]
-pub(crate) struct RegisteredTypeParameter<F = ()> {
+pub(crate) struct RegisteredTypeParameter<F> {
     pub(crate) binding: String,
     pub(crate) name: String,
     pub(crate) kind: TypeParameterKind,

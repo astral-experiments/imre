@@ -63,7 +63,7 @@ impl CompiledDefinition {
     pub(crate) fn generic_class<'a, 'p, E: FrameEmitter<'a, 'p>>(
         &self,
         frame: &mut E,
-        parameters: &[RegisteredTypeParameter],
+        parameters: &CompiledTypeParameters,
         range: TextRange,
         layout: &ir::PackedArguments,
         operand: impl FnMut(&mut E, usize) -> String,
@@ -71,7 +71,9 @@ impl CompiledDefinition {
         frame.set_source_range(Some(range));
         let enclosing = frame.scope.clone();
         let outer = frame.op("annotation_scope", &[&enclosing]);
-        let scope = frame.checked_parameter_scope(&enclosing, parameters, true);
+        let Some(scope) = frame.bind_type_parameters(&enclosing, parameters, true) else {
+            return "0".into();
+        };
         frame.scope = frame.op("class_base_scope", &[&scope, &outer]);
         frame.set_source_range(None);
         let arguments = frame.class_arguments(layout, operand);
@@ -177,14 +179,16 @@ pub(crate) struct CompiledGenerator {
 
 pub(crate) struct CompiledAlias {
     pub(crate) definition: CompiledDefinition,
-    pub(crate) parameters: Option<Vec<RegisteredTypeParameter>>,
+    pub(crate) parameters: Option<CompiledTypeParameters>,
 }
 
 impl CompiledAlias {
     pub(crate) fn instantiate(&self, frame: &mut RegisteredFrame<'_, '_>) -> String {
         let outer = frame.scope.clone();
         let (scope, parameters) = if let Some(params) = &self.parameters {
-            let scope = frame.checked_parameter_scope(&outer, params, false);
+            let Some(scope) = frame.bind_type_parameters(&outer, params, false) else {
+                return "0".into();
+            };
             let key = frame.code_name(".type_params");
             let parameters = frame.op("lookup", &[&scope, &key]);
             (scope, parameters)
@@ -237,7 +241,7 @@ pub(crate) struct CheckedSites {
     pub(crate) annotation_strings: HashMap<TextSize, String>,
     pub(crate) definitions: HashMap<TextSize, Declaration>,
     pub(crate) class_namespaces:
-        HashMap<TextSize, (CompiledDefinition, Vec<RegisteredTypeParameter>, TextRange)>,
+        HashMap<TextSize, (CompiledDefinition, CompiledTypeParameters, TextRange)>,
     pub(crate) lambdas: HashMap<TextSize, CompiledDefinition>,
     pub(crate) generators: HashMap<TextRange, CompiledGenerator>,
     pub(crate) aliases: HashMap<TextSize, Result<CompiledAlias, String>>,
@@ -381,19 +385,6 @@ impl RegisteredFrame<'_, '_> {
             let offset = site.to_u32();
             self.checked(&format!("call i64 @imre_dyn_mark_class_annotation(ptr %ctx, i64 {}, i64 {key}, i32 {offset})", self.scope));
         }
-    }
-
-    pub(crate) fn checked_parameter_scope(
-        &mut self,
-        outer: &str,
-        params: &[RegisteredTypeParameter],
-        class: bool,
-    ) -> String {
-        if !self.native_suspension && params.iter().any(|p| !p.fields.is_empty()) {
-            let message = self.text("class type parameter bounds and defaults");
-            self.op("unsupported", &[&message]);
-        }
-        self.parameter_scope(outer, params, class)
     }
 
     pub(crate) fn bind_type_parameters(

@@ -140,8 +140,8 @@ pub(crate) use registered::{
     AnnotationProvider, AssertionSite, CheckedProvider, DeferredAnnotation, ModuleAnnotations,
     ParameterAnnotations, ParameterEvaluator, PhysicalOperand, RegisteredBindings,
     RegisteredFunction, RegisteredGenerator, RegisteredLambda, RegisteredScope, RegisteredSuite,
-    SourceEffect, SuitePreparation, ValueStatement, annotation_expression, place_fixed_function,
-    registered_sites, registered_type_alias, registered_type_parameters,
+    SourceEffect, SuitePreparation, TypeParameterValues, ValueStatement, annotation_expression,
+    place_fixed_function, registered_sites, registered_type_alias,
 };
 pub(crate) use registered::{LocalBinding, RegisteredClass, RegisteredOperand, RegisteredRegion};
 pub(crate) use registered::{

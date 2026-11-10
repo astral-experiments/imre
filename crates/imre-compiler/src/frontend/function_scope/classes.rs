@@ -20,6 +20,7 @@ impl ClassBindings {
 }
 
 pub(crate) struct ClassScope {
+    pub(crate) enclosing_class: Option<ruff_text_size::TextSize>,
     pub(crate) annotations: super::ClassAnnotations,
     pub(crate) bindings: ClassBindings,
     pub(crate) namespace: FunctionScope,
@@ -31,7 +32,11 @@ pub(crate) struct ClassScope {
 }
 
 impl ClassScope {
-    pub(crate) fn prepare(class: &ast::StmtClassDef, names: &imre_ast::Names) -> Self {
+    pub(crate) fn prepare(
+        class: &ast::StmtClassDef,
+        names: &imre_ast::Names,
+        enclosing_class: Option<ruff_text_size::TextSize>,
+    ) -> Self {
         let body = &class.body;
         let string_annotations = names.string_annotations;
         let mut declarations = ClosureNames::default();
@@ -40,6 +45,7 @@ impl ClassScope {
         let (frame_reads, method_reads) =
             class_metadata::capture(&mut declarations, class, string_annotations);
         Self {
+            enclosing_class,
             annotations: Default::default(),
             bindings,
             namespace: FunctionScope::new(
