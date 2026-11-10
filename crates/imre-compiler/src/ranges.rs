@@ -925,10 +925,19 @@ impl Analyzer {
                 *state = merge(exits, current).unwrap_or_else(|| State::unknown(state.0.len()));
                 Interval::bounded(0, 1)
             }
-            ExprKind::BooleanValue(and, left, right) => {
+            ExprKind::BooleanValue(and, left, right, predicate) => {
                 let left_range = self.expression(left, state, record);
-                let stopped = self.assume(left, !and, state.clone());
-                let right_state = self.assume(left, *and, state.clone());
+                let (stopped, right_state) = if let Some(predicate) = predicate {
+                    state.0[predicate.receiver] = left_range;
+                    self.expression(&predicate.condition, state, record);
+                    state.0[predicate.receiver] = self.cleared[predicate.receiver];
+                    (Some(state.clone()), Some(state.clone()))
+                } else {
+                    (
+                        self.assume(left, !and, state.clone()),
+                        self.assume(left, *and, state.clone()),
+                    )
+                };
                 if let Some(mut right_state) = right_state {
                     let right_range = self.expression(right, &mut right_state, record);
                     let result = if stopped.is_some() {
@@ -1106,7 +1115,7 @@ impl Analyzer {
             ExprKind::Bool(value) => (*value == truth).then_some(state),
             ExprKind::Not(value) => self.assume(value, !truth, state),
             ExprKind::Builtin(Builtin::Bool, values) => self.assume(&values[0], truth, state),
-            ExprKind::BooleanValue(and, left, right) => {
+            ExprKind::BooleanValue(and, left, right, None) => {
                 if *and == truth {
                     self.assume(left, truth, state)
                         .and_then(|state| self.assume(right, truth, state))
@@ -1260,9 +1269,10 @@ fn contains_scope(expression: &Expr) -> bool {
         | ExprKind::Not(value)
         | ExprKind::Negate(value)
         | ExprKind::Field(value, _) => contains_scope(value),
-        ExprKind::Binary(_, left, right) | ExprKind::BooleanValue(_, left, right) => {
-            contains_scope(left) || contains_scope(right)
+        ExprKind::BooleanValue(_, left, right, predicate) => {
+            predicate.is_some() || contains_scope(left) || contains_scope(right)
         }
+        ExprKind::Binary(_, left, right) => contains_scope(left) || contains_scope(right),
         ExprKind::Conditional(test, yes, no) => {
             contains_scope(test) || contains_scope(yes) || contains_scope(no)
         }
@@ -1693,7 +1703,7 @@ mod tests {
                     }),
                 ),
                 1 => ExprKind::Boolean(true, vec![flag, write]),
-                _ => ExprKind::BooleanValue(false, Box::new(flag), Box::new(write)),
+                _ => ExprKind::BooleanValue(false, Box::new(flag), Box::new(write), None),
             };
             function.body = vec![
                 Statement::Assign(1, Expr::integer(0)),

@@ -250,39 +250,20 @@ impl Checker<'_> {
             if known.is_none() {
                 right = self.coerce(right, ty, last)?;
             }
-            if self.bool_method(left.ty).is_some() || self.needs_truth_dispatch(left.ty) {
-                let slot = self.hidden(left.ty);
-                let captured = self.local(slot);
-                let stop = if self.types.payload(left.ty) == Some(ty) {
-                    Expr {
-                        ty,
-                        kind: ExprKind::Unwrap(Box::new(captured.clone())),
-                    }
+            let predicate =
+                if self.bool_method(left.ty).is_some() || self.needs_truth_dispatch(left.ty) {
+                    let receiver = self.hidden(left.ty);
+                    let condition = self.test_truth(self.local(receiver), first)?;
+                    Some(ir::TruthPredicate {
+                        receiver,
+                        condition: Box::new(condition),
+                    })
                 } else {
-                    self.coerce(captured.clone(), ty, first)?
+                    None
                 };
-                let condition = self.test_truth(captured, first)?;
-                let (yes, no) = if and { (right, stop) } else { (stop, right) };
-                right = Expr {
-                    ty,
-                    kind: ExprKind::Scope {
-                        body: vec![Statement::Assign(slot, left)],
-                        value: Box::new(Expr {
-                            ty,
-                            kind: ExprKind::Conditional(
-                                Box::new(condition),
-                                Box::new(yes),
-                                Box::new(no),
-                            ),
-                        }),
-                        clear: vec![slot],
-                    },
-                };
-                continue;
-            }
             right = Expr {
                 ty,
-                kind: ExprKind::BooleanValue(and, Box::new(left), Box::new(right)),
+                kind: ExprKind::BooleanValue(and, Box::new(left), Box::new(right), predicate),
             };
         }
         Ok(right)

@@ -796,6 +796,10 @@ impl Verifier<'_> {
             }
             // Arithmetic and value-selecting boolean semantics remain the
             // frontend's responsibility; all child identities are still checked.
+            ExprKind::BooleanValue(_, left, _, Some(predicate)) => {
+                same(left.ty, self.local(predicate.receiver)?)?;
+                same(predicate.condition.ty, Type::Bool)
+            }
             ExprKind::Binary(..) | ExprKind::BooleanValue(..) => Ok(()),
         }
     }

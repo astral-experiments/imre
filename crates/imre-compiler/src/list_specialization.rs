@@ -463,8 +463,12 @@ impl Plan<'_> {
                     return false;
                 }
             }
-            ExprKind::BooleanValue(_, left, right) => {
-                if !self.expression(left, aliases) {
+            ExprKind::BooleanValue(_, left, right, predicate) => {
+                if !self.expression(left, aliases)
+                    || predicate
+                        .as_mut()
+                        .is_some_and(|p| !self.expression(&mut p.condition, aliases))
+                {
                     return false;
                 }
                 let mut taken = aliases.to_vec();

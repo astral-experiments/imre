@@ -195,8 +195,11 @@ fn expression(value: &Expr, functions: &[bool], targets: Context<'_>) -> bool {
                 || expression(yes, functions, targets)
                 || expression(no, functions, targets)
         }
-        ExprKind::BooleanValue(_, left, right) => {
+        ExprKind::BooleanValue(_, left, right, predicate) => {
             targets.types.truth_may_materialize(left.ty)
+                || predicate
+                    .as_ref()
+                    .is_some_and(|p| expression(&p.condition, functions, targets))
                 || expression(left, functions, targets)
                 || expression(right, functions, targets)
         }

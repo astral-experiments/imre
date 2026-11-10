@@ -304,6 +304,7 @@ impl PhysicalPreparation<'_, '_> {
         let (edges, leaves) = edges(node, context, Depth::All);
         let operands = leaves
             .into_iter()
+            .map(|input| input.value)
             .map(|child| self.shared_input(child))
             .collect();
         PreparedSteps { edges, operands }
