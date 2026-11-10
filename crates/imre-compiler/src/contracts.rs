@@ -691,6 +691,7 @@ impl Builtin {
             | Self::RegisteredGenerator(..)
             | Self::RegisteredTypeAlias(_)
             | Self::RegisteredStatement(..)
+            | Self::RegisteredDiscard
             | Self::RegisteredName(_)
             | Self::RegisteredCompare(_)
             | Self::RegisteredContainsLiteral(_)

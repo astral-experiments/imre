@@ -1290,6 +1290,12 @@ impl<'a> ArgumentPack<'a> {
 pub(crate) trait FrameEmitter<'a, 'p>:
     std::ops::DerefMut<Target = RegisteredFrame<'a, 'p>> + Sized
 {
+    fn discard_operand(&mut self, evaluate: impl FnOnce(&mut Self) -> String) {
+        let mark = self.temporary_mark();
+        evaluate(self);
+        self.discard_truth(&mark);
+    }
+
     /// Append each interpolation after its value and spec have been evaluated. An
     /// unavailable field ends this path after the preceding Python operations.
     fn template<T>(

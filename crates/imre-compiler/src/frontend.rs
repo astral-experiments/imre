@@ -133,7 +133,7 @@ pub(crate) use registered::values::registered_value;
 pub(crate) use registered::values::{
     RegisteredSource, ValueStatement, display_elements, literal_replacements,
     module_literal_replacements, packed_arguments, push_codepoints, registered_argument_at,
-    registered_arguments, registered_index_key, value_statement,
+    registered_arguments, value_statement,
 };
 pub(crate) use registered::{
     AnnotationValue, AssertionSite, DeferredAnnotation, ParameterAnnotations, PhysicalOperand,

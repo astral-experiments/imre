@@ -579,6 +579,39 @@ fn literal_bound(bound: &ast::Expr, value: Option<&Expr>) -> Option<ir::Constant
     }
 }
 
+fn slice_bounds(slice: &ast::ExprSlice) -> [Option<&ast::Expr>; 3] {
+    [
+        slice.lower.as_deref(),
+        slice.upper.as_deref(),
+        slice.step.as_deref(),
+    ]
+}
+
+/// A bare annotated target evaluates its receiver and key expressions without accessing
+/// the final attribute or item. Each slice bound remains an ordinary expression.
+pub(super) fn bare_target_operands(target: &ast::Expr) -> Option<Vec<&ast::Expr>> {
+    fn key_operands<'a>(key: &'a ast::Expr, inputs: &mut Vec<&'a ast::Expr>) {
+        match key {
+            ast::Expr::Tuple(tuple) => {
+                for item in &tuple.elts {
+                    key_operands(item, inputs);
+                }
+            }
+            ast::Expr::Slice(slice) => inputs.extend(slice_bounds(slice).into_iter().flatten()),
+            value => inputs.push(value),
+        }
+    }
+    match target {
+        ast::Expr::Attribute(field) => Some(vec![&field.value]),
+        ast::Expr::Subscript(item) => {
+            let mut inputs = vec![item.value.as_ref()];
+            key_operands(&item.slice, &mut inputs);
+            Some(inputs)
+        }
+        _ => None,
+    }
+}
+
 fn slice_key<'a, E>(
     slice: &'a ast::ExprSlice,
     mut operand: impl FnMut(&'a ast::Expr) -> StdResult<(Expr, Option<ir::Constant>), E>,
@@ -586,10 +619,7 @@ fn slice_key<'a, E>(
     use ir::Constant as C;
     let mut bounds = Vec::with_capacity(3);
     let mut constants = Some([C::None, C::None, C::None]);
-    for (i, bound) in [&slice.lower, &slice.upper, &slice.step]
-        .into_iter()
-        .enumerate()
-    {
+    for (i, bound) in slice_bounds(slice).into_iter().enumerate() {
         if let Some(bound) = bound {
             let (value, constant) = operand(bound)?;
             bounds.push(value);

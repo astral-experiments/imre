@@ -833,6 +833,8 @@ pub(crate) struct SourceRun {
 pub(crate) enum SourceEffect {
     /// Evaluate the RHS once for the following checked assignment targets.
     AssignmentInput(usize),
+    /// Evaluate and release each operand of an annotation without an assigned value.
+    Discard(Vec<PhysicalOperand>),
     /// The enclosing suite owns any source inputs on their test or failure edge.
     Assertion(Box<AssertionSite>),
     /// Evaluate the operands at their place in the operation, in the current frame.
@@ -874,7 +876,11 @@ impl LoopSuite {
             let start = sources.len();
             if !matches!(
                 run.effect,
-                Some(SourceEffect::For(_) | SourceEffect::ObjectOperation(..))
+                Some(
+                    SourceEffect::For(_)
+                        | SourceEffect::ObjectOperation(..)
+                        | SourceEffect::Discard(_)
+                )
             ) {
                 sources.extend_from_slice(&stmts[run.statements.clone()]);
             }
@@ -1359,7 +1365,9 @@ impl<'a> SuitePreparation<'a> {
                             sites.prepare_input(&assign.value, source, kind, suspended);
                         }
                     }
-                    Some(SourceEffect::ObjectOperation(_, inputs)) => {
+                    Some(
+                        SourceEffect::ObjectOperation(_, inputs) | SourceEffect::Discard(inputs),
+                    ) => {
                         for input in inputs {
                             if let PhysicalOperand::Source(expr) = input {
                                 sites.prepare_input(expr, source, kind, suspended);
@@ -1582,6 +1590,28 @@ impl<'a> SuitePreparation<'a> {
                 continue;
             }
             scope.truncate_locals(slots_before);
+            if let ast::Stmt::AnnAssign(ann) = stmt
+                && ann.value.is_none()
+                && let Some(inputs) = values::bare_target_operands(&ann.target)
+            {
+                body.push(checkpoint(stmt));
+                residual.push(SourceRun {
+                    at: body.len(),
+                    statements: i..i + 1,
+                    effect: Some(SourceEffect::Discard(
+                        inputs
+                            .into_iter()
+                            .map(
+                                |expr| match RegisteredOperand::prepare(expr, self.source, kind) {
+                                    Some(value) => PhysicalOperand::Checked(Box::new(value)),
+                                    None => PhysicalOperand::Source(Box::new(expr.clone())),
+                                },
+                            )
+                            .collect(),
+                    )),
+                });
+                continue;
+            }
             if let ast::Stmt::Assign(assign) = stmt {
                 let input = scope.hidden(Type::PythonObject);
                 let value = unpacking::take_pattern_temporary(
@@ -2047,6 +2077,17 @@ impl statements::StatementLowering for SourceScope<'_> {
             }
             ast::Stmt::Global(_) | ast::Stmt::Nonlocal(_) => Ok((Vec::new(), true)),
             ast::Stmt::AnnAssign(ann) => {
+                if ann.value.is_none()
+                    && let Some(inputs) = values::bare_target_operands(&ann.target)
+                {
+                    let operands = inputs
+                        .into_iter()
+                        .map(|expr| self.operand(expr))
+                        .collect::<Option<_>>()
+                        .ok_or(())?;
+                    let effect = operation(Builtin::RegisteredDiscard, Type::None, operands);
+                    return Ok((vec![Statement::Expr(effect)], true));
+                }
                 let name = ann.target.as_name_expr().ok_or(())?;
                 let mut body = Vec::new();
                 if let Some(value) = &ann.value {
@@ -2383,6 +2424,9 @@ impl SourceScope<'_> {
         if stmt.is_return_stmt()
             || stmt.is_expr_stmt()
             || stmt.is_delete_stmt()
+            || stmt
+                .as_ann_assign_stmt()
+                .is_some_and(|ann| ann.value.is_none() && !ann.target.is_name_expr())
             || stmt.is_aug_assign_stmt()
             || stmt.is_raise_stmt()
             || attribute_write(stmt).is_some()

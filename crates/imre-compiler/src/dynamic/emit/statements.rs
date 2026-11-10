@@ -212,15 +212,14 @@ impl<'p> Function<'_, 'p> {
                 let value = self.expr(&assignment.value);
                 self.frame.store_private(*slot, &value);
             }
+            SourceEffect::Discard(inputs) => {
+                for input in inputs {
+                    self.discard_operand(|code| code.physical_operand(input));
+                }
+            }
             SourceEffect::ObjectOperation(op, inputs) => {
                 let (receiver, args) = inputs.split_first().expect("object operation receiver");
-                self.object_operation(op, receiver, args.iter(), |code, input| match input {
-                    PhysicalOperand::Checked(value) => {
-                        code.prepare_checked_value(&value.value);
-                        code.frame.prepared_operand(value, &code.sites, false)
-                    }
-                    PhysicalOperand::Source(expr) => code.expr(expr),
-                });
+                self.object_operation(op, receiver, args.iter(), Self::physical_operand);
             }
         }
     }
@@ -265,6 +264,16 @@ impl<'p> Function<'_, 'p> {
             },
             false,
         );
+    }
+
+    fn physical_operand(&mut self, input: &PhysicalOperand) -> String {
+        match input {
+            PhysicalOperand::Checked(value) => {
+                self.prepare_checked_value(&value.value);
+                self.frame.prepared_operand(value, &self.sites, false)
+            }
+            PhysicalOperand::Source(expr) => self.expr(expr),
+        }
     }
 
     /// Supply only the source operands requested by the registered matcher.
@@ -452,17 +461,6 @@ impl<'p> Function<'_, 'p> {
                             &value,
                             matches!(&*v.target, ast::Expr::Name(_)),
                         );
-                    } else {
-                        match &*v.target {
-                            ast::Expr::Attribute(attr) => {
-                                self.discard_annotation_operand(&attr.value);
-                            }
-                            ast::Expr::Subscript(subscript) => {
-                                self.discard_annotation_operand(&subscript.value);
-                                self.discard_annotation_slice(&subscript.slice);
-                            }
-                            _ => {}
-                        }
                     }
                     if (self.module || self.class_locals.is_some())
                         && let Some(marker) =
@@ -1088,46 +1086,12 @@ impl<'p> Function<'_, 'p> {
         self.frame.decorate(decorators, lines, value)
     }
 
-    fn discard_annotation_operand(&mut self, expr: &ast::Expr) {
-        let mark = self.temporary_mark();
-        self.expr(expr);
-        self.discard_truth(&mark);
-    }
-
-    // Without an assignment, CPython evaluates each subscript operand but
-    // neither constructs an extended slice nor invokes __getitem__.
-    fn discard_annotation_slice(&mut self, slice: &ast::Expr) {
-        match slice {
-            ast::Expr::Slice(s) => {
-                for bound in [&s.lower, &s.upper, &s.step].into_iter().flatten() {
-                    self.discard_annotation_operand(bound);
-                }
-            }
-            ast::Expr::Tuple(t) => {
-                for item in &t.elts {
-                    self.discard_annotation_slice(item);
-                }
-            }
-            expr => self.discard_annotation_operand(expr),
-        }
-    }
-
-    pub(super) fn index_operand(&mut self, key: &ast::Expr) -> String {
-        if let Some(key) =
-            crate::frontend::registered_index_key(key, self.source.registered_source())
-        {
-            self.registered_value(&key)
-        } else {
-            self.expr(key)
-        }
-    }
-
     fn place(&mut self, target: &ast::Expr) -> Option<Place> {
         Some(match target {
             ast::Expr::Name(n) => Place::Name(self.code_name(n.id.as_str())),
             ast::Expr::Subscript(s) => {
                 let obj = self.expr(&s.value);
-                Place::Item(obj, self.index_operand(&s.slice))
+                Place::Item(obj, self.expr(&s.slice))
             }
             _ => {
                 self.unsupported("assignment target");

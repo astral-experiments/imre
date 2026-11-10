@@ -4809,6 +4809,7 @@ impl Emitter<'_, '_> {
             | Builtin::RegisteredGenerator(..)
             | Builtin::RegisteredTypeAlias(_)
             | Builtin::RegisteredStatement(..)
+            | Builtin::RegisteredDiscard
             | Builtin::RegisteredNamespace(_)
             | Builtin::RegisteredUnpack { .. }
             | Builtin::RegisteredIter(_)
