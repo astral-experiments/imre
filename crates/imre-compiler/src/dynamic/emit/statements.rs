@@ -1326,56 +1326,39 @@ impl<'p> Function<'_, 'p> {
     }
 
     fn protected_suite(&mut self, stmt: &'p ast::StmtTry) {
-        let (handler, enclosing) = self.begin_operand_scope();
-        self.statements(&stmt.body);
-        self.body.error_target = enclosing;
-        self.statements(&stmt.orelse);
-        let (exception, done) = self.enter_handlers(&handler);
-        if stmt.is_star {
-            crate::llvm::registered::handlers::groups(
-                self,
-                &stmt.handlers,
-                &exception,
-                &done,
-                |code, ast::ExceptHandler::ExceptHandler(handler)| {
-                    let matcher = handler.type_.as_deref().expect("except* requires a type");
-                    code.checkpoint(handler);
-                    (
-                        code.expr(matcher),
-                        handler.name.as_ref().map(|name| name.as_str()),
-                        &handler.body,
-                    )
-                },
-                Self::statements,
-            );
-        } else {
-            for ast::ExceptHandler::ExceptHandler(handler) in &stmt.handlers {
-                crate::llvm::registered::handlers::arm(
-                    self,
-                    &exception,
-                    &done,
+        crate::llvm::registered::handlers::protected(
+            self,
+            &stmt.body,
+            &stmt.handlers,
+            &stmt.orelse,
+            stmt.is_star,
+            |code, ast::ExceptHandler::ExceptHandler(handler)| {
+                let class = handler.type_.as_deref().map(|class| {
+                    let site = if stmt.is_star {
+                        handler.range()
+                    } else {
+                        class.range()
+                    };
+                    code.checkpoint(&site);
+                    code.expr(class)
+                });
+                (
+                    class,
                     handler.name.as_ref().map(|name| name.as_str()),
-                    |code| {
-                        handler.type_.as_deref().map(|class| {
-                            code.checkpoint(class);
-                            code.expr(class)
-                        })
-                    },
-                    |code, cleanup| {
-                        if let Some((name, target)) = cleanup {
-                            code.exits
-                                .push((Cleanup::ExceptionName(name.into()), target.into()));
-                        }
-                        code.statements(&handler.body);
-                        if cleanup.is_some() {
-                            code.exits.pop();
-                        }
-                    },
-                );
-            }
-            self.raise(&exception, None, true);
-        }
-        self.leave_handlers(&done);
+                    handler.body.as_slice(),
+                )
+            },
+            |code, body, cleanup| {
+                if let Some((name, outer)) = cleanup {
+                    code.exits
+                        .push((Cleanup::ExceptionName(name.into()), outer.into()));
+                }
+                code.statements(body);
+                if cleanup.is_some() {
+                    code.exits.pop();
+                }
+            },
+        );
     }
 
     fn emit_finally(&mut self, suite: FinallySuite<'p>) {
@@ -1413,11 +1396,7 @@ impl<'p> Function<'_, 'p> {
                     },
                     enclosing.into(),
                 ));
-                if stmt.handlers.is_empty() {
-                    code.statements(&stmt.body);
-                } else {
-                    code.protected_suite(stmt);
-                }
+                code.protected_suite(stmt);
                 code.exits.pop();
             },
             |code, pending| {

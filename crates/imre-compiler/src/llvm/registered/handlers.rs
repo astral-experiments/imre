@@ -7,7 +7,7 @@ use crate::llvm::operations::CheckedBody;
 impl RegisteredFrame<'_, '_> {
     /// The normal else edge skips the handlers. On the error edge, keep the
     /// pending exception live and active until handler dispatch is complete.
-    pub(crate) fn enter_handlers(&mut self, handler: &str) -> (String, String) {
+    fn enter_handlers(&mut self, handler: &str) -> (String, String) {
         let done = self.name("b");
         self.jump(&done);
         self.label(handler);
@@ -17,7 +17,7 @@ impl RegisteredFrame<'_, '_> {
         (exception, done)
     }
 
-    pub(crate) fn leave_handlers(&mut self, done: &str) {
+    fn leave_handlers(&mut self, done: &str) {
         self.caught.pop();
         self.live.pop();
         self.label(done);
@@ -64,27 +64,27 @@ pub(crate) fn finalized<'a, 'p, E: FrameEmitter<'a, 'p>>(
 
 /// A named arm clears its binding on fallthrough, handler failure and abrupt
 /// transfer. The caller installs the abrupt-transfer cleanup around its body.
-pub(crate) fn arm<'a, 'p, E: FrameEmitter<'a, 'p>>(
+fn arm<'a, 'p, E: FrameEmitter<'a, 'p>, S, N: AsRef<str>>(
     code: &mut E,
     exception: &str,
     done: &str,
-    name: Option<&str>,
-    matcher: impl FnOnce(&mut E) -> Option<String>,
-    body: impl FnOnce(&mut E, Option<(&str, &str)>),
+    describe: impl FnOnce(&mut E) -> (Option<String>, Option<N>, S),
+    emit_suite: impl FnOnce(&mut E, S, Option<(&str, &str)>),
 ) {
     let next = code.name("b");
-    if let Some(class) = matcher(code) {
+    let (class, name, body) = describe(code);
+    if let Some(class) = class {
         let matches = code.op("matches", &[exception, &class]);
         let matches = code.value(&format!("icmp eq i64 {matches}, 2"));
         let matched = code.name("b");
         code.branch(&matches, &matched, &next);
         code.label(&matched);
     }
-    if let Some(name) = name {
+    if let Some(name) = name.as_ref().map(AsRef::as_ref) {
         code.bind(name, exception);
         let failed = code.name("b");
         let enclosing = std::mem::replace(&mut code.body.error_target, failed.clone());
-        body(code, Some((name, &enclosing)));
+        emit_suite(code, body, Some((name, &enclosing)));
         code.body.error_target = enclosing;
         if !code.body.terminated {
             code.clear_exception_name(name);
@@ -95,21 +95,60 @@ pub(crate) fn arm<'a, 'p, E: FrameEmitter<'a, 'p>>(
         code.clear_exception_name(name);
         code.raise(&error, None, true);
     } else {
-        body(code, None);
+        emit_suite(code, body, None);
         code.jump(done);
     }
     code.label(&next);
 }
 
+/// Run else outside the protected body, then dispatch the pending exception.
+pub(crate) fn protected<'a, 'p, 'h, E, H, S, N>(
+    code: &mut E,
+    body: &'h [S],
+    handlers: &'h [H],
+    otherwise: &'h [S],
+    is_star: bool,
+    mut describe: impl FnMut(&mut E, &'h H) -> (Option<String>, Option<N>, &'h [S]),
+    mut suite: impl FnMut(&mut E, &'h [S], Option<(&str, &str)>),
+) where
+    E: FrameEmitter<'a, 'p>,
+    N: AsRef<str>,
+{
+    if handlers.is_empty() {
+        suite(code, body, None);
+        return;
+    }
+    let (handler, enclosing) = code.begin_operand_scope();
+    suite(code, body, None);
+    code.body.error_target = enclosing;
+    suite(code, otherwise, None);
+    let (exception, done) = code.enter_handlers(&handler);
+    if is_star {
+        groups(code, handlers, &exception, &done, describe, suite);
+    } else {
+        for handler in handlers {
+            arm(
+                code,
+                &exception,
+                &done,
+                |code| describe(code, handler),
+                &mut suite,
+            );
+        }
+        code.raise(&exception, None, true);
+    }
+    code.leave_handlers(&done);
+}
+
 /// Split a pending group in source order, retaining its matched and unhandled parts
 /// across callbacks before merging the outcomes back into the enclosing exception.
-pub(crate) fn groups<'a, 'p, 'h, F: FrameEmitter<'a, 'p>, H, S: 'h, N: AsRef<str>>(
+fn groups<'a, 'p, 'h, F: FrameEmitter<'a, 'p>, H, S: 'h, N: AsRef<str>>(
     code: &mut F,
     handlers: &'h [H],
     exc: &str,
     done: &str,
-    mut describe: impl FnMut(&mut F, &'h H) -> (String, Option<N>, &'h [S]),
-    mut emit_suite: impl FnMut(&mut F, &'h [S]),
+    mut describe: impl FnMut(&mut F, &'h H) -> (Option<String>, Option<N>, &'h [S]),
+    mut emit_suite: impl FnMut(&mut F, &'h [S], Option<(&str, &str)>),
 ) {
     let raised = code.op("list", &[]);
     code.live.push(raised.clone());
@@ -120,6 +159,7 @@ pub(crate) fn groups<'a, 'p, 'h, F: FrameEmitter<'a, 'p>, H, S: 'h, N: AsRef<str
         code.live.extend([remainder.clone(), active.clone()]);
         let (matcher, name, suite) = describe(code, handler);
         let name = name.as_ref().map(AsRef::as_ref);
+        let matcher = matcher.expect("except* requires a type");
         let pair = code.op("except_star_split", &[&remainder, &matcher]);
         let zero = code.integer(0);
         let matched = code.op("get", &[&pair, &zero]);
@@ -145,7 +185,7 @@ pub(crate) fn groups<'a, 'p, 'h, F: FrameEmitter<'a, 'p>, H, S: 'h, N: AsRef<str
             code.bind(name, &matched);
         }
         let outer = std::mem::replace(&mut code.body.error_target, failed.clone());
-        emit_suite(code, suite);
+        emit_suite(code, suite, None);
         code.body.error_target = outer;
         if !code.body.terminated
             && let Some(name) = name
@@ -214,74 +254,44 @@ impl Frame<'_, '_, '_> {
         otherwise: &[Statement],
         finalbody: &[Statement],
     ) {
+        let names = self.names;
+        let stars = handlers
+            .first()
+            .is_some_and(|handler| matches!(handler.matcher, ExceptionMatcher::Subgroup(..)));
         let run = |f: &mut Self| {
-            if handlers.is_empty() {
-                f.emit_suite(body);
-                return;
-            }
-            let (handler, enclosing) = f.begin_operand_scope();
-            f.emit_suite(body);
-            f.body.error_target = enclosing;
-            f.emit_suite(otherwise);
-            let (exc, done) = f.enter_handlers(&handler);
-            if matches!(handlers[0].matcher, ExceptionMatcher::Subgroup(..)) {
-                groups(
-                    f,
-                    handlers,
-                    &exc,
-                    &done,
-                    |f, handler| {
-                        let ExceptionMatcher::Subgroup(site, class) = &handler.matcher else {
-                            unreachable!("ordinary and subgroup handlers cannot be mixed")
-                        };
-                        f.checkpoint(*site);
-                        let matcher = f.evaluate_handle(class);
-                        let name = handler.name.map(|slot| {
-                            f.names.expect("registered scope")[&slot]
-                                .name
-                                .clone()
+            protected(
+                f,
+                body,
+                handlers,
+                otherwise,
+                stars,
+                |f, handler| {
+                    let class = match &handler.matcher {
+                        ExceptionMatcher::Categories(_) => None,
+                        ExceptionMatcher::Object(site, class)
+                        | ExceptionMatcher::Subgroup(site, class) => {
+                            f.checkpoint(*site);
+                            Some(f.evaluate_handle(class))
+                        }
+                    };
+                    let name = handler
+                        .name
+                        .map(|slot| names.expect("registered scope")[&slot].name.as_str());
+                    (class, name, handler.body.as_slice())
+                },
+                |f, body, cleanup| {
+                    if let Some((name, outer)) = cleanup {
+                        f.code.iteration.scopes.push(Region::ExceptionName {
+                            name: name.into(),
+                            outer: outer.into(),
                         });
-                        (matcher, name, handler.body.as_slice())
-                    },
-                    Self::emit_suite,
-                );
-            } else {
-                for handler in handlers {
-                    let name = handler.name.map(|slot| {
-                        f.names.expect("registered scope")[&slot]
-                            .name
-                            .as_str()
-                    });
-                    arm(
-                        f,
-                        &exc,
-                        &done,
-                        name,
-                        |f| match &handler.matcher {
-                            ExceptionMatcher::Categories(_) => None,
-                            ExceptionMatcher::Subgroup(..) => unreachable!("subgroup handler"),
-                            ExceptionMatcher::Object(range, class) => {
-                                f.checkpoint(*range);
-                                Some(f.evaluate_handle(class))
-                            }
-                        },
-                        |f, cleanup| {
-                            if let Some((name, outer)) = cleanup {
-                                f.code.iteration.scopes.push(Region::ExceptionName {
-                                    name: name.into(),
-                                    outer: outer.into(),
-                                });
-                            }
-                            f.emit_suite(&handler.body);
-                            if cleanup.is_some() {
-                                f.leave_scope();
-                            }
-                        },
-                    );
-                }
-                f.raise(&exc, None, true);
-            }
-            f.leave_handlers(&done);
+                    }
+                    f.emit_suite(body);
+                    if cleanup.is_some() {
+                        f.leave_scope();
+                    }
+                },
+            );
         };
         if finalbody.is_empty() {
             run(self);
