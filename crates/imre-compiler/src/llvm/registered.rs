@@ -1077,6 +1077,12 @@ impl RegisteredFrame<'_, '_> {
         })
     }
 
+    pub(crate) fn unary_handle(&mut self, op: ir::ObjectUnary, operand: String) -> CheckedValue {
+        self.with_checked_frame(&CheckedSites::default(), |frame| {
+            CheckedBody::registered(frame).unary_value(op, CheckedValue::handle(operand), false)
+        })
+    }
+
     pub(crate) fn registered_value(&mut self, expression: &Expr, sites: &CheckedSites) -> String {
         self.registered_expression(expression, sites, false)
     }

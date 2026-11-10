@@ -3110,7 +3110,9 @@ impl Emitter<'_, '_> {
 
     fn other_expression(&mut self, expression: &Expr) -> Value {
         match &expression.kind {
-            ExprKind::Scope { .. }
+            ExprKind::Negate(_)
+            | ExprKind::Not(_)
+            | ExprKind::Scope { .. }
             | ExprKind::Int(_)
             | ExprKind::Float(_)
             | ExprKind::Str(_)
@@ -3178,32 +3180,6 @@ impl Emitter<'_, '_> {
                     receiver.operand
                 };
                 self.decode_word(word, expression.ty)
-            }
-            ExprKind::Negate(value) => {
-                let direct = self.ranges.integer(expression).is_some()
-                    && self.ranges.integer(value).is_some();
-                let value = self.operand(value);
-                let result = if value.value.ty == Type::Float {
-                    Value {
-                        ty: Type::Float,
-                        operand: self.instruction(format!("fneg double {}", value.value.operand)),
-                        small_integer: false,
-                    }
-                } else if direct {
-                    self.small_binary(Binary::Subtract, &small(0), &value.value, false, None)
-                } else {
-                    self.binary(Binary::Subtract, &small(0), &value.value)
-                };
-                self.release_operand(&value);
-                result
-            }
-            ExprKind::Not(value) => {
-                let value = self.expr(value);
-                Value {
-                    ty: Type::Bool,
-                    operand: self.instruction(format!("xor i1 {}, true", value.operand)),
-                    small_integer: false,
-                }
             }
             ExprKind::Boolean(and, values) => self.boolean(*and, values),
             ExprKind::BooleanValue(and, left, right) => {

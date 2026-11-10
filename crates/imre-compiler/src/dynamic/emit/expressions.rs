@@ -72,12 +72,19 @@ impl Function<'_, '_> {
         let value = if let Some((items, display)) = crate::frontend::display_elements(expr) {
             self.sequence_display(items, display, None, ast_spread, Self::expr)
         } else if let Some(operation) = self.source.registered_source().object_operation(expr) {
-            self.object_operation(
-                &operation.opcode,
-                operation.target,
-                operation.arguments(),
-                Self::expr,
-            )
+            if let crate::ir::Builtin::RegisteredUnary(op) = operation.opcode {
+                let scope = self.begin_operand_scope();
+                let operand = self.expr(operation.target);
+                let result = self.frame.unary_handle(op, operand);
+                self.finish_unary(scope, op, result).into_handle()
+            } else {
+                self.object_operation(
+                    &operation.opcode,
+                    operation.target,
+                    operation.arguments(),
+                    Self::expr,
+                )
+            }
         } else {
             self.expr_inner(expr)
         };

@@ -10,6 +10,7 @@ use crate::frontend::push_codepoints;
 use crate::ir;
 use crate::ir::{Builtin, Constant, DisplayKind, Expr};
 use crate::llvm::body::FunctionBody;
+use crate::llvm::operations::CheckedValue;
 use ruff_text_size::{TextRange, TextSize};
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -995,11 +996,10 @@ pub(crate) trait FrameEmitter<'a, 'p>:
         op: &Builtin,
         target: &'e T,
         args: impl Iterator<Item = &'e T>,
-        mut evaluate: impl FnMut(&mut Self, &T) -> String,
+        evaluate: impl FnMut(&mut Self, &T) -> String,
     ) -> String {
         match op {
             Builtin::RegisteredCall(call) => self.call_value(call, target, args, None, evaluate),
-            Builtin::RegisteredUnary(op) => self.unary_value(*op, |f| evaluate(f, target)),
             Builtin::RegisteredAttribute {
                 action,
                 name,
@@ -1015,28 +1015,26 @@ pub(crate) trait FrameEmitter<'a, 'p>:
         }
     }
 
-    fn unary_value(
+    fn begin_operand_scope(&mut self) -> (String, (String, String)) {
+        (self.temporary_mark(), self.open_operand_unwind())
+    }
+
+    /// Consume an evaluated operand using the temporary roots established before its evaluation.
+    fn finish_unary(
         &mut self,
+        (mark, edge): (String, (String, String)),
         op: ir::ObjectUnary,
-        evaluate: impl FnOnce(&mut Self) -> String,
-    ) -> String {
-        let mark = self.temporary_mark();
-        self.unwind_operands(&mark, |f| {
-            let operand = evaluate(f);
-            let name = match op {
-                ir::ObjectUnary::Positive => "pos",
-                ir::ObjectUnary::Negative => "neg",
-                ir::ObjectUnary::Invert => "~",
-                ir::ObjectUnary::Not => "not",
-            };
-            let value = f.op(name, &[&operand]);
-            if op == ir::ObjectUnary::Not {
-                f.discard_truth(&mark);
-            } else {
-                f.keep_operands(&mark, &value, "0");
-            }
-            value
-        })
+        result: CheckedValue,
+    ) -> CheckedValue {
+        if op != ir::ObjectUnary::Not
+            && let CheckedValue::Handle { id, .. } = &result
+        {
+            self.keep_operands(&mark, id, "0");
+        } else {
+            self.discard_truth(&mark);
+        }
+        self.close_unwind(edge, |frame| frame.discard_truth(&mark));
+        result
     }
 
     /// Evaluate the callable before its arguments. A lone *iterable is converted
