@@ -18,13 +18,14 @@ impl SourceInfo<'_> {
         def: &'s ast::StmtFunctionDef,
     ) -> Body<'s> {
         let start = def.start();
-        if let Some(plan) = self.function_bodies.get(&start)
-            && plan.header.is_some()
+        let plan = &self.function_bodies[&start];
+        if plan.header.is_none()
+            && let super::super::FunctionBody::Suite(suite) = &plan.body
         {
+            Body::Suite(suite)
+        } else {
             let globals = self.scopes.functions[&start].lexical.globals();
             Body::Checked(plan.checked(), Some(globals))
-        } else {
-            Body::Function(&def.body, self.scopes.function(def).suspension_flags)
         }
     }
 }

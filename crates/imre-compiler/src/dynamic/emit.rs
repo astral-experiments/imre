@@ -478,31 +478,34 @@ impl<'a> PreparedBody<'a, '_> {
                         .get(&site)
                         .is_some_and(PreparedFunction::has_ordinary_header)
                 };
-                if !site.prepare_entry {
-                    prepare.physical_body(&def.body, kind, suspended, &has_ordinary_header);
-                    continue;
-                }
-                FunctionBody::Suite(prepare.function_suite(
+                FunctionBody::Suite(prepare.named_body(
                     &def.body,
                     kind,
                     suspended,
+                    site.prepare_entry,
                     &has_ordinary_header,
                 ))
             };
             let complete = match &body {
                 FunctionBody::Program(_) => true,
-                FunctionBody::Suite(plan) => plan.fully_checked(),
+                FunctionBody::Suite(suite) => site.prepare_entry && suite.plan.fully_checked(),
             };
-            let header = complete.then(|| {
-                CheckedHeader::prepare(
-                    def,
-                    &mut scope.ordinary,
-                    sites.parameter_annotations.get(&def.parameters.start()),
-                    thread_entries.contains_key(&start),
-                    keep_docstrings,
-                )
-            });
-            function_bodies.insert(start, PreparedFunction { body, header });
+            let (header, declaration) = CheckedHeader::prepare(
+                def,
+                &mut scope.ordinary,
+                sites.parameter_annotations.get(&def.parameters.start()),
+                thread_entries.contains_key(&start),
+                keep_docstrings,
+                complete,
+            );
+            function_bodies.insert(
+                start,
+                PreparedFunction {
+                    body,
+                    header,
+                    declaration,
+                },
+            );
         }
         let mut source = SourceInfo {
             annotation_operands,
@@ -544,7 +547,7 @@ impl<'a> PreparedBody<'a, '_> {
             text,
         };
         let docstring = (!expression && keep_docstrings)
-            .then(|| source.docstring("", &body))
+            .then(|| crate::frontend::docstring(&body).or_else(|| source.bundled_docstring("")))
             .flatten();
         let retain_syntax = source.initializer.as_ref().is_some_and(|suite| {
             !suite.fully_checked()
@@ -781,8 +784,7 @@ enum ReturnOperand<'a> {
 
 enum Body<'a> {
     Namespace,
-    /// A function suite and its suspension flags, shared by complete and mixed frames.
-    Function(&'a [ast::Stmt], u32),
+    Suite(&'a crate::frontend::PhysicalSuite),
     AnnotationProvider(
         &'a crate::frontend::RegisteredSuite,
         &'a [crate::ir::AnnotationOccurrence],
@@ -838,12 +840,13 @@ struct TypeAliasDefinition {
 /// Graph analysis owns program entries; physical preparation owns the other function suites.
 enum FunctionBody<'a> {
     Program(&'a crate::frontend::RegisteredFunction),
-    Suite(crate::frontend::RegisteredSuite),
+    Suite(crate::frontend::PhysicalSuite),
 }
 
 struct PreparedFunction<'a> {
     body: FunctionBody<'a>,
     header: Option<CheckedHeader>,
+    declaration: DeclarationMetadata,
 }
 
 impl PreparedFunction<'_> {
@@ -865,17 +868,18 @@ impl PreparedFunction<'_> {
         }
     }
 
+    #[cfg(test)]
     fn suite(&self) -> Option<&crate::frontend::RegisteredSuite> {
         match &self.body {
             FunctionBody::Program(_) => None,
-            FunctionBody::Suite(suite) => Some(suite),
+            FunctionBody::Suite(suite) => Some(&suite.plan),
         }
     }
 
     fn checked(&self) -> &crate::frontend::RegisteredFunction {
         match &self.body {
             FunctionBody::Program(checked) => checked,
-            FunctionBody::Suite(suite) => &suite.checked,
+            FunctionBody::Suite(suite) => &suite.plan.checked,
         }
     }
 }
@@ -886,9 +890,13 @@ enum CheckedHeader {
     /// Other declarations use the source header. A released unit moves it here without its body.
     Declaration {
         syntax: Option<Box<ast::StmtFunctionDef>>,
-        docstring: Option<String>,
-        integer_sign_parameters: Vec<String>,
     },
+}
+
+#[derive(Default)]
+struct DeclarationMetadata {
+    docstring: Option<String>,
+    integer_sign_parameters: Vec<String>,
 }
 
 impl CheckedHeader {
@@ -898,12 +906,12 @@ impl CheckedHeader {
         annotations: Option<&crate::frontend::ParameterAnnotations>,
         worker: bool,
         keep_docstrings: bool,
-    ) -> Self {
-        if ordinary.is_some() && !worker {
-            return Self::Ordinary;
+        complete: bool,
+    ) -> (Option<Self>, DeclarationMetadata) {
+        if complete && ordinary.is_some() && !worker {
+            return (Some(Self::Ordinary), DeclarationMetadata::default());
         }
-        // Workers bind through their specialized declaration and need only its docstring.
-        let lexical = ordinary.take();
+        let lexical = complete.then(|| ordinary.take()).flatten();
         let docstring = keep_docstrings
             .then(|| {
                 lexical.map_or_else(
@@ -924,11 +932,13 @@ impl CheckedHeader {
             .filter(|name| crate::frontend::only_compares_zero(&def.body, name))
             .map(str::to_owned)
             .collect();
-        Self::Declaration {
-            syntax: None,
-            docstring,
-            integer_sign_parameters,
-        }
+        (
+            complete.then_some(Self::Declaration { syntax: None }),
+            DeclarationMetadata {
+                docstring,
+                integer_sign_parameters,
+            },
+        )
     }
 }
 
@@ -999,10 +1009,6 @@ impl SourceInfo<'_> {
     }
 
     /// Keep documentation attached to the bundled definition, even when callers rebind its name.
-    fn docstring(&self, qualname: &str, body: &[ast::Stmt]) -> Option<String> {
-        crate::frontend::docstring(body).or_else(|| self.bundled_docstring(qualname))
-    }
-
     fn bundled_docstring(&self, qualname: &str) -> Option<String> {
         self.docs
             .as_ref()?
@@ -1125,10 +1131,6 @@ impl SourceMap<'_> {
                     .clone(),
             );
         }
-        let prepared = match body {
-            Body::Function(..) => start.and_then(|key| self.function_bodies.get(&key)?.suite()),
-            _ => None,
-        };
         let mut f = self.function(
             frame,
             sites::CheckedSites::default(),
@@ -1166,16 +1168,12 @@ impl SourceMap<'_> {
                 f.physical_suite(&prepared.body);
                 f.finish_class_annotations(&class.annotations, &class.bindings.globals);
             }
-            Body::Function(stmts, _) => {
+            Body::Suite(suite) => {
                 let globals = self.scopes.functions[&start.expect("function definition")]
                     .lexical
                     .globals();
                 f.declare_globals(globals);
-                if let Some(prepared) = prepared {
-                    f.prepared_function(prepared, |code, run| code.source_run(stmts, run));
-                } else {
-                    f.statements(stmts);
-                }
+                f.physical_suite(suite);
             }
             Body::AnnotationProvider(plan, entries, scope) => {
                 f.frame.annotation_scope = scope;
@@ -1352,6 +1350,23 @@ mod tests {
         prepared.source.class_bodies = class_bodies;
         prepared.source.statement_sites = sites;
         prepared.source.nested_bodies.extend(nested);
+    }
+
+    fn install_test_function_body(source: &mut SourceInfo<'_>, def: &ast::StmtFunctionDef) {
+        let plan = source.nested_bodies.remove(&def.body[0].start()).unwrap();
+        let function = source.function_bodies.get_mut(&def.start()).unwrap();
+        function.body = FunctionBody::Suite(crate::frontend::PhysicalSuite::new(plan, &def.body));
+        function.header = None;
+    }
+
+    fn test_function_suite<'s>(
+        source: &'s mut SourceInfo<'_>,
+        start: TextSize,
+    ) -> &'s mut crate::frontend::PhysicalSuite {
+        match &mut source.function_bodies.get_mut(&start).unwrap().body {
+            FunctionBody::Suite(suite) => suite,
+            FunctionBody::Program(_) => panic!("expected the physical suite of a named function"),
+        }
     }
 
     fn residual_value_mut(suite: &mut crate::frontend::RegisteredSuite) -> &mut ast::Expr {
@@ -1616,7 +1631,7 @@ mod tests {
         else {
             panic!("expected a prepared function suite");
         };
-        let bodies = HashMap::from([(site, suite.checked)]);
+        let bodies = HashMap::from([(site, suite.plan.checked)]);
         let module = PreparedBody::module(
             "header",
             path,
@@ -1779,6 +1794,40 @@ mod tests {
     }
 
     #[test]
+    fn mixed_named_entry_uses_its_stored_suite_after_erasing_the_declaration_body() {
+        let mut module = PreparedBody::module(
+            "example",
+            Path::new("example.py"),
+            "def make():
+    def define[T]():
+        @retain
+        def twice[U](value):
+            return 2 * value
+    return define
+",
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let before = module.standalone().unwrap();
+        let def = module.syntax.as_mut().unwrap().to_mut()[0]
+            .as_function_def_stmt_mut()
+            .unwrap();
+        let start = def.start();
+        def.body.clear();
+        assert_eq!(module.standalone().unwrap(), before);
+
+        let suite = test_function_suite(&mut module.source, start);
+        let Some(crate::ir::Statement::Return(result)) =
+            suite.plan.checked.function.body.last_mut()
+        else {
+            panic!("expected the checked return after the nested declaration");
+        };
+        *result = crate::ir::Expr::none();
+        assert_ne!(module.standalone().unwrap(), before);
+    }
+
+    #[test]
     fn mixed_for_emits_after_its_source_statement_is_erased() {
         let source = concat!(
             "def capture(rows):\n",
@@ -1800,7 +1849,6 @@ mod tests {
             .as_function_def_stmt()
             .unwrap();
         let start = def.start();
-        let body_start = def.body[0].start();
         // Withhold template spelling from the suite planner. The physical child can
         // still read the real prepared template, even after its enclosing loop is erased.
         let missing = HashMap::new();
@@ -1823,8 +1871,8 @@ mod tests {
         let (sites, nested) = (physical.sites, physical.nested);
         module.source.statement_sites = sites;
         module.source.nested_bodies.extend(nested);
-        module.source.function_bodies.remove(&start);
-        let plan = &module.source.nested_bodies[&body_start];
+        install_test_function_body(&mut module.source, def);
+        let plan = &test_function_suite(&mut module.source, start).plan;
         let [run] = plan.residual.as_slice() else {
             panic!("expected a mixed for")
         };
@@ -1877,7 +1925,12 @@ mod tests {
         let parsed = ruff_python_parser::parse_module(text).unwrap();
         let outer = parsed.syntax().body[0].as_function_def_stmt().unwrap();
         let scoped = outer.body[0].as_function_def_stmt().unwrap();
-        assert!(module.source.nested_bodies[&scoped.body[0].start()].fully_checked());
+        assert!(
+            module.source.function_bodies[&scoped.start()]
+                .suite()
+                .unwrap()
+                .fully_checked()
+        );
     }
 
     #[test]
@@ -1928,7 +1981,7 @@ mod tests {
         let (sites, nested) = (plan.sites, plan.nested);
         module.source.statement_sites = sites;
         module.source.nested_bodies.extend(nested);
-        module.source.function_bodies.remove(&function.start());
+        install_test_function_body(&mut module.source, function);
 
         let original = module.standalone().unwrap();
         let def = module.syntax.as_mut().unwrap().to_mut()[0]
@@ -3047,9 +3100,9 @@ mod tests {
             prepared.source.statement_sites,
             prepared.source.nested_bodies,
         ) = (physical.sites, physical.nested);
-        prepared.source.function_bodies.remove(&function.start());
-        let position = function.body[0].start();
-        let suite = &prepared.source.nested_bodies[&position];
+        let position = function.start();
+        install_test_function_body(&mut prepared.source, function);
+        let suite = &test_function_suite(&mut prepared.source, position).plan;
         let [run] = suite.residual.as_slice() else {
             panic!("expected a mixed context")
         };
@@ -3074,7 +3127,7 @@ mod tests {
         assert_eq!(prepared.standalone().unwrap(), original);
 
         // The expression statement owns the one call that still needs its lambda child.
-        let suite = prepared.source.nested_bodies.get_mut(&position).unwrap();
+        let suite = &mut test_function_suite(&mut prepared.source, position).plan;
         let Some(crate::frontend::SourceEffect::Context(context)) = &mut suite.residual[0].effect
         else {
             panic!("expected the mixed context");
@@ -3620,14 +3673,10 @@ mod tests {
             sites::CheckedSites::visit(&body.function.body, &mut |site| required.push(site));
             if i == 0 {
                 assert!(required.is_empty());
-                let CheckedHeader::Declaration {
+                let DeclarationMetadata {
                     docstring,
                     integer_sign_parameters,
-                    ..
-                } = module.source.checked_function_header(def.start()).unwrap()
-                else {
-                    panic!("missing annotated header");
-                };
+                } = &module.source.function_bodies[&def.start()].declaration;
                 assert_eq!(docstring.as_deref(), Some("Record the sign."));
                 assert_eq!(integer_sign_parameters.as_slice(), ["value"]);
             } else {
@@ -4242,7 +4291,6 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             .as_function_def_stmt()
             .unwrap();
         let function_start = function.start();
-        let try_start = function.body[0].start();
         // Withhold the descriptors from suite preparation alone so these operands
         // still use their real compiled lambda children during emission.
         let missing = HashMap::new();
@@ -4265,9 +4313,13 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         let (sites, nested) = (plan.sites, plan.nested);
         module.source.statement_sites = sites;
         module.source.nested_bodies.extend(nested);
-        module.source.function_bodies.remove(&function_start);
+        install_test_function_body(&mut module.source, function);
 
-        let [run] = module.source.nested_bodies[&try_start].residual.as_slice() else {
+        let [run] = test_function_suite(&mut module.source, function_start)
+            .plan
+            .residual
+            .as_slice()
+        else {
             panic!("expected a single mixed try");
         };
         let Some(SourceEffect::Try(region)) = &run.effect else {
@@ -4292,11 +4344,8 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         .into();
         assert_eq!(module.standalone().unwrap(), original);
 
-        let run = &mut module
-            .source
-            .nested_bodies
-            .get_mut(&try_start)
-            .unwrap()
+        let run = &mut test_function_suite(&mut module.source, function_start)
+            .plan
             .residual[0];
         let Some(SourceEffect::Try(region)) = &mut run.effect else {
             unreachable!()
@@ -4423,7 +4472,6 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             .as_function_def_stmt()
             .unwrap();
         let function = def.start();
-        let body_start = def.body[0].start();
         // Withhold the child descriptor only from suite lowering. The physical
         // message still uses the real compiled child when the assertion fails.
         let missing = HashMap::new();
@@ -4470,8 +4518,12 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         let (sites, nested) = (physical.sites, physical.nested);
         module.source.statement_sites = sites;
         module.source.nested_bodies.extend(nested);
-        module.source.function_bodies.remove(&function);
-        let [run] = module.source.nested_bodies[&body_start].residual.as_slice() else {
+        install_test_function_body(&mut module.source, def);
+        let [run] = test_function_suite(&mut module.source, function)
+            .plan
+            .residual
+            .as_slice()
+        else {
             panic!("expected the assertion's external message");
         };
         let Some(crate::frontend::SourceEffect::Assertion(site)) = &run.effect else {
@@ -4506,7 +4558,15 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             .as_function_def_stmt_mut()
             .unwrap();
         let assertion = def.body[0].as_assert_stmt_mut().unwrap();
-        *assertion.msg.as_deref_mut().unwrap() = replacement;
+        *assertion.msg.as_deref_mut().unwrap() = replacement.clone();
+        assert_eq!(module.standalone().unwrap(), original);
+        let suite = test_function_suite(&mut module.source, function);
+        *suite.sources[0]
+            .as_assert_stmt_mut()
+            .unwrap()
+            .msg
+            .as_deref_mut()
+            .unwrap() = replacement;
         assert_ne!(module.standalone().unwrap(), original);
     }
 
@@ -5281,7 +5341,9 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             .as_function_def_stmt()
             .unwrap();
         let class = outer.body[0].as_class_def_stmt().unwrap();
-        assert!(!prepared.source.function_bodies.contains_key(&outer.start()));
+        let outer_body = &prepared.source.function_bodies[&outer.start()];
+        assert!(matches!(outer_body.body, FunctionBody::Suite(_)));
+        assert!(outer_body.header.is_none());
         let class_start = class.start();
         let suite = &prepared.source.class_bodies[&class_start].body.plan;
         assert!(
