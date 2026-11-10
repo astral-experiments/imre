@@ -2437,14 +2437,18 @@ pub(crate) fn inline_operand(
     native_suspension: bool,
 ) -> StdResult<Option<RegisteredOperand>, (TextRange, &'static str)> {
     match expr {
-        ast::Expr::Dict(_) | ast::Expr::Named(_) => {
-            let is_dict = expr.is_dict_expr();
+        ast::Expr::List(_)
+        | ast::Expr::Tuple(_)
+        | ast::Expr::Set(_)
+        | ast::Expr::Dict(_)
+        | ast::Expr::Named(_) => {
+            let is_named = expr.is_named_expr();
             let mut refusal = None;
             let operand = RegisteredOperand::prepare_with(source, kind, |scope| {
-                if is_dict {
-                    scope.suspending_operands = native_suspension;
-                } else {
+                if is_named {
                     scope.diagnostic_suspension = Some(native_suspension);
+                } else {
+                    scope.suspending_operands = native_suspension;
                 }
                 let value = scope.operand(expr);
                 refusal = scope.refusal;
@@ -2454,10 +2458,14 @@ pub(crate) fn inline_operand(
                 refusal.unwrap_or_else(|| {
                     (
                         expr.range(),
-                        if is_dict {
-                            "cannot compile this dictionary display ahead of time"
-                        } else {
-                            "cannot compile this assignment expression ahead of time"
+                        match expr {
+                            ast::Expr::Dict(_) => {
+                                "cannot compile this dictionary display ahead of time"
+                            }
+                            ast::Expr::Named(_) => {
+                                "cannot compile this assignment expression ahead of time"
+                            }
+                            _ => "cannot compile this collection display ahead of time",
                         },
                     )
                 })

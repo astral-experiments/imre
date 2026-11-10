@@ -144,8 +144,6 @@ impl Function<'_, '_> {
             } else {
                 result.into_handle()
             }
-        } else if let Some((items, display)) = crate::frontend::display_elements(expr) {
-            self.sequence_display(items, display, None, ast_spread, Self::expr)
         } else if let Some(inputs) = self.source.statement_sites.expressions.physical(expr) {
             let handles = inputs
                 .operands(expr, self.native_suspension)
@@ -301,8 +299,4 @@ impl Function<'_, '_> {
             }
         })
     }
-}
-
-fn ast_spread(element: &ast::Expr) -> Option<&ast::Expr> {
-    element.as_starred_expr().map(|star| star.value.as_ref())
 }

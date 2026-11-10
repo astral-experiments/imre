@@ -487,8 +487,7 @@ pub(super) fn number_literal(number: &ast::Number, minus: bool) -> ExprKind {
     }
 }
 
-/// Identify the sequence operation even when an individual operand still needs its source adapter.
-pub(crate) fn display_elements(node: &ast::Expr) -> Option<(&[ast::Expr], DisplayKind)> {
+fn display_elements(node: &ast::Expr) -> Option<(&[ast::Expr], DisplayKind)> {
     match node {
         ast::Expr::List(list) => Some((&list.elts, DisplayKind::List)),
         ast::Expr::Tuple(tuple) => Some((&tuple.elts, DisplayKind::Tuple)),
@@ -734,6 +733,9 @@ fn display_operands<E>(
                         kind: number_literal(&n.value, op.op == ast::UnaryOp::USub),
                     },
                 ))
+            } else if item.is_slice_expr() {
+                // An extended subscript key can mix a slice with other tuple elements.
+                index_key(item, child)
             } else {
                 collection_item(item, &mut *child)
             }
