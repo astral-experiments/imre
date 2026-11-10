@@ -33,6 +33,12 @@ pub(crate) enum CheckedValue {
     },
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ValueUse {
+    General,
+    IntegerOperand,
+}
+
 impl CheckedValue {
     pub(crate) fn handle(id: String) -> Self {
         Self::Handle {
@@ -54,15 +60,23 @@ impl CheckedValue {
         }
     }
 
-    /// Keep an available native result through addition or subtraction. Two rooted
-    /// handles need either two known words or a checked integer whose word
-    /// still needs a guard. One known word alone cannot justify probing its peer.
-    fn can_use_integer_arithmetic(&self, left: Type, other: &Self, right: Type) -> bool {
+    /// An integer consumer can use the result without boxing it. In that case
+    /// one available word is enough to try projecting the other operand.
+    fn can_use_integer_arithmetic(
+        &self,
+        left: Type,
+        other: &Self,
+        right: Type,
+        usage: ValueUse,
+    ) -> bool {
         match (self, other) {
             (Self::Handle { exact_word: a, .. }, Self::Handle { exact_word: b, .. }) => {
-                (a.is_some() && b.is_some())
-                    || (a.is_none() && left == Type::Int)
-                    || (b.is_none() && right == Type::Int)
+                match (a, b) {
+                    (Some(_), Some(_)) => true,
+                    (Some(_), None) => right == Type::Int || usage == ValueUse::IntegerOperand,
+                    (None, Some(_)) => left == Type::Int || usage == ValueUse::IntegerOperand,
+                    (None, None) => left == Type::Int || right == Type::Int,
+                }
             }
             _ => true,
         }
@@ -169,9 +183,13 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
     }
 
     fn operand(&mut self, expr: &Expr) -> CheckedValue {
+        self.operand_for(expr, ValueUse::General)
+    }
+
+    fn operand_for(&mut self, expr: &Expr, usage: ValueUse) -> CheckedValue {
         match &mut self.0 {
             Entry::Native(emitter) => CheckedValue::native(emitter.operand(expr)),
-            Entry::Registered(_) => self.emit_value(expr),
+            Entry::Registered(_) => self.value_for(expr, usage),
         }
     }
 
@@ -382,6 +400,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         right: &Expr,
         expr: &Expr,
         fixed_site: bool,
+        usage: ValueUse,
     ) -> CheckedValue {
         if let Entry::Native(emitter) = &mut self.0
             && let Some(value) = emitter.specialized_binary(op, left, right, expr)
@@ -394,13 +413,20 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             (true, Binary::Repeat) => Binary::Multiply,
             _ => op,
         };
-        let (a, b) = (self.operand(left), self.operand(right));
-        let result = if matches!(op, Binary::Add | Binary::Subtract | Binary::Multiply)
-            && (fixed_site
-                || expr.ty == Type::PythonObject
-                || left.ty == Type::Int && right.ty == Type::Int)
+        let checked_ints = left.ty == Type::Int && right.ty == Type::Int;
+        let arithmetic = matches!(op, Binary::Add | Binary::Subtract | Binary::Multiply)
+            && (fixed_site || expr.ty == Type::PythonObject || checked_ints);
+        let operand_use = if arithmetic
+            && (op == Binary::Multiply || checked_ints || usage == ValueUse::IntegerOperand)
         {
-            if matches!(op, Binary::Multiply) || a.can_use_integer_arithmetic(left.ty, &b, right.ty)
+            ValueUse::IntegerOperand
+        } else {
+            ValueUse::General
+        };
+        let a = self.operand_for(left, operand_use);
+        let b = self.operand_for(right, operand_use);
+        let result = if arithmetic {
+            if op == Binary::Multiply || a.can_use_integer_arithmetic(left.ty, &b, right.ty, usage)
             {
                 self.integer_arithmetic(op, &a, &b)
             } else {
@@ -417,6 +443,10 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
     }
 
     pub(crate) fn emit_value(&mut self, expr: &Expr) -> CheckedValue {
+        self.value_for(expr, ValueUse::General)
+    }
+
+    fn value_for(&mut self, expr: &Expr, usage: ValueUse) -> CheckedValue {
         if let Entry::Registered(frame) = &mut self.0
             && let Some(range) = frame.next_fixed_site()
         {
@@ -424,14 +454,19 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 return frame.load_fixed_field(receiver, range);
             }
             return frame.located_value(range, range.start(), |frame| {
-                CheckedBody::registered(frame.reborrow()).emit_operation(expr, true)
+                CheckedBody::registered(frame.reborrow()).emit_operation(expr, true, usage)
             });
         }
-        self.emit_operation(expr, false)
+        self.emit_operation(expr, false, usage)
     }
 
-    fn emit_operation(&mut self, expr: &Expr, fixed_site: bool) -> CheckedValue {
+    fn emit_operation(&mut self, expr: &Expr, fixed_site: bool, usage: ValueUse) -> CheckedValue {
         match &expr.kind {
+            ExprKind::Builtin(Builtin::RegisteredLocation(range, position), operands) => {
+                self.python().located_value(*range, *position, |frame| {
+                    CheckedBody::registered(frame.reborrow()).value_for(&operands[0], usage)
+                })
+            }
             ExprKind::Int(text) => {
                 let integer = text.parse::<i64>().ok();
                 match &mut self.0 {
@@ -538,7 +573,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 }
             },
             ExprKind::Binary(op, left, right) => {
-                self.binary_expression(*op, left, right, expr, fixed_site)
+                self.binary_expression(*op, left, right, expr, fixed_site, usage)
             }
             ExprKind::Builtin(Builtin::FormatJoin, parts) => match &mut self.0 {
                 Entry::Native(emitter) => CheckedValue::owned(emitter.concat(expr)),

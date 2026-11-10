@@ -904,9 +904,6 @@ impl Frame<'_, '_, '_> {
                     .code
                     .interpolation(&value, expression, *conversion, &spec)
             }),
-            (Builtin::RegisteredLocation(range, position), [value]) => {
-                return self.located_value(*range, *position, |frame| frame.evaluate(value));
-            }
             (Builtin::RegisteredLambda(site, scoped), operands) => {
                 let mut operands = operands.iter();
                 let scope = if *scoped {
