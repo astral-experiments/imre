@@ -1202,15 +1202,19 @@ impl statements::StatementLowering for SourceScope<'_> {
                 Ok((vec![Statement::Continue], false))
             }
             ast::Stmt::Global(_) | ast::Stmt::Nonlocal(_) => Ok((Vec::new(), true)),
-            ast::Stmt::AnnAssign(ann) if matches!(self.kind, RegisteredScope::Module) => {
-                let marker = self.operations.get(&ann.target.range()).ok_or(())?.clone();
+            ast::Stmt::AnnAssign(ann) if !matches!(self.kind, RegisteredScope::Class) => {
+                let name = ann.target.as_name_expr().ok_or(())?;
                 let mut body = Vec::new();
                 if let Some(value) = &ann.value {
-                    let name = ann.target.as_name_expr().ok_or(())?;
                     let value = self.operand(value).ok_or(())?;
                     body.push(self.store(name.id.as_str(), value));
                 }
-                body.push(Statement::Expr(marker));
+                // A function-local annotation has no runtime operand. A simple
+                // module annotation records its declaration for later evaluation.
+                if matches!(self.kind, RegisteredScope::Module) && ann.simple {
+                    let marker = self.operations.get(&ann.target.range()).ok_or(())?;
+                    body.push(Statement::Expr(marker.clone()));
+                }
                 Ok((body, true))
             }
             ast::Stmt::Delete(delete) => {
@@ -2867,6 +2871,23 @@ mod tests {
             (2, 2, 2)
         );
         assert!(finalbody.is_empty() && crate::llvm::registered::supports(&checked));
+    }
+
+    #[test]
+    fn local_annotation_uses_only_the_assigned_value() {
+        let graph = SourceGraph::single("header: missing() = ()\nother: missing()\n").unwrap();
+        let entry = &graph.modules[graph.entry];
+        let checked = registered_suite(
+            &entry.parsed.syntax().body,
+            RegisteredScope::Function { is_async: false },
+            values::ModuleSource::new(entry).context(&entry.source),
+        )
+        .expect("function-local annotations need no execution-time provider");
+        let mut calls = 0;
+        ir::walk_expressions(&checked.function.body, &mut |value| {
+            calls += usize::from(matches!(value.kind, ExprKind::Builtin(Builtin::RegisteredCall(_), _)));
+        });
+        assert_eq!(calls, 0);
     }
 
     #[test]
