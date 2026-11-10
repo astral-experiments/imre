@@ -876,7 +876,7 @@ fn checked_assertion(
 #[derive(Default)]
 pub(crate) struct StatementSites {
     pub(crate) assertions: HashMap<TextRange, Vec<Statement>>,
-    pub(crate) ifs: HashMap<TextRange, Vec<SourceGuard>>,
+    pub(crate) ifs: HashMap<TextRange, SourceConditional>,
     pub(crate) matches: HashMap<TextRange, Option<patterns::SourceMatch>>,
     pub(crate) contexts: HashMap<TextRange, Vec<ContextInput>>,
 }
@@ -919,13 +919,64 @@ impl ContextTarget {
     }
 }
 
-/// A residual arm keeps its source test in the source adapter. Compilable tests
-/// are already owned IR when the enclosing statement needs a residual arm.
+/// Source sites for a statement which could not be lowered as a complete checked block.
+pub(crate) struct SourceConditional(Vec<SourceIfArm>);
+
+pub(crate) struct SourceIfArm {
+    clause: Option<usize>,
+    pub(crate) body_start: Option<TextSize>,
+    guard: Option<SourceGuard>,
+}
+
 pub(crate) enum SourceGuard {
     Literal(bool),
     Checked(Expr),
     Residual,
-    Otherwise,
+}
+
+impl SourceIfArm {
+    pub(crate) fn test<'a>(&self, source: &'a ast::StmtIf) -> &'a ast::Expr {
+        match self.clause {
+            Some(index) => source.elif_else_clauses[index]
+                .test
+                .as_ref()
+                .expect("conditional guard"),
+            None => &source.test,
+        }
+    }
+
+    pub(crate) fn body<'a>(&self, source: &'a ast::StmtIf) -> &'a [ast::Stmt] {
+        match self.clause {
+            Some(index) => &source.elif_else_clauses[index].body,
+            None => &source.body,
+        }
+    }
+}
+
+impl SourceConditional {
+    /// Dead literal arms in a suspended frame have no resume entry.
+    pub(crate) fn arms(
+        &self,
+        suspended: bool,
+    ) -> impl Iterator<Item = (Option<&SourceGuard>, &SourceIfArm)> {
+        self.0.iter().filter_map(move |arm| {
+            let test = match &arm.guard {
+                Some(SourceGuard::Literal(false)) if suspended => return None,
+                Some(SourceGuard::Literal(true)) if suspended => None,
+                guard => guard.as_ref(),
+            };
+            Some((test, arm))
+        })
+    }
+}
+
+fn if_clauses(branch: &ast::StmtIf) -> impl Iterator<Item = (Option<&ast::Expr>, &[ast::Stmt])> {
+    std::iter::once((Some(branch.test.as_ref()), branch.body.as_slice())).chain(
+        branch
+            .elif_else_clauses
+            .iter()
+            .map(|clause| (clause.test.as_ref(), clause.body.as_slice())),
+    )
 }
 
 fn statement_sites(
@@ -985,12 +1036,15 @@ fn statement_sites(
                             .map_or(SourceGuard::Residual, SourceGuard::Checked)
                     }
                 };
-                let tests = std::iter::once(guard(&branch.test))
-                    .chain(branch.elif_else_clauses.iter().map(|clause| {
-                        clause.test.as_ref().map_or(SourceGuard::Otherwise, guard)
-                    }))
+                let arms = if_clauses(branch)
+                    .enumerate()
+                    .map(|(index, (test, body))| SourceIfArm {
+                        clause: index.checked_sub(1),
+                        body_start: body.first().map(Ranged::start),
+                        guard: test.map(guard),
+                    })
                     .collect();
-                self.sites.ifs.insert(stmt.range(), tests);
+                self.sites.ifs.insert(stmt.range(), SourceConditional(arms));
             }
             walk_stmt(self, stmt);
         }
@@ -1472,13 +1526,7 @@ impl statements::StatementLowering for SourceScope<'_> {
         let mut arms = Vec::new();
         let mut otherwise = (Vec::new(), true);
         let mut falls = false;
-        let clauses = std::iter::once((Some(branch.test.as_ref()), branch.body.as_slice())).chain(
-            branch
-                .elif_else_clauses
-                .iter()
-                .map(|clause| (clause.test.as_ref(), clause.body.as_slice())),
-        );
-        for (test, suite) in clauses {
+        for (test, suite) in if_clauses(branch) {
             if let Some(test) = test {
                 let condition = truth(self.operand(test).ok_or(())?);
                 let (body, continues) = self.block(suite)?;

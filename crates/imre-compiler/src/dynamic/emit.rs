@@ -1874,6 +1874,69 @@ mod tests {
     }
 
     #[test]
+    fn mixed_if_emits_only_the_unprepared_guard_and_statements_from_source() {
+        fn branch<'a>(prepared: &'a mut PreparedBody<'_, '_>) -> &'a mut ast::StmtIf {
+            prepared.syntax.as_mut().unwrap().to_mut()[0]
+                .as_if_stmt_mut()
+                .unwrap()
+        }
+
+        fn erased(expr: &ast::Expr) -> ast::Expr {
+            ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
+                range: expr.range(),
+                node_index: Default::default(),
+            })
+        }
+
+        let source = concat!(
+            "if ready():\n    accepted()\n",
+            "elif probe((lambda: (value := x))() async for x in rows()):\n",
+            "    before()\n",
+            "    consume((lambda: (value := y))() async for y in rows())\n",
+            "    after()\n",
+            "else:\n    declined()\n",
+        );
+        let mut prepared = PreparedBody::module(
+            "example",
+            Path::new("example.py"),
+            source,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        assert!(prepared.source.initializer.as_ref().unwrap().fully_checked());
+        inject_residual_child_module(&mut prepared);
+        let original = prepared.standalone().unwrap().unwrap();
+        let stmt = prepared.syntax.as_ref().unwrap()[0].as_if_stmt().unwrap();
+        let suites = &prepared.source.nested_bodies;
+        assert!(suites[&stmt.body[0].start()].fully_checked());
+        let mixed = &suites[&stmt.elif_else_clauses[0].body[0].start()];
+        assert_eq!(mixed.residual.len(), 1);
+        assert_eq!(mixed.residual[0].statements, 1..2);
+
+        let stmt = branch(&mut prepared);
+        *stmt.test = erased(&stmt.test);
+        stmt.body.clear();
+        stmt.elif_else_clauses[1].body.clear();
+        assert!(prepared.standalone().unwrap().unwrap() == original);
+
+        let clause = &mut branch(&mut prepared).elif_else_clauses[0];
+        let guard = clause
+            .test
+            .replace(erased(clause.test.as_ref().unwrap()))
+            .unwrap();
+        assert!(prepared.standalone().unwrap().unwrap() != original);
+        let clause = &mut branch(&mut prepared).elif_else_clauses[0];
+        clause.test = Some(guard);
+        let body = &mut clause.body;
+        body[1] = ast::Stmt::Pass(ast::StmtPass {
+            range: body[1].range(),
+            node_index: Default::default(),
+        });
+        assert!(prepared.standalone().unwrap().unwrap() != original);
+    }
+
+    #[test]
     fn a_registered_match_renders_after_its_checked_input_syntax_is_erased() {
         let source = concat!(
             "match subject():\n",

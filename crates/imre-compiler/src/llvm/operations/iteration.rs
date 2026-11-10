@@ -343,7 +343,8 @@ impl CheckedBody<'_, '_, '_, '_> {
         super::join::choose(
             self,
             Self::body,
-            |code, t, f| {
+            [(Some(test), (yes, facts.as_ref())), (None, (no, None))],
+            |code, test, t, f| {
                 if let Some(facts) = &facts {
                     let bit = code.fixed().expr(test).operand;
                     code.fixed().if_edges(stmt, &bit, facts, t, f);
@@ -351,17 +352,16 @@ impl CheckedBody<'_, '_, '_, '_> {
                     code.branch_condition(test, t, f);
                 }
             },
-            |code| {
-                if let Some(facts) = &facts {
+            |code, (body, facts)| {
+                if let Some(facts) = facts {
                     code.fixed().enter_if_body(test, facts);
                 }
-                code.emit_block(yes);
-                if let Some(facts) = &facts {
+                code.emit_block(body);
+                if let Some(facts) = facts {
                     code.fixed().leave_if_body(facts);
                 }
             },
-            |code| code.emit_block(no),
-            |_, ()| {},
+            false,
         );
     }
 }

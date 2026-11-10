@@ -247,6 +247,45 @@ impl<'p> Function<'_, 'p> {
                 .map_or_else(|| stmt.range(), |assertion| assertion.test.range());
             self.checkpoint(&position);
             self.simple_call = imre_ast::unhighlighted_call(stmt);
+            if let Some(site) = self.source.statement_sites.ifs.get(&stmt.range()) {
+                use crate::frontend::SourceGuard;
+                let source = stmt.as_if_stmt().expect("prepared conditional");
+                let arms = site
+                    .arms(self.native_suspension)
+                    .map(|(guard, arm)| (guard.map(|guard| (guard, arm)), arm));
+                crate::llvm::operations::choose(
+                    self,
+                    |code| {
+                        code.flush_check();
+                        &mut code.frame.body
+                    },
+                    arms,
+                    |code, (guard, arm), yes, no| match guard {
+                        SourceGuard::Literal(taken) => {
+                            code.branch(if *taken { "true" } else { "false" }, yes, no);
+                        }
+                        SourceGuard::Checked(value) => {
+                            code.prepare_checked_value(value);
+                            code.frame.registered_branch(value, &code.sites, yes, no);
+                        }
+                        SourceGuard::Residual => code.branch_expr(arm.test(source), yes, no),
+                    },
+                    |code, arm| {
+                        if let Some(plan) = arm
+                            .body_start
+                            .and_then(|at| code.source.nested_bodies.get(&at))
+                        {
+                            code.checked_runs(plan, |code, run| {
+                                code.source_run(arm.body(source), run);
+                            });
+                        } else {
+                            code.source_statements(arm.body(source));
+                        }
+                    },
+                    true,
+                );
+                continue;
+            }
             if let Some(site) = self.source.statement_sites.matches.get(&stmt.range()) {
                 if let Some(site) = site {
                     self.emit_match_inputs(site, stmt.as_match_stmt().unwrap());
@@ -382,7 +421,6 @@ impl<'p> Function<'_, 'p> {
                     let function = self.apply_decorators(&decorators, &v.decorator_list, function);
                     self.bind(v.name.as_str(), &function);
                 }
-                ast::Stmt::If(v) => self.conditional_fragments(v),
                 ast::Stmt::For(v) => {
                     let iter = self.iteration_result(|code| {
                         let value = code.expr(&v.iter);
@@ -1183,57 +1221,6 @@ impl<'p> Function<'_, 'p> {
         let second = self.value(&format!("load i64, ptr {second_slot}"));
         self.assign(left, &first);
         self.assign(right, &second);
-    }
-
-    /// Return whether control can reach a subsequent arm.
-    fn conditional_fragments(&mut self, stmt: &'p ast::StmtIf) {
-        use crate::frontend::SourceGuard;
-        use crate::llvm::operations::Choice;
-        let guards = &self.source.statement_sites.ifs[&stmt.range()];
-        let fragments = std::iter::once((Some(stmt.test.as_ref()), stmt.body.as_slice())).chain(
-            stmt.elif_else_clauses
-                .iter()
-                .map(|part| (part.test.as_ref(), part.body.as_slice())),
-        );
-        let mut choice = Choice::new(&mut self.frame.body);
-        for (guard, (test, body)) in guards.iter().zip(fragments) {
-            let next = match guard {
-                SourceGuard::Otherwise => None,
-                SourceGuard::Literal(taken) if self.native_suspension => {
-                    if !taken {
-                        continue;
-                    }
-                    None
-                }
-                guard => {
-                    let (yes, no) = Choice::successors(&mut self.frame.body);
-                    match guard {
-                        SourceGuard::Literal(taken) => {
-                            self.branch(if *taken { "true" } else { "false" }, &yes, &no)
-                        }
-                        SourceGuard::Checked(value) => {
-                            self.prepare_checked_value(value);
-                            self.frame.registered_branch(value, &self.sites, &yes, &no);
-                        }
-                        SourceGuard::Residual => {
-                            self.branch_expr(test.expect("residual if guard"), &yes, &no)
-                        }
-                        SourceGuard::Otherwise => unreachable!(),
-                    }
-                    self.label(&yes);
-                    Some(no)
-                }
-            };
-            self.statements(body);
-            self.flush_check();
-            choice.finish_arm(&mut self.frame.body);
-            let Some(next) = next else { break };
-            self.label(&next);
-        }
-        // A residual suite can contain a suspension that resumes in a later block.
-        self.flush_check();
-        choice.finish_arm(&mut self.frame.body);
-        choice.finish(&mut self.frame.body, true);
     }
 
     fn loop_body(
