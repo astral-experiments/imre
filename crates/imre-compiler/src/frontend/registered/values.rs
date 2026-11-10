@@ -829,7 +829,7 @@ pub(super) fn has_checked_lambda_body(
         Some(sites) => sites
             .get(&lambda.start())
             .is_some_and(|site| site.body.is_some()),
-        None => Region::Lambda.operand(&lambda.body, source).is_some(),
+        None => RegisteredLambda::body(lambda, source).is_some(),
     }
 }
 
@@ -845,7 +845,7 @@ pub(super) fn checked_binding(
             .map(|default| default.inline().cloned())
             .collect::<Option<_>>()?
     } else {
-        Region::Lambda.operand(&lambda.body, source)?;
+        RegisteredLambda::body(lambda, source)?;
         lambda_defaults(lambda)
             .map(|default| Region::Lambda.operand(default, source))
             .collect::<Option<_>>()?

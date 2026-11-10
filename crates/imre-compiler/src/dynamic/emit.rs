@@ -1862,21 +1862,25 @@ mod tests {
         let mut prepared = PreparedBody::module(
             "scan",
             Path::new("scan.py"),
-            "cursor = (emit(y) for x in rows((lambda: [key for key in keys])()) if keep(x) for y in children(x))\n",
+            concat!(
+                "def receive():\n",
+                "    cursor = (emit(y) for x in (yield [key for key in keys]) if keep(x) for y in children(x))\n",
+                "    yield cursor\n",
+            ),
             0,
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        let initializer = prepared.source.initializer.as_ref().unwrap();
-        assert!(!initializer.fully_checked());
-        let site = prepared.syntax.as_ref().unwrap()[0].as_assign_stmt().unwrap().value.range();
+        let enclosing = prepared.syntax.as_ref().unwrap()[0].as_function_def_stmt().unwrap();
+        let site = enclosing.body[0].as_assign_stmt().unwrap().value.range();
         assert!(prepared.source.generators.contains_key(&site));
         let before = prepared.standalone().unwrap().unwrap();
         assert!(before.1.contains("call void @imre_dyn_suspend_operands("));
 
-        let assignment = prepared.syntax.as_mut().unwrap().to_mut()[0]
-            .as_assign_stmt_mut()
+        let enclosing = prepared.syntax.as_mut().unwrap().to_mut()[0]
+            .as_function_def_stmt_mut()
             .unwrap();
+        let assignment = enclosing.body[0].as_assign_stmt_mut().unwrap();
         let generator = assignment.value.as_generator_expr_mut().unwrap();
         // The caller still evaluates the outer iterable. Only the child owns
         // the target, filters, inner loop and yield operand.
