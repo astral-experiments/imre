@@ -518,7 +518,7 @@ fn iterator_paths_recheck_the_suspended_operands() {
     });
     let wrapper = heap.alloc(Value::CoroutineWrapper(coroutine));
     let mapped = heap.alloc(Value::Map {
-        function: NONE,
+        function: crate::dynamic::zip::MapFunction::Python(NONE),
         inputs: [wrapper].into(),
         strict: false,
     });

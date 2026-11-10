@@ -69,6 +69,17 @@ def current():
         pull(cursor)
         print(events)
 
+    cursor = map(int, "３x7")
+    print(next(cursor))
+    pull(cursor)
+    print(list(cursor))
+
+    class Character(str):
+        def __int__(self):
+            return 41
+
+    print(list(map(int, [Character("7")])))
+
     cursor = map(str, [1, 2, 3])
     for first in cursor:
         print(first, cursor.__next__())
