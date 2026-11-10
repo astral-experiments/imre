@@ -1314,7 +1314,7 @@ impl RegisteredFrame<'_, '_> {
     }
 
     /// Emit a registered expression whose names are resolved through this live frame.
-    fn with_checked_frame<R>(
+    pub(crate) fn with_checked_frame<R>(
         &mut self,
         sites: &CheckedSites,
         names: Option<&HashMap<usize, LocalBinding>>,
@@ -1354,17 +1354,6 @@ impl RegisteredFrame<'_, '_> {
         self.with_checked_frame(sites, None, |frame| {
             CheckedBody::registered(frame).branch_condition(test, yes, no)
         })
-    }
-
-    pub(crate) fn logical_operand(
-        &mut self,
-        plan: &mut super::operations::branches::Logical,
-        step: usize,
-        operand: super::operations::branches::LogicalOperand,
-    ) {
-        self.with_checked_frame(&CheckedSites::default(), None, |frame| {
-            plan.accept(&mut CheckedBody::registered(frame), step, operand)
-        });
     }
 
     pub(crate) fn registered_value(&mut self, expression: &Expr, sites: &CheckedSites) -> String {

@@ -98,6 +98,15 @@ impl LogicalSites {
             .flatten()
     }
 
+    pub(crate) fn value<'a>(
+        &'a self,
+        node: &'a ast::Expr,
+        source: RegisteredSource<'_>,
+    ) -> Option<(Edges, Vec<SourceOperand<'a>>)> {
+        matches!(node.split(Context::Value), Split::Operands(..))
+            .then(|| prepare_boolean(node, Context::Value, source, self))
+    }
+
     pub(crate) fn conditional<'a>(&'a self, node: &'a ast::Expr) -> Option<[SourceOperand<'a>; 3]> {
         let children = conditional_parts(node)?;
         Some(match self.selected.get(&node.range()) {
