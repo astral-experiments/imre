@@ -60,8 +60,8 @@ struct FrameLine<'a> {
     file: TraceText<'a>,
     path: Option<&'a Path>,
     embedded_source: Option<&'a str>,
-    name: &'a str,
-    line: i64,
+    name: Option<&'a str>,
+    line: i128,
     span: Option<TracebackSpan>,
 }
 
@@ -113,14 +113,18 @@ impl<'a> FrameLine<'a> {
             file,
             path,
             embedded_source,
-            name: ctx.str_value(code.name)?,
-            line,
+            name: Some(ctx.str_value(code.name)?),
+            line: i128::from(line),
             span,
         })
     }
 
     fn formatted_suffix(&self, source: Option<&str>) -> String {
-        let mut out = format!("\", line {}, in {}\n", self.line, self.name);
+        let mut out = format!("\", line {}", self.line);
+        if let Some(name) = self.name {
+            let _ = write!(out, ", in {name}");
+        }
+        out.push('\n');
         let Some(raw) = usize::try_from(self.line)
             .ok()
             .and_then(|line| line.checked_sub(1))
@@ -138,7 +142,7 @@ impl<'a> FrameLine<'a> {
         let _ = writeln!(out, "    {line}");
         if let Some([start, split, end]) = self
             .span
-            .filter(|s| i64::from(s.end_line) == self.line)
+            .filter(|s| i128::from(s.end_line) == self.line)
             .and_then(|s| {
                 let end = s.end as usize;
                 let split = match s.anchor {
@@ -367,45 +371,84 @@ fn captured_frames(
             FrameLine::new(ctx, *code, *line, *span, path)
         })
         .collect::<Result<Vec<_>>>()?;
-    render_frame_lines(&stack, lines);
+    render_frame_lines(stack.into_iter(), |line| lines.push(line));
     Ok(())
 }
 
-fn render_frame_lines(stack: &[FrameLine<'_>], lines: &mut Vec<TraceText<'static>>) {
-    if !stack.is_empty() {
-        lines.push(TraceText::Scalar(
-            "Traceback (most recent call last):\n".into(),
-        ));
-        let mut sources = HashMap::new();
-        let mut i = 0;
-        while i < stack.len() {
-            let same = stack[i..]
-                .iter()
-                .take_while(|f| {
-                    f.file == stack[i].file && f.name == stack[i].name && f.line == stack[i].line
-                })
-                .count();
-            for frame in &stack[i..i + same.min(3)] {
-                let source = frame.embedded_source.or_else(|| {
-                    sources
-                        .entry(&frame.file)
-                        .or_insert_with(|| std::fs::read_to_string(frame.path?).ok())
-                        .as_deref()
-                });
-                let suffix = frame.formatted_suffix(source);
-                lines.push(frame.file.surrounded("  File \"", &suffix));
+/// Explicit native raises retain their physical file and line on the exception.
+pub(crate) fn write_raise_origins(
+    origins: &[(crate::StrOwner, u64)],
+    out: &mut impl std::io::Write,
+) {
+    let frames = origins.iter().rev().map(|(file, line)| {
+        let file = file.as_str();
+        FrameLine {
+            file: TraceText::Scalar(Cow::Borrowed(file)),
+            path: (!(file.starts_with('<') && file.ends_with('>'))).then(|| Path::new(file)),
+            embedded_source: None,
+            name: None,
+            line: i128::from(*line),
+            span: None,
+        }
+    });
+    render_frame_lines(frames, |line| {
+        let TraceText::Scalar(text) = line else {
+            unreachable!("native origins have UTF-8 filenames")
+        };
+        let _ = out.write_all(text.as_bytes());
+    });
+}
+
+fn render_frame_lines<'a>(
+    frames: impl Iterator<Item = FrameLine<'a>>,
+    mut emit: impl FnMut(TraceText<'static>),
+) {
+    let mut frames = frames.peekable();
+    if frames.peek().is_none() {
+        return;
+    }
+    emit(TraceText::Scalar(
+        "Traceback (most recent call last):\n".into(),
+    ));
+    let mut sources = HashMap::new();
+    while let Some(first) = frames.next() {
+        let same = |next: &FrameLine<'_>| {
+            first.name.is_some()
+                && next.file == first.file
+                && next.name == first.name
+                && next.line == first.line
+        };
+        let mut render = |frame: &FrameLine<'a>| {
+            let source = frame.embedded_source.or_else(|| {
+                let path = frame.path?;
+                sources
+                    .entry(path)
+                    .or_insert_with(|| std::fs::read_to_string(path).ok())
+                    .as_deref()
+            });
+            emit(
+                frame
+                    .file
+                    .surrounded("  File \"", &frame.formatted_suffix(source)),
+            );
+        };
+        render(&first);
+        let mut count = 1;
+        while let Some(frame) = frames.next_if(same) {
+            count += 1;
+            if count <= 3 {
+                render(&frame);
             }
-            if same > 3 {
-                let count = same - 3;
-                lines.push(TraceText::Scalar(
-                    format!(
-                        "  [Previous line repeated {count} more time{}]\n",
-                        if count == 1 { "" } else { "s" }
-                    )
-                    .into(),
-                ));
-            }
-            i += same;
+        }
+        if count > 3 {
+            let repeated = count - 3;
+            emit(TraceText::Scalar(
+                format!(
+                    "  [Previous line repeated {repeated} more time{}]\n",
+                    if repeated == 1 { "" } else { "s" }
+                )
+                .into(),
+            ));
         }
     }
 }

@@ -4,6 +4,7 @@
 use crate::dynamic::value::SlotStorage;
 pub(crate) use stdlib::hashlib::digest::State as DigestState;
 pub(crate) use stdlib::provider_available;
+pub(crate) use stdlib::traceback::write_raise_origins;
 
 mod abstract_class;
 mod allocation_traces;

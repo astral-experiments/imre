@@ -2704,11 +2704,8 @@ fn write_exception_chain(exception: crate::ObjectOwner) {
             };
             let _ = writeln!(diagnostic, "\n{separator}\n");
         }
-        if let Some(origins) = origins.filter(|frames| !frames.is_empty()) {
-            let _ = writeln!(diagnostic, "Traceback (most recent call last):");
-            for (filename, line) in origins.iter().rev() {
-                let _ = writeln!(diagnostic, "  File \"{filename}\", line {line}");
-            }
+        if let Some(origins) = origins {
+            crate::dynamic::write_raise_origins(&origins, &mut *diagnostic);
         }
         if let Some(hint) = suggestion {
             let _ = writeln!(diagnostic, "{name}: {message}. Did you mean: '{hint}'?");
