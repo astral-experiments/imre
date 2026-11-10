@@ -1527,6 +1527,31 @@ print("result", call(b=2, a=1))
     }
 
     #[test]
+    fn bytes_of_a_boxed_sorted_list_keeps_its_return_type() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("main.py");
+        std::fs::write(
+            &path,
+            r#"def numbers(data):
+    found = set()
+    for value in data:
+        found.add(value)
+    return sorted(found)
+
+
+def packed(data) -> int:
+    return bytes(numbers(data))
+
+
+print(packed(b"ba"))
+"#,
+        )
+        .unwrap();
+        let error = super::check_file(&path, None).unwrap_err();
+        assert!(error.contains("Imre: expected int, got bytes"), "{error}");
+    }
+
+    #[test]
     fn native_bytearray_construction_preserves_object_fallback() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("main.py");
@@ -1589,31 +1614,6 @@ print("result", call(b=2, a=1))
             );
             assert_eq!(incremental.check_file(&path, None), ordinary);
         }
-    }
-
-    #[test]
-    fn bytes_of_a_boxed_sorted_list_keeps_its_return_type() {
-        let root = tempfile::tempdir().unwrap();
-        let path = root.path().join("main.py");
-        std::fs::write(
-            &path,
-            r#"def numbers(data):
-    found = set()
-    for value in data:
-        found.add(value)
-    return sorted(found)
-
-
-def packed(data) -> int:
-    return bytes(numbers(data))
-
-
-print(packed(b"ba"))
-"#,
-        )
-        .unwrap();
-        let error = super::check_file(&path, None).unwrap_err();
-        assert!(error.contains("Imre: expected int, got bytes"), "{error}");
     }
 
     #[test]
