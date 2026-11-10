@@ -4065,6 +4065,13 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             .msg
             .as_deref()
             .unwrap();
+        assert!(matches!(
+            physical.sites.expressions.get(message),
+            Some(crate::frontend::ExpressionSelection::Suspension(
+                crate::ir::SuspendValue::Yield,
+                _
+            ))
+        ));
         let replacement = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
             range: message.range(),
             node_index: Default::default(),
@@ -4101,6 +4108,14 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
 
         let assertion = def.body[0].as_assert_stmt_mut().unwrap();
         erase(&mut assertion.test);
+        // The physical suspension owns its input even when the source child is erased.
+        let suspension = assertion
+            .msg
+            .as_deref_mut()
+            .unwrap()
+            .as_yield_expr_mut()
+            .unwrap();
+        suspension.value = None;
         assert_eq!(module.standalone().unwrap().unwrap(), original);
 
         let def = module.syntax.as_mut().unwrap().to_mut()[0]
