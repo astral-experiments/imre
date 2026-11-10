@@ -11,6 +11,7 @@ use ruff_text_size::{Ranged, TextRange};
 use crate::CodegenUnit;
 use crate::frontend::module_source::{self, ParsedModule};
 use crate::frontend::{RegisteredGenerator, RegisteredLambda};
+use crate::llvm::ModuleLauncher;
 use crate::llvm::registered::{
     ABI, AnnotationScope, FrameEmitter, Output, RegisteredFrame, SourcePositions, permanent, sites,
     suspension,
@@ -47,92 +48,6 @@ pub(super) enum ModuleOrigin<'a> {
     Bundled,
 }
 
-/// Root constants, registration calls and declarations for one output layout.
-#[derive(Clone)]
-struct RootCode {
-    output: Output,
-    main: String,
-    declarations: HashSet<String>,
-}
-
-impl RootCode {
-    fn new(
-        config: &str,
-        keep_docstrings: bool,
-        has_zip: bool,
-        has_builtins: bool,
-        has_errors: bool,
-    ) -> Self {
-        let mut output = Output {
-            keep_docstrings,
-            ..Output::default()
-        };
-        let config = output.data(config.as_bytes());
-        // Entry-only registration must not change fingerprints of unrelated packed providers.
-        let main = format!(
-            "declare void @imre_dyn_register_source(ptr, ptr, ptr, ptr, i64, ptr)\n\ndefine i32 @main(i32 %argc, ptr %argv) {{\nentry:\n  %ctx = call ptr @imre_dyn_new(i32 %argc, ptr %argv, ptr {config})\n"
-        );
-        output
-            .functions
-            .push_str("declare void @imre_dyn_register_file_code(ptr, ptr, ptr, ptr, i32, ptr)\n");
-        if has_zip {
-            output.functions.push_str(
-                "declare void @imre_dyn_register_zip_source(ptr, ptr, ptr, ptr, i32, ptr)\n",
-            );
-        }
-        if has_builtins {
-            output.functions.push_str(
-                "declare void @imre_dyn_register_builtin_source(ptr, ptr, ptr, ptr, i64, ptr)\n",
-            );
-        }
-        if has_errors {
-            output.functions.push_str(
-            "declare void @imre_dyn_register_module_error(ptr, ptr, ptr, ptr, i64, ptr, ptr, i8, ptr)\n",
-        );
-        }
-        Self {
-            output,
-            main,
-            declarations: HashSet::new(),
-        }
-    }
-
-    fn register_error(
-        &mut self,
-        (name, path, source): &ModuleSource,
-        error: &super::ModuleSyntaxError,
-        zip: Option<&([u8; 32], u32)>,
-    ) {
-        let Self { output, main, .. } = self;
-        let module_name = output.data(name.as_bytes());
-        let file = output.data(path.as_os_str().as_encoded_bytes());
-        let message = output.data(error.message.as_bytes());
-        let position = error
-            .position
-            .map_or_else(|| "null".into(), |span| output.position(span));
-        let text = output.data(source.as_bytes());
-        let hash = zip.map_or_else(|| "null".into(), |(digest, _)| output.data(digest));
-        writeln!(
-                main,
-                "  call void @imre_dyn_register_module_error(ptr %ctx, ptr {module_name}, ptr {file}, ptr {text}, i64 {}, ptr {message}, ptr {position}, i8 {}, ptr {hash})",
-                source.len(), if error.parse_error { 2 } else { u8::from(error.in_args) }
-            ).unwrap();
-    }
-
-    fn finish(mut self) -> CodegenUnit {
-        self.output.integer_prelude();
-        self.main
-            .push_str("  %status = call i32 @imre_dyn_finish(ptr %ctx)\n  ret i32 %status\n}\n");
-        CodegenUnit {
-            name: "__main__".into(),
-            llvm_ir: format!(
-                "{ABI}\n{}\n{}\n{}",
-                self.output.constants, self.output.functions, self.main
-            ),
-        }
-    }
-}
-
 /// All module source has already been resolved. Import execution remains conditional.
 pub(super) fn emit(
     (files, builtins, mut entry_source): (
@@ -162,7 +77,7 @@ pub(super) fn emit(
     );
     let mut units = Vec::new();
     let mut used_archive = false;
-    let mut root = RootCode::new(
+    let mut root = ModuleLauncher::new(
         config,
         python_optimization < 2,
         !archive_members.is_empty(),
@@ -171,7 +86,7 @@ pub(super) fn emit(
     );
     // The requested whole IR and split native root share their exact prefix.
     // Fork only when the split layout acquires its first independent local unit.
-    let mut whole: Option<RootCode> = None;
+    let mut whole: Option<ModuleLauncher> = None;
     let files = files.iter().map(|module| (module, false));
     let builtins = builtins.iter().map(|module| (module, true));
     for (unit, (module, builtin)) in files.chain(builtins).enumerate() {
@@ -180,7 +95,14 @@ pub(super) fn emit(
         let zip = archive_members.get(path);
         if !builtin && let Some(error) = module_errors.get(path) {
             for state in std::iter::once(&mut root).chain(whole.as_mut()) {
-                state.register_error(module, error, zip);
+                state.register_error(
+                    (name, path, source),
+                    &error.message,
+                    error.position,
+                    error.in_args,
+                    error.parse_error,
+                    zip.map(|(digest, _)| digest),
+                );
             }
             continue;
         }
@@ -224,7 +146,7 @@ pub(super) fn emit(
                     && let Some((symbol, ir)) = initializer.standalone()?
                 {
                     archived = check_archive && providers.contains(&symbol);
-                    if !archived && separate && !root.declarations.contains(&symbol) {
+                    if !archived && separate && !root.declares(&symbol) {
                         if whole.is_none()
                             && matches!(layout, crate::BoxedLayout::WholeWithUnits(_))
                         {
@@ -240,24 +162,17 @@ pub(super) fn emit(
                         external = Some(symbol);
                     }
                 }
-                let register = |state: &mut RootCode, symbol: Option<&str>| -> Result<(), String> {
-                    let RootCode {
-                        output,
-                        main,
-                        declarations,
-                    } = state;
-                    let module = output.module_registration(&registration);
-                    let code = if let Some(symbol) = symbol {
-                        if declarations.insert(symbol.to_owned()) {
-                            writeln!(output.functions, "declare i64 @{symbol}(ptr, i64)").unwrap();
-                        }
-                        format!("@{symbol}")
-                    } else {
-                        initializer.emit(output, unit, &module.file)?
+                let register =
+                    |launcher: &mut ModuleLauncher, symbol: Option<&str>| -> Result<(), String> {
+                        let module = launcher.module_registration(&registration);
+                        let code = if let Some(symbol) = symbol {
+                            launcher.external(symbol)
+                        } else {
+                            initializer.emit(&mut launcher.output, unit, &module.file)?
+                        };
+                        module.write_call(launcher, &code);
+                        Ok(())
                     };
-                    module.write_call(output, main, &code);
-                    Ok(())
-                };
                 register(&mut root, external.as_deref())?;
                 if let Some(whole) = &mut whole {
                     register(whole, external.as_deref().filter(|_| archived))?;
