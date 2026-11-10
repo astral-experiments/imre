@@ -447,7 +447,11 @@ impl Function<'_, '_> {
                     self.with(&v.items, &v.body, v.is_async);
                 }
                 ast::Stmt::Raise(v) => {
-                    self.raise_operands(v.exc.as_deref(), v.cause.as_deref(), Self::expr);
+                    let exception = v.exc.as_deref().map(|value| self.expr(value));
+                    if self.begin_raise(exception) {
+                        let cause = v.cause.as_deref().map(|value| self.expr(value));
+                        self.finish_raise(cause.as_deref());
+                    }
                 }
                 ast::Stmt::Assert(v) => {
                     let pass = self.name("b");
@@ -1333,58 +1337,56 @@ impl Function<'_, '_> {
     }
 
     fn protected_suite(&mut self, stmt: &ast::StmtTry) {
-        crate::llvm::registered::handlers::protected(
-            self,
-            |code| code.statements(&stmt.body),
-            |code| code.statements(&stmt.orelse),
-            |code, exception, done| {
-                if stmt.is_star {
-                    crate::llvm::registered::handlers::groups(
-                        code,
-                        &stmt.handlers,
-                        exception,
-                        done,
-                        |code, ast::ExceptHandler::ExceptHandler(handler)| {
-                            let matcher =
-                                handler.type_.as_deref().expect("except* requires a type");
-                            code.checkpoint(handler);
-                            (
-                                code.expr(matcher),
-                                handler.name.as_ref().map(|name| name.as_str()),
-                                &handler.body,
-                            )
-                        },
-                        Self::statements,
-                    );
-                    return;
-                }
-                for ast::ExceptHandler::ExceptHandler(handler) in &stmt.handlers {
-                    crate::llvm::registered::handlers::arm(
-                        code,
-                        exception,
-                        done,
+        let (handler, enclosing) = self.begin_operand_scope();
+        self.statements(&stmt.body);
+        self.body.error_target = enclosing;
+        self.statements(&stmt.orelse);
+        let (exception, done) = self.enter_handlers(&handler);
+        if stmt.is_star {
+            crate::llvm::registered::handlers::groups(
+                self,
+                &stmt.handlers,
+                &exception,
+                &done,
+                |code, ast::ExceptHandler::ExceptHandler(handler)| {
+                    let matcher = handler.type_.as_deref().expect("except* requires a type");
+                    code.checkpoint(handler);
+                    (
+                        code.expr(matcher),
                         handler.name.as_ref().map(|name| name.as_str()),
-                        |code| {
-                            handler.type_.as_deref().map(|class| {
-                                code.checkpoint(class);
-                                code.expr(class)
-                            })
-                        },
-                        |code, cleanup| {
-                            if let Some((name, target)) = cleanup {
-                                code.exits
-                                    .push((Cleanup::ExceptionName(name.into()), target.into()));
-                            }
-                            code.statements(&handler.body);
-                            if cleanup.is_some() {
-                                code.exits.pop();
-                            }
-                        },
-                    );
-                }
-                code.raise(exception, None, true);
-            },
-        );
+                        &handler.body,
+                    )
+                },
+                Self::statements,
+            );
+        } else {
+            for ast::ExceptHandler::ExceptHandler(handler) in &stmt.handlers {
+                crate::llvm::registered::handlers::arm(
+                    self,
+                    &exception,
+                    &done,
+                    handler.name.as_ref().map(|name| name.as_str()),
+                    |code| {
+                        handler.type_.as_deref().map(|class| {
+                            code.checkpoint(class);
+                            code.expr(class)
+                        })
+                    },
+                    |code, cleanup| {
+                        if let Some((name, target)) = cleanup {
+                            code.exits
+                                .push((Cleanup::ExceptionName(name.into()), target.into()));
+                        }
+                        code.statements(&handler.body);
+                        if cleanup.is_some() {
+                            code.exits.pop();
+                        }
+                    },
+                );
+            }
+            self.raise(&exception, None, true);
+        }
+        self.leave_handlers(&done);
     }
 
     fn protected_statement(&mut self, stmt: &ast::StmtTry) {
