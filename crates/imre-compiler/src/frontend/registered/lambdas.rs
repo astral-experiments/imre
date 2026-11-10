@@ -109,13 +109,15 @@ pub(crate) enum LambdaDefault {
     Source(DefaultParameter),
 }
 
-impl LambdaDefault {
-    pub(super) fn inline(&self) -> Option<&Expr> {
-        match self {
-            Self::Value(value) => Some(value),
-            _ => None,
-        }
-    }
+/// A binding with private slots owns its region. Only an incomplete binding
+/// needs individual default producers at the source boundary.
+pub(crate) enum LambdaBinding {
+    Inline(Expr),
+    Operand(RegisteredOperand),
+    Residual {
+        operation: Expr,
+        defaults: Vec<LambdaDefault>,
+    },
 }
 
 /// Only a genuinely residual default needs its source operand. Record its physical
@@ -150,7 +152,7 @@ impl DefaultParameter {
 pub(crate) struct RegisteredLambda {
     pub(crate) metadata: LambdaMetadata,
     pub(crate) body: Option<RegisteredFunction>,
-    pub(crate) defaults: Vec<LambdaDefault>,
+    pub(crate) binding: LambdaBinding,
 }
 
 impl RegisteredLambda {
@@ -252,29 +254,64 @@ impl RegisteredLambda {
         scope: &FunctionScope,
         owner: RegisteredScope,
     ) -> Self {
-        let operand = |node: &ast::Expr| values::Region::Lambda.operand(node, source);
+        let body = Self::body(lambda, source);
+        let binding = Self::binding(lambda, source, owner, body.is_some());
+        Self {
+            metadata: LambdaMetadata::new(lambda, scope),
+            binding,
+            body,
+        }
+    }
+
+    fn binding(
+        lambda: &ast::ExprLambda,
+        source: values::RegisteredSource<'_>,
+        owner: RegisteredScope,
+        checked_body: bool,
+    ) -> LambdaBinding {
+        if checked_body {
+            let operations = HashMap::new();
+            let sites = StatementSites::default();
+            let mut scope = SourceScope::new(owner, source, &operations, &sites);
+            // A physical caller evaluates defaults in its own activation, including
+            // operands either side of an await in a single default expression.
+            if let Some(binding) =
+                scope.with_suspending_operands(|scope| scope.lambda_binding(lambda))
+            {
+                return if scope.locals.is_empty() {
+                    LambdaBinding::Inline(binding)
+                } else {
+                    LambdaBinding::Operand(RegisteredOperand::from_scope(binding, scope))
+                };
+            }
+        }
+
         let mut defaults = Vec::new();
         if let Some(parameters) = lambda.parameters.as_deref() {
             for (group, params) in DefaultParameter::groups(parameters).into_iter().enumerate() {
                 for (index, param) in params.iter().enumerate() {
                     if let Some(node) = param.default.as_deref() {
-                        defaults.push(if let Some(value) = operand(node) {
-                            LambdaDefault::Value(value)
-                        } else if let Some(value) = RegisteredOperand::prepare(node, source, owner)
-                        {
-                            LambdaDefault::Operand(Box::new(value))
-                        } else {
-                            LambdaDefault::Source(DefaultParameter { group, index })
-                        });
+                        defaults.push(
+                            if let Some(value) = values::Region::Lambda.operand(node, source) {
+                                LambdaDefault::Value(value)
+                            } else if let Some(value) =
+                                RegisteredOperand::prepare(node, source, owner)
+                            {
+                                LambdaDefault::Operand(Box::new(value))
+                            } else {
+                                LambdaDefault::Source(DefaultParameter { group, index })
+                            },
+                        );
                     }
                 }
             }
         }
-        let body = Self::body(lambda, source);
-        Self {
-            metadata: LambdaMetadata::new(lambda, scope),
+        let inputs = (0..defaults.len())
+            .map(|slot| Expr::local(slot, Type::PythonObject))
+            .collect();
+        LambdaBinding::Residual {
+            operation: values::lambda_binding(lambda, inputs),
             defaults,
-            body,
         }
     }
 }
@@ -324,13 +361,8 @@ async def factory(seed, rows, mark):
         };
 
         let checked = &sites[&lambda(0).start()];
-        let [
-            LambdaDefault::Value(_),
-            LambdaDefault::Operand(display),
-            LambdaDefault::Value(_),
-        ] = checked.defaults.as_slice()
-        else {
-            panic!("expected the checked comprehension between two inline defaults");
+        let LambdaBinding::Operand(display) = &checked.binding else {
+            panic!("the complete binding should own the comprehension's private slots");
         };
         let row = display
             .local_names
@@ -373,6 +405,19 @@ async def factory(seed, rows, mark):
             owner,
         );
         sites.insert(residual.start(), mixed);
+        let LambdaBinding::Residual {
+            operation,
+            defaults,
+        } = &sites[&residual.start()].binding
+        else {
+            panic!("a withheld child should leave a mixed binding");
+        };
+        let ExprKind::Builtin(Builtin::RegisteredLambda(site, false), inputs) = &operation.kind
+        else {
+            panic!("expected the ordinary callable binding");
+        };
+        assert_eq!(*site, residual.start());
+        assert_eq!(inputs.len(), defaults.len());
         let [
             LambdaDefault::Value(_),
             LambdaDefault::Operand(_),
@@ -380,7 +425,7 @@ async def factory(seed, rows, mark):
             LambdaDefault::Value(async_generator),
             LambdaDefault::Source(parameter),
             LambdaDefault::Value(_),
-        ] = sites[&residual.start()].defaults.as_slice()
+        ] = defaults.as_slice()
         else {
             panic!("only the lambda with an unprepared body should need its physical parameter");
         };
@@ -408,6 +453,61 @@ async def factory(seed, rows, mark):
         };
         assert!(RegisteredOperand::prepare(binding(0), source, owner).is_some());
         assert!(RegisteredOperand::prepare(binding(1), source, owner).is_none());
+    }
+
+    #[test]
+    fn lambda_binding_owns_await_and_comprehension_in_one_default() {
+        let text = "async def factory(rows):\n    return lambda n=consume(await one(), [x for x in rows]): n\n";
+        let graph = SourceGraph::single(text).unwrap();
+        let module = &graph.modules[graph.entry];
+        let literals = values::ModuleSource::new(module);
+        let factory = module.parsed.syntax().body[0]
+            .as_function_def_stmt()
+            .unwrap();
+        let lambda = factory.body[0]
+            .as_return_stmt()
+            .unwrap()
+            .value
+            .as_deref()
+            .unwrap()
+            .as_lambda_expr()
+            .unwrap();
+        let plan = RegisteredLambda::prepare(
+            lambda,
+            literals.context(&module.source),
+            &FunctionScope::lambda(lambda, false),
+            RegisteredScope::Function { is_async: true },
+        );
+
+        let LambdaBinding::Operand(binding) = &plan.binding else {
+            panic!("the awaited default should be part of the prepared binding");
+        };
+        let iteration = binding
+            .local_names
+            .values()
+            .find(|local| local.name == "x")
+            .unwrap();
+        assert!(
+            binding
+                .region()
+                .private_slots()
+                .contains(&iteration.namespace.unwrap())
+        );
+        let mut bindings = Vec::new();
+        let mut awaits = Vec::new();
+        ir::walk_operand_expressions(&binding.value, &mut |expr| match &expr.kind {
+            ExprKind::Builtin(Builtin::RegisteredLambda(site, false), args) => {
+                bindings.push((*site, args.len()));
+            }
+            ExprKind::Builtin(Builtin::RegisteredSuspend(ir::SuspendValue::Await, range), _) => {
+                awaits.push(&text[*range]);
+            }
+            _ => {}
+        });
+        assert_eq!(bindings, [(lambda.start(), 1)]);
+        assert_eq!(awaits, ["await one()"]);
+        let child = plan.body.as_ref().unwrap();
+        assert!(child.local_names.is_empty() && child.region().private_slots().is_empty());
     }
 
     #[test]
@@ -555,13 +655,37 @@ async def factory(seed, rows, mark):
         let child_checked = values::Region::Lambda
             .operand(&nested.body, source)
             .is_some();
-        assert_eq!(
-            plan.defaults
-                .iter()
-                .map(|default| default.inline().is_some())
-                .collect::<Vec<_>>(),
-            [true, child_checked, true]
-        );
+        match &plan.binding {
+            LambdaBinding::Inline(binding) => {
+                let ExprKind::Builtin(Builtin::RegisteredLambda(_, false), defaults) =
+                    &binding.kind
+                else {
+                    panic!("expected the ordinary callable binding");
+                };
+                assert!(child_checked);
+                assert_eq!(defaults.len(), 3);
+                let mut children = Vec::new();
+                ir::walk_operand_expressions(&defaults[1], &mut |expr| {
+                    if let ExprKind::Builtin(Builtin::RegisteredLambda(site, false), _) = &expr.kind
+                    {
+                        children.push(*site);
+                    }
+                });
+                assert_eq!(children, [nested.start()]);
+            }
+            LambdaBinding::Residual { defaults, .. } => {
+                assert!(!child_checked);
+                assert!(matches!(
+                    defaults.as_slice(),
+                    [
+                        LambdaDefault::Value(_),
+                        LambdaDefault::Source(_),
+                        LambdaDefault::Value(_)
+                    ]
+                ));
+            }
+            LambdaBinding::Operand(_) => panic!("these defaults need no private slots"),
+        }
         assert!(plan.body.is_some());
         assert_eq!(
             values::checked_binding(lambda, source).is_some(),

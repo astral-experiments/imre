@@ -7,7 +7,7 @@ mod eager;
 mod generators;
 pub(crate) use generators::RegisteredGenerator;
 mod lambdas;
-pub(crate) use lambdas::{LambdaDefault, RegisteredLambda};
+pub(crate) use lambdas::{LambdaBinding, LambdaDefault, RegisteredLambda};
 mod templates;
 pub(crate) use templates::{PreparedStrings, ResidualField, prepare_expression_sites, template_operands};
 pub(super) mod patterns;
@@ -99,13 +99,17 @@ impl RegisteredOperand {
         let sites = StatementSites::default();
         let mut scope = SourceScope::new(kind, source, &operations, &sites);
         let value = scope.operand(expr)?;
+        Some(Self::from_scope(value, scope))
+    }
+
+    fn from_scope(value: Expr, scope: SourceScope<'_>) -> Self {
         let (_locals, local_names) = scope.bindings();
-        Some(Self {
+        Self {
             value,
             #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
             locals: _locals,
             local_names,
-        })
+        }
     }
 
     pub(crate) fn region(&self) -> RegisteredRegion<'_> {
@@ -1985,6 +1989,13 @@ impl SourceScope<'_> {
         value
     }
 
+    fn lambda_binding(&mut self, lambda: &ast::ExprLambda) -> Option<Expr> {
+        let defaults = values::lambda_defaults(lambda)
+            .map(|default| self.ordinary_operand(default))
+            .collect::<Option<_>>()?;
+        Some(values::lambda_binding(lambda, defaults))
+    }
+
     fn ordinary_operand(&mut self, expr: &ast::Expr) -> Option<Expr> {
         self.lower_operand(expr, false)
     }
@@ -2031,10 +2042,7 @@ impl SourceScope<'_> {
             if !values::has_checked_lambda_body(lambda, self.source) {
                 return None;
             }
-            let defaults = values::lambda_defaults(lambda)
-                .map(|default| self.ordinary_operand(default))
-                .collect::<Option<_>>()?;
-            let binding = values::lambda_binding(lambda, defaults);
+            let binding = self.lambda_binding(lambda)?;
             // A generator expression retains its own clause cursors across an awaited default.
             if self.loop_scope != LoopScope::Outside
                 && (!self.generator_expression || self.comprehension.is_some())

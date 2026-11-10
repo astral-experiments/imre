@@ -141,7 +141,7 @@ pub(crate) use registered::{
     registered_type_alias, registered_type_parameters, template_operands,
 };
 pub(crate) use registered::{
-    LambdaDefault, LocalBinding, RegisteredClass, RegisteredOperand, RegisteredRegion, inline_operand,
+    LambdaBinding, LambdaDefault, LocalBinding, RegisteredClass, RegisteredOperand, RegisteredRegion, inline_operand,
 };
 mod sequences;
 mod shutil;
