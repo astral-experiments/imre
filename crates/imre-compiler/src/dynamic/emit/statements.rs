@@ -3,7 +3,7 @@ mod declarations;
 use super::sites::{CompiledDefinition, CompiledProvider};
 
 use super::{AnnotationScope, FrameEmitter};
-use crate::ir::{ItemUpdate, Statement};
+use crate::ir::Statement;
 use crate::llvm::registered::Place;
 use crate::llvm::registered::context::{ContextEmitter, ContextRegion};
 use imre_ast::code_flags;
@@ -430,29 +430,6 @@ impl<'p> Function<'_, 'p> {
                             self.source.namespace_operations.get(&v.target.range())
                     {
                         self.registered_value(marker);
-                    }
-                }
-                ast::Stmt::AugAssign(v) => {
-                    if let Some((receiver, key)) = self.checked_index_target(&v.target) {
-                        if let Some(rhs) = crate::frontend::registered_value(
-                            &v.value,
-                            self.source.registered_source(),
-                        ) {
-                            self.checked_statement(&Statement::AugmentItem(
-                                receiver,
-                                key,
-                                ItemUpdate::Protocol(v.op.as_str()),
-                                rhs,
-                            ));
-                            continue;
-                        }
-                        let receiver = self.registered_value(&receiver);
-                        let key = self.registered_value(&key);
-                        self.update_item(receiver, key, v.op.as_str(), |code| code.expr(&v.value));
-                        continue;
-                    }
-                    if let Some(target) = self.place(&v.target) {
-                        self.update_place(&target, v.op.as_str(), |code| code.expr(&v.value));
                     }
                 }
                 ast::Stmt::FunctionDef(v) => {
@@ -1099,13 +1076,6 @@ impl<'p> Function<'_, 'p> {
         } else {
             self.expr(key)
         }
-    }
-
-    fn checked_index_target(
-        &self,
-        target: &ast::Expr,
-    ) -> Option<(crate::ir::Expr, crate::ir::Expr)> {
-        crate::frontend::registered_index_target(target, self.source.registered_source())
     }
 
     fn place(&mut self, target: &ast::Expr) -> Option<Place> {

@@ -1631,18 +1631,6 @@ pub(super) fn attribute_effects(stmt: &ast::Stmt) -> Option<Vec<AttributeEffect<
         .collect()
 }
 
-/// Prepare only an indexed target's receiver and key. Its caller owns RHS evaluation
-/// or unpacking, and retains each finished target when a later target raises.
-pub(crate) fn registered_index_target(
-    target: &ast::Expr,
-    source: values::RegisteredSource<'_>,
-) -> Option<(Expr, Expr)> {
-    let index = target.as_subscript_expr()?;
-    let base = values::registered_value(&index.value, source)?;
-    let key = values::registered_index_key(&index.slice, source)?;
-    Some((base, key))
-}
-
 pub(crate) fn delete_item(receiver: Expr, key: Expr) -> Expr {
     operation(
         Builtin::RegisteredDeleteItem,
@@ -1788,8 +1776,9 @@ impl statements::StatementLowering for SourceScope<'_> {
                     );
                     return Ok((vec![self.store(name.id.as_str(), value)], true));
                 }
-                let (receiver, key) =
-                    registered_index_target(&assign.target, self.source).ok_or(())?;
+                let target = assign.target.as_subscript_expr().ok_or(())?;
+                let receiver = TargetInput::Receiver(&target.value).lower(self).ok_or(())?;
+                let key = TargetInput::Index(&target.slice).lower(self).ok_or(())?;
                 let rhs = self.ordinary_operand(&assign.value).ok_or(())?;
                 Ok((
                     vec![Statement::AugmentItem(
@@ -2206,6 +2195,7 @@ impl SourceScope<'_> {
             return self.statement(stmt, body);
         }
         if stmt.is_delete_stmt()
+            || stmt.is_aug_assign_stmt()
             || stmt.is_raise_stmt()
             || self.sites.assertions.contains_key(&stmt.range())
             || attribute_write(stmt).is_some()
@@ -2242,11 +2232,18 @@ impl SourceScope<'_> {
             }
             return Ok(true);
         }
-        let (lowered, continues) = statements::StatementLowering::source_statement(
-            self,
-            stmt,
-            matches!(self.kind, RegisteredScope::Module),
-        )?;
+        let lower = |scope: &mut Self| {
+            statements::StatementLowering::source_statement(
+                scope,
+                stmt,
+                matches!(scope.kind, RegisteredScope::Module),
+            )
+        };
+        let (lowered, continues) = if stmt.is_aug_assign_stmt() {
+            self.with_suspending_operands(lower)
+        } else {
+            lower(self)
+        }?;
         body.push(checkpoint(stmt));
         body.extend(lowered);
         Ok(continues)

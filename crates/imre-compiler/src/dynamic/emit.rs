@@ -3171,6 +3171,32 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
     }
 
     #[test]
+    fn suspended_index_update_keeps_its_operands_after_source_erasure() {
+        let mut prepared = PreparedBody::module(
+            "example",
+            Path::new("example.py"),
+            "def update():\n    (yield 'receiver')[(yield 'key')] += (yield 'rhs')\n",
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let before = prepared.standalone().unwrap().unwrap();
+        let def = prepared.syntax.as_mut().unwrap().to_mut()[0]
+            .as_function_def_stmt_mut()
+            .unwrap();
+        let suite = prepared.source.function_bodies[&def.start()].suite().unwrap();
+        assert!(suite.fully_checked());
+        assert!(suite.checked.function.body.iter().any(|statement| {
+            matches!(statement, crate::ir::Statement::AugmentItem(..))
+        }));
+        def.body[0] = ast::Stmt::Pass(ast::StmtPass {
+            range: def.body[0].range(),
+            node_index: Default::default(),
+        });
+        assert_eq!(prepared.standalone().unwrap().unwrap(), before);
+    }
+
+    #[test]
     fn mixed_while_keeps_its_checked_guard_and_reads_its_physical_body() {
         let mut prepared = PreparedBody::module(
             "example",

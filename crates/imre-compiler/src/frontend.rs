@@ -136,7 +136,7 @@ pub(crate) use registered::{
     AnnotationValue, DeferredAnnotation, ParameterAnnotations, PhysicalOperand, PreparedStrings, RegisteredFunction,
     RegisteredGenerator, RegisteredLambda, RegisteredScope, RegisteredSites, RegisteredSuite,
     ResidualField, SourceEffect, SourceRun, StatementSites, SuitePreparation,
-    annotation_expression, attribute_write, prepare_expression_sites, registered_index_target,
+    annotation_expression, attribute_write, prepare_expression_sites,
     registered_sites, registered_type_alias, registered_type_parameters, template_operands,
 };
 pub(crate) use registered::{ContextTarget, LoopBinding, LoopSuite, PreparedFor, SourceGuard};
