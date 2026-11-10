@@ -506,6 +506,13 @@ impl Checker<'_> {
             return Err(error(self.source, call, "next takes at most one default"));
         }
         let source = self.expr(source)?;
+        if source.ty == Type::PythonObject {
+            let mut args = vec![source];
+            if let [default] = rest {
+                args.push(self.expr(default)?);
+            }
+            return Ok(self.registered_builtin_call(call, "next", args));
+        }
         self.next_value(source, rest, call)
     }
 

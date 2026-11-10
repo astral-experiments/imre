@@ -13374,12 +13374,7 @@ impl<'a> Checker<'a> {
                     .iter()
                     .any(|value| self.types.stores_python_object(value.ty)) =>
             {
-                // A fixed-only caller can check the remaining operands and source
-                // operations. The actual call requires its registered Python frame.
-                if self.registered.is_none() && !self.globals.registered_initializers {
-                    self.missing_operation(&self.scoped_builtin_error(name, call));
-                }
-                return Ok(registered::values::name_call(call, name, args));
+                return Ok(self.registered_builtin_call(call, name, args));
             }
             _ => return Err(error(self.source, call, UNSUPPORTED_ARGUMENTS)),
         };
@@ -13387,6 +13382,15 @@ impl<'a> Checker<'a> {
             ty,
             kind: ExprKind::Builtin(builtin, args),
         })
+    }
+
+    fn registered_builtin_call(&self, call: &ast::ExprCall, name: &str, args: Vec<Expr>) -> Expr {
+        // A fixed-only caller can check the remaining operands and source
+        // operations. The actual call requires its registered Python frame.
+        if self.registered.is_none() && !self.globals.registered_initializers {
+            self.missing_operation(&self.scoped_builtin_error(name, call));
+        }
+        registered::values::name_call(call, name, args)
     }
 
     /// Text uses UTF-8 and defaults to reading; explicit modes stay literal.
