@@ -4,10 +4,11 @@ mod comparisons;
 pub(crate) use comparisons::ComparisonChain;
 mod iteration;
 pub(crate) use iteration::LoopEdges;
+pub(crate) mod branches;
 mod join;
 pub(crate) mod sequences;
 use crate::ir::{DisplayKind, ObjectUnary};
-pub(crate) use join::ValueJoin;
+pub(crate) use join::{Choice, ValueJoin};
 
 use super::records;
 use super::{Binary, Builtin, Expr, ExprKind, Statement, Type};
@@ -142,7 +143,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         Self(Entry::Registered(frame))
     }
 
-    fn python(&mut self) -> &mut CheckedFrame<'f, 'a, 'p> {
+    pub(crate) fn python(&mut self) -> &mut CheckedFrame<'f, 'a, 'p> {
         let Entry::Registered(frame) = &mut self.0 else {
             unreachable!("checked Python operation requires a registered frame")
         };
@@ -257,7 +258,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
 
     fn unary_expression(&mut self, op: ObjectUnary, operand: &Expr, expr: &Expr) -> CheckedValue {
         if let Entry::Registered(frame) = &mut self.0 {
-            let scope = frame.begin_operand_scope();
+            let scope = frame.begin_unary();
             let value = self.evaluate(operand);
             let result = self.unary_value(op, value, false);
             return self.python().finish_unary(scope, op, result);
@@ -438,9 +439,18 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             ExprKind::Builtin(Builtin::RegisteredCompare(ops), values) => {
                 self.registered_comparisons(values, ops, false)
             }
-            ExprKind::Conditional(test, yes, no) => match &mut self.0 {
-                Entry::Native(emitter) => CheckedValue::owned(emitter.conditional(test, yes, no)),
-                Entry::Registered(frame) => frame.select(test, yes, no),
+            ExprKind::Conditional(test, yes, no) => self.conditional_value(test, yes, no),
+            ExprKind::Boolean(..) | ExprKind::BooleanValue(..) => self.boolean_expression(expr),
+            ExprKind::Builtin(op @ Builtin::Bool, args) => match &mut self.0 {
+                Entry::Native(emitter) => CheckedValue::owned(emitter.builtin(op, args, expr.ty)),
+                Entry::Registered(_) => {
+                    let Some(Ok(crate::ir::IterationOperands::Truth(value))) =
+                        op.iteration_operands(args)
+                    else {
+                        unreachable!("checked truth operand");
+                    };
+                    self.predicate(value, false)
+                }
             },
             ExprKind::Binary(op, left, right) => self.binary_expression(*op, left, right, expr),
             ExprKind::Builtin(
@@ -498,6 +508,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                     self.release_input(value);
                 }
             }
+            Statement::Match(subject, cases) => self.emit_prepared_match(subject, cases),
             Statement::Return(expr) => {
                 let value = self.evaluate(expr);
                 match &mut self.0 {

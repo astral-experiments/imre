@@ -4,6 +4,7 @@ mod abi;
 pub(crate) mod context;
 mod frame;
 pub(crate) mod handlers;
+pub(crate) mod patterns;
 mod sequences;
 pub(crate) mod sites;
 pub(crate) mod suspension;
@@ -76,7 +77,8 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
                         matches!(receiver.ty, Type::Dict(_) | Type::PythonObject)
                     }
                     Statement::Clear(slot) => private.contains(slot),
-                    Statement::If(_, _, no) => no.is_empty(),
+                    Statement::If(..) => true,
+                    Statement::Match(_, cases) => cases.iter().flat_map(|case| &case.captures).all(has_slot),
                     Statement::IterNext {
                         kind: ir::IterNextKind::Generic,
                         iterator,
@@ -125,7 +127,7 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
                 });
                 !suspends(body) && !suspension
             }
-            ExprKind::Conditional(..) => true,
+            ExprKind::Conditional(..) | ExprKind::BooleanValue(..) | ExprKind::Boolean(..) => true,
             ExprKind::Dict { entries, .. } => entries.is_empty(),
             ExprKind::Builtin(op, args) if let Some(iteration) = op.iteration_operands(args) => {
                 uses_python_protocol |= matches!(iteration, Ok(ir::IterationOperands::Iter(_)));
@@ -151,7 +153,10 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
             }
             ExprKind::Builtin(Builtin::RegisteredIndexConstant(_), args) => args.len() == 1,
             ExprKind::Builtin(Builtin::RegisteredSlice, args) => matches!(args.len(), 2 | 3),
-            ExprKind::Builtin(Builtin::RegisteredDeleteItem | Builtin::RegisteredInPlace(_), args) => {
+            ExprKind::Builtin(
+                Builtin::RegisteredDeleteItem | Builtin::RegisteredInPlace(_),
+                args,
+            ) => {
                 uses_python_protocol = true;
                 args.len() == 2
             }
@@ -291,50 +296,33 @@ impl Frame<'_, '_, '_> {
 
     pub(crate) fn evaluate_test(&mut self, expr: &Expr) -> String {
         let mut inner = expr;
-        while let ExprKind::Builtin(Builtin::RegisteredLocation(..), values) = &inner.kind {
-            inner = &values[0];
+        while let ExprKind::Builtin(Builtin::RegisteredLocation(..), operands) = &inner.kind {
+            inner = &operands[0];
         }
-        if !matches!(
+        if matches!(
             inner.kind,
-            ExprKind::Builtin(
-                Builtin::RegisteredCompare(_) | Builtin::RegisteredUnary(ir::ObjectUnary::Not),
-                _
-            ) | ExprKind::Conditional(..)
+            ExprKind::Conditional(..)
+                | ExprKind::Boolean(..)
+                | ExprKind::BooleanValue(..)
+                | ExprKind::Not(_)
+                | ExprKind::Builtin(
+                    Builtin::Bool | Builtin::RegisteredUnary(ir::ObjectUnary::Not),
+                    _
+                )
         ) {
-            let value = self.evaluate_handle(expr);
-            let range = match &expr.kind {
-                ExprKind::Builtin(Builtin::RegisteredLocation(range, _), _) => Some(*range),
-                _ => None,
-            };
-            return self.code.truth_at(&value, range);
+            return crate::llvm::operations::ValueJoin::select(
+                self,
+                Self::body,
+                |frame, yes, no| {
+                    CheckedBody::registered(frame.reborrow()).branch_condition(expr, yes, no)
+                },
+                |_| CheckedValue::condition("true".to_owned()),
+                |_| CheckedValue::condition("false".to_owned()),
+            )
+            .expect("logical test has a normal successor")
+            .into_condition();
         }
-        self.test_structure(expr)
-    }
-
-    fn test_structure(&mut self, expr: &Expr) -> String {
-        match &expr.kind {
-            ExprKind::Builtin(Builtin::RegisteredLocation(range, position), values) => {
-                let previous = std::mem::replace(&mut self.code.current_range, *range);
-                let line = self.code.enter_expression(*position);
-                let bit = self.test_structure(&values[0]);
-                self.code.leave_expression(line);
-                self.code.current_range = previous;
-                bit
-            }
-            ExprKind::Builtin(Builtin::RegisteredCompare(ops), values) => {
-                let mut body = CheckedBody::registered(self.reborrow());
-                body.registered_comparisons(values, ops, true)
-                    .into_condition()
-            }
-            ExprKind::Builtin(Builtin::RegisteredUnary(ir::ObjectUnary::Not), values) => {
-                let bit = self.evaluate_test(&values[0]);
-                self.code.value(&format!("xor i1 {bit}, true"))
-            }
-            ExprKind::Conditional(test, yes, no) => {
-                self.select_with(test, yes, no, true).into_condition()
-            }
-            _ => unreachable!("structured truth consumer"),
-        }
+        CheckedBody::registered(self.reborrow()).test_operand(expr)
     }
 
     pub(crate) fn sequence(&mut self, values: &[Expr], display: DisplayKind) -> CheckedValue {
@@ -406,14 +394,11 @@ impl Frame<'_, '_, '_> {
     pub(crate) fn block_name(&mut self) -> String {
         self.code.name("b")
     }
-    pub(crate) fn invert(&mut self, value: &str) -> String {
-        self.code.value(&format!("xor i1 {value}, true"))
-    }
     pub(crate) fn compare_scope(&mut self) -> (String, (String, String)) {
-        (self.code.temporary_mark(), self.open_operand_unwind())
+        (self.code.temporary_mark(), self.begin_operand_scope())
     }
     pub(crate) fn close_compare_scope(&mut self, edge: (String, String), mark: &str) {
-        self.close_unwind(edge, |f| f.discard_truth(mark));
+        self.finish_operand_scope(mark, edge);
     }
 
     pub(crate) fn comparison_truth(&mut self, value: &str, mark: Option<&str>) -> String {
@@ -714,31 +699,6 @@ impl Frame<'_, '_, '_> {
             .line(&format!("call void @imre_int_release(i64 {word})"));
     }
 
-    pub(crate) fn select(&mut self, test: &Expr, yes: &Expr, no: &Expr) -> CheckedValue {
-        self.select_with(test, yes, no, false)
-    }
-
-    fn select_with(&mut self, test: &Expr, yes: &Expr, no: &Expr, condition: bool) -> CheckedValue {
-        let arm = |frame: &mut Self, value: &Expr| {
-            if condition {
-                CheckedValue::condition(frame.evaluate_test(value))
-            } else {
-                frame.evaluate(value)
-            }
-        };
-        crate::llvm::operations::ValueJoin::select(
-            self,
-            Self::body,
-            |code, yes, no| {
-                let bit = code.test_with_temporaries(|code| code.evaluate_test(test));
-                code.branch(&bit, yes, no);
-            },
-            |code| arm(code, yes),
-            |code| arm(code, no),
-        )
-        .expect("value-producing registered conditional")
-    }
-
     pub(crate) fn builtin(&mut self, op: &Builtin, operands: &[Expr]) -> CheckedValue {
         let handle = match (op, operands) {
             (op, args) if let Some(iteration) = op.iteration_operands(args) => {
@@ -941,12 +901,6 @@ impl Frame<'_, '_, '_> {
             code.evaluate_handle(expr)
         });
         CheckedValue::handle(handle)
-    }
-
-    pub(crate) fn exact_word(&mut self, handle: &str) -> String {
-        self.code.value(&format!(
-            "call i64 @imre_dyn_exact_int_word(ptr %ctx, i64 {handle})"
-        ))
     }
 
     pub(crate) fn own_word(&mut self, word: &str) -> usize {
@@ -1176,6 +1130,29 @@ impl RegisteredFrame<'_, '_> {
         self.with_checked_frame(&CheckedSites::default(), |frame| {
             CheckedBody::registered(frame).unary_value(op, CheckedValue::handle(operand), false)
         })
+    }
+
+    pub(crate) fn registered_branch(
+        &mut self,
+        test: &Expr,
+        sites: &CheckedSites,
+        yes: &str,
+        no: &str,
+    ) {
+        self.with_checked_frame(sites, |frame| {
+            CheckedBody::registered(frame).branch_condition(test, yes, no)
+        })
+    }
+
+    pub(crate) fn logical_operand(
+        &mut self,
+        plan: &mut super::operations::branches::Logical,
+        step: usize,
+        operand: super::operations::branches::LogicalOperand,
+    ) {
+        self.with_checked_frame(&CheckedSites::default(), |frame| {
+            plan.accept(&mut CheckedBody::registered(frame), step, operand)
+        });
     }
 
     pub(crate) fn registered_value(&mut self, expression: &Expr, sites: &CheckedSites) -> String {

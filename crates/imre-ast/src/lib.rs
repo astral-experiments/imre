@@ -94,12 +94,14 @@ pub fn wildcard_pattern(pattern: &ast::Pattern) -> bool {
 }
 
 /// The sequence protocol operations required by one validated sequence pattern.
+#[derive(Clone)]
 pub struct SequencePatternPlan {
     /// A sole star does not call len. Otherwise require exactly or at least this many items.
     pub length: Option<(ast::CmpOp, usize)>,
     pub items: SequencePatternItems,
 }
 
+#[derive(Clone)]
 pub enum SequencePatternItems {
     /// Every item is a wildcard. The subject need not be indexed or iterated.
     Ignore,

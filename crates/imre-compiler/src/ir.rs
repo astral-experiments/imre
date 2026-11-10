@@ -1,6 +1,8 @@
 //! Closed, representation-checked IR. Lowering preserves owned results and may
 //! borrow rooted locals for the duration of operator and call evaluation.
 
+pub(crate) mod control;
+
 use std::collections::BTreeSet;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -3129,6 +3131,36 @@ pub(crate) enum ItemUpdate {
 }
 
 #[derive(Clone)]
+pub(crate) enum MatchTest {
+    Always,
+    Singleton(Option<bool>),
+    Equal(Expr),
+    Or(Vec<MatchTest>),
+    Capture(Box<MatchTest>, String),
+    Sequence(imre_ast::SequencePatternPlan, Vec<MatchTest>),
+    Mapping(Vec<(Expr, MatchTest)>, Option<String>),
+    Class {
+        class: Expr,
+        positional: Vec<MatchTest>,
+        keywords: Vec<(String, MatchTest)>,
+    },
+}
+
+#[derive(Clone)]
+pub(crate) struct MatchPattern {
+    pub(crate) test: MatchTest,
+    pub(crate) names: Vec<String>,
+}
+
+#[derive(Clone)]
+pub(crate) struct MatchCase {
+    pub(crate) pattern: MatchPattern,
+    pub(crate) captures: Vec<usize>,
+    pub(crate) guard: Option<Expr>,
+    pub(crate) body: Vec<Statement>,
+}
+
+#[derive(Clone)]
 pub(crate) enum Statement {
     Assign(usize, Expr),
     /// Transfers an owned local to another local, resetting its source.
@@ -3146,6 +3178,8 @@ pub(crate) enum Statement {
     AugmentField(Expr, usize, Binary, Expr),
     Expr(Expr),
     If(Expr, Vec<Statement>, Vec<Statement>),
+    /// The evaluated subject survives failed guards, with captures bound before the guard.
+    Match(Expr, Vec<MatchCase>),
     /// The final suite runs only on condition failure or iterator exhaustion.
     While(Expr, Vec<Statement>, Vec<Statement>),
     For {
@@ -3190,6 +3224,40 @@ pub(crate) enum Statement {
     Raise(Option<Expr>),
 }
 
+// Visit value patterns in source order with either a shared or a mutable borrow.
+macro_rules! pattern_expressions {
+    ($test:expr, $visit:expr) => {{
+        let mut pending = vec![$test];
+        while let Some(test) = pending.pop() {
+            match test {
+                MatchTest::Equal(value) => ($visit)(value),
+                MatchTest::Or(tests) | MatchTest::Sequence(_, tests) => {
+                    pending.extend(tests.into_iter().rev())
+                }
+                MatchTest::Capture(inner, _) => pending.push(inner),
+                MatchTest::Mapping(items, _) => {
+                    let mut children = Vec::with_capacity(items.len());
+                    for (key, child) in items {
+                        ($visit)(key);
+                        children.push(child);
+                    }
+                    pending.extend(children.into_iter().rev());
+                }
+                MatchTest::Class {
+                    class,
+                    positional,
+                    keywords,
+                } => {
+                    ($visit)(class);
+                    pending.extend(keywords.into_iter().rev().map(|(_, test)| test));
+                    pending.extend(positional.into_iter().rev());
+                }
+                MatchTest::Always | MatchTest::Singleton(_) => {}
+            }
+        }
+    }};
+}
+
 // Match ergonomics preserve the borrow of each operand and suite for inspection or rewriting.
 macro_rules! statement_children {
     ($statement:expr, $expression:expr, $suite:expr) => {
@@ -3212,6 +3280,23 @@ macro_rules! statement_children {
                 ($suite)(body);
             }
             Statement::Scope { body, .. } => ($suite)(body),
+            Statement::Match(subject, cases) => {
+                ($expression)(subject);
+                for MatchCase {
+                    pattern,
+                    guard,
+                    body,
+                    ..
+                } in cases
+                {
+                    let MatchPattern { test, .. } = pattern;
+                    pattern_expressions!(test, $expression);
+                    if let Some(guard) = guard {
+                        ($expression)(guard);
+                    }
+                    ($suite)(body);
+                }
+            }
             Statement::If(test, yes, no) | Statement::While(test, yes, no) => {
                 ($expression)(test);
                 ($suite)(yes);
@@ -3257,6 +3342,12 @@ macro_rules! statement_children {
 }
 
 impl Statement {
+    /// Visit immediate operands, including the subject, value patterns and guards of a match.
+    pub(crate) fn operands<'a>(&'a self, visit: impl FnMut(&'a Expr)) {
+        let mut visit = visit;
+        statement_children!(self, &mut visit, |_| {});
+    }
+
     /// Visits nested suites in source order, excluding suites owned by expressions.
     pub(crate) fn suites<'a>(&'a self, mut visit: impl FnMut(&'a [Statement])) {
         statement_children!(self, |_| {}, visit);
@@ -3578,6 +3669,11 @@ fn node_writes(node: Node<'_>, visit: &mut impl FnMut(usize, Option<&Expr>)) {
     };
     match statement {
         Statement::Assign(slot, value) => visit(*slot, Some(value)),
+        Statement::Match(_, cases) => {
+            for &slot in cases.iter().flat_map(|case| &case.captures) {
+                visit(slot, None);
+            }
+        }
         Statement::Clear(slot) => visit(*slot, None),
         Statement::Move(target, source) => {
             visit(*target, None);

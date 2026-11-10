@@ -92,6 +92,8 @@ fn block(body: &[Statement], functions: &[bool], targets: Context<'_>) -> bool {
                 || expression(receiver, functions, targets)
                 || expression(value, functions, targets)
         }
+        // Matching an object can call arbitrary equality and truth hooks.
+        Statement::Match(..) => true,
         Statement::If(test, yes, no) => {
             expression(test, functions, targets)
                 || block(yes, functions, targets)

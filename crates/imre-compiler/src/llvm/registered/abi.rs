@@ -103,6 +103,7 @@ pub(crate) struct Declarations {
     pub(crate) registered_expression: bool,
     pub(crate) checked_integer_add: bool,
     pub(crate) checked_integer_multiply: bool,
+    pub(crate) reads_exact_int_word: bool,
 }
 
 #[derive(Clone, Default)]
@@ -122,11 +123,13 @@ pub(crate) struct Output {
 impl Output {
     pub(crate) fn integer_prelude(&mut self) {
         use crate::ir::Binary;
+        if self.declarations.reads_exact_int_word {
+            self.functions.push_str("declare i64 @imre_dyn_exact_int_word(ptr, i64)\n");
+        }
         if !self.declarations.checked_integer_add && !self.declarations.checked_integer_multiply {
             return;
         }
         self.functions.push_str(concat!(
-            "declare i64 @imre_dyn_exact_int_word(ptr, i64)\n",
             "declare i64 @imre_dyn_take_int(ptr, i64)\n",
             "declare void @imre_int_retain(i64)\n",
             "declare void @imre_int_release(i64)\n",

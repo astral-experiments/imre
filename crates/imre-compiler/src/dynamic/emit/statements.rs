@@ -122,6 +122,50 @@ impl Function<'_, '_> {
         }
     }
 
+    /// Fill the native matcher's out-of-line blocks from the enclosing residual suite.
+    fn match_fragments(&mut self, stmt: &ast::StmtMatch) {
+        let Some(plan) = self.source.statement_sites.matches.get(&stmt.range()) else {
+            self.unsupported("unsupported value in match pattern");
+            return;
+        };
+        let mark = self.temporary_mark();
+        let subject = match &plan.subject {
+            Some(value) => self.registered_value(value),
+            None => self.expr(&stmt.subject),
+        };
+        let blocks = self.frame.match_blocks(
+            &subject,
+            &mark,
+            plan.cases.iter().map(|p| (&p.pattern, p.guard.is_some())),
+        );
+        for ((case, prepared), block) in stmt.cases.iter().zip(&plan.cases).zip(&blocks.cases) {
+            if let (Some(test), Some(guard)) = (&prepared.guard, &block.guard) {
+                let outer = guard.enter(&mut self.frame);
+                match test {
+                    crate::frontend::MatchGuard::Checked(value) => {
+                        self.prepare_checked_value(value);
+                        self.frame.registered_branch(
+                            value,
+                            &self.sites,
+                            &guard.matched,
+                            &guard.failed,
+                        );
+                    }
+                    crate::frontend::MatchGuard::Residual => self.branch_expr(
+                        case.guard.as_deref().unwrap(),
+                        &guard.matched,
+                        &guard.failed,
+                    ),
+                }
+                guard.leave(&mut self.frame, outer);
+            }
+            self.label(&block.body);
+            self.statements(&case.body);
+            self.jump(&blocks.done);
+        }
+        self.label(&blocks.done);
+    }
+
     fn emit_value_statement(&mut self, output: crate::frontend::ValueStatement<'_>) {
         use crate::frontend::ValueStatement;
         match output {
@@ -161,9 +205,11 @@ impl Function<'_, '_> {
                 .map_or_else(|| stmt.range(), |assertion| assertion.test.range());
             self.checkpoint(&position);
             self.simple_call = imre_ast::unhighlighted_call(stmt);
-            if let Some(output) =
-                crate::frontend::value_statement(stmt, self.source.registered_source())
-            {
+            if let Some(output) = crate::frontend::value_statement(
+                stmt,
+                self.source.registered_source(),
+                &self.source.logicals,
+            ) {
                 self.emit_value_statement(output);
                 continue;
             }
@@ -356,23 +402,8 @@ impl Function<'_, '_> {
                     let class = self.apply_decorators(&decorators, &v.decorator_list, class);
                     self.bind(v.name.as_str(), &class);
                 }
-                ast::Stmt::Match(v) => self.match_statement(v),
-                ast::Stmt::If(v) => {
-                    let done = self.name("b");
-                    let mut next = self.if_arm(&v.test, &v.body, &done);
-                    for clause in &v.elif_else_clauses {
-                        if !next {
-                            break;
-                        }
-                        if let Some(test) = &clause.test {
-                            next = self.if_arm(test, &clause.body, &done);
-                        } else {
-                            self.statements(&clause.body);
-                        }
-                    }
-                    self.jump(&done);
-                    self.label(&done);
-                }
+                ast::Stmt::Match(v) => self.match_fragments(v),
+                ast::Stmt::If(v) => self.conditional_fragments(v),
                 ast::Stmt::For(v) => {
                     let iter = self.iteration_cursor(&v.iter, v.is_async);
                     self.loop_body(&v.body, &v.orelse, Some(&iter), |f, yes, no| {
@@ -1146,24 +1177,54 @@ impl Function<'_, '_> {
     }
 
     /// Return whether control can reach a subsequent arm.
-    fn if_arm(&mut self, test: &ast::Expr, body: &[ast::Stmt], done: &str) -> bool {
-        if self.native_suspension
-            && let ast::Expr::BooleanLiteral(lit) = test
-        {
-            if lit.value {
-                self.statements(body);
-                self.jump(done);
-            }
-            return !lit.value;
+    fn conditional_fragments(&mut self, stmt: &ast::StmtIf) {
+        use crate::frontend::SourceGuard;
+        use crate::llvm::operations::Choice;
+        let guards = &self.source.statement_sites.ifs[&stmt.range()];
+        let fragments = std::iter::once((Some(stmt.test.as_ref()), stmt.body.as_slice())).chain(
+            stmt.elif_else_clauses
+                .iter()
+                .map(|part| (part.test.as_ref(), part.body.as_slice())),
+        );
+        let mut choice = Choice::new(&mut self.frame.body);
+        for (guard, (test, body)) in guards.iter().zip(fragments) {
+            let next = match guard {
+                SourceGuard::Otherwise => None,
+                SourceGuard::Literal(taken) if self.native_suspension => {
+                    if !taken {
+                        continue;
+                    }
+                    None
+                }
+                guard => {
+                    let (yes, no) = Choice::successors(&mut self.frame.body);
+                    match guard {
+                        SourceGuard::Literal(taken) => {
+                            self.branch(if *taken { "true" } else { "false" }, &yes, &no)
+                        }
+                        SourceGuard::Checked(value) => {
+                            self.prepare_checked_value(value);
+                            self.frame.registered_branch(value, &self.sites, &yes, &no);
+                        }
+                        SourceGuard::Residual => {
+                            self.branch_expr(test.expect("residual if guard"), &yes, &no)
+                        }
+                        SourceGuard::Otherwise => unreachable!(),
+                    }
+                    self.label(&yes);
+                    Some(no)
+                }
+            };
+            self.statements(body);
+            self.flush_check();
+            choice.finish_arm(&mut self.frame.body);
+            let Some(next) = next else { break };
+            self.label(&next);
         }
-        let body_label = self.name("b");
-        let next = self.name("b");
-        self.branch_expr(test, &body_label, &next);
-        self.label(&body_label);
-        self.statements(body);
-        self.jump(done);
-        self.label(&next);
-        true
+        // A residual suite can contain a suspension that resumes in a later block.
+        self.flush_check();
+        choice.finish_arm(&mut self.frame.body);
+        choice.finish(&mut self.frame.body, true);
     }
 
     fn loop_body(
@@ -1378,10 +1439,10 @@ impl Function<'_, '_> {
         let site = self.source.statement_sites.contexts[&item.context_expr.range()];
         let (exit, value, above_exit) = if is_async {
             let mark = self.temporary_mark();
-            let unwind = self.open_operand_unwind();
-            let manager = self.expr(&item.context_expr);
-            let (exit, value, above_exit) = self.frame.enter_async(&manager, site, &mark);
-            self.close_unwind(unwind, |f| f.discard_truth(&mark));
+            let (exit, value, above_exit) = self.unwind_operands(&mark, |code| {
+                let manager = code.expr(&item.context_expr);
+                code.frame.enter_async(&manager, site, &mark)
+            });
             (exit, value, Some(above_exit))
         } else {
             let manager = self.expr(&item.context_expr);

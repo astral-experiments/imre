@@ -267,6 +267,14 @@ struct ForwardCursor {
     start: Option<String>,
 }
 
+/// Range and append-window facts that hold only in the true suite of a native guard.
+struct NativeIfFacts {
+    small_slots: Vec<usize>,
+    guarded_lists: usize,
+    previous_window: Option<(usize, String)>,
+    window: Option<(usize, ForwardCursor, String)>,
+}
+
 #[derive(Clone)]
 enum ListBuffer {
     Words(String),
@@ -2731,6 +2739,113 @@ impl Emitter<'_, '_> {
         }
     }
 
+    fn if_facts(&mut self, test: &Expr, yes: &[Statement]) -> NativeIfFacts {
+        let mut bounded = false;
+        if crate::list_specialization::is_window_range_guard(test)
+            && let [Statement::While(_, body, _)] = yes
+        {
+            crate::ir::walk_expressions(body, &mut |value| {
+                bounded |= matches!(
+                    value.kind,
+                    ExprKind::Builtin(Builtin::GetBoundedInAppendWindow { .. }, _)
+                );
+            });
+        }
+        let small_slots = if bounded {
+            self.ranges
+                .checked_small_slots(yes, &self.locals, &self.small_locals)
+        } else {
+            Vec::new()
+        };
+        let previous_window = self.reserved_append_window.clone();
+        let window = bounded
+            .then(|| crate::list_specialization::reserved_append_window(yes))
+            .flatten()
+            .and_then(|(slot, cursor)| Some((slot, self.forward_cursors.get(&cursor)?.clone())))
+            .map(|(slot, cursor)| {
+                let tail = self.entry_alloca("i64");
+                self.reserved_append_window = Some((slot, tail.clone()));
+                (slot, cursor, tail)
+            });
+        NativeIfFacts {
+            small_slots,
+            guarded_lists: self.guarded_integer_lists.len(),
+            previous_window,
+            window,
+        }
+    }
+
+    /// The fast loop needs tagged starting counters and room for the remaining appends.
+    fn if_edges(
+        &mut self,
+        statement: &Statement,
+        guard: &str,
+        facts: &NativeIfFacts,
+        yes: &str,
+        no: &str,
+    ) {
+        self.reserved_append_window
+            .clone_from(&facts.previous_window);
+        let mut guard = guard.to_owned();
+        let mut unknown = facts
+            .small_slots
+            .iter()
+            .copied()
+            .filter(|slot| !self.ranges.starts_small(statement, *slot))
+            .collect::<Vec<_>>()
+            .into_iter();
+        if let Some(first) = unknown.next() {
+            let mut words = self.borrow_slot(first).operand;
+            for slot in unknown {
+                let word = self.borrow_slot(slot).operand;
+                words = self.instruction(format!("and i64 {words}, {word}"));
+            }
+            let tagged = self.instruction(format!("trunc i64 {words} to i1"));
+            guard = self.instruction(format!("and i1 {guard}, {tagged}"));
+        }
+        if let Some((slot, cursor, _)) = &facts.window {
+            let check = self.label();
+            self.branch(&guard, &check, no);
+            self.start(&check);
+            let bytes = self.remaining_cursor_bytes(cursor);
+            let list = self.borrow_slot(*slot).operand;
+            let window = self.append_window(*slot);
+            let success = self.instruction(format!(
+                "call i32 @imre_list_try_open_append_window(ptr {list}, i64 {bytes}, ptr {window})"
+            ));
+            guard = self.instruction(format!("icmp ne i32 {success}, 0"));
+        }
+        self.branch(&guard, yes, no);
+    }
+
+    fn enter_if_body(&mut self, test: &Expr, facts: &NativeIfFacts) {
+        if let Some((slot, _, tail)) = &facts.window {
+            self.reserved_append_window = Some((*slot, tail.clone()));
+            // Opening the reserved window proves the list has an immediate tail.
+            let window = self.append_window(*slot);
+            let cursor = self.instruction(format!(
+                "getelementptr [3 x ptr], ptr {window}, i32 0, i32 1"
+            ));
+            let next = self.instruction(format!("load ptr, ptr {cursor}"));
+            let last = self.instruction(format!("getelementptr i64, ptr {next}, i64 -1"));
+            let word = self.instruction(format!("load i64, ptr {last}"));
+            self.line(format!("store i64 {word}, ptr {tail}"));
+        }
+        self.borrow_guarded_integer_lists(test);
+        for &slot in &facts.small_slots {
+            self.small_locals[slot] = true;
+        }
+    }
+
+    fn leave_if_body(&mut self, facts: &NativeIfFacts) {
+        self.reserved_append_window
+            .clone_from(&facts.previous_window);
+        for &slot in &facts.small_slots {
+            self.small_locals[slot] = false;
+        }
+        self.guarded_integer_lists.truncate(facts.guarded_lists);
+    }
+
     fn other_statement(&mut self, statement: &Statement) {
         match statement {
             Statement::Assign(..)
@@ -2740,6 +2855,7 @@ impl Emitter<'_, '_> {
             | Statement::With { .. }
             | Statement::Clear(_)
             | Statement::SetItem(..)
+            | Statement::Match(..)
             | Statement::If(..)
             | Statement::While(..)
             | Statement::IterNext { .. }
@@ -3034,6 +3150,8 @@ impl Emitter<'_, '_> {
             | ExprKind::Local(_)
             | ExprKind::Bind(..)
             | ExprKind::Binary(..)
+            | ExprKind::Boolean(..)
+            | ExprKind::BooleanValue(..)
             | ExprKind::Conditional(..)
             | ExprKind::Builtin(..) => unreachable!("shared IR expression"),
             ExprKind::List(_) | ExprKind::Tuple(_) | ExprKind::Set { .. } => {
@@ -3092,10 +3210,6 @@ impl Emitter<'_, '_> {
                     receiver.operand
                 };
                 self.decode_word(word, expression.ty)
-            }
-            ExprKind::Boolean(and, values) => self.boolean(*and, values),
-            ExprKind::BooleanValue(and, left, right) => {
-                self.boolean_value(*and, left, right, expression.ty)
             }
             ExprKind::Compare(..) => unreachable!("checked comparison"),
             ExprKind::Call(id, args) => {
@@ -4469,64 +4583,19 @@ impl Emitter<'_, '_> {
         self.operand(expression)
     }
 
-    /// Each predecessor transfers one result owner into the phi. Removing that
-    /// branch's temporary before emitting the other branch keeps its error
-    /// cleanup from referring to an SSA value that does not dominate it.
-    fn conditional(&mut self, test: &Expr, yes: &Expr, no: &Expr) -> Value {
-        if let Some(value) = conditionals::absolute_operand(test, yes, no) {
-            let value = self.operand(value);
-            let result = self.call("int_abs", Type::Int, &[&value.value]);
-            self.release_operand(&value);
-            return result;
-        }
-        let test = self.expr(test);
-        let arm = |code: &mut Self, expr| {
-            let result = code.expr(expr);
-            code.forget(&result);
-            operations::CheckedValue::owned(result)
-        };
-        operations::ValueJoin::select(
-            self,
-            |code| &mut code.body,
-            |code, yes, no| code.branch(&test.operand, yes, no),
-            |code| arm(code, yes),
-            |code| arm(code, no),
-        )
-        .expect("value-producing native conditional")
-        .into_native()
-        .value
+    fn absolute_choice(&mut self, test: &Expr, yes: &Expr, no: &Expr) -> Option<Value> {
+        let value = self.operand(conditionals::absolute_operand(test, yes, no)?);
+        let result = self.call("int_abs", Type::Int, &[&value.value]);
+        self.release_operand(&value);
+        Some(result)
     }
 
-    fn boolean(&mut self, and: bool, values: &[Expr]) -> Value {
-        if let Some(result) = self.indexed_ascii_membership(and, values) {
-            return result;
-        }
-        if !and && let Some(value) = self.ascii_affix_alternatives(values) {
-            return value;
-        }
-        let end = self.label();
-        let mut incoming = Vec::new();
-        for (i, expression) in values.iter().enumerate() {
-            let value = self.expr(expression);
-            incoming.push(format!("[ {}, %{} ]", value.operand, self.body.current));
-            if i + 1 == values.len() {
-                self.jump(&end);
-            } else {
-                let next = self.label();
-                if and {
-                    self.branch(&value.operand, &next, &end);
-                } else {
-                    self.branch(&value.operand, &end, &next);
-                }
-                self.start(&next);
-            }
-        }
-        self.start(&end);
-        Value {
-            ty: Type::Bool,
-            operand: self.instruction(format!("phi i1 {}", incoming.join(", "))),
-            small_integer: false,
-        }
+    fn boolean_specialization(&mut self, and: bool, values: &[Expr]) -> Option<Value> {
+        self.indexed_ascii_membership(and, values).or_else(|| {
+            (!and)
+                .then(|| self.ascii_affix_alternatives(values))
+                .flatten()
+        })
     }
 
     fn builtin(&mut self, builtin: &Builtin, expressions: &[Expr], returns: Type) -> Value {

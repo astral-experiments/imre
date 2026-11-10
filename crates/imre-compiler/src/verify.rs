@@ -328,6 +328,19 @@ impl Verifier<'_> {
                     "invalid augmented field index",
                 )
             }
+            Statement::Match(_, cases) => {
+                for case in cases {
+                    if case.captures.len() != case.pattern.names.len() {
+                        return Err("match capture names and slots have different lengths".into());
+                    }
+                    self.slots(&case.captures)?;
+                    if let Some(guard) = &case.guard {
+                        same(guard.ty, Type::Bool)?;
+                    }
+                    self.block(&case.body)?;
+                }
+                Ok(())
+            }
             Statement::If(test, yes, no) | Statement::While(test, yes, no) => {
                 same(test.ty, Type::Bool)?;
                 self.block(yes)?;

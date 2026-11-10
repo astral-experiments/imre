@@ -7,6 +7,69 @@ pub(crate) struct ValueJoin {
     owner: Option<usize>,
 }
 
+/// The continuation belongs to all reachable arms of an if/elif/else.
+pub(crate) struct Choice {
+    done: String,
+    reachable: bool,
+}
+
+impl Choice {
+    pub(crate) fn new(out: &mut FunctionBody) -> Self {
+        Self {
+            done: out.name("select_end"),
+            reachable: false,
+        }
+    }
+
+    pub(crate) fn successors(out: &mut FunctionBody) -> (String, String) {
+        (out.name("select_yes"), out.name("select_no"))
+    }
+
+    pub(crate) fn finish_arm(&mut self, out: &mut FunctionBody) {
+        if !out.terminated {
+            out.jump(&self.done);
+            self.reachable = true;
+        }
+    }
+
+    pub(crate) fn finish(self, out: &mut FunctionBody, resumable: bool) {
+        out.start(&self.done);
+        if !self.reachable && !resumable {
+            out.end("unreachable");
+        }
+    }
+}
+
+/// Emit a choice using the normal successors observed after each arm. The caller
+/// supplies only the edge action (transferring a value for an expression, or none
+/// for a statement). A returning/raising arm has no edge into the continuation.
+pub(super) fn choose<C, V>(
+    context: &mut C,
+    output: fn(&mut C) -> &mut FunctionBody,
+    branch: impl FnOnce(&mut C, &str, &str),
+    on_true: impl FnOnce(&mut C) -> V,
+    on_false: impl FnOnce(&mut C) -> V,
+    mut transfer: impl FnMut(&mut FunctionBody, V),
+) {
+    let out = output(context);
+    let (yes, no) = Choice::successors(out);
+    let mut choice = Choice::new(out);
+    let mut finish = |out: &mut FunctionBody, value| {
+        if !out.terminated {
+            transfer(out, value);
+            choice.finish_arm(out);
+        }
+    };
+    branch(context, &yes, &no);
+    output(context).start(&yes);
+    let left = on_true(context);
+    finish(output(context), left);
+    output(context).start(&no);
+    let right = on_false(context);
+    finish(output(context), right);
+    choice.finish(output(context), false);
+}
+
 impl ValueJoin {
     /// The producer decides the condition and evaluates only the selected arm at
     /// runtime. Accessing the output publishes the normal edge after an ABI check.
@@ -17,25 +80,11 @@ impl ValueJoin {
         on_true: impl FnOnce(&mut C) -> CheckedValue,
         on_false: impl FnOnce(&mut C) -> CheckedValue,
     ) -> Option<CheckedValue> {
-        let out = output(context);
-        let yes = out.name("select_yes");
-        let no = out.name("select_no");
-        let done = out.name("select_end");
         let mut join = Self::default();
-        branch(context, &yes, &no);
-        output(context).start(&yes);
-        let left = on_true(context);
-        join.jump(output(context), &done, left);
-        output(context).start(&no);
-        let right = on_false(context);
-        join.jump(output(context), &done, right);
-        let out = output(context);
-        out.start(&done);
-        let value = join.finish(out);
-        if value.is_none() {
-            out.end("unreachable");
-        }
-        value
+        choose(context, output, branch, on_true, on_false, |out, value| {
+            join.incoming(out, value);
+        });
+        join.finish(output(context))
     }
 
     /// Record an arm after its error check and before its normal terminator.

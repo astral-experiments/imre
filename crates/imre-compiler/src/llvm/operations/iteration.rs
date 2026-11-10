@@ -1,5 +1,5 @@
 //! Shared traversal of loop and unpacking IR for fixed and registered entries.
-use super::{Builtin, CheckedBody, CheckedValue, Entry, Expr, ExprKind, Statement};
+use super::{CheckedBody, CheckedValue, Entry, Expr, ExprKind, Statement};
 use crate::ir::IterNextKind;
 use crate::llvm::{Cleanup, Completion, Emitter, LoopTarget};
 
@@ -47,7 +47,7 @@ impl CheckedBody<'_, '_, '_, '_> {
         &mut self,
         otherwise: &[Statement],
         enter: impl FnOnce(&mut Self, &LoopEdges),
-        test: impl FnOnce(&mut Self) -> String,
+        test: impl FnOnce(&mut Self, &str, &str),
         body: impl FnOnce(&mut Self, &LoopEdges),
     ) {
         let step = self.block_name();
@@ -65,9 +65,7 @@ impl CheckedBody<'_, '_, '_, '_> {
         };
         enter(self, &edges);
         self.body().start(&edges.step);
-        let condition = test(self);
-        self.body()
-            .branch(&condition, &body_label, &edges.exhausted);
+        test(self, &body_label, &edges.exhausted);
         self.body().start(&body_label);
         body(self, &edges);
         self.jump_open(&edges.step);
@@ -136,27 +134,6 @@ impl CheckedBody<'_, '_, '_, '_> {
         result
     }
 
-    fn object_condition(&mut self, expr: &Expr) -> String {
-        match &expr.kind {
-            ExprKind::Bool(value) => return value.to_string(),
-            ExprKind::Not(value) => {
-                let inner = self.object_condition(value);
-                return self.python().invert(&inner);
-            }
-            ExprKind::Builtin(op, args)
-                if let Some(Ok(crate::ir::IterationOperands::Truth(value))) =
-                    op.iteration_operands(args) =>
-            {
-                return self.object_condition(value);
-            }
-            _ => {}
-        }
-        let mark = self.python().temporary_mark();
-        let condition = self.python().evaluate_test(expr);
-        self.python().discard_truth(&mark);
-        condition
-    }
-
     pub(super) fn while_suite(
         &mut self,
         stmt: &Statement,
@@ -186,18 +163,19 @@ impl CheckedBody<'_, '_, '_, '_> {
                 }
                 this.jump_open(&edges.step);
             },
-            |this| {
+            |this, yes, no| {
                 if let Entry::Native(e) = &mut this.0 {
                     e.check_interrupt();
-                    e.while_condition(
+                    let bit = e.while_condition(
                         test,
                         optimized.as_ref().is_some_and(|(_, _, s)| s.is_some()),
-                    )
+                    );
+                    e.branch(&bit, yes, no);
                 } else {
                     if let Some(mark) = &mark {
                         this.python().begin_step(mark);
                     }
-                    this.object_condition(test)
+                    this.branch_condition(test, yes, no);
                 }
             },
             |this, edges| {
@@ -333,118 +311,37 @@ impl CheckedBody<'_, '_, '_, '_> {
 
     pub(super) fn conditional_suite(
         &mut self,
-        statement: &Statement,
+        stmt: &Statement,
         test: &Expr,
         yes: &[Statement],
         no: &[Statement],
     ) {
-        let (yes_label, no_label, end) = (self.block_name(), self.block_name(), self.block_name());
-        let state = if let Entry::Native(e) = &mut self.0 {
-            let mut bounded = false;
-            if crate::list_specialization::is_window_range_guard(test)
-                && let [Statement::While(_, body, _)] = yes
-            {
-                crate::ir::walk_expressions(body, &mut |value| {
-                    bounded |= matches!(
-                        value.kind,
-                        ExprKind::Builtin(Builtin::GetBoundedInAppendWindow { .. }, _)
-                    );
-                });
-            }
-            let slots = if bounded {
-                e.ranges
-                    .checked_small_slots(yes, &e.locals, &e.small_locals)
-            } else {
-                Vec::new()
-            };
-            let reserve = bounded
-                .then(|| crate::list_specialization::reserved_append_window(yes))
-                .flatten();
-            let reserve = reserve.and_then(|(slot, cursor)| {
-                e.forward_cursors.get(&cursor).cloned().map(|c| (slot, c))
-            });
-            let previous = e.reserved_append_window.clone();
-            let carried = reserve
-                .as_ref()
-                .map(|(slot, _)| (*slot, e.entry_alloca("i64")));
-            if carried.is_some() {
-                e.reserved_append_window.clone_from(&carried);
-            }
-            let condition = e.expr(test);
-            e.reserved_append_window.clone_from(&previous);
-            let mut guard = condition.operand;
-            let unknown = slots
-                .iter()
-                .copied()
-                .filter(|slot| !e.ranges.starts_small(statement, *slot))
-                .collect::<Vec<_>>();
-            if let Some((first, rest)) = unknown.split_first() {
-                let mut words = e.borrow_slot(*first).operand;
-                for slot in rest {
-                    let word = e.borrow_slot(*slot).operand;
-                    words = e.instruction(format!("and i64 {words}, {word}"));
-                }
-                let tagged = e.instruction(format!("trunc i64 {words} to i1"));
-                guard = e.instruction(format!("and i1 {guard}, {tagged}"));
-            }
-            if let Some((slot, cursor)) = reserve {
-                let check = e.label();
-                e.branch(&guard, &check, &no_label);
-                e.start(&check);
-                let bytes = e.remaining_cursor_bytes(&cursor);
-                let list = e.borrow_slot(slot).operand;
-                let window = e.append_window(slot);
-                let success = e.instruction(format!(
-                        "call i32 @imre_list_try_open_append_window(ptr {list}, i64 {bytes}, ptr {window})"
-                    ));
-                let opened = e.instruction(format!("icmp ne i32 {success}, 0"));
-                e.branch(&opened, &yes_label, &no_label);
-                e.reserved_append_window.clone_from(&carried);
-            } else {
-                e.branch(&guard, &yes_label, &no_label);
-            }
-            e.start(&yes_label);
-            if let Some((slot, tail)) = carried {
-                // Opening the reserved window proves the list has an immediate tail.
-                let window = e.append_window(slot);
-                let cursor = e.instruction(format!(
-                    "getelementptr [3 x ptr], ptr {window}, i32 0, i32 1"
-                ));
-                let next = e.instruction(format!("load ptr, ptr {cursor}"));
-                let last = e.instruction(format!("getelementptr i64, ptr {next}, i64 -1"));
-                let word = e.instruction(format!("load i64, ptr {last}"));
-                e.line(format!("store i64 {word}, ptr {tail}"));
-            }
-            let prior = e.guarded_integer_lists.len();
-            e.borrow_guarded_integer_lists(test);
-            for slot in &slots {
-                e.small_locals[*slot] = true;
-            }
-            Some((previous, slots, prior))
-        } else {
-            let condition = self.object_condition(test);
-            self.body().branch(&condition, &yes_label, &no_label);
-            self.body().start(&yes_label);
-            None
+        let facts = match &mut self.0 {
+            Entry::Native(emitter) => Some(emitter.if_facts(test, yes)),
+            Entry::Registered(_) => None,
         };
-        self.emit_block(yes);
-        if let Some((previous, slots, prior)) = state {
-            let e = self.fixed();
-            e.reserved_append_window = previous;
-            for slot in slots {
-                e.small_locals[slot] = false;
-            }
-            e.guarded_integer_lists.truncate(prior);
-        }
-        let yes_ends = self.body().terminated;
-        self.jump_open(&end);
-        self.body().start(&no_label);
-        self.emit_block(no);
-        let no_ends = self.body().terminated;
-        self.jump_open(&end);
-        self.body().start(&end);
-        if yes_ends && no_ends {
-            self.body().end("unreachable");
-        }
+        super::join::choose(
+            self,
+            Self::body,
+            |code, t, f| {
+                if let Some(facts) = &facts {
+                    let bit = code.fixed().expr(test).operand;
+                    code.fixed().if_edges(stmt, &bit, facts, t, f);
+                } else {
+                    code.branch_condition(test, t, f);
+                }
+            },
+            |code| {
+                if let Some(facts) = &facts {
+                    code.fixed().enter_if_body(test, facts);
+                }
+                code.emit_block(yes);
+                if let Some(facts) = &facts {
+                    code.fixed().leave_if_body(facts);
+                }
+            },
+            |code| code.emit_block(no),
+            |_, ()| {},
+        );
     }
 }

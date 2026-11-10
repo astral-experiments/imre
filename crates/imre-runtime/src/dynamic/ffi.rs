@@ -210,25 +210,100 @@ impl Context {
         self.python_instance_check(subject, class)
     }
 
-    /// Fetch keyword fields in source order before evaluating their nested patterns.
+    /// Resolve positional names only after isinstance succeeds, then fetch all
+    /// fields in source order before testing any nested patterns.
     fn match_class(&mut self, subject: Id, class: Id, names: Id) -> Result<Id> {
         if !self.class_pattern_matches(subject, class)? {
             return Ok(NONE);
         }
         let Value::List(names) = self.heap.get(names) else {
-            unreachable!("compiled class pattern keywords")
+            unreachable!("compiled class pattern arguments")
         };
-        let names = names.clone();
+        let mut names = names.clone();
+        let positional = names.iter().take_while(|&&name| name == NONE).count();
         let mut fields = Vec::with_capacity(names.len());
-        for name in names {
-            let name = self.str_value(name)?.to_owned();
-            match self.lookup_attr(subject, &name) {
+        let mut seen = Vec::new();
+        let mut first = 0;
+        let args_mark = self.heap.temporary_mark();
+        if positional > 0 {
+            let match_args = self.optional_attr(class, "__match_args__")?;
+            let match_self = match_args.is_none() && self.class_matches_self(class)?;
+            let elements = match match_args {
+                Some(tuple) => match self.heap.get(tuple) {
+                    Value::Tuple(items) => items.as_slice(),
+                    _ => {
+                        return Err(Error::new(
+                            "TypeError",
+                            format!(
+                                "{}.__match_args__ must be a tuple (got {})",
+                                self.class_name(class),
+                                self.type_name(tuple)
+                            ),
+                        ));
+                    }
+                },
+                None => &[],
+            };
+            let allowed = if match_self { 1 } else { elements.len() };
+            if positional > allowed {
+                let suffix = if allowed == 1 { "" } else { "s" };
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "{}() accepts {allowed} positional sub-pattern{suffix} ({positional} given)",
+                        self.class_name(class)
+                    ),
+                ));
+            }
+            if match_self {
+                self.heap.keep(subject);
+                fields.push(subject);
+                first = 1;
+            } else {
+                names[..positional].copy_from_slice(&elements[..positional]);
+            }
+        }
+        for (index, &name) in names.iter().enumerate().skip(first) {
+            if index < positional
+                && !matches!(self.heap.get(name), Value::Str(_) | Value::SurrogateStr(_))
+            {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "__match_args__ elements must be strings (got {})",
+                        self.type_name(name)
+                    ),
+                ));
+            }
+            if positional > 0 {
+                if seen.iter().any(|&other| self.equal(other, name)) {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!(
+                            "{}() got multiple sub-patterns for attribute {}",
+                            self.class_name(class),
+                            self.repr(name)
+                        ),
+                    ));
+                }
+                seen.push(name);
+            }
+            let attr = super::attribute_name::AttributeName::Python {
+                key: name,
+                text: None,
+            };
+            match self.lookup_attribute(subject, attr, false) {
                 Ok(field) => {
                     self.heap.keep(field);
                     fields.push(field);
                 }
                 Err(error) if self.is_attribute_error(&error) => return Ok(NONE),
                 Err(error) => return Err(error),
+            }
+            if index + 1 == positional {
+                // MATCH_CLASS drops the descriptor's tuple after its positional reads.
+                // Retain the extracted values and names across this observable boundary.
+                self.discard_temporaries(args_mark, fields.iter().chain(&seen).copied());
             }
         }
         Ok(self.alloc(Value::Tuple(fields)))

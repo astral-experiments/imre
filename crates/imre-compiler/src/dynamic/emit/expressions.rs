@@ -3,13 +3,24 @@ use ruff_python_ast as ast;
 use ruff_text_size::Ranged;
 
 use super::FrameEmitter;
-use super::boolean::{Context as BooleanContext, Flow, Target};
 use super::{Body, Function, permanent};
-use crate::llvm::operations::{CheckedValue, ComparisonChain, ValueJoin};
+use crate::frontend::{SourceOperand, prepare_boolean};
+use crate::ir::control::Context as BooleanContext;
+use crate::llvm::operations::branches::{Logical, LogicalOperand};
+use crate::llvm::operations::{CheckedValue, Choice, ComparisonChain, ValueJoin};
 
 impl Function<'_, '_> {
     pub(super) fn expr(&mut self, expr: &ast::Expr) -> String {
         self.with_expression_range(expr.range(), |code| {
+            if let Some(selected) = code.source.logicals.get(expr) {
+                match selected {
+                    crate::frontend::LogicalSelection::Checked(value) => {
+                        return code.registered_value(value);
+                    }
+                    _ if !code.native_suspension => return code.located_expr(expr),
+                    _ => {}
+                }
+            }
             code.registered_region(expr, false)
                 .unwrap_or_else(|| code.located_expr(expr))
         })
@@ -77,7 +88,7 @@ impl Function<'_, '_> {
             self.binary_handles(op, &left, &right)
         } else if let Some(operation) = self.source.registered_source().object_operation(expr) {
             if let crate::ir::Builtin::RegisteredUnary(op) = operation.opcode {
-                let scope = self.begin_operand_scope();
+                let scope = self.begin_unary();
                 let operand = self.expr(operation.target);
                 let result = self.frame.unary_handle(op, operand);
                 self.finish_unary(scope, op, result).into_handle()
@@ -152,18 +163,7 @@ impl Function<'_, '_> {
             ),
             ast::Expr::BoolOp(_) => self.boolean_value(expr),
             ast::Expr::Compare(v) => self.source_comparison(v, false),
-            ast::Expr::If(v) => ValueJoin::select(
-                self,
-                |f| {
-                    f.flush_check();
-                    &mut f.frame.body
-                },
-                |f, yes, no| f.branch_expr(&v.test, yes, no),
-                |f| CheckedValue::handle(f.expr(&v.body)),
-                |f| CheckedValue::handle(f.expr(&v.orelse)),
-            )
-            .expect("value-producing registered conditional")
-            .into_handle(),
+            ast::Expr::If(branch) => self.residual_conditional(branch),
             ast::Expr::Named(v) => {
                 let ast::Expr::Name(target) = &*v.target else {
                     return self.unsupported("assignment expression target");
@@ -201,16 +201,106 @@ impl Function<'_, '_> {
         }
     }
 
-    /// Jump to the selected suite without materializing or retesting a short-circuit operand.
-    pub(super) fn branch_expr(&mut self, expr: &ast::Expr, yes: &str, no: &str) {
-        let test = |f: &mut Self, expr: &ast::Expr, yes: &str, no: &str| {
-            let condition = f.test_operand(expr);
-            f.branch(&condition, yes, no);
-        };
-        if BooleanContext::Condition.splits(expr) {
-            self.boolean_steps(expr, BooleanContext::Condition, yes, no, test);
+    fn residual_conditional(&mut self, expr: &ast::ExprIf) -> String {
+        let (yes, no) = Choice::successors(&mut self.frame.body);
+        let mut choice = Choice::new(&mut self.frame.body);
+        let mut values = ValueJoin::default();
+        let parts = self.source.logicals.choice(expr);
+        if let Some(test) = parts.and_then(|p| p[0].as_ref()) {
+            self.prepare_checked_value(test);
+            self.frame.registered_branch(test, &self.sites, &yes, &no);
         } else {
-            test(self, expr, yes, no);
+            self.branch_expr(&expr.test, &yes, &no);
+        }
+        for (i, block, operand) in [(1, &yes, &expr.body), (2, &no, &expr.orelse)] {
+            self.label(block);
+            let value = match parts.and_then(|p| p[i].as_ref()) {
+                Some(value) => self.registered_value(value),
+                None => self.expr(operand),
+            };
+            self.flush_check();
+            values.incoming(&mut self.frame.body, CheckedValue::handle(value));
+            choice.finish_arm(&mut self.frame.body);
+        }
+        choice.finish(&mut self.frame.body, false);
+        values
+            .finish(&mut self.frame.body)
+            .expect("value-producing conditional")
+            .into_handle()
+    }
+
+    /// The enclosing source operation supplies evaluated leaves. Its branch graph
+    /// and ownership policy are the same ones used by a wholly checked suite.
+    pub(super) fn branch_expr(&mut self, expr: &ast::Expr, yes: &str, no: &str) {
+        if let Some(crate::frontend::LogicalSelection::Checked(condition)) =
+            self.source.logicals.get(expr)
+        {
+            self.prepare_checked_value(condition);
+            self.frame
+                .registered_branch(condition, &self.sites, yes, no);
+            return;
+        }
+        let (edges, inputs) = prepare_boolean(
+            expr,
+            BooleanContext::Condition,
+            self.source.registered_source(),
+            &self.source.logicals,
+        );
+        let mut plan = Logical::branch(&mut self.frame.body, edges, yes, no);
+        self.logical_inputs(&mut plan, inputs, BooleanContext::Condition);
+    }
+
+    fn boolean_value(&mut self, expr: &ast::Expr) -> String {
+        let (edges, inputs) = prepare_boolean(
+            expr,
+            BooleanContext::Value,
+            self.source.registered_source(),
+            &self.source.logicals,
+        );
+        let mut plan = Logical::value(&mut self.frame.body, edges, crate::ir::Type::PythonObject);
+        self.logical_inputs(&mut plan, inputs, BooleanContext::Value);
+        self.flush_check();
+        plan.finish(&mut self.frame.body).into_handle()
+    }
+
+    fn logical_inputs(
+        &mut self,
+        plan: &mut Logical,
+        inputs: Vec<SourceOperand<'_>>,
+        context: BooleanContext,
+    ) {
+        for (i, leaf) in inputs.into_iter().enumerate().rev() {
+            if let Some(block) = plan.block(i) {
+                self.label(block);
+            }
+            let operand = if context == BooleanContext::Condition {
+                let bit = match leaf {
+                    SourceOperand::Checked(value) => {
+                        self.prepare_checked_value(&value);
+                        self.frame.registered_expression(&value, &self.sites, true)
+                    }
+                    SourceOperand::Residual(expr) => self.test_operand(expr),
+                };
+                LogicalOperand::Predicate(bit)
+            } else {
+                let mark = (!plan.final_value(i)).then(|| self.temporary_mark());
+                let value = match leaf {
+                    SourceOperand::Checked(value) => self.registered_value(&value),
+                    SourceOperand::Residual(expr) => self.expr(expr),
+                };
+                match mark {
+                    Some(mark) => {
+                        let truth = self.truth(&value);
+                        LogicalOperand::Tested {
+                            value: CheckedValue::handle(value),
+                            truth,
+                            mark: Some(mark),
+                        }
+                    }
+                    None => LogicalOperand::Selected(CheckedValue::handle(value)),
+                }
+            };
+            self.frame.logical_operand(plan, i, operand);
         }
     }
 
@@ -232,78 +322,6 @@ impl Function<'_, '_> {
         })
     }
 
-    /// Assign a block to each graph step. Multiple predecessors can share a single operand.
-    fn boolean_steps(
-        &mut self,
-        expr: &ast::Expr,
-        context: BooleanContext,
-        yes: &str,
-        no: &str,
-        mut emit: impl FnMut(&mut Self, &ast::Expr, &str, &str),
-    ) {
-        let flow = Flow::new(expr, context);
-        let labels: Vec<_> = flow.steps.iter().map(|_| self.name("b")).collect();
-        let label = |target| match target {
-            Target::Step(i) => labels[i].as_str(),
-            Target::Truth(true) => yes,
-            Target::Truth(false) => no,
-            Target::Operand => {
-                debug_assert_eq!(yes, no);
-                yes
-            }
-        };
-        for (i, step) in flow.steps.iter().enumerate().rev() {
-            if i + 1 != flow.steps.len() {
-                self.label(&labels[i]);
-            }
-            emit(self, step.expr, label(step.yes), label(step.no));
-        }
-    }
-
-    /// Keep the selected object at the join. Discard other operand roots before visiting the next.
-    fn boolean_value(&mut self, expr: &ast::Expr) -> String {
-        let done = self.name("b");
-        let mut incoming = Vec::new();
-        self.boolean_steps(
-            expr,
-            BooleanContext::Value,
-            &done,
-            &done,
-            |f, expr, yes, no| {
-                if yes == no {
-                    let value = f.expr(expr);
-                    incoming.push(format!("[ {value}, %{} ]", f.current_block()));
-                    f.jump(&done);
-                    return;
-                }
-                let mark = f.temporary_mark();
-                let value = f.expr(expr);
-                let truth = f.truth(&value);
-                if yes != done && no != done {
-                    f.discard_truth(&mark);
-                    f.branch(&truth, yes, no);
-                    return;
-                }
-                incoming.push(format!("[ {value}, %{} ]", f.current_block()));
-                let discard = f.name("b");
-                let next = if yes == done {
-                    f.branch(&truth, &done, &discard);
-                    no
-                } else {
-                    f.branch(&truth, &discard, &done);
-                    yes
-                };
-                f.label(&discard);
-                f.discard_truth(&mark);
-                f.jump(next);
-            },
-        );
-        self.label(&done);
-        self.value(&format!("phi i64 {}", incoming.join(", ")))
-    }
-
-    /// A failed intermediate comparison returns its object in a value context and false in a branch.
-    /// Evaluate a residual operand only in the reached link, keeping its result rooted.
     fn source_comparison(&mut self, cmp: &ast::ExprCompare, condition: bool) -> String {
         if let Some((needle, items, negate)) = crate::frontend::literal_membership(cmp) {
             let needle = self.expr(needle);

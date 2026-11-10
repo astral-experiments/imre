@@ -367,7 +367,7 @@ pub(in crate::frontend) fn call_with_target<E>(
     Ok(object_call(call, operands))
 }
 
-fn number_literal(number: &ast::Number, minus: bool) -> ExprKind {
+pub(super) fn number_literal(number: &ast::Number, minus: bool) -> ExprKind {
     match number {
         ast::Number::Int(n) => {
             let mut text = n.to_string();
@@ -647,11 +647,17 @@ pub(super) fn operation<E>(
                 ExprKind::Builtin(Builtin::RegisteredCompare(cmp.ops.to_vec()), values)
             }
         }
-        ast::Expr::If(branch) => ExprKind::Conditional(
-            Box::new(child(&branch.test)?),
-            Box::new(child(&branch.body)?),
-            Box::new(child(&branch.orelse)?),
-        ),
+        ast::Expr::If(branch) => {
+            return Ok(Some(select(
+                child(&branch.test)?,
+                child(&branch.body)?,
+                child(&branch.orelse)?,
+            )));
+        }
+        ast::Expr::BoolOp(op) => {
+            let values = op.values.iter().map(child).collect::<StdResult<_, _>>()?;
+            return Ok(Some(selected_operands(op.op == ast::BoolOp::And, values)));
+        }
         ast::Expr::Name(name) => {
             if let Some(value) = local {
                 return Ok(Some(value));
@@ -807,17 +813,22 @@ pub(crate) enum ValueStatement<'a> {
 pub(crate) fn value_statement<'a>(
     stmt: &'a ast::Stmt,
     source: RegisteredSource<'_>,
+    logicals: &super::booleans::LogicalSites,
 ) -> Option<ValueStatement<'a>> {
+    let operand = |value: &ast::Expr| match logicals.get(value) {
+        Some(super::booleans::Selection::Checked(value)) => Some(value.clone()),
+        Some(_) => None,
+        None => registered_value(value, source),
+    };
     Some(match stmt {
         ast::Stmt::Return(ret) => match ret.value.as_deref() {
             None => ValueStatement::Checked(Statement::Return(Expr::none())),
-            Some(value) => registered_value(value, source)
-                .map_or(ValueStatement::ReturnOperand(value), |value| {
-                    ValueStatement::Checked(Statement::Return(value))
-                }),
+            Some(value) => operand(value).map_or(ValueStatement::ReturnOperand(value), |value| {
+                ValueStatement::Checked(Statement::Return(value))
+            }),
         },
         ast::Stmt::Expr(expr) if expr.value.is_string_literal_expr() => ValueStatement::Ignore,
-        ast::Stmt::Expr(expr) => registered_value(&expr.value, source)
+        ast::Stmt::Expr(expr) => operand(&expr.value)
             .map_or(ValueStatement::DiscardOperand(&expr.value), |value| {
                 ValueStatement::Checked(Statement::Expr(value))
             }),

@@ -15,10 +15,8 @@ use crate::llvm::registered::{
     ABI, FrameEmitter, Output, RegisteredFrame, SourcePositions, permanent, sites, suspension,
 };
 
-mod boolean;
 mod comprehensions;
 mod expressions;
-mod patterns;
 mod statements;
 
 type ModuleSource = (String, PathBuf, String);
@@ -466,8 +464,11 @@ impl<'a> PreparedBody<'a> {
         let sites = crate::frontend::registered_sites(&body, &private_names);
         let mut operations = sites.operations;
         let mut type_aliases = HashMap::new();
-        let mut scopes =
-            crate::frontend::function_scope::ScopeFacts::prepare(&body, &private_names, |alias| {
+        let mut logicals = crate::frontend::LogicalSites::default();
+        let mut scopes = crate::frontend::function_scope::ScopeFacts::prepare(
+            &body,
+            &private_names,
+            |alias| {
                 let Some(name) = alias.name.as_name_expr() else {
                     return;
                 };
@@ -490,7 +491,9 @@ impl<'a> PreparedBody<'a> {
                         parameters,
                     },
                 );
-            });
+            },
+            |expr| logicals.visit(expr, values),
+        );
         let lambdas = RegisteredLambda::collect(&body, values, std::mem::take(&mut scopes.lambdas));
         let mut namespace_annotations = HashMap::new();
         let annotation_operands = crate::frontend::annotation_operands(
@@ -585,6 +588,7 @@ impl<'a> PreparedBody<'a> {
             lambdas,
             thread_entries,
             checked_deletions,
+            logicals,
             statement_sites: prepare.sites,
             python_optimization,
             nested_bodies: prepare.nested,
@@ -831,6 +835,7 @@ struct SourceInfo<'a> {
         crate::frontend::PreparedAnnotation<Box<SourceInfo<'static>>>,
     >,
     namespace_annotations: HashMap<Option<ruff_text_size::TextSize>, Vec<ruff_text_size::TextSize>>,
+    logicals: crate::frontend::LogicalSites,
     scopes: crate::frontend::function_scope::ScopeFacts,
     thread_entries: HashMap<ruff_text_size::TextSize, imre_ast::ThreadEntry>,
     lambdas: HashMap<ruff_text_size::TextSize, RegisteredLambda>,
@@ -1217,6 +1222,49 @@ mod tests {
         assert!(!prepared.source.replacements.is_empty());
         prepared.source.replacements.clear();
         assert_eq!(prepared.standalone().unwrap().unwrap(), before);
+    }
+
+    #[test]
+    fn residual_named_assignment_consumes_its_completed_choice_after_erasing_the_arm_syntax() {
+        let mut prepared = PreparedBody::module(
+            "program", Path::new("program.py"),
+            "try:\n    result = (seen := yes() if first() and second() else no())\nfinally:\n    cleanup()\n",
+            0, ModuleOrigin::Program(None),
+        ).unwrap();
+        fn emitted(body: &PreparedBody) -> String {
+            let mut out = Output::default();
+            let file = out.data(b"program.py");
+            body.emit(&mut out, 0, &file).unwrap();
+            out.functions
+        }
+        let original = emitted(&prepared);
+        let ast::Stmt::Try(block) = &mut prepared.body[0] else {
+            panic!("expected try")
+        };
+        let ast::Stmt::Assign(assign) = &mut block.body[0] else {
+            panic!("expected assignment")
+        };
+        assert!(
+            crate::frontend::registered_value(&assign.value, prepared.source.registered_source())
+                .is_none()
+        );
+        let ast::Expr::Named(named) = assign.value.as_mut() else {
+            panic!("expected assignment expression")
+        };
+        assert!(matches!(
+            prepared.source.logicals.get(&named.value),
+            Some(crate::frontend::LogicalSelection::Checked(_))
+        ));
+        let ast::Expr::If(choice) = named.value.as_mut() else {
+            panic!("expected choice")
+        };
+        for part in [&mut choice.test, &mut choice.body, &mut choice.orelse] {
+            **part = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
+                range: part.range(),
+                node_index: Default::default(),
+            });
+        }
+        assert_eq!(emitted(&prepared), original);
     }
 
     #[test]

@@ -2,11 +2,13 @@
 
 use super::*;
 
+pub(super) mod booleans;
 mod eager;
 mod lambdas;
 pub(crate) use lambdas::RegisteredLambda;
 mod templates;
 pub(crate) use templates::{PreparedStrings, prepare_strings};
+pub(super) mod patterns;
 pub(super) mod type_alias;
 pub(super) mod values;
 
@@ -158,6 +160,37 @@ impl SourceChecks {
             .iter()
             .all(|range| !definition.range().contains_range(*range))
     }
+}
+
+/// Both operands are already Python handles. A heterogeneous selection needs no conversion.
+fn selected_type(left: Type, right: Type) -> Type {
+    if left == right {
+        left
+    } else {
+        Type::PythonObject
+    }
+}
+
+pub(super) fn truth(value: Expr) -> Expr {
+    operation(Builtin::Bool, Type::Bool, vec![value])
+}
+
+pub(super) fn select(condition: Expr, yes: Expr, no: Expr) -> Expr {
+    Expr {
+        ty: selected_type(yes.ty, no.ty),
+        kind: ExprKind::Conditional(Box::new(condition), Box::new(yes), Box::new(no)),
+    }
+}
+
+pub(super) fn selected_operands(and: bool, mut operands: Vec<Expr>) -> Expr {
+    let mut result = operands.pop().expect("boolean operands are nonempty");
+    for left in operands.into_iter().rev() {
+        result = Expr {
+            ty: selected_type(left.ty, result.ty),
+            kind: ExprKind::BooleanValue(and, Box::new(left), Box::new(result)),
+        };
+    }
+    result
 }
 
 pub(super) fn capture(
@@ -595,7 +628,18 @@ fn checked_assertion(
 #[derive(Default)]
 pub(crate) struct StatementSites {
     pub(crate) assertions: HashMap<TextRange, Vec<Statement>>,
+    pub(crate) ifs: HashMap<TextRange, Vec<SourceGuard>>,
+    pub(crate) matches: HashMap<TextRange, patterns::SourceMatch>,
     pub(crate) contexts: HashMap<TextRange, ir::ContextSite>,
+}
+
+/// A residual arm keeps its source test in the source adapter. Compilable tests
+/// are already owned IR when the enclosing statement needs a residual arm.
+pub(crate) enum SourceGuard {
+    Literal(bool),
+    Checked(Expr),
+    Residual,
+    Otherwise,
 }
 
 fn statement_sites(
@@ -629,6 +673,27 @@ fn statement_sites(
                     let site = context_site(self.source.text, &item.context_expr);
                     self.sites.contexts.insert(site.range, site);
                 }
+            }
+            if let ast::Stmt::Match(branch) = stmt
+                && let Some(plan) = patterns::SourceMatch::prepare(branch, self.source)
+            {
+                self.sites.matches.insert(stmt.range(), plan);
+            }
+            if let ast::Stmt::If(branch) = stmt {
+                let guard = |expr: &ast::Expr| {
+                    if let ast::Expr::BooleanLiteral(literal) = expr {
+                        SourceGuard::Literal(literal.value)
+                    } else {
+                        values::registered_value(expr, self.source)
+                            .map_or(SourceGuard::Residual, SourceGuard::Checked)
+                    }
+                };
+                let tests = std::iter::once(guard(&branch.test))
+                    .chain(branch.elif_else_clauses.iter().map(|clause| {
+                        clause.test.as_ref().map_or(SourceGuard::Otherwise, guard)
+                    }))
+                    .collect();
+                self.sites.ifs.insert(stmt.range(), tests);
             }
             walk_stmt(self, stmt);
         }
@@ -953,6 +1018,29 @@ impl statements::StatementLowering for SourceScope<'_> {
         unpacking::bind_assignment(self, &assign.targets, value)
     }
 
+    fn branch(&mut self, branch: &ast::StmtIf) -> StdResult<statements::Block, ()> {
+        let mut arms = Vec::new();
+        let mut otherwise = (Vec::new(), true);
+        let mut falls = false;
+        let clauses = std::iter::once((Some(branch.test.as_ref()), branch.body.as_slice())).chain(
+            branch
+                .elif_else_clauses
+                .iter()
+                .map(|clause| (clause.test.as_ref(), clause.body.as_slice())),
+        );
+        for (test, suite) in clauses {
+            if let Some(test) = test {
+                let condition = truth(self.operand(test).ok_or(())?);
+                let (body, continues) = self.block(suite)?;
+                arms.push((condition, body));
+                falls |= continues;
+            } else {
+                otherwise = self.block(suite)?;
+            }
+        }
+        Ok((statements::if_arms(arms, otherwise.0), falls || otherwise.1))
+    }
+
     fn definition(&mut self, def: &ast::StmtFunctionDef) -> StdResult<Option<Statement>, ()> {
         if def.type_params.is_some() {
             return Err(());
@@ -1046,6 +1134,7 @@ impl statements::StatementLowering for SourceScope<'_> {
                 })?],
                 false,
             )),
+            ast::Stmt::Match(branch) => self.match_statement(branch),
             ast::Stmt::ClassDef(class) if plain_class_header(class) => {
                 let decorators = class
                     .decorator_list
@@ -1219,7 +1308,7 @@ impl unpacking::PatternBinder for SourceScope<'_> {
 }
 
 impl SourceScope<'_> {
-    fn statement(&mut self, stmt: &ast::Stmt, body: &mut Vec<Statement>) -> StdResult<(), ()> {
+    fn statement(&mut self, stmt: &ast::Stmt, body: &mut Vec<Statement>) -> StdResult<bool, ()> {
         if let ast::Stmt::Assert(assertion) = stmt {
             if let Some(statements) = self.sites.assertions.get(&stmt.range()) {
                 body.extend_from_slice(statements);
@@ -1228,24 +1317,20 @@ impl SourceScope<'_> {
                 // and admit suspension at a whole operand's boundary.
                 body.extend(checked_assertion(assertion, |expr| self.operand(expr)).ok_or(())?);
             }
-            return Ok(());
+            return Ok(true);
         }
-        let (lowered, _) = statements::StatementLowering::source_statement(
+        let (lowered, continues) = statements::StatementLowering::source_statement(
             self,
             stmt,
             matches!(self.kind, RegisteredScope::Module),
         )?;
         body.push(checkpoint(stmt));
         body.extend(lowered);
-        Ok(())
+        Ok(continues)
     }
 
     fn suite(&mut self, stmts: &[ast::Stmt]) -> StdResult<Vec<Statement>, ()> {
-        let mut body = Vec::new();
-        for stmt in stmts {
-            self.statement(stmt, &mut body)?;
-        }
-        Ok(body)
+        self.block(stmts).map(|(body, _)| body)
     }
 
     fn with_items(
@@ -1291,6 +1376,50 @@ impl SourceScope<'_> {
         let slot = self.locals.len();
         self.locals.push(ty);
         slot
+    }
+
+    fn match_statement(&mut self, branch: &ast::StmtMatch) -> StdResult<statements::Block, ()> {
+        let subject = self.operand(&branch.subject).ok_or(())?;
+        let mut cases = Vec::with_capacity(branch.cases.len());
+        let mut falls = false;
+        let mut exhaustive = false;
+        let patterns = &self
+            .sites
+            .matches
+            .get(&branch.range())
+            .ok_or(())?
+            .cases;
+        for (case, planned) in branch.cases.iter().zip(patterns) {
+            if exhaustive {
+                return Err(());
+            }
+            let pattern = planned.pattern.clone();
+            let captures = pattern.names.iter().map(|name| self.slot(name)).collect();
+            let guard = case
+                .guard
+                .as_deref()
+                .map(|value| self.operand(value).map(truth).ok_or(()))
+                .transpose()?;
+            exhaustive = guard.is_none() && case.pattern.is_irrefutable();
+            let (body, continues) = self.block(&case.body)?;
+            cases.push(ir::MatchCase {
+                pattern,
+                captures,
+                guard,
+                body,
+            });
+            falls |= continues;
+        }
+        Ok((vec![Statement::Match(subject, cases)], falls || !exhaustive))
+    }
+
+    fn block(&mut self, stmts: &[ast::Stmt]) -> StdResult<statements::Block, ()> {
+        let mut body = Vec::new();
+        let mut falls = true;
+        for stmt in stmts {
+            falls &= self.statement(stmt, &mut body)?;
+        }
+        Ok((body, falls))
     }
 
     fn slot(&mut self, name: &str) -> usize {
@@ -1434,7 +1563,7 @@ mod tests {
         module_annotations(stmts, string_annotations, operations, &strings)
     }
 
-    fn registered_suite(
+    pub(super) fn registered_suite(
         stmts: &[ast::Stmt],
         kind: RegisteredScope,
         source: values::RegisteredSource<'_>,
@@ -1699,10 +1828,94 @@ mod tests {
         let [run] = &plan.residual[..] else {
             panic!("expected one source range")
         };
-        assert_eq!(run.statements, 2..4);
-        assert_eq!(run.at, 5);
-        assert_eq!(plan.checked.function.body.len(), 7);
-        assert!(prepare.nested.values().all(RegisteredSuite::fully_checked));
+        // Only the annotated list assignment remains in the source run. The branch
+        // now owns the delete operation, and the last import still follows the run.
+        assert_eq!(run.statements, 3..4);
+        let (before, after) = plan.checked.function.body.split_at(run.at);
+        let Some(Statement::If(_, yes, no)) = before.last() else {
+            panic!("expected the checked conditional immediately before y")
+        };
+        assert!(no.is_empty());
+        assert!(matches!(yes.as_slice(), [_, Statement::Expr(Expr {
+            kind: ExprKind::Builtin(Builtin::RegisteredDeleteName(name, _), _), ..
+        })] if name == "a"));
+        assert!(matches!(
+            after,
+            [
+                _,
+                Statement::Expr(Expr {
+                    kind: ExprKind::Builtin(Builtin::RegisteredImport(_), _),
+                    ..
+                })
+            ]
+        ));
+        assert!(prepare.nested.is_empty());
+    }
+
+    #[test]
+    fn prepared_match_retains_the_guard_capture_and_both_conditional_arms() {
+        let text = concat!(
+            "if enabled:\n",
+            "    match subject:\n",
+            "        case Row(value=item) if accept(item):\n",
+            "            record(item if choose else other)\n",
+            "else:\n",
+            "    record(other)\n",
+        );
+        let graph = SourceGraph::single(text).unwrap();
+        let module = &graph.modules[graph.entry];
+        let source = values::ModuleSource::new(module);
+        let body = registered_suite(
+            &module.parsed.syntax().body,
+            RegisteredScope::Module,
+            source.context(text),
+        )
+        .unwrap();
+        assert!(crate::llvm::registered::supports(&body));
+        let mut matched = false;
+        ir::walk_statements(&body.function.body, &mut |stmt| {
+            if let Statement::Match(_, cases) = stmt {
+                let [case] = cases.as_slice() else {
+                    panic!("expected one match case")
+                };
+                assert_eq!(case.pattern.names, ["item"]);
+                assert_eq!(case.captures.len(), 1);
+                assert!(case.guard.is_some());
+                let mut selected = false;
+                ir::walk_expressions(&case.body, &mut |expr| {
+                    selected |= matches!(expr.kind, ExprKind::Conditional(..));
+                });
+                assert!(selected);
+                matched = true;
+            }
+        });
+        assert!(matched);
+    }
+
+    #[test]
+    fn registered_branches_keep_selected_operands_and_live_bool_calls() {
+        let graph = SourceGraph::single(concat!(
+            "def choose(flag: int, left, right, sink):\n",
+            "    if flag and left:\n",
+            "        sink(left if flag else right)\n",
+            "    else:\n",
+            "        sink(bool(flag), (left and right) or flag)\n",
+        ))
+        .unwrap();
+        assert!(super::super::lower(&graph).is_err());
+        let bodies = graph.registered_functions();
+        let body = &bodies[&graph.entry][&TextSize::default()].function.body;
+        assert!(body.iter().any(|stmt| matches!(stmt, Statement::If(..))));
+        let mut counts = [0; 5];
+        ir::walk_expressions(body, &mut |expr| match &expr.kind {
+            ExprKind::Conditional(..) => counts[0] += 1,
+            ExprKind::Boolean(..) => counts[1] += 1,
+            ExprKind::BooleanValue(..) => counts[2] += 1,
+            ExprKind::Builtin(Builtin::RegisteredName(name), _) if name == "bool" => counts[3] += 1,
+            ExprKind::Builtin(Builtin::RegisteredCall(..), _) => counts[4] += 1,
+            _ => {}
+        });
+        assert_eq!(counts, [1, 1, 2, 1, 3]);
     }
 
     #[test]

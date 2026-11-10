@@ -118,6 +118,11 @@ mod record_inputs;
 mod records;
 mod regex;
 mod registered;
+pub(crate) use registered::SourceGuard;
+pub(crate) use registered::booleans::{
+    LogicalSites, Selection as LogicalSelection, SourceOperand, prepare_boolean,
+};
+pub(crate) use registered::patterns::MatchGuard;
 pub(crate) use registered::type_alias::type_alias_body;
 pub(crate) use registered::values::{
     RegisteredSource, ValueStatement, binary_operands, display_elements, lambda_defaults, literal_membership,
@@ -5229,7 +5234,7 @@ impl<'a> Checker<'a> {
                 }
                 ast::Stmt::For(loop_) => !loop_.is_async,
                 ast::Stmt::While(_) => true,
-                ast::Stmt::If(branch) => branch.elif_else_clauses.is_empty(),
+                ast::Stmt::If(_) => true,
                 ast::Stmt::Break(_) | ast::Stmt::Continue(_) => true,
                 ast::Stmt::Return(_) | ast::Stmt::Expr(_) | ast::Stmt::Pass(_) => true,
                 _ => false,
@@ -5636,7 +5641,6 @@ impl<'a> Checker<'a> {
                 }
                 return Ok((statements, true));
             }
-            ast::Stmt::If(branch) => return self.if_chain(branch),
             ast::Stmt::Match(branch) => return self.match_statement(branch),
             ast::Stmt::While(loop_) => {
                 self.invalidate_loop_facts(&loop_.body, None)?;
@@ -6556,7 +6560,7 @@ impl<'a> Checker<'a> {
             }
             arms.push((condition, yes));
         }
-        let (mut no, no_falls) = if let Some(tail) = clauses.last().filter(|c| c.test.is_none()) {
+        let (no, no_falls) = if let Some(tail) = clauses.last().filter(|c| c.test.is_none()) {
             let guards = self.namespace_guards.len();
             let last_test = clauses
                 .iter()
@@ -6577,10 +6581,7 @@ impl<'a> Checker<'a> {
         if let Some(joined) = joined {
             self.restore_state(joined);
         }
-        for (condition, yes) in arms.into_iter().rev() {
-            no = vec![Statement::If(condition, yes, no)];
-        }
-        Ok((no, falls))
+        Ok((statements::if_arms(arms, no), falls))
     }
 
     /// A call or expression can supply its own concrete collection layout.

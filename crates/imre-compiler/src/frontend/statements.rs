@@ -4,10 +4,21 @@ use super::*;
 
 pub(super) type Block = (Vec<Statement>, bool);
 
+pub(super) fn if_arms(
+    arms: Vec<(Expr, Vec<Statement>)>,
+    mut otherwise: Vec<Statement>,
+) -> Vec<Statement> {
+    for (test, body) in arms.into_iter().rev() {
+        otherwise = vec![Statement::If(test, body, otherwise)];
+    }
+    otherwise
+}
+
 pub(super) trait StatementLowering {
     type Error;
 
     fn assignment(&mut self, assign: &ast::StmtAssign) -> StdResult<Vec<Statement>, Self::Error>;
+    fn branch(&mut self, branch: &ast::StmtIf) -> StdResult<Block, Self::Error>;
     fn definition(
         &mut self,
         def: &ast::StmtFunctionDef,
@@ -32,6 +43,7 @@ pub(super) trait StatementLowering {
         }
         let (statement, continues) = match stmt {
             ast::Stmt::Assign(assign) => return Ok((self.assignment(assign)?, true)),
+            ast::Stmt::If(branch) => return self.branch(branch),
             ast::Stmt::FunctionDef(def) => (self.definition(def)?, true),
             ast::Stmt::Expr(expr) => self.effect(&expr.value)?,
             ast::Stmt::Return(ret) if !module => {
@@ -84,6 +96,10 @@ impl StatementLowering for Checker<'_> {
             ));
         }
         Ok(Some(statements))
+    }
+
+    fn branch(&mut self, branch: &ast::StmtIf) -> Result<Block, String> {
+        self.if_chain(branch)
     }
 
     fn assignment(&mut self, assign: &ast::StmtAssign) -> Result<Vec<Statement>, String> {
