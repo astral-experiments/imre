@@ -189,11 +189,116 @@ impl RegisteredFrame<'_, '_> {
     }
 }
 
-/// Emit every acquired manager around the binding of its own target, subsequent
-/// managers, and the body. Each caller supplies operands and its lexical exit stack.
-pub(crate) trait ContextEmitter<'a, 'p>: FrameEmitter<'a, 'p> {
-    fn push_context(&mut self, exit: ContextRegion, outer: String);
-    fn pop_context(&mut self) -> (ContextRegion, String);
+/// Both body emitters use the registered frame's loop targets, roots and caught
+/// exceptions. Only the prepared final suite and its lexical stack belong to the body.
+pub(crate) trait RegionEmitter<'a, 'p>: FrameEmitter<'a, 'p> {
+    type Finally;
+    fn regions(&mut self) -> &mut Vec<Region<Self::Finally>>;
+    fn emit_finally(&mut self, suite: &Self::Finally);
+
+    /// Root a return across cleanup and forward checked exits to an enclosing physical suite.
+    fn return_from_regions(&mut self, value: String) {
+        self.live.push(value.clone());
+        self.exit_regions(0, Some(&value));
+        self.live.pop();
+        if self.body.terminated {
+            return;
+        }
+        if self.cleanup_returns.is_some() {
+            let label = self.name("return_cleanup");
+            self.jump(&label);
+            let site = self.current_range;
+            self.cleanup_returns
+                .as_mut()
+                .unwrap()
+                .push((label, value, site));
+        } else {
+            self.return_value(&value);
+        }
+    }
+
+    fn unwind_loop(&mut self, stmt: &Statement) {
+        let target = self.loops.last().expect("loop transfer");
+        let (label, depth) = match stmt {
+            Statement::Break => (&target.edges.done, target.exit_depth),
+            Statement::Continue => (&target.edges.step, target.step_depth),
+            Statement::Exhaust => (&target.edges.exhausted, target.step_depth),
+            _ => unreachable!("loop transfer"),
+        };
+        let label = label.clone();
+        self.exit_regions(depth, None);
+        self.jump(&label);
+    }
+
+    fn exit_regions(&mut self, depth: usize, pending_return: Option<&str>) {
+        if self.regions().len() == depth {
+            return;
+        }
+        let target = self.body.error_target.clone();
+        let mut left = Vec::new();
+        let mut discarded = Vec::new();
+        while self.regions().len() > depth && !self.body.terminated {
+            // An exit inside a final suite can override the original transfer. It
+            // must see only the regions outside the cleanup currently being run.
+            let region = self.regions().pop().unwrap();
+            match &region {
+                Region::Context { exit, outer } => {
+                    self.body.error_target.clone_from(outer);
+                    self.leave_context(exit, &mut discarded);
+                    self.flush_check();
+                }
+                Region::Slots(slots) => self.clear_slots(slots),
+                Region::Finally {
+                    body,
+                    outer,
+                    loops,
+                    caught,
+                } => {
+                    self.body.error_target.clone_from(outer);
+                    let inner_loops = self.loops.split_off(*loops);
+                    let inner_handlers = self.caught.split_off(*caught);
+                    let value = pending_return.filter(|value| *value != "0");
+                    if let Some(value) = value {
+                        self.regions().push(Region::Pending {
+                            value: value.into(),
+                            enclosing: None,
+                            outer: outer.clone(),
+                        });
+                    }
+                    self.emit_finally(body);
+                    if value.is_some() {
+                        self.regions().pop();
+                    }
+                    self.caught.extend(inner_handlers);
+                    self.loops.extend(inner_loops);
+                }
+                Region::ExceptionName { name, outer } => {
+                    self.body.error_target.clone_from(outer);
+                    self.clear_exception_name(name);
+                    self.flush_check();
+                }
+                Region::Pending {
+                    value,
+                    enclosing,
+                    outer,
+                } => {
+                    self.body.error_target.clone_from(outer);
+                    if let Some(caught) = enclosing {
+                        self.op("restore_caught", &[caught]);
+                    }
+                    let index = self.live.iter().rposition(|v| v == value).unwrap();
+                    discarded.push((index, self.live.remove(index)));
+                    self.release_target(None);
+                }
+            }
+            left.push(region);
+        }
+        for (slot, owner) in discarded.into_iter().rev() {
+            self.live.insert(slot, owner);
+        }
+        self.regions().extend(left.into_iter().rev());
+        self.body.error_target = target;
+    }
 
     fn with_contexts(
         &mut self,
@@ -217,7 +322,10 @@ pub(crate) trait ContextEmitter<'a, 'p>: FrameEmitter<'a, 'p> {
                 (exit, value, None)
             };
             let (region, outer) = self.begin_context(site, exit);
-            self.push_context(region, outer);
+            self.regions().push(Region::Context {
+                exit: region,
+                outer,
+            });
             bind(self, index, &value);
             if let Some(mark) = above_exit {
                 self.discard_truth(&mark);
@@ -225,36 +333,22 @@ pub(crate) trait ContextEmitter<'a, 'p>: FrameEmitter<'a, 'p> {
         }
         body(self);
         for _ in 0..count {
-            let (region, outer) = self.pop_context();
-            self.end_context(region, outer);
+            let Some(Region::Context { exit, outer }) = self.regions().pop() else {
+                unreachable!("active context region")
+            };
+            self.end_context(exit, outer);
         }
     }
 }
 
-impl<'a, 'p> ContextEmitter<'a, 'p> for Frame<'_, 'a, 'p> {
-    fn push_context(&mut self, exit: ContextRegion, outer: String) {
-        self.code
-            .iteration
-            .scopes
-            .push(Region::Context { exit, outer });
-    }
-
-    fn pop_context(&mut self) -> (ContextRegion, String) {
-        let Some(Region::Context { exit, outer }) = self.code.iteration.scopes.pop() else {
-            unreachable!("active context region")
-        };
-        (exit, outer)
-    }
-}
-
-pub(super) enum Region {
+pub(crate) enum Region<B> {
     Slots(Vec<usize>),
     Context {
         exit: ContextRegion,
         outer: String,
     },
     Finally {
-        body: std::rc::Rc<[Statement]>,
+        body: B,
         outer: String,
         loops: usize,
         caught: usize,
@@ -291,74 +385,16 @@ impl Frame<'_, '_, '_> {
             |frame| frame.emit_suite(body),
         );
     }
+}
 
-    pub(super) fn exit_regions(&mut self, depth: usize, pending_return: Option<&str>) {
-        if self.code.iteration.scopes.len() == depth {
-            return;
-        }
-        let target = self.code.body.error_target.clone();
-        let mut left = Vec::new();
-        let mut discarded = Vec::new();
-        while self.code.iteration.scopes.len() > depth && !self.code.body.terminated {
-            // An exit inside a final suite can override the original transfer. It
-            // must see only the regions outside the cleanup currently being run.
-            let region = self.code.iteration.scopes.pop().unwrap();
-            match &region {
-                Region::Context { exit, outer } => {
-                    self.code.body.error_target.clone_from(outer);
-                    self.code.leave_context(exit, &mut discarded);
-                    self.code.flush_check();
-                }
-                Region::Slots(slots) => self.clear_slots(slots),
-                Region::Finally {
-                    body,
-                    outer,
-                    loops,
-                    caught,
-                } => {
-                    self.code.body.error_target.clone_from(outer);
-                    let inner_loops = self.code.loops.split_off(*loops);
-                    let inner_handlers = self.code.caught.split_off(*caught);
-                    let value = pending_return.filter(|value| *value != "0");
-                    if let Some(value) = value {
-                        self.code.iteration.scopes.push(Region::Pending {
-                            value: value.into(),
-                            enclosing: None,
-                            outer: outer.clone(),
-                        });
-                    }
-                    self.emit_suite(body);
-                    if value.is_some() {
-                        self.leave_scope();
-                    }
-                    self.code.caught.extend(inner_handlers);
-                    self.code.loops.extend(inner_loops);
-                }
-                Region::ExceptionName { name, outer } => {
-                    self.code.body.error_target.clone_from(outer);
-                    self.code.clear_exception_name(name);
-                    self.code.flush_check();
-                }
-                Region::Pending {
-                    value,
-                    enclosing,
-                    outer,
-                } => {
-                    self.code.body.error_target.clone_from(outer);
-                    if let Some(caught) = enclosing {
-                        self.code.op("restore_caught", &[caught]);
-                    }
-                    let index = self.code.live.iter().rposition(|v| v == value).unwrap();
-                    discarded.push((index, self.code.live.remove(index)));
-                    self.code.release_target(None);
-                }
-            }
-            left.push(region);
-        }
-        for (slot, owner) in discarded.into_iter().rev() {
-            self.code.live.insert(slot, owner);
-        }
-        self.code.iteration.scopes.extend(left.into_iter().rev());
-        self.code.body.error_target = target;
+impl<'a, 'p> RegionEmitter<'a, 'p> for Frame<'_, 'a, 'p> {
+    type Finally = std::rc::Rc<[Statement]>;
+
+    fn regions(&mut self) -> &mut Vec<Region<Self::Finally>> {
+        &mut self.code.iteration.scopes
+    }
+
+    fn emit_finally(&mut self, suite: &Self::Finally) {
+        self.emit_suite(suite);
     }
 }

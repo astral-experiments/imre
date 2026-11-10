@@ -1485,19 +1485,6 @@ pub(crate) trait FrameEmitter<'a, 'p>:
         });
     }
 
-    fn unwind_loop(&mut self, stmt: &ir::Statement, unwind: impl FnOnce(&mut Self, usize)) {
-        let target = self.loops.last().expect("loop transfer");
-        let (label, depth) = match stmt {
-            ir::Statement::Break => (&target.edges.done, target.exit_depth),
-            ir::Statement::Continue => (&target.edges.step, target.step_depth),
-            ir::Statement::Exhaust => (&target.edges.exhausted, target.step_depth),
-            _ => unreachable!("loop transfer"),
-        };
-        let label = label.clone();
-        unwind(self, depth);
-        self.jump(&label);
-    }
-
     /// A bare raise transfers the active exception immediately. An explicit raise
     /// roots its evaluated exception until the caller has evaluated the cause.
     fn raise_operands<T>(
