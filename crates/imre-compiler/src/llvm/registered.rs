@@ -169,6 +169,10 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
                 uses_python_protocol = true;
                 expr.is_registered_invoke()
             }
+            ExprKind::Builtin(Builtin::RegisteredImport(_), operands) => {
+                uses_python_protocol = true;
+                operands.is_empty()
+            }
             ExprKind::Builtin(Builtin::RegisteredCall(call), operands) => {
                 uses_python_protocol = true;
                 operands.len() > usize::from(call.explicit_scope)

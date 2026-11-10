@@ -1167,6 +1167,35 @@ impl Session {
             .all(|binding| binding.binding.definition().is_none())
     }
 
+    /// A sole local import writes a Python binding without invalidating another checked layout.
+    pub(crate) fn sole_local_import(
+        &self,
+        module: usize,
+        statement: &ruff_python_ast::Stmt,
+    ) -> bool {
+        let aliases = match statement {
+            ruff_python_ast::Stmt::Import(import) => &import.names,
+            ruff_python_ast::Stmt::ImportFrom(import) => &import.names,
+            _ => return false,
+        };
+        let file = self.db.program_file(self.files[module]);
+        let index = ty_python_core::semantic_index(&self.db, file);
+        aliases.iter().all(|alias| {
+            let Some(binding) = index.try_definition(alias) else {
+                return false;
+            };
+            let scope = binding.file_scope(&self.db);
+            let place = binding.place(&self.db);
+            place
+                .as_symbol()
+                .is_some_and(|id| index.place_table(scope).symbol(id).is_local())
+                && index
+                    .use_def_map(scope)
+                    .definitions_with_usage()
+                    .all(|(_, other, _)| other == binding || other.place(&self.db) != place)
+        })
+    }
+
     /// A function-local module alias can be shadowed independently of the package binding.
     pub(crate) fn is_stdlib_module(&self, module: usize, expression: &Expr, name: &str) -> bool {
         use ty_python_semantic::types::Type as Ty;
