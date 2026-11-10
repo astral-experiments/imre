@@ -4,14 +4,14 @@ use super::super::sites::{
     Declaration, RequiredSite,
 };
 use super::super::{
-    AnnotationScope, Body, DefinitionName, Entry, Function, Output, RegisteredFrame, ReturnOperand,
-    SourceInfo, SourceMap,
+    AnnotationScope, Body, DefinitionName, Entry, Function, Output, RegisteredFrame, SourceInfo,
+    SourceMap,
 };
 use super::CallableSites;
 use crate::frontend::PreparedAnnotation;
 use crate::frontend::function_scope::NamedFunction;
 use crate::ir::{Expr, Statement};
-use ruff_text_size::{Ranged, TextRange, TextSize};
+use ruff_text_size::{TextRange, TextSize};
 use serde_json::json;
 
 impl SourceInfo<'_> {
@@ -93,10 +93,7 @@ impl<'p> SourceMap<'p> {
             location.code(
                 output,
                 String::new(),
-                Body::Operand(
-                    body.code.range,
-                    ReturnOperand::Prepared(&body.code.operand, None),
-                ),
+                Body::Operand(body.code.range, &body.code.operand, None),
                 false,
                 None,
             )
@@ -284,12 +281,9 @@ impl CallableSites<'_, '_> {
         if self.sites.definitions.contains_key(&start) {
             return;
         }
-        let definition = if class.header.parameters.is_some() {
+        let definition = if let Some(header) = &class.header.function {
             let name = format!("<generic parameters of {}>", class.name);
-            let body = class.header.function.as_ref().map_or_else(
-                || Body::Operand(class.name.range(), ReturnOperand::ClassArguments(start)),
-                |checked| Body::Checked(checked, None),
-            );
+            let body = Body::CheckedProvider(header, AnnotationScope::Plain);
             self.compile_definition(start, DefinitionName::ClassHeader(&name), body)
         } else {
             self.compile_class_namespace(start)
@@ -461,12 +455,12 @@ impl CallableSites<'_, '_> {
         }
         let compiled = match &alias.body {
             Ok(code) => {
-                let operand = ReturnOperand::Prepared(&code.operand, self.class_locals.cloned());
+                let body = Body::Operand(code.range, &code.operand, self.class_locals.cloned());
                 Some(CompiledAlias {
                     definition: self.compile_definition(
                         site,
                         DefinitionName::TypeAlias(&alias.name),
-                        Body::Operand(code.range, operand),
+                        body,
                     ),
                     parameters: alias.parameters.clone(),
                 })

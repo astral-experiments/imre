@@ -716,24 +716,20 @@ enum DefinitionName<'a> {
     ClassHeader(&'a str),
 }
 
-enum ReturnOperand<'a> {
-    Prepared(
-        &'a crate::frontend::RegisteredOperand,
-        Option<crate::frontend::function_scope::ClassBindings>,
-    ),
-    ClassArguments(TextSize),
-}
-
 enum Body<'a> {
     Namespace,
     Suite(&'a crate::frontend::RegisteredSuite),
-    AnnotationProvider(&'a crate::frontend::AnnotationProvider, AnnotationScope),
+    CheckedProvider(&'a crate::frontend::CheckedProvider, AnnotationScope),
     /// Named bodies carry their lexical global declarations into the checked frame.
     Checked(
         &'a crate::frontend::RegisteredFunction,
         Option<&'a BTreeSet<String>>,
     ),
-    Operand(TextRange, ReturnOperand<'a>),
+    Operand(
+        TextRange,
+        &'a crate::frontend::RegisteredOperand,
+        Option<crate::frontend::function_scope::ClassBindings>,
+    ),
 }
 
 enum Entry {
@@ -1046,7 +1042,7 @@ impl SourceMap<'_> {
                 f.physical_suite(suite);
                 f.frame
             }
-            Body::AnnotationProvider(provider, scope) => {
+            Body::CheckedProvider(provider, scope) => {
                 frame.annotation_scope = scope;
                 match provider {
                     Ok(checked) => self.emit_checked_body(
@@ -1066,7 +1062,7 @@ impl SourceMap<'_> {
                     }
                 }
             }
-            Body::Operand(range, ReturnOperand::Prepared(operand, class)) => {
+            Body::Operand(range, operand, class) => {
                 frame.current_range = range;
                 frame.checkpoint(range);
                 if let Some(class) = class {
@@ -1081,22 +1077,6 @@ impl SourceMap<'_> {
                 let value = frame.prepared_operand(operand, &sites, false);
                 frame.return_value(&value);
                 frame
-            }
-            Body::Operand(range, ReturnOperand::ClassArguments(site)) => {
-                let mut f = source_function(frame, sites, prefix);
-                f.checkpoint(&range);
-                let class = &self.class_bodies[&site];
-                let parameters = class.header.parameters.as_deref().expect("generic class");
-                let namespace = f.callable_sites().compile_class_namespace(site);
-                let value = namespace.generic_class(
-                    &mut f,
-                    parameters,
-                    class.range,
-                    &class.header.layout,
-                    |code, index| code.physical_operand(&class.header.operands[index]),
-                );
-                f.return_value(&value);
-                f.frame
             }
         };
         frame.finish(false)
@@ -2242,7 +2222,7 @@ mod tests {
             let owner = &typing.source.class_bodies[&class.decorator_list[0].start()];
             let parameters = owner.header.parameters.as_ref().unwrap();
             assert_eq!(parameters[0].name, "T");
-            let header = owner.header.function.as_ref().unwrap();
+            let header = owner.header.function.as_ref().unwrap().as_ref().unwrap();
             let mut arguments = Vec::new();
             crate::ir::walk_expressions(&header.function.body, &mut |expr| {
                 if let ExprKind::Builtin(Builtin::RegisteredClassNamespace(site, _), children) =
@@ -2286,13 +2266,35 @@ mod tests {
                 crate::frontend::PhysicalOperand::Checked(_)
             ]
         ));
-        let function = header.function.as_ref().unwrap();
+        let function = header.function.as_ref().unwrap().as_ref().unwrap();
         assert!(matches!(
             function.function.body.last(),
             Some(crate::ir::Statement::Return(crate::ir::Expr {
                 kind: ExprKind::Builtin(Builtin::RegisteredClassNamespace(_, _), operands), ..
             })) if operands.len() == 3
         ));
+    }
+
+    #[test]
+    fn generic_class_header_reports_its_missing_checked_child() {
+        let mut module = PreparedBody::module(
+            "example",
+            Path::new("example.py"),
+            "class Packet[T](\n    pick(lambda: T),\n    metaclass=meta(T),\n): pass\n",
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        module.standalone().unwrap();
+
+        inject_residual_child_module(&mut module);
+        let header = &module.source.class_bodies.values().next().unwrap().header;
+        assert!(header.operands.is_empty());
+        assert!(module.syntax.take().is_some());
+        assert_eq!(
+            module.standalone().unwrap_err(),
+            "example.py:2:10: cannot compile this lambda body ahead of time (through 2:19)"
+        );
     }
 
     #[test]

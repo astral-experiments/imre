@@ -114,7 +114,7 @@ impl SourceMap<'_> {
         let code = self.definition(
             output,
             String::new(),
-            Body::AnnotationProvider(body, scope),
+            Body::CheckedProvider(body, scope),
             start,
             false,
             Entry::Compiled,
