@@ -2093,7 +2093,10 @@ struct SourceScope<'a> {
     locals: Vec<Type>,
     loop_scope: LoopScope,
     suspending_operands: bool,
-    refused_comprehension: Option<TextRange>,
+    refusal: Option<(TextRange, &'static str)>,
+    // A dictionary reports its first unprepared comprehension. A Named operand
+    // also preserves terminal errors from its RHS, in the enclosing frame.
+    named_suspension: Option<bool>,
 }
 
 /// Prepare an inline expression that can require private slots in the enclosing activation.
@@ -2104,20 +2107,28 @@ pub(crate) fn inline_operand(
     native_suspension: bool,
 ) -> StdResult<Option<RegisteredOperand>, (TextRange, &'static str)> {
     match expr {
-        ast::Expr::Dict(_) => {
-            let mut refusal = (expr.range(), "cannot compile this dictionary display ahead of time");
+        ast::Expr::Dict(_) | ast::Expr::Named(_) => {
+            let is_dict = expr.is_dict_expr();
+            let mut refusal = None;
             let operand = RegisteredOperand::prepare_with(source, kind, |scope| {
-                scope.suspending_operands = native_suspension;
-                let value = scope.operand(expr);
-                if let Some(range) = scope.refused_comprehension {
-                    refusal = (range, "cannot compile this comprehension ahead of time");
+                if is_dict {
+                    scope.suspending_operands = native_suspension;
+                } else {
+                    scope.named_suspension = Some(native_suspension);
                 }
+                let value = scope.operand(expr);
+                refusal = scope.refusal;
                 value
             });
-            operand.map(Some).ok_or(refusal)
+            operand.map(Some).ok_or_else(|| {
+                refusal.unwrap_or_else(|| (expr.range(), if is_dict {
+                    "cannot compile this dictionary display ahead of time"
+                } else {
+                    "cannot compile this assignment expression ahead of time"
+                }))
+            })
         }
-        ast::Expr::Named(_)
-        | ast::Expr::ListComp(_)
+        ast::Expr::ListComp(_)
         | ast::Expr::SetComp(_)
         | ast::Expr::DictComp(_)
         | ast::Expr::Generator(_)
@@ -2180,7 +2191,8 @@ impl<'a> SourceScope<'a> {
             locals: Vec::new(),
             loop_scope: LoopScope::Outside,
             suspending_operands: false,
-            refused_comprehension: None,
+            refusal: None,
+            named_suspension: None,
         }
     }
 
@@ -2571,6 +2583,29 @@ impl SourceScope<'_> {
     }
 
     fn lower_operand(&mut self, expr: &ast::Expr, whole: bool) -> Option<Expr> {
+        if expr.is_dict_expr() && let Some(suspended) = self.named_suspension.take() {
+            // A dictionary owns its own diagnostic, including inside a Named RHS.
+            let value = self.checked_operand(expr, whole);
+            self.named_suspension = Some(suspended);
+            if value.is_none() {
+                self.refusal.get_or_insert((expr.range(), "cannot compile this dictionary display ahead of time"));
+            }
+            return value;
+        }
+
+        let value = self.checked_operand(expr, whole);
+        if value.is_none() && self.named_suspension.is_some() {
+            let reason = match expr {
+                ast::Expr::FString(_) => "cannot compile this formatted string ahead of time",
+                ast::Expr::Generator(_) => "cannot compile this generator expression ahead of time",
+                _ => return None,
+            };
+            self.refusal = Some((expr.range(), reason));
+        }
+        value
+    }
+
+    fn checked_operand(&mut self, expr: &ast::Expr, whole: bool) -> Option<Expr> {
         // A generator lambda can resume within its return expression. Eager
         // display bodies use their own iteration and operand boundaries.
         let suspension = match self.kind {
@@ -2589,7 +2624,7 @@ impl SourceScope<'_> {
         {
             self.suspend_operand(kind, value, expr.range())?
         } else if let ast::Expr::TString(template) = expr {
-            self.with_suspending_operands(|scope| {
+            match self.with_suspending_operands(|scope| {
                 scope.source.template(
                     template,
                     matches!(
@@ -2598,7 +2633,15 @@ impl SourceScope<'_> {
                     ),
                     |child| scope.ordinary_operand(child),
                 )
-            })?
+            }) {
+                Ok(value) => value,
+                Err(reason) => {
+                    if self.named_suspension == Some(true) && let Some(reason) = reason {
+                        self.refusal = Some((expr.range(), reason));
+                    }
+                    return None;
+                }
+            }
         } else if let ast::Expr::FString(formatted) = expr {
             self.with_suspending_operands(|scope| {
                 fstrings::registered_fstring(formatted, scope.source, |child| {
@@ -2609,7 +2652,7 @@ impl SourceScope<'_> {
         } else if matches!(expr, ast::Expr::ListComp(_) | ast::Expr::SetComp(_) | ast::Expr::DictComp(_)) {
             let value = self.eager_comprehension(expr);
             if value.is_none() {
-                self.refused_comprehension = Some(expr.range());
+                self.refusal = Some((expr.range(), "cannot compile this comprehension ahead of time"));
             }
             value?
         } else if (self.comprehension.is_some() || self.generator_expression)
@@ -2619,6 +2662,9 @@ impl SourceScope<'_> {
             self.suspend_operand(ir::SuspendValue::Await, Some(&awaited.value), expr.range())?
         } else if let ast::Expr::Lambda(lambda) = expr {
             if !values::has_checked_lambda_body(lambda, self.source) {
+                if self.named_suspension.is_some() {
+                    self.refusal = Some((expr.range(), "cannot compile this lambda body ahead of time"));
+                }
                 return None;
             }
             let binding = self.lambda_binding(lambda)?;

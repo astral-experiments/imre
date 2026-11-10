@@ -414,8 +414,8 @@ impl Frame<'_, '_, '_> {
     /// Retain the original RHS across a replaced owner's finalizer.
     pub(crate) fn bind_expression(&mut self, slot: usize, mark: &str, handle: &str) {
         let (scope, name) = self.assignment_name(slot);
-        self.code
-            .assign_expression_name(&scope, &name, handle, mark);
+        let replaced = self.code.op("assign_named_target", &[&scope, &name, handle]);
+        self.code.release_replaced(&replaced, Some((mark, handle)));
     }
 
     pub(crate) fn body(&mut self) -> &mut FunctionBody {
