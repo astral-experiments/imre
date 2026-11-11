@@ -131,6 +131,11 @@ impl<M> Diagnostic<M> {
         self
     }
 
+    pub(crate) fn exact_operand_in(&self, path: &std::path::Path) -> Option<TextRange> {
+        self.exact_operand()
+            .filter(|_| self.path.as_deref() == Some(path))
+    }
+
     pub(crate) fn earlier_contract(&self, other: &Self) -> bool {
         matches!(
             self.kind,

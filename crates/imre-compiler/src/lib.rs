@@ -1194,7 +1194,14 @@ fn checked_lower_with(
         };
         // An inapplicable object representation cannot replace a native source or ABI
         // diagnostic. A real registration checks this result before emitting its body.
-        graph.source_contract = Some(checked);
+        graph.source_contract = Some(checked.and_then(|()| {
+            if let Err(error) = &lowered
+                && graph.session.declared_exact_operand(graph, error)
+            {
+                return Err(error.to_string());
+            }
+            Ok(())
+        }));
         lowered
     };
     match result {

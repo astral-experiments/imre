@@ -1257,6 +1257,138 @@ impl Session {
             .is_some_and(|def| def.kind(&self.db).target_range(parsed) == alias)
     }
 
+    fn declared_storage(&self, module: usize, target: &Expr, collection: bool) -> bool {
+        use ty_python_core::definition::DefinitionKind;
+        use ty_python_semantic::types::KnownClass;
+
+        let Some(name) = target.as_name_expr() else {
+            return false;
+        };
+        let file = self.files[module];
+        let index = ty_python_core::semantic_index(&self.db, self.db.program_file(file));
+        let Some(scope) = index.try_expression_scope_id(target) else {
+            return false;
+        };
+        let Some(place) = index.place_table(scope).symbol_id(&name.id) else {
+            return false;
+        };
+        let parsed = self.parsed(file);
+        index
+            .use_def_map(scope)
+            .reachable_symbol_declarations(place)
+            .filter_map(|entry| entry.declaration.definition())
+            .any(|definition| {
+                let annotation = match definition.kind(&self.db) {
+                    DefinitionKind::AnnotatedAssignment(a) => Some(a.annotation(&parsed)),
+                    DefinitionKind::Parameter(p) => p.annotation(&parsed),
+                    _ => None,
+                };
+                annotation.is_some_and(|annotation| {
+                    !collection
+                        || annotation.as_subscript_expr().is_some_and(|sub| {
+                            [KnownClass::List, KnownClass::Dict, KnownClass::Set]
+                                .into_iter()
+                                .any(|class| self.is_known_class(module, &sub.value, class))
+                        })
+                })
+            })
+    }
+
+    /// Identify the declaration behind a fixed operand error before sharing it with a registered body.
+    pub(crate) fn declared_exact_operand(
+        &self,
+        graph: &crate::modules::SourceGraph,
+        error: &crate::frontend::phase::Diagnostic,
+    ) -> bool {
+        use ruff_python_ast::{AnyNodeRef, find_node::covering_node};
+        use ty_python_core::definition::DefinitionKind;
+
+        let Some((id, range)) = graph
+            .modules
+            .iter()
+            .enumerate()
+            .filter(|(_, module)| module.checks_source_contracts())
+            .find_map(|(id, module)| {
+                error
+                    .exact_operand_in(&module.path)
+                    .map(|range| (id, range))
+            })
+        else {
+            return false;
+        };
+        let parsed = self.parsed(self.files[id]);
+        let root = AnyNodeRef::from(parsed.syntax());
+        if !root.range().contains_range(range) {
+            return false;
+        }
+        for node in covering_node(root, range).ancestors() {
+            match node {
+                AnyNodeRef::StmtAnnAssign(store)
+                    if store
+                        .value
+                        .as_ref()
+                        .is_some_and(|value| value.range() == range) =>
+                {
+                    return true;
+                }
+                AnyNodeRef::StmtAssign(store) if store.value.range() == range => {
+                    return store.targets.iter().any(|target| match target {
+                        Expr::Subscript(item) => self.declared_storage(id, &item.value, true),
+                        target => self.declared_storage(id, target, false),
+                    });
+                }
+                AnyNodeRef::ExprCall(call)
+                    if call
+                        .arguments
+                        .iter_source_order()
+                        .any(|arg| arg.value().range() == range) =>
+                {
+                    let target = if let Some(attribute) = call.func.as_attribute_expr() {
+                        if self.declared_storage(id, &attribute.value, true) {
+                            return true;
+                        }
+                        &*attribute.value
+                    } else {
+                        &*call.func
+                    };
+                    if self.reaching_binding(id, target).is_some_and(|binding| {
+                        !matches!(
+                            binding.kind(&self.db),
+                            DefinitionKind::Function(_)
+                                | DefinitionKind::Import(_)
+                                | DefinitionKind::ImportFrom(_)
+                        )
+                    }) {
+                        return false;
+                    }
+                    let Some(crate::modules::Binding::Definition(def)) =
+                        graph.resolve(id, &call.func)
+                    else {
+                        return false;
+                    };
+                    let owner = &graph.modules[def.module];
+                    if !owner.checks_source_contracts() {
+                        return false;
+                    }
+                    let Some(function) =
+                        owner.parsed.syntax().body[def.statement].as_function_def_stmt()
+                    else {
+                        return false;
+                    };
+                    return function.decorator_list.is_empty()
+                        && crate::frontend::fixed_call_arguments(call, &function.parameters)
+                            .is_some_and(|bound| {
+                                bound.into_iter().any(|(parameter, value)| {
+                                    parameter.annotation().is_some() && value.range() == range
+                                })
+                            });
+                }
+                _ => {}
+            }
+        }
+        false
+    }
+
     /// Check the reaching declaration of the original callee. A forwarded call can
     /// reuse an original call's index while substituting a different function.
     pub(crate) fn calls_annotated_parameter(
