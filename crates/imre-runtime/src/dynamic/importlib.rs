@@ -803,6 +803,54 @@ impl Context {
         Ok(spec)
     }
 
+    /// Execute the exact registered FILE as __main__ with its package's import context.
+    pub(super) fn prepare_packaged_file(
+        &mut self,
+        name: Id,
+        qualified: &str,
+        path: &Path,
+    ) -> Result<(Id, Id)> {
+        let mark = self.heap.temporary_mark();
+        if let Some((parent, _)) = qualified.rsplit_once('.') {
+            self.module(parent)?;
+        }
+        let qualified = self.text(qualified);
+        let spec = self.registered_source_spec(qualified, Some(path), None)?;
+        let origin = self.lookup_attr(spec, "origin")?;
+        let loader = self.lookup_attr(spec, "loader")?;
+        let cached = self.lookup_attr(spec, "cached")?;
+        let package = self.lookup_attr(spec, "parent")?;
+        // Resolving the parent can replace __main__. Run the registered body in the
+        // resulting namespace, including any builtins supplied by the hook.
+        let modules = self.public_modules()?;
+        let module = self.get_item(modules, name)?;
+        self.heap.keep(module);
+        let globals = self.lookup_attr(module, "__dict__")?;
+        if self.dict_storage(globals).is_none() {
+            let ty = self.type_name(globals);
+            return Err(Error::new(
+                "TypeError",
+                format!("exec() globals must be a dict, not {ty}"),
+            ));
+        }
+        let builtins = self.namespace_builtins(globals, None)?;
+        let scope = self.function_environment("__main__", globals, builtins);
+        self.bind(scope, "__name__", name);
+        self.bind(scope, "__doc__", NONE);
+        self.bind(scope, "__file__", origin);
+        self.bind(scope, "__cached__", cached);
+        self.bind(scope, "__loader__", loader);
+        self.bind(scope, "__package__", package);
+        self.bind(scope, "__spec__", spec);
+        if let Value::Module { origin: file, .. } = self.heap.get_mut(module) {
+            *file = Some(origin);
+        }
+        self.heap.release_temporaries_since(mark);
+        self.heap.keep(module);
+        self.heap.keep(scope);
+        Ok((module, scope))
+    }
+
     pub(super) fn location_list(&mut self, locations: &[PathBuf]) -> Result<Id> {
         let values = locations
             .iter()

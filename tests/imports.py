@@ -2038,6 +2038,78 @@ def require_success(result: subprocess.CompletedProcess[str]) -> None:
     assert result.returncode == 0, (result.args, result.stdout, result.stderr)
 
 
+def check_saved_package_files(args, temporary, build_flags):
+    # A FILE operand identifies the entry even when the build/run cwd offers a namesake.
+    module = "saved_entry.tools.driver"
+    entry_path = "saved_entry/tools/driver.py"
+    shadow = temporary / "shadow"
+    write_files(shadow, {
+        "saved_entry/__init__.py": "", "saved_entry/tools/__init__.py": "",
+        entry_path: 'print("cwd entry")\n',
+        "saved_entry/tools/leaf.py": 'value = "cwd sibling"\n',
+    })
+    shadowed = run([args.python, "-E", "-B", "-m", module], shadow)
+    require_success(shadowed)
+    assert shadowed.stdout == "cwd entry\n"
+    for regular, level in ((False, args.opt_levels[0]), (True, args.opt_levels[-1])):
+        root = temporary / ("regular-entry" if regular else "namespace-entry")
+        files = {
+            entry_path: (
+                "import sys\nfrom .leaf import value\nfrom ..outer import marker\n"
+                "assert __name__ == '__main__' and globals() is sys.modules['__main__'].__dict__\n"
+                "assert __spec__.name == 'saved_entry.tools.driver' and __spec__.name not in sys.modules\n"
+                "assert __package__ == __spec__.parent == 'saved_entry.tools'\n"
+                "assert __loader__ is __spec__.loader and __spec__.has_location\n"
+                "assert __loader__.get_code(__spec__.name).co_filename == __file__ == __spec__.origin\n"
+                "assert sys.argv[0] == sys.argv[1]\n"
+                "print(value, marker)\n"
+                "if len(sys.argv) == 3:\n"
+                "    try: __import__(sys.argv[2])\n"
+                "    except ModuleNotFoundError as e: print('missing', e.name)\n"
+                "    else: print('present')\n"
+            ),
+            "saved_entry/tools/leaf.py": 'value = "nested"\n',
+            "saved_entry/outer.py": 'marker = "outer"\n',
+            "saved_entry/tools/unreferenced.py": 'value = 41\n',
+        }
+        if regular:
+            files["sitecustomize.py"] = (
+                "import sys\nfrom types import ModuleType\n"
+                "held = ModuleType('__main__')\nheld.token = object()\nsys.modules['__main__'] = held\n"
+            )
+            files["saved_entry/__init__.py"] = (
+                "import sys\nfrom sitecustomize import held\n"
+                "assert held is sys.modules['__main__'] and not hasattr(held, '__file__')\n"
+                "held.parent_token = held.token\nprint('parent')\n"
+            )
+            files["saved_entry/tools/__init__.py"] = 'print("child")\n'
+            files[entry_path] += (
+                "import builtins\nfrom sitecustomize import held\n"
+                "assert globals() is held.__dict__ and parent_token is held.token\n"
+                "assert __builtins__ is builtins.__dict__\n"
+            )
+        write_files(root, files)
+        entry = str(root / entry_path)
+        baseline = run([args.python, "-E", "-B", "-m", module, entry], root)
+        require_success(baseline)
+        assert baseline.stdout == ("parent\nchild\n" if regular else "") + "nested outer\n"
+        product = root.parent / (root.name + "-application")
+        command = [str(args.compiler.resolve()), "build", entry, "--runtime", str(args.runtime.resolve()),
+                   "--opt-level", str(level), "--clang", args.clang, "-o", str(product), *build_flags]
+        # Infer the enclosing regular package. Namespace portions need their declared root.
+        if not regular:
+            command += ["--module-root", str(root)]
+        if args.sanitize:
+            command.append("--sanitize")
+        require_success(run(command, shadow, timeout=300))
+        executable = str(product.rename(shadow / product.name))
+        root.rename(root.with_suffix(".withdrawn"))
+        unused = "saved_entry.tools.unreferenced"
+        saved = run([executable, executable, unused], shadow)
+        require_success(saved)
+        assert saved.stdout == baseline.stdout + "missing " + unused + "\n" and saved.stderr == "", saved
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--compiler", type=Path, required=True)
@@ -2080,6 +2152,9 @@ def main() -> None:
                 require_success(result)
                 assert result.stdout == baseline.stdout, (entry, level, result.stdout, baseline.stdout)
                 checks += 1
+
+        check_saved_package_files(args, temporary, build_flags)
+        checks += 2
 
         build_timeout = 120 if args.lto_linker and not args.sanitize else 60
         for name, files in ACCEPTED.items():
