@@ -2987,6 +2987,21 @@ pub(crate) fn boxed_mock_export(name: &str) -> bool {
 }
 
 impl SourceModule {
+    /// Consecutive executable statements can borrow their original parsed body.
+    pub(crate) fn executable_statements(&self) -> std::borrow::Cow<'_, [ast::Stmt]> {
+        use std::borrow::Cow;
+
+        let source = &self.parsed.syntax().body;
+        let Some((&first, &last)) = self.executable.first().zip(self.executable.last()) else {
+            return Cow::Borrowed(&[]);
+        };
+        if self.executable.len() == last - first + 1 {
+            Cow::Borrowed(&source[first..=last])
+        } else {
+            Cow::Owned(self.executable.iter().map(|&i| source[i].clone()).collect())
+        }
+    }
+
     /// Entry guards and standalone initializer calls precede the remaining declarations.
     pub(crate) fn has_entry_guard(&self) -> bool {
         self.entry_globals.iter().any(|&index| {

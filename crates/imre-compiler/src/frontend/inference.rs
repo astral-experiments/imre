@@ -837,6 +837,7 @@ impl Inference {
     pub fn solve(
         &self,
         graph: &SourceGraph,
+        entry_statements: &[ast::Stmt],
         definitions: &mut [(ModuleId, ast::StmtFunctionDef, Signature)],
         signatures: &mut HashMap<DefinitionId, Signature>,
         classes: &mut ClassInfo,
@@ -1080,7 +1081,6 @@ impl Inference {
                     }
                 }
             }
-            let module = &graph.modules[graph.entry];
             let mut checker = Checker::new(
                 graph,
                 graph.entry,
@@ -1092,12 +1092,7 @@ impl Inference {
             );
             checker.inference = Some(self);
             checker.module_scope = true;
-            let statements = module
-                .executable
-                .iter()
-                .map(|&index| module.parsed.syntax().body[index].clone())
-                .collect::<Vec<_>>();
-            let result = checker.lower_block(&statements, None);
+            let result = checker.lower_block(entry_statements, None);
             let entry_callable = match checker.finish_region(result) {
                 Err(Failure::PendingSignature {
                     signature,
