@@ -145,7 +145,10 @@ impl ModuleValues {
     }
 
     fn saved_function(&self, value: &Expr) -> Option<usize> {
-        self.stored_functions(value)?.last().copied()
+        match &value.kind {
+            ExprKind::Builtin(Builtin::StaticFunction(function), _) => Some(*function),
+            _ => self.stored_functions(value)?.last().copied(),
+        }
     }
 
     pub(super) fn invoked_functions(&self, value: &Expr) -> Option<std::cell::Ref<'_, Vec<usize>>> {
