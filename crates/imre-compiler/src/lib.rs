@@ -1792,7 +1792,7 @@ print("result", call(b=2, a=1))
             result.unwrap_err(),
             format!(
                 "{}:9:13: Imre: expected int, got str; annotations are enforced contracts",
-                path.display()
+                path.canonicalize().unwrap().display()
             )
         );
     }

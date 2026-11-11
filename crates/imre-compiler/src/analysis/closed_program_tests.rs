@@ -1088,7 +1088,7 @@ fn a_guarded_reexport_resolves_to_its_linked_class_without_running_the_module() 
     fs::write(&stub, "from .other import Packet as Packet\n").unwrap();
     let mut graph = crate::modules::SourceGraph::load(&entry, Some(root), &[]).unwrap();
     let (inputs, paths) = graph.disk_inputs(None);
-    assert!(paths.contains(&stub));
+    assert!(paths.contains(&stub.canonicalize().unwrap()));
     assert!(inputs.fresh());
     fs::write(&stub, "from .model import Packet as Packet\n").unwrap();
     assert!(!inputs.fresh());

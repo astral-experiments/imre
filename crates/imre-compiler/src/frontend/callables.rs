@@ -796,7 +796,7 @@ mod tests {
             diagnostic.to_string(),
             format!(
                 "{}:2:1: Imre: using this function as a value requires Python argument binding",
-                provider.display()
+                provider.canonicalize().unwrap().display()
             ),
         );
     }
