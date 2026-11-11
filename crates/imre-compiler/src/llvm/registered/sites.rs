@@ -246,6 +246,7 @@ impl CheckedSites {
                     .entry(site)
                     .or_insert_with(|| definitions.declaration(site));
             }
+            RequiredSite::DefinitionAfterInputs(_) => {}
             RequiredSite::ClassNamespace(site) => {
                 self.class_namespaces
                     .entry(site)

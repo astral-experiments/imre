@@ -6,6 +6,8 @@ use ruff_text_size::{TextRange, TextSize};
 #[derive(Clone, Copy)]
 pub(crate) enum RequiredSite {
     Definition(TextSize),
+    /// The body follows header operands supplied by the enclosing registered suite.
+    DefinitionAfterInputs(TextSize),
     ClassNamespace(TextSize),
     Lambda(TextSize, bool),
     Generator(TextRange),
@@ -14,10 +16,20 @@ pub(crate) enum RequiredSite {
 }
 
 fn visit_expression_site(expr: &Expr, visit: &mut impl FnMut(RequiredSite)) {
-    let ExprKind::Builtin(op, _) = &expr.kind else {
+    let ExprKind::Builtin(op, operands) = &expr.kind else {
         return;
     };
     visit(match op {
+        Builtin::RegisteredDefinition(ir::DefinitionSite::Class { start, .. })
+            if operands.iter().any(|value| {
+                matches!(
+                    value.kind,
+                    ExprKind::Builtin(Builtin::RegisteredInput(_), _)
+                )
+            }) =>
+        {
+            RequiredSite::DefinitionAfterInputs(*start)
+        }
         Builtin::RegisteredDefinition(site) => RequiredSite::Definition(site.start()),
         Builtin::RegisteredClassNamespace(site, _) => RequiredSite::ClassNamespace(*site),
         Builtin::RegisteredLambda(site, scoped) => RequiredSite::Lambda(*site, *scoped),

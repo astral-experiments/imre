@@ -1690,16 +1690,33 @@ mod tests {
         }
     }
 
+    fn input_statements(
+        suite: &crate::frontend::RegisteredSuite,
+    ) -> impl Iterator<Item = (usize, &crate::ir::Statement)> {
+        suite
+            .checked
+            .function
+            .body
+            .iter()
+            .enumerate()
+            .filter(|(_, statement)| {
+                let mut has_input = false;
+                crate::ir::walk_expressions(std::slice::from_ref(*statement), &mut |expr| {
+                    has_input |= matches!(
+                        expr.kind,
+                        crate::ir::ExprKind::Builtin(crate::ir::Builtin::RegisteredInput(_), _)
+                    );
+                });
+                has_input
+            })
+    }
+
     fn residual_occurrence(
         suite: &mut crate::frontend::RegisteredSuite,
     ) -> &mut crate::frontend::OwnedExpression {
-        let [run] = suite.residual.as_mut_slice() else {
-            panic!("expected one mixed statement");
-        };
-        let Ok(crate::frontend::SourceEffect::Value(_, inputs)) = &mut run.effect else {
-            panic!("expected a value operand");
-        };
-        let [crate::frontend::PhysicalOperand::Residual(value)] = inputs.as_mut_slice() else {
+        assert!(suite.refusals.is_empty());
+        let [crate::frontend::PhysicalOperand::Residual(value)] = suite.operands.as_mut_slice()
+        else {
             panic!("expected one owned expression");
         };
         value
@@ -1816,7 +1833,7 @@ mod tests {
 
     #[test]
     fn mixed_function_header_keeps_its_binding_after_erasing_the_declaration() {
-        use crate::frontend::{PhysicalOperand, SourceEffect};
+        use crate::frontend::PhysicalOperand;
         let text = "@decorate\ndef choose[T: bound() = fallback()](first=checked(), *, last=(lambda: item)()):\n    return T, first, last\n";
         let mut module = PreparedBody::module_with_syntax(
             "case",
@@ -1829,22 +1846,29 @@ mod tests {
         inject_residual_child_module(&mut module);
 
         let plan = module.initializer();
-        let inputs: Vec<_> = plan
-            .residual
-            .iter()
-            .map(|run| {
-                let Ok(SourceEffect::Value(statement, input)) = &run.effect else {
-                    panic!("expected a mixed header operand");
+        assert!(plan.refusals.is_empty());
+        let assignments: Vec<_> = input_statements(plan)
+            .map(|(_, statement)| {
+                let crate::ir::Statement::Assign(_, value) = statement else {
+                    panic!("expected a mixed header assignment");
                 };
-                assert!(matches!(
-                    statement.as_ref(),
-                    crate::ir::Statement::Assign(..)
-                ));
-                matches!(input.as_slice(), [PhysicalOperand::Checked(_)])
+                let crate::ir::ExprKind::Builtin(crate::ir::Builtin::RegisteredInput(slot), _) =
+                    value.kind
+                else {
+                    panic!("expected a retained header input");
+                };
+                slot
             })
             .collect();
-        // The decorator and positional default are checked. Only the keyword default needs source.
-        assert_eq!(inputs, [true, true, false]);
+        assert_eq!(assignments, [0, 1, 2]);
+        assert!(matches!(
+            plan.operands.as_slice(),
+            [
+                PhysicalOperand::Checked(_),
+                PhysicalOperand::Checked(_),
+                PhysicalOperand::Residual(_)
+            ]
+        ));
         let original = module.standalone().unwrap();
         assert!(original.1.contains("type_parameter_evaluator"));
         module.syntax = None;
@@ -2497,7 +2521,7 @@ mod tests {
         assert_eq!(module.standalone().unwrap(), original);
 
         let plan = test_function_suite(&mut module.source, function_start);
-        assert!(plan.residual.is_empty());
+        assert!(plan.refusals.is_empty());
         let [region] = plan.suites.as_mut_slice() else {
             panic!("expected the prepared while");
         };
@@ -2725,7 +2749,7 @@ mod tests {
 
     #[test]
     fn mixed_class_header_uses_its_retained_starred_operand_after_erasure() {
-        use crate::frontend::{ExpressionSelection, PhysicalOperand, SourceEffect};
+        use crate::frontend::{ExpressionSelection, PhysicalOperand};
         use crate::ir::{Builtin, DefinitionSite, Expr, ExprKind, Statement};
 
         let source = "def keep(cls): return cls\n@keep\nclass C(*(lambda: (object,))(), metaclass=type):\n    (lambda: None)()\n";
@@ -2744,11 +2768,10 @@ mod tests {
         assert_eq!(module.standalone().unwrap(), before);
 
         let suite = module.source.initializer.as_mut().unwrap();
-        let [run] = suite.residual.as_mut_slice() else {
+        assert!(suite.refusals.is_empty());
+        let statements: Vec<_> = input_statements(suite).collect();
+        let [(_, statement)] = statements.as_slice() else {
             panic!("expected one mixed class header");
-        };
-        let Ok(SourceEffect::Value(statement, inputs)) = &mut run.effect else {
-            panic!("expected a class definition with deferred operands");
         };
         let Statement::Assign(
             _,
@@ -2756,6 +2779,7 @@ mod tests {
                 kind:
                     ExprKind::Builtin(
                         Builtin::RegisteredDefinition(DefinitionSite::Class {
+                            start,
                             arguments: Some(layout),
                             ..
                         }),
@@ -2763,17 +2787,24 @@ mod tests {
                     ),
                 ..
             },
-        ) = statement.as_ref()
+        ) = statement
         else {
             panic!("expected the packed class definition result");
         };
+        let mut deferred = Vec::new();
+        RequiredSite::visit(&suite.checked.function.body, &mut |site| {
+            if let RequiredSite::DefinitionAfterInputs(at) = site {
+                deferred.push(at);
+            }
+        });
+        assert_eq!(deferred, [*start]);
         assert_eq!(layout.starred, [true]);
         assert_eq!(slots.len(), 3);
         let [
             PhysicalOperand::Checked(_),
             PhysicalOperand::Residual(base),
             PhysicalOperand::Checked(_),
-        ] = inputs.as_mut_slice()
+        ] = suite.operands.as_mut_slice()
         else {
             panic!("expected the starred base between the decorator and metaclass");
         };
@@ -2788,11 +2819,8 @@ mod tests {
         let body = residual_occurrence(&mut class.body);
         body.selected = std::rc::Rc::new(ExpressionSelection::Refused(body.range, "body refused"));
         assert!(module.standalone().unwrap_err().contains("body refused"));
-        let run = &mut module.source.initializer.as_mut().unwrap().residual[0];
-        let Ok(SourceEffect::Value(_, inputs)) = &mut run.effect else {
-            unreachable!()
-        };
-        inputs[1] = PhysicalOperand::Residual(refused_base);
+        module.source.initializer.as_mut().unwrap().operands[1] =
+            PhysicalOperand::Residual(refused_base);
         assert!(module.standalone().unwrap_err().contains("header refused"));
     }
 
@@ -3086,7 +3114,8 @@ mod tests {
             .suite()
             .unwrap();
         crate::verify::registered(suite.checked.region()).unwrap();
-        assert!(suite.residual.is_empty());
+        assert!(suite.fully_checked());
+        assert!(suite.operands.is_empty() && suite.suites.is_empty());
         for name in ["selected", "suspended"] {
             assert!(
                 suite
@@ -3546,7 +3575,7 @@ mod tests {
         inject_residual_child_module(&mut prepared);
 
         let original = prepared.standalone().unwrap();
-        assert!(prepared.initializer().residual[0].at > 0);
+        assert!(input_statements(prepared.initializer()).next().unwrap().0 > 0);
         let root = residual_selection(prepared.source.initializer.as_mut().unwrap());
         let outer_inputs = root.physical().unwrap().operands().collect::<Vec<_>>();
         let [
@@ -3598,7 +3627,7 @@ mod tests {
         .unwrap();
         inject_residual_child_module(&mut prepared);
         let original = prepared.standalone().unwrap();
-        assert!(prepared.initializer().residual[0].at > 0);
+        assert!(input_statements(prepared.initializer()).next().unwrap().0 > 0);
         let root = residual_occurrence(prepared.source.initializer.as_mut().unwrap());
         assert_eq!(
             &text[root.range],
@@ -3646,7 +3675,7 @@ mod tests {
         inject_residual_child_module(&mut prepared);
 
         let original = prepared.standalone().unwrap();
-        assert!(prepared.initializer().residual[0].at > 0);
+        assert!(input_statements(prepared.initializer()).next().unwrap().0 > 0);
         let inputs = residual_selection(prepared.source.initializer.as_mut().unwrap())
             .physical()
             .unwrap();
@@ -3775,13 +3804,14 @@ mod tests {
         let [region] = suite.suites.as_mut_slice() else {
             panic!("expected the mixed context");
         };
-        let Ok(crate::frontend::SourceEffect::Value(statement, inputs)) =
-            &mut region.suites[0].residual[0].effect
+        let body = &mut region.suites[0];
+        assert!(body.refusals.is_empty());
+        assert!(matches!(
+            input_statements(body).next().unwrap().1,
+            crate::ir::Statement::Expr(_)
+        ));
+        let [crate::frontend::PhysicalOperand::Residual(call)] = body.operands.as_mut_slice()
         else {
-            panic!("expected a prepared expression statement");
-        };
-        assert!(matches!(statement.as_ref(), crate::ir::Statement::Expr(_)));
-        let [crate::frontend::PhysicalOperand::Residual(call)] = inputs.as_mut_slice() else {
             panic!("expected the residual call");
         };
         std::rc::Rc::get_mut(&mut call.selected)
@@ -3981,7 +4011,7 @@ mod tests {
 
     #[test]
     fn mixed_if_owns_its_guards_and_residual_arm_after_source_erasure() {
-        use crate::frontend::{PhysicalOperand, RegisteredSuite, SourceEffect};
+        use crate::frontend::{PhysicalOperand, RegisteredSuite};
         use crate::ir::Statement;
 
         fn region<'a>(prepared: &'a mut PreparedBody<'_>) -> &'a mut RegisteredSuite {
@@ -4006,7 +4036,7 @@ mod tests {
         .unwrap();
 
         inject_residual_child_module(&mut prepared);
-        assert!(prepared.initializer().residual.is_empty());
+        assert!(prepared.initializer().refusals.is_empty());
         let [branch] = prepared.initializer().suites.as_slice() else {
             panic!("expected a prepared conditional");
         };
@@ -4046,13 +4076,9 @@ mod tests {
         region(&mut prepared).operands[1] = saved;
         assert_eq!(prepared.standalone().unwrap(), original);
 
-        let [run] = region(&mut prepared).suites[1].residual.as_mut_slice() else {
-            panic!("expected the middle arm to retain only the call");
-        };
-        let Ok(SourceEffect::Value(_, inputs)) = &mut run.effect else {
-            panic!("expected an expression statement");
-        };
-        let [operand @ PhysicalOperand::Residual(_)] = inputs.as_mut_slice() else {
+        let middle = &mut region(&mut prepared).suites[1];
+        assert!(middle.refusals.is_empty());
+        let [operand @ PhysicalOperand::Residual(_)] = middle.operands.as_mut_slice() else {
             panic!("expected only the call to need its source operand");
         };
         *operand = child;
@@ -4312,9 +4338,10 @@ mod tests {
         ));
         assert!(region.suites[0].fully_checked());
         let mixed = &region.suites[1];
-        assert_eq!(mixed.residual.len(), 1);
+        assert!(mixed.refusals.is_empty());
+        let positions: Vec<_> = input_statements(mixed).map(|(at, _)| at).collect();
         assert!(
-            mixed.residual[0].at > 0 && mixed.residual[0].at < mixed.checked.function.body.len()
+            matches!(positions.as_slice(), [at] if *at > 0 && *at + 1 < mixed.checked.function.body.len())
         );
         *branch.subject = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
             range: branch.subject.range(),
@@ -5395,15 +5422,12 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
     fn physical_assertion_retains_its_test_before_a_suspending_message() {
         use crate::frontend::{
             ExpressionSelection, OwnedExpression, PhysicalOperand, RegisteredScope,
-            RegisteredSource, RegisteredSuite, SourceEffect, SuitePreparation,
+            RegisteredSource, RegisteredSuite, SuitePreparation,
         };
         use crate::ir::{Builtin, Expr, ExprKind, Statement, SuspendValue, Type};
 
         fn held_input(suite: &mut RegisteredSuite, external_test: bool) -> &mut OwnedExpression {
-            let Ok(SourceEffect::Value(_, inputs)) = &mut suite.residual[0].effect else {
-                panic!("expected the mixed assertion's inputs");
-            };
-            let (checked, held) = match (external_test, inputs.as_mut_slice()) {
+            let (checked, held) = match (external_test, suite.operands.as_mut_slice()) {
                 (
                     true,
                     [
@@ -5486,13 +5510,9 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             module.source.statement_sites = physical.sites;
             install_test_function_body(&mut module.source, def, body);
             let suite = test_function_suite(&mut module.source, function);
-            let [run] = suite.residual.as_slice() else {
-                panic!("expected one mixed assertion")
-            };
-            let Ok(SourceEffect::Value(statement, _)) = &run.effect else {
-                panic!("expected a checked statement with prepared inputs")
-            };
-            let Statement::If(test, success, failure) = statement.as_ref() else {
+            assert!(suite.refusals.is_empty());
+            let Some(Statement::If(test, success, failure)) = suite.checked.function.body.get(1)
+            else {
                 panic!("expected a conditional assertion")
             };
             assert!(matches!(
@@ -5570,7 +5590,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
 
         fn region<'a>(module: &'a mut PreparedBody) -> &'a mut RegisteredSuite {
             let suite = module.source.initializer.as_mut().unwrap();
-            assert!(suite.residual.is_empty());
+            assert!(suite.refusals.is_empty());
             let [region] = suite.suites.as_mut_slice() else {
                 panic!("expected the prepared while");
             };
@@ -5605,10 +5625,12 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             let otherwise = std::mem::take(else_block(region(&mut module)));
             assert!(module.standalone().unwrap() != original);
             *else_block(region(&mut module)) = otherwise;
-            let residual = std::mem::take(&mut region(&mut module).suites[0].residual);
-            assert!(!residual.is_empty());
+            let child = &mut region(&mut module).suites[0];
+            assert!(child.refusals.is_empty());
+            let body = std::mem::take(&mut child.checked.function.body);
+            assert!(!body.is_empty());
             assert!(module.standalone().unwrap() != original);
-            region(&mut module).suites[0].residual = residual;
+            region(&mut module).suites[0].checked.function.body = body;
             match &mut region(&mut module).operands[0] {
                 PhysicalOperand::Checked(operand) if checked => {
                     operand.value = crate::ir::Expr::integer(0);
@@ -6420,21 +6442,22 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         let suite = &prepared.source.class_bodies[&class_start].body;
         crate::verify::registered(suite.checked.region()).unwrap();
         assert!(!suite.checked.region().private_slots().is_empty());
-        let [rhs, attribute] = suite.residual.as_slice() else {
+        assert!(suite.refusals.is_empty());
+        let statements: Vec<_> = input_statements(suite)
+            .map(|(_, statement)| statement)
+            .collect();
+        let [
+            crate::ir::Statement::Assign(..),
+            crate::ir::Statement::Expr(attribute),
+        ] = statements.as_slice()
+        else {
             panic!("expected a residual RHS followed by a mixed attribute store");
         };
-        assert!(matches!(
-            &rhs.effect,
-            Ok(crate::frontend::SourceEffect::Value(statement, _))
-                if matches!(statement.as_ref(), crate::ir::Statement::Assign(..))
-        ));
-        assert!(matches!(&attribute.effect,
-            Ok(crate::frontend::SourceEffect::Value(statement, inputs))
-                if inputs.len() == 2 && matches!(statement.as_ref(), crate::ir::Statement::Expr(value)
-                    if matches!(&value.kind, crate::ir::ExprKind::Builtin(crate::ir::Builtin::RegisteredAttribute {
-                        action: crate::ir::AttributeAction::Store, ..
-                    }, _)))
-        ));
+        assert!(matches!(&attribute.kind, crate::ir::ExprKind::Builtin(
+            crate::ir::Builtin::RegisteredAttribute { action: crate::ir::AttributeAction::Store, .. },
+            args
+        ) if args.len() == 2));
+        assert_eq!(suite.operands.len(), 3);
 
         let emit = |prepared: &PreparedBody<'_>| {
             let mut output = Output::default();
@@ -6458,12 +6481,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         assert_eq!(emit(&prepared), before);
 
         let class = prepared.source.class_bodies.get_mut(&class_start).unwrap();
-        let Ok(crate::frontend::SourceEffect::Value(_, inputs)) =
-            &mut class.body.residual[0].effect
-        else {
-            panic!("expected the retained assignment value");
-        };
-        let [crate::frontend::PhysicalOperand::Residual(value)] = &mut inputs[..] else {
+        let crate::frontend::PhysicalOperand::Residual(value) = &mut class.body.operands[0] else {
             panic!("expected the residual lambda call");
         };
         value.selected = std::rc::Rc::new(crate::frontend::ExpressionSelection::Checked(
@@ -6510,17 +6528,16 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             [_, crate::ir::Statement::Match(..)]
         ));
         let suite = &region.suites[0];
-        let [run] = suite.residual.as_slice() else {
+        assert!(suite.refusals.is_empty());
+        let statements: Vec<_> = input_statements(suite).collect();
+        let [(at, crate::ir::Statement::Expr(value))] = statements.as_slice() else {
             panic!("expected one external deletion operand");
         };
         assert!(matches!(
-            &run.effect,
-            Ok(crate::frontend::SourceEffect::Value(statement, _))
-                if matches!(statement.as_ref(), crate::ir::Statement::Expr(value)
-                    if matches!(value.kind, crate::ir::ExprKind::Builtin(
-                        crate::ir::Builtin::RegisteredDeleteItem, _)))
+            value.kind,
+            crate::ir::ExprKind::Builtin(crate::ir::Builtin::RegisteredDeleteItem, _)
         ));
-        assert!(run.at > 0 && run.at < suite.checked.function.body.len());
+        assert!(*at > 0 && *at + 1 < suite.checked.function.body.len());
         branch.cases[0].body[0]
             .as_delete_stmt_mut()
             .unwrap()
@@ -6553,22 +6570,20 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         let initializer = prepared.initializer();
         let suite = initializer;
         crate::verify::registered(suite.checked.region()).unwrap();
-        let [gap] = suite.residual.as_slice() else {
-            panic!("only the target with the injected key needs a source input");
+        assert!(suite.refusals.is_empty());
+        let statements: Vec<_> = input_statements(suite).collect();
+        let [(at, crate::ir::Statement::Expr(value))] = statements.as_slice() else {
+            panic!("only the last deletion needs external inputs");
         };
-        assert_eq!(gap.at, suite.checked.function.body.len());
-        let Ok(crate::frontend::SourceEffect::Value(statement, operands)) = &gap.effect else {
-            panic!("expected a prepared item deletion");
-        };
+        assert_eq!(*at + 1, suite.checked.function.body.len());
         assert!(
-            matches!(statement.as_ref(), crate::ir::Statement::Expr(value)
-            if matches!(&value.kind, crate::ir::ExprKind::Builtin(crate::ir::Builtin::RegisteredDeleteItem, slots)
-                if slots.len() == 2))
+            matches!(&value.kind, crate::ir::ExprKind::Builtin(crate::ir::Builtin::RegisteredDeleteItem, slots)
+            if slots.len() == 2)
         );
         let [
             crate::frontend::PhysicalOperand::Checked(_),
             crate::frontend::PhysicalOperand::Residual(key),
-        ] = operands.as_slice()
+        ] = suite.operands.as_slice()
         else {
             panic!("expected a checked base and an opaque key");
         };
