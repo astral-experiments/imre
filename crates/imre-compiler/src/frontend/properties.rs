@@ -5,7 +5,9 @@ use super::*;
 impl Checker<'_> {
     /// Frozen instances retain their existing assignment diagnostic.
     pub(super) fn writable_property(&self, ty: Type, attr: &ast::ExprAttribute) -> Option<usize> {
-        let Type::Class(class) = ty else { return None };
+        let (Type::Class(class) | Type::NamedException(class)) = ty else {
+            return None;
+        };
         let declaration = &self.classes.declarations.definitions[class];
         (self.classes.setters[class].contains_key(attr.attr.as_str())
             && !declaration.dataclass.as_ref().is_some_and(|d| d.frozen))
@@ -20,6 +22,7 @@ impl Checker<'_> {
         receiver: Expr,
         value: Expr,
     ) -> Result<Statement, String> {
+        let receiver = Self::exception_record(receiver);
         if !self.classes.has_concrete_subclasses(class) {
             return self.direct_setter(class, attr, receiver, value);
         }

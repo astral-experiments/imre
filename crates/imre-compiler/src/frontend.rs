@@ -3786,11 +3786,18 @@ impl<'a> Checker<'a> {
             };
             return self.coerce(literals::view(value, string), expected, node);
         }
-        if matches!(
-            value.ty,
-            Type::ImportException | Type::TimeoutExpired | Type::NamedException(_)
-        ) && expected == Type::Exception
-        {
+        let exception_upcast = match (value.ty, expected) {
+            (Type::NamedException(child), Type::NamedException(parent)) => self
+                .classes
+                .declarations
+                .subclass(self.graph, child, parent),
+            (
+                Type::ImportException | Type::TimeoutExpired | Type::NamedException(_),
+                Type::Exception,
+            ) => true,
+            _ => false,
+        };
+        if exception_upcast {
             return Ok(Expr {
                 ty: expected,
                 kind: ExprKind::Builtin(
@@ -5951,8 +5958,8 @@ impl<'a> Checker<'a> {
                     let receiver = Self::weak_target(self.expr(&target.value)?);
                     if let Some(class) = self.writable_property(receiver.ty, target) {
                         let slot = self.hidden(receiver.ty);
-                        let old =
-                            self.class_attribute(target, class, Some(self.local(slot)), None)?;
+                        let record = Self::exception_record(self.local(slot));
+                        let old = self.class_attribute(target, class, Some(record), None)?;
                         let rhs = self.expr(&assign.value)?;
                         let combined = self.binary_expr(assign.op, old, rhs, statement)?;
                         if self.types.element(combined.ty).is_some() {
