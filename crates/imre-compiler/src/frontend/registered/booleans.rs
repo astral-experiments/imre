@@ -173,14 +173,17 @@ impl PhysicalPreparation<'_, '_> {
         }
     }
 
-    fn select_value(&mut self, node: &ast::Expr) -> Option<Selection> {
-        let region = if self.suspended {
-            values::Region::SuspendedOperand
+    fn checked_value(&self, node: &ast::Expr) -> Option<ir::Expr> {
+        if self.suspended {
+            values::suspended_operand(node, self.source)
         } else {
-            values::Region::Residual
-        };
+            values::registered_value(node, self.source)
+        }
+    }
+
+    fn select_value(&mut self, node: &ast::Expr) -> Option<Selection> {
         if !node.is_t_string_expr()
-            && let Some(value) = region.operand(node, self.source)
+            && let Some(value) = self.checked_value(node)
         {
             return Some(Selection::Checked(value));
         }
@@ -225,7 +228,7 @@ impl PhysicalPreparation<'_, '_> {
     }
 
     fn ordinary_input(&mut self, node: &ast::Expr) -> PhysicalOperand {
-        self.input(node, values::registered_value(node, self.source))
+        self.input(node, self.checked_value(node))
     }
 
     /// Keep control flow in the checked operation and bind each leaf at its own use.
@@ -248,7 +251,7 @@ impl PhysicalPreparation<'_, '_> {
             .expect("a logical or comparison expression has a checked operation");
             return self.source.located(node, value);
         }
-        let checked = match values::registered_value(node, self.source) {
+        let checked = match self.checked_value(node) {
             Some(value) if ir::control::boolean_literal(&value).is_some() => return value,
             checked => checked,
         };
@@ -304,7 +307,12 @@ impl PhysicalPreparation<'_, '_> {
                 ir::Type::PythonObject,
             );
             values::binary(op, left, right)
-        } else if let Some(value) = values::index_operation(node, source, |child, value| {
+        } else if let Some(value) = values::index_operation(node, source, |child, ordinary| {
+            let value = ordinary.or_else(|| {
+                self.suspended
+                    .then(|| values::suspended_operand(child, source))
+                    .flatten()
+            });
             super::bind_operand(
                 &mut children,
                 self.input(child, value),
@@ -363,12 +371,7 @@ impl PhysicalPreparation<'_, '_> {
         ))
     }
 
-    fn input(&mut self, child: &ast::Expr, ordinary: Option<ir::Expr>) -> PhysicalOperand {
-        let checked = ordinary.or_else(|| {
-            self.suspended
-                .then(|| values::suspended_operand(child, self.source))
-                .flatten()
-        });
+    fn input(&mut self, child: &ast::Expr, checked: Option<ir::Expr>) -> PhysicalOperand {
         match checked {
             Some(value) => PhysicalOperand::Checked(Box::new(RegisteredOperand::with_inputs(
                 value,
