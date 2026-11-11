@@ -3325,6 +3325,14 @@ impl SourceGraph {
         (self.modules, self.registered_functions.into_inner())
     }
 
+    /// The fixed adapter displaced when this source supplies the import.
+    pub(crate) fn replaced_adapter(&self, name: &str, body: &str) -> Option<ModuleId> {
+        let id = *self.by_name.get(name)?;
+        let module = &self.modules[id];
+        (module.bundled && !module.source.is_empty() && module.original_source() != body)
+            .then_some(id)
+    }
+
     /// A concrete Python file registered by the checked resolver, before object lowering.
     pub(crate) fn python_file(&self, name: &str) -> Option<ModuleId> {
         let id = *self.by_name.get(name)?;

@@ -9,6 +9,13 @@ import tempfile
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures/socketserver"
 REJECT = {
+    "registered_factory_unknown_keyword": (
+        "from socketserver import TCPServer\n"
+        "calls = bytearray()\n"
+        "def handler(request, address, server): calls.append(1)\n"
+        'TCPServer(("127.0.0.1", 0), handler, bind_and_activate=False, extra=True)\n',
+        "unknown-argument",
+    ),
     "runtime_server_keeps_argument_checks": (
         "from socketserver import ThreadingTCPServer\n"
         "def identity(value: int) -> int: return value\n"

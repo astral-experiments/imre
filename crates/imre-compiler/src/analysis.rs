@@ -1222,7 +1222,7 @@ impl Session {
     /// Start diagnostics with independent rules and Salsa storage. Every file has already
     /// passed the loader's preflight in this snapshot.
     pub(crate) fn diagnostic_copy(&self) -> Result<Self, String> {
-        self.copy_for_diagnostics(None)
+        self.copy_for_diagnostics(None, None)
     }
 
     /// Check a prospective function against the source typing rules before an
@@ -1246,15 +1246,43 @@ impl Session {
             .collect()
     }
 
-    fn copy_for_diagnostics(&self, script_entry: Option<File>) -> Result<Self, String> {
+    pub(crate) fn copy_for_diagnostics(
+        &self,
+        script_entry: Option<File>,
+        registrations: Option<&crate::dynamic::RegisteredSources<'_>>,
+    ) -> Result<Self, String> {
+        let provider_roots = registrations.map(|registrations| {
+            let mut roots = registrations.roots.to_vec();
+            roots.push(crate::dynamic::BUNDLED_SOURCE_ROOT.into());
+            roots
+        });
         let mut copy = Self::with_storage(
             &self.root,
-            &self.extension_roots,
+            provider_roots.as_deref().unwrap_or(&self.extension_roots),
             salsa::Storage::default(),
             script_entry.is_some(),
         )?;
         copy.explicit_check = self.explicit_check;
-        for &file in self.files.iter().chain(&self.declarations) {
+        if let Some(registrations) = registrations {
+            // Declarations can be re-exported from another selected Python module.
+            for winner in registrations
+                .winners
+                .iter()
+                .filter(|s| s.checked_module.is_none())
+            {
+                copy.seed(winner.path, winner.source)?;
+            }
+        }
+        for (id, &file) in self.files.iter().enumerate() {
+            if let Some(&(path, body)) = registrations.and_then(|r| r.provider_sources.get(&id)) {
+                // Keep the module index used by checked callers, and the original
+                // filename and search root used by the Python import.
+                let path = path.to_str().ok_or("module paths must be valid UTF-8")?;
+                let input = imre_ast::indentation::prepare(body);
+                let file = copy.write_file(path, &input.text)?;
+                copy.files.push(file);
+                continue;
+            }
             let path = file
                 .path(&self.db)
                 .as_system_path()
@@ -1268,7 +1296,14 @@ impl Session {
             };
             copy.files.push(file);
         }
-        copy.declarations = copy.files.split_off(self.files.len());
+        for &file in &self.declarations {
+            let path = file
+                .path(&self.db)
+                .as_system_path()
+                .expect("physical declaration");
+            let source = ruff_db::source::source_text(&self.db, file);
+            copy.add_declaration_source(path.as_std_path(), source.as_str())?;
+        }
         Ok(copy)
     }
 
@@ -1849,7 +1884,7 @@ impl Session {
         skipped: Option<&[Vec<TextRange>]>,
         overloads: &[Vec<CheckedDiagnostic>],
         calls: FallbackCalls,
-        runtime_provider: Option<usize>,
+        roots: impl Iterator<Item = usize>,
         checked_modules: Option<&[crate::modules::SourceModule]>,
     ) -> Result<(), String> {
         let checks = match calls {
@@ -1863,8 +1898,7 @@ impl Session {
             matches!(calls, FallbackCalls::DecoratorFactories),
             checked_modules.is_some(),
         );
-        let provider = runtime_provider.map(|index| self.files[index]);
-        self.errors(skipped, overloads, checks, provider, checked_modules)?;
+        self.errors(roots, skipped, overloads, checks, checked_modules)?;
         if let FallbackCalls::Entry(entry) = calls {
             // Only the entry gained a new statement order. Imported modules retain
             // the argument-checking policy they had before the guard.
@@ -1875,7 +1909,6 @@ impl Session {
                 skipped.map_or(&[][..], |ranges| ranges[entry].as_slice()),
                 overloads[entry].as_slice(),
                 FileChecks::FallbackCalls,
-                provider,
                 checked_modules.is_some_and(|modules| !modules[entry].bundled),
                 self.explicit_check,
                 None,
@@ -1946,7 +1979,13 @@ impl Session {
         DiagnosticRules::get(&self.db)
             .set_rules(&mut self.db)
             .to(self.rules.clone());
-        self.errors(skipped, overloads, FileChecks::Full, None, None)
+        self.errors(
+            0..self.files.len(),
+            skipped,
+            overloads,
+            FileChecks::Full,
+            None,
+        )
     }
 
     /// Check explicit source signatures before choosing a representation.
@@ -2118,7 +2157,6 @@ impl Session {
                 skipped.map_or(&[][..], |ranges| ranges[index].as_slice()),
                 overloads.get(index).map_or(&[][..], Vec::as_slice),
                 FileChecks::DeclaredSignatures,
-                None,
                 true,
                 self.explicit_check,
                 Some(declarations),
@@ -2139,24 +2177,21 @@ impl Session {
 
     fn errors(
         &self,
+        roots: impl Iterator<Item = usize>,
         skipped: Option<&[Vec<TextRange>]>,
         overloads: &[Vec<CheckedDiagnostic>],
         checks: FileChecks,
-        runtime_provider: Option<File>,
         checked_modules: Option<&[crate::modules::SourceModule]>,
     ) -> Result<(), String> {
-        let errors: Vec<_> = self
-            .files
-            .iter()
-            .enumerate()
-            .flat_map(|(index, &file)| {
+        let errors: Vec<_> = roots
+            .flat_map(|index| {
+                let file = self.files[index];
                 let checked = CheckedFile::new(
                     &self.db,
                     file,
                     skipped.map_or(&[][..], |ranges| ranges[index].as_slice()),
                     overloads.get(index).map_or(&[][..], Vec::as_slice),
                     checks,
-                    runtime_provider,
                     checked_modules.is_some_and(|modules| !modules[index].bundled),
                     self.explicit_check,
                     None,
@@ -2182,8 +2217,6 @@ struct CheckedFile<'db> {
     overloads: Vec<CheckedDiagnostic>,
     #[returns(copy)]
     checks: FileChecks,
-    #[returns(copy)]
-    runtime_provider: Option<File>,
     #[returns(copy)]
     first_party: bool,
     #[returns(copy)]
@@ -2614,7 +2647,7 @@ fn declared_parameter(diagnostic: &Diagnostic, parameters: &[(File, TextRange)])
     })
 }
 
-/// Leave argument conversion to Python for vendored code and its compiler-supplied adapter.
+/// Leave argument conversion on vendored callables to Python.
 fn runtime_argument(db: &dyn Db, checked: CheckedFile<'_>, range: TextRange, rule: &str) -> bool {
     use ruff_python_ast::{AnyNodeRef, find_node::covering_node};
     use ty_python_semantic::types::Type;
@@ -2711,10 +2744,7 @@ fn runtime_argument(db: &dyn Db, checked: CheckedFile<'_>, range: TextRange, rul
     let uses_runtime_provider = |ty: Type<'_>| {
         ty.definition(db, &model.program_environment())
             .and_then(|definition| definition.definition())
-            .is_some_and(|definition| {
-                let file = definition.file(db);
-                file.path(db).is_vendored_path() || Some(file) == checked.runtime_provider(db)
-            })
+            .is_some_and(|definition| definition.file(db).path(db).is_vendored_path())
     };
     match callee {
         Type::Union(union) => union
@@ -3020,9 +3050,13 @@ impl AnalysisCache {
             && cached.same_files(fresh, inputs)
         {
             cached.update(fresh, inputs)?;
-            return cached
-                .session
-                .errors(skipped, overloads, FileChecks::Full, None, None);
+            return cached.session.errors(
+                0..cached.session.files.len(),
+                skipped,
+                overloads,
+                FileChecks::Full,
+                None,
+            );
         }
         if self.hints.is_some() {
             // The quiet database must retain its inference with diagnostics disabled.
@@ -3483,7 +3517,13 @@ mod diagnostic_mode_tests {
             )
             .unwrap();
         let errors = session
-            .check_fallback_contracts(None, &[], FallbackCalls::NamedFunctions, None, None)
+            .check_fallback_contracts(
+                None,
+                &[],
+                FallbackCalls::NamedFunctions,
+                0..session.files.len(),
+                None,
+            )
             .unwrap_err();
         assert_eq!(
             errors.matches("error[invalid-argument-type]").count(),
@@ -3506,7 +3546,13 @@ mod diagnostic_mode_tests {
             .unwrap();
         FILE_CHECKS.with_borrow_mut(|checks| *checks = Some(Vec::new()));
         session
-            .check_fallback_contracts(None, &[vec![]], FallbackCalls::All, None, None)
+            .check_fallback_contracts(
+                None,
+                &[vec![]],
+                FallbackCalls::All,
+                0..session.files.len(),
+                None,
+            )
             .unwrap();
         let visits = FILE_CHECKS.with_borrow_mut(Option::take).unwrap();
         assert!(visits.is_empty());
@@ -3578,12 +3624,18 @@ mod diagnostic_mode_tests {
         let whole = TextRange::new(0.into(), 40.into());
         assert!(
             session
-                .errors(Some(&[vec![whole]]), &[], FileChecks::Full, None, None)
+                .errors(
+                    0..session.files.len(),
+                    Some(&[vec![whole]]),
+                    &[],
+                    FileChecks::Full,
+                    None
+                )
                 .is_ok()
         );
         assert_eq!(
             session
-                .errors(None, &[], FileChecks::Full, None, None)
+                .errors(0..session.files.len(), None, &[], FileChecks::Full, None)
                 .unwrap_err(),
             message
         );

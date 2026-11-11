@@ -834,6 +834,8 @@ pub(crate) struct RegisteredSources<'a> {
     pub(crate) roots: &'a [PathBuf],
     pub(crate) winners: &'a [RegisteredSource<'a>],
     pub(crate) file_alternatives: &'a [RegisteredSource<'a>],
+    /// Selected provider bodies that replace a fixed-layout declaration in the checked graph.
+    pub(crate) provider_sources: HashMap<crate::modules::ModuleId, (&'a Path, &'a str)>,
     pub(crate) has_file_body: Option<&'a dyn Fn(&str) -> bool>,
 }
 
@@ -1180,6 +1182,7 @@ pub(crate) fn compile(
     // Keep source hints on the winning regular package's path. The runtime finder
     // can still load a different child if a parent changes its __path__.
     let mut entry_sources: HashMap<String, (PathBuf, bool)> = HashMap::new();
+    let mut checked_sdk_providers = Vec::new();
     let mut bundled_includes = HashMap::new();
     let mut before_site = HashSet::new();
     let mut named_registrations = None;
@@ -1585,6 +1588,12 @@ pub(crate) fn compile(
                     }
                     if on_sdk_path && let Some(name) = options.include_modules.get(&prefix) {
                         bundled_includes.insert(name, frozen);
+                    }
+                    if on_sdk_path
+                        && let Some(id) =
+                            checked_graph.and_then(|g| g.replaced_adapter(&prefix, &source))
+                    {
+                        checked_sdk_providers.push((id, sources.len()));
                     }
                     sources.push((prefix.clone(), path, source.into_owned()));
                 }
@@ -2114,6 +2123,22 @@ pub(crate) fn compile(
         .collect();
     let (winners, file_alternatives) =
         selected_sources.split_at(ordinary_registrations.unwrap_or(selected_sources.len()));
+    // Built-in SDK bodies have no file winner. Other origins, including ZIP
+    // members, already have a selected source unit with its exact bytes.
+    let mut provider_sources: HashMap<_, _> = checked_sdk_providers
+        .into_iter()
+        .filter_map(|(id, unit)| {
+            let (name, path, body) = &sources[unit];
+            (!entry_sources.contains_key(name)).then_some((id, (path.as_path(), body.as_str())))
+        })
+        .collect();
+    if let Some(graph) = checked_graph {
+        for winner in winners {
+            if let Some(id) = graph.replaced_adapter(winner.name, winner.source) {
+                provider_sources.insert(id, (winner.path, winner.source));
+            }
+        }
+    }
     // SDK members retain their loader-visible filenames while the ZIP is the build input.
     for path in inputs
         .files
@@ -2140,6 +2165,7 @@ pub(crate) fn compile(
             roots: &roots,
             winners,
             file_alternatives,
+            provider_sources,
             has_file_body: sdk_runpy.then_some(&has_file_body),
         }),
     )?;
