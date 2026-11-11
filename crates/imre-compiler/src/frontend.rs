@@ -2036,7 +2036,7 @@ fn signature(
             matches!(value, ast::Expr::Subscript(subscript) if annotations::sequence_annotation(graph.resolve(module, &subscript.value))));
         let empty_sequence = sequence
             && matches!(parameter.default.as_deref(), Some(ast::Expr::Tuple(tuple)) if tuple.elts.is_empty());
-        let fixed_default =
+        let mut fixed_default =
             parameter
                 .default
                 .as_deref()
@@ -2099,8 +2099,7 @@ fn signature(
                         annotation_in_class(value, graph, module, classes, types, owner)
                     }
                 })
-                .transpose()?
-                .or(parameter
+                .or_else(|| parameter
                     .default
                     .as_deref()
                     .filter(|value| !empty_sequence && !matches!(value, ast::Expr::Dict(dict) if dict.items.is_empty() && parameter.annotation().is_some()))
@@ -2110,10 +2109,10 @@ fn signature(
                         } else if let Some(default) = &fixed_default {
                             Ok(default.ty)
                         } else {
-                            calls::scalar_literal(value, source).map(|value| value.ty)
+                            Ok(fixed_default.insert(calls::scalar_literal(value, source)?).ty)
                         }
-                    })
-                    .transpose()?)
+                    }))
+                .transpose()?
         };
         if parameter.annotation().is_none()
             && matches!(
