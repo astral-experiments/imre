@@ -84,6 +84,35 @@ fn registry_name(name: &str) -> Result<String, SourceDecodeError> {
     Ok(out)
 }
 
+fn codec_kind(key: &str) -> Option<&'static str> {
+    NAMES
+        .lines()
+        .filter_map(|line| line.split_once(' '))
+        .find_map(|(alias, kind)| (alias == key).then_some(kind))
+}
+
+/// Match a text stream's plain UTF-8 codec, without the tokenizer's cookie shortcuts.
+pub fn is_utf8_codec(name: &str) -> bool {
+    if name == "utf-8" {
+        return true;
+    }
+    if name.contains('\0') {
+        return false;
+    }
+    let Ok(mut key) = registry_name(name) else {
+        return false;
+    };
+    if key.contains('.') {
+        // encodings.search_function also tries dots as underscores for aliases.
+        // utf_8 itself is a module name, so utf.8 is not a UTF-8 alias.
+        key = key.replace('.', "_");
+        if key == "utf_8" {
+            return false;
+        }
+    }
+    codec_kind(&key) == Some("utf-8")
+}
+
 // CPython registers the OS code pages in addition to the portable registry.
 #[cfg(windows)]
 fn platform_codec(name: &str) -> bool {
@@ -194,12 +223,8 @@ pub fn decode_source(
         "utf-8" | "iso-8859-1" => name,
         _ => {
             normalized = registry_name(name)?;
-            match NAMES
-                .lines()
-                .filter_map(|l| l.split_once(' '))
-                .find(|(alias, _)| *alias == normalized)
-            {
-                Some((_, kind)) => kind,
+            match codec_kind(&normalized) {
+                Some(kind) => kind,
                 None if platform_codec(&normalized) => "unsupported",
                 None => {
                     return Err(SourceDecodeError::Invalid(

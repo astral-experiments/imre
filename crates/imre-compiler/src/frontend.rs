@@ -5,6 +5,7 @@ use std::result::Result as StdResult;
 use std::sync::Arc;
 
 pub(crate) use imre_ast::exceptions::builtin_id as exception_kind;
+use imre_ast::source_encoding::is_utf8_codec;
 use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange, TextSize};
 
@@ -13996,7 +13997,7 @@ impl<'a> Checker<'a> {
                 match keyword.arg.as_deref() {
                     Some("encoding") if !encoding => {
                         let value = &keyword.value;
-                        if !self.is_utf8_literal(value)? {
+                        if !self.literal_encoding_matches(value, is_utf8_codec)? {
                             let message = if value.is_literal_expr()
                                 && !value.is_string_literal_expr()
                                 && !matches!(value, ast::Expr::NoneLiteral(_))
@@ -14066,10 +14067,15 @@ impl<'a> Checker<'a> {
                 "text file I/O requires encoding='utf-8'",
             ));
         };
-        self.utf8_encoding_keyword(encoding)
+        // The sealed gzip ABI supplies its own encoding spelling.
+        self.utf8_encoding_keyword(encoding, |name| name == "utf-8")
     }
 
-    fn utf8_encoding_keyword(&self, encoding: &ast::Keyword) -> Result<(), String> {
+    fn utf8_encoding_keyword(
+        &self,
+        encoding: &ast::Keyword,
+        accepts: fn(&str) -> bool,
+    ) -> Result<(), String> {
         if encoding
             .arg
             .as_ref()
@@ -14081,7 +14087,7 @@ impl<'a> Checker<'a> {
                 "text file I/O accepts only encoding='utf-8'",
             ));
         }
-        if !self.is_utf8_literal(&encoding.value)? {
+        if !self.literal_encoding_matches(&encoding.value, accepts)? {
             return Err(error(
                 self.source,
                 encoding,
@@ -14091,12 +14097,16 @@ impl<'a> Checker<'a> {
         Ok(())
     }
 
-    fn is_utf8_literal(&self, value: &ast::Expr) -> Result<bool, String> {
+    fn literal_encoding_matches(
+        &self,
+        value: &ast::Expr,
+        accepts: fn(&str) -> bool,
+    ) -> Result<bool, String> {
         let ast::Expr::StringLiteral(literal) = value else {
             return Ok(false);
         };
         check_string(literal, self.source)?;
-        Ok(literal.value.to_str() == "utf-8")
+        Ok(accepts(literal.value.to_str()))
     }
 }
 
