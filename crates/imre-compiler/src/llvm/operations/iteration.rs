@@ -1,7 +1,7 @@
 //! Shared traversal of loop and unpacking IR for fixed and registered entries.
 use super::{CheckedBody, CheckedValue, Entry, Expr, ExprKind, FrameEmitter, Statement};
-use crate::ir::{ItemUpdate, IterNextKind};
-use crate::llvm::{Cleanup, Completion, Emitter, LoopTarget, NativeLoop};
+use crate::ir::{Binary, Compare, ItemUpdate, IterNextKind};
+use crate::llvm::{Cleanup, Completion, Emitter, LoopTarget, NativeLoop, small};
 
 #[derive(Clone)]
 pub(crate) struct LoopEdges {
@@ -54,6 +54,107 @@ pub(crate) fn loop_region<C, T>(
 }
 
 impl Emitter<'_, '_> {
+    pub(in crate::llvm) fn range_loop(
+        &mut self,
+        small_cursor: bool,
+        [target, cursor, stop, step]: [usize; 4],
+        args: &[Expr],
+        body: &[Statement],
+        orelse: &[Statement],
+    ) {
+        let unit_step = match args {
+            [_] | [_, _] => true,
+            [_, _, step] => matches!(&step.kind, ExprKind::Int(n) if n == "1"),
+            _ => false,
+        };
+        let mut args = args.iter().map(|arg| self.expr(arg)).collect::<Vec<_>>();
+        if args.len() == 1 {
+            args.insert(0, small(0));
+        }
+        if args.len() == 2 {
+            args.push(small(1));
+        }
+        for (slot, value) in [cursor, stop, step].into_iter().zip(&args) {
+            self.store(slot, value);
+        }
+        let zero = self.compare(Compare::Equal, &args[2], &small(0));
+        let [fail, condition, body_label, increment, end] = std::array::from_fn(|_| self.label());
+        let exhausted = if orelse.is_empty() {
+            end.clone()
+        } else {
+            self.label()
+        };
+        self.uniform_append(body, &args, target, cursor, &exhausted);
+        if unit_step {
+            self.uniform_indexed_sum(body, target, cursor, &args, &exhausted);
+        }
+        self.branch(&zero.operand, &fail, &condition);
+        self.start(&fail);
+        self.checked_line("call void @imre_range_step_zero()");
+        self.body.end("unreachable");
+        self.start(&condition);
+        self.check_interrupt();
+        let mut current = self.borrow_slot(cursor);
+        current.small_integer |= small_cursor;
+        let mut stop_value = self.borrow_slot(stop);
+        stop_value.small_integer |= args[1].small_integer;
+        let mut step_value = self.borrow_slot(step);
+        step_value.small_integer |= args[2].small_integer;
+        let positive = self.compare(Compare::Greater, &step_value, &small(0));
+        let below = self.compare(Compare::Less, &current, &stop_value);
+        let above = self.compare(Compare::Greater, &current, &stop_value);
+        let test = self.instruction(format!(
+            "select i1 {}, i1 {}, i1 {}",
+            positive.operand, below.operand, above.operand
+        ));
+        self.branch(&test, &body_label, &exhausted);
+        self.start(&body_label);
+        if unit_step {
+            self.advance_affine(body, target, cursor, stop);
+        }
+        let current = self.load(cursor, small_cursor);
+        self.store(target, &current);
+        self.loops.push(NativeLoop {
+            target: LoopTarget {
+                edges: LoopEdges {
+                    step: increment.clone(),
+                    exhausted: exhausted.clone(),
+                    done: end.clone(),
+                },
+                cleanup_depth: self.cleanups.len(),
+            },
+            raw_subtotal: None,
+        });
+        self.block(body);
+        self.loops.pop();
+        if !self.body.terminated {
+            if unit_step {
+                self.batch_modular_writes(body, target, cursor, stop);
+            }
+            self.jump(&increment);
+        }
+        self.start(&increment);
+        let mut current = self.borrow_slot(cursor);
+        current.small_integer |= small_cursor;
+        let mut step_value = self.borrow_slot(step);
+        step_value.small_integer |= args[2].small_integer;
+        let next = if small_cursor {
+            self.small_binary(Binary::Add, &current, &step_value, false, None)
+        } else {
+            self.binary(Binary::Add, &current, &step_value)
+        };
+        self.store(cursor, &next);
+        self.jump(&condition);
+        if !orelse.is_empty() {
+            self.start(&exhausted);
+            self.block(orelse);
+            if !self.body.terminated {
+                self.jump(&end);
+            }
+        }
+        self.start(&end);
+    }
+
     /// A specialized pull uses the same guarded-success edge as the Python iterator.
     pub(in crate::llvm) fn when(&mut self, condition: &str, success: impl FnOnce(&mut Self)) {
         CheckedBody::native(self).when(condition, None, |body| success(body.fixed()));

@@ -1008,7 +1008,58 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 kind,
             } => self.pull(*iterator, *key, *value, *ready, *kind),
             Statement::Break | Statement::Continue | Statement::Exhaust => self.loop_transfer(stmt),
-            _ => self.fixed().other_statement(stmt),
+            Statement::Move(target, source) => self.fixed().move_local(*target, *source),
+            Statement::SetField(receiver, field, rhs) => {
+                let code = self.fixed();
+                let value = code.operand(rhs);
+                let receiver = code.operand(receiver);
+                code.set_field(&receiver.value, *field, &value.value);
+                code.release_operand(&receiver);
+                code.release_operand(&value);
+            }
+            Statement::AugmentField(receiver, field, op, rhs) => {
+                let code = self.fixed();
+                let receiver = code.operand(receiver);
+                let old = code.field_update_operand(&receiver.value, *field, rhs);
+                let right = code.operand(rhs);
+                let value = code.binary(*op, &old.value, &right.value);
+                code.forget(&value);
+                code.replace_field(&receiver.value, *field, &value);
+                code.release_operand(&right);
+                code.release_operand(&old);
+                code.release_operand(&receiver);
+            }
+            Statement::For {
+                target,
+                cursor,
+                stop,
+                step,
+                args,
+                body,
+                orelse,
+            } => {
+                let code = self.fixed();
+                // The proof covers the hidden cursor and its final increment,
+                // independently of reassignment of the visible target.
+                let small_cursor = code.ranges.range_cursor(stmt).is_some();
+                code.range_loop(
+                    small_cursor,
+                    [*target, *cursor, *stop, *step],
+                    args,
+                    body,
+                    orelse,
+                );
+            }
+            Statement::Assert(test) => {
+                let code = self.fixed();
+                let test = code.expr(test);
+                let (success, fail) = (code.label(), code.label());
+                code.branch(&test.operand, &success, &fail);
+                code.start(&fail);
+                code.checked_line("call void @imre_assert_fail()");
+                code.body.end("unreachable");
+                code.start(&success);
+            }
         }
     }
 
