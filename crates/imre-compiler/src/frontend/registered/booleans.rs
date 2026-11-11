@@ -478,9 +478,10 @@ mod tests {
         use crate::modules::SourceGraph;
         use ast::HasNodeIndex;
 
-        let text = include_str!("../../../../../tests/fixtures/calls/forwarded_keywords.py");
-        let graph = SourceGraph::single(text).unwrap();
+        let fixture = include_str!("../../../../../tests/fixtures/calls/forwarded_keywords.py");
+        let graph = SourceGraph::single(fixture).unwrap();
         let module = &graph.modules[graph.entry];
+        let text = &module.source;
         let mut forward = module.parsed.syntax().body[1]
             .as_function_def_stmt()
             .unwrap()

@@ -2055,14 +2055,15 @@ mod tests {
 
     #[test]
     fn paired_module_registers_its_checked_bodies_without_executable_syntax() {
-        let source = include_str!("../../../../tests/fixtures/registered_reduction_callback.py");
-        let mut graph = crate::modules::SourceGraph::single(source).unwrap();
+        let fixture = include_str!("../../../../tests/fixtures/registered_reduction_callback.py");
+        let mut graph = crate::modules::SourceGraph::single(fixture).unwrap();
         assert!(matches!(
             crate::checked_lower(&mut graph).unwrap(),
             crate::CheckedProgram::Registered(_)
         ));
         let bodies = graph.registered_functions();
         let functions = &bodies[&graph.entry];
+        let source = &graph.modules[graph.entry].source;
         let prepared = PreparedBody::module(
             "example",
             Path::new("example.py"),
