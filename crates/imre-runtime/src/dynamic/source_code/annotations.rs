@@ -116,9 +116,7 @@ impl Program {
     pub(super) fn annotation_program(
         &self,
         function: &mut ast::StmtFunctionDef,
-        body: &Program,
-        line: u32,
-    ) -> Result<Option<Rc<Program>>> {
+    ) -> Result<Option<Box<Program>>> {
         // CPython emits ordinary positional annotations before the positional-only group.
         let params = &mut function.parameters;
         let mut entries: Vec<_> = params
@@ -147,31 +145,19 @@ impl Program {
                 *expr = string_literal(expr);
             }
         }
-        Ok(Some(self.annotation_provider(
-            entries,
-            Some(&body.qualname),
-            line,
-            Vec::new(),
-        )))
+        Ok(Some(self.annotation_provider(entries, Vec::new())))
     }
 
     pub(super) fn annotation_provider(
         &self,
         entries: Vec<(String, ast::Expr)>,
-        owner: Option<&str>,
-        line: u32,
         conditional_fields: Vec<usize>,
-    ) -> Rc<Program> {
+    ) -> Box<Program> {
         let mut provider = self.nested_program("__annotate__");
-        provider.qualname = owner.map_or_else(
-            || "__annotate__".into(),
-            |name| format!("{name}.__annotate__"),
-        );
-        provider.first_line = line;
         provider.private_names = self.private_names.clone();
         provider.conditional_fields = conditional_fields;
         provider.items.push(SourceItem::Annotations(entries));
-        Rc::new(provider)
+        Box::new(provider)
     }
 }
 
@@ -198,10 +184,9 @@ impl<'a> CompiledStrings<'a, '_> {
 
     pub(super) fn annotation_code(
         &mut self,
-        provider: &'a mut Rc<Program>,
+        provider: &mut Program,
         class_scope: bool,
     ) -> Result<()> {
-        let provider = Rc::get_mut(provider).expect("new annotation code");
         if class_scope {
             // A global declared by the class also bypasses its dictionary in the annotation scope.
             for (name, (kind, _)) in self.directives {
