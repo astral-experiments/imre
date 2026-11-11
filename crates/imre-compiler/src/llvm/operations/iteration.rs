@@ -1,7 +1,7 @@
 //! Shared traversal of loop and unpacking IR for fixed and registered entries.
 use super::{CheckedBody, CheckedValue, Entry, Expr, ExprKind, FrameEmitter, Statement};
 use crate::ir::{ItemUpdate, IterNextKind};
-use crate::llvm::{Cleanup, Completion, Emitter, LoopTarget};
+use crate::llvm::{Cleanup, Completion, Emitter, LoopTarget, NativeLoop};
 
 #[derive(Clone)]
 pub(crate) struct LoopEdges {
@@ -187,11 +187,11 @@ impl CheckedBody<'_, '_, '_, '_> {
             },
             |this, edges, ()| {
                 match &mut this.0 {
-                    Entry::Native(e) => e.loops.push(LoopTarget {
-                        end: edges.done.clone(),
-                        exhausted: edges.exhausted.clone(),
-                        next: edges.step.clone(),
-                        cleanup_depth: e.cleanups.len(),
+                    Entry::Native(e) => e.loops.push(NativeLoop {
+                        target: LoopTarget {
+                            edges: edges.clone(),
+                            cleanup_depth: e.cleanups.len(),
+                        },
                         raw_subtotal: optimized.as_ref().and_then(|(_, _, s)| s.clone()),
                     }),
                     Entry::Registered(f) => f.enter_loop(edges),
@@ -229,19 +229,22 @@ impl CheckedBody<'_, '_, '_, '_> {
     }
 
     pub(super) fn loop_transfer(&mut self, statement: &Statement) {
+        let target = match &self.0 {
+            Entry::Native(e) => e.loops.last().map(|active| &active.target),
+            Entry::Registered(f) => f.loops.last(),
+        }
+        .expect("loop transfer");
+        let label = match statement {
+            Statement::Break => &target.edges.done,
+            Statement::Continue => &target.edges.step,
+            Statement::Exhaust => &target.edges.exhausted,
+            _ => unreachable!("loop transfer"),
+        }
+        .clone();
+        let depth = target.cleanup_depth;
         match &mut self.0 {
-            Entry::Registered(f) => f.transfer_loop(statement),
-            Entry::Native(e) => {
-                let target = e.loops.last().expect("loop transfer");
-                e.route(Completion::Jump {
-                    label: match statement {
-                        Statement::Break => target.end.clone(),
-                        Statement::Exhaust => target.exhausted.clone(),
-                        _ => target.next.clone(),
-                    },
-                    depth: target.cleanup_depth,
-                });
-            }
+            Entry::Native(e) => e.route(Completion::Jump { label, depth }),
+            Entry::Registered(f) => f.jump_from_regions(label, depth),
         }
     }
 

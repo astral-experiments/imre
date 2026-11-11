@@ -11,7 +11,7 @@ use crate::frontend::push_codepoints;
 use crate::ir;
 use crate::ir::{Builtin, Constant, DisplayKind, Expr};
 use crate::llvm::body::FunctionBody;
-use crate::llvm::operations::{CheckedValue, LoopEdges};
+use crate::llvm::operations::CheckedValue;
 use indexmap::IndexSet;
 use ruff_python_ast::UnaryOp;
 use ruff_text_size::{TextRange, TextSize};
@@ -76,7 +76,7 @@ pub(crate) struct RegisteredFrame<'a, 'p> {
     pub(crate) positions: &'p SourcePositions<'p>,
     pub(crate) unit: usize,
     pub(super) iteration: super::IterationState,
-    pub(crate) loops: Vec<super::LoopTarget>,
+    pub(in crate::llvm) loops: Vec<super::LoopTarget>,
     pub(crate) current_range: TextRange,
     pub(super) regions: Vec<super::context::Region>,
     pub(crate) async_generator: bool,
@@ -1518,14 +1518,6 @@ pub(crate) trait FrameEmitter<'a, 'p>:
         let mark = self.temporary_mark();
         evaluate(self);
         self.discard_truth(&mark);
-    }
-
-    fn push_loop(&mut self, edges: LoopEdges, step_depth: usize, exit_depth: usize) {
-        self.loops.push(super::LoopTarget {
-            edges,
-            step_depth,
-            exit_depth,
-        });
     }
 
     fn raise_operand_at(&mut self, exception: &str, cause: Option<&str>, statement: TextRange) {
