@@ -848,7 +848,7 @@ pub(super) fn operation<'a, E>(
     node: &ast::Expr,
     source: RegisteredSource<'a>,
     local: Option<Expr>,
-    class_namespace: bool,
+    allow_typed_receiver: bool,
     literal: impl Fn(&Expr) -> Option<bool>,
     dynamic_receiver: impl FnOnce(&ast::Expr) -> bool,
     mut operand: impl FnMut(&ast::Expr, Option<crate::analysis::OperandTypes<'a>>) -> StdResult<Expr, E>,
@@ -891,7 +891,7 @@ pub(super) fn operation<'a, E>(
             return Ok(None);
         }
         let target = child(selected.target)?;
-        if target.ty != Type::PythonObject && !class_namespace {
+        if target.ty != Type::PythonObject && !allow_typed_receiver {
             return Ok(None);
         }
         let arguments = selected
@@ -913,21 +913,7 @@ pub(super) fn operation<'a, E>(
                 .generators
                 .is_some_and(|sites| sites.contains_key(&generator.range())) =>
         {
-            let outer = imre_ast::comprehension::outer_clause(&generator.generators);
-            let acquire = if outer.is_async {
-                ir::IteratorOp::Async(outer.iter.range())
-            } else {
-                ir::IteratorOp::Get(outer.iter.range())
-            };
-            let iterator = super::operation(
-                Builtin::RegisteredIter(acquire),
-                Type::PythonObject,
-                vec![child(&outer.iter)?],
-            );
-            ExprKind::Builtin(
-                Builtin::RegisteredGenerator(generator.range(), false),
-                vec![iterator],
-            )
+            return generator_binding(generator, child).map(Some);
         }
         ast::Expr::Compare(cmp) => {
             if let Some((needle, items, negate)) = literal_membership(cmp) {
@@ -1004,6 +990,29 @@ pub(super) fn operation<'a, E>(
         ty: Type::PythonObject,
         kind,
     }))
+}
+
+/// Acquire only the outer cursor here. The lexical generator owns iteration and its body.
+fn generator_binding<E>(
+    generator: &ast::ExprGenerator,
+    mut operand: impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
+) -> StdResult<Expr, E> {
+    let outer = imre_ast::comprehension::outer_clause(&generator.generators);
+    let acquire = if outer.is_async {
+        ir::IteratorOp::Async(outer.iter.range())
+    } else {
+        ir::IteratorOp::Get(outer.iter.range())
+    };
+    let iterator = super::operation(
+        Builtin::RegisteredIter(acquire),
+        Type::PythonObject,
+        vec![operand(&outer.iter)?],
+    );
+    Ok(super::operation(
+        Builtin::RegisteredGenerator(generator.range(), false),
+        Type::PythonObject,
+        vec![iterator],
+    ))
 }
 
 pub(crate) fn registered_index_key(key: &ast::Expr, source: RegisteredSource<'_>) -> Option<Expr> {
@@ -1224,6 +1233,16 @@ impl Checker<'_> {
         module: &ModuleSource,
     ) -> Result<Option<Expr>, String> {
         let source = module.context(self.source);
+        if let ast::Expr::Generator(generator) = node
+            && self.optional_registered_body
+        {
+            let mut value = generator_binding(generator, |outer| self.expr(outer))?;
+            self.live_protocol_parameters = true;
+            if let Some(slot) = self.namespace {
+                in_namespace(&mut value, self.local(slot));
+            }
+            return Ok(Some(source.located(node, value)));
+        }
         if let ast::Expr::Lambda(lambda) = node {
             if checked_binding(lambda, source).is_none() {
                 return Ok(None);
@@ -1300,14 +1319,24 @@ impl Checker<'_> {
                 previous = Some(dynamic);
             }
         }
+        // These methods consume or produce an iterable through Python's string protocol.
+        // A typed receiver in this frame can still be a subclass with an overriding method.
+        let string_method = self.optional_registered_body
+            && node
+                .as_call_expr()
+                .and_then(|call| source.direct_method(call))
+                .is_some_and(|method| {
+                    matches!(method.attr.as_str(), "join" | "split")
+                        && graph.session.scalar_type(owner, &method.value) == Some(Type::Str)
+                });
         let Some(mut value) = operation(
             node,
             source,
             local,
-            false,
+            string_method,
             // Even a skipped operand participates in static argument and result checking.
             |_| None,
-            |receiver| graph.session.is_dynamic_receiver(owner, receiver),
+            |receiver| string_method || graph.session.is_dynamic_receiver(owner, receiver),
             |child, _| self.expr(child),
         )?
         else {
@@ -1316,6 +1345,7 @@ impl Checker<'_> {
         if let Some(slot) = self.namespace {
             in_namespace(&mut value, self.local(slot));
         }
+        self.live_protocol_parameters |= string_method;
         // Checked locals and exact literals keep their known types in the registered frame.
         value.ty = match &value.kind {
             ExprKind::Int(_) => Type::Int,

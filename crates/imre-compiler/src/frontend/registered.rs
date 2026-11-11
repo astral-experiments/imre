@@ -152,7 +152,17 @@ impl RegisteredOperand {
     }
 }
 
+/// Argument binding and lexical dependencies of a retained Python frame.
+pub(crate) enum FrameInputs {
+    Checked,
+    /// Scalar parameters reach Python call operands without native coercion.
+    Protocol {
+        generators: Box<[TextRange]>,
+    },
+}
+
 pub(crate) struct RegisteredFunction {
+    pub(crate) inputs: FrameInputs,
     /// Physical positions for the unchanged fixed operations, in checked node order.
     pub(crate) fixed_sites: Vec<TextRange>,
     /// Descriptor names and token positions for placed fixed-layout field reads.
@@ -169,6 +179,7 @@ impl RegisteredFunction {
     pub(super) fn expression(range: TextRange, value: Expr) -> Self {
         let body = Self::returning(range, value);
         Self {
+            inputs: FrameInputs::Checked,
             fixed_sites: Vec::new(),
             fixed_fields: None,
             function: ir::Function {
@@ -259,20 +270,23 @@ pub(super) fn lower_definition<'a>(
         )
         .classify(Kind::ScopedObject));
     }
-    let function = RegisteredFunction {
+    let mut function = RegisteredFunction {
+        inputs: FrameInputs::Checked,
         fixed_sites: Vec::new(),
         fixed_fields: None,
         function: body.function,
         local_names,
     };
-    if !crate::llvm::registered::supports(&function) {
-        return Err(error(
-            source,
-            definition,
-            "function body has no checked registered-frame representation",
-        )
-        .classify(Kind::ScopedObject));
-    }
+    function.inputs =
+        crate::llvm::registered::frame_inputs(&function, body.live_protocol_parameters)
+            .ok_or_else(|| {
+                error(
+                    source,
+                    definition,
+                    "function body has no checked registered-frame representation",
+                )
+                .classify(Kind::ScopedObject)
+            })?;
     Ok(function)
 }
 
@@ -784,6 +798,7 @@ impl DeferredAnnotation {
             vec![],
         )));
         Ok(RegisteredFunction {
+            inputs: FrameInputs::Checked,
             fixed_sites: Vec::new(),
             fixed_fields: None,
             function: ir::Function {
@@ -2456,12 +2471,10 @@ impl statements::StatementLowering for SourceScope<'_> {
     }
 
     fn effect(&mut self, value: &ast::Expr) -> StdResult<(Option<Statement>, bool), ()> {
-        let effect = if value.is_string_literal_expr() {
-            None
-        } else {
-            Some(Statement::Expr(self.frame_value(value).ok_or(())?))
-        };
-        Ok((effect, true))
+        Ok((
+            Some(Statement::Expr(self.frame_value(value).ok_or(())?)),
+            true,
+        ))
     }
 
     fn returned(&mut self, ret: &ast::StmtReturn) -> StdResult<Expr, ()> {
@@ -2829,6 +2842,7 @@ impl<'a> SourceScope<'a> {
     fn finish(self, body: Vec<Statement>) -> RegisteredFunction {
         let (locals, local_names) = self.bindings();
         RegisteredFunction {
+            inputs: FrameInputs::Checked,
             fixed_sites: Vec::new(),
             fixed_fields: None,
             function: ir::Function {

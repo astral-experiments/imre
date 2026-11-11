@@ -491,7 +491,17 @@ impl<'a> PreparedBody<'a> {
             header.annotations = site.annotations;
             header.prepare_signature(def, site.thread_entry, python_annotations);
             let suspended = header.metadata.suspension_flags() != 0;
-            let body = if let Some(checked) = program_bodies.and_then(|bodies| bodies.get(&start)) {
+            // A solved checker may reference an activation before this source has
+            // prepared its lexical children. Place it only with its actual definition.
+            let checked = program_bodies
+                .and_then(|bodies| bodies.get(&start))
+                .filter(|checked| match &checked.inputs {
+                    crate::frontend::FrameInputs::Checked => true,
+                    crate::frontend::FrameInputs::Protocol {
+                        generators: required,
+                    } => required.iter().all(|range| generators.contains_key(range)),
+                });
+            let body = if let Some(checked) = checked {
                 FunctionBody::Function(checked)
             } else {
                 let kind = crate::frontend::RegisteredScope::Function {
@@ -2165,6 +2175,49 @@ mod tests {
         annotated.sort_unstable();
         assert_eq!(ordinary, ["first", "second"]);
         assert_eq!(annotated, ["publish", "successor_sum"]);
+    }
+
+    #[test]
+    fn a_checked_generator_reference_requires_its_lexical_activation() {
+        let source = "def render(words):\n    return ''.join(word.title() for word in words)\n";
+        let path = Path::new("render.py");
+        let site = ruff_text_size::TextSize::default();
+        let mut original =
+            PreparedBody::module("render", path, source, 0, ModuleOrigin::Program(None)).unwrap();
+        let FunctionBody::Suite(suite) = original.source.function_bodies.remove(&site).unwrap()
+        else {
+            panic!("expected the source suite");
+        };
+        let mut generators = Vec::new();
+        RequiredSite::visit(&suite.checked.function.body, None, &mut |required| {
+            if let RequiredSite::Generator(range) = required {
+                generators.push(&source[range]);
+            }
+        });
+        assert_eq!(generators, ["word.title() for word in words"]);
+        let mut checked = suite.checked;
+        checked.inputs = crate::llvm::registered::frame_inputs(&checked, true).unwrap();
+        let bodies = HashMap::from([(site, checked)]);
+        for (source, retained) in [
+            (source, true),
+            ("def render(words):\n    return ''.join(words)\n", false),
+        ] {
+            let module = PreparedBody::module(
+                "render",
+                path,
+                source,
+                0,
+                ModuleOrigin::Program(Some(&bodies)),
+            )
+            .unwrap();
+            assert_eq!(
+                matches!(
+                    module.source.function_bodies[&site],
+                    FunctionBody::Function(_)
+                ),
+                retained
+            );
+        }
     }
 
     #[test]

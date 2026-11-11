@@ -48,6 +48,7 @@ pub(super) trait StatementLowering {
             ast::Stmt::Assign(assign) => return Ok((self.assignment(assign)?, true)),
             ast::Stmt::If(branch) => return self.branch(branch),
             ast::Stmt::FunctionDef(def) => (self.definition(def)?, true),
+            ast::Stmt::Expr(expr) if expr.value.is_string_literal_expr() => (None, true),
             ast::Stmt::Expr(expr) => self.effect(&expr.value)?,
             ast::Stmt::Return(ret) if !module => {
                 (Some(Statement::Return(self.returned(ret)?)), false)

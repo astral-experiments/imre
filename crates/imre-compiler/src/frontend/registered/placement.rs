@@ -8,6 +8,7 @@ pub(crate) fn place_fixed_function(
 ) -> RegisteredFunction {
     function.returns = Type::PythonObject;
     RegisteredFunction {
+        inputs: FrameInputs::Checked,
         function,
         local_names: source.local_names,
         fixed_sites: source.positions,

@@ -24,8 +24,33 @@ use std::collections::HashMap;
 
 use ruff_text_size::{TextRange, TextSize};
 
-/// Only take a body when all its operations have a lowering for the registered calling convention.
+#[cfg(test)]
 pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
+    frame_inputs(
+        checked,
+        matches!(
+            checked.inputs,
+            crate::frontend::FrameInputs::Protocol { .. }
+        ),
+    )
+    .is_some()
+}
+
+/// Check the frame's operations and retain their lexical requirements at the same visit.
+pub(crate) fn frame_inputs(
+    checked: &RegisteredFunction,
+    live_parameters: bool,
+) -> Option<crate::frontend::FrameInputs> {
+    use crate::frontend::FrameInputs;
+    let scalar_parameter = |value: &Expr| {
+        live_parameters
+            && value.ty != Type::PythonObject
+            && matches!(value.kind, ExprKind::Local(slot)
+                if checked.function.params.contains(&slot) && checked.function.locals[slot].builtin_scalar_name().is_some())
+    };
+    let mut scalar_reads = 0usize;
+    let mut protocol_reads = 0usize;
+    let mut generators = Vec::new();
     let body = &checked.function.body;
     let mut uses_python_protocol = false;
     let private = checked.region().private_slots();
@@ -104,7 +129,10 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
             ir::Node::Expression(expr) => expr,
         };
         supported &= match &expr.kind {
-            ExprKind::Local(slot) => has_slot(slot),
+            ExprKind::Local(slot) => {
+                scalar_reads += usize::from(scalar_parameter(expr));
+                has_slot(slot)
+            }
             ExprKind::Bind(slot, _) => {
                 uses_python_protocol = true;
                 checked.local_names.contains_key(slot)
@@ -141,7 +169,10 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
                 uses_python_protocol = true;
                 !scoped || !operands.is_empty()
             }
-            ExprKind::Builtin(Builtin::RegisteredGenerator(_, scoped), operands) => {
+            ExprKind::Builtin(Builtin::RegisteredGenerator(range, scoped), operands) => {
+                if live_parameters {
+                    generators.push(*range);
+                }
                 uses_python_protocol = true;
                 ir::generator_operands(*scoped, operands).is_ok()
             }
@@ -159,7 +190,20 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
             }
             ExprKind::Builtin(Builtin::RegisteredCall(call), operands) => {
                 uses_python_protocol = true;
-                operands.len() > usize::from(call.explicit_scope)
+                let scope = usize::from(call.explicit_scope);
+                if live_parameters {
+                    // The method receiver and arguments are passed as their original handles.
+                    for mut operand in operands.iter().skip(scope) {
+                        while let ExprKind::Builtin(Builtin::RegisteredLocation(..), children) =
+                            &operand.kind
+                        {
+                            let [child] = children.as_slice() else { break };
+                            operand = child;
+                        }
+                        protocol_reads += usize::from(scalar_parameter(operand));
+                    }
+                }
+                operands.len() > scope
             }
             ExprKind::Builtin(Builtin::RegisteredIndexConstant(_), args) => args.len() == 1,
             ExprKind::Builtin(Builtin::RegisteredSlice, args) => matches!(args.len(), 2 | 3),
@@ -204,12 +248,20 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
     });
     // Only an unresolved signature needs a Python operation to establish its
     // calling convention. Solved functions already have an ordinary checked caller.
-    let has_live_parameter = checked
-        .function
-        .params
-        .iter()
-        .any(|slot| checked.function.locals[*slot] == Type::PythonObject);
-    supported && (!has_live_parameter || uses_python_protocol)
+    let has_live_parameter = checked.function.params.iter().any(|slot| {
+        let ty = checked.function.locals[*slot];
+        ty == Type::PythonObject || live_parameters && ty.builtin_scalar_name().is_some()
+    });
+    if !supported || has_live_parameter && !uses_python_protocol || scalar_reads != protocol_reads {
+        return None;
+    }
+    Some(if live_parameters {
+        FrameInputs::Protocol {
+            generators: generators.into_boxed_slice(),
+        }
+    } else {
+        FrameInputs::Checked
+    })
 }
 
 #[derive(Default)]
