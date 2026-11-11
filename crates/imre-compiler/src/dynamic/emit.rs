@@ -127,7 +127,7 @@ pub(super) fn emit(
         let mut external = None;
         let mut archived = false;
         if check_archive || separate {
-            let (symbol, ir) = initializer.standalone()?;
+            let (symbol, body) = initializer.provider_body()?;
             archived = check_archive && providers.contains(&symbol);
             if !archived && separate && !root.declares(&symbol) {
                 if whole.is_none() && matches!(layout, crate::BoxedLayout::WholeWithUnits(_)) {
@@ -135,7 +135,7 @@ pub(super) fn emit(
                 }
                 units.push(CodegenUnit {
                     name: name.clone(),
-                    llvm_ir: ir,
+                    llvm_ir: body.llvm_ir(&symbol),
                 });
             }
             used_archive |= archived;
@@ -677,8 +677,14 @@ impl<'a> PreparedBody<'a> {
         }
     }
 
-    /// Emit independent IR with private, address-significant constant slots.
     pub(super) fn standalone(&self) -> Result<(String, String), String> {
+        let (symbol, body) = self.provider_body()?;
+        let ir = body.llvm_ir(&symbol);
+        Ok((symbol, ir))
+    }
+
+    /// Hash the emitted module before deciding whether its native object is already available.
+    fn provider_body(&self) -> Result<(String, ProviderBody), String> {
         let mut output = Output {
             keep_docstrings: self.source.python_optimization < 2,
             ..Output::default()
@@ -687,22 +693,48 @@ impl<'a> PreparedBody<'a> {
         let file = output.data(filename);
         let entry = self.emit(&mut output, 0, &file)?;
         output.integer_prelude();
-        let mut ir = format!("{ABI}\n{}\n{}", output.constants, output.functions);
+        let body = ProviderBody {
+            constants: output.constants,
+            functions: output.functions,
+            entry,
+        };
         let mut hash = blake3::Hasher::new();
         for field in [
             std::env::consts::ARCH.as_bytes(),
             self.name.as_bytes(),
             filename,
             self.source.text.as_bytes(),
-            ir.as_bytes(),
         ] {
             hash.update(&(field.len() as u64).to_le_bytes());
             hash.update(field);
         }
+        let parts = body.parts();
+        let length: usize = parts.iter().map(|part| part.len()).sum();
+        hash.update(&(length as u64).to_le_bytes());
+        for part in parts {
+            hash.update(part.as_bytes());
+        }
         hash.update(&[u8::from(self.source.python_optimization < 2)]);
         let symbol = format!("imre_provider_{}", hash.finalize().to_hex());
-        writeln!(ir, "@{symbol} = alias i64 (ptr, i64), ptr {entry}").unwrap();
-        Ok((symbol, ir))
+        Ok((symbol, body))
+    }
+}
+
+struct ProviderBody {
+    constants: String,
+    functions: String,
+    entry: String,
+}
+
+impl ProviderBody {
+    fn parts(&self) -> [&str; 5] {
+        [ABI, "\n", &self.constants, "\n", &self.functions]
+    }
+
+    fn llvm_ir(&self, symbol: &str) -> String {
+        let mut ir = self.parts().concat();
+        writeln!(ir, "@{symbol} = alias i64 (ptr, i64), ptr {}", self.entry).unwrap();
+        ir
     }
 }
 
