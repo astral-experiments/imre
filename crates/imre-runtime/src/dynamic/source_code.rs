@@ -8,7 +8,6 @@ use annotations::CONDITIONAL;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
-use std::sync::Arc;
 
 use imre_ast::code_flags;
 use imre_ast::comprehension::{
@@ -20,15 +19,14 @@ use ruff_text_size::{Ranged, TextRange};
 use super::value::{Body, ExecGlobals};
 use super::*;
 
-#[derive(Clone)]
-struct SourceFilename {
-    // Code objects own the Python spelling. Rust diagnostic locations require scalar text.
-    object: Id,
-    display: Arc<str>,
+/// Only the module code object escapes validation of a source string.
+struct ParsedModule {
+    constants: Id,
+    flags: u32,
+    flags_complete: bool,
 }
 
 struct Program {
-    filename: SourceFilename,
     // Stop symbol collection at the first invalid binding or misplaced future import.
     syntax_limit: Option<ruff_text_size::TextRange>,
     // An invalid pattern still has a symbol table. Let all its scopes finish checking
@@ -36,16 +34,12 @@ struct Program {
     deferred_pattern:
         Option<Rc<std::cell::RefCell<(TextRange, imre_ast::executable::PatternMessage)>>>,
     pub name: String,
-    qualname: String,
-    nested_global: bool,
     class_scope: bool,
     class_cell: bool,
     class_nonlocal: bool,
     has_named_bindings: bool,
     doc: Option<ruff_text_size::TextRange>,
     strip_docstrings: bool,
-    string_roots: Id,
-    first_line: u32,
     kind: FunctionKind,
     scope_flags: u32,
     unlowered_yield: bool,
@@ -64,7 +58,6 @@ struct Program {
 enum FunctionKind {
     Plain,
     Generator,
-    GeneratorLambda,
     Coroutine,
     AsyncGenerator,
 }
@@ -200,14 +193,12 @@ enum SourceItem {
     },
     From(String, Vec<(String, String)>),
     Define(Definition),
-    ReturnClass(Definition),
     Annotations(Vec<(String, ast::Expr)>),
-    ModuleAnnotations(Option<Rc<Program>>),
+    ModuleAnnotations(Option<Box<Program>>),
     ModuleDoc(String),
     StringAnnotation(String, ast::Expr),
-    ClassAnnotator(Rc<Program>),
+    ClassAnnotator(Box<Program>),
     MakeGenerator(ast::Expr),
-    Return(Option<ast::Expr>),
     Raise(ast::StmtRaise),
     Assert(ast::StmtAssert),
     Match {
@@ -229,9 +220,9 @@ struct SourceCase {
 struct Definition {
     binding: String,
     decorators: Vec<ast::Decorator>,
-    body: Rc<Program>,
+    body: Box<Program>,
     kind: DefinitionKind,
-    annotate: Option<Rc<Program>>,
+    annotate: Option<Box<Program>>,
 }
 
 enum DefinitionKind {
@@ -819,7 +810,6 @@ impl<'a, 'ctx> CompiledStrings<'a, 'ctx> {
     fn prepare_children(
         &mut self,
         functions: Vec<&'a ast::Expr>,
-        filename: &SourceFilename,
         has_named_bindings: bool,
         module: bool,
     ) -> Result<()> {
@@ -835,8 +825,7 @@ impl<'a, 'ctx> CompiledStrings<'a, 'ctx> {
         for expr in functions {
             let child = match expr {
                 ast::Expr::Lambda(lambda) => {
-                    let new_program =
-                        || Program::new(filename.clone(), "<lambda>", has_named_bindings);
+                    let new_program = || Program::new("<lambda>", has_named_bindings);
                     let mut declared = has_named_bindings.then(new_program);
                     if let Some(child) = &mut declared {
                         let mut named = NamedBindings::default();
@@ -846,18 +835,14 @@ impl<'a, 'ctx> CompiledStrings<'a, 'ctx> {
                     if let Some(plan) = OperandPlan::for_function(&lambda.body, FunctionKind::Plain)
                     {
                         let mut child = declared.unwrap_or_else(new_program);
-                        let value = child.lower_operand(*lambda.body.clone(), &plan)?;
-                        if value.is_none() {
-                            child.kind = FunctionKind::GeneratorLambda;
-                        }
-                        child.items.push(SourceItem::Return(value));
+                        child.record_operand(*lambda.body.clone(), &plan)?;
                         Child::Lowered(Box::new(child))
                     } else {
                         Child::Expression(&lambda.body)
                     }
                 }
                 ast::Expr::Generator(genexpr) => {
-                    let mut child = Program::new(filename.clone(), "<genexpr>", has_named_bindings);
+                    let mut child = Program::new("<genexpr>", has_named_bindings);
                     if has_named_bindings {
                         let mut bindings = NamedBindings::default();
                         bindings.visit_expr(expr);
@@ -891,7 +876,7 @@ impl<'a, 'ctx> CompiledStrings<'a, 'ctx> {
                         CompiledStrings::new(self.heap, self.shared, self.spellings, &directives);
                     strings.visit_expr(body);
                     let nested = strings.scan(&mut false)?;
-                    strings.prepare_children(nested, filename, has_named_bindings, false)?;
+                    strings.prepare_children(nested, has_named_bindings, false)?;
                     strings.finish()
                 }
                 Child::Lowered(mut program) => {
@@ -1143,7 +1128,8 @@ impl Program {
         let stringized = self.string_annotations();
         let mut strings = CompiledStrings::new(heap, shared, spellings, &self.directives);
         let mut prepared_generators = Vec::new();
-        for op in &mut self.items {
+        let mut items = std::mem::take(&mut self.items);
+        for op in &mut items {
             match op {
                 SourceItem::Eval(ast::Expr::StringLiteral(doc))
                     if self.scope_flags & code_flags::HAS_DOCSTRING != 0
@@ -1239,12 +1225,11 @@ impl Program {
                 | SourceItem::ModuleAnnotations(Some(provider)) => {
                     strings.annotation_code(provider, self.class_scope)?;
                 }
-                SourceItem::Define(definition) | SourceItem::ReturnClass(definition) => {
+                SourceItem::Define(definition) => {
                     if let Some(provider) = &mut definition.annotate {
                         strings.annotation_code(provider, self.class_scope)?;
                     }
-                    let child =
-                        Rc::get_mut(&mut definition.body).expect("newly lowered child code");
+                    let child = &mut definition.body;
                     strings.heap.code_name(&definition.binding);
                     let roots = child.prepare_strings(strings.heap, strings.shared, spellings)?;
                     if roots != NONE {
@@ -1265,11 +1250,6 @@ impl Program {
                     }
                 }
                 SourceItem::ModuleAnnotations(None) => {}
-                SourceItem::Return(e) => {
-                    if let Some(e) = e {
-                        strings.visit_expr(e);
-                    }
-                }
                 SourceItem::Raise(statement) => {
                     if let Some(e) = &statement.exc {
                         strings.visit_expr(e);
@@ -1290,14 +1270,8 @@ impl Program {
         }
         let mut functions = strings.scan(&mut self.unlowered_yield)?;
         functions.extend(prepared_generators);
-        strings.prepare_children(
-            functions,
-            &self.filename,
-            self.has_named_bindings,
-            self.name == "<module>",
-        )?;
-        self.string_roots = strings.finish();
-        Ok(self.string_roots)
+        strings.prepare_children(functions, self.has_named_bindings, self.name == "<module>")?;
+        Ok(strings.finish())
     }
 
     fn declare(
@@ -1392,8 +1366,8 @@ impl Program {
             }
         };
         for op in &mut self.items {
-            if let SourceItem::Define(definition) | SourceItem::ReturnClass(definition) = op {
-                let child = Rc::get_mut(&mut definition.body).expect("newly lowered child code");
+            if let SourceItem::Define(definition) = op {
+                let child = &mut definition.body;
                 if let Some(params) = definition.kind.type_params() {
                     child.resolve_directives(
                         &|name| {
@@ -1420,7 +1394,7 @@ impl Program {
     }
 
     fn nested_program(&self, name: &str) -> Self {
-        let mut child = Self::new(self.filename.clone(), name, self.has_named_bindings);
+        let mut child = Self::new(name, self.has_named_bindings);
 
         child.syntax_limit = self.syntax_limit;
         child.deferred_pattern.clone_from(&self.deferred_pattern);
@@ -1441,23 +1415,17 @@ impl Program {
         flags
     }
 
-    fn new(filename: SourceFilename, name: &str, has_named_bindings: bool) -> Self {
+    fn new(name: &str, has_named_bindings: bool) -> Self {
         Self {
-            filename,
-
             syntax_limit: None,
             deferred_pattern: None,
             name: name.to_owned(),
-            qualname: name.to_owned(),
-            nested_global: false,
             class_scope: false,
             class_cell: false,
             class_nonlocal: false,
             has_named_bindings,
             doc: None,
             strip_docstrings: false,
-            string_roots: NONE,
-            first_line: 1,
             kind: FunctionKind::Plain,
             scope_flags: 0,
             unlowered_yield: false,
@@ -1613,16 +1581,6 @@ impl Program {
         Ok(())
     }
 
-    fn qualified_name(parent: &str, class: bool, name: &str) -> String {
-        if parent == "<module>" {
-            name.to_owned()
-        } else if class {
-            format!("{parent}.{name}")
-        } else {
-            format!("{parent}.<locals>.{name}")
-        }
-    }
-
     fn definition_spelling<'a>(&'a self, name: &'a ast::Identifier) -> &'a str {
         self.private_names
             .as_ref()
@@ -1653,27 +1611,9 @@ impl Program {
         Ok(())
     }
 
-    fn definition_body(
-        &self,
-        name: &ast::Identifier,
-        decorators: &[ast::Decorator],
-        line: u32,
-        lines: &[usize],
-    ) -> Self {
-        let original = self.definition_spelling(name);
-        let mut child = self.nested_program(original);
-        child.nested_global = self.name != "<module>"
-            && matches!(
-                self.directives.get(name.as_str()),
-                Some((ScopeDirective::Global, _))
-            );
-        if !child.nested_global {
-            child.qualname = Self::qualified_name(&self.qualname, self.class_scope, original);
-        }
+    fn definition_body(&self, name: &ast::Identifier) -> Self {
+        let mut child = self.nested_program(self.definition_spelling(name));
         child.private_names = self.private_names.clone();
-        child.first_line = decorators.first().map_or(line, |d| {
-            lines.partition_point(|n| *n <= d.start().to_usize()) as u32
-        });
         child
     }
 
@@ -1683,12 +1623,7 @@ impl Program {
             .is_some_and(|n| n.string_annotations)
     }
 
-    fn lower_namespace(
-        &mut self,
-        mut body: ast::Suite,
-        lines: &[usize],
-        function: bool,
-    ) -> Result<()> {
+    fn lower_namespace(&mut self, mut body: ast::Suite, function: bool) -> Result<()> {
         let class = self.class_scope;
         if !function && !class && imre_ast::annotations::has_variable_annotation(&body) {
             self.items.push(SourceItem::ModuleAnnotations(None));
@@ -1710,16 +1645,11 @@ impl Program {
                 body.remove(0);
             }
         }
-        self.lower_block(body, lines, function, None, class)?;
+        self.lower_block(body, function, None, class)?;
         if !self.deferred_annotations.is_empty() {
             let entries = std::mem::take(&mut self.deferred_annotations);
             let fields = std::mem::take(&mut self.conditional_fields);
-            let provider = self.annotation_provider(
-                entries,
-                class.then_some(&self.qualname),
-                self.first_line,
-                fields,
-            );
+            let provider = self.annotation_provider(entries, fields);
             if class {
                 self.items.push(SourceItem::ClassAnnotator(provider));
             } else {
@@ -1732,17 +1662,15 @@ impl Program {
     fn lower(
         &mut self,
         body: ast::Suite,
-        lines: &[usize],
         function: bool,
         active: Option<&mut usize>,
     ) -> Result<()> {
-        self.lower_block(body, lines, function, active, false)
+        self.lower_block(body, function, active, false)
     }
 
     fn lower_block(
         &mut self,
         mut body: ast::Suite,
-        lines: &[usize],
         function: bool,
         active: Option<&mut usize>,
         class_top_level: bool,
@@ -1763,7 +1691,7 @@ impl Program {
                     named.visit_stmt(stmt);
                 }
             }
-            self.lower_suite(body, lines, function, active, class_top_level)?;
+            self.lower_suite(body, function, active, class_top_level)?;
             named.declare(self)
         })
     }
@@ -1771,7 +1699,6 @@ impl Program {
     fn lower_suite(
         &mut self,
         body: ast::Suite,
-        lines: &[usize],
         function: bool,
         mut active: Option<&mut usize>,
         class_top_level: bool,
@@ -1906,14 +1833,10 @@ impl Program {
                     if !function {
                         self.invalid_transfer(s.range(), "'return' outside function")?;
                     }
-                    let Some(value) = s.value else {
-                        self.items.push(SourceItem::Return(None));
-                        continue;
-                    };
-                    match self.lower_suspension(*value, function)? {
-                        Some(value) => SourceItem::Return(Some(value)),
-                        None => continue,
+                    if let Some(value) = s.value {
+                        self.record_expression(*value, function)?;
                     }
+                    continue;
                 }
                 Stmt::Raise(s) => SourceItem::Raise(s),
                 Stmt::Import(s) if !s.is_lazy => {
@@ -1959,26 +1882,24 @@ impl Program {
                     }) {
                         return Err(unsupported("type alias parameter bounds and defaults"));
                     }
-                    let line = lines.partition_point(|n| *n <= s.start().to_usize()) as u32;
                     let ast::Expr::Name(name) = *s.name else {
                         return Err(unsupported("type alias target"));
                     };
                     let name = ast::Identifier::new(name.id, name.range);
-                    let mut child = self.definition_body(&name, &[], line, lines);
+                    let mut child = self.definition_body(&name);
                     child.locals.insert(".format".to_owned());
-                    child.items.push(SourceItem::Return(Some(*s.value)));
+                    child.items.push(SourceItem::Discard(*s.value));
                     self.locals.insert(name.to_string());
                     SourceItem::Define(Definition {
                         binding: name.to_string(),
                         decorators: Vec::new(),
-                        body: Rc::new(child),
+                        body: Box::new(child),
                         kind: DefinitionKind::TypeAlias(s.type_params),
                         annotate: None,
                     })
                 }
                 Stmt::FunctionDef(mut s) => {
-                    let line = lines.partition_point(|n| *n <= s.start().to_usize()) as u32;
-                    let mut child = self.definition_body(&s.name, &s.decorator_list, line, lines);
+                    let mut child = self.definition_body(&s.name);
                     if let Some(params) = &s.type_params {
                         child.validate_type_params(params, "function")?;
                     }
@@ -1987,7 +1908,7 @@ impl Program {
                         s.type_params.is_some(),
                         self.class_scope && s.type_params.is_none(),
                     );
-                    let annotate = self.annotation_program(&mut s, &child, line)?;
+                    let annotate = self.annotation_program(&mut s)?;
                     if s.is_async {
                         child.kind = if imre_ast::code_flags::is_generator(&s.body) {
                             FunctionKind::AsyncGenerator
@@ -1995,7 +1916,7 @@ impl Program {
                             FunctionKind::Coroutine
                         };
                     }
-                    child.lower_namespace(s.body, lines, true)?;
+                    child.lower_namespace(s.body, true)?;
                     for param in s.parameters.iter() {
                         let name = param.name().as_str();
                         if let Some((kind, range)) = child.directives.get(name) {
@@ -2010,7 +1931,7 @@ impl Program {
                     SourceItem::Define(Definition {
                         binding: s.name.to_string(),
                         decorators: s.decorator_list.into_iter().collect(),
-                        body: Rc::new(child),
+                        body: Box::new(child),
                         kind: DefinitionKind::Function {
                             parameters: s.parameters,
                             type_params: s.type_params,
@@ -2019,8 +1940,7 @@ impl Program {
                     })
                 }
                 Stmt::ClassDef(mut s) => {
-                    let line = lines.partition_point(|n| *n <= s.start().to_usize()) as u32;
-                    let mut child = self.definition_body(&s.name, &s.decorator_list, line, lines);
+                    let mut child = self.definition_body(&s.name);
                     if let Some(names) = &class_names {
                         child.private_names = Some(Rc::clone(names));
                     }
@@ -2040,12 +1960,12 @@ impl Program {
                         child.scope_flags |= code_flags::NESTED;
                     }
                     child.class_scope = true;
-                    child.lower_namespace(s.body, lines, false)?;
+                    child.lower_namespace(s.body, false)?;
                     self.locals.insert(s.name.to_string());
                     let mut definition = Definition {
                         binding: s.name.to_string(),
                         decorators: s.decorator_list.into_iter().collect(),
-                        body: Rc::new(child),
+                        body: Box::new(child),
                         kind: DefinitionKind::Class {
                             arguments: s.arguments,
                         },
@@ -2055,19 +1975,15 @@ impl Program {
                         definition.body.validate_type_params(&params, "class")?;
                         // Bases and keywords run in the implicit type-parameter function.
                         // Decorators are evaluated and applied in the enclosing scope.
-                        let mut header = self.definition_body(&s.name, &[], line, lines);
+                        let mut header = self.definition_body(&s.name);
                         header.name = format!("<generic parameters of {}>", definition.body.name);
-                        header.qualname =
-                            Self::qualified_name(&self.qualname, self.class_scope, &header.name);
-                        header.nested_global = false;
-                        header.first_line = definition.body.first_line;
                         header.private_names = definition.body.private_names.clone();
                         let decorators = std::mem::take(&mut definition.decorators);
-                        header.items.push(SourceItem::ReturnClass(definition));
+                        header.items.push(SourceItem::Define(definition));
                         definition = Definition {
                             binding: s.name.to_string(),
                             decorators,
-                            body: Rc::new(header),
+                            body: Box::new(header),
                             kind: DefinitionKind::ClassParameters(params),
                             annotate: None,
                         };
@@ -2107,8 +2023,8 @@ impl Program {
                         }
                         _ => unreachable!(),
                     };
-                    self.lower(body, lines, function, Some(&mut 0))?;
-                    self.lower(orelse, lines, function, active.as_deref_mut())?;
+                    self.lower(body, function, Some(&mut 0))?;
+                    self.lower(orelse, function, active.as_deref_mut())?;
                     continue;
                 }
                 Stmt::With(s) => {
@@ -2131,7 +2047,7 @@ impl Program {
                             self.items.push(SourceItem::EnterWith(item));
                         }
                     }
-                    self.lower(s.body, lines, function, active.as_deref_mut())?;
+                    self.lower(s.body, function, active.as_deref_mut())?;
                     continue;
                 }
                 Stmt::Try(s)
@@ -2146,7 +2062,7 @@ impl Program {
                     return Err(unsupported("deferred module annotations in try suites"));
                 }
                 Stmt::Try(s) if !s.is_star && !s.handlers.is_empty() && s.finalbody.is_empty() => {
-                    self.lower(s.body, lines, function, active.as_deref_mut())?;
+                    self.lower(s.body, function, active.as_deref_mut())?;
                     let before_handlers = self.deferred_annotations.len();
                     for ast::ExceptHandler::ExceptHandler(h) in s.handlers {
                         if let Some(class) = h.type_ {
@@ -2156,10 +2072,10 @@ impl Program {
                             self.locals.insert(name.to_string());
                             self.items.push(SourceItem::Name(name));
                         }
-                        self.lower(h.body, lines, function, active.as_deref_mut())?;
+                        self.lower(h.body, function, active.as_deref_mut())?;
                     }
                     let before_else = self.deferred_annotations.len();
-                    self.lower(s.orelse, lines, function, active.as_deref_mut())?;
+                    self.lower(s.orelse, function, active.as_deref_mut())?;
                     // CPython emits annotations from else before annotations from handlers.
                     let handler_count = before_else - before_handlers;
                     let else_count = self.deferred_annotations.len() - before_else;
@@ -2177,10 +2093,10 @@ impl Program {
                     } else {
                         std::iter::once(Stmt::Try(s)).collect()
                     };
-                    self.lower(protected, lines, function, active.as_deref_mut())?;
+                    self.lower(protected, function, active.as_deref_mut())?;
                     let exits_after = active.as_deref().copied();
                     let first = self.deferred_annotations.len();
-                    self.lower(finalbody, lines, function, active.as_deref_mut())?;
+                    self.lower(finalbody, function, active.as_deref_mut())?;
                     let annotation_count = self.deferred_annotations.len() - first;
                     if annotation_count != 0 {
                         // A break or continue crossing this finally has its own inlined
@@ -2210,7 +2126,7 @@ impl Program {
                             captures,
                             guard: case.guard,
                         });
-                        self.lower(case.body, lines, function, active.as_deref_mut())?;
+                        self.lower(case.body, function, active.as_deref_mut())?;
                     }
                     self.items.insert(
                         dispatch,
@@ -2223,12 +2139,12 @@ impl Program {
                 }
                 Stmt::If(s) => {
                     self.record_expression(*s.test, function)?;
-                    self.lower(s.body, lines, function, active.as_deref_mut())?;
+                    self.lower(s.body, function, active.as_deref_mut())?;
                     for clause in s.elif_else_clauses {
                         if let Some(test) = clause.test {
                             self.record_expression(test, function)?;
                         }
-                        self.lower(clause.body, lines, function, active.as_deref_mut())?;
+                        self.lower(clause.body, function, active.as_deref_mut())?;
                     }
                     continue;
                 }
@@ -2610,13 +2526,6 @@ impl Context {
         }
     }
 
-    fn source_filename(&self, object: Id) -> Result<SourceFilename> {
-        Ok(SourceFilename {
-            object,
-            display: Arc::from(self.filename_display(object)?.as_ref()),
-        })
-    }
-
     pub(super) fn compile_source_with_flags(
         &mut self,
         source: Id,
@@ -2625,7 +2534,7 @@ impl Context {
         inherited: u32,
     ) -> Result<Id> {
         let program = self.prepare_source_program(source, filename, mode, false, inherited)?;
-        Ok(self.box_source_code(program))
+        Ok(self.box_source_code(program, filename))
     }
 
     fn prepare_source_program(
@@ -2635,7 +2544,7 @@ impl Context {
         mode: Id,
         strip_indent: bool,
         inherited: u32,
-    ) -> Result<Program> {
+    ) -> Result<ParsedModule> {
         use ruff_python_parser::Mode;
         let mode = self.str_value(mode)?;
         let interactive = mode == "single";
@@ -2650,7 +2559,7 @@ impl Context {
             }
         };
         let filename_id = filename;
-        let filename = self.source_filename(filename_id)?;
+        let display = self.filename_display(filename_id)?;
         let source = match self.heap.get(self.scalar_value(source)) {
             Value::Bytes(data) | Value::ByteArray(data) => {
                 match crate::objects::decode_compile_source(data) {
@@ -2704,8 +2613,7 @@ impl Context {
             return IndentationDiagnostic::from_issue(source, issue, mode == "exec")
                 .raise(self, filename_id);
         }
-        let lines: Rc<[usize]> =
-            line_starts(source.match_indices('\n').map(|(offset, _)| offset + 1))?.into();
+        let lines = line_starts(source.match_indices('\n').map(|(offset, _)| offset + 1))?;
         let parse_error = parsed
             .errors()
             .first()
@@ -2728,9 +2636,10 @@ impl Context {
             if mode == "exec" && !text.ends_with('\n') {
                 text.push('\n');
             }
+            let display = display.into_owned();
             return Err(self.parser_syntax_error(
                 filename_id,
-                &filename.display,
+                &display,
                 &detail,
                 prefix_filename,
                 [row as i64, end_row as i64, column as i64, end_column as i64],
@@ -2792,7 +2701,7 @@ impl Context {
             _ => Default::default(),
         };
         let symbol_error = bindings.first_symbol(future_error);
-        let mut code = Program::new(filename, "<module>", source.contains(":="));
+        let mut code = Program::new("<module>", source.contains(":="));
         code.deferred_pattern = bindings
             .pattern
             .map(|issue| Rc::new(std::cell::RefCell::new(issue)));
@@ -2848,7 +2757,7 @@ impl Context {
                     code.private_names = Some(Rc::new(imre_ast::lower_in(&mut body, "", true)));
                 }
                 code.syntax_limit = symbol_error.map(|(range, _)| range);
-                let lowering = code.lower_namespace(body, &lines, false).and_then(|()| {
+                let lowering = code.lower_namespace(body, false).and_then(|()| {
                     // Closure binding resolution follows symbol collection and future placement.
                     if symbol_error.is_none() {
                         let mut module_globals = HashSet::new();
@@ -2882,7 +2791,7 @@ impl Context {
                 None
             }
         };
-        code.prepare_scope_strings(
+        let constants = code.prepare_scope_strings(
             &mut self.heap,
             &mut SharedConstants::default(),
             &spellings,
@@ -2891,7 +2800,17 @@ impl Context {
         if let Some(issue) = pending_syntax(self, &code)? {
             return Err(issue);
         }
-        Ok(code)
+        Ok(ParsedModule {
+            constants,
+            flags: code.scope_flags
+                | match code.kind {
+                    FunctionKind::Generator => imre_ast::code_flags::GENERATOR,
+                    FunctionKind::Coroutine => imre_ast::code_flags::COROUTINE,
+                    FunctionKind::AsyncGenerator => imre_ast::code_flags::ASYNC_GENERATOR,
+                    FunctionKind::Plain => 0,
+                },
+            flags_complete: code.scope_flags & code_flags::OPTIMIZED != 0 && !code.unlowered_yield,
+        })
     }
 
     /// Attach the filename after tokenization, just as compile does for string input.
@@ -2956,10 +2875,8 @@ impl Context {
         }
     }
 
-    fn box_source_code(&mut self, program: Program) -> Id {
-        let name = self.heap.code_name(&program.name);
-        let qualname = self.heap.code_name(&program.qualname);
-        let filename = program.filename.object;
+    fn box_source_code(&mut self, module: ParsedModule, filename: Id) -> Id {
+        let name = self.heap.code_name("<module>");
         self.alloc(Value::Code(value::CodeObject {
             compilation_constants: Default::default(),
             parsed_parameters: Default::default(),
@@ -2967,26 +2884,17 @@ impl Context {
             cellvars: NONE,
             freevar_names: NONE,
             name,
-            qualname,
+            qualname: name,
             // compile() returns the module code object. Its docstring is a rooted constant.
             doc: NONE,
             filename,
-            first_line: program.first_line,
-            module_definition: !program.nested_global && program.name == program.qualname,
-            flags: program.scope_flags
-                | match program.kind {
-                    FunctionKind::Generator | FunctionKind::GeneratorLambda => {
-                        imre_ast::code_flags::GENERATOR
-                    }
-                    FunctionKind::Coroutine => imre_ast::code_flags::COROUTINE,
-                    FunctionKind::AsyncGenerator => imre_ast::code_flags::ASYNC_GENERATOR,
-                    FunctionKind::Plain => 0,
-                },
-            flags_complete: program.scope_flags & code_flags::OPTIMIZED != 0
-                && !program.unlowered_yield,
-            generator_lambda: program.kind == FunctionKind::GeneratorLambda,
+            first_line: 1,
+            module_definition: true,
+            flags: module.flags,
+            flags_complete: module.flags_complete,
+            generator_lambda: false,
             body: Body::Parsed {
-                constants: program.string_roots,
+                constants: module.constants,
             },
             parameters: NONE,
             nested: Vec::new(),
@@ -3567,18 +3475,14 @@ impl Context {
             Value::Str(_) | Value::Bytes(_) | Value::ByteArray(_) => {
                 let filename = self.text("<string>");
                 let mode_id = self.text(mode);
-                let program = self.prepare_source_program(
+                self.prepare_source_program(
                     source,
                     filename,
                     mode_id,
                     mode == "eval",
                     self.inherited_compile_flags(),
                 )?;
-                return Err(Self::missing_body_error(
-                    &program.qualname,
-                    &program.filename.display,
-                    program.first_line,
-                ));
+                return Err(Self::missing_body_error("<module>", "<string>", 1));
             }
             _ => {
                 return Err(Error::new(
