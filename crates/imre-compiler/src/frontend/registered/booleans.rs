@@ -259,7 +259,7 @@ impl PhysicalPreparation<'_, '_> {
                 false,
                 ir::control::boolean_literal,
                 |_| true,
-                |child| Ok::<_, std::convert::Infallible>(self.logical_operation(child, inputs)),
+                |child, _| Ok::<_, std::convert::Infallible>(self.logical_operation(child, inputs)),
             )
             .unwrap()
             .expect("a logical or comparison expression has a checked operation");
