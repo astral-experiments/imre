@@ -34,6 +34,10 @@ impl<V> Finalbody<V> {
         }
     }
 
+    pub(super) fn is_empty(&self) -> bool {
+        self.edges.is_empty()
+    }
+
     /// Save this predecessor's completion before transferring to the single cleanup.
     pub(super) fn enter(
         &mut self,
@@ -143,7 +147,7 @@ impl Emitter<'_, '_> {
     pub(super) fn emit_finalbody(&mut self, statements: &[Statement]) {
         const MAX_CLEANUP_BYTES: usize = 8 * 1024 * 1024;
         let region = self.finalbodies.pop().expect("active finally");
-        if region.edges.is_empty() {
+        if region.is_empty() {
             return;
         }
         self.start(&region.entry);

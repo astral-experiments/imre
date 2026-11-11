@@ -26,13 +26,16 @@ impl RegisteredFrame<'_, '_> {
 }
 
 impl<'f, 'p> Frame<'f, '_, 'p> {
-    /// Every exit conveys its pending action to the same lexical suite.
-    fn finalized(&mut self, body: &[Statement], protected: impl FnOnce(&mut Self)) {
-        let failed = self.name("b");
-        let done = self.name("b");
+    /// Early transfers and fallthrough in a protected body enter one lexical cleanup.
+    pub(super) fn protected_exits(
+        &mut self,
+        failed: &str,
+        done: &str,
+        protected: impl FnOnce(&mut Self),
+    ) -> (Finalbody<String>, bool) {
         let entry = self.name("b");
         let depth = self.regions.len();
-        let enclosing = std::mem::replace(&mut self.body.error_target, failed.clone());
+        let enclosing = std::mem::replace(&mut self.body.error_target, failed.to_owned());
         self.regions.push(Region::Finally(Finalbody::new(entry)));
         protected(self);
         let Some(Region::Finally(mut region)) = self.regions.pop() else {
@@ -45,12 +48,73 @@ impl<'f, 'p> Frame<'f, '_, 'p> {
             region.enter(
                 &mut self.body,
                 Completion::Jump {
-                    label: done.clone(),
+                    label: done.to_owned(),
                     depth,
                 },
                 None,
             );
         }
+        (region, normal)
+    }
+
+    /// Keep the pending return across cleanup, then resume the original transfer.
+    /// A Python context handles its exceptional exit separately because it can suppress it.
+    pub(super) fn finish_exits(
+        &mut self,
+        region: Finalbody<String>,
+        cleanup: impl FnOnce(&mut Self, &Finalbody<String>) -> Option<String>,
+    ) -> bool {
+        if region.is_empty() {
+            return false;
+        }
+        self.label(&region.entry);
+        let (targets, tag) = region.completions(&mut self.body, |_| ());
+        let returned = targets.contains(&Completion::Return(())).then(|| {
+            region.phi(&mut self.body, "i64", |edge| match &edge.completion {
+                Completion::Return(value) => value.clone(),
+                _ => "0".into(),
+            })
+        });
+        let live = self.live.len();
+        let depth = self.regions.len();
+        if let Some(value) = &returned {
+            self.keep_pending_exit(value, None);
+        }
+        let error = cleanup(self, &region);
+        self.live.truncate(live);
+        self.regions.truncate(depth);
+        if self.body.terminated {
+            return false;
+        }
+        for (index, target) in targets.iter().enumerate() {
+            let next = (index + 1 < targets.len()).then(|| {
+                let selected = self.value(&format!("icmp eq i32 {tag}, {index}"));
+                let resume = self.name("b");
+                let next = self.name("b");
+                self.branch(&selected, &resume, &next);
+                self.label(&resume);
+                next
+            });
+            match target {
+                Completion::Return(()) => {
+                    self.return_from_regions(returned.as_ref().unwrap().clone())
+                }
+                Completion::Jump { label, depth } => self.jump_from_regions(label.clone(), *depth),
+                Completion::Error => {
+                    self.raise(error.as_deref().expect("pending exception"), None, true)
+                }
+            }
+            if let Some(next) = next {
+                self.label(&next);
+            }
+        }
+        true
+    }
+
+    fn finalized(&mut self, body: &[Statement], protected: impl FnOnce(&mut Self)) {
+        let failed = self.name("b");
+        let done = self.name("b");
+        let (mut region, normal) = self.protected_exits(&failed, &done, protected);
         self.label(&failed);
         let raised = self.op("take_error", &[]);
         let outer = self.caught.last().cloned().unwrap_or_else(|| "0".into());
@@ -60,67 +124,28 @@ impl<'f, 'p> Frame<'f, '_, 'p> {
             Completion::Error,
             Some((raised, outer.clone())),
         );
-        self.label(&region.entry);
-
-        let (targets, tag) = region.completions(&mut self.body, |_| ());
-        let returned = targets.contains(&Completion::Return(())).then(|| {
-            region.phi(&mut self.body, "i64", |edge| match &edge.completion {
-                Completion::Return(value) => value.clone(),
-                _ => "0".into(),
-            })
-        });
-        let error = region.phi(&mut self.body, "i64", |edge| {
-            edge.exception
-                .as_ref()
-                .map_or_else(|| "0".into(), |(error, _)| error.clone())
-        });
-        let active = if outer == "0" {
-            error.clone()
-        } else {
-            region.phi(&mut self.body, "i64", |edge| {
+        let resumes = self.finish_exits(region, |frame, region| {
+            let error = region.phi(&mut frame.body, "i64", |edge| {
                 edge.exception
                     .as_ref()
-                    .map_or_else(|| outer.clone(), |(error, _)| error.clone())
-            })
-        };
-        let live = self.live.len();
-        if let Some(value) = &returned {
-            self.keep_pending_exit(value, None);
-        }
-        self.keep_pending_exit(&error, Some(outer));
-        self.caught.push(active);
-        self.emit_suite(body);
-        self.caught.pop();
-        self.live.truncate(live);
-        self.regions.truncate(depth);
-
-        let mut needs_join = self.module_annotation_sites.is_some();
-        if !self.body.terminated {
-            needs_join |= normal;
-            for (index, target) in targets.iter().enumerate() {
-                let next = (index + 1 < targets.len()).then(|| {
-                    let selected = self.value(&format!("icmp eq i32 {tag}, {index}"));
-                    let resume = self.name("b");
-                    let next = self.name("b");
-                    self.branch(&selected, &resume, &next);
-                    self.label(&resume);
-                    next
-                });
-                match target {
-                    Completion::Return(()) => {
-                        self.return_from_regions(returned.as_ref().unwrap().clone())
-                    }
-                    Completion::Jump { label, depth } => {
-                        self.jump_from_regions(label.clone(), *depth)
-                    }
-                    Completion::Error => self.raise(&error, None, true),
-                }
-                if let Some(next) = next {
-                    self.label(&next);
-                }
-            }
-        }
-        if needs_join {
+                    .map_or_else(|| "0".into(), |(error, _)| error.clone())
+            });
+            let active = if outer == "0" {
+                error.clone()
+            } else {
+                region.phi(&mut frame.body, "i64", |edge| {
+                    edge.exception
+                        .as_ref()
+                        .map_or_else(|| outer.clone(), |(error, _)| error.clone())
+                })
+            };
+            frame.keep_pending_exit(&error, Some(outer));
+            frame.caught.push(active);
+            frame.emit_suite(body);
+            frame.caught.pop();
+            Some(error)
+        });
+        if self.module_annotation_sites.is_some() || normal && resumes {
             self.label(&done);
         }
     }
