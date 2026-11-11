@@ -40,7 +40,7 @@ mod version;
 mod watch;
 mod write_parts;
 mod zip_entry;
-pub use zip_entry::is_zip_path;
+pub use zip_entry::{is_zip_path, packaged_stdlib_zip};
 
 /// Emits native provider IR for packaging alongside the Linux toolchain.
 pub fn write_bundled_provider_ir(directory: &std::path::Path) -> Result<(), String> {

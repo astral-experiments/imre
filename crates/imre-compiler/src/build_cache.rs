@@ -224,7 +224,7 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
 pub(super) fn stdlib_archive_path() -> Result<PathBuf, String> {
     // SAFETY: geteuid takes no arguments and has no failure mode.
     let uid = unsafe { libc::geteuid() };
-    let digest = blake3::hash(super::STDLIB_ARCHIVE).to_hex();
+    let digest = blake3::hash(super::packaged_stdlib_zip()).to_hex();
     Ok(std::path::absolute(env::temp_dir())
         .map_err(|e| e.to_string())?
         .join(format!("imre-stdlib-{uid}-{digest}"))
@@ -256,12 +256,12 @@ pub(super) fn prepare_stdlib_archive(path: &Path) -> io::Result<()> {
     }
     if path
         .symlink_metadata()
-        .is_ok_and(|m| m.is_file() && m.len() == super::STDLIB_ARCHIVE.len() as u64)
-        && fs::read(path)? == super::STDLIB_ARCHIVE
+        .is_ok_and(|m| m.is_file() && m.len() == super::packaged_stdlib_zip().len() as u64)
+        && fs::read(path)? == super::packaged_stdlib_zip()
     {
         return Ok(());
     }
-    atomic_write(path, super::STDLIB_ARCHIVE)
+    atomic_write(path, super::packaged_stdlib_zip())
 }
 
 /// An action index points to a verified object. Publishing the bytes first

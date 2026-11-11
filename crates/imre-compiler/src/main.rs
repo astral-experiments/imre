@@ -18,7 +18,7 @@ mod wheel;
 
 use build_output::BuildOutput;
 use cli::{BuildOptions, Relro};
-use imre_compiler::CodegenUnit;
+use imre_compiler::{CodegenUnit, packaged_stdlib_zip};
 
 #[derive(Clone, Copy, Default)]
 enum Allocator {
@@ -28,7 +28,6 @@ enum Allocator {
 }
 
 const JEMALLOC_RUNTIME: &str = "libimre_runtime_jemalloc.a";
-const STDLIB_ARCHIVE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/imre-stdlib.zip"));
 const PYTHON_HEADER: &str = include_str!("../../imre-runtime/include/Python.h");
 
 const USAGE: &str = "Usage: imre check SOURCE.py [--module-root DIRECTORY] [--extension-path DIRECTORY] [--include-module MODULE] [--reachable-only] [--entry-profile FILE] [--watch | -w]
@@ -91,7 +90,7 @@ fn run() -> Result<ExitCode, String> {
         }
         std::io::stdout()
             .lock()
-            .write_all(STDLIB_ARCHIVE)
+            .write_all(packaged_stdlib_zip())
             .map_err(|e| e.to_string())?;
         return Ok(ExitCode::SUCCESS);
     }

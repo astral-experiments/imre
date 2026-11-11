@@ -71,10 +71,17 @@ fn read_source<R: Read + Seek>(archive: &mut ZipArchive<R>, member: &str) -> Opt
     std::io::read_to_string(archive.by_name(member).ok()?).ok()
 }
 
+/// Exact installed standard library bytes shared by the native compiler and CLI.
+pub fn packaged_stdlib_zip() -> &'static [u8] {
+    const LENGTH: usize = include_bytes!(concat!(env!("OUT_DIR"), "/imre-stdlib.zip")).len();
+    static BYTES: [u8; LENGTH] = *include_bytes!(concat!(env!("OUT_DIR"), "/imre-stdlib.zip"));
+    &BYTES
+}
+
 /// Read a selected member only after checking earlier application sources.
 pub(crate) fn installed_source(member: &str) -> Result<String, String> {
-    const RESOURCE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/imre-stdlib.zip"));
-    let mut archive = ZipArchive::new(Cursor::new(RESOURCE)).map_err(|e| e.to_string())?;
+    let mut archive =
+        ZipArchive::new(Cursor::new(packaged_stdlib_zip())).map_err(|e| e.to_string())?;
     read_source(&mut archive, member)
         .ok_or_else(|| format!("cannot read installed source {member}"))
 }
