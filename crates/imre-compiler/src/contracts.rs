@@ -590,6 +590,7 @@ impl Builtin {
             | Self::IntBounded { .. }
             | Self::CanElideMapperFrames(_)
             | Self::SysGetRecursionLimit
+            | Self::SysMaxSize
             | Self::SysContextAwareWarnings
             | Self::FaultFrame { .. }
             | Self::FaultLine(_)

@@ -8418,6 +8418,12 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Builtin(Builtin::SysImplementation, vec![]),
                     });
                 }
+                Intrinsic::SysMaxSize => {
+                    return Ok(Expr {
+                        ty: Type::Int,
+                        kind: ExprKind::Builtin(Builtin::SysMaxSize, Vec::new()),
+                    });
+                }
                 Intrinsic::SysVersionInfo => return Ok(self.sys_version_info(false)),
                 Intrinsic::SysThreadInfo => return Ok(self.sys_thread_info()),
                 Intrinsic::SysHexversion => {

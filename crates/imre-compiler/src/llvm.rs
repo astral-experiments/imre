@@ -6513,6 +6513,7 @@ impl Emitter<'_, '_> {
                 self.call(function, returns, &[])
             }
             Builtin::SysPlatform => self.call("imre_sys_platform", returns, &[]),
+            Builtin::SysMaxSize => self.call("imre_sys_maxsize", Type::Int, &[]),
             Builtin::SysIntern => {
                 self.uses_string_interning = true;
                 self.call("imre_sys_intern", Type::Str, &[&args[0].value])
@@ -11419,6 +11420,7 @@ declare i64 @imre_sys_getframemodulename(i64)
 declare i64 @imre_sys_getrecursionlimit()
 declare void @imre_sys_setrecursionlimit(i64)
 declare ptr @imre_sys_platform()
+declare i64 @imre_sys_maxsize()
 declare ptr @imre_frozenset_strings(ptr)
 declare i1 @imre_str_tuple_contains(ptr, ptr)
 declare ptr @imre_sys_builtin_module_names(ptr, i64, i1)
