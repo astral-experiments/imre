@@ -2860,7 +2860,7 @@ pub(crate) struct SourceModule {
     pub(crate) entry_globals: Vec<usize>,
     /// Names that may be bound by each optional import when the object importer executes it.
     pub(crate) optional_imports: HashMap<TextRange, Vec<String>>,
-    /// First assignment of each module value that needs a rebindable cell.
+    /// First physical binding of each mutable module value.
     pub(crate) rebound_values: HashSet<usize>,
     /// Mutable exports read at the source from-import, keyed by statement.
     pub(crate) snapshots: HashMap<usize, ImportSnapshot>,
@@ -2971,6 +2971,18 @@ impl SourceModule {
                 ast::Stmt::If(_) | ast::Stmt::Expr(_)
             )
         })
+    }
+
+    pub(crate) fn function_binding(
+        &self,
+        owner: ModuleId,
+        function: &ast::StmtFunctionDef,
+    ) -> Option<DefinitionId> {
+        let Binding::Value(first) = *self.bindings.get(function.name.as_str())? else {
+            return None;
+        };
+        (first.module == owner && self.parsed.syntax().body[first.statement].is_function_def_stmt())
+            .then_some(first)
     }
 
     fn local_value(&self, id: ModuleId, statement: &ast::Stmt) -> Option<DefinitionId> {
@@ -3886,6 +3898,7 @@ impl SourceGraph {
                     || entry_declarations
                     || !module.entry_globals.is_empty()
                     || !module.overloads.is_empty()
+                    || !module.rebound_values.is_empty()
                     || (!segment.is_empty()
                         && errno_import(&module.parsed.syntax().body[segment.end - 1]).is_some())
             })
@@ -5128,6 +5141,22 @@ impl<'a> Loader<'a> {
                         // consecutive definitions. Intervening statements still go
                         // through the ordinary static rebind rejection.
                         self.modules[id].bindings.insert(name.into(), current);
+                    } else if let Some(Binding::Definition(first) | Binding::Value(first)) =
+                        self.modules[id].bindings.get(name).copied()
+                        && first.module == id
+                        && parsed.syntax().body[first.statement].is_function_def_stmt()
+                        && self.modules[id].is_program_source()
+                        && !decorated
+                        && !self.modules[id].overloads.contains(&first.statement)
+                        && !global_writes.contains(name)
+                        && (self.modules[id].rebound_values.contains(&first.statement)
+                            || self.session.module_function_declarations(id, name))
+                    {
+                        let module = &mut self.modules[id];
+                        module.rebound_values.insert(first.statement);
+                        module
+                            .bindings
+                            .insert(name.to_owned(), Binding::Value(first));
                     } else {
                         self.bind(id, name, current, statement)?;
                     }

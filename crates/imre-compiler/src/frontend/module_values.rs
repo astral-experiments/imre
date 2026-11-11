@@ -25,6 +25,8 @@ pub(super) struct ModuleValues {
     types: RefCell<Vec<Type>>,
     pub(super) regex_literals: RefCell<HashMap<String, regex::CaptureLayout>>,
     regex_globals: RefCell<HashMap<usize, regex::CaptureLayout>>,
+    /// Physical functions published in a module slot, in execution order.
+    slot_functions: RefCell<HashMap<usize, Vec<usize>>>,
 }
 
 impl ModuleValues {
@@ -116,6 +118,32 @@ impl ModuleValues {
             ty: self.types.borrow()[slot],
             kind: ExprKind::Builtin(Builtin::GlobalGet(slot), vec![]),
         }
+    }
+
+    fn publish_function(&self, slot: usize, function: usize) {
+        self.slot_functions
+            .borrow_mut()
+            .entry(slot)
+            .or_default()
+            .push(function);
+    }
+
+    fn stored_functions(&self, value: &Expr) -> Option<std::cell::Ref<'_, Vec<usize>>> {
+        let ExprKind::Builtin(Builtin::GlobalGet(slot), _) = &value.kind else {
+            return None;
+        };
+        std::cell::Ref::filter_map(self.slot_functions.borrow(), |slots| slots.get(slot)).ok()
+    }
+
+    fn saved_function(&self, value: &Expr) -> Option<usize> {
+        self.stored_functions(value)?.last().copied()
+    }
+
+    pub(super) fn invoked_functions(&self, value: &Expr) -> Option<std::cell::Ref<'_, Vec<usize>>> {
+        let ExprKind::Invoke { callable, .. } = &value.kind else {
+            return None;
+        };
+        self.stored_functions(callable)
     }
 
     pub(super) fn reserve(&self, ty: Type) -> usize {
@@ -232,6 +260,7 @@ impl Checker<'_> {
             })?;
         let storage = self.globals.slot_value(slot);
         if member.is_none()
+            && !matches!(ty, Type::Callable(_))
             && self.graph.modules[definition.module]
                 .rebound_values
                 .contains(&definition.statement)
@@ -470,6 +499,9 @@ impl Checker<'_> {
                 .collect::<Result<Vec<_>, _>>()?;
             for (member, value) in values.into_iter().enumerate() {
                 let slot = self.globals.insert_member(definition, member, value.ty);
+                if let Some(target) = self.globals.saved_function(&value) {
+                    self.globals.publish_function(slot, target);
+                }
                 body.push(Statement::Expr(Expr {
                     ty: Type::None,
                     kind: ExprKind::Builtin(Builtin::GlobalSet(slot), vec![value]),
@@ -500,7 +532,14 @@ impl Checker<'_> {
         // A native frozenset predicate captures only its already-initialized immutable set.
         let frozen_predicate = matches!(&value.kind, ExprKind::Callable { receiver: Some(set), .. }
             if set.ty == Type::FrozenStrings);
-        if !exact_parser && !frozen_predicate && callables::contains_callable(value.ty, self.types)
+        let saved = self
+            .globals
+            .saved_function(&value)
+            .filter(|_| rebound.is_none());
+        if !exact_parser
+            && !frozen_predicate
+            && saved.is_none()
+            && callables::contains_callable(value.ty, self.types)
         {
             return Err(error(
                 self.source,
@@ -531,6 +570,9 @@ impl Checker<'_> {
             value
         };
         let slot = self.globals.insert(definition, value.ty);
+        if let Some(target) = saved {
+            self.globals.publish_function(slot, target);
+        }
         if let Some(groups) = self.globals.regex_groups(&value) {
             self.globals.regex_globals.borrow_mut().insert(slot, groups);
         }
@@ -684,6 +726,36 @@ impl Initialization {
                 }
                 ast::Stmt::FunctionDef(function) => {
                     available.insert(definition);
+                    if let Some(first) = module.function_binding(checker.module, function) {
+                        let Some(signature) = checker.functions.get(&definition) else {
+                            continue;
+                        };
+                        let value = checker.callable_value(signature, None, None, statement)?;
+                        let slot = if first == definition {
+                            checker.globals.insert(first, value.ty)
+                        } else {
+                            let (slot, ty) = checker.globals.get(first).ok_or_else(|| {
+                                error(
+                                    checker.source,
+                                    statement,
+                                    "the preceding declaration is unavailable",
+                                )
+                            })?;
+                            if ty != value.ty {
+                                return Err(error(
+                                    checker.source,
+                                    statement,
+                                    "repeated definitions require a common fixed callable signature",
+                                ));
+                            }
+                            slot
+                        };
+                        checker.globals.publish_function(slot, signature.id);
+                        body.push(Statement::Expr(Expr {
+                            ty: Type::None,
+                            kind: ExprKind::Builtin(Builtin::GlobalSet(slot), vec![value]),
+                        }));
+                    }
                     if inspect::marks_function(checker.graph, checker.module, function)
                         && let Some(signature) = checker.functions.get(&definition)
                     {
@@ -876,6 +948,7 @@ impl InitializationOrder {
         binding_reads: &[HashSet<DefinitionId>],
         callables: &[DefinitionId],
         targets: &HashMap<Type, HashSet<usize>>,
+        globals: &ModuleValues,
     ) -> std::result::Result<(), String> {
         let module = &graph.modules[self.module];
         for checkpoint in &self.checkpoints {
@@ -884,12 +957,23 @@ impl InitializationOrder {
             let mut references = Vec::new();
             let mut visited = HashSet::new();
             let mut required_bindings = checkpoint.binding_reads.clone();
+            // A deferred reader sees the most recently executed declaration. An immutable
+            // snapshot has just the one physical target it copied at its own store.
+            let current = |value: &Expr| {
+                globals
+                    .invoked_functions(value)?
+                    .iter()
+                    .rev()
+                    .copied()
+                    .find(|&id| checkpoint.definitions.contains(&callables[id]))
+            };
             collect(
                 &functions[initializer].body[checkpoint.body.clone()],
                 &mut reads,
                 &mut calls,
                 &mut references,
                 targets,
+                &current,
             );
             while let Some(id) = calls.pop() {
                 if !visited.insert(id) {
@@ -910,6 +994,7 @@ impl InitializationOrder {
                     &mut calls,
                     &mut references,
                     targets,
+                    &current,
                 );
             }
             if let Some(read) = required_bindings
@@ -976,6 +1061,7 @@ fn collect(
     calls: &mut Vec<usize>,
     references: &mut Vec<usize>,
     targets: &HashMap<Type, HashSet<usize>>,
+    current: &impl Fn(&Expr) -> Option<usize>,
 ) {
     ir::walk_expressions(body, &mut |value| match &value.kind {
         ExprKind::Builtin(Builtin::GlobalGet(slot), _) => {
@@ -995,7 +1081,9 @@ fn collect(
         } => calls.push(*id),
         ExprKind::Callable { function, .. } => references.push(*function),
         _ if callables::invoked_signature(value).is_some() => {
-            if let Some(targets) =
+            if let Some(id) = current(value) {
+                calls.push(id);
+            } else if let Some(targets) =
                 callables::invoked_signature(value).and_then(|ty| targets.get(&ty))
             {
                 calls.extend(targets);

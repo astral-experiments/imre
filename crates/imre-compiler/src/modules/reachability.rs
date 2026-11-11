@@ -569,7 +569,9 @@ impl Reachable {
                 }
                 match node {
                     ast::Stmt::FunctionDef(f) => {
-                        if definition_effect(graph, module, f) {
+                        if source.function_binding(module, f).is_some()
+                            || definition_effect(graph, module, f)
+                        {
                             found.definitions.insert(id);
                         }
                     }

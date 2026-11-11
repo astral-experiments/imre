@@ -1323,6 +1323,37 @@ impl Session {
             .collect()
     }
 
+    /// Every write reaching this symbol must be a plain top-level function declaration.
+    pub(crate) fn module_function_declarations(&self, module: usize, name: &str) -> bool {
+        let file = self.files[module];
+        let index = ty_python_core::semantic_index(&self.db, self.db.program_file(file));
+        let scope = FileScopeId::global();
+        let Some(symbol) = index.place_table(scope).symbol_id(name) else {
+            return false;
+        };
+        let parsed = self.parsed(file);
+        index
+            .use_def_map(scope)
+            .reachable_symbol_bindings(symbol)
+            .all(|binding| {
+                binding.binding.is_undefined_or(|def| {
+                    let ty_python_core::definition::DefinitionKind::Function(def) =
+                        def.kind(&self.db)
+                    else {
+                        return false;
+                    };
+                    let f = def.node(&parsed);
+                    crate::frontend::fixed_frame_entry(f)
+                        && f.parameters.kwonlyargs.is_empty()
+                        && parsed
+                            .syntax()
+                            .body
+                            .binary_search_by_key(&f.start(), Ranged::start)
+                            .is_ok()
+                })
+            })
+    }
+
     /// Only an assignment through an explicit global can replace the module's binding.
     pub(crate) fn nested_global_writes(
         &self,
