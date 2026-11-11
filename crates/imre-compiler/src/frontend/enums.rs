@@ -386,9 +386,8 @@ impl Checker<'_> {
                 } else {
                     (right, left)
                 };
-                let proxy_class = matches!(other, ast::Expr::Attribute(attr) if attr.attr.as_str() == "__class__");
                 let other = self.expr(other)?;
-                let value = if proxy_class && other.ty == Type::BuiltinClass {
+                let value = if other.ty == Type::BuiltinClass {
                     self.record_class_object(class)
                 } else if let Some(base) = self.types.constructor_base(other.ty) {
                     self.record_constructor_value(class, base, other.ty, literal)?
