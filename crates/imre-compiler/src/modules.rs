@@ -5309,22 +5309,21 @@ impl<'a> Loader<'a> {
                         continue;
                     }
                     self.scan_value_writes(id, statement)?;
-                    if let Some(name) = value_name(statement) {
-                        if (!is_entry || entry_global)
-                            && self.modules[id].rebound_target(id, statement).is_none()
-                        {
-                            self.bind(
-                                id,
-                                name,
-                                Binding::Value(DefinitionId {
-                                    module: id,
-                                    statement: index,
-                                }),
-                                statement,
-                            )?;
-                            if global_writes.contains(name) {
-                                self.modules[id].rebound_values.insert(index);
-                            }
+                    if let Some(name) = value_name(statement)
+                        && (!is_entry || entry_global)
+                        && self.modules[id].rebound_target(id, statement).is_none()
+                    {
+                        self.bind(
+                            id,
+                            name,
+                            Binding::Value(DefinitionId {
+                                module: id,
+                                statement: index,
+                            }),
+                            statement,
+                        )?;
+                        if global_writes.contains(name) {
+                            self.modules[id].rebound_values.insert(index);
                         }
                     }
                     if entry_global {
