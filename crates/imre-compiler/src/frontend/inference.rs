@@ -857,8 +857,7 @@ impl Inference {
             }
             let before = self.revision.get();
             let class_globals = classes.declarations.has_class_values(graph.entry);
-            let helpers =
-                Helpers::new(definitions.len() + graph.initializers(class_globals).count());
+            let helpers = Helpers::new(self.len() + graph.initializers(class_globals).count());
             let globals = ModuleValues::for_initializers(!registered.is_empty());
             let mut available = HashSet::new();
             let mut errors = Vec::new();
