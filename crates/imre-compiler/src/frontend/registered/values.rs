@@ -105,8 +105,26 @@ impl RegisteredSource<'_> {
     }
 
     pub(super) fn located(self, node: &ast::Expr, value: Expr) -> Expr {
+        self.located_operand(node, value, None)
+    }
+
+    /// Keep the source operand's checked layout on its position, independently of the handle.
+    pub(super) fn located_operand(
+        self,
+        node: &ast::Expr,
+        value: Expr,
+        types: Option<crate::analysis::OperandTypes<'_>>,
+    ) -> Expr {
         let position = imre_ast::expression_position(node, self.method_imports, self.private_names);
-        located(node.range(), position, value)
+        let mut value = located(node.range(), position, value);
+        if value.ty == Type::PythonObject
+            && let ExprKind::Builtin(Builtin::RegisteredLocation(_, _, hint), _) = &mut value.kind
+            && hint.is_none()
+            && let Some(types) = types
+        {
+            *hint = types.scalar_type(node);
+        }
+        value
     }
 }
 
@@ -282,8 +300,10 @@ pub(in crate::frontend) fn located(
     ) {
         return value;
     }
+    let hint = (value.ty == Type::PythonObject && matches!(value.kind, ExprKind::Int(_)))
+        .then_some(Type::Int);
     super::operation(
-        Builtin::RegisteredLocation(range, position, None),
+        Builtin::RegisteredLocation(range, position, hint),
         value.ty,
         vec![value],
     )
@@ -824,37 +844,27 @@ pub(super) fn binary(op: Binary, left: Expr, right: Expr) -> Expr {
 }
 
 /// Select one registered-frame operation before requesting its operands in source order.
-pub(super) fn operation<E>(
+pub(super) fn operation<'a, E>(
     node: &ast::Expr,
-    source: RegisteredSource<'_>,
+    source: RegisteredSource<'a>,
     local: Option<Expr>,
     class_namespace: bool,
     literal: impl Fn(&Expr) -> Option<bool>,
     dynamic_receiver: impl FnOnce(&ast::Expr) -> bool,
-    mut child: impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
+    mut operand: impl FnMut(&ast::Expr, Option<crate::analysis::OperandTypes<'a>>) -> StdResult<Expr, E>,
 ) -> StdResult<Option<Expr>, E> {
     if let Some((op, [left, right])) = binary_operands(node) {
-        let mut lhs = child(left)?;
-        let mut rhs = child(right)?;
-        if matches!(op, Binary::Add | Binary::Subtract)
-            && let Some(types) = source.operand_types
-            && let (Some(left), Some(right)) = (left.as_name_expr(), right.as_name_expr())
-        {
-            for (value, name) in [(&mut lhs, left), (&mut rhs, right)] {
-                if value.ty == Type::PythonObject
-                    && let ExprKind::Builtin(Builtin::RegisteredLocation(_, _, hint), _) =
-                        &mut value.kind
-                {
-                    *hint = types.scalar_type(name);
-                }
-                // A word operation needs two integer operands.
-                if value.checked_operand_type() != Type::Int {
-                    break;
-                }
-            }
-        }
+        let types = source
+            .operand_types
+            .filter(|_| matches!(op, Binary::Add | Binary::Subtract));
+        let lhs = operand(left, types)?;
+        let rhs = operand(
+            right,
+            types.filter(|_| lhs.checked_operand_type() == Type::Int),
+        )?;
         return Ok(Some(binary(op, lhs, rhs)));
     }
+    let mut child = |node: &ast::Expr| operand(node, None);
     if let Some((items, display)) = display_elements(node) {
         let values = display_operands(items, source, &mut child)?;
         return Ok(Some(Expr {
@@ -1069,6 +1079,15 @@ impl Region {
         node: &ast::Expr,
         source: RegisteredSource<'_>,
     ) -> Option<Expr> {
+        self.operand_with_types(node, source, None)
+    }
+
+    fn operand_with_types(
+        self,
+        node: &ast::Expr,
+        source: RegisteredSource<'_>,
+        types: Option<crate::analysis::OperandTypes<'_>>,
+    ) -> Option<Expr> {
         if node.is_slice_expr() {
             return index_key(node, &mut |child| self.operand(child, source).ok_or(())).ok();
         }
@@ -1107,11 +1126,11 @@ impl Region {
                 false,
                 ir::control::boolean_literal,
                 |_| true,
-                |child| self.operand(child, source).ok_or(()),
+                |child, types| self.operand_with_types(child, source, types).ok_or(()),
             )
             .ok()??,
         };
-        Some(source.located(node, value))
+        Some(source.located_operand(node, value, types))
     }
 }
 
@@ -1288,7 +1307,7 @@ impl Checker<'_> {
             // Even a skipped operand participates in static argument and result checking.
             |_| None,
             |receiver| graph.session.is_dynamic_receiver(owner, receiver),
-            |child| self.expr(child),
+            |child, _| self.expr(child),
         )?
         else {
             return Ok(None);

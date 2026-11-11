@@ -165,22 +165,25 @@ impl OperandTypes<'_> {
         self.session.parsed(self.session.files[self.module])
     }
 
-    pub(crate) fn scalar_type(self, name: &ruff_python_ast::ExprName) -> Option<crate::ir::Type> {
-        use ruff_python_ast::{AnyRootNodeRef, ExprContext};
+    pub(crate) fn scalar_type(self, operand: &Expr) -> Option<crate::ir::Type> {
+        use ruff_python_ast::{AnyRootNodeRef, ExprContext, HasNodeIndex};
         let session = self.session;
         let index = ty_python_core::semantic_index(
             &session.db,
             session.db.program_file(session.files[self.module]),
         );
-        // Forwarded operands can retain an index while changing the name it reads.
-        index.try_expression_scope_id(&ruff_python_ast::ExprRef::Name(name))?;
+        // Forwarding may preserve a node index while changing the expression it evaluates.
+        index.try_expression_scope_id(operand)?;
         let parsed = self.parsed();
-        let AnyRootNodeRef::Expr(original @ Expr::Name(original_name)) =
-            parsed.get_by_index(name.node_index.load())
+        let AnyRootNodeRef::Expr(original) = parsed.get_by_index(operand.node_index().load())
         else {
             return None;
         };
-        if original_name.ctx != ExprContext::Load || original_name != name {
+        if original != operand
+            || original
+                .as_name_expr()
+                .is_some_and(|name| name.ctx != ExprContext::Load)
+        {
             return None;
         }
         session.scalar_type(self.module, original)

@@ -3216,7 +3216,7 @@ impl SourceScope<'_> {
     }
 
     fn operand(&mut self, expr: &ast::Expr) -> Option<Expr> {
-        self.lower_operand(expr, true)
+        self.lower_operand(expr, true, None)
     }
 
     fn condition_operand(&mut self, test: &ast::Expr) -> Option<Expr> {
@@ -3248,13 +3248,18 @@ impl SourceScope<'_> {
     }
 
     fn ordinary_operand(&mut self, expr: &ast::Expr) -> Option<Expr> {
-        self.lower_operand(expr, false)
+        self.lower_operand(expr, false, None)
     }
 
-    fn lower_operand(&mut self, expr: &ast::Expr, whole: bool) -> Option<Expr> {
+    fn lower_operand(
+        &mut self,
+        expr: &ast::Expr,
+        whole: bool,
+        types: Option<crate::analysis::OperandTypes<'_>>,
+    ) -> Option<Expr> {
         if expr.is_dict_expr() && self.report_child_refusals {
             self.report_child_refusals = false;
-            let value = self.checked_operand(expr, whole);
+            let value = self.checked_operand(expr, whole, types);
             self.report_child_refusals = true;
             if value.is_none() {
                 self.refusal.get_or_insert((
@@ -3265,7 +3270,7 @@ impl SourceScope<'_> {
             return value;
         }
 
-        let value = self.checked_operand(expr, whole);
+        let value = self.checked_operand(expr, whole, types);
         if value.is_none() && self.report_child_refusals {
             let reason = match expr {
                 ast::Expr::FString(_) => FORMATTED_STRING_REFUSAL,
@@ -3277,7 +3282,12 @@ impl SourceScope<'_> {
         value
     }
 
-    fn checked_operand(&mut self, expr: &ast::Expr, whole: bool) -> Option<Expr> {
+    fn checked_operand(
+        &mut self,
+        expr: &ast::Expr,
+        whole: bool,
+        types: Option<crate::analysis::OperandTypes<'_>>,
+    ) -> Option<Expr> {
         // A generator lambda can resume within its return expression. Eager
         // display bodies use their own iteration and operand boundaries.
         let suspension = match self.kind {
@@ -3371,7 +3381,7 @@ impl SourceScope<'_> {
         } else if let ast::Expr::Named(named) = expr {
             let target = named.target.as_name_expr()?;
             let value =
-                self.with_binding_operands(|scope| scope.lower_operand(&named.value, whole))?;
+                self.with_binding_operands(|scope| scope.lower_operand(&named.value, whole, None))?;
             Expr {
                 ty: value.ty,
                 kind: ExprKind::Bind(self.slot(&target.id), Box::new(value)),
@@ -3384,7 +3394,7 @@ impl SourceScope<'_> {
                 matches!(self.kind, RegisteredScope::Class),
                 ir::control::boolean_literal,
                 |_| true,
-                |child| {
+                |child, types| {
                     match expr {
                         ast::Expr::Generator(_) => {
                             self.creating_iterable(|scope| scope.ordinary_operand(child))
@@ -3396,7 +3406,7 @@ impl SourceScope<'_> {
                         {
                             self.operand(child)
                         }
-                        _ => self.ordinary_operand(child),
+                        _ => self.lower_operand(child, false, types),
                     }
                     .ok_or(())
                 },
@@ -3406,7 +3416,7 @@ impl SourceScope<'_> {
         if let Some(scope) = &self.comprehension {
             values::in_namespace(&mut value, Expr::local(scope.slot, Type::PythonObject));
         }
-        Some(self.source.located(expr, value))
+        Some(self.source.located_operand(expr, value, types))
     }
 
     fn suspend_operand(
@@ -4831,20 +4841,37 @@ mod tests {
     fn a_late_import_keeps_the_selected_sources_operand_types() {
         let dir = tempfile::tempdir().unwrap();
         let entry = dir.path().join("app.py");
-        std::fs::write(&entry, "import sys\nsys.path = list(sys.path)\nimport prices\nprint(prices.add(13, 27), prices.join('a', 'b'), prices.sub(27, 13))\n").unwrap();
+        std::fs::write(
+            &entry,
+            concat!(
+                "import sys\nsys.path = list(sys.path)\nimport prices\n",
+                "print(prices.add(13, 27), prices.join('a', 'b'), prices.sub(27, 13))\n",
+                "print(prices.bump([4]))\n",
+            ),
+        )
+        .unwrap();
         std::fs::write(
             dir.path().join("prices.py"),
-            "def add(n: int, other: int):\n    return n + other\ndef join(n: str, other: str):\n    return n + other\ndef sub(n: int, other: int):\n    return n - other\n",
+            concat!(
+                "def add(n: int, other: int):\n    return n + other\n",
+                "def join(n: str, other: str):\n    return n + other\n",
+                "def sub(n: int, other: int):\n    return n - other\n",
+                "def bump(values: list[int]):\n    return values[0] + 1\n",
+            ),
         )
         .unwrap();
         let ir = crate::compile_file(&entry, None, &Default::default())
             .unwrap()
             .llvm_ir;
-        for (line, native) in [(2, "@int_add("), (6, "@int_sub(")] {
+        for (line, native, projections) in [
+            (2, "@int_add(", 2),
+            (6, "@int_sub(", 2),
+            (8, "@int_add(", 1),
+        ] {
             let body = registered_body_at(&ir, "prices.py", line);
             assert_eq!(
                 body.matches("call i64 @imre_dyn_exact_int_word(").count(),
-                2
+                projections
             );
             assert!(body.contains(native) && body.contains("call i64 @imre_dyn_op_at("));
         }
