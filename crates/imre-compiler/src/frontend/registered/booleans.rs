@@ -318,15 +318,14 @@ impl PhysicalPreparation<'_, '_> {
                     .map(|(child, ordinary)| self.input(child, ordinary))
                     .collect(),
             )
-        } else if let Some(object) = source.object_operation(node) {
+        } else {
+            let object = source.object_operation(node)?;
             let operands = std::iter::once(object.target).chain(object.arguments());
             return Some(Selection::Inputs(self.slotted_operation(
                 node,
                 object.opcode,
                 operands,
             )));
-        } else {
-            return None;
         };
         Some(Selection::Inputs(self.inputs(
             node,
