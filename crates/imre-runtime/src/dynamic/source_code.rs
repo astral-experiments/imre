@@ -204,18 +204,16 @@ enum DefinitionKind {
     },
     Class {
         arguments: Option<Box<ast::Arguments>>,
+        type_params: Option<Box<ast::TypeParams>>,
     },
-    ClassParameters(Box<ast::TypeParams>),
 }
 
 impl DefinitionKind {
     fn type_params(&self) -> Option<&ast::TypeParams> {
         match self {
-            Self::Function { type_params, .. } | Self::TypeAlias(type_params) => {
-                type_params.as_deref()
-            }
-            Self::ClassParameters(params) => Some(params),
-            Self::Class { .. } => None,
+            Self::Function { type_params, .. }
+            | Self::Class { type_params, .. }
+            | Self::TypeAlias(type_params) => type_params.as_deref(),
         }
     }
 }
@@ -1195,7 +1193,29 @@ impl Program {
                 SourceItem::Define(definition) => {
                     let child = &mut definition.body;
                     strings.heap.code_name(&definition.binding);
-                    let roots = child.prepare_strings(strings.heap, strings.shared, spellings)?;
+                    let mut roots =
+                        child.prepare_strings(strings.heap, strings.shared, spellings)?;
+                    if let DefinitionKind::Class {
+                        arguments,
+                        type_params: Some(_),
+                    } = &definition.kind
+                    {
+                        // A generic class's bases and keywords belong to its type-parameter scope.
+                        let directives = HashMap::new();
+                        let mut header = CompiledStrings::new(
+                            strings.heap,
+                            strings.shared,
+                            spellings,
+                            &directives,
+                        );
+                        if roots != NONE {
+                            header.keep(roots)?;
+                        }
+                        if let Some(args) = arguments {
+                            header.visit_arguments(args);
+                        }
+                        roots = header.finish_nested_scope(self.has_named_bindings)?;
+                    }
                     if roots != NONE {
                         strings.keep(roots)?;
                     }
@@ -1208,7 +1228,7 @@ impl Program {
                         }
                         DefinitionKind::Class {
                             arguments: Some(args),
-                            ..
+                            type_params: None,
                         } => strings.visit_arguments(args),
                         _ => {}
                     }
@@ -1850,31 +1870,18 @@ impl Program {
                     child.class_scope = true;
                     child.lower_namespace(s.body, false)?;
                     self.locals.insert(s.name.to_string());
-                    let mut definition = Definition {
+                    if let Some(params) = &s.type_params {
+                        child.validate_type_params(params, "class")?;
+                    }
+                    SourceItem::Define(Definition {
                         binding: s.name.to_string(),
                         decorators: s.decorator_list.into_iter().collect(),
                         body: Box::new(child),
                         kind: DefinitionKind::Class {
                             arguments: s.arguments,
+                            type_params: s.type_params,
                         },
-                    };
-                    if let Some(params) = s.type_params {
-                        definition.body.validate_type_params(&params, "class")?;
-                        // Bases and keywords run in the implicit type-parameter function.
-                        // Decorators are evaluated and applied in the enclosing scope.
-                        let mut header = self.definition_body(&s.name);
-                        header.name = format!("<generic parameters of {}>", definition.body.name);
-                        header.private_names = definition.body.private_names.clone();
-                        let decorators = std::mem::take(&mut definition.decorators);
-                        header.items.push(SourceItem::Define(definition));
-                        definition = Definition {
-                            binding: s.name.to_string(),
-                            decorators,
-                            body: Box::new(header),
-                            kind: DefinitionKind::ClassParameters(params),
-                        };
-                    }
-                    SourceItem::Define(definition)
+                    })
                 }
                 Stmt::Break(_) | Stmt::Continue(_) => {
                     if let Some(exits) = active.as_deref_mut() {
