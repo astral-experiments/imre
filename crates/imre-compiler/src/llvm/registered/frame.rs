@@ -1567,12 +1567,6 @@ pub(crate) trait FrameEmitter<'a, 'p>:
         condition
     }
 
-    fn contains_literal(&mut self, value: &str, items: &[String], negate: bool) -> String {
-        let (array, count) = self.handle_array(items);
-        let negate = u32::from(negate);
-        self.checked(&format!("call i64 @imre_dyn_contains_literal_tuple(ptr %ctx, i64 {value}, ptr {array}, i64 {count}, i32 {negate})"))
-    }
-
     /// Acquire the cursor at the iterable's source position. A suspended activation
     /// releases its operands once the cursor owns everything needed for the first pull.
     fn acquire_iterator(

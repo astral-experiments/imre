@@ -729,7 +729,6 @@ impl Builtin {
             | Self::RegisteredStatement(..)
             | Self::RegisteredDiscard
             | Self::RegisteredName(_)
-            | Self::RegisteredContainsLiteral(_)
             | Self::RegisteredInPlace(_)
             | Self::RegisteredAttribute { .. }
             | Self::RegisteredSpread

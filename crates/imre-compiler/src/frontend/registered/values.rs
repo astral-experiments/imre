@@ -788,21 +788,6 @@ fn display_operands<E>(
         .collect()
 }
 
-/// Test membership without allocating the small constant tuple at runtime.
-fn literal_membership(cmp: &ast::ExprCompare) -> Option<(&ast::Expr, &[ast::Expr], bool)> {
-    let [op @ (ast::CmpOp::In | ast::CmpOp::NotIn)] = cmp.ops.as_ref() else {
-        return None;
-    };
-    let [needle, ast::Expr::Tuple(items)] = cmp.operands.as_ref() else {
-        return None;
-    };
-    (items.elts.len() <= 8 && items.elts.iter().all(imre_ast::literal_tuple_element)).then_some((
-        needle,
-        &items.elts,
-        *op == ast::CmpOp::NotIn,
-    ))
-}
-
 /// The Python operand order is also used when a child still needs its source emitter.
 pub(super) fn binary_operands(node: &ast::Expr) -> Option<(Binary, [&ast::Expr; 2])> {
     let binary = node.as_bin_op_expr()?;
@@ -897,20 +882,12 @@ pub(super) fn operation<'a, E>(
             return generator_binding(generator, child).map(Some);
         }
         ast::Expr::Compare(cmp) => {
-            if let Some((needle, items, negate)) = literal_membership(cmp) {
-                let values = std::iter::once(needle)
-                    .chain(items)
-                    .map(&mut child)
-                    .collect::<StdResult<Vec<_>, _>>()?;
-                ExprKind::Builtin(Builtin::RegisteredContainsLiteral(negate), values)
-            } else {
-                let values = cmp
-                    .operands
-                    .iter()
-                    .map(&mut child)
-                    .collect::<StdResult<Vec<_>, _>>()?;
-                ExprKind::Compare(values, cmp.ops.to_vec())
-            }
+            let values = cmp
+                .operands
+                .iter()
+                .map(&mut child)
+                .collect::<StdResult<Vec<_>, _>>()?;
+            ExprKind::Compare(values, cmp.ops.to_vec())
         }
         ast::Expr::If(branch) => {
             return Ok(Some(select(

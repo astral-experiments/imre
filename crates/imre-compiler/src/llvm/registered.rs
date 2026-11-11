@@ -53,14 +53,7 @@ pub(crate) fn frame_inputs(
             && matches!(value.kind, ExprKind::Local(slot)
                 if checked.function.params.contains(&slot) && checked.function.locals[slot].builtin_scalar_name().is_some())
     };
-    let protocol_parameter = |mut value: &Expr| {
-        while let ExprKind::Builtin(Builtin::RegisteredLocation(..), children) = &value.kind
-            && let [child] = children.as_slice()
-        {
-            value = child;
-        }
-        usize::from(scalar_parameter(value))
-    };
+    let protocol_parameter = |value: &Expr| usize::from(scalar_parameter(value.without_location()));
     let mut scalar_reads = 0usize;
     let mut protocol_reads = 0usize;
     let mut generators = Vec::new();
@@ -195,7 +188,6 @@ pub(crate) fn frame_inputs(
             ExprKind::Compare(values, ops) if ir::Compare::uses_python_protocol(expr.ty, ops) => {
                 !ops.is_empty() && values.len() == ops.len() + 1
             }
-            ExprKind::Builtin(Builtin::RegisteredContainsLiteral(_), values) => !values.is_empty(),
             ExprKind::Invoke { .. } => {
                 uses_python_protocol = true;
                 expr.is_registered_invoke()
@@ -603,10 +595,7 @@ impl Frame<'_, '_, '_> {
     }
 
     fn evaluate_test(&mut self, expr: &Expr, already_rooted: bool) -> String {
-        let mut inner = expr;
-        while let ExprKind::Builtin(Builtin::RegisteredLocation(..), operands) = &inner.kind {
-            inner = &operands[0];
-        }
+        let inner = expr.without_location();
         if matches!(
             inner.kind,
             ExprKind::Conditional(..)
@@ -735,6 +724,32 @@ impl Frame<'_, '_, '_> {
         } else {
             self.truth(value)
         }
+    }
+
+    /// A short tuple of constants can be searched without materializing the tuple.
+    pub(crate) fn literal_tuple_membership(
+        &mut self,
+        needle: &str,
+        container: &Expr,
+        negate: bool,
+    ) -> Option<String> {
+        let ExprKind::Tuple(items) = &container.without_location().kind else {
+            return None;
+        };
+        if items.len() > 8
+            || !items
+                .iter()
+                .all(|item| ir::Constant::from_expr(item).is_some())
+        {
+            return None;
+        }
+        let items = items
+            .iter()
+            .map(|item| self.evaluate_handle(item))
+            .collect::<Vec<_>>();
+        let (array, count) = self.handle_array(&items);
+        let negate = u32::from(negate);
+        Some(self.checked(&format!("call i64 @imre_dyn_contains_literal_tuple(ptr %ctx, i64 {needle}, ptr {array}, i64 {count}, i32 {negate})")))
     }
 
     pub(crate) fn rich_comparison(
@@ -1054,14 +1069,6 @@ impl Frame<'_, '_, '_> {
                         self.comprehension_scope(parent, names)
                     }
                 }
-            }
-            (Builtin::RegisteredContainsLiteral(negate), [needle, items @ ..]) => {
-                let needle = self.evaluate_handle(needle);
-                let items = items
-                    .iter()
-                    .map(|item| self.evaluate_handle(item))
-                    .collect::<Vec<_>>();
-                self.contains_literal(&needle, &items, *negate)
             }
             (Builtin::FormatConversion(_) | Builtin::FormatField(_) | Builtin::FormatJoin, _) => {
                 let mark = self.temporary_mark();

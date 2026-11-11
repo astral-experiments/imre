@@ -796,6 +796,16 @@ impl Expr {
         matches!(&self.kind, ExprKind::List(items) if !items.is_empty())
     }
 
+    /// Read the operation beneath its diagnostic source positions.
+    pub(crate) fn without_location(&self) -> &Self {
+        let mut value = self;
+        while let ExprKind::Builtin(Builtin::RegisteredLocation(..), args) = &value.kind {
+            let [inner] = args.as_slice() else { break };
+            value = inner;
+        }
+        value
+    }
+
     /// Return a literal integer that fits the native tagged representation.
     pub(crate) fn tagged_integer_literal(&self) -> Option<i64> {
         let value = match &self.kind {
@@ -2238,8 +2248,6 @@ pub(crate) enum Builtin {
     RegisteredCall(RegisteredCall),
     /// Resolve the code name in the live registered Python scope.
     RegisteredName(String),
-    /// The needle and a short constant tuple's elements, with optional negation.
-    RegisteredContainsLiteral(bool),
     /// Apply Python's in-place protocol to the previously loaded target and the RHS.
     RegisteredInPlace(&'static str),
     /// Store evaluates the RHS before the receiver; in-place retains the receiver across the RHS.

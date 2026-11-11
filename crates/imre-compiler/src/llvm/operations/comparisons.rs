@@ -41,6 +41,14 @@ impl<'f, 'a, 'p, 'm> CheckedBody<'f, 'a, 'p, 'm> {
         };
         let mut chain = ComparisonChain::new(self, ops, truth);
         for expr in values {
+            if let [op @ (CmpOp::In | CmpOp::NotIn)] = ops
+                && let Some(CheckedValue::Handle { id, .. }) = &chain.left
+                && let Some(result) =
+                    self.python()
+                        .literal_tuple_membership(id, expr, *op == CmpOp::NotIn)
+            {
+                return self.comparison_result(result, None, truth);
+            }
             let value = if immediate {
                 CheckedValue::native(self.fixed().immediate_receiver(expr))
             } else {
@@ -51,6 +59,21 @@ impl<'f, 'a, 'p, 'm> CheckedBody<'f, 'a, 'p, 'm> {
             }
         }
         unreachable!("checked comparisons end with a result")
+    }
+
+    fn comparison_result(
+        &mut self,
+        value: String,
+        predicate: Option<String>,
+        truth: bool,
+    ) -> CheckedValue {
+        if truth {
+            CheckedValue::condition(
+                predicate.unwrap_or_else(|| self.python().comparison_truth(&value, None)),
+            )
+        } else {
+            CheckedValue::handle(value)
+        }
     }
 
     fn compare_pair(
@@ -148,13 +171,7 @@ impl<'a> ComparisonChain<'a> {
             } else {
                 code.release_comparison(&right);
             }
-            let value = if truth {
-                CheckedValue::condition(
-                    predicate.unwrap_or_else(|| code.python().comparison_truth(&value, None)),
-                )
-            } else {
-                CheckedValue::handle(value)
-            };
+            let value = code.comparison_result(value, predicate, truth);
             let result = if self.branched {
                 join.jump(code.body(), done, value);
                 code.body().start(done);
