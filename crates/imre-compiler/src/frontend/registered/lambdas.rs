@@ -188,6 +188,7 @@ async def factory(seed, rows, mark):
         let mut scopes =
             crate::frontend::function_scope::ScopeFacts::prepare(&body, &names, |_, _| {});
         let source = values::RegisteredSource {
+            operand_types: None,
             text,
             method_imports: &Default::default(),
             replacements: &Default::default(),
@@ -403,6 +404,7 @@ async def factory(seed, rows, mark):
             unreachable!()
         };
         let source = values::RegisteredSource {
+            operand_types: None,
             text,
             method_imports: &Default::default(),
             replacements: &Default::default(),
@@ -477,6 +479,7 @@ async def factory(seed, rows, mark):
             .body;
         let lambda = expression.as_lambda_expr().unwrap();
         let source = values::RegisteredSource {
+            operand_types: None,
             text,
             method_imports: &Default::default(),
             replacements: &Default::default(),

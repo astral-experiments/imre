@@ -108,6 +108,94 @@ impl ClosedSource for (PathBuf, bool) {
     }
 }
 
+/// The selected source checker and its physical registration-to-file mapping.
+pub(crate) struct RegisteredLayouts {
+    session: Session,
+    modules: HashMap<usize, usize>,
+}
+
+impl std::fmt::Debug for RegisteredLayouts {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RegisteredLayouts")
+            .field("modules", &self.modules)
+            .finish_non_exhaustive()
+    }
+}
+
+impl RegisteredLayouts {
+    fn from_winners<'a>(
+        session: impl FnOnce() -> Session,
+        winners: impl Iterator<Item = (usize, crate::dynamic::RegisteredSource<'a>)>,
+    ) -> Option<Self> {
+        let modules: HashMap<_, _> = winners
+            .filter(|(_, winner)| winner.declares_signatures)
+            .filter_map(|(module, winner)| Some((winner.unit?, module)))
+            .collect();
+        (!modules.is_empty()).then(|| Self {
+            session: session(),
+            modules,
+        })
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.modules.is_empty()
+    }
+
+    pub(crate) fn take(&mut self, unit: usize) -> Option<OperandTypes<'_>> {
+        Some(OperandTypes {
+            session: &self.session,
+            module: self.modules.remove(&unit)?,
+        })
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct OperandTypes<'a> {
+    session: &'a Session,
+    module: usize,
+}
+
+impl OperandTypes<'_> {
+    pub(crate) fn matches_source(self, text: &str) -> bool {
+        self.session.matches_parser_input(self.module, text)
+    }
+
+    pub(crate) fn parsed(self) -> ParsedModuleRef {
+        self.session.parsed(self.session.files[self.module])
+    }
+
+    pub(crate) fn integer_add(self, left: &Expr, right: &Expr) -> bool {
+        use ruff_python_ast::{AnyRootNodeRef, ExprContext};
+        let (Expr::Name(left), Expr::Name(right)) = (left, right) else {
+            return false;
+        };
+        let parsed = self.parsed();
+        let session = self.session;
+        let index = ty_python_core::semantic_index(
+            &session.db,
+            session.db.program_file(session.files[self.module]),
+        );
+        [left, right].into_iter().all(|name| {
+            // Forwarded operands can retain an index while changing the name it reads.
+            if index
+                .try_expression_scope_id(&ruff_python_ast::ExprRef::Name(name))
+                .is_none()
+            {
+                return false;
+            }
+            let AnyRootNodeRef::Expr(original @ Expr::Name(original_name)) =
+                parsed.get_by_index(name.node_index.load())
+            else {
+                return false;
+            };
+            original_name.ctx == ExprContext::Load
+                && original_name == name
+                && session.scalar_type(self.module, original) == Some(crate::ir::Type::Int)
+        })
+    }
+}
+
 /// Check the winning runtime registrations together so that imports see the same definitions.
 pub(crate) fn check_registered_project<'a>(
     root: &Path,
@@ -119,10 +207,10 @@ pub(crate) fn check_registered_project<'a>(
     has_file_body: Option<&dyn Fn(&str) -> bool>,
     checked: Option<&crate::modules::SourceGraph>,
     refusal: Option<&crate::frontend::phase::Diagnostic>,
-) -> Result<(), String> {
+) -> Result<Option<RegisteredLayouts>, String> {
     let sources = sources.into_iter();
     if sources.len() == 0 {
-        return Ok(());
+        return Ok(None);
     }
     let entry_operand = checked.zip(refusal).and_then(|(graph, report)| {
         let site = report.entry_operand()?;
@@ -187,12 +275,20 @@ pub(crate) fn check_registered_project<'a>(
                     || matched.contains(&id)
             })
         {
-            return graph.session.check_registered_execution(
+            let winners = sources.map(|winner| (winner.checked_module.unwrap(), winner));
+            graph.session.check_registered_execution(
                 result.clone(),
-                sources.map(|s| (s.checked_module.unwrap(), s)),
+                winners.clone(),
                 has_file_body,
                 entry_operand,
-            );
+            )?;
+            return Ok(RegisteredLayouts::from_winners(
+                || graph.session.clone(),
+                winners.filter(|(id, winner)| {
+                    let physical = &graph.modules[*id];
+                    physical.path == winner.path && physical.original_source() == winner.source
+                }),
+            ));
         }
     }
 
@@ -234,12 +330,9 @@ pub(crate) fn check_registered_project<'a>(
         paths.push((path, is_program));
     }
     let contracts = session.check_closed_program(&paths, None, &[], None);
-    session.check_registered_execution(
-        contracts,
-        (first_winner..).zip(sources),
-        has_file_body,
-        entry_operand,
-    )
+    let winners = (first_winner..).zip(sources);
+    session.check_registered_execution(contracts, winners.clone(), has_file_body, entry_operand)?;
+    Ok(RegisteredLayouts::from_winners(|| session, winners))
 }
 
 impl Session {
@@ -1786,7 +1879,7 @@ impl Session {
         ty != KnownClass::NoneType.to_instance(&self.db, &ProgramEnvironment::from_file(program))
     }
 
-    /// Get a scalar layout hint for an append operand in its own lexical scope.
+    /// Get a scalar layout hint for an operand in its own lexical scope.
     pub(crate) fn scalar_type(&self, module: usize, value: &Expr) -> Option<crate::ir::Type> {
         use crate::ir::Type;
         use ty_python_semantic::types::{KnownClass, ProgramEnvironment, Type as Ty};

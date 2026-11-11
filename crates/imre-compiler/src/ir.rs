@@ -1023,6 +1023,8 @@ pub(crate) enum ExprKind {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Binary {
     Add,
+    /// Checked integer operands carried as Python objects; guard their actual representations.
+    GuardedIntAdd,
     Subtract,
     Multiply,
     Divide,
@@ -1063,7 +1065,7 @@ impl From<ruff_python_ast::Operator> for Binary {
 impl Binary {
     pub(crate) fn protocol(self) -> &'static str {
         match self {
-            Self::Add | Self::Concat => "+",
+            Self::Add | Self::GuardedIntAdd | Self::Concat => "+",
             Self::Subtract => "-",
             Self::Multiply | Self::Repeat => "*",
             Self::Divide => "/",
