@@ -1110,7 +1110,6 @@ pub(crate) type PhysicalOperand =
 
 pub(crate) type OperandRefusal = (TextRange, &'static str);
 
-
 /// Physical source locations and semantic operations shared by complete and residual suites.
 #[derive(Default)]
 pub(crate) struct StatementSites {

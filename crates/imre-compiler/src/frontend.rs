@@ -128,7 +128,8 @@ mod required_sites;
 #[cfg(test)]
 pub(crate) use registered::booleans::ExpressionInput;
 pub(crate) use registered::booleans::{
-    BorrowedOperand, ExpressionSites, PhysicalInputs, Selection as ExpressionSelection, SourceOperand,
+    BorrowedOperand, ExpressionSites, PhysicalInputs, Selection as ExpressionSelection,
+    SourceOperand,
 };
 pub(crate) use registered::type_alias_body;
 #[cfg(test)]
@@ -141,8 +142,8 @@ pub(crate) use registered::{
     AnnotationProvider, CheckedProvider, DeclarationSite, DeferredAnnotation, ModuleAnnotations,
     ParameterAnnotations, ParameterEvaluator, PhysicalOperand, RegisteredBindings,
     RegisteredFunction, RegisteredGenerator, RegisteredLambda, RegisteredScope, RegisteredSuite,
-    SuitePreparation, TypeParameterValues, annotation_expression,
-    place_fixed_function, registered_sites, registered_type_alias,
+    SuitePreparation, TypeParameterValues, annotation_expression, place_fixed_function,
+    registered_sites, registered_type_alias,
 };
 pub(crate) use registered::{LocalBinding, RegisteredClass, RegisteredOperand, RegisteredRegion};
 #[cfg(test)]
