@@ -122,14 +122,10 @@ impl From<String> for PatternMessage {
 }
 type Names<'a> = IndexMap<&'a str, &'a str>;
 
-/// Check names in store order, optionally recording how each successful OR arm
-/// moves its tentative captures into the first arm's slots. Private names are
-/// compared as written, even when two spellings have the same storage name.
-#[derive(Default)]
-struct CapturePlan<'a, 'out> {
+/// Check captures in store order, comparing private names as written even
+/// when two spellings have the same storage name.
+struct CapturePlan<'a> {
     spellings: Option<&'a crate::Names>,
-    slots: Option<&'out mut HashMap<TextRange, Vec<usize>>>,
-    // Slot allocation runs after the original executable syntax has been checked.
     source: Option<&'a str>,
 }
 
@@ -138,9 +134,9 @@ pub fn case_bindings<'a>(
     source: &'a str,
     has_next: bool,
 ) -> Result<impl Iterator<Item = &'a str>, BindingError> {
-    let mut plan = CapturePlan {
+    let plan = CapturePlan {
+        spellings: None,
         source: Some(source),
-        ..Default::default()
     };
     Ok(plan.case(case, has_next)?.into_keys())
 }
@@ -149,11 +145,9 @@ pub fn source_case_bindings<'a>(
     case: &'a ast::MatchCase,
     has_next: bool,
     spellings: Option<&'a crate::Names>,
-    slots: &mut HashMap<TextRange, Vec<usize>>,
 ) -> Result<Vec<String>, BindingError> {
-    let mut plan = CapturePlan {
+    let plan = CapturePlan {
         spellings,
-        slots: Some(slots),
         source: None,
     };
     Ok(plan
@@ -163,19 +157,15 @@ pub fn source_case_bindings<'a>(
         .collect())
 }
 
-impl<'a> CapturePlan<'a, '_> {
-    fn case(
-        &mut self,
-        case: &'a ast::MatchCase,
-        has_next: bool,
-    ) -> Result<Names<'a>, BindingError> {
+impl<'a> CapturePlan<'a> {
+    fn case(&self, case: &'a ast::MatchCase, has_next: bool) -> Result<Names<'a>, BindingError> {
         let mut names = IndexMap::new();
         self.collect(&case.pattern, case.guard.is_some() || !has_next, &mut names)?;
         Ok(names)
     }
 
     fn collect(
-        &mut self,
+        &self,
         pattern: &'a ast::Pattern,
         allow_irrefutable: bool,
         names: &mut Names<'a>,
@@ -214,31 +204,20 @@ impl<'a> CapturePlan<'a, '_> {
                         allow_irrefutable && i + 1 == or.patterns.len(),
                         &mut next,
                     )?;
-                    let expected = first.as_ref().unwrap_or(&next);
-                    let different = || {
-                        (
-                            or.range(),
-                            "alternative patterns bind different names"
-                                .to_owned()
-                                .into(),
-                        )
-                    };
-                    if next.len() != expected.len() {
-                        return Err(different());
-                    }
-                    let mut order = Vec::new();
-                    for name in expected.keys() {
-                        let slot = next.get_index_of(name).ok_or_else(different)?;
-                        if self.slots.is_some() {
-                            order.push(slot);
+                    if let Some(expected) = &first {
+                        if next.len() != expected.len()
+                            || !expected.keys().all(|name| next.contains_key(name))
+                        {
+                            return Err((
+                                or.range(),
+                                "alternative patterns bind different names"
+                                    .to_owned()
+                                    .into(),
+                            ));
                         }
+                    } else {
+                        first = Some(next);
                     }
-                    if let Some(slots) = self.slots.as_deref_mut()
-                        && !order.is_empty()
-                    {
-                        slots.insert(arm.range(), order);
-                    }
-                    first.get_or_insert(next);
                 }
                 for (name, storage) in first.into_iter().flatten() {
                     store(names, name, storage)?;
@@ -736,16 +715,9 @@ mod tests {
         let ast::Stmt::Match(stmt) = &parsed.syntax().body[0] else {
             unreachable!()
         };
-        let case = &stmt.cases[0];
-        let ast::Pattern::MatchOr(or) = &case.pattern else {
-            unreachable!()
-        };
-        let mut slots = HashMap::new();
         assert_eq!(
-            source_case_bindings(case, false, None, &mut slots).unwrap(),
+            source_case_bindings(&stmt.cases[0], false, None).unwrap(),
             ["a", "b"]
         );
-        assert_eq!(slots[&or.patterns[0].range()], [0, 1]);
-        assert_eq!(slots[&or.patterns[1].range()], [1, 0]);
     }
 }

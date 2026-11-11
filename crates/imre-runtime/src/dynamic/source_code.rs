@@ -2059,18 +2059,13 @@ impl Program {
         if !operands.supported {
             return Err(unsupported("match pattern"));
         }
-        imre_ast::executable::source_case_bindings(
-            case,
-            has_next,
-            self.private_names.as_deref(),
-            &mut HashMap::new(),
-        )
-        .map_err(|(range, message)| {
-            match message.render(crate::integer_text::check_decimal) {
-                Ok(reason) => Error::source_syntax(reason.into_owned(), range),
-                Err(error) => error.into(),
-            }
-        })
+        imre_ast::executable::source_case_bindings(case, has_next, self.private_names.as_deref())
+            .map_err(
+                |(range, message)| match message.render(crate::integer_text::check_decimal) {
+                    Ok(reason) => Error::source_syntax(reason.into_owned(), range),
+                    Err(error) => error.into(),
+                },
+            )
     }
 
     /// Declare every local name in a loop or unpacking target.
