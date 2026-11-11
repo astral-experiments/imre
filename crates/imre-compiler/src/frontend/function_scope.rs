@@ -373,7 +373,6 @@ impl FunctionScope {
 pub(crate) struct ScopeFacts {
     pub(crate) module_annotations: bool,
     pub(crate) functions: HashMap<TextSize, NamedFunction>,
-    pub(crate) lambdas: HashMap<TextSize, FunctionScope>,
     pub(crate) aliases: HashMap<TextSize, FunctionScope>,
     pub(crate) classes: HashMap<TextSize, classes::ClassScope>,
     pub(crate) annotations: annotations::AnnotationScopes,
@@ -393,13 +392,16 @@ impl ScopeFacts {
         body: &'a [ast::Stmt],
         names: &imre_ast::Names,
         alias_site: impl FnMut(&'a ast::StmtTypeAlias, Option<TextSize>),
-        generator_site: impl FnMut(TextRange, &Plan<'a>, FunctionScope),
+        generator_site: impl FnMut(TextRange, &Plan<'a>, bool, FunctionScope),
+        expressions: &mut LexicalSites<'a>,
     ) -> Self {
         let mut scopes = Self::default();
         Collector {
             scopes: &mut scopes,
             names,
             scope: Scope::Module,
+            suite_scope: None,
+            expressions,
             alias_site,
             generator_site,
         }
@@ -408,29 +410,45 @@ impl ScopeFacts {
     }
 }
 
+/// Lambda and template operands in dependency order, with their evaluation scopes.
+pub(crate) type LexicalSites<'a> = Vec<(&'a ast::Expr, super::RegisteredScope)>;
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Scope {
     Module,
     Class(TextSize),
-    Function,
+    Function { is_async: bool },
+    Lambda,
 }
 
-struct Collector<'a, A, G> {
-    scopes: &'a mut ScopeFacts,
-    names: &'a imre_ast::Names,
+impl Scope {
+    fn registered(self) -> super::RegisteredScope {
+        match self {
+            Self::Module => super::RegisteredScope::Module,
+            Self::Class(_) => super::RegisteredScope::Class,
+            Self::Function { is_async } => super::RegisteredScope::Function { is_async },
+            Self::Lambda => super::RegisteredScope::Lambda,
+        }
+    }
+}
+
+struct Collector<'s, 'a, A, G> {
+    scopes: &'s mut ScopeFacts,
+    names: &'s imre_ast::Names,
     scope: Scope,
+    suite_scope: Option<Scope>,
+    expressions: &'s mut LexicalSites<'a>,
     alias_site: A,
     generator_site: G,
 }
 
-impl<'a, A, G> Visitor<'a> for Collector<'_, A, G>
+impl<'a, A, G> Visitor<'a> for Collector<'_, 'a, A, G>
 where
     A: FnMut(&'a ast::StmtTypeAlias, Option<TextSize>),
-    G: FnMut(TextRange, &Plan<'a>, FunctionScope),
+    G: FnMut(TextRange, &Plan<'a>, bool, FunctionScope),
 {
     fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
         let strings = self.names.string_annotations;
-        let parent = self.scope;
         match stmt {
             ast::Stmt::FunctionDef(def) => {
                 let start = def
@@ -447,14 +465,16 @@ where
                 let lexical = FunctionScope::function(def, strings);
                 let header = NamedFunction::prepare(def, self.names, lexical, suspension_flags);
                 self.scopes.functions.insert(start, header);
-                self.scope = Scope::Function;
+                self.suite_scope = Some(Scope::Function {
+                    is_async: def.is_async,
+                });
             }
             ast::Stmt::ClassDef(class) => {
                 let start = class
                     .decorator_list
                     .first()
                     .map_or(class.start(), Ranged::start);
-                let enclosing_class = match parent {
+                let enclosing_class = match self.scope {
                     Scope::Class(site) => Some(site),
                     _ => None,
                 };
@@ -462,7 +482,7 @@ where
                     start,
                     classes::ClassScope::prepare(class, self.names, enclosing_class),
                 );
-                self.scope = Scope::Class(start);
+                self.suite_scope = Some(Scope::Class(start));
             }
             ast::Stmt::TypeAlias(alias) => {
                 let enclosing_class = match self.scope {
@@ -506,34 +526,60 @@ where
             },
             _ => {}
         }
+        let suite_scope = self.suite_scope;
         visitor::walk_stmt(self, stmt);
-        if let (ast::Stmt::ClassDef(class), Scope::Class(start)) = (stmt, self.scope) {
+        if let (ast::Stmt::ClassDef(class), Some(Scope::Class(start))) = (stmt, suite_scope) {
             let scope = self.scopes.classes.get_mut(&start).unwrap();
             scope
                 .annotations
                 .finish(class, &self.scopes.annotations, &scope.bindings);
         }
+    }
+
+    fn visit_body(&mut self, body: &'a [ast::Stmt]) {
+        // Decorators, defaults, and bases are evaluated before entering the declaration's suite.
+        let parent = self.scope;
+        if let Some(scope) = self.suite_scope.take() {
+            self.scope = scope;
+        }
+        visitor::walk_body(self, body);
         self.scope = parent;
     }
 
     fn visit_expr(&mut self, expr: &'a ast::Expr) {
-        let strings = self.names.string_annotations;
-        if let ast::Expr::Lambda(lambda) = expr {
-            self.scopes
-                .lambdas
-                .insert(lambda.start(), FunctionScope::lambda(lambda, strings));
-        }
-        visitor::walk_expr(self, expr);
-        if let ast::Expr::Generator(generator) = expr {
-            let plan = Plan::generator(generator);
-            let mut names = class_metadata::generator_scope(&plan, strings);
-            let captures_class = names.reads.contains("__class__");
-            names.locals.insert(".0".into());
-            (self.generator_site)(
-                expr.range(),
-                &plan,
-                FunctionScope::new(names, None, captures_class),
-            );
-        }
+        stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || match expr {
+            ast::Expr::Lambda(lambda) => {
+                if let Some(parameters) = &lambda.parameters {
+                    self.visit_parameters(parameters);
+                }
+                let parent = std::mem::replace(&mut self.scope, Scope::Lambda);
+                self.visit_expr(&lambda.body);
+                self.scope = parent;
+                self.expressions.push((expr, parent.registered()));
+            }
+            ast::Expr::Generator(generator) => {
+                let plan = Plan::generator(generator);
+                self.visit_expr(plan.outer);
+                let is_async = plan.body_suspends();
+                let parent = std::mem::replace(&mut self.scope, Scope::Function { is_async });
+                plan.visit_body(|child| self.visit_expr(child));
+                self.scope = parent;
+                let mut names =
+                    class_metadata::generator_scope(&plan, self.names.string_annotations);
+                let captures_class = names.reads.contains("__class__");
+                names.locals.insert(".0".into());
+                (self.generator_site)(
+                    expr.range(),
+                    &plan,
+                    is_async,
+                    FunctionScope::new(names, None, captures_class),
+                );
+            }
+            ast::Expr::TString(_) => {
+                visitor::walk_expr(self, expr);
+                self.expressions.push((expr, self.scope.registered()));
+            }
+            _ => visitor::walk_expr(self, expr),
+        });
     }
 }
