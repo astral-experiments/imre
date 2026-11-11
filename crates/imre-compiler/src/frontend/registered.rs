@@ -3459,10 +3459,13 @@ impl SourceScope<'_> {
                 kind: ExprKind::Bind(self.slot(&target.id), Box::new(value)),
             }
         } else {
-            let local = expr
-                .as_name_expr()
-                .and_then(|name| self.comprehension_target(&name.id))
-                .map(|slot| Expr::local(slot, Type::PythonObject));
+            let local = expr.as_name_expr().and_then(|name| {
+                let slot = match (&self.comprehension, self.kind) {
+                    (None, RegisteredScope::Module) => self.names.get(name.id.as_str()).copied(),
+                    _ => self.comprehension_target(&name.id),
+                }?;
+                Some(Expr::local(slot, Type::PythonObject))
+            });
             values::operation(
                 expr,
                 self.source,
@@ -3555,6 +3558,48 @@ mod tests {
         SuitePreparation::new(&operations, source, true)
             .complete(stmts, kind)
             .map(|plan| plan.checked)
+    }
+
+    #[test]
+    fn a_module_call_loads_the_place_that_received_its_definition() {
+        let text = "import token\ndef take(value: int) -> int:\n    return value\n\ndef text():\n    return 'wrong'\nprint(take(text()))\n";
+        let graph = SourceGraph::single(text).unwrap();
+        let module = &graph.modules[graph.entry];
+        let source = values::ModuleSource::new(module);
+        let suite = registered_suite(
+            &module.parsed.syntax().body,
+            RegisteredScope::Module,
+            source.context(text),
+        )
+        .unwrap();
+        let mut stores = Vec::new();
+        let mut calls = Vec::new();
+        ir::walk_expressions(&suite.function.body, &mut |expr| match &expr.kind {
+            ExprKind::Builtin(Builtin::GlobalSet(slot), values)
+                if matches!(
+                    values[0].kind,
+                    ExprKind::Builtin(Builtin::RegisteredDefinition(_), _)
+                ) =>
+            {
+                stores.push(*slot);
+            }
+            ExprKind::Invoke { callable, .. } => {
+                ir::walk_operand_expressions(callable, &mut |target| {
+                    if let ExprKind::Local(slot) = target.kind {
+                        calls.push(slot);
+                    }
+                });
+            }
+            _ => {}
+        });
+        assert_eq!(
+            stores
+                .iter()
+                .map(|slot| suite.local_names[slot].name.as_str())
+                .collect::<Vec<_>>(),
+            ["take", "text"]
+        );
+        assert_eq!(calls, stores);
     }
 
     #[test]
