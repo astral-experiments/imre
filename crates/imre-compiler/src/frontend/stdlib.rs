@@ -2,15 +2,24 @@
 
 use super::*;
 
-/// The fixed positional specialization only knows templates written as string literals.
-pub(super) fn runtime_format_method(call: &ast::ExprCall) -> Option<&ast::ExprAttribute> {
+/// These calls bind the original string method and its operands in the Python frame.
+pub(super) fn registered_string_method(call: &ast::ExprCall) -> Option<&ast::ExprAttribute> {
     let method = call.func.as_attribute_expr()?;
-    (method.attr.as_str() == "format"
-        && !method.value.is_string_literal_expr()
-        && !call.arguments.args.is_empty()
-        && !call.arguments.args.iter().any(ast::Expr::is_starred_expr)
-        && call.arguments.keywords.iter().all(|kw| kw.arg.is_some()))
-    .then_some(method)
+    let args = &call.arguments;
+    let supported = match method.attr.as_str() {
+        "removeprefix" => {
+            matches!(args.args.as_slice(), [prefix] if !prefix.is_starred_expr())
+                && args.keywords.is_empty()
+        }
+        "format" => {
+            !method.value.is_string_literal_expr()
+                && !args.args.is_empty()
+                && !args.args.iter().any(ast::Expr::is_starred_expr)
+                && args.keywords.iter().all(|kw| kw.arg.is_some())
+        }
+        _ => false,
+    };
+    supported.then_some(method)
 }
 
 fn replace_arguments(call: &ast::ExprCall) -> Option<(&ast::Expr, &ast::Expr, Option<&ast::Expr>)> {
@@ -798,10 +807,6 @@ impl Checker<'_> {
         receiver: Expr,
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
-        if let Some(method) = runtime_format_method(call) {
-            // A runtime template determines which positional and keyword values it uses.
-            return self.registered_method_call(call, method, receiver, Type::Str);
-        }
         let mut args = vec![receiver];
         if !call.arguments.args.is_empty() {
             let ast::Expr::Attribute(method) = &*call.func else {

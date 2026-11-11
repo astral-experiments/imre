@@ -12575,6 +12575,16 @@ impl<'a> Checker<'a> {
                     call,
                 );
             }
+            if matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
+                && let Some(method) = stdlib::registered_string_method(call)
+            {
+                return self.registered_method_call(
+                    call,
+                    method,
+                    Self::string_value(receiver),
+                    Type::Str,
+                );
+            }
             if attribute.attr.as_str() == "format"
                 && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
             {
