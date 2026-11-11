@@ -2365,18 +2365,14 @@ impl statements::StatementLowering for SourceScope<'_> {
     }
 
     fn definition(&mut self, def: &ast::StmtFunctionDef) -> StdResult<Option<Statement>, ()> {
-        let prepare_header = |scope: &mut Self| {
-            imre_ast::function_definition_expressions(def)
-                .map(|expr| scope.ordinary_operand(expr))
-                .collect::<Option<Vec<_>>>()
-        };
-        // Ordinary decorators and defaults can suspend in the enclosing frame.
-        let header = if def.type_params.is_none() {
-            self.with_binding_operands(prepare_header)
-        } else {
-            prepare_header(self)
-        }
-        .ok_or(())?;
+        // Decorators and parameter defaults execute in the enclosing frame, including for generics.
+        let header = self
+            .with_binding_operands(|scope| {
+                imre_ast::function_definition_expressions(def)
+                    .map(|expr| scope.ordinary_operand(expr))
+                    .collect::<Option<Vec<_>>>()
+            })
+            .ok_or(())?;
         Ok(Some(self.bind_definition(
             def.name.as_str(),
             ir::DefinitionSite::Function(def.start()),
@@ -3432,7 +3428,7 @@ mod tests {
 
     #[test]
     fn entirely_mixed_suite_keeps_its_prepared_entry() {
-        let text = "def outer():\n    @(yield 'decorator')\n    def bind[T]():\n        pass\n";
+        let text = "def outer():\n    received = yield 'value'\n";
         let graph = SourceGraph::single(text).unwrap();
         let module = &graph.modules[graph.entry];
         let body = &module.parsed.syntax().body[0]
@@ -5489,6 +5485,17 @@ mod tests {
             "        yield from received\n",
         );
         assert_cursor_suspensions(source, &["yield row", "yield from received"]);
+    }
+
+    #[test]
+    fn generic_function_default_suspends_in_the_enclosing_loop() {
+        let source = concat!(
+            "def f(rows):\n",
+            "    for x, y in rows:\n",
+            "        def hold[T](value=(yield 1)):\n",
+            "            return value\n",
+        );
+        assert_cursor_suspensions(source, &["yield 1"]);
     }
 
     #[test]
