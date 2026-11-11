@@ -26,7 +26,7 @@ pub(super) fn is_raw_binary_mode(mode: &str) -> bool {
 }
 
 /// An update mode has one access letter, one '+' and optionally 'b' or 't', in any order.
-pub(super) fn is_update_open(args: &ast::Arguments, mode: &str) -> bool {
+pub(super) fn is_update_mode(mode: &str) -> bool {
     let mode = mode.as_bytes();
     let expected_len = if mode.contains(&b't') || mode.contains(&b'b') {
         3
@@ -36,7 +36,6 @@ pub(super) fn is_update_open(args: &ast::Arguments, mode: &str) -> bool {
     mode.len() == expected_len
         && mode.contains(&b'+')
         && mode.iter().any(|c| matches!(c, b'r' | b'w' | b'x' | b'a'))
-        && has_open_arguments(args)
 }
 
 pub(super) fn has_open_arguments(args: &ast::Arguments) -> bool {
@@ -734,6 +733,10 @@ impl Checker<'_> {
                 ));
             }
         };
+        // A read/write stream needs the buffered update implementation used by io.open.
+        if call.arguments.len() == 1 && is_update_mode(mode) {
+            return Err(self.scoped_builtin_error("buffered update open", call));
+        }
         let (ty, mut builtin) = match mode {
             "rt" | "tr" => file_open_mode("r"),
             "wt" | "tw" => file_open_mode("w"),

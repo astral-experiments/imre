@@ -13753,7 +13753,8 @@ impl<'a> Checker<'a> {
         let mut checked_path = None;
         if !gzip
             && let Some(ast::Expr::StringLiteral(mode)) = args.find_argument_value("mode", 1)
-            && paths::is_update_open(args, mode.value.to_str())
+            && paths::is_update_mode(mode.value.to_str())
+            && paths::has_open_arguments(args)
             && let Some(path) = args.find_argument_value("file", 0)
         {
             let value = self.expr(path)?;
