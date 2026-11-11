@@ -3,22 +3,27 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-const SEALED: &str = "imre_sealed_v1_";
+const SEALED: &str = "imre_sealed_v2_";
 
 /// Only a matching compiler can attest the result of the pack producer's lowering.
-fn sealed_key(name: &str, path: &Path, source: &str) -> Option<blake3::Hash> {
+fn compiler_digest() -> Option<&'static blake3::Hash> {
     use std::sync::OnceLock;
 
     if !cfg!(target_os = "linux") {
         return None;
     }
     static COMPILER: OnceLock<Option<blake3::Hash>> = OnceLock::new();
-    let compiler = COMPILER.get_or_init(|| {
-        // An installed executable can be replaced while its old process is still running.
-        let file = std::fs::File::open("/proc/self/exe").ok()?;
-        Some(blake3::Hasher::new().update_reader(file).ok()?.finalize())
-    });
-    let mut hash = blake3::Hasher::new_keyed(compiler.as_ref()?.as_bytes());
+    COMPILER
+        .get_or_init(|| {
+            // An installed executable can be replaced while its old process is still running.
+            let file = std::fs::File::open("/proc/self/exe").ok()?;
+            Some(blake3::Hasher::new().update_reader(file).ok()?.finalize())
+        })
+        .as_ref()
+}
+
+fn source_key(name: &str, path: &Path, source: &str) -> blake3::Hash {
+    let mut hash = blake3::Hasher::new();
     for field in [
         SEALED.as_bytes(),
         std::env::consts::ARCH.as_bytes(),
@@ -29,17 +34,18 @@ fn sealed_key(name: &str, path: &Path, source: &str) -> Option<blake3::Hash> {
         hash.update(&(field.len() as u64).to_le_bytes());
         hash.update(field);
     }
-    Some(hash.finalize())
+    hash.finalize()
 }
 
 pub(super) fn seal(ir: &mut String, symbol: &str, name: &str, path: &Path, source: &str) {
     use std::fmt::Write;
 
-    if let Some(key) = sealed_key(name, path, source) {
+    if let Some(compiler) = compiler_digest() {
+        let key = source_key(name, path, source);
         // Only the archive index needs the stamp. The native link can discard its section.
         writeln!(
             ir,
-            "@{SEALED}{key} = hidden constant ptr @{symbol}, section \".data.rel.ro.imre.provider\""
+            "@{SEALED}{key}_{compiler} = hidden constant ptr @{symbol}, section \".data.rel.ro.imre.provider\""
         )
         .unwrap();
     }
@@ -48,7 +54,7 @@ pub(super) fn seal(ir: &mut String, symbol: &str, name: &str, path: &Path, sourc
 #[derive(Default)]
 pub(super) struct Providers {
     pub(super) symbols: HashSet<String>,
-    sealed: HashMap<blake3::Hash, Option<String>>,
+    sealed: HashMap<blake3::Hash, Option<(blake3::Hash, String)>>,
 }
 
 impl Providers {
@@ -78,20 +84,27 @@ impl Providers {
                     continue;
                 }
                 agree(&mut members, symbol.offset().0, Some(name));
-            } else if let Some(key) = name
-                .strip_prefix(SEALED)
-                .and_then(|s| blake3::Hash::from_hex(s).ok())
+            } else if let Some((key, compiler)) =
+                name.strip_prefix(SEALED).and_then(|s| s.split_once('_'))
+                && let (Ok(key), Ok(compiler)) = (
+                    blake3::Hash::from_hex(key),
+                    blake3::Hash::from_hex(compiler),
+                )
             {
-                seals.push((key, symbol.offset().0));
+                seals.push((key, compiler, symbol.offset().0));
             }
         }
-        for (key, member) in seals {
+        for (key, compiler, member) in seals {
             let name = members
                 .get(&member)
                 .copied()
                 .flatten()
                 .filter(|name| !duplicate_symbols.contains(name));
-            agree(&mut providers.sealed, key, name.map(str::to_owned));
+            agree(
+                &mut providers.sealed,
+                key,
+                name.map(|name| (compiler, name.to_owned())),
+            );
         }
         Some(providers)
     }
@@ -105,9 +118,8 @@ impl Providers {
         if self.sealed.is_empty() {
             return None;
         }
-        self.sealed
-            .get(&sealed_key(name, path, source)?)?
-            .as_deref()
+        let (producer, symbol) = self.sealed.get(&source_key(name, path, source))?.as_ref()?;
+        (compiler_digest()? == producer).then_some(symbol.as_str())
     }
 }
 
