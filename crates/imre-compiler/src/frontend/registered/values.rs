@@ -1292,7 +1292,7 @@ impl Checker<'_> {
             .filter(|_| self.optional_registered_body)
             .and_then(|call| source.direct_method(call));
         let string_method = method.is_some_and(|method| {
-            matches!(method.attr.as_str(), "join" | "split")
+            matches!(method.attr.as_str(), "join" | "split" | "replace")
                 && graph.session.scalar_type(owner, &method.value) == Some(Type::Str)
         });
         // A Python frame reads this module binding before selecting the method.
