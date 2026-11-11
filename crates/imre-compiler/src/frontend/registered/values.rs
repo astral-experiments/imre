@@ -1086,11 +1086,12 @@ impl Region {
                 })
                 .ok()?
             }
-            ast::Expr::Lambda(lambda)
-                if !matches!(self, Self::Residual | Self::SuspendedOperand) =>
-            {
-                checked_binding(lambda, source)?
-            }
+            ast::Expr::Lambda(lambda) => match self {
+                Self::Residual => return None,
+                // A suspended operand can reuse a binding prepared in its enclosing scope.
+                Self::SuspendedOperand if source.lambdas.is_none() => return None,
+                _ => checked_binding(lambda, source)?,
+            },
             node if matches!(self, Self::Lambda | Self::SuspendedOperand)
                 && let Some((kind, value)) = ir::SuspendValue::operand(node) =>
             {
