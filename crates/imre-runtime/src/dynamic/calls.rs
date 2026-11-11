@@ -306,9 +306,9 @@ impl RegisteredFrame {
     /// It must stay in place on this thread until the linked entry and finalization return.
     pub(super) unsafe fn run(self, context: *mut Context) -> Result<Id> {
         stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
-            // SAFETY: the caller owns this execution and its loaded code. The ABI returns
-            // before the Context is borrowed to finish the rooted frame.
+            // SAFETY: the caller owns this execution and keeps the linked entry loaded.
             let value = unsafe { (self.entry)(context, self.scope) };
+            // SAFETY: the entry has returned, leaving the live Context exclusively with the caller.
             let ctx = unsafe { &mut *context };
             let result = ctx.finish_native_frame(value);
             self.returning.finish(ctx, result)
