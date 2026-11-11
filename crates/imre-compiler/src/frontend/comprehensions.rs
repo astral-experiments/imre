@@ -712,7 +712,13 @@ impl Checker<'_> {
         } else {
             None
         };
-        let (ty, mut body) = helper.comprehension_body(display, input, collector, result)?;
+        let mut mapping = None;
+        let (ty, mut body) =
+            helper.comprehension_body(display, input, collector, result, |checker, leaf| {
+                if gather_input.is_some() {
+                    mapping = checker.dictionary_gather_mapping(display, leaf);
+                }
+            })?;
         if let Some((iterable, target)) = list_binding {
             self.helpers.list_builds.borrow_mut().insert(
                 id,
@@ -726,7 +732,7 @@ impl Checker<'_> {
         body.push(Statement::Return(helper.local(result)));
         if ty == Type::ListInt
             && let Some(mut input) = gather_input
-            && let Some(mapping) = helper.dictionary_gather_mapping(display)?
+            && let Some(mapping) = mapping
         {
             // Validate at exactly the original decode's evaluation point, before
             // subsequent captures and before entering the helper. Immutable bytes
@@ -797,41 +803,34 @@ impl Checker<'_> {
         })
     }
 
-    /// Finds the mapping in a checked, callback-free character comprehension.
-    /// Ordinary captures and type checks remain intact; the replacement skips
-    /// this mapping load for an empty source, just as the original loop does.
-    fn dictionary_gather_mapping(&mut self, display: &Plan<'_>) -> Result<Option<Expr>, String> {
+    /// The fused helper reads the same mapping as the accepted character lookup.
+    fn dictionary_gather_mapping(&self, display: &Plan<'_>, leaf: &[Statement]) -> Option<Expr> {
         let [clause] = display.clauses else {
-            return Ok(None);
+            return None;
         };
-        if !clause.ifs.is_empty() {
-            return Ok(None);
-        }
-        let ast::Expr::Name(target) = &clause.target else {
-            return Ok(None);
+        let [Statement::Expr(append)] = leaf else {
+            return None;
         };
-        let Output::List(ast::Expr::Subscript(subscript)) = display.output else {
-            return Ok(None);
+        let ExprKind::Builtin(Builtin::Append, append) = &append.kind else {
+            return None;
         };
-        let ast::Expr::Name(key) = &*subscript.slice else {
-            return Ok(None);
+        let ExprKind::Builtin(Builtin::DictGet, operands) = &append.last()?.kind else {
+            return None;
         };
-        let ast::Expr::Name(mapping) = &*subscript.value else {
-            return Ok(None);
+        let [mapping, key] = operands.as_slice() else {
+            return None;
         };
-        if key.id != target.id || mapping.id == target.id {
-            return Ok(None);
-        }
-        let mapping = self.expr(&subscript.value)?;
-        if self.types.mapping(mapping.ty) != Some((Type::Str, Type::Int))
-            || !matches!(
+        let ExprKind::Local(key) = &key.kind else {
+            return None;
+        };
+        (clause.ifs.is_empty()
+            && self.names.get(clause.target.as_name_expr()?.id.as_str()) == Some(key)
+            && self.types.mapping(mapping.ty) == Some((Type::Str, Type::Int))
+            && matches!(
                 mapping.kind,
                 ExprKind::Local(_) | ExprKind::Builtin(Builtin::GlobalGet(_), _)
-            )
-        {
-            return Ok(None);
-        }
-        Ok(Some(mapping))
+            ))
+        .then(|| mapping.clone())
     }
 
     pub(super) fn enter_comprehension(&mut self, targets: HashSet<String>) -> ComprehensionScope {
@@ -912,7 +911,7 @@ impl Checker<'_> {
         }
         let scope = self.enter_comprehension(targets.clone());
         let result = self.hidden(Type::None);
-        let body = self.comprehension_body(display, input, collector, result);
+        let body = self.comprehension_body(display, input, collector, result, |_, _| {});
         if let Some(namespace) = self.namespace {
             for name in &targets {
                 if let Some(&slot) = self.names.get(name) {
@@ -980,8 +979,14 @@ impl Checker<'_> {
         input: Iteration,
         collector: Collector,
         result: usize,
+        mut checked_leaf: impl FnMut(&Self, &[Statement]),
     ) -> Result<(Type, Vec<Statement>), String> {
-        let loops = self.eager_loop(display, input, collector, result)?;
+        let loops =
+            self.comprehension_loop(display, 0, input, &mut |lower, output, conditions| {
+                let leaf = lower.collect(output, collector, result, conditions)?;
+                checked_leaf(lower, &leaf);
+                Ok(leaf)
+            })?;
         let ty = self.locals[result];
         let empty = match (collector, display.output) {
             (Collector::Display(_), Output::List(_)) => ExprKind::List(Vec::new()),
