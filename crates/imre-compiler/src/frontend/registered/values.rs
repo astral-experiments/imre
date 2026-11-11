@@ -1249,7 +1249,7 @@ impl Checker<'_> {
             node,
             ast::Expr::ListComp(_) | ast::Expr::DictComp(_) | ast::Expr::SetComp(_)
         ) && let Some(plan) = imre_ast::comprehension::Plan::from_expr(node)
-            && !plan.suspends()
+            && (self.asynchronous || !plan.suspends())
         {
             let value = self.lower_display(node, &plan, None)?;
             return Ok(Some(source.located(node, value)));

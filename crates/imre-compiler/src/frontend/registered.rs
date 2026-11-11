@@ -1134,17 +1134,27 @@ fn for_pull(loop_: &ast::StmtFor) -> Option<ir::AsyncPull> {
     })
 }
 
-fn iteration_protocol(
+/// Acquire the live Python iterator and prepare its matching pull in the owning frame.
+pub(super) fn cursor_input(
+    value: Expr,
+    element: Type,
     iterable: TextRange,
     pull: Option<ir::AsyncPull>,
-) -> (ir::IteratorOp, ir::IterNextKind) {
-    match pull {
+    hidden: impl FnMut(Type) -> usize,
+) -> pipelines::Prepared {
+    let (acquire, kind) = match pull {
         Some(pull) => (
             ir::IteratorOp::Async(iterable),
             ir::IterNextKind::Async(pull),
         ),
         None => (ir::IteratorOp::Loop(iterable), ir::IterNextKind::Generic),
-    }
+    };
+    let cursor = operation(
+        Builtin::RegisteredIter(acquire),
+        Type::PythonObject,
+        vec![value],
+    );
+    pipelines::Prepared::pull_cursor(cursor, element, kind, hidden)
 }
 
 fn if_clauses(branch: &ast::StmtIf) -> impl Iterator<Item = (Option<&ast::Expr>, &[ast::Stmt])> {
@@ -1832,7 +1842,13 @@ impl<'a> SuitePreparation<'a> {
         let mut operands = Vec::new();
         let iterable = bind_operand(&mut operands, iterable, Type::PythonObject);
         let mut scope = SourceScope::new(kind, self.source, self.operations, &self.sites);
-        let mut input = scope.cursor_input(iterable, loop_.iter.range(), for_pull(loop_));
+        let mut input = cursor_input(
+            iterable,
+            Type::PythonObject,
+            loop_.iter.range(),
+            for_pull(loop_),
+            |ty| scope.hidden(ty),
+        );
         let binding = scope
             .with_binding_operands(|scope| scope.for_binding(loop_, &mut input))
             .map_err(|()| {
@@ -3187,22 +3203,13 @@ impl SourceScope<'_> {
         pull: Option<ir::AsyncPull>,
     ) -> Option<pipelines::Prepared> {
         let value = self.ordinary_operand(iterable)?;
-        Some(self.cursor_input(value, iterable.range(), pull))
-    }
-
-    fn cursor_input(
-        &mut self,
-        value: Expr,
-        range: TextRange,
-        pull: Option<ir::AsyncPull>,
-    ) -> pipelines::Prepared {
-        let (acquire, kind) = iteration_protocol(range, pull);
-        let cursor = operation(
-            Builtin::RegisteredIter(acquire),
+        Some(cursor_input(
+            value,
             Type::PythonObject,
-            vec![value],
-        );
-        pipelines::Prepared::pull_cursor(cursor, Type::PythonObject, kind, |ty| self.hidden(ty))
+            iterable.range(),
+            pull,
+            |ty| self.hidden(ty),
+        ))
     }
 
     /// The activation owns the complete value before a return, discard or store.
@@ -5987,6 +5994,29 @@ mod tests {
                 keywords: vec![None],
             })]
         );
+    }
+
+    #[test]
+    fn checked_async_display_owns_its_resumable_pull() {
+        let source = "async def collect(feed):
+    return [item async for item in feed]
+";
+        let graph = SourceGraph::single(source).unwrap();
+        let _ = super::super::lower(&graph);
+        let registered = graph.registered_functions();
+        let function = &registered[&graph.entry][&TextSize::default()].function;
+        let mut pulls = Vec::new();
+        ir::walk_statements(&function.body, &mut |stmt| {
+            if let Statement::IterNext {
+                kind: ir::IterNextKind::Async(pull),
+                ..
+            } = stmt
+            {
+                pulls.push(pull.range);
+            }
+        });
+        assert_eq!(pulls.len(), 1);
+        assert_eq!(&source[pulls[0]], "item");
     }
 
     #[test]

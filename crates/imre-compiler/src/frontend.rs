@@ -4794,14 +4794,13 @@ impl<'a> Checker<'a> {
                         )
                     })?
             };
-            let cursor = Expr {
-                ty: Type::PythonObject,
-                kind: ExprKind::Builtin(
-                    Builtin::RegisteredIter(ir::IteratorOp::Loop(expression.range())),
-                    vec![value],
-                ),
-            };
-            return Ok(Iteration::Prepared(self.prepare_cursor(cursor, element)));
+            return Ok(Iteration::Prepared(registered::cursor_input(
+                value,
+                element,
+                expression.range(),
+                None,
+                |ty| self.hidden(ty),
+            )));
         }
         if let Some(input) = self.pipeline_input(expression, None, split_needle)? {
             return Ok(input);

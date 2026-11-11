@@ -2360,11 +2360,15 @@ impl Checker<'_> {
         zip_sum: Option<&mut Option<zip_sums::Sum>>,
     ) -> Result<Prepared, String> {
         let plan = Plan::generator(generator);
-        self.check_comprehension_inputs(
-            &plan,
-            generator,
-            "asynchronous generator expressions are unsupported",
-        )?;
+        // A synchronous consumer cannot resume an asynchronous generator.
+        if plan.body_suspends() {
+            return Err(error(
+                self.source,
+                generator,
+                "asynchronous generator expressions are unsupported",
+            ));
+        }
+        self.check_comprehension_inputs(&plan, generator)?;
         if generator
             .generators
             .iter()
