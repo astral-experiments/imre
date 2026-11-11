@@ -12923,13 +12923,25 @@ impl<'a> Checker<'a> {
                     "stream methods on an object value require an isinstance guard for io.BytesIO or io.StringIO",
                 ));
             }
-            let element = self.types.element(receiver.ty).ok_or_else(|| {
-                error(
+            let Some(element) = self.types.element(receiver.ty) else {
+                if self
+                    .graph
+                    .session
+                    .missing_literal_attribute(self.module, attribute)
+                {
+                    return self.registered_method_call(
+                        call,
+                        attribute,
+                        receiver,
+                        Type::ObjectValue,
+                    );
+                }
+                return Err(error(
                     self.source,
                     call,
                     "supported value methods are typed-list append/pop, dict.get, set.add/discard, and str.split()",
-                )
-            })?;
+                ));
+            };
             let append = if self.joined_lines.writes_buffer(call.range()) {
                 Builtin::JoinBufferAppend
             } else {

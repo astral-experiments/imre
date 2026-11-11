@@ -1531,6 +1531,25 @@ impl Session {
         )
     }
 
+    /// A missing descriptor on an exact builtin literal raises at the Python lookup site.
+    pub(crate) fn missing_literal_attribute(
+        &self,
+        module: usize,
+        attribute: &ruff_python_ast::ExprAttribute,
+    ) -> bool {
+        use ty_python_semantic::types::{
+            Type as Ty, ide_support::static_member_type_for_attribute,
+        };
+        // Some protocol slots have no declaration in typeshed, even on exact builtins.
+        if ruff_python_ast::helpers::is_dunder(attribute.attr.as_str()) {
+            return false;
+        }
+        self.hint_reads.set(self.hint_reads.get() + 1);
+        let model = SemanticModel::new(&self.db, self.db.program_file(self.files[module]));
+        matches!(attribute.value.inferred_type(&model), Some(Ty::LiteralValue(value)) if !value.is_enum())
+            && static_member_type_for_attribute(&model, attribute).is_none()
+    }
+
     pub(crate) fn is_typing_protocol(&self, module: usize, expression: &Expr) -> bool {
         use ty_python_semantic::types::{SpecialFormType, Type as Ty};
         self.hint_reads.set(self.hint_reads.get() + 1);
