@@ -325,7 +325,7 @@ enum Cleanup {
     Owner(Value),
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 enum Completion<T = Value> {
     Return(T),
     Jump { label: String, depth: usize },

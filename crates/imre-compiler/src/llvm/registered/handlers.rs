@@ -1,11 +1,9 @@
 //! Exception handlers entered through a registered Python frame.
 
-use super::{
-    Frame, RegisteredFrame,
-    context::{Finally, Region},
-};
+use super::{Frame, RegisteredFrame, context::Region};
 use crate::ir::{ExceptHandler, ExceptionMatcher, Statement};
 use crate::llvm::operations::CheckedBody;
+use crate::llvm::{Completion, finally::Finalbody};
 
 impl RegisteredFrame<'_, '_> {
     /// The normal else edge skips the handlers. On the error edge, keep the
@@ -28,76 +26,113 @@ impl RegisteredFrame<'_, '_> {
 }
 
 impl<'f, 'p> Frame<'f, '_, 'p> {
-    /// Install the final suite before entering the body so an abrupt exit can find it.
-    fn finalized(&mut self, body: Finally<'p>, protected: impl FnOnce(&mut Self)) {
+    /// Every exit conveys its pending action to the same lexical suite.
+    fn finalized(&mut self, body: &[Statement], protected: impl FnOnce(&mut Self)) {
         let failed = self.name("b");
         let done = self.name("b");
+        let entry = self.name("b");
+        let depth = self.regions.len();
         let enclosing = std::mem::replace(&mut self.body.error_target, failed.clone());
-        let region = Region::Finally {
-            body,
-            outer: enclosing.clone(),
-            loops: self.loops.len(),
-            caught: self.caught.len(),
-        };
-        self.regions.push(region);
+        self.regions.push(Region::Finally(Finalbody::new(entry)));
         protected(self);
-        let Some(Region::Finally { body, .. }) = self.regions.pop() else {
+        let Some(Region::Finally(mut region)) = self.regions.pop() else {
             unreachable!("active finally region")
         };
-        self.body.error_target.clone_from(&enclosing);
-        let normal = (!self.body.terminated).then(|| {
-            let cleanup = self.name("b");
-            self.jump(&cleanup);
-            (cleanup, self.body.current.clone())
-        });
+        self.body.error_target = enclosing;
+        let normal = !self.body.terminated;
+        if normal {
+            self.flush_check();
+            region.enter(
+                &mut self.body,
+                Completion::Jump {
+                    label: done.clone(),
+                    depth,
+                },
+                None,
+            );
+        }
         self.label(&failed);
         let raised = self.op("take_error", &[]);
         let outer = self.caught.last().cloned().unwrap_or_else(|| "0".into());
-        // Both paths enter the same suite. A normal exit inherits the surrounding
-        // handler. An exceptional exit carries the exception raised by the body.
-        let (pending, active) = if let Some((cleanup, from)) = &normal {
-            self.jump(cleanup);
-            let error_from = self.body.current.clone();
-            self.label(cleanup);
-            let pending = self.value(&format!("phi i64 [0, %{from}], [{raised}, %{error_from}]"));
-            let active = if outer == "0" {
-                pending.clone()
-            } else {
-                self.value(&format!(
-                    "phi i64 [{outer}, %{from}], [{raised}, %{error_from}]"
-                ))
-            };
-            (pending, active)
-        } else {
-            (raised.clone(), raised)
-        };
+        self.flush_check();
+        region.enter(
+            &mut self.body,
+            Completion::Error,
+            Some((raised, outer.clone())),
+        );
+        self.label(&region.entry);
 
-        self.live.push(pending.clone());
-        self.caught.push(active);
-        self.regions.push(Region::Pending {
-            value: pending.clone(),
-            enclosing: Some(outer),
-            outer: enclosing,
+        let (targets, tag) = region.completions(&mut self.body, |_| ());
+        let returned = targets.contains(&Completion::Return(())).then(|| {
+            region.phi(&mut self.body, "i64", |edge| match &edge.completion {
+                Completion::Return(value) => value.clone(),
+                _ => "0".into(),
+            })
         });
-        self.emit_finally(&body);
-        self.regions.pop();
+        let error = region.phi(&mut self.body, "i64", |edge| {
+            edge.exception
+                .as_ref()
+                .map_or_else(|| "0".into(), |(error, _)| error.clone())
+        });
+        let active = if outer == "0" {
+            error.clone()
+        } else {
+            region.phi(&mut self.body, "i64", |edge| {
+                edge.exception
+                    .as_ref()
+                    .map_or_else(|| outer.clone(), |(error, _)| error.clone())
+            })
+        };
+        let live = self.live.len();
+        if let Some(value) = &returned {
+            self.keep_pending_exit(value, None);
+        }
+        self.keep_pending_exit(&error, Some(outer));
+        self.caught.push(active);
+        self.emit_suite(body);
         self.caught.pop();
-        self.live.pop();
-        // Module providers also visit unreachable annotation sites in source order.
+        self.live.truncate(live);
+        self.regions.truncate(depth);
+
         let mut needs_join = self.module_annotation_sites.is_some();
         if !self.body.terminated {
-            if normal.is_some() {
-                let failed = self.value(&format!("icmp ne i64 {pending}, 0"));
-                let reraise = self.name("b");
-                self.branch(&failed, &reraise, &done);
-                self.label(&reraise);
-                needs_join = true;
+            needs_join |= normal;
+            for (index, target) in targets.iter().enumerate() {
+                let next = (index + 1 < targets.len()).then(|| {
+                    let selected = self.value(&format!("icmp eq i32 {tag}, {index}"));
+                    let resume = self.name("b");
+                    let next = self.name("b");
+                    self.branch(&selected, &resume, &next);
+                    self.label(&resume);
+                    next
+                });
+                match target {
+                    Completion::Return(()) => {
+                        self.return_from_regions(returned.as_ref().unwrap().clone())
+                    }
+                    Completion::Jump { label, depth } => {
+                        self.jump_from_regions(label.clone(), *depth)
+                    }
+                    Completion::Error => self.raise(&error, None, true),
+                }
+                if let Some(next) = next {
+                    self.label(&next);
+                }
             }
-            self.raise(&pending, None, true);
         }
         if needs_join {
             self.label(&done);
         }
+    }
+
+    fn keep_pending_exit(&mut self, value: &str, enclosing: Option<String>) {
+        self.live.push(value.to_owned());
+        let outer = self.body.error_target.clone();
+        self.regions.push(Region::Pending {
+            value: value.to_owned(),
+            enclosing,
+            outer,
+        });
     }
 
     /// A named handler clears its binding on every path out of the body.
@@ -311,12 +346,7 @@ impl<'p> Frame<'_, '_, 'p> {
             run(self);
             return;
         }
-        // A child can transfer from another prepared scope. Resolve the owned
-        // final suite here, before that child changes the active inputs.
-        let cleanup = self
-            .prepared_child(finalbody)
-            .map_or_else(|| Finally::Checked(finalbody.into()), Finally::Prepared);
-        self.finalized(cleanup, run);
+        self.finalized(finalbody, run);
     }
 
     pub(crate) fn emit_suite(&mut self, suite: &[Statement]) {

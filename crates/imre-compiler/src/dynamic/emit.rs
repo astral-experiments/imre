@@ -5543,12 +5543,14 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         .unwrap()
         .standalone()
         .unwrap();
-        let reacquire = ir.lines().filter(|line| {
-            line.contains("call void @imre_dyn_statement_with_exception(")
-                && line.contains(", i32 8, i64 ")
-        });
-        // The pending return and the pending exception each enter the outer finally.
-        assert_eq!(reacquire.count(), 2);
+        for line in [6, 8] {
+            let position = format!(", i32 {line}, i64 ");
+            let calls = ir.lines().filter(|instruction| {
+                instruction.contains("call void @imre_dyn_statement_with_exception(")
+                    && instruction.contains(&position)
+            });
+            assert_eq!(calls.count(), 1, "cleanup on line {line}");
+        }
     }
 
     #[test]
