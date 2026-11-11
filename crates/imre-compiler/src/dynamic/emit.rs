@@ -2469,7 +2469,7 @@ mod tests {
         assert_eq!(module.standalone().unwrap(), original);
 
         let plan = test_function_suite(&mut module.source, start);
-        let Ok(crate::frontend::SourceEffect::Region(region)) = &mut plan.residual[0].effect else {
+        let [region] = plan.suites.as_mut_slice() else {
             panic!("missing registered loop");
         };
         let crate::frontend::PhysicalOperand::Checked(iterable) = &mut region.operands[0] else {
