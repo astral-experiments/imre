@@ -334,12 +334,6 @@ impl ClassInfo {
                             Some(class_id),
                         )
                         .and_then(|ty| {
-                            // The resolved TOML hash projection serializes these fields together.
-                            let ty = if class.toml_hash && ty == Type::JsonObject {
-                                documents::MAP
-                            } else {
-                                ty
-                            };
                             if class.dataclass.is_some_and(|d| d.value_struct)
                                 && !matches!(ty, Type::Float | Type::Bool)
                             {
@@ -381,6 +375,10 @@ impl ClassInfo {
                                     &field.annotation,
                                     "class fields cannot contain callable values",
                                 ))
+                            } else if class.toml_hash && ty == Type::JsonObject {
+                                // The constructor accepts its declared default. The hash reads
+                                // these fields together using the stored TOML representation.
+                                Ok(documents::MAP)
                             } else {
                                 Ok(ty)
                             }
