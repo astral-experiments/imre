@@ -14,6 +14,12 @@ impl MethodContext {
     pub(super) fn kind(self, classes: &Classes) -> MethodKind {
         classes.definitions[self.class].method_kinds[self.index]
     }
+
+    /// The class collector supplies this method's parameters and field stores together.
+    pub(super) fn generated_initializer(self, classes: &Classes) -> bool {
+        let class = &classes.definitions[self.class];
+        class.generated_initializer && class.initializer == Some(self.index)
+    }
 }
 
 /// A class method has a statically bound class, so its native function needs no
@@ -696,10 +702,8 @@ impl Checker<'_> {
                     .to_string()
             })
         });
-        self.initializing = context.is_some_and(|context| {
-            let declaration = &self.classes.declarations.definitions[context.class];
-            declaration.generated_initializer && declaration.initializer == Some(context.index)
-        });
+        self.initializing = context
+            .is_some_and(|context| context.generated_initializer(&self.classes.declarations));
     }
 
     /// An erased receiver shadows module-level bindings with the same name.

@@ -1896,9 +1896,7 @@ fn lower_function(
         }
     };
     if let Some(context) = signature.method
-        && let class = &classes.declarations.definitions[context.class]
-        && class.generated_initializer
-        && class.initializer == Some(context.index)
+        && context.generated_initializer(&classes.declarations)
         && let Some(post) = classes.methods[context.class].get("__post_init__")
     {
         checker.calls.insert(post.id);
