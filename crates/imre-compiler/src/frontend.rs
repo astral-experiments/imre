@@ -1059,12 +1059,14 @@ fn lower_graph(
             inference.discover_packed_arguments();
         }
     }
+    let entry_statements = graph.modules[graph.entry].executable_statements();
     let inference::Solution {
         registered_parameters,
         mut checked_bodies,
         registered_generators,
     } = inference.solve(
         graph,
+        &entry_statements,
         &mut definitions,
         &mut signatures,
         &mut classes,
@@ -1409,19 +1411,11 @@ fn lower_graph(
             }
         }
     }
-    let mut entry = None;
     let mut startup = Vec::new();
-    for (module_id, module) in graph.modules.iter().enumerate() {
-        if module_id != graph.entry {
-            continue;
-        }
+    let entry = {
+        let module_id = graph.entry;
         let mut checker = checker_for(module_id);
         checker.module_scope = true;
-        let statements = module
-            .executable
-            .iter()
-            .map(|&index| module.parsed.syntax().body[index].clone())
-            .collect::<Vec<_>>();
         if let Some((definition, mut report)) = refused_body.take() {
             // The normal entry binder can establish that this physical definition
             // is called. Its diagnostic remains the ordinary result on every exit.
@@ -1430,7 +1424,7 @@ fn lower_graph(
                 entry_site: None,
             }));
             let _ = graph.try_registered_body(module_id, || {
-                checker.lower_block(&statements, None).ok().map(drop)
+                checker.lower_block(&entry_statements, None).ok().map(drop)
             });
             if let Some((statement, call)) =
                 checker.observed_definition.and_then(|seen| seen.entry_site)
@@ -1440,7 +1434,7 @@ fn lower_graph(
             return Err(report);
         }
         let mut fixed_entry = (!needs_registered_entry).then(Vec::new);
-        let result = checker.lower_block(&statements, fixed_entry.as_mut());
+        let result = checker.lower_block(&entry_statements, fixed_entry.as_mut());
         let result = checker.finish_region(result);
         if checked_region(result, graph, module_id, &mut unavailable, |failure| {
             // Entry checking has finished. An object refusal discards the fixed graph, so
@@ -1457,14 +1451,16 @@ fn lower_graph(
             && let Some(body) = fixed_entry
         {
             checker.fault_frame(&mut startup, "<module>", TextSize::default());
-            entry = Some(ir::Function {
+            Some(ir::Function {
                 params: Vec::new(),
                 returns: Type::None,
                 locals: checker.locals,
                 body,
-            });
+            })
+        } else {
+            None
         }
-    }
+    };
     if let Some(reason) = unavailable.or_else(|| {
         globals
             .missing_bindings
