@@ -913,35 +913,13 @@ impl Inference {
                     checker.registered = Some(module_literals);
                 }
                 checker.inference = Some(self);
-                checker.returns = signature.returns;
-                checker.asynchronous = signature.asynchronous;
-                checker.method_context(signature.method);
-                checker.generator_item = classes.producer_items.get(&signature.id).copied();
                 checker.discover_document_return =
                     self.pending.borrow()[signature.id].document_return;
                 checker.inferred_returns =
                     (infer_return || checker.discover_document_return.is_some()).then(Vec::new);
                 let mut checked_return = false;
                 let result = (|| {
-                    for (index, (parameter, layout)) in
-                        closed_calls::parameters(&function.parameters)
-                            .zip(&signature.params)
-                            .enumerate()
-                    {
-                        checker.bind_parameter(
-                            parameter,
-                            layout.ty,
-                            signature.parameter_declaration(index),
-                        )?;
-                    }
-                    if let Some(keyword) = &function.parameters.kwarg {
-                        let parameter = signature.params.last().expect("keyword-rest signature");
-                        checker.bind_parameter(
-                            keyword,
-                            parameter.ty,
-                            signature.parameter_declaration(signature.params.len() - 1),
-                        )?;
-                    }
+                    checker.bind_function_signature(function, &signature, |_| {})?;
                     checker.collect_local_definitions(&function.body)?;
                     let falls_through = checker.lower_block(&function.body, None)?;
                     // An outstanding call cannot establish an implicit return, even
