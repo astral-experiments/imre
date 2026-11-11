@@ -518,12 +518,11 @@ impl Checker<'_> {
 pub(in crate::frontend) fn name_call(
     call: &ast::ExprCall,
     name: &str,
-    mut arguments: Vec<Expr>,
+    arguments: Vec<Expr>,
 ) -> Expr {
-    arguments.insert(0, name_binding(name));
-    super::operation(
-        Builtin::RegisteredCall(call_site(call, callable_target(call))),
-        Type::PythonObject,
+    bound_call(
+        call_site(call, callable_target(call)),
+        name_binding(name),
         arguments,
     )
 }
@@ -1359,6 +1358,26 @@ mod tests {
             panic!("expected a registered operation");
         };
         (op, operands, position)
+    }
+
+    #[test]
+    fn selected_builtin_keeps_a_live_positional_call() {
+        let parsed = ruff_python_parser::parse_module("globals()").unwrap();
+        let call = parsed.syntax().body[0]
+            .as_expr_stmt()
+            .unwrap()
+            .value
+            .as_call_expr()
+            .unwrap();
+        let result = name_call(call, "globals", Vec::new());
+        assert!(result.is_registered_invoke());
+        let ExprKind::Invoke { callable, args } = result.kind else {
+            unreachable!()
+        };
+        assert!(
+            matches!(callable.kind, ExprKind::Builtin(Builtin::RegisteredName(ref name), _) if name == "globals")
+        );
+        assert_eq!(args.site.python().unwrap().range, call.range());
     }
 
     #[test]
