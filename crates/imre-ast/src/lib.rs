@@ -483,6 +483,12 @@ struct Mangler<'a> {
     only_parameters: Option<&'a HashSet<Name>>,
 }
 
+fn private_name(owner: &str, name: &str) -> Option<Name> {
+    let owner = owner.trim_start_matches('_');
+    (is_mangled_private(name) && !name.contains('.') && !owner.is_empty())
+        .then(|| Name::new(format!("_{owner}{name}")))
+}
+
 impl Mangler<'_> {
     fn replacement(&self, name: &str) -> Option<Name> {
         if self
@@ -491,9 +497,7 @@ impl Mangler<'_> {
         {
             return None;
         }
-        let owner = self.owner.trim_start_matches('_');
-        (is_mangled_private(name) && !name.contains('.') && !owner.is_empty())
-            .then(|| Name::new(format!("_{owner}{name}")))
+        private_name(self.owner, name)
     }
 
     fn rename(&self, name: &mut Name) {

@@ -699,25 +699,6 @@ impl Checker<'_> {
         )
     }
 
-    pub(super) fn check_comprehension_inputs(
-        &self,
-        plan: &Plan<'_>,
-        node: &impl Ranged,
-    ) -> Result<(), String> {
-        if plan
-            .clauses
-            .iter()
-            .any(|clause| !narrowing::expression_assignments(&clause.iter).is_empty())
-        {
-            return Err(error(
-                self.source,
-                node,
-                "assignment expressions are forbidden in comprehension iterables",
-            ));
-        }
-        Ok(())
-    }
-
     fn comprehension_display(
         &mut self,
         expression: &ast::Expr,
@@ -733,7 +714,6 @@ impl Checker<'_> {
                 "asynchronous comprehensions are unsupported",
             ));
         }
-        self.check_comprehension_inputs(display, expression)?;
         let input = self.input(&display.clauses[0])?;
         let writes = narrowing::expression_assignments(expression);
         if matches!(input, Iteration::Prepared(_))

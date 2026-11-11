@@ -203,6 +203,30 @@ impl<'a> Plan<'a> {
         names
     }
 
+    /// Visit the comprehension's private scope in symbol-table order. The enclosing
+    /// scope already visited the first iterable. An inner target precedes its
+    /// iterable, and a dict value precedes its key when selecting a symbol error.
+    pub(super) fn visit_symbol_body<V: Visitor<'a>>(
+        &self,
+        visitor: &mut V,
+        target: impl Fn(&mut V, &'a ast::Expr),
+        iterable: impl Fn(&mut V, &'a ast::Expr),
+    ) {
+        for (depth, clause) in self.clauses.iter().enumerate() {
+            target(visitor, &clause.target);
+            if depth > 0 {
+                iterable(visitor, &clause.iter);
+            }
+            for test in &clause.ifs {
+                visitor.visit_expr(test);
+            }
+        }
+        visitor.visit_expr(self.output.value());
+        if let Some(key) = self.output.key() {
+            visitor.visit_expr(key);
+        }
+    }
+
     /// Includes implicit awaits in async iteration, and excludes the acquisition
     /// expression which runs in the caller when constructing a generator.
     pub fn body_suspends(&self) -> bool {
@@ -255,16 +279,27 @@ pub fn try_collect_target_names(
 }
 
 fn visit_target<'a>(
-    mut target: &'a ast::Expr,
+    target: &'a ast::Expr,
     names: &mut impl Extend<String>,
+    invalid: impl Fn(InvalidTarget) -> Result<(), InvalidTarget>,
+    mut visit: impl FnMut(&'a ast::Expr),
+) -> Result<(), InvalidTarget> {
+    visit_target_leaves(target, invalid, |leaf| match leaf {
+        ast::Expr::Name(name) => names.extend([name.id.to_string()]),
+        expr => visit(expr),
+    })
+}
+
+/// Visit binding names and evaluated receivers in the order in which they occur in a target.
+pub(super) fn visit_target_leaves<'a>(
+    mut target: &'a ast::Expr,
     invalid: impl Fn(InvalidTarget) -> Result<(), InvalidTarget>,
     mut visit: impl FnMut(&'a ast::Expr),
 ) -> Result<(), InvalidTarget> {
     let mut pending = Vec::new();
     loop {
         match target {
-            ast::Expr::Name(name) => names.extend([name.id.to_string()]),
-            ast::Expr::Attribute(_) | ast::Expr::Subscript(_) => visit(target),
+            ast::Expr::Name(_) | ast::Expr::Attribute(_) | ast::Expr::Subscript(_) => visit(target),
             ast::Expr::Starred(star) => {
                 invalid(InvalidTarget::BareStar)?;
                 target = &star.value;

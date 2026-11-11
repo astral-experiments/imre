@@ -2609,7 +2609,9 @@ impl Context {
             _ => None,
         };
         let spellings = string_replacements(source, parsed.tokens());
-        let scope_error = imre_ast::async_generators::check(parsed.syntax().into());
+        let has_named_bindings = source.contains(":=");
+        let scope_error =
+            imre_ast::async_generators::check(parsed.syntax().into(), has_named_bindings);
         if scope_error.is_some()
             && let ast::Mod::Module(module) = parsed.syntax()
             && imre_ast::misplaced_star_import(&module.body).is_some()
@@ -2626,7 +2628,7 @@ impl Context {
                 } else {
                     SyntaxSpan::InFields(error.range)
                 };
-                (span, error.message.to_owned())
+                (span, error.message)
             })
             .or_else(|| {
                 let keyword = imre_ast::repeated_keyword(parsed.syntax().into())?;
@@ -2656,7 +2658,7 @@ impl Context {
             _ => Default::default(),
         };
         let symbol_error = bindings.first_symbol(future_error);
-        let mut code = Program::new("<module>", source.contains(":="));
+        let mut code = Program::new("<module>", has_named_bindings);
         code.deferred_pattern = bindings
             .pattern
             .map(|issue| Rc::new(std::cell::RefCell::new(issue)));

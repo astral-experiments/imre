@@ -2379,25 +2379,13 @@ impl Checker<'_> {
                 "asynchronous generator expressions are unsupported",
             ));
         }
-        self.check_comprehension_inputs(&plan, generator)?;
-        let mut target_writes = false;
-        let targets = plan.target_bindings(|expr| {
-            target_writes = target_writes || !narrowing::expression_assignments(expr).is_empty();
-        });
-        if target_writes {
-            return Err(error(
-                self.source,
-                generator,
-                "assignment expressions are forbidden in comprehension targets",
-            ));
-        }
         let lists = zip_sum
             .as_ref()
             .and_then(|_| zip_sums::lists(self, generator));
         let first = self.expansion_input(plan.outer, None)?;
         let mut first = self.prepare_iteration(first, generator, false)?;
         let first_private = self.locals.len();
-        let scope = self.enter_comprehension(targets);
+        let scope = self.enter_comprehension(plan.target_names());
         // Suspended generators can observe later enclosing writes. Facts about
         // those mutable slots must be proved again inside the lazy body.
         self.narrowed = assignments::Narrowed::new();

@@ -197,23 +197,11 @@ impl<'a> Rhs<'a> {
             comprehension: Some(expr),
             in_iterable: self.in_iterable,
         };
-        for (depth, clause) in plan.clauses.iter().enumerate() {
-            // Symbol analysis checks a binding before its inner iterable.
-            child.visit_expr(&clause.target);
-            if depth > 0 {
-                child.in_iterable = true;
-                child.visit_expr(&clause.iter);
-                child.in_iterable = self.in_iterable;
-            }
-            for test in &clause.ifs {
-                child.visit_expr(test);
-            }
-        }
-        // CPython visits a dict's value first when selecting a symbol error.
-        child.visit_expr(plan.output.value());
-        if let Some(key) = plan.output.key() {
-            child.visit_expr(key);
-        }
+        plan.visit_symbol_body(&mut child, Self::visit_expr, |scope, iterable| {
+            scope.in_iterable = true;
+            scope.visit_expr(iterable);
+            scope.in_iterable = self.in_iterable;
+        });
         self.error = child.error;
         if self.error.is_none()
             && self.comprehension.is_none()
