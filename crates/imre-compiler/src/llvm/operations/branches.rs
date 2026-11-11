@@ -334,17 +334,18 @@ impl CheckedBody<'_, '_, '_, '_> {
             self.body().branch(&bit, yes, no);
             return;
         }
-        let (edges, inputs) = edges(expr, Context::Condition, Depth::All);
-        Logical::branch(self.body(), edges, yes, no).emit(self, &inputs);
-    }
-
-    pub(super) fn condition(&mut self, expr: &Expr, yes: &str, no: &str) {
-        if let Entry::Native(code) = &mut self.0 {
-            let bit = code.expr(expr);
-            code.branch(&bit.operand, yes, no);
-        } else {
-            self.branch_condition(expr, yes, no);
+        if let Some(value) = self.native_boolean(expr) {
+            let bit = self.operand_truth(expr, &value, None);
+            self.release_input(value);
+            self.body().branch(&bit, yes, no);
+            return;
         }
+        let depth = match &self.0 {
+            Entry::Native(_) => Self::logical_depth(expr),
+            Entry::Registered(_) => Depth::All,
+        };
+        let (edges, inputs) = edges(expr, Context::Condition, depth);
+        Logical::branch(self.body(), edges, yes, no).emit(self, &inputs);
     }
 
     pub(crate) fn predicate(&mut self, expr: &Expr, negate: bool) -> CheckedValue {
@@ -385,13 +386,16 @@ impl CheckedBody<'_, '_, '_, '_> {
         (CheckedValue::owned(emitter.take_slot(slot)), truth.operand)
     }
 
-    fn logical_value(&mut self, expr: &Expr) -> CheckedValue {
-        let depth = if expr.ty == Type::Bool && matches!(&expr.kind, ExprKind::Boolean(..)) {
+    fn logical_depth(expr: &Expr) -> Depth {
+        if expr.ty == Type::Bool && matches!(&expr.kind, ExprKind::Boolean(..)) {
             Depth::Root
         } else {
             Depth::All
-        };
-        let (edges, inputs) = edges(expr, Context::Value, depth);
+        }
+    }
+
+    fn logical_value(&mut self, expr: &Expr) -> CheckedValue {
+        let (edges, inputs) = edges(expr, Context::Value, Self::logical_depth(expr));
         Logical::value(self.body(), edges, expr.ty)
             .emit(self, &inputs)
             .expect("a selected operand reaches the join")
@@ -404,30 +408,38 @@ impl CheckedBody<'_, '_, '_, '_> {
             return CheckedValue::owned(value);
         }
         self.select_value(
-            |code, t, f| code.condition(test, t, f),
+            |code, t, f| code.branch_condition(test, t, f),
             |code| code.evaluate(yes),
             |code| code.evaluate(no),
         )
     }
 
-    pub(super) fn boolean_expression(&mut self, expr: &Expr) -> CheckedValue {
-        if let (Entry::Native(emitter), ExprKind::BooleanValue(and, left, right, None)) =
-            (&mut self.0, &expr.kind)
-            && let Some(truth) = emitter.module.types.truthiness(left.ty)
-        {
-            let value = emitter.operand(left);
-            if truth == *and {
-                emitter.release_operand(&value);
-                return CheckedValue::owned(emitter.expr(right));
+    fn native_boolean(&mut self, expr: &Expr) -> Option<CheckedValue> {
+        let Entry::Native(emitter) = &mut self.0 else {
+            return None;
+        };
+        match &expr.kind {
+            ExprKind::BooleanValue(and, left, right, None) => {
+                let truth = emitter.module.types.truthiness(left.ty)?;
+                let value = emitter.operand(left);
+                if truth == *and {
+                    emitter.release_operand(&value);
+                    return Some(CheckedValue::owned(emitter.expr(right)));
+                }
+                let owned = emitter.own_operand(value);
+                Some(CheckedValue::owned(
+                    emitter.selected_operand(owned, expr.ty, truth),
+                ))
             }
-            let owned = emitter.own_operand(value);
-            return CheckedValue::owned(emitter.selected_operand(owned, expr.ty, truth));
+            ExprKind::Boolean(and, values) => emitter
+                .boolean_specialization(*and, values)
+                .map(CheckedValue::owned),
+            _ => None,
         }
-        if let (Entry::Native(emitter), ExprKind::Boolean(and, values)) = (&mut self.0, &expr.kind)
-            && let Some(value) = emitter.boolean_specialization(*and, values)
-        {
-            return CheckedValue::owned(value);
-        }
-        self.logical_value(expr)
+    }
+
+    pub(super) fn boolean_expression(&mut self, expr: &Expr) -> CheckedValue {
+        self.native_boolean(expr)
+            .unwrap_or_else(|| self.logical_value(expr))
     }
 }
