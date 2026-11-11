@@ -10,6 +10,16 @@ pub(crate) struct FixedBodySource {
     pub(crate) local_names: HashMap<usize, registered::LocalBinding>,
 }
 
+impl FixedBodySource {
+    pub(super) fn matches(&self, function: &ir::Function) -> bool {
+        let mut remaining = Some(self.operations.as_slice());
+        ir::walk_nodes(&function.body, &mut |node, _| {
+            remaining = FixedNode::consume(remaining, &node);
+        });
+        matches!(remaining, Some([])) && self.local_names.len() == function.locals.len()
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct FixedField {
     pub(crate) name: String,
@@ -22,17 +32,27 @@ pub(crate) enum FixedNode {
     Effect,
     Store(usize),
     Read(usize, Type),
+    Integer(i64),
     Field(usize, Type),
     Binary(Binary, Type),
 }
 
 impl FixedNode {
+    pub(crate) fn consume<'a>(
+        operations: Option<&'a [Option<Self>]>,
+        node: &ir::Node<'_>,
+    ) -> Option<&'a [Option<Self>]> {
+        let (expected, rest) = operations?.split_first()?;
+        (Self::checked(node) == Some((*expected)?)).then_some(rest)
+    }
+
     pub(crate) fn checked(node: &ir::Node<'_>) -> Option<Self> {
         Some(match node {
             ir::Node::Statement(Statement::Return(_)) => Self::Return,
             ir::Node::Statement(Statement::Expr(_)) => Self::Effect,
             ir::Node::Statement(Statement::Assign(slot, _)) => Self::Store(*slot),
             ir::Node::Expression(expr) => match expr.kind {
+                ExprKind::Int(ref text) => Self::Integer(text.parse().ok()?),
                 ExprKind::Local(slot) => Self::Read(slot, expr.ty),
                 ExprKind::Field(_, slot) => Self::Field(slot, expr.ty),
                 ExprKind::Binary(op, _, _) => Self::Binary(op, expr.ty),

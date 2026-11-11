@@ -383,11 +383,7 @@ pub(crate) fn analyze_program(
             .map(|(_, source)| std::mem::take(&mut source.operations));
         let mut remaining = operations.as_deref();
         ir::walk_nodes(&function.body, &mut |node, _| {
-            remaining = remaining.and_then(|operations| {
-                let (expected, rest) = operations.split_first()?;
-                let expected = (*expected)?;
-                (crate::frontend::FixedNode::checked(&node) == Some(expected)).then_some(rest)
-            });
+            remaining = crate::frontend::FixedNode::consume(remaining, &node);
             let ir::Node::Expression(expr) = node else {
                 return;
             };
