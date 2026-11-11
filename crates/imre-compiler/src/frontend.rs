@@ -1122,7 +1122,6 @@ fn lower_graph(
         }
     };
     let mut literals = HashMap::new();
-    let mut source_checks = registered::SourceChecks::default();
     if needs_registered_entry {
         // A checked body or a real function-value read can establish the registered binding.
         globals.missing_bindings.borrow_mut().extend(
@@ -1212,8 +1211,10 @@ fn lower_graph(
         if registered_generators.contains(&signature.id) {
             continue;
         }
-        let accepted =
-            signature.registered_frame() && source_checks.accepts(graph, *module_id, definition);
+        let accepted = signature.registered_frame()
+            && inference
+                .source_checks
+                .accepts(graph, *module_id, definition);
         if accepted || original.is_some() {
             // A read of the callable establishes a live namespace binding. An
             // unused, unresolved signature cannot select this calling convention.
@@ -1313,7 +1314,9 @@ fn lower_graph(
                     .get(module_id)
                     .is_some_and(|bodies| bodies.contains_key(&definition.start()))
                 && source.matches(&function)
-                && source_checks.accepts(graph, *module_id, definition)
+                && inference
+                    .source_checks
+                    .accepts(graph, *module_id, definition)
             {
                 // The fixed graph still uses the checked instructions for call and initializer
                 // validation. Its named entry executes those operations with the Python binder.
@@ -1416,7 +1419,9 @@ fn lower_graph(
                             .get(&module_id)
                             .is_some_and(|entries| entries.contains_key(&definition.start()))
                         && source.matches(&function)
-                        && source_checks.accepts(graph, module_id, definition)
+                        && inference
+                            .source_checks
+                            .accepts(graph, module_id, definition)
                     {
                         graph.register_function(
                             module_id,

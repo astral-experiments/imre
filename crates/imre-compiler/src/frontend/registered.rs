@@ -282,12 +282,12 @@ pub(super) fn lower_definition<'a>(
 #[derive(Default)]
 pub(super) struct SourceChecks {
     session: std::cell::OnceCell<Option<crate::analysis::Session>>,
-    errors: HashMap<ModuleId, Vec<TextRange>>,
+    errors: std::cell::RefCell<HashMap<ModuleId, Vec<TextRange>>>,
 }
 
 impl SourceChecks {
     pub(super) fn accepts(
-        &mut self,
+        &self,
         graph: &SourceGraph,
         module: ModuleId,
         definition: &ast::StmtFunctionDef,
@@ -299,6 +299,7 @@ impl SourceChecks {
             return false;
         };
         self.errors
+            .borrow_mut()
             .entry(module)
             .or_insert_with(|| session.source_error_ranges(module))
             .iter()
@@ -353,7 +354,6 @@ pub(super) fn capture(
     mode: Capture<'_>,
 ) {
     let mut sources = HashMap::new();
-    let mut checks = SourceChecks::default();
     let mut pending = inference.pending_bodies.borrow_mut();
     let owners = pending.get_or_insert_with(|| {
         // Inference can request recovery before signatures settle.
@@ -423,7 +423,7 @@ pub(super) fn capture(
             lower()
         };
         if let Some(body) = body
-            && checks.accepts(graph, id, function)
+            && inference.source_checks.accepts(graph, id, function)
         {
             graph.register_function(id, function.start(), body);
             return false;
