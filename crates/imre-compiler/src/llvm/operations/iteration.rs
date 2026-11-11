@@ -56,36 +56,11 @@ pub(crate) fn loop_region<C, T>(
 impl Emitter<'_, '_> {
     /// A specialized pull uses the same guarded-success edge as the Python iterator.
     pub(in crate::llvm) fn when(&mut self, condition: &str, success: impl FnOnce(&mut Self)) {
-        CheckedBody::native(self).when(condition, |body| success(body.fixed()));
+        CheckedBody::native(self).when(condition, None, |body| success(body.fixed()));
     }
 }
 
 impl CheckedBody<'_, '_, '_, '_> {
-    fn block_name(&mut self) -> String {
-        match &mut self.0 {
-            Entry::Native(e) => e.label(),
-            Entry::Registered(f) => f.block_name(),
-        }
-    }
-    fn jump_open(&mut self, dest: &str) {
-        let body = self.body();
-        if !body.terminated {
-            body.jump(dest);
-        }
-    }
-
-    /// A failed pull leaves its outputs untouched. The same guard also
-    /// branches around a filtered suite without evaluating any of its effects.
-    fn when(&mut self, test: &str, yes: impl FnOnce(&mut Self)) {
-        let take = self.block_name();
-        let end = self.block_name();
-        self.body().branch(test, &take, &end);
-        self.body().start(&take);
-        yes(self);
-        self.jump_open(&end);
-        self.body().start(&end);
-    }
-
     pub(super) fn clear_iteration_slots(&mut self, slots: &[usize]) {
         match &mut self.0 {
             Entry::Native(e) => e.clear_slots(slots),

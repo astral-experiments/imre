@@ -136,17 +136,8 @@ impl<'f, 'p> Frame<'f, '_, 'p> {
     }
 
     /// A named handler clears its binding on every path out of the body.
-    fn arm(&mut self, handler: &ExceptHandler, exception: &str, done: &str) {
-        let next = self.name("b");
-        let (class, name) = self.handler_header(handler);
-        if let Some(class) = class {
-            let matches = self.op("matches", &[exception, &class]);
-            let matches = self.value(&format!("icmp eq i64 {matches}, 2"));
-            let matched = self.name("b");
-            self.branch(&matches, &matched, &next);
-            self.label(&matched);
-        }
-        if let Some(name) = name {
+    fn caught_arm(&mut self, handler: &ExceptHandler, exception: &str, done: &str) {
+        if let Some(name) = self.handler_name(handler) {
             self.code.bind(name, exception);
             let failed = self.name("b");
             let enclosing = std::mem::replace(&mut self.body.error_target, failed.clone());
@@ -169,7 +160,6 @@ impl<'f, 'p> Frame<'f, '_, 'p> {
             self.emit_handler_suite(&handler.body);
             self.jump(done);
         }
-        self.label(&next);
     }
 
     /// Run the else suite outside the protected body, then dispatch any pending exception.
@@ -184,18 +174,20 @@ impl<'f, 'p> Frame<'f, '_, 'p> {
             self.emit_handler_suite(body);
             return;
         }
-        let (handler, enclosing) = self.begin_operand_scope();
-        self.emit_handler_suite(body);
-        self.body.error_target = enclosing;
-        self.emit_handler_suite(otherwise);
+        let handler = self.name("b");
+        CheckedBody::registered(self.reborrow()).protected_suites(body, otherwise, Some(&handler));
         let (exception, done) = self.enter_handlers(&handler);
         if is_star {
             self.groups(handlers, &exception, &done);
         } else {
-            for handler in handlers {
-                self.arm(handler, &exception, &done);
+            let unmatched = CheckedBody::registered(self.reborrow()).ordinary_handlers(
+                handlers,
+                &exception,
+                |code, handler| code.python().caught_arm(handler, &exception, &done),
+            );
+            if unmatched {
+                self.raise(&exception, None, true);
             }
-            self.raise(&exception, None, true);
         }
         self.leave_handlers(&done);
     }
@@ -209,8 +201,10 @@ impl<'f, 'p> Frame<'f, '_, 'p> {
         let mut active = exc.to_owned();
         for handler in handlers {
             self.live.extend([remainder.clone(), active.clone()]);
-            let (matcher, name) = self.handler_header(handler);
-            let matcher = matcher.expect("except* requires a type");
+            let matcher = self
+                .handler_class(&handler.matcher)
+                .expect("except* requires a type");
+            let name = self.handler_name(handler);
             let pair = self.op("except_star_split", &[&remainder, &matcher]);
             let zero = self.code.integer(0);
             let matched = self.op("get", &[&pair, &zero]);
@@ -273,21 +267,23 @@ impl<'f, 'p> Frame<'f, '_, 'p> {
         self.raise(&merged, None, true);
     }
 
-    fn handler_header(&mut self, handler: &ExceptHandler) -> (Option<String>, Option<&'f str>) {
-        let class = match &handler.matcher {
+    pub(in crate::llvm) fn handler_class(&mut self, matcher: &ExceptionMatcher) -> Option<String> {
+        match matcher {
             ExceptionMatcher::Categories(_) => None,
             ExceptionMatcher::Object(site, class) | ExceptionMatcher::Subgroup(site, class) => {
                 self.checkpoint(*site);
                 Some(self.evaluate_handle(class))
             }
-        };
-        let name = handler
-            .name
-            .map(|slot| self.names.expect("registered scope")[&slot].name.as_str());
-        (class, name)
+        }
     }
 
-    fn emit_handler_suite(&mut self, body: &[Statement]) {
+    fn handler_name(&self, handler: &ExceptHandler) -> Option<&'f str> {
+        handler
+            .name
+            .map(|slot| self.names.expect("registered scope")[&slot].name.as_str())
+    }
+
+    pub(in crate::llvm) fn emit_handler_suite(&mut self, body: &[Statement]) {
         // Module providers retain annotation sites even in an unentered else.
         if self.body.terminated
             && let Some(child) = self.prepared_child(body)
