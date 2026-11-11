@@ -15,7 +15,6 @@ pub(crate) fn choose<C, T, A>(
     arms: impl IntoIterator<Item = (Option<T>, A)>,
     mut branch: impl FnMut(&mut C, T, &str, &str),
     mut emit: impl FnMut(&mut C, A),
-    resumable: bool,
 ) {
     let done = output(context).name("select_end");
     let mut reachable = false;
@@ -42,7 +41,7 @@ pub(crate) fn choose<C, T, A>(
     let out = output(context);
     finish(out);
     out.start(&done);
-    if !reachable && !resumable {
+    if !reachable {
         out.end("unreachable");
     }
 }
@@ -70,7 +69,6 @@ impl ValueJoin {
                 };
                 join.incoming(output(code), value);
             },
-            false,
         );
         join.finish(output(context))
     }

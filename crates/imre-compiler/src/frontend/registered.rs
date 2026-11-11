@@ -1615,7 +1615,7 @@ impl<'a> SuitePreparation<'a> {
     ) -> RegisteredSuite {
         let mut region = self.region(kind);
         let mut arms = Vec::new();
-        let mut otherwise = Vec::new();
+        let mut otherwise = None;
         for (test, suite) in if_clauses(branch) {
             // A dead literal arm in a suspended frame has no resume entry.
             let test = match test {
@@ -1636,7 +1636,7 @@ impl<'a> SuitePreparation<'a> {
             if let Some(test) = test {
                 arms.push((region.operand(test, Type::Bool), child));
             } else {
-                otherwise = child;
+                otherwise = Some(child);
                 break;
             }
         }
@@ -1645,11 +1645,13 @@ impl<'a> SuitePreparation<'a> {
             Type::None,
             vec![],
         )));
+        region.falls_through =
+            otherwise.is_none() || region.suites.iter().any(|arm| arm.falls_through);
         region
             .checked
             .function
             .body
-            .extend(statements::if_arms(arms, otherwise));
+            .extend(statements::if_arms(arms, otherwise.unwrap_or_default()));
         region
     }
 
