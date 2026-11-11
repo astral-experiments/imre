@@ -1775,6 +1775,8 @@ ACCEPTED = {
     },
     "source_loader_namespace_directory": {
         "main.py": (
+            "import os\n"
+            "from types import ModuleType\n"
             "from importlib.machinery import SourceFileLoader\n"
             "import ns.child\n"
             "try:\n"
@@ -1783,6 +1785,15 @@ ACCEPTED = {
             "    pass\n"
             "else:\n"
             "    raise AssertionError('file loader returned code for a namespace directory')\n"
+            "path = ns.__path__[0] + '/late.py'\n"
+            "with open(path, 'wb'):\n"
+            "    pass\n"
+            "try:\n"
+            "    loader = SourceFileLoader('late', path)\n"
+            "    assert loader.get_code('late').co_filename == path\n"
+            "    loader.exec_module(ModuleType('late'))\n"
+            "finally:\n"
+            "    os.unlink(path)\n"
         ),
         "ns/child.py": "",
     },
