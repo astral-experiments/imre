@@ -109,13 +109,15 @@ with Rust-competitive performance.
 
 ## Standard library test results
 
-As of November 9, 2026, Imre has a paired pass for **13,157 of 16,202 tests (81.21%)** across the 44 standard library module families tracked below.
+Through November 9, 2026, Imre recorded a paired pass for **13,157 of 16,202 tests (81.21%)** across the 44 standard library module families tracked below.
 The paired pass rate is 80.2% (10,688 of 13,327) for the original 25 families and 85.9% (2,469 of 2,875) for the 19 additional families.
 A **paired pass** means that CPython 3.14.5 passed the original test and Imre passed it at both
 `-O0` and `-O3`. The total combines focused and intact suite runs across revisions, including
 development branches. The intact `dataclasses` run at `143809dd` replaces that family’s earlier count. Each original test occurrence counts once. Skipped and omitted tests remain
 in the denominator. The [omission decisions](docs/stdlib-omissions.md) cover 118 originals in these 44 families and [eight supplemental Decimal originals](docs/stdlib-omissions.md#decimal).
-The published totals at `58276705` include typed native code, boxed native code that calls the runtime, and earlier runs through the retired Python source evaluator. Use the recorded product and launch mode when reproducing a row. [Compiler design](docs/design.md#boxed-compilation) · [Evaluator removal](https://github.com/astral-experiments/imre/pull/6309)
+The published totals at `58276705` include typed native code, boxed native code that calls the runtime, and earlier runs through the retired Python source evaluator. Use the recorded product and launch mode when reproducing a row. [Compiler design](docs/design.md#emitting-operations) · [Evaluator removal](https://github.com/astral-experiments/imre/pull/6309)
+
+A later Linux recheck covered 155 previously credited tests. CPython passed all 155. At both native optimization levels, 136 `importlib` tests failed in setup while loading temporary disk or ZIP packages, and seven failed inside the test method while loading a temporary module. Twelve `logging.config.fileConfig` tests failed while evaluating a handler class or formatter defaults from configuration text. The table below records the earlier passes under their original launch configurations. [Per-test results](benchmarks/cpython_stdlib/paired-recheck-6814.tsv) · [Imre revision](https://github.com/astral-experiments/imre/commit/6f4b1f67bea8024ea216bae84194edc26b7534ed)
 
 The [supplemental `test_urllib2` decision](docs/stdlib-omissions.md#test_urllib2) covers the single packaging-specific error in a separate 80-case replay.
 
