@@ -946,6 +946,7 @@ pub(super) fn new_context_with_heap<S: Into<crate::Str>>(
         helper_executable,
         argv: NONE,
         startup_path0: None,
+        saved_entry_root: None,
         default_encoding: NONE,
         displaced_sni_callbacks: Default::default(),
         audit_hooks: Vec::new(),
@@ -1292,9 +1293,9 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
     let startup_site = ctx.config["executable"].is_string()
         && ctx.config["no_site"] != true
         && (ctx.config["frozen_modules"] != false || ctx.config["sitecustomize"] == true);
-    let frame = ctx.startup_sys().and_then(|_| {
+    let frame = ctx.startup_sys().and_then(|launched| {
         if ctx.config["path0"] == true && !startup_site {
-            ctx.insert_startup_path0()?;
+            ctx.insert_startup_path0(launched)?;
         }
         if ctx.config["faulthandler"].as_bool() == Some(true) {
             let handler = ctx.module("faulthandler")?;
@@ -1328,7 +1329,7 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
                 .inspect_err(|_| failed_site = true)?;
             ctx.heap.release_temporaries_since(mark);
             if ctx.config["path0"] == true {
-                ctx.insert_startup_path0()?;
+                ctx.insert_startup_path0(launched)?;
             }
         }
         let name = ctx.text("__main__");

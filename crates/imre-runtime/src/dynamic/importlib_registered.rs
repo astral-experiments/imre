@@ -37,6 +37,13 @@ impl Context {
             };
             root
         };
+        if let Some((current, saved)) = &self.saved_entry_root
+            && current == &root
+        {
+            let saved = self.text_codepoints(saved.clone());
+            let root = self.import_path_text(&root)?;
+            return Ok(self.alloc(Value::Tuple(vec![root, saved])));
+        }
         let registered = self.sources.iter().any(|(name, entries)| {
             let leaf = OsStr::new(name.rsplit('.').next().unwrap());
             entries.iter().any(|entry| {

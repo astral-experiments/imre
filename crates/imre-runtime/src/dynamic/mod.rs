@@ -215,6 +215,8 @@ pub(crate) struct Context {
     argv: Id,
     /// Filesystem bytes of the installed startup entry. An empty entry follows the current cwd.
     startup_path0: Option<Vec<u32>>,
+    /// Registered files backing the initial cwd of a relocated, file-backed named entry.
+    saved_entry_root: Option<(PathBuf, Vec<u32>)>,
     default_encoding: Id,
     displaced_sni_callbacks: std::collections::HashSet<Id>,
     audit_hooks: Vec<Id>,
@@ -3922,7 +3924,7 @@ impl Context {
     }
 
     /// Install the search entry after site, keeping its configured value independent of sys.path.
-    fn insert_startup_path0(&mut self) -> Result<()> {
+    fn insert_startup_path0(&mut self, launched: bool) -> Result<()> {
         let entry = if self.config["path_entry"] != true
             && self.config["command_source"].is_string()
         {
@@ -3931,6 +3933,13 @@ impl Context {
             let Some(cwd) = Self::startup_cwd() else {
                 return Ok(());
             };
+            if !launched && self.config["path0_bytes"].is_array() {
+                let bytes: Vec<u8> = serde_json::from_value(self.config["path0_bytes"].clone())
+                    .expect("compiler path0 bytes");
+                if cwd.as_os_str().as_encoded_bytes() != bytes {
+                    self.saved_entry_root = Some((cwd.clone(), Self::import_path_points(&bytes)?));
+                }
+            }
             self.import_path_text(&cwd)?
         } else if self.config["path0_bytes"].is_array() {
             let bytes: Vec<u8> = serde_json::from_value(self.config["path0_bytes"].clone())

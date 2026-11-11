@@ -2097,6 +2097,17 @@ pub(crate) fn compile(
             || entry_sources
                 .get("runpy")
                 .is_none_or(|(root, _)| root == Path::new(bundled_root)));
+    // A saved -m application can still find the file initializer selected from path[0].
+    // ZIP and open module launchers keep their own finder and search path.
+    let bound_path0 = sdk_runpy
+        && !options.path_entry
+        && !options.sitecustomize
+        && !options.stdlib_sitecustomize
+        && options.user_site_pth.is_none()
+        && module_body.is_some_and(|(id, root, _)| {
+            initial[..path0_len].contains(root)
+                && registrations.physical_files.contains_key(&sources[id].1)
+        });
     // Borrow the winners once discovery has finished growing the emitter's source table.
     let mut function_modules = Vec::new();
     let mut declared_open_paths = HashSet::new();
@@ -2319,9 +2330,9 @@ pub(crate) fn compile(
     let mut path0_bytes = None;
     if path0_len != 0 {
         let first = &mut initial[0];
-        if in_memory && !options.path_entry {
+        if in_memory && !options.path_entry && !bound_path0 {
             first.clear();
-        } else if first.to_str().is_none() {
+        } else if bound_path0 || first.to_str().is_none() {
             path0_bytes = Some(std::mem::take(first).into_os_string().into_encoded_bytes());
         }
     }
