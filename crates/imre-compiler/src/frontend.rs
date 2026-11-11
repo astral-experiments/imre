@@ -8025,6 +8025,15 @@ impl<'a> Checker<'a> {
             return Ok(value);
         }
         if let Some(target) = self.resolve(expression) {
+            // Calls to the sealed compile intrinsic have their own checked operands.
+            // Taking the callable, flag object, or module itself requires its live namespace.
+            if matches!(
+                target,
+                Binding::IntrinsicModule(crate::modules::IntrinsicModule::Re)
+                    | Binding::Intrinsic(Intrinsic::RegexCompile | Intrinsic::RegexMultiline)
+            ) {
+                return Err(self.scoped_builtin_error("the re module binding", expression));
+            }
             if target == Binding::Intrinsic(Intrinsic::CalendarUtc) {
                 return Ok(calendar::utc());
             }
@@ -9328,7 +9337,13 @@ impl<'a> Checker<'a> {
                             "comparison of unified-diff objects is unsupported",
                         ));
                     }
-                    if matches!(ty, Type::RegexPattern | Type::RegexMatch) {
+                    if matches!(
+                        ty,
+                        Type::RegexPattern
+                            | Type::RegexMatch
+                            | Type::RegexBytesPattern
+                            | Type::RegexBytesMatch
+                    ) {
                         return Err(error(
                             self.source,
                             expression,
@@ -9803,6 +9818,26 @@ impl<'a> Checker<'a> {
                     return self.class_attribute(attribute, class, None, None);
                 }
                 let receiver = self.expr(&attribute.value)?;
+                if matches!(receiver.ty, Type::RegexPattern | Type::RegexBytesPattern) {
+                    let member = match attribute.attr.as_str() {
+                        "pattern" => Some((
+                            if receiver.ty == Type::RegexBytesPattern {
+                                Type::Bytes
+                            } else {
+                                Type::Str
+                            },
+                            Builtin::RegexSpelling,
+                        )),
+                        "flags" => Some((Type::Int, Builtin::RegexFlags)),
+                        _ => None,
+                    };
+                    if let Some((ty, member)) = member {
+                        return Ok(Expr {
+                            ty,
+                            kind: ExprKind::Builtin(member, vec![receiver]),
+                        });
+                    }
+                }
                 if receiver.ty == Type::PythonObject {
                     return Ok(registered::values::loaded_attribute(attribute, receiver));
                 }
@@ -10487,6 +10522,9 @@ impl<'a> Checker<'a> {
             return Err(self.scoped_builtin_error(export, call));
         }
         if let Some(method) = self.boxed_descriptor(&call.func) {
+            if matches!(method, "re.Pattern.findall" | "re.Pattern.split") {
+                return self.compiled_regex_collection(call, method == "re.Pattern.split", method);
+            }
             return Err(self.scoped_builtin_error(method, call));
         }
         if let Some(local) = self.local_class(&call.func)?
@@ -12570,9 +12608,16 @@ impl<'a> Checker<'a> {
             if let Some(element) = self.types.deque_element(receiver.ty) {
                 return self.deque_method(call, attribute, receiver, element);
             }
-            if matches!(receiver.ty, Type::RegexPattern | Type::RegexMatch)
-                || self.types.payload(receiver.ty) == Some(Type::RegexMatch)
-            {
+            if matches!(
+                receiver.ty,
+                Type::RegexPattern
+                    | Type::RegexMatch
+                    | Type::RegexBytesPattern
+                    | Type::RegexBytesMatch
+            ) || matches!(
+                self.types.payload(receiver.ty),
+                Some(Type::RegexMatch | Type::RegexBytesMatch)
+            ) {
                 return self.regex_method(receiver, attribute, call);
             }
             if matches!(receiver.ty, Type::Str | Type::StrLiteral(_))

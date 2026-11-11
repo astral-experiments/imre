@@ -360,7 +360,7 @@ pub(in crate::objects) unsafe fn type_name(
             return unsafe {
                 object(word as *const Object).0.with(|s| match s {
                     Storage::Sequence(_) => "list".into(),
-                    Storage::RegexMatch(_) => "re.Match".into(),
+                    Storage::RegexMatch(_) | Storage::RegexBytesMatch(_) => "re.Match".into(),
                     Storage::Dictionary(_) => "dict".into(),
                     Storage::Set(_) => "set".into(),
                     Storage::File(file) if let Some((name, _)) = file.memory_class() => name.into(),

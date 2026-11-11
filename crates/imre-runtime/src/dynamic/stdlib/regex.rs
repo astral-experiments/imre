@@ -30,14 +30,8 @@ pub(super) use split::pattern_split;
 use split::split;
 pub(super) use sub::{match_expand, pattern_sub};
 
-const IGNORECASE: i64 = 2;
-const LOCALE: i64 = 4;
-const MULTILINE: i64 = 8;
-const DOTALL: i64 = 16;
-const UNICODE: i64 = 32;
-const VERBOSE: i64 = 64;
-const DEBUG: i64 = 128;
-const ASCII: i64 = 256;
+use imre_regex::flags::{ASCII, DEBUG, DOTALL, IGNORECASE, LOCALE, MULTILINE, UNICODE, VERBOSE};
+
 const KNOWN_FLAGS: i64 =
     IGNORECASE | LOCALE | MULTILINE | DOTALL | UNICODE | VERBOSE | DEBUG | ASCII;
 

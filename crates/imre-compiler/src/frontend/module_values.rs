@@ -23,7 +23,6 @@ pub(super) struct ModuleValues {
     pub(super) unittest_skips: RefCell<HashMap<(DefinitionId, usize), (usize, usize)>>,
     literal_tuples: RefCell<HashMap<ClassLiteral, usize>>,
     types: RefCell<Vec<Type>>,
-    pub(super) regex_literals: RefCell<HashMap<String, regex::CaptureLayout>>,
     regex_globals: RefCell<HashMap<usize, regex::CaptureLayout>>,
     /// Physical functions published in a module slot, in execution order.
     slot_functions: RefCell<HashMap<usize, Vec<usize>>>,
@@ -200,8 +199,8 @@ impl ModuleValues {
 
     pub(super) fn regex_groups(&self, pattern: &Expr) -> Option<regex::CaptureLayout> {
         match &pattern.kind {
-            ExprKind::Builtin(Builtin::RegexCompile { source, .. }, _) => {
-                self.regex_literals.borrow().get(source).cloned()
+            ExprKind::Builtin(Builtin::RegexCompile { pattern, .. }, _) => {
+                Some(regex::CaptureLayout(pattern.clone()))
             }
             ExprKind::Builtin(Builtin::GlobalGet(slot), _) => {
                 self.regex_globals.borrow().get(slot).cloned()

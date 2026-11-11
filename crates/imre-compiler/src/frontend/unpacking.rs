@@ -296,6 +296,25 @@ impl Checker<'_> {
         &mut self,
         assignment: &ast::StmtAssign,
     ) -> Result<Vec<Statement>, String> {
+        // The live namespace owns later lookups. An enclosing call may already
+        // have loaded its callable before an argument mutates this attribute.
+        for target in &assignment.targets {
+            if self.registered.is_none()
+                && let ast::Expr::Attribute(attribute) = target
+                && matches!(attribute.attr.as_str(), "compile" | "MULTILINE" | "M")
+                && self
+                    .graph
+                    .session
+                    .is_stdlib_module(self.module, &attribute.value, "re")
+                && match self.resolve(&attribute.value) {
+                    Some(Binding::IntrinsicModule(crate::modules::IntrinsicModule::Re)) => true,
+                    Some(Binding::Module(module)) => self.graph.modules[module].is_bundled("re"),
+                    _ => false,
+                }
+            {
+                return Err(self.scoped_builtin_error("the mutable re module binding", attribute));
+            }
+        }
         if let [ast::Expr::Attribute(attribute)] = assignment.targets.as_slice()
             && let Some(field) = self.mime_attribute(attribute)
         {

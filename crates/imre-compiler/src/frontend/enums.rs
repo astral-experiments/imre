@@ -562,6 +562,15 @@ impl Checker<'_> {
                 same
             });
         }
+        if [left.ty, right.ty]
+            .iter()
+            .all(|t| matches!(t, Type::RegexPattern | Type::RegexBytesPattern))
+        {
+            return Ok(Self::identity_result(
+                vec![left, right],
+                op == ast::CmpOp::IsNot,
+            ));
+        }
         if [left.ty, right.ty].iter().all(|t| {
             matches!(
                 t,

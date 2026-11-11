@@ -68,8 +68,7 @@ REJECTED = {
     "unknown_url_export": "from urllib.parse import no_such_url_export",
     "escaped_unquote": 'from urllib.parse import unquote\ncallback = unquote',
     "unused_invalid_method": 'def unused(value: str) -> str:\n    return value.strip(chars="x")',
-    "regex_dynamic": 'import re\ndef bad(value: str) -> None:\n    re.compile(value)',
-    "regex_bytes": 'import re\nre.compile(b"x")',
+    "regex_non_pattern": 'import re\nre.compile(17)',
     "regex_flags": 'import re\nre.compile("x", re.IGNORECASE)',
     "regex_compiled_flags": 'import re\np = re.compile("x")\nre.search(p, "x", re.UNICODE)',
     "regex_search_bytes": 'import re\nre.search("x", b"x")',
@@ -82,6 +81,13 @@ REJECTED = {
     "regex_aliased_dict_as_str": 'import re\ndef bad() -> str:\n    match = re.search("(?P<x>x)", "x")\n    if match is None:\n        return ""\n    groups = match.groupdict()\n    alias = groups\n    alias["x"] = None\n    return groups["x"]',
     "regex_nested_repeat": 'import re\nre.compile("(x?)*")',
     "sub_nullable": 'import re\nre.sub("x*", "!", "xxx")',
+    # Only the text pattern can consume a character outside the byte range.
+    "sub_text_after_bytes_layout": (
+        "import re\n"
+        r"bytes_pat = re.compile(br'(?:(?P<a>x)|[^\x00-\xff])?')" "\n"
+        r"text_pat = re.compile(r'(?:(?P<a>x)|[^\x00-\xff])?')" "\n"
+        "print(text_pat.sub('m', ''))"
+    ),
     "sub_invalid_group": 'import re\nre.sub("(x)", r"\\2", "none")',
     "sub_unclosed_group": 'import re\nre.sub("(x)", r"\\g<1", "none")',
     "sub_dynamic_template": 'import re\ndef bad(s: str) -> str:\n    return re.sub("x", s, "x")',

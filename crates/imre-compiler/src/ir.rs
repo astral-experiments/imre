@@ -136,6 +136,7 @@ pub(crate) enum Type {
     Semaphore,
     /// An immutable compiled text pattern or one successful search and its captures.
     RegexPattern,
+    RegexBytesPattern,
     NativeModule,
     ModuleNamespace,
     LogRecord,
@@ -175,6 +176,7 @@ pub(crate) enum Type {
     ZipInfo,
     CsvReader,
     RegexMatch,
+    RegexBytesMatch,
     /// Immutable selections from decoded JSON. Only the object form has a source annotation.
     JsonRoot,
     JsonValue,
@@ -432,6 +434,7 @@ impl std::fmt::Display for Type {
             Self::Patch(PatchKind::File) => "unidiff.PatchedFile",
             Self::Patch(PatchKind::Hunk) => "unidiff.Hunk",
             Self::RegexPattern => "re.Pattern[str]",
+            Self::RegexBytesPattern => "re.Pattern[bytes]",
             Self::NativeModule => "builtin module",
             Self::ModuleNamespace => "module namespace",
             Self::LogFormatter => "logging.Formatter",
@@ -465,6 +468,7 @@ impl std::fmt::Display for Type {
             Self::ZipInfo => "zipfile.ZipInfo",
             Self::CsvReader => "CSV reader",
             Self::RegexMatch => "re.Match[str]",
+            Self::RegexBytesMatch => "re.Match[bytes]",
             Self::JsonRoot => "JSON document",
             Self::JsonValue => "JSON value",
             Self::JsonObject => "dict[str, Any]",
@@ -2323,9 +2327,11 @@ pub(crate) enum Builtin {
     GzipOpen,
     /// The compile-time validated pattern is independent of the source spelling.
     RegexCompile {
-        source: String,
-        spelling: String,
+        spelling: Constant,
+        supplied_flags: u16,
+        pattern: std::sync::Arc<imre_regex::FixedPattern>,
     },
+    RegexFlags,
     RegexSpelling,
     UnittestCompilePattern,
     RegexSearch,
