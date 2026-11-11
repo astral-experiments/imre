@@ -165,27 +165,25 @@ impl<M> Diagnostic<M> {
                 .is_some_and(|(a, b)| a.range.start() < b.range.start())
     }
 
-    pub(crate) fn matching_contract(
+    pub(crate) fn matching_declared_argument(
         &self,
         path: &std::path::Path,
-        range: TextRange,
-        rule: &str,
+        operand: TextRange,
+        module: ModuleId,
+        parameter: TextRange,
     ) -> Option<&Self> {
         std::iter::once(self)
             .chain(self.following.iter())
             .find(|report| {
-                report.path.as_deref() == Some(path)
-                    && report
-                        .position
-                        .as_ref()
-                        .is_some_and(|position| position.range == range)
-                    && matches!(
-                        (report.kind, rule),
-                        (
-                            Kind::ExactType | Kind::DeclaredArgument,
-                            "invalid-argument-type"
-                        ) | (Kind::ReturnType, "invalid-return-type")
-                    )
+                report.kind == Kind::ExactType
+                    && report.path.as_deref() == Some(path)
+                    && report.position.as_ref().is_some_and(|position| {
+                        position.range == operand
+                            && position.expected_from.is_some_and(|declaration| {
+                                declaration.module == module
+                                    && parameter.contains_range(declaration.annotation)
+                            })
+                    })
             })
     }
 

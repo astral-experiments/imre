@@ -504,6 +504,100 @@ fn eager_comprehension_exports_only_guaranteed_assignments() {
     }
 }
 
+const DORMANT_SOCKET_WORKER: &str = r#"import socket
+import threading
+
+import scores
+
+def receive(stream):
+    with stream as source:
+        print(source.recv(2))
+
+if False:
+    reader, writer = socket.socketpair()
+    writer.sendall(b"Rx")
+    task = threading.Thread(target=receive, args=(reader,))
+    task.start()
+    task.join()
+    writer.close()
+scores.measure()
+"#;
+
+#[test]
+fn dormant_thread_preserves_the_declared_call_diagnostic_across_edits() {
+    let project = tempfile::tempdir().unwrap();
+    let entry = project.path().join("worker_unused.py");
+    let scores = project.path().join("scores.py");
+    std::fs::write(&entry, DORMANT_SOCKET_WORKER).unwrap();
+    let source = "def take(value: int) -> int:\n    return value\n\ndef measure() -> int:\n    return take('x')\n";
+    let expected = ":5:17: Imre: expected int, got str; annotations are enforced contracts";
+    let mut compiler = IncrementalCompiler::default();
+    std::fs::write(&scores, source).unwrap();
+    assert_refusal_before_llvm(&entry, &scores, expected, &[CompileOptions::default()]);
+    assert_source_diagnostic(
+        &compiler.check_file(&entry, None).unwrap_err(),
+        &scores,
+        expected,
+    );
+
+    let mixed = format!("{source}\ndef other() -> int:\n    return 'unrelated'\n");
+    std::fs::write(&scores, mixed).unwrap();
+    let diagnostic = compiler.check_file(&entry, None).unwrap_err();
+    assert_eq!(check_file(&entry, None).unwrap_err(), diagnostic);
+    assert!(
+        diagnostic.starts_with("error[invalid-return-type]"),
+        "{diagnostic}"
+    );
+    assert!(diagnostic.contains("scores.py:8:12"), "{diagnostic}");
+    assert!(!diagnostic.contains(expected), "{diagnostic}");
+
+    std::fs::write(&scores, source.replace("take('x')", "take(3)")).unwrap();
+    compiler.check_file(&entry, None).unwrap();
+    check_file(&entry, None).unwrap();
+}
+
+#[test]
+fn same_argument_span_retains_the_other_declared_parameter_error() {
+    let project = tempfile::tempdir().unwrap();
+    let entry = project.path().join("worker_unused.py");
+    std::fs::write(&entry, DORMANT_SOCKET_WORKER).unwrap();
+    std::fs::write(
+        project.path().join("api.py"),
+        concat!(
+            "def take_int(value: int) -> int:\n    return value\n",
+            "\ndef take_bytes(value: bytes) -> int:\n    return 7\n",
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        project.path().join("scores.py"),
+        concat!(
+            "from typing import TYPE_CHECKING\nfrom api import take_int as take\n",
+            "if TYPE_CHECKING:\n    from api import take_bytes as take\n",
+            "\ndef measure() -> int:\n    return take('x')\n",
+        ),
+    )
+    .unwrap();
+
+    let diagnostic = check_file(&entry, None).unwrap_err();
+    assert_eq!(
+        diagnostic.matches("scores.py:7:17").count(),
+        2,
+        "{diagnostic}"
+    );
+    assert!(
+        diagnostic.contains("scores.py:7:17: Imre: expected int, got str"),
+        "{diagnostic}"
+    );
+    assert_eq!(
+        diagnostic.matches("error[invalid-argument-type]").count(),
+        1,
+        "{diagnostic}"
+    );
+    assert!(diagnostic.contains("Expected `bytes`"), "{diagnostic}");
+    assert!(diagnostic.contains("api.py:4:5"), "{diagnostic}");
+}
+
 #[test]
 fn dormant_thread_keeps_an_imported_modules_exact_types() {
     let project = tempfile::tempdir().unwrap();
