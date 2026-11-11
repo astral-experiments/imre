@@ -1,0 +1,724 @@
+family	id	occurrence	frozen_stock	previous_credit	stock	alternate_stock	O0	O3	paired
+inspect	test.test_inspect.test_inspect.IsTestBase.test__all__	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestBlockComments.test_class_async_method	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestBlockComments.test_class_method	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestBlockComments.test_toplevel_class	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestBoundArguments.test_signature_bound_arguments_apply_defaults	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestBoundArguments.test_signature_bound_arguments_arguments_type	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestBoundArguments.test_signature_bound_arguments_equality	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestBoundArguments.test_signature_bound_arguments_pickle	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestBoundArguments.test_signature_bound_arguments_repr	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestBoundArguments.test_signature_bound_arguments_unhashable	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestBuggyCases.test_class_decorator	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestBuggyCases.test_class_definition_in_multiline_comment	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestBuggyCases.test_class_definition_in_multiline_string_definition	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestBuggyCases.test_class_definition_same_name_diff_methods	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestBuggyCases.test_class_inside_conditional	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestBuggyCases.test_class_with_method_from_other_module	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestBuggyCases.test_comment_or_empty_line_after_decorator	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestBuggyCases.test_findsource_binary	1	addSuccess	0	skipped 'unicodedata is not an external binary module'		skipped 'unicodedata is not an external binary module'	skipped 'unicodedata is not an external binary module'	0
+inspect	test.test_inspect.test_inspect.TestBuggyCases.test_findsource_code_in_linecache	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestBuggyCases.test_findsource_on_class_with_out_of_bounds_lineno	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestBuggyCases.test_findsource_on_func_with_out_of_bounds_lineno	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestBuggyCases.test_findsource_without_filename	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestBuggyCases.test_generator_expression	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestBuggyCases.test_getsource_on_class_code_object	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestBuggyCases.test_getsource_on_method	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestBuggyCases.test_method_in_dynamic_class	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestBuggyCases.test_multiline_sig	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestBuggyCases.test_multiple_children_classes	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestBuggyCases.test_nested_class	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestBuggyCases.test_nested_class_definition	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestBuggyCases.test_nested_class_definition_indented_string	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestBuggyCases.test_nested_class_definition_inside_async_function	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestBuggyCases.test_nested_class_definition_inside_function	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestBuggyCases.test_nested_func	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestBuggyCases.test_one_liner_dedent_non_name	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestBuggyCases.test_one_liner_followed_by_non_name	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestBuggyCases.test_with_comment	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestBuggyCases.test_with_comment_instead_of_docstring	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestClassesAndFunctions.test_argspec_api_ignores_wrapped	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestClassesAndFunctions.test_classify_DynamicClassAttribute	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestClassesAndFunctions.test_classify_VirtualAttribute	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestClassesAndFunctions.test_classify_VirtualAttribute_multi_classes	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestClassesAndFunctions.test_classify_builtin_types	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestClassesAndFunctions.test_classify_class_attrs_with_buggy_dir	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestClassesAndFunctions.test_classify_metaclass_class_attribute	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestClassesAndFunctions.test_classify_newstyle	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestClassesAndFunctions.test_classify_overrides_bool	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestClassesAndFunctions.test_getfullargspec	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestClassesAndFunctions.test_getfullargspec_builtin_func	1	addSuccess	0	"skipped ""No module named '_testcapi'"""		skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	0
+inspect	test.test_inspect.test_inspect.TestClassesAndFunctions.test_getfullargspec_builtin_func_no_signature	1	addSuccess	0	"skipped ""No module named '_testcapi'"""		skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	0
+inspect	test.test_inspect.test_inspect.TestClassesAndFunctions.test_getfullargspec_builtin_methods	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestClassesAndFunctions.test_getfullargspec_definition_order_preserved_on_kwonly	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestClassesAndFunctions.test_getfullargspec_signature_annos	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestClassesAndFunctions.test_getfullargspec_signature_attr	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestClassesAndFunctions.test_getmembers_VirtualAttribute	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestClassesAndFunctions.test_getmembers_custom_broken_dir	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestClassesAndFunctions.test_getmembers_custom_dir	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestClassesAndFunctions.test_getmembers_custom_duplicated_dir	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestClassesAndFunctions.test_getmembers_descriptors	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestClassesAndFunctions.test_getmembers_method	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestClassesAndFunctions.test_getmembers_static	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestClassesAndFunctions.test_getmembers_with_buggy_dir	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestClassesAndFunctions.test_newstyle_mro	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestComplexDecorator.test_parens_in_decorator	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestDecorators.test_decorator_with_lambda	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestDecorators.test_getsource_unwrap	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestDecorators.test_replacing_decorator	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestDecorators.test_wrapped_decorator	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestFormatAnnotation.test_formatannotationrelativeto	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestFormatAnnotation.test_forwardref	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestFormatAnnotation.test_typing_replacement	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetAsyncGenState.test_closed_after_exhaustion	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetAsyncGenState.test_closed_after_immediate_exception	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetAsyncGenState.test_created	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetAsyncGenState.test_easy_debugging	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetAsyncGenState.test_getasyncgenlocals	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetAsyncGenState.test_getasyncgenlocals_empty	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetAsyncGenState.test_getasyncgenlocals_error	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetAsyncGenState.test_running	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetAsyncGenState.test_suspended	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetClosureVars.test_attribute_same_name_as_global_var	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestGetClosureVars.test_builtins_as_dict	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestGetClosureVars.test_builtins_as_module	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestGetClosureVars.test_builtins_fallback	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestGetClosureVars.test_generator_closure	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestGetClosureVars.test_getclosurevars_empty	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestGetClosureVars.test_getclosurevars_error	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestGetClosureVars.test_method_closure	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestGetClosureVars.test_name_resolution	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestGetClosureVars.test_nonlocal_vars	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestGetCoroutineState.test_closed_after_close	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetCoroutineState.test_closed_after_exhaustion	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetCoroutineState.test_closed_after_immediate_exception	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetCoroutineState.test_created	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetCoroutineState.test_easy_debugging	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetCoroutineState.test_getcoroutinelocals	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetCoroutineState.test_suspended	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetGeneratorState.test_closed_after_close	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetGeneratorState.test_closed_after_exhaustion	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetGeneratorState.test_closed_after_immediate_exception	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetGeneratorState.test_created	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetGeneratorState.test_easy_debugging	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetGeneratorState.test_getgeneratorlocals	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestGetGeneratorState.test_getgeneratorlocals_empty	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestGetGeneratorState.test_getgeneratorlocals_error	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestGetGeneratorState.test_running	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetGeneratorState.test_suspended	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetGeneratorState.test_types_coroutine_wrapper_state	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetattrStatic.test_basic	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetattrStatic.test_cache_does_not_cause_classes_to_persist	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetattrStatic.test_classAttribute	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetattrStatic.test_classVirtualAttribute	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetattrStatic.test_class_as_property	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetattrStatic.test_custom___getattr__	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetattrStatic.test_custom___getattribute__	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetattrStatic.test_custom_object_dict	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetattrStatic.test_descriptor	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetattrStatic.test_descriptor_raises_AttributeError	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetattrStatic.test_dict_as_property	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetattrStatic.test_inherited	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetattrStatic.test_inherited_classattribute	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetattrStatic.test_inherited_slots	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetattrStatic.test_instance_attr	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetattrStatic.test_metaclass	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetattrStatic.test_metaclass_dict_as_property	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetattrStatic.test_metaclass_with_descriptor	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetattrStatic.test_metaclass_with_metaclass_with_dict_as_property	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetattrStatic.test_module	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetattrStatic.test_mro_as_property	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetattrStatic.test_mutated_mro	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetattrStatic.test_no_dict_no_slots	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetattrStatic.test_no_dict_no_slots_instance_member	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetattrStatic.test_property	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetattrStatic.test_slots	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetcallargsFunctions.test_errors	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestGetcallargsFunctions.test_keyword_only	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestGetcallargsFunctions.test_multiple_features	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestGetcallargsFunctions.test_plain	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestGetcallargsFunctions.test_varargs	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestGetcallargsFunctions.test_varkw	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestGetcallargsFunctions.test_varkw_only	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestGetcallargsMethods.test_errors	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestGetcallargsMethods.test_keyword_only	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestGetcallargsMethods.test_multiple_features	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestGetcallargsMethods.test_plain	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestGetcallargsMethods.test_varargs	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestGetcallargsMethods.test_varkw	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestGetcallargsMethods.test_varkw_only	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestGetcallargsUnboundMethods.test_errors	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestGetcallargsUnboundMethods.test_keyword_only	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestGetcallargsUnboundMethods.test_multiple_features	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestGetcallargsUnboundMethods.test_plain	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestGetcallargsUnboundMethods.test_varargs	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestGetcallargsUnboundMethods.test_varkw	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestGetcallargsUnboundMethods.test_varkw_only	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestGetsourceInteractive.test_getclasses_interactive	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetsourceStdlib.test_getsource_stdlib_abc	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetsourceStdlib.test_getsource_stdlib_collections_abc	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetsourceStdlib.test_getsource_stdlib_decimal	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGetsourceStdlib.test_getsource_stdlib_tomllib	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGettingSourceOfToplevelFrames.test_range_toplevel_frame	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestGettingSourceOfToplevelFrames.test_range_traceback_toplevel_frame	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestInterpreterStack.test__all__	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestInterpreterStack.test_abuse_done	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestInterpreterStack.test_frame	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestInterpreterStack.test_previous_frame	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestInterpreterStack.test_stack	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestInterpreterStack.test_trace	1	addSuccess	0	pass		fail	fail	0
+inspect	test.test_inspect.test_inspect.TestIsDataDescriptor.test_custom_descriptors	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestIsDataDescriptor.test_functions	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestIsDataDescriptor.test_property	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestIsDataDescriptor.test_slot	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestIsMethodDescriptor.test_builtin_descriptors	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestIsMethodDescriptor.test_custom_descriptors	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestIsMethodDescriptor.test_descriptor_being_a_class	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestIsMethodDescriptor.test_non_descriptors	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestMain.test_builtins	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestMain.test_custom_getattr	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestMain.test_details	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestMain.test_only_source	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestMain.test_qualname_source	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestNoEOL.test_class	1	addSuccess	1	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestOneliners.test_anonymous	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestOneliners.test_dataclass	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestOneliners.test_enum	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestOneliners.test_lambda_in_list	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestOneliners.test_manyargs	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestOneliners.test_namedtuple	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestOneliners.test_nested_lambda	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestOneliners.test_oneline_lambda	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestOneliners.test_onelinefunc	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestOneliners.test_parenthesized_multiline_lambda	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestOneliners.test_post_line_parenthesized_lambda	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestOneliners.test_threeline_lambda	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestOneliners.test_twoline_indented_lambda	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestOneliners.test_twolinefunc	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestOneliners.test_typeddict	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestParameterObject.test_signature_parameter_equality	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestParameterObject.test_signature_parameter_hashable	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestParameterObject.test_signature_parameter_immutability	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestParameterObject.test_signature_parameter_implicit	1	addSuccess	0	pass		skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	0
+inspect	test.test_inspect.test_inspect.TestParameterObject.test_signature_parameter_kinds	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestParameterObject.test_signature_parameter_object	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestParameterObject.test_signature_parameter_positional_only	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestParameterObject.test_signature_parameter_replace	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestPredicates.test__all__	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestPredicates.test_excluding_predicates	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestPredicates.test_get_slot_members	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestPredicates.test_isabstract	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestPredicates.test_isabstract_during_init_subclass	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestPredicates.test_isawaitable	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestPredicates.test_isclass	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestPredicates.test_iscoroutine	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestPredicates.test_ispackage	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestPredicates.test_isroutine	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestPredicates.test_isroutine_singledispatch	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestReload.test_getsource_reload	1	addSuccess	1	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestRepl.test_getsource	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestRetrievingSourceCode.test_c_cleandoc	1	addSuccess	0	pass		skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	0
+inspect	test.test_inspect.test_inspect.TestRetrievingSourceCode.test_cleandoc	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestRetrievingSourceCode.test_finddoc	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestRetrievingSourceCode.test_getclasses	1	addSuccess	0	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestRetrievingSourceCode.test_getcomments	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestRetrievingSourceCode.test_getdoc	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestRetrievingSourceCode.test_getdoc_inherited	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestRetrievingSourceCode.test_getfile	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestRetrievingSourceCode.test_getfile_broken_repr	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestRetrievingSourceCode.test_getfile_builtin_class	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestRetrievingSourceCode.test_getfile_builtin_function_or_method	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestRetrievingSourceCode.test_getfile_builtin_module	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestRetrievingSourceCode.test_getfile_class_without_module	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestRetrievingSourceCode.test_getframeinfo_get_first_line	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestRetrievingSourceCode.test_getfunctions	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestRetrievingSourceCode.test_getmodule	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestRetrievingSourceCode.test_getmodule_file_not_found	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestRetrievingSourceCode.test_getmodule_recursion	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestRetrievingSourceCode.test_getsource	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestRetrievingSourceCode.test_getsource_empty_file	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestRetrievingSourceCode.test_getsource_on_class_without_firstlineno	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestRetrievingSourceCode.test_getsource_on_code_object	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestRetrievingSourceCode.test_getsource_on_generated_class	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestRetrievingSourceCode.test_getsourcefile	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestRetrievingSourceCode.test_proceed_with_fake_filename	1	addSuccess	1	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestSignatureBind.test_signature_bind_args_and_kwargs	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureBind.test_signature_bind_args_and_varargs	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureBind.test_signature_bind_arguments	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureBind.test_signature_bind_empty	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureBind.test_signature_bind_implicit_arg	1	addSuccess	0	pass		skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	0
+inspect	test.test_inspect.test_inspect.TestSignatureBind.test_signature_bind_just_args	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureBind.test_signature_bind_just_kwargs	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureBind.test_signature_bind_kwonly	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureBind.test_signature_bind_positional_only	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureBind.test_signature_bind_posonly_kwargs	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureBind.test_signature_bind_var	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureBind.test_signature_bind_vararg_name	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureBind.test_signature_bind_varargs_order	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureBind.test_signature_bind_with_self_arg	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureDefinitions.test_abc_module_has_signatures	1	addSuccess	0	pass		skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	0
+inspect	test.test_inspect.test_inspect.TestSignatureDefinitions.test_atexit_module_has_signatures	1	addSuccess	0	pass		skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	0
+inspect	test.test_inspect.test_inspect.TestSignatureDefinitions.test_base_class_have_text_signature	1	addSuccess	1	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestSignatureDefinitions.test_builtins_have_signatures	1	addSuccess	0	pass		skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	0
+inspect	test.test_inspect.test_inspect.TestSignatureDefinitions.test_codecs_module_has_signatures	1	addSuccess	0	pass		skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	0
+inspect	test.test_inspect.test_inspect.TestSignatureDefinitions.test_collections_abc_module_has_signatures	1	addSuccess	0	pass		skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	0
+inspect	test.test_inspect.test_inspect.TestSignatureDefinitions.test_collections_module_has_signatures	1	addSuccess	0	pass		skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	0
+inspect	test.test_inspect.test_inspect.TestSignatureDefinitions.test_errno_module_has_signatures	1	addSuccess	0	pass		skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	0
+inspect	test.test_inspect.test_inspect.TestSignatureDefinitions.test_faulthandler_module_has_signatures	1	addSuccess	0	pass		skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	0
+inspect	test.test_inspect.test_inspect.TestSignatureDefinitions.test_functools_module_has_signatures	1	addSuccess	0	pass		skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	0
+inspect	test.test_inspect.test_inspect.TestSignatureDefinitions.test_gc_module_has_signatures	1	addSuccess	0	pass		skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	0
+inspect	test.test_inspect.test_inspect.TestSignatureDefinitions.test_io_module_has_signatures	1	addSuccess	0	pass		skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	0
+inspect	test.test_inspect.test_inspect.TestSignatureDefinitions.test_itertools_module_has_signatures	1	addSuccess	0	pass		skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	0
+inspect	test.test_inspect.test_inspect.TestSignatureDefinitions.test_locale_module_has_signatures	1	addSuccess	0	pass		skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	0
+inspect	test.test_inspect.test_inspect.TestSignatureDefinitions.test_marshal_module_has_signatures	1	addSuccess	0	pass		skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	0
+inspect	test.test_inspect.test_inspect.TestSignatureDefinitions.test_operator_module_has_signatures	1	addSuccess	0	pass		skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	0
+inspect	test.test_inspect.test_inspect.TestSignatureDefinitions.test_os_module_has_signatures	1	addSuccess	0	pass		skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	0
+inspect	test.test_inspect.test_inspect.TestSignatureDefinitions.test_pwd_module_has_signatures	1	addSuccess	0	pass		skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	0
+inspect	test.test_inspect.test_inspect.TestSignatureDefinitions.test_python_function_override_signature	1	addSuccess	1	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestSignatureDefinitions.test_re_module_has_signatures	1	addSuccess	0	pass		skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	0
+inspect	test.test_inspect.test_inspect.TestSignatureDefinitions.test_signal_module_has_signatures	1	addSuccess	0	pass		skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	0
+inspect	test.test_inspect.test_inspect.TestSignatureDefinitions.test_stat_module_has_signatures	1	addSuccess	0	pass		skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	0
+inspect	test.test_inspect.test_inspect.TestSignatureDefinitions.test_string_module_has_signatures	1	addSuccess	0	pass		skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	0
+inspect	test.test_inspect.test_inspect.TestSignatureDefinitions.test_symtable_module_has_signatures	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestSignatureDefinitions.test_sys_module_has_signatures	1	addSuccess	0	pass		skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	0
+inspect	test.test_inspect.test_inspect.TestSignatureDefinitions.test_sysconfig_module_has_signatures	1	addSuccess	0	pass		skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	0
+inspect	test.test_inspect.test_inspect.TestSignatureDefinitions.test_thread_module_has_signatures	1	addSuccess	0	pass		skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	0
+inspect	test.test_inspect.test_inspect.TestSignatureDefinitions.test_threading_module_has_signatures	1	addSuccess	0	pass		skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	0
+inspect	test.test_inspect.test_inspect.TestSignatureDefinitions.test_time_module_has_signatures	1	addSuccess	0	pass		skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	0
+inspect	test.test_inspect.test_inspect.TestSignatureDefinitions.test_tokenize_module_has_signatures	1	addSuccess	0	pass		skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	0
+inspect	test.test_inspect.test_inspect.TestSignatureDefinitions.test_tracemalloc_module_has_signatures	1	addSuccess	0	pass		skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	0
+inspect	test.test_inspect.test_inspect.TestSignatureDefinitions.test_types_module_has_signatures	1	addSuccess	0	pass		skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	0
+inspect	test.test_inspect.test_inspect.TestSignatureDefinitions.test_typing_module_has_signatures	1	addSuccess	0	pass		skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	0
+inspect	test.test_inspect.test_inspect.TestSignatureDefinitions.test_warnings_module_has_signatures	1	addSuccess	0	pass		skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	0
+inspect	test.test_inspect.test_inspect.TestSignatureDefinitions.test_weakref_module_has_signatures	1	addSuccess	0	pass		skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	0
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signater_parameters_is_ordered	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_annotation_format	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_annotations_with_local_namespaces	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_deferred_annotations	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_definition_order_preserved_on_kwonly	1	addSuccess	1	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_equality	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_eval_str	1	addSuccess	1	pass		subtest-error	subtest-error	0
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_format	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_format_all_arg_types	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_format_unquote	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_from_callable_builtin_obj	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_from_callable_class	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_from_callable_python_obj	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_from_functionlike_object	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_functionlike_class	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_hashable	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_immutability	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_none_annotation	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_object	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_object_pickle	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_on_builtin_class	1	addSuccess	0	pass		error	error	0
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_on_builtins	1	addSuccess	0	"skipped ""No module named '_testcapi'"""		skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	0
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_on_builtins_no_signature	1	addSuccess	0	"skipped ""No module named '_testcapi'"""		skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	0
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_on_callable_objects	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_on_callable_objects_with_text_signature_attr	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_on_class	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_on_class_with_init	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_on_class_with_new	1	addSuccess	0	pass		subtest-error	subtest-error	0
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_on_class_with_wrapped_init	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_on_class_with_wrapped_metaclass_call	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_on_class_with_wrapped_new	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_on_class_without_init	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_on_classmethod	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_on_complex_args	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_on_decorated	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_on_decorated_builtins	1	addSuccess	0	"skipped ""No module named '_testcapi'"""		skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	0
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_on_derived_classes	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_on_fake_partialmethod	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_on_generic_subclass	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_on_lambdas	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_on_mangled_parameters	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_on_method	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_on_mocks	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_on_noarg	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_on_non_comparable	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_on_non_function	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_on_noncallable_mocks	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_on_partial	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_on_partialmethod	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_on_staticmethod	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_on_subclass	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_on_wargs	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_on_wkwonly	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_on_wrapper	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_parsing_with_defaults	1	addSuccess	0	"skipped ""No module named '_testcapi'"""		"skipped ""No module named '_testcapi'"""	"skipped ""No module named '_testcapi'"""	0
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_replace_anno	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_replace_parameters	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_replaced	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_str	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_str_positional_only	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_without_self	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignatureObject.test_signature_wrapped_bound_method	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestSignaturePrivateHelpers.test_signature_strip_non_python_syntax	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestUnwrap.test_cycle	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestUnwrap.test_recursion_limit	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestUnwrap.test_stop	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestUnwrap.test_unhashable	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestUnwrap.test_unwrap_one	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestUnwrap.test_unwrap_several	1	addSuccess	1	pass		pass	pass	1
+inspect	test.test_inspect.test_inspect.TestUnwrap.test_wrapped_descriptor	1	addSuccess	1	pass		pass	pass	1
+itertools	itertools.batched	1	addSuccess	1	pass		fail	fail	0
+itertools	test.test_free_threading.test_itertools_batched.EnumerateThreading.test_threading	1		0	skip before discovery	pass	skip before discovery	skip before discovery	0
+itertools	test.test_itertools.LengthTransparency.test_repeat	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.LengthTransparency.test_repeat_with_negative_times	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.RegressionTests.test_issue30347_1	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.RegressionTests.test_issue30347_2	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.RegressionTests.test_long_chain_of_empty_iterables	1	addSkip	1	pass		pass	pass	1
+itertools	test.test_itertools.RegressionTests.test_sf_793826	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.RegressionTests.test_sf_950057	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.SizeofTest.test_combinations_sizeof	1	addSuccess	0	pass		skip	skip	0
+itertools	test.test_itertools.SizeofTest.test_combinations_with_replacement_sizeof	1	addSuccess	0	pass		skip	skip	0
+itertools	test.test_itertools.SizeofTest.test_permutations_sizeof	1	addSuccess	0	pass		skip	skip	0
+itertools	test.test_itertools.SizeofTest.test_product_sizeof	1	addSuccess	0	pass		skip	skip	0
+itertools	test.test_itertools.SubclassWithKwargsTest.test_keywords_in_subclass	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestBasicOps.test_StopIteration	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestBasicOps.test_accumulate	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestBasicOps.test_batched	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestBasicOps.test_bug_7244	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestBasicOps.test_chain	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestBasicOps.test_chain_from_iterable	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestBasicOps.test_combinations	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestBasicOps.test_combinations_overflow	1	addSkip	0	skip		skip	skip	0
+itertools	test.test_itertools.TestBasicOps.test_combinations_result_gc	1	addSuccess	0	pass		skip	skip	0
+itertools	test.test_itertools.TestBasicOps.test_combinations_tuple_reuse	1	addSuccess	0	pass		skip	skip	0
+itertools	test.test_itertools.TestBasicOps.test_combinations_with_replacement	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestBasicOps.test_combinations_with_replacement_overflow	1	addSkip	0	skip		skip	skip	0
+itertools	test.test_itertools.TestBasicOps.test_combinations_with_replacement_result_gc	1	addSuccess	0	pass		skip	skip	0
+itertools	test.test_itertools.TestBasicOps.test_combinations_with_replacement_tuple_reuse	1	addSuccess	0	pass		skip	skip	0
+itertools	test.test_itertools.TestBasicOps.test_combinatorics	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestBasicOps.test_compress	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestBasicOps.test_count	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestBasicOps.test_count_threading	1	addSuccess	0	pass		error	error	0
+itertools	test.test_itertools.TestBasicOps.test_count_with_step	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestBasicOps.test_count_with_step_threading	1	addSuccess	0	pass		error	error	0
+itertools	test.test_itertools.TestBasicOps.test_cycle	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestBasicOps.test_dropwhile	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestBasicOps.test_filter	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestBasicOps.test_filterfalse	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestBasicOps.test_groupby	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestBasicOps.test_groupby_reentrant_eq_does_not_crash	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestBasicOps.test_grouper_reentrant_eq_does_not_crash	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestBasicOps.test_immutable_types	1	addSuccess	0	pass		skip	skip	0
+itertools	test.test_itertools.TestBasicOps.test_islice	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestBasicOps.test_map	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestBasicOps.test_pairwise	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestBasicOps.test_pairwise_reenter	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestBasicOps.test_pairwise_reenter2	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestBasicOps.test_pairwise_result_gc	1	addSuccess	0	pass		skip	skip	0
+itertools	test.test_itertools.TestBasicOps.test_permutations	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestBasicOps.test_permutations_overflow	1	addSkip	0	skip		skip	skip	0
+itertools	test.test_itertools.TestBasicOps.test_permutations_result_gc	1	addSuccess	0	pass		skip	skip	0
+itertools	test.test_itertools.TestBasicOps.test_permutations_tuple_reuse	1	addSuccess	0	pass		skip	skip	0
+itertools	test.test_itertools.TestBasicOps.test_product	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestBasicOps.test_product_overflow	1	addSkip	0	skip		skip	skip	0
+itertools	test.test_itertools.TestBasicOps.test_product_result_gc	1	addSuccess	0	pass		skip	skip	0
+itertools	test.test_itertools.TestBasicOps.test_product_tuple_reuse	1	addSuccess	0	pass		skip	skip	0
+itertools	test.test_itertools.TestBasicOps.test_repeat	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestBasicOps.test_repeat_with_negative_times	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestBasicOps.test_starmap	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestBasicOps.test_takewhile	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestBasicOps.test_tee	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestBasicOps.test_tee_concurrent	1	addSuccess	0	pass		error	error	0
+itertools	test.test_itertools.TestBasicOps.test_tee_dealloc_segfault	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestBasicOps.test_tee_del_backward	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestBasicOps.test_tee_reenter	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestBasicOps.test_zip	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestBasicOps.test_zip_longest_bad_iterable	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestBasicOps.test_zip_longest_result_gc	1	addSuccess	0	pass		skip	skip	0
+itertools	test.test_itertools.TestBasicOps.test_zip_longest_tuple_reuse	1	addSuccess	0	pass		skip	skip	0
+itertools	test.test_itertools.TestBasicOps.test_zip_tuple_reuse	1	addSuccess	0	pass		skip	skip	0
+itertools	test.test_itertools.TestBasicOps.test_ziplongest	1	addSuccess	1	pass		error	error	0
+itertools	test.test_itertools.TestExamples.test_accumulate	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestExamples.test_chain	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestExamples.test_chain_from_iterable	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestExamples.test_combinations	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestExamples.test_combinations_with_replacement	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestExamples.test_compress	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestExamples.test_count	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestExamples.test_cycle	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestExamples.test_dropwhile	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestExamples.test_filter	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestExamples.test_filterfalse	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestExamples.test_groupby	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestExamples.test_islice	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestExamples.test_map	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestExamples.test_permutations	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestExamples.test_product	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestExamples.test_repeat	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestExamples.test_stapmap	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestExamples.test_takewhile	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestExamples.test_zip	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestExamples.test_zip_longest	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestGC.test_accumulate	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestGC.test_batched	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestGC.test_chain	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestGC.test_chain_from_iterable	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestGC.test_combinations	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestGC.test_combinations_with_replacement	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestGC.test_compress	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestGC.test_count	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestGC.test_cycle	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestGC.test_dropwhile	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestGC.test_filter	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestGC.test_filterfalse	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestGC.test_groupby	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestGC.test_islice	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestGC.test_issue2246	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestGC.test_map	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestGC.test_pairwise	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestGC.test_permutations	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestGC.test_product	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestGC.test_repeat	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestGC.test_starmap	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestGC.test_takewhile	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestGC.test_zip	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestGC.test_zip_longest	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestPurePythonRoughEquivalents.test_batched_recipe	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestPurePythonRoughEquivalents.test_groupby_recipe	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestPurePythonRoughEquivalents.test_islice_recipe	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestPurePythonRoughEquivalents.test_tee_recipe	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestVariousIteratorArgs.test_accumulate	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestVariousIteratorArgs.test_batched	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestVariousIteratorArgs.test_chain	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestVariousIteratorArgs.test_compress	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestVariousIteratorArgs.test_cycle	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestVariousIteratorArgs.test_dropwhile	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestVariousIteratorArgs.test_filter	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestVariousIteratorArgs.test_filterfalse	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestVariousIteratorArgs.test_groupby	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestVariousIteratorArgs.test_islice	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestVariousIteratorArgs.test_map	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestVariousIteratorArgs.test_pairwise	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestVariousIteratorArgs.test_product	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestVariousIteratorArgs.test_starmap	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestVariousIteratorArgs.test_takewhile	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestVariousIteratorArgs.test_tee	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestVariousIteratorArgs.test_zip	1	addSuccess	1	pass		pass	pass	1
+itertools	test.test_itertools.TestVariousIteratorArgs.test_ziplongest	1	addSuccess	1	pass		pass	pass	1
+shutil	test.test_shutil.PublicAPITests.test_module_all_attribute	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestArchives.test_make_archive	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestArchives.test_make_archive_cwd	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestArchives.test_make_archive_cwd_default	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestArchives.test_make_archive_cwd_supports_root_dir	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestArchives.test_make_archive_owner_group	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestArchives.test_make_tarfile	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestArchives.test_make_tarfile_in_curdir	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestArchives.test_make_tarfile_rootdir_nodir	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestArchives.test_make_tarfile_with_explicit_curdir	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestArchives.test_make_tarfile_without_rootdir	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestArchives.test_make_zipfile	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestArchives.test_make_zipfile_in_curdir	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestArchives.test_make_zipfile_rootdir_nodir	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestArchives.test_make_zipfile_with_explicit_curdir	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestArchives.test_make_zipfile_without_rootdir	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestArchives.test_register_archive_format	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestArchives.test_tarfile_root_owner	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestArchives.test_tarfile_vs_tar	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestArchives.test_unpack_archive_bztar	1	addSkip	1	pass	skip	pass	pass	1
+shutil	test.test_shutil.TestArchives.test_unpack_archive_gztar	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestArchives.test_unpack_archive_tar	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestArchives.test_unpack_archive_xztar	1	addSuccess	1	pass	skip	pass	pass	1
+shutil	test.test_shutil.TestArchives.test_unpack_archive_zip	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestArchives.test_unpack_archive_zip_badpaths	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestArchives.test_unpack_archive_zstdtar	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestArchives.test_unpack_registry	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestArchives.test_unzip_zipfile	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestArchives.test_zipfile_vs_zip	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestCopy.test_copy	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestCopy.test_copy2	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestCopy.test_copy2_dir	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestCopy.test_copy2_symlinks	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestCopy.test_copy2_xattr	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestCopy.test_copy_dir	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestCopy.test_copy_return_value	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestCopy.test_copy_symlinks	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestCopy.test_copyfile_copy_dir	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestCopy.test_copyfile_named_pipe	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestCopy.test_copyfile_nonexistent_dir	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestCopy.test_copyfile_return_value	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestCopy.test_copyfile_same_file	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestCopy.test_copyfile_symlinks	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestCopy.test_copymode_follow_symlinks	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestCopy.test_copymode_symlink_to_symlink	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestCopy.test_copymode_symlink_to_symlink_wo_lchmod	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestCopy.test_copystat_handles_harmless_chflags_errors	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestCopy.test_copystat_symlinks	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestCopy.test_copyxattr	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestCopy.test_copyxattr_symlinks	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestCopy.test_dont_copy_file_onto_link_to_itself	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestCopy.test_dont_copy_file_onto_symlink_to_itself	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestCopyFile.test_w_dest_close_fails	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestCopyFile.test_w_dest_open_fails	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestCopyFile.test_w_source_close_fails	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestCopyFile.test_w_source_open_fails	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestCopyFileObj.test_content	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestCopyFileObj.test_file_not_closed	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestCopyFileObj.test_file_offset	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestCopyFileObj.test_win_impl	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestCopyTree.test_copytree_arg_types_of_ignore	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestCopyTree.test_copytree_custom_copy_function	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestCopyTree.test_copytree_dangling_symlinks	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestCopyTree.test_copytree_dirs_exist_ok	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestCopyTree.test_copytree_named_pipe	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestCopyTree.test_copytree_retains_permissions	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestCopyTree.test_copytree_return_value	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestCopyTree.test_copytree_simple	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestCopyTree.test_copytree_special_func	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestCopyTree.test_copytree_subdirectory	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestCopyTree.test_copytree_symlink_dir	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestCopyTree.test_copytree_symlinks	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestCopyTree.test_copytree_winerror	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestCopyTree.test_copytree_with_exclude	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestGetTerminalSize.test_bad_environ	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestGetTerminalSize.test_does_not_crash	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestGetTerminalSize.test_fallback	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestGetTerminalSize.test_os_environ_first	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestGetTerminalSize.test_stty_match	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestMisc.test_chown	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestMisc.test_disk_usage	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestMove.test_destinsrc_false_negative	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestMove.test_destinsrc_false_positive	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestMove.test_dont_move_dir_in_itself	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestMove.test_existing_file_inside_dest_dir	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestMove.test_move_as_rename_return_value	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestMove.test_move_dangling_symlink	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestMove.test_move_dir	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestMove.test_move_dir_altsep_to_dir	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestMove.test_move_dir_caseinsensitive	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestMove.test_move_dir_other_fs	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestMove.test_move_dir_permission_denied	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestMove.test_move_dir_sep_to_dir	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestMove.test_move_dir_special_function	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestMove.test_move_dir_symlink	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestMove.test_move_dir_to_dir	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestMove.test_move_dir_to_dir_other_fs	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestMove.test_move_file	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestMove.test_move_file_other_fs	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestMove.test_move_file_special_function	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestMove.test_move_file_symlink	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestMove.test_move_file_symlink_to_dir	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestMove.test_move_file_to_dir	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestMove.test_move_file_to_dir_other_fs	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestMove.test_move_file_to_dir_pathlike_dst	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestMove.test_move_file_to_dir_pathlike_src	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestMove.test_move_return_value	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestMove.test_move_symlink_to_dir_into_dir	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestMove.test_move_symlink_to_dir_into_symlink_to_dir	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestRmTree.test_both_onerror_and_onexc	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestRmTree.test_on_error	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestRmTree.test_on_exc	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestRmTree.test_rmtree_above_recursion_limit	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestRmTree.test_rmtree_deleted_race_condition	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestRmTree.test_rmtree_does_not_choke_on_failing_lstat	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestRmTree.test_rmtree_dont_delete_file	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestRmTree.test_rmtree_errors	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestRmTree.test_rmtree_errors_onerror	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestRmTree.test_rmtree_errors_onexc	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestRmTree.test_rmtree_fails_on_close	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestRmTree.test_rmtree_fails_on_junctions_onerror	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestRmTree.test_rmtree_fails_on_junctions_onexc	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestRmTree.test_rmtree_fails_on_symlink_onerror	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestRmTree.test_rmtree_fails_on_symlink_onexc	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestRmTree.test_rmtree_on_junction	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestRmTree.test_rmtree_on_named_pipe	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestRmTree.test_rmtree_on_symlink	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestRmTree.test_rmtree_uses_safe_fd_version_if_available	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestRmTree.test_rmtree_with_dir_fd	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestRmTree.test_rmtree_with_dir_fd_unsupported	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestRmTree.test_rmtree_works_on_bytes	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestRmTree.test_rmtree_works_on_junctions	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestRmTree.test_rmtree_works_on_symlinks	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestWhich.test_absolute_cmd	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestWhich.test_basic	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestWhich.test_cwd_non_win32	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestWhich.test_cwd_win32	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestWhich.test_cwd_win32_added_before_all_other_path	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestWhich.test_dir_order_with_pathext_extension	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestWhich.test_dir_order_without_pathext_extension	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestWhich.test_empty_path	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestWhich.test_empty_path_no_PATH	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestWhich.test_environ_path	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestWhich.test_environ_path_cwd	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestWhich.test_environ_path_empty	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestWhich.test_environ_path_missing	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestWhich.test_non_matching_mode	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestWhich.test_nonexistent_file	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestWhich.test_pathext	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestWhich.test_pathext_applied_on_files_in_path	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestWhich.test_pathext_checking	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestWhich.test_pathext_extension_ends_with_dot	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestWhich.test_pathext_with_empty_str	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestWhich.test_pathext_with_multidot_extension	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestWhich.test_pathext_with_null_extension	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestWhich.test_relative_cmd	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestWhich.test_relative_path	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestWhich.test_same_dir_with_pathext_extension	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestWhich.test_same_dir_without_pathext_extension	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestWhich.test_win_path_needs_curdir	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestWhichBytes.test_absolute_cmd	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestWhichBytes.test_basic	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestWhichBytes.test_cwd_non_win32	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestWhichBytes.test_cwd_win32	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestWhichBytes.test_cwd_win32_added_before_all_other_path	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestWhichBytes.test_dir_order_with_pathext_extension	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestWhichBytes.test_dir_order_without_pathext_extension	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestWhichBytes.test_empty_path	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestWhichBytes.test_empty_path_no_PATH	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestWhichBytes.test_environ_path	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestWhichBytes.test_environ_path_cwd	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestWhichBytes.test_environ_path_empty	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestWhichBytes.test_environ_path_missing	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestWhichBytes.test_non_matching_mode	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestWhichBytes.test_nonexistent_file	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestWhichBytes.test_pathext	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestWhichBytes.test_pathext_applied_on_files_in_path	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestWhichBytes.test_pathext_checking	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestWhichBytes.test_pathext_extension_ends_with_dot	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestWhichBytes.test_pathext_with_empty_str	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestWhichBytes.test_pathext_with_multidot_extension	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestWhichBytes.test_pathext_with_null_extension	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestWhichBytes.test_relative_cmd	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestWhichBytes.test_relative_path	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestWhichBytes.test_same_dir_with_pathext_extension	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestWhichBytes.test_same_dir_without_pathext_extension	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestWhichBytes.test_win_path_needs_curdir	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestZeroCopyCopyFileRange.test_big_chunk	1	addSuccess	1	skip	pass	pass	pass	1
+shutil	test.test_shutil.TestZeroCopyCopyFileRange.test_blocksize_arg	1	addSuccess	1	skip	pass	pass	pass	1
+shutil	test.test_shutil.TestZeroCopyCopyFileRange.test_cant_get_size	1	addSuccess	1	skip	pass	pass	pass	1
+shutil	test.test_shutil.TestZeroCopyCopyFileRange.test_empty_file	1	addSuccess	1	skip	pass	pass	pass	1
+shutil	test.test_shutil.TestZeroCopyCopyFileRange.test_exception_on_first_call	1	addSuccess	1	skip	pass	pass	pass	1
+shutil	test.test_shutil.TestZeroCopyCopyFileRange.test_exception_on_second_call	1	addSuccess	0	skip	pass	error	error	0
+shutil	test.test_shutil.TestZeroCopyCopyFileRange.test_filesystem_full	1	addSuccess	1	skip	pass	pass	pass	1
+shutil	test.test_shutil.TestZeroCopyCopyFileRange.test_non_existent_src	1	addSuccess	1	skip	pass	pass	pass	1
+shutil	test.test_shutil.TestZeroCopyCopyFileRange.test_non_regular_file_dst	1	addSuccess	1	skip	pass	pass	pass	1
+shutil	test.test_shutil.TestZeroCopyCopyFileRange.test_non_regular_file_src	1	addSuccess	1	skip	pass	pass	pass	1
+shutil	test.test_shutil.TestZeroCopyCopyFileRange.test_regular_copy	1	addSuccess	1	skip	pass	pass	pass	1
+shutil	test.test_shutil.TestZeroCopyCopyFileRange.test_same_file	1	addSuccess	1	skip	pass	pass	pass	1
+shutil	test.test_shutil.TestZeroCopyCopyFileRange.test_small_chunks	1	addSuccess	1	skip	pass	pass	pass	1
+shutil	test.test_shutil.TestZeroCopyCopyFileRange.test_unhandled_exception	1	addSuccess	1	skip	pass	pass	pass	1
+shutil	test.test_shutil.TestZeroCopyMACOS.test_empty_file	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestZeroCopyMACOS.test_exception_on_first_call	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestZeroCopyMACOS.test_filesystem_full	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestZeroCopyMACOS.test_non_existent_src	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestZeroCopyMACOS.test_regular_copy	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestZeroCopyMACOS.test_same_file	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestZeroCopyMACOS.test_unhandled_exception	1	addSkip	0	skip	skip	skip	skip	0
+shutil	test.test_shutil.TestZeroCopySendfile.test_big_chunk	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestZeroCopySendfile.test_blocksize_arg	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestZeroCopySendfile.test_cant_get_size	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestZeroCopySendfile.test_empty_file	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestZeroCopySendfile.test_exception_on_first_call	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestZeroCopySendfile.test_exception_on_second_call	1	addSuccess	0	pass	pass	error	error	0
+shutil	test.test_shutil.TestZeroCopySendfile.test_file2file_not_supported	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestZeroCopySendfile.test_filesystem_full	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestZeroCopySendfile.test_non_existent_src	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestZeroCopySendfile.test_non_regular_file_dst	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestZeroCopySendfile.test_non_regular_file_src	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestZeroCopySendfile.test_regular_copy	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestZeroCopySendfile.test_same_file	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestZeroCopySendfile.test_small_chunks	1	addSuccess	1	pass	pass	pass	pass	1
+shutil	test.test_shutil.TestZeroCopySendfile.test_unhandled_exception	1	addSuccess	1	pass	pass	pass	pass	1
