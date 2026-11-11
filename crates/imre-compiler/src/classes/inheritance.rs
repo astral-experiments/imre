@@ -327,9 +327,8 @@ pub(crate) fn direct_base_init(
         )
 }
 
-/// Infer storage from an exact builtin value. The constructor still evaluates
-/// the original expression, including every format argument and its errors.
-fn literal_field_annotation(
+/// Infer scalar field storage without changing how the constructor evaluates its value.
+fn scalar_field_annotation(
     graph: &SourceGraph,
     module: usize,
     value: &ast::Expr,
@@ -344,6 +343,7 @@ fn literal_field_annotation(
         {
             "str"
         }
+        _ if graph.session.has_string_layout(module, value) => "str",
         _ => return None,
     };
     let annotation = ast::Expr::Name(ast::ExprName {
@@ -461,7 +461,12 @@ pub(super) fn infer_fields(
             continue;
         }
         let ann = match &*assign.value {
-            ast::Expr::Name(name) => params.get(name.id.as_str()).map(|&ann| ann.clone()),
+            ast::Expr::Name(name) if let Some(&ann) = params.get(name.id.as_str()) => {
+                Some(ann.clone())
+            }
+            value if let Some(annotation) = scalar_field_annotation(graph, module, value) => {
+                Some(annotation)
+            }
             ast::Expr::Call(call)
                 if matches!(&*call.func, ast::Expr::Name(name) if name.id == "list")
                     && graph.resolve(module, &call.func).is_none()
@@ -504,7 +509,7 @@ pub(super) fn infer_fields(
                         && matches!(&*list.slice, ast::Expr::Name(ty) if matches!(ty.id.as_str(), "str" | "bytes")));
                 preserving.then(|| field.annotation.clone())
             }
-            value => literal_field_annotation(graph, module, value),
+            _ => None,
         };
         if let Some(annotation) = ann {
             fields.push(Field {
