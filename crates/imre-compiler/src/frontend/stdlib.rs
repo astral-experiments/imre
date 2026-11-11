@@ -951,6 +951,10 @@ impl Checker<'_> {
     /// Render one checked value with builtin str, independent of a local binding named str.
     pub(super) fn checked_string(&mut self, value: Expr, at: &impl Ranged) -> Result<Expr, String> {
         let ty = value.ty;
+        if ty == Type::PythonObject {
+            self.require_registered_operation(at)?;
+            return Ok(super::fstrings::object_conversion(value, 's'));
+        }
         if matches!(ty, Type::Calendar(_)) {
             return Ok(calendar::format_builtin("str", vec![value]));
         }

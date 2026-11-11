@@ -154,7 +154,7 @@ pub(super) fn registered_fstring<E>(
     .lower(value)
 }
 
-fn object_conversion(value: Expr, flag: char) -> Expr {
+pub(super) fn object_conversion(value: Expr, flag: char) -> Expr {
     Expr {
         ty: Type::PythonObject,
         kind: ExprKind::Builtin(Builtin::FormatConversion(flag), vec![value]),
