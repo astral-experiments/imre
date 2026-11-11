@@ -3,6 +3,7 @@ _pydecimal.py
 cmd.py
 getpass.py
 graphlib.py
+netrc.py
 shlex.py
 statistics.py
 tarfile.py

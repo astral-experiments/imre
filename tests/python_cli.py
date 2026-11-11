@@ -322,6 +322,16 @@ def check_installed_site(imre, root, run):
         companion = imre.with_name(name)
         if companion.exists():
             (install / name).symlink_to(companion, target_is_directory=companion.is_dir())
+    credentials = root / "credentials.netrc"
+    credentials.write_text("machine example.test login user password sample\n")
+    authenticated = run(
+        launcher, "-IB", "-c",
+        "import netrc, sys; print(netrc.netrc(sys.argv[1]).authenticators('example.test'))",
+        credentials, timeout=300,
+    )
+    assert (authenticated.returncode, authenticated.stdout, authenticated.stderr) == (
+        0, b"('user', '', 'sample')\n", b"",
+    ), authenticated
     name = "xml.etree.ElementTree"
     sample = root / "sample.tar"
     member = root / "payload"
