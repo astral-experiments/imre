@@ -3473,8 +3473,7 @@ impl SourceGraph {
         });
         inputs.files.append(&mut self.zip_files);
         let paths = inputs
-            .files
-            .iter()
+            .source_files()
             .map(|(path, _, _)| path.clone())
             .chain(profile.map(Path::to_path_buf))
             .collect();
@@ -4609,6 +4608,9 @@ impl SiteProbes {
     }
 }
 
+/// Import path, canonical identity, package flag, search-root index and native archive.
+type ModuleFile = (PathBuf, PathBuf, bool, usize, Option<NativeArchive>);
+
 struct Loader<'a> {
     module_operand: Option<String>,
     fs: FileSystem<'a>,
@@ -4809,6 +4811,7 @@ impl<'a> Loader<'a> {
         reachable_only: bool,
         profile: Option<&Path>,
     ) -> Result<SourceGraph, String> {
+        let mut annotation_imports = std::collections::BTreeSet::new();
         // Resolve against the completed graph. Type-only imports neither run a
         // module initializer nor introduce runtime bindings or import cycles.
         for id in 0..self.modules.len() {
@@ -4873,10 +4876,21 @@ impl<'a> Loader<'a> {
                                 .insert(local.to_string(), binding);
                         }
                     }
+                    annotation_imports.insert(name);
                 }
             }
         }
         let doctest_imports = self.doctest_program()?;
+        let guard_search = self.inputs.missing.len();
+        for name in annotation_imports {
+            if !self.by_name.contains_key(&name) {
+                self.add_annotation_module(&name)?;
+            }
+        }
+        // A guarded child of a regular package can newly resolve when a missing file appears.
+        for path in self.inputs.missing.drain(guard_search..) {
+            self.inputs.file_checks.insert(path, false);
+        }
         self.inputs.missing.sort_unstable();
         self.inputs.missing.dedup();
         let mut checked_diagnostics = vec![Vec::new(); self.modules.len()];
@@ -6467,6 +6481,160 @@ impl<'a> Loader<'a> {
         ))
     }
 
+    fn add_annotation_module(&mut self, name: &str) -> Result<(), String> {
+        // A loaded physical package determines the search roots for its child.
+        let Some((package, _)) = name.rsplit_once('.') else {
+            return Ok(());
+        };
+        let Some(&parent) = self.by_name.get(package) else {
+            return Ok(());
+        };
+        let module = &self.modules[parent];
+        let SearchRoots::Single(index) = module.search_roots else {
+            return Ok(());
+        };
+        let root = Self::root_at(&self.root, &self.search_roots, index);
+        if !module.is_package
+            || module.bundled
+            || module.archive.is_some()
+            || self.zip_sources.contains_key(root)
+            || (index == 0 && self.skip_current_root)
+        {
+            return Ok(());
+        }
+        let base = root.join(name.replace('.', "/"));
+        // A competing stub owns type lookup. Keep it as a physical input even
+        // when the checker cannot use its declaration for a fixed result.
+        let stub = [base.join("__init__.pyi"), base.with_extension("pyi")]
+            .into_iter()
+            .find(|path| {
+                let present = self.fs.is_file(path);
+                self.inputs.file_checks.insert(path.clone(), present);
+                present
+            });
+        let (path, identity) = if let Some(path) = stub {
+            let identity = self.fs.canonicalize(&path).unwrap_or_else(|_| path.clone());
+            (path, identity)
+        } else if let Ok(Some((path, identity, _, _, None))) = self.module_file(name, index, &base)
+        {
+            (path, identity)
+        } else {
+            return Ok(());
+        };
+        let root = Self::root_at(&self.root, &self.search_roots, index);
+        let bytes = if identity.starts_with(root) {
+            self.fs.read_source(&identity).ok()
+        } else {
+            None
+        };
+        let digest = bytes.as_deref().map_or_else(String::new, |bytes| {
+            blake3::hash(bytes).to_hex().to_string()
+        });
+        if path.extension().is_some_and(|ext| ext == "py")
+            && let Some(source) = bytes.as_deref().and_then(|b| std::str::from_utf8(b).ok())
+            && let Ok(source) = crate::normalize_source(source, crate::SourceKind::File)
+        {
+            self.session.add_declaration_source(&path, &source)?;
+        }
+        self.inputs.declaration_files.push((path, identity, digest));
+        Ok(())
+    }
+
+    fn root_at<'r>(entry: &'r PathBuf, search: &'r [PathBuf], index: usize) -> &'r PathBuf {
+        if index == 0 {
+            entry
+        } else {
+            &search[index - 1]
+        }
+    }
+
+    /// Choose a package, native archive, or Python source in one physical search root.
+    fn module_file(
+        &mut self,
+        name: &str,
+        root_index: usize,
+        base: &Path,
+    ) -> Result<Option<ModuleFile>, String> {
+        let root = Self::root_at(&self.root, &self.search_roots, root_index);
+        let package = base.join("__init__.py");
+        let source = base.with_extension("py");
+        let stub = base.with_extension("pyi");
+        let (path, is_package, archive) = if self.fs.is_file(&package) {
+            (package, true, None)
+        } else {
+            self.inputs.missing.push(package);
+            let installed = self.search_roots[..self.archive_roots].contains(root);
+            let mut archives = imre_ast::NATIVE_ARCHIVE_EXTENSIONS
+                .iter()
+                .map(|ext| base.with_extension(ext));
+            let archive = if installed {
+                archives.find(|path| {
+                    let exists = self.fs.is_file(path);
+                    if !exists {
+                        self.inputs.missing.push(path.clone());
+                    }
+                    exists
+                })
+            } else {
+                self.site_probes
+                    .as_mut()
+                    .filter(|(sites, _)| sites.contains(root))
+                    .and_then(|(_, probes)| {
+                        archives.find(|path| probes.paired(&mut self.fs, path, &stub))
+                    })
+            };
+            if let Some(archive) = archive {
+                if installed && !self.fs.is_file(&stub) {
+                    return Err(format!(
+                        "native module {name:?} requires a typed declaration at {}",
+                        stub.display()
+                    ));
+                }
+                let identity = self.fs.canonicalize(&archive).map_err(|e| e.to_string())?;
+                if !identity.starts_with(root) {
+                    return Err(format!(
+                        "archive for native module {name:?} resolves outside its extension path"
+                    ));
+                }
+                (
+                    stub,
+                    false,
+                    Some(NativeArchive {
+                        path: archive,
+                        identity,
+                    }),
+                )
+            } else if self.fs.is_file(&source) {
+                (source, false, None)
+            } else if installed && self.fs.is_file(&stub) {
+                return Err(format!(
+                    "native module {name:?} requires a rebuilt archive at {}",
+                    base.with_extension(crate::NATIVE_ARCHIVE_EXTENSION)
+                        .display()
+                ));
+            } else {
+                self.inputs.missing.push(source);
+                if installed {
+                    self.inputs.missing.push(stub);
+                }
+                return Ok(None);
+            }
+        };
+        let identity = self
+            .fs
+            .canonicalize(&path)
+            .map_err(|error| error.to_string())?;
+        if !identity.starts_with(root) {
+            self.inputs
+                .declared_file_resolutions
+                .push((path, Some(identity)));
+            return Err(format!(
+                "module {name:?} resolves outside the first-party module root or extension path"
+            ));
+        }
+        Ok(Some((path, identity, is_package, root_index, archive)))
+    }
+
     fn load_new_module(&mut self, name: &str) -> Result<ModuleId, String> {
         let first = name.split('.').next().unwrap_or("");
         let directory_main = name == "__main__" && self.module_operand.as_deref() == Some(name);
@@ -6486,19 +6654,18 @@ impl<'a> Loader<'a> {
         }
         // A regular package owns its subtree. A namespace searches its portions in path order.
         let relative = name.replace('.', "/");
-        let parent_roots = parent.map(|(id, _)| &self.modules[id].search_roots);
-        let roots = std::iter::once(&self.root).chain(&self.search_roots);
         let mut resolved = None;
         let mut portions = Vec::new();
         let mut zip_import = false;
         let mut member_source = None;
-        for (root_index, root) in roots.enumerate() {
+        for root_index in 0..=self.search_roots.len() {
             if root_index == 0 && self.skip_current_root {
                 continue;
             }
-            if parent_roots.is_some_and(|roots| !roots.contains(root_index)) {
+            if parent.is_some_and(|(id, _)| !self.modules[id].search_roots.contains(root_index)) {
                 continue;
             }
+            let root = Self::root_at(&self.root, &self.search_roots, root_index);
             if let Some(archive) = self.zip_sources.get_mut(root) {
                 // The path-entry finder supplies the physical member used as __main__
                 // and the source of imports from this same first-party archive.
@@ -6524,86 +6691,19 @@ impl<'a> Loader<'a> {
                 continue;
             }
             let base = root.join(&relative);
-            let package = base.join("__init__.py");
-            let source = base.with_extension("py");
-            let stub = base.with_extension("pyi");
-            let (path, is_package, archive) = if self.fs.is_file(&package) {
-                (package, true, None)
-            } else {
-                self.inputs.missing.push(package);
-                let installed = self.search_roots[..self.archive_roots].contains(root);
-                let mut archives = imre_ast::NATIVE_ARCHIVE_EXTENSIONS
-                    .iter()
-                    .map(|ext| base.with_extension(ext));
-                let archive = if installed {
-                    archives.find(|path| {
-                        let exists = self.fs.is_file(path);
-                        if !exists {
-                            self.inputs.missing.push(path.clone());
-                        }
-                        exists
-                    })
-                } else {
-                    self.site_probes
-                        .as_mut()
-                        .filter(|(sites, _)| sites.contains(root))
-                        .and_then(|(_, probes)| {
-                            archives.find(|path| probes.paired(&mut self.fs, path, &stub))
-                        })
-                };
-                if let Some(archive) = archive {
-                    if installed && !self.fs.is_file(&stub) {
-                        return Err(format!(
-                            "native module {name:?} requires a typed declaration at {}",
-                            stub.display()
-                        ));
-                    }
-                    let identity = self.fs.canonicalize(&archive).map_err(|e| e.to_string())?;
-                    if !identity.starts_with(root) {
-                        return Err(format!(
-                            "archive for native module {name:?} resolves outside its extension path"
-                        ));
-                    }
-                    (
-                        stub,
-                        false,
-                        Some(NativeArchive {
-                            path: archive,
-                            identity,
-                        }),
-                    )
-                } else if self.fs.is_file(&source) {
-                    (source, false, None)
-                } else if installed && self.fs.is_file(&stub) {
-                    return Err(format!(
-                        "native module {name:?} requires a rebuilt archive at {}",
-                        base.with_extension(crate::NATIVE_ARCHIVE_EXTENSION)
-                            .display()
-                    ));
-                } else {
-                    self.inputs.missing.push(source);
-                    if installed {
-                        self.inputs.missing.push(stub);
-                    }
-                    if self.fs.is_dir(&base) {
-                        portions.push((root_index, root.clone(), base));
-                    } else {
-                        self.inputs.missing.push(base);
-                    }
-                    continue;
-                }
-            };
-            let identity = self
-                .fs
-                .canonicalize(&path)
-                .map_err(|error| error.to_string())?;
-            if !identity.starts_with(root) {
-                return Err(format!(
-                    "module {name:?} resolves outside the first-party module root or extension path"
-                ));
+            resolved = self.module_file(name, root_index, &base)?;
+            if resolved.is_some() {
+                break;
             }
-            resolved = Some((path, identity, is_package, root_index, archive));
-            break;
+            if self.fs.is_dir(&base) {
+                portions.push((
+                    root_index,
+                    Self::root_at(&self.root, &self.search_roots, root_index).clone(),
+                    base,
+                ));
+            } else {
+                self.inputs.missing.push(base);
+            }
         }
         if let Some(declaration) = declaration {
             if resolved.is_some() || (!zip_import && !portions.is_empty()) {

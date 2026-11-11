@@ -2335,22 +2335,38 @@ fn annotation_with_aliases(
     }
     if let ast::Expr::StringLiteral(value) = expression {
         check_string(value, source)?;
-        if let Some((origin, name)) = graph.session.quoted_class(module, expression) {
-            let body = &graph.modules[origin].parsed.syntax().body;
-            let statement = body.partition_point(|stmt| stmt.end() <= name.start());
-            let definition = DefinitionId {
-                module: origin,
-                statement,
-            };
-            if body
-                .get(statement)
-                .and_then(ast::Stmt::as_class_def_stmt)
-                .is_some_and(|class| class.name.range() == name)
-                && let Some(ty) = declaration_annotation(definition, graph, classes, types)
-            {
-                return Ok(ty);
+    }
+    if let Some(class) = graph.session.annotation_class(module, expression) {
+        let (origin, name) = match class {
+            crate::analysis::AnnotationClass::Linked(origin, name) => (origin, name),
+            crate::analysis::AnnotationClass::Declaration(location) => {
+                return Err(diagnostic_message(
+                    source,
+                    expression,
+                    &format!("class declared at {location} has no linked native layout"),
+                ));
             }
+        };
+        let body = &graph.modules[origin].parsed.syntax().body;
+        let statement = body.partition_point(|stmt| stmt.end() <= name.start());
+        if body
+            .get(statement)
+            .and_then(ast::Stmt::as_class_def_stmt)
+            .is_some_and(|class| class.name.range() == name)
+            && let Some(ty) = declaration_annotation(
+                DefinitionId {
+                    module: origin,
+                    statement,
+                },
+                graph,
+                classes,
+                types,
+            )
+        {
+            return Ok(ty);
         }
+    }
+    if let ast::Expr::StringLiteral(value) = expression {
         let contents = value.value.to_str();
         let parsed = ruff_python_parser::parse_expression(contents).map_err(|_| {
             diagnostic_message(source, expression, "invalid quoted type annotation")

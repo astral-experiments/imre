@@ -62,11 +62,18 @@ struct Database {
     analysis: Arc<AnalysisSettings>,
 }
 
+pub(crate) enum AnnotationClass {
+    Linked(usize, TextRange),
+    Declaration(String),
+}
+
 /// A project database shared by ty's checks and Ruff's cached parser.
 #[derive(Clone)]
 pub(crate) struct Session {
     db: Database,
     files: Vec<File>,
+    /// Physical annotation providers with no runtime module or executable body.
+    declarations: Vec<File>,
     external_loader_declarations: File,
     execution_names: File,
     tuple_spreads: Vec<HashMap<TextSize, usize>>,
@@ -824,6 +831,7 @@ impl Session {
         Ok(Self {
             db,
             files: Vec::new(),
+            declarations: Vec::new(),
             external_loader_declarations,
             execution_names,
             tuple_spreads: Vec::new(),
@@ -833,6 +841,18 @@ impl Session {
             hint_reads: Cell::new(0),
             explicit_check: false,
         })
+    }
+
+    /// Make a physical import available to ty without adding a module to the program.
+    pub(crate) fn add_declaration_source(
+        &mut self,
+        path: &Path,
+        source: &str,
+    ) -> Result<(), String> {
+        let path = path.to_str().ok_or("module paths must be valid UTF-8")?;
+        let file = self.write_file(path, source)?;
+        self.declarations.push(file);
+        Ok(())
     }
 
     /// Parses a normalized source once; semantic checks wait until every import is present.
@@ -1141,7 +1161,7 @@ impl Session {
             script_entry.is_some(),
         )?;
         copy.explicit_check = self.explicit_check;
-        for &file in &self.files {
+        for &file in self.files.iter().chain(&self.declarations) {
             let path = file
                 .path(&self.db)
                 .as_system_path()
@@ -1155,6 +1175,7 @@ impl Session {
             };
             copy.files.push(file);
         }
+        copy.declarations = copy.files.split_off(self.files.len());
         Ok(copy)
     }
 
@@ -1530,19 +1551,22 @@ impl Session {
         )
     }
 
-    /// Locate the physical class of a quoted annotation in its declaration scope.
-    pub(crate) fn quoted_class(
+    /// Resolve an indexed class reference using the annotation's declaring scope.
+    pub(crate) fn annotation_class(
         &self,
         module: usize,
         annotation: &Expr,
-    ) -> Option<(usize, TextRange)> {
+    ) -> Option<AnnotationClass> {
+        use ruff_python_ast::HasNodeIndex;
         use ty_python_semantic::types::{Type, TypeDefinition};
 
-        let literal = annotation.as_string_literal_expr()?;
         // Recursively parsed string contents have no node in the indexed module.
-        literal.node_index.load().as_u32()?;
-        if !ruff_python_stdlib::identifiers::is_identifier(literal.value.to_str()) {
-            return None;
+        annotation.node_index().load().as_u32()?;
+        match annotation {
+            Expr::StringLiteral(literal)
+                if ruff_python_stdlib::identifiers::is_identifier(literal.value.to_str()) => {}
+            Expr::Name(_) | Expr::Attribute(_) if !self.declarations.is_empty() => {}
+            _ => return None,
         }
         self.hint_reads.set(self.hint_reads.get() + 1);
         let model = SemanticModel::new(&self.db, self.db.program_file(self.files[module]));
@@ -1555,11 +1579,21 @@ impl Session {
             return None;
         };
         let location = class.focus_range(&self.db)?;
-        let owner = self
-            .files
-            .iter()
-            .position(|file| *file == location.file())?;
-        Some((owner, location.range()))
+        let file = location.file();
+        if let Some(owner) = self.files.iter().position(|f| *f == file) {
+            return Some(AnnotationClass::Linked(owner, location.range()));
+        }
+        if !self.declarations.contains(&file) || !self.parsed(file).has_no_syntax_errors() {
+            return None;
+        }
+        let path = file.path(&self.db).as_system_path()?;
+        let source = ruff_db::source::source_text(&self.db, file);
+        let position = ruff_db::source::line_index(&self.db, file)
+            .line_column(location.range().start(), source.as_str());
+        Some(AnnotationClass::Declaration(format!(
+            "{path}:{}:{}",
+            position.line, position.column
+        )))
     }
 
     /// Resolve a bare `object` base at the point where the class is defined.
@@ -2914,6 +2948,7 @@ impl CachedSession {
         self.session.root == fresh.root
             && self.session.extension_roots == fresh.extension_roots
             && self.inputs.missing == inputs.missing
+            && self.inputs.declaration_files == inputs.declaration_files
             && self.inputs.files.len() == inputs.files.len()
             && self
                 .inputs

@@ -363,10 +363,10 @@ fn run() -> Result<ExitCode, String> {
         {
             validate_paths(
                 sources
-                    .files
-                    .iter()
-                    .map(|(p, _, _)| p.as_path())
+                    .source_files()
+                    .map(|(path, _, _)| path.as_path())
                     .chain(options.bundled_provider_archive.as_deref()),
+                &sources,
                 &runtime,
                 &output,
                 None,
@@ -455,6 +455,7 @@ fn run() -> Result<ExitCode, String> {
             )
             .chain(&library_manifests)
             .map(PathBuf::as_path),
+        &sources,
         &runtime,
         &output,
         llvm_path.as_deref(),
@@ -728,34 +729,36 @@ fn extension_libraries(
 
 fn validate_paths<'a>(
     sources: impl Iterator<Item = &'a Path>,
+    inputs: &imre_compiler::SourceInputs,
     runtime: &'a Path,
     output: &'a Path,
     llvm_path: Option<&'a Path>,
     linker: Option<&'a Path>,
     clang: Option<&'a Path>,
 ) -> Result<(), String> {
-    let mut paths = sources.collect::<Vec<_>>();
-    paths.extend([runtime, output]);
-    if let Some(path) = llvm_path {
-        paths.push(path);
-    }
-    if let Some(path) = linker {
-        paths.push(path);
-    }
-    paths.extend(clang);
-    let identities = paths
+    let collision =
+        "All source modules, runtime, linker, executable, and LLVM output must have distinct paths";
+    let mut declarations: std::collections::HashSet<_> = inputs
+        .declaration_files
         .iter()
-        .map(|path| identity(path))
-        .collect::<Result<Vec<_>, _>>()?;
-    for (i, path) in identities.iter().enumerate() {
-        if identities[..i]
-            .iter()
-            .any(|previous| previous == path || same_file(previous, path))
-        {
-            return Err(
-                "All source modules, runtime, linker, executable, and LLVM output must have distinct paths"
-                    .to_owned(),
-            );
+        .map(|(p, _, _)| p.as_path())
+        .collect();
+    let mut seen = std::collections::HashMap::new();
+    for path in sources {
+        // Distinct declarations may share a file with each other or with an executed module.
+        let key = file_identity(path)?;
+        if declarations.remove(path) {
+            seen.entry(key).or_insert(false);
+        } else if seen.insert(key, true) == Some(true) {
+            return Err(collision.to_owned());
+        }
+    }
+    for path in [Some(runtime), Some(output), llvm_path, linker, clang]
+        .into_iter()
+        .flatten()
+    {
+        if seen.insert(file_identity(path)?, true).is_some() {
+            return Err(collision.to_owned());
         }
     }
     Ok(())
@@ -915,16 +918,20 @@ fn identity(path: &Path) -> Result<PathBuf, String> {
     }
 }
 
-/// Canonical paths catch symlinks; inode identity also protects hard-linked inputs.
-fn same_file(left: &Path, right: &Path) -> bool {
+#[derive(Eq, Hash, PartialEq)]
+enum FileIdentity {
+    Path(PathBuf),
     #[cfg(unix)]
-    {
+    Inode(u64, u64),
+}
+
+fn file_identity(path: &Path) -> Result<FileIdentity, String> {
+    #[cfg(unix)]
+    if let Ok(metadata) = path.metadata() {
         use std::os::unix::fs::MetadataExt;
-        if let (Ok(left), Ok(right)) = (left.metadata(), right.metadata()) {
-            return left.dev() == right.dev() && left.ino() == right.ino();
-        }
+        return Ok(FileIdentity::Inode(metadata.dev(), metadata.ino()));
     }
-    false
+    identity(path).map(FileIdentity::Path)
 }
 
 #[cfg(test)]

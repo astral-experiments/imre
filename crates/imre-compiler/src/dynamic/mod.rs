@@ -2172,9 +2172,21 @@ pub(crate) fn compile(
             ));
         }
     }
+    if let Some(graph) = project.as_ref() {
+        inputs
+            .declaration_files
+            .clone_from(&graph.inputs.declaration_files);
+        inputs.file_checks.extend(graph.inputs.file_checks.clone());
+        inputs
+            .declared_file_resolutions
+            .extend_from_slice(&graph.inputs.declared_file_resolutions);
+    }
     // Nested search roots can register one identical input snapshot under multiple names.
     inputs.files.sort_unstable();
     inputs.files.dedup();
+    inputs
+        .declaration_files
+        .retain(|file| inputs.files.binary_search(file).is_err());
     inputs.boxed_imports = true;
     // Registration has committed to the selected bodies. Leave the type database
     // and import graph behind before preparing their source initializers.
@@ -2287,7 +2299,10 @@ pub(crate) fn compile(
     )?;
     Ok(Some(crate::CompilationResult::Built(UnitCompilation {
         units,
-        input_paths: inputs.files.iter().map(|(p, _, _)| p.clone()).collect(),
+        input_paths: inputs
+            .source_files()
+            .map(|(path, _, _)| path.clone())
+            .collect(),
         source_inputs: inputs,
         extension_archives: options
             .bundled_provider_archive
