@@ -347,7 +347,10 @@ fn bound_wrapper_emits_once_with_its_fixed_callable_layout() {
                 native_calls.set(native_calls.get() + 1);
                 let ranges = ranges::analyze(&module);
                 let llvm_ir = llvm::emit_file(&module, &ranges, false, program)?;
-                assert!(llvm_ir.contains("call ptr @imre_function_set_wrapped("));
+                assert!(llvm_ir.lines().any(|line| {
+                    line.contains("getelementptr inbounds %callable,")
+                        && line.ends_with(", i32 0, i32 2")
+                }));
                 assert!(llvm_ir.contains("call ptr @imre_function_get_wrapped("));
                 Ok(vec![CodegenUnit {
                     name: "__main__".into(),

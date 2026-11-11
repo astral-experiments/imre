@@ -17,26 +17,6 @@ unsafe fn link(function: *const usize) -> *mut *const usize {
 }
 
 /// # Safety
-/// The wrapper is a live Python function. The target borrows a live callable
-/// record with the same signature, including a method with an owned receiver.
-/// The caller takes one reference to the returned wrapper.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_function_set_wrapped(
-    wrapper: *const usize,
-    wrapped: *const usize,
-) -> *const usize {
-    // SAFETY: retained before replacing the old owner, even on self-assignment.
-    unsafe {
-        debug_assert!(is_function(descriptor(wrapper)));
-        imre_record_retain(wrapped);
-        let previous = link(wrapper).replace(wrapped);
-        imre_record_release(previous);
-        imre_record_retain(wrapper);
-    }
-    wrapper
-}
-
-/// # Safety
 /// The caller roots the function and takes one reference to a successful result.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_function_get_wrapped(wrapper: *const usize) -> *const usize {
@@ -134,10 +114,9 @@ mod tests {
                     .write(StrOwner::into_raw(text.clone()));
                 records[0].add(1).cast::<*mut usize>().write(witness);
                 for (index, &record) in records.iter().enumerate() {
-                    imre_record_release(imre_function_set_wrapped(
-                        record,
-                        records[(index + 1) % size],
-                    ));
+                    let next = records[(index + 1) % size];
+                    imre_record_retain(next);
+                    link(record).write(next);
                 }
                 let alias = imre_function_get_wrapped(records[size - 1]);
                 assert_eq!(alias, records[0].cast_const());
