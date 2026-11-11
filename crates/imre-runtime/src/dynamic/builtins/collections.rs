@@ -671,6 +671,12 @@ pub(super) fn construct(
     {
         return Ok(*one);
     }
+    if name == "list"
+        && let [source] = args
+        && let Some(list) = ctx.list_from_int_character_map(*source)
+    {
+        return Ok(list);
+    }
     // list() consults the cursor's signed length hint before pulling an item.
     if name == "list"
         && let [source] = args

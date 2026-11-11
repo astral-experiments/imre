@@ -74,6 +74,14 @@ def current():
     pull(cursor)
     print(list(cursor))
 
+    cursor = map(int, "2x７")
+    try:
+        list(cursor)
+    except ValueError:
+        assert list(cursor) == [7]
+    else:
+        raise AssertionError("list must consume the invalid character")
+
     class Character(str):
         def __int__(self):
             return 41
