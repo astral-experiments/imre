@@ -1068,25 +1068,27 @@ impl Checker<'_> {
 
     /// Decimal integer fields keep their full precision. Fixed-point and
     /// percentage fields use Python's checked integer-to-float conversion.
-    pub(super) fn formatted_scalar(
+    pub(super) fn prepare_field(
         &mut self,
         field: &ast::InterpolatedElement,
         conversion: ast::ConversionFlag,
-    ) -> Result<Option<Expr>, String> {
+    ) -> Result<fstrings::FieldValue, String> {
+        use fstrings::FieldValue::{Formatted, Operand};
+        let operand = |checker: &mut Self| checker.expr(&field.expression).map(Operand);
         let mut specification = String::new();
         if let Some(spec) = &field.format_spec {
             for part in &spec.elements {
                 let ast::InterpolatedStringElement::Literal(literal) = part else {
-                    return Ok(None);
+                    return operand(self);
                 };
                 specification.push_str(&literal.value);
             }
         }
         if conversion == ast::ConversionFlag::Ascii {
             return if specification.is_empty() {
-                self.ascii_expr(&field.expression).map(Some)
+                self.ascii_expr(&field.expression).map(Formatted)
             } else {
-                Ok(None)
+                operand(self)
             };
         }
         let format = if specification.is_empty() {
@@ -1094,9 +1096,20 @@ impl Checker<'_> {
         } else if let Some(numeric) = NumericField::parse(&specification) {
             Some(numeric)
         } else {
-            return Ok(None);
+            return operand(self);
         };
-        self.scalar_field(field, conversion, format).map(Some)
+        if format.is_none()
+            && let Some(text) = self.unittest_failure_repr(&field.expression)?
+        {
+            return Ok(Formatted(text));
+        }
+        let value = self.expr(&field.expression)?;
+        if value.ty == Type::PythonObject {
+            self.require_registered_operation(field)?;
+            return Ok(Operand(value));
+        }
+        self.scalar_field(field, conversion, format, value)
+            .map(Formatted)
     }
 
     fn scalar_field(
@@ -1104,13 +1117,8 @@ impl Checker<'_> {
         field: &ast::InterpolatedElement,
         conversion: ast::ConversionFlag,
         format: Option<NumericField<'_>>,
+        mut value: Expr,
     ) -> Result<Expr, String> {
-        if format.is_none()
-            && let Some(text) = self.unittest_failure_repr(&field.expression)?
-        {
-            return Ok(text);
-        }
-        let mut value = self.expr(&field.expression)?;
         if conversion != ast::ConversionFlag::Repr {
             value = if matches!(value.ty, Type::Enum(_)) {
                 Expr {
