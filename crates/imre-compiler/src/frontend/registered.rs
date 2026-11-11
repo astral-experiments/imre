@@ -1055,6 +1055,7 @@ pub(crate) struct RegisteredSuite {
 }
 
 impl RegisteredSuite {
+    #[cfg(test)]
     pub(crate) fn fully_checked(&self) -> bool {
         self.operands.is_empty() && self.suites.is_empty()
     }

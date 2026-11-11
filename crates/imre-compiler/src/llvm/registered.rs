@@ -343,23 +343,37 @@ pub(crate) fn emit_physical_operand<'a, 'p>(
     }
 }
 
-/// Emit checked statements, reporting a deferred refusal at its execution position.
-pub(crate) fn emit_prepared_suite<'a, 'p>(
-    owner: &mut dyn PreparedSuiteEmitter<'a, 'p>,
-    suite: &'p crate::frontend::RegisteredSuite,
-) {
-    let checked = &suite.checked;
-    let Some(enclosing) = owner.enter_checked_slots(checked.region()) else {
-        return;
-    };
-    let mut frame = Frame {
-        code: FrameOwner::Prepared(owner),
-        names: Some(&checked.local_names),
-        inputs: FrameInputs::Region(suite),
-        fixed_sites: None,
-    };
-    frame.checked_statements(&checked.function.body);
-    frame.restore_checked_slots(enclosing);
+/// Both forms provide the checked function. A suite also supplies the operation
+/// inputs and child suites referenced by that function. Source preparation owns
+/// its suites, and emission borrows them.
+pub(crate) enum RegisteredBody<'p, S = &'p crate::frontend::RegisteredSuite> {
+    Function(&'p RegisteredFunction),
+    Suite(S),
+}
+
+impl<'p> RegisteredBody<'p> {
+    pub(crate) fn emit(self, owner: &mut dyn PreparedSuiteEmitter<'_, 'p>) {
+        self.emit_on(FrameOwner::Prepared(owner));
+    }
+
+    fn emit_on(self, mut code: FrameOwner<'_, '_, 'p>) {
+        let (checked, inputs) = match self {
+            Self::Function(checked) => (checked, FrameInputs::Handles(&[])),
+            Self::Suite(suite) => (&suite.checked, FrameInputs::Region(suite)),
+        };
+        let Some(enclosing) = code.enter_checked_slots(checked.region()) else {
+            return;
+        };
+        let next = Cell::new(0);
+        let mut frame = Frame {
+            code: code.reborrow(),
+            names: Some(&checked.local_names),
+            inputs,
+            fixed_sites: (!checked.fixed_sites.is_empty()).then_some((checked, &next)),
+        };
+        frame.checked_statements(&checked.function.body);
+        frame.restore_checked_slots(enclosing);
+    }
 }
 
 pub(crate) fn prepared_condition<'a, 'p>(
@@ -481,7 +495,9 @@ impl<'f, 'a, 'p> Frame<'f, 'a, 'p> {
 
     fn checked_statements(&mut self, body: &[Statement]) {
         if !body.is_empty() && self.next_statement() {
-            self.code.prepared_owner().place_statements(body);
+            if let FrameOwner::Prepared(owner) = &mut self.code {
+                owner.place_statements(body);
+            }
             self.emit_suite(body);
         }
     }
@@ -960,7 +976,7 @@ impl Frame<'_, '_, '_> {
             let FrameInputs::Region(region) = self.inputs else {
                 unreachable!("ordered child suite outside its control region")
             };
-            emit_prepared_suite(self.code.prepared_owner(), &region.suites[*index]);
+            RegisteredBody::Suite(&region.suites[*index]).emit(self.code.prepared_owner());
             true
         } else if let ExprKind::Builtin(Builtin::RegisteredStatement(range, simple), _) = &expr.kind
         {
@@ -1661,21 +1677,6 @@ impl RegisteredFrame<'_, '_> {
         let value = self.value(&format!("load i64, ptr {slot}"));
         self.store_private(items[0], &key);
         self.store_private(items[1], &value);
-    }
-
-    pub(crate) fn checked_body(&mut self, checked: &RegisteredFunction, sites: &CheckedSites) {
-        let Some(enclosing) = self.enter_checked_slots(checked.region()) else {
-            return;
-        };
-        let next = Cell::new(0);
-        CheckedBody::registered(Frame {
-            code: FrameOwner::Registered(self, sites),
-            names: Some(&checked.local_names),
-            fixed_sites: (!checked.fixed_sites.is_empty()).then_some((checked, &next)),
-            inputs: FrameInputs::Handles(&[]),
-        })
-        .emit_function(&checked.function);
-        self.restore_checked_slots(enclosing);
     }
 }
 

@@ -193,7 +193,9 @@ impl<'p> Frame<'_, '_, 'p> {
     pub(super) fn emit_finally(&mut self, suite: &Finally<'p>) {
         match suite {
             Finally::Checked(statements) => self.emit_suite(statements),
-            Finally::Prepared(body) => super::emit_prepared_suite(self.code.prepared_owner(), body),
+            Finally::Prepared(body) => {
+                super::RegisteredBody::Suite(*body).emit(self.code.prepared_owner())
+            }
         }
     }
 

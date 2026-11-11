@@ -1,5 +1,5 @@
 use super::CheckedSites;
-use super::{Output, RegisteredFrame, SourcePositions};
+use super::{FrameOwner, Output, RegisteredBody, RegisteredFrame, SourcePositions};
 use crate::modules::SourceGraph;
 use ruff_text_size::{TextRange, TextSize};
 use std::path::Path;
@@ -31,7 +31,8 @@ fn emit_registered_body(source: &str, function: &crate::frontend::RegisteredFunc
     let file = output.data(b"app.py");
     let positions = SourcePositions::new(Path::new("app.py"), source, &file);
     let mut frame = RegisteredFrame::new(&mut output, &positions, false, 0, 0.into());
-    RegisteredFrame::checked_body(&mut frame, function, &CheckedSites::default());
+    RegisteredBody::Function(function)
+        .emit_on(FrameOwner::Registered(&mut frame, &CheckedSites::default()));
     frame.finish_callable(None);
     output
 }
@@ -293,7 +294,8 @@ fn placed_multiplication_keeps_the_exact_integer_guard_and_python_protocol() {
         let file = output.data(b"product.py");
         let positions = SourcePositions::new(Path::new("product.py"), &source, &file);
         let mut frame = RegisteredFrame::new(&mut output, &positions, false, 0, 0.into());
-        frame.checked_body(&placed, &CheckedSites::default());
+        RegisteredBody::Function(&placed)
+            .emit_on(FrameOwner::Registered(&mut frame, &CheckedSites::default()));
         frame.finish_callable(None);
         let star = output.data(b"*");
         let body = &output.functions;
