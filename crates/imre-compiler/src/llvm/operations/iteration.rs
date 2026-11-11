@@ -359,7 +359,10 @@ impl CheckedBody<'_, '_, '_, '_> {
             Entry::Native(emitter) => Some(emitter.if_facts(test, yes)),
             Entry::Registered(_) => None,
         };
-        let resumable = matches!(&self.0, Entry::Registered(frame) if frame.has_region_inputs());
+        let resumable = matches!(
+            test.kind,
+            ExprKind::Builtin(crate::ir::Builtin::RegisteredInput(_), _)
+        );
         super::join::choose(
             self,
             Self::body,

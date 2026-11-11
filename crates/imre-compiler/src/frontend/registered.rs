@@ -1051,8 +1051,6 @@ struct LoweredSuite<'s> {
 pub(crate) enum SourceEffect {
     /// The statement reads each prepared operand by its position in the input list.
     Value(Box<Statement>, Vec<PhysicalOperand>),
-    /// Checked control flow with guards and child suites bound in their lexical frame.
-    Region(Box<PreparedRegion>),
 }
 
 fn loop_transfer(stmt: &ast::Stmt) -> Option<Statement> {
@@ -1063,21 +1061,26 @@ fn loop_transfer(stmt: &ast::Stmt) -> Option<Statement> {
     }
 }
 
-pub(crate) struct PreparedRegion {
-    /// A disabled loop can only leave through its else suite.
-    terminates: bool,
-    pub(crate) checked: RegisteredFunction,
-    pub(crate) operands: Vec<PhysicalOperand>,
-    pub(crate) suites: Vec<RegisteredSuite>,
-}
-
 fn bind_operand(operands: &mut Vec<PhysicalOperand>, value: PhysicalOperand, ty: Type) -> Expr {
     let index = operands.len();
     operands.push(value);
     Expr::registered_input(index, ty)
 }
 
-impl PreparedRegion {
+pub(crate) struct RegisteredSuite {
+    pub(crate) refusal: Option<OperandRefusal>,
+    falls_through: bool,
+    pub(crate) checked: RegisteredFunction,
+    pub(crate) operands: Vec<PhysicalOperand>,
+    pub(crate) suites: Vec<RegisteredSuite>,
+    pub(crate) residual: Vec<SuiteOperation>,
+}
+
+impl RegisteredSuite {
+    pub(crate) fn fully_checked(&self) -> bool {
+        self.residual.is_empty() && self.operands.is_empty() && self.suites.is_empty()
+    }
+
     pub(crate) fn child_suite(&self, body: &[Statement]) -> Option<&RegisteredSuite> {
         let [
             Statement::Expr(Expr {
@@ -1096,7 +1099,9 @@ impl PreparedRegion {
             checked,
             operands,
             suites: Vec::new(),
-            terminates: false,
+            residual: Vec::new(),
+            refusal: None,
+            falls_through: true,
         }
     }
 
@@ -1120,18 +1125,6 @@ pub(crate) type PhysicalOperand =
 
 pub(crate) type OperandRefusal = (TextRange, &'static str);
 
-pub(crate) struct RegisteredSuite {
-    pub(crate) refusal: Option<OperandRefusal>,
-    falls_through: bool,
-    pub(crate) checked: RegisteredFunction,
-    pub(crate) residual: Vec<SuiteOperation>,
-}
-
-impl RegisteredSuite {
-    pub(crate) fn fully_checked(&self) -> bool {
-        self.residual.is_empty()
-    }
-}
 
 /// Physical source locations and semantic operations shared by complete and residual suites.
 #[derive(Default)]
@@ -1373,47 +1366,69 @@ impl<'a> SuitePreparation<'a> {
             pending,
             checked_exit,
         } = self.lower(stmts, kind, select, suspended);
+        let mut suite = RegisteredSuite::new(checked, Vec::new());
+        if pending.is_empty() {
+            suite.refusal = self.checked_declaration_refusal(&suite.checked.function.body);
+            suite.falls_through = checked_exit.is_none();
+            return suite;
+        }
         let enclosing = self.refusal.take();
-        let mut residual = Vec::with_capacity(pending.len());
+        let mut statements = std::mem::take(&mut suite.checked.function.body).into_iter();
         let mut offset = 0;
         let mut live = true;
         for run in pending {
+            let count = run.at - offset;
             if live {
-                self.refusal = self.refusal.or_else(|| {
-                    self.checked_declaration_refusal(&checked.function.body[offset..run.at])
-                });
+                self.refusal = self
+                    .refusal
+                    .or_else(|| self.checked_declaration_refusal(&statements.as_slice()[..count]));
                 live = checked_exit.is_none_or(|exit| run.at < exit);
             }
+            suite
+                .checked
+                .function
+                .body
+                .extend(statements.by_ref().take(count));
             offset = run.at;
             let preceding = self.refusal.take();
             let effect = match run.effect {
                 PendingEffect::Prepared(effect) => Ok(effect),
                 PendingEffect::Refused(refusal) => Err(refusal),
-                PendingEffect::Source(stmt) => match stmt {
-                    ast::Stmt::If(branch) => {
-                        Ok(self.prepare_if(branch, kind, child_selection, suspended))
+                PendingEffect::Source(stmt) => {
+                    let child = match stmt {
+                        ast::Stmt::If(branch) => {
+                            Ok(self.prepare_if(branch, kind, child_selection, suspended))
+                        }
+                        ast::Stmt::While(loop_) => {
+                            Ok(self.prepare_while(loop_, kind, child_selection, suspended))
+                        }
+                        ast::Stmt::For(loop_) => {
+                            self.prepare_for(loop_, kind, child_selection, suspended)
+                        }
+                        ast::Stmt::Try(protected) => Ok(self.prepare_try(
+                            protected,
+                            checkpoint(stmt),
+                            kind,
+                            child_selection,
+                            suspended,
+                        )),
+                        ast::Stmt::With(with) => {
+                            Ok(self.prepare_context(with, kind, child_selection, suspended))
+                        }
+                        ast::Stmt::Match(branch) => self.prepare_match(branch, kind, suspended),
+                        _ => Err((stmt.range(), "cannot compile this statement ahead of time")),
+                    };
+                    match child {
+                        Ok(child) => {
+                            self.refusal = preceding.or(self.refusal.filter(|_| live));
+                            live &= child.falls_through;
+                            let enter = suite.child(child);
+                            suite.checked.function.body.extend(enter);
+                            continue;
+                        }
+                        Err(refusal) => Err(refusal),
                     }
-                    ast::Stmt::While(loop_) => {
-                        Ok(self.prepare_while(loop_, kind, child_selection, suspended))
-                    }
-                    ast::Stmt::For(loop_) => {
-                        self.prepare_for(loop_, kind, child_selection, suspended)
-                    }
-                    ast::Stmt::Try(protected) => Ok(self.prepare_try(
-                        protected,
-                        checkpoint(stmt),
-                        kind,
-                        child_selection,
-                        suspended,
-                    )),
-                    ast::Stmt::With(with) => {
-                        Ok(self.prepare_context(with, kind, child_selection, suspended))
-                    }
-                    ast::Stmt::Match(branch) => self
-                        .prepare_match(branch, kind, suspended)
-                        .map(|region| SourceEffect::Region(Box::new(region))),
-                    _ => Err((stmt.range(), "cannot compile this statement ahead of time")),
-                },
+                }
             };
             let selected = match &effect {
                 Err(refusal) => Some(*refusal),
@@ -1423,7 +1438,6 @@ impl<'a> SuitePreparation<'a> {
                     .or_else(|| {
                         self.checked_declaration_refusal(std::slice::from_ref(statement.as_ref()))
                     }),
-                _ => None,
             };
             let operation = self.refusal.take().or(selected);
             self.refusal = preceding.or(operation.filter(|_| live));
@@ -1432,24 +1446,22 @@ impl<'a> SuitePreparation<'a> {
                     statement.as_ref(),
                     Statement::Return(_) | Statement::Raise(_)
                 ),
-                Ok(SourceEffect::Region(region)) => !region.terminates,
                 _ => true,
             };
-            residual.push(SuiteOperation { at: run.at, effect });
+            suite.residual.push(SuiteOperation {
+                at: suite.checked.function.body.len(),
+                effect,
+            });
         }
         if live {
             self.refusal = self
                 .refusal
-                .or_else(|| self.checked_declaration_refusal(&checked.function.body[offset..]));
+                .or_else(|| self.checked_declaration_refusal(statements.as_slice()));
         }
-        let falls_through = live && checked_exit.is_none();
-        let refusal = std::mem::replace(&mut self.refusal, enclosing);
-        RegisteredSuite {
-            checked,
-            residual,
-            refusal,
-            falls_through,
-        }
+        suite.checked.function.body.extend(statements);
+        suite.falls_through = live && checked_exit.is_none();
+        suite.refusal = std::mem::replace(&mut self.refusal, enclosing);
+        suite
     }
 
     pub(crate) fn checked_declaration_refusal(
@@ -1536,9 +1548,9 @@ impl<'a> SuitePreparation<'a> {
         child
     }
 
-    fn region(&self, kind: RegisteredScope) -> PreparedRegion {
+    fn region(&self, kind: RegisteredScope) -> RegisteredSuite {
         let scope = SourceScope::new(kind, self.source, self.operations, &self.sites);
-        PreparedRegion::new(scope.finish(Vec::new()), Vec::new())
+        RegisteredSuite::new(scope.finish(Vec::new()), Vec::new())
     }
 
     fn prepare_if(
@@ -1547,7 +1559,7 @@ impl<'a> SuitePreparation<'a> {
         kind: RegisteredScope,
         selection: SuiteSelection,
         suspended: bool,
-    ) -> SourceEffect {
+    ) -> RegisteredSuite {
         let mut region = self.region(kind);
         let mut arms = Vec::new();
         let mut otherwise = Vec::new();
@@ -1585,7 +1597,7 @@ impl<'a> SuitePreparation<'a> {
             .function
             .body
             .extend(statements::if_arms(arms, otherwise));
-        SourceEffect::Region(Box::new(region))
+        region
     }
 
     fn prepare_try(
@@ -1595,7 +1607,7 @@ impl<'a> SuitePreparation<'a> {
         kind: RegisteredScope,
         selection: SuiteSelection,
         suspended: bool,
-    ) -> SourceEffect {
+    ) -> RegisteredSuite {
         let mut scope = SourceScope::new(kind, self.source, self.operations, &self.sites);
         let names: Vec<_> = stmt
             .handlers
@@ -1604,7 +1616,7 @@ impl<'a> SuitePreparation<'a> {
                 handler.name.as_ref().map(|name| scope.slot(name.as_str()))
             })
             .collect();
-        let mut region = PreparedRegion::new(scope.finish(vec![checkpoint]), Vec::new());
+        let mut region = RegisteredSuite::new(scope.finish(vec![checkpoint]), Vec::new());
 
         // Preserve the first refusal from the body, entered else, handlers and finally.
         let body = self.physical_suite(&stmt.body, kind, selection, suspended);
@@ -1644,14 +1656,14 @@ impl<'a> SuitePreparation<'a> {
             let continues = suite.falls_through;
             (region.child(suite), continues)
         };
-        region.terminates = !try_continues(body_continues, !handlers.is_empty(), final_continues);
+        region.falls_through = try_continues(body_continues, !handlers.is_empty(), final_continues);
         region.checked.function.body.push(Statement::Try {
             body,
             handlers,
             orelse,
             finalbody,
         });
-        SourceEffect::Region(Box::new(region))
+        region
     }
 
     fn prepare_context(
@@ -1660,7 +1672,7 @@ impl<'a> SuitePreparation<'a> {
         kind: RegisteredScope,
         selection: SuiteSelection,
         suspended: bool,
-    ) -> SourceEffect {
+    ) -> RegisteredSuite {
         let mut scope = SourceScope::new(kind, self.source, self.operations, &self.sites);
         scope.report_child_refusals = true;
         let bindings: Vec<_> = stmt
@@ -1680,7 +1692,7 @@ impl<'a> SuitePreparation<'a> {
                     .transpose()
             })
             .collect();
-        let mut region = PreparedRegion::new(scope.finish(Vec::new()), Vec::new());
+        let mut region = RegisteredSuite::new(scope.finish(Vec::new()), Vec::new());
         let mut managers = Vec::with_capacity(stmt.items.len());
         let mut refused_binding = None;
         for (index, (item, binding)) in stmt.items.iter().zip(bindings).enumerate() {
@@ -1701,13 +1713,13 @@ impl<'a> SuitePreparation<'a> {
         let suite = if let Some(fault) = refused_binding {
             self.refusal.get_or_insert(fault);
             RegisteredSuite {
-                checked: self.region(kind).checked,
                 residual: vec![SuiteOperation {
                     at: 0,
                     effect: Err(fault),
                 }],
                 refusal: Some(fault),
                 falls_through: false,
+                ..self.region(kind)
             }
         } else {
             self.physical_suite(&stmt.body, kind, selection, suspended)
@@ -1725,7 +1737,7 @@ impl<'a> SuitePreparation<'a> {
             vec![],
         )));
         region.checked.function.body.extend(body);
-        SourceEffect::Region(Box::new(region))
+        region
     }
 
     fn prepare_while(
@@ -1734,7 +1746,7 @@ impl<'a> SuitePreparation<'a> {
         kind: RegisteredScope,
         selection: SuiteSelection,
         suspended: bool,
-    ) -> SourceEffect {
+    ) -> RegisteredSuite {
         let mut region = self.region(kind);
         let test = match loop_.test.as_ref() {
             ast::Expr::BooleanLiteral(literal) => Expr::boolean(literal.value),
@@ -1754,7 +1766,7 @@ impl<'a> SuitePreparation<'a> {
             Vec::new()
         } else {
             let suite = self.physical_suite(&loop_.orelse, kind, selection, suspended);
-            region.terminates = disabled && !suite.falls_through;
+            region.falls_through = !disabled || suite.falls_through;
             region.child(suite)
         };
         region
@@ -1762,7 +1774,7 @@ impl<'a> SuitePreparation<'a> {
             .function
             .body
             .push(Statement::While(test, body, otherwise));
-        SourceEffect::Region(Box::new(region))
+        region
     }
 
     fn prepare_for(
@@ -1771,7 +1783,7 @@ impl<'a> SuitePreparation<'a> {
         kind: RegisteredScope,
         selection: SuiteSelection,
         suspended: bool,
-    ) -> StdResult<SourceEffect, OperandRefusal> {
+    ) -> StdResult<RegisteredSuite, OperandRefusal> {
         let iterable = self.physical_operand(&loop_.iter, kind, selection, suspended);
         let mut operands = Vec::new();
         let iterable = bind_operand(&mut operands, iterable, Type::PythonObject);
@@ -1785,7 +1797,7 @@ impl<'a> SuitePreparation<'a> {
                     "cannot compile this assignment target ahead of time",
                 ))
             })?;
-        let mut region = PreparedRegion::new(scope.finish(Vec::new()), operands);
+        let mut region = RegisteredSuite::new(scope.finish(Vec::new()), operands);
         let body = region.child(self.physical_suite(&loop_.body, kind, selection, suspended));
         let otherwise = if loop_.orelse.is_empty() {
             Vec::new()
@@ -1799,7 +1811,7 @@ impl<'a> SuitePreparation<'a> {
         ))];
         statements.extend(input.for_suite(binding, body, otherwise, Vec::new()));
         region.checked.function.body = statements;
-        Ok(SourceEffect::Region(Box::new(region)))
+        Ok(region)
     }
 
     fn lower<'s>(
@@ -1907,7 +1919,10 @@ impl<'a> SuitePreparation<'a> {
                             at: body.len(),
                             effect: PendingEffect::Prepared(store_input(slot, frame_value(expr))),
                         });
-                        unpacking::take_pattern_temporary(Expr::local(slot, Type::PythonObject), slot)
+                        unpacking::take_pattern_temporary(
+                            Expr::local(slot, Type::PythonObject),
+                            slot,
+                        )
                     })
                     .collect();
                 body.push(scope.bind_definition(
@@ -2118,9 +2133,7 @@ impl<'a> SuitePreparation<'a> {
         let lowered = self.lower(stmts, kind, SuiteSelection::All, false);
         lowered.pending.is_empty().then(|| RegisteredSuite {
             falls_through: lowered.checked_exit.is_none(),
-            refusal: None,
-            checked: lowered.checked,
-            residual: Vec::new(),
+            ..RegisteredSuite::new(lowered.checked, Vec::new())
         })
     }
 }
@@ -3863,11 +3876,15 @@ mod tests {
                 .iter()
                 .any(|stmt| matches!(stmt, Statement::If(..)))
         );
-        let [run] = plan.residual.as_slice() else {
-            panic!("expected only the second conditional to need a physical guard")
-        };
-
-        let Ok(SourceEffect::Region(region)) = &run.effect else {
+        assert!(plan.residual.is_empty());
+        assert!(plan.checked.function.body.iter().any(|stmt| matches!(
+            stmt,
+            Statement::Expr(Expr {
+                kind: ExprKind::Builtin(Builtin::RegisteredSuite(0), _),
+                ..
+            })
+        )));
+        let [region] = plan.suites.as_slice() else {
             panic!("expected the conditional to bind its child suite")
         };
         assert!(matches!(region.checked.function.body.as_slice(),

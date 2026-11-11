@@ -353,32 +353,19 @@ pub(crate) fn emit_prepared_suite<'a, 'p>(
     owner: &mut dyn PreparedSuiteEmitter<'a, 'p>,
     suite: &'p crate::frontend::RegisteredSuite,
 ) {
-    emit_checked_region(
-        owner,
-        &suite.checked,
-        &suite.residual,
-        FrameInputs::Handles(&[]),
-    );
-}
-
-fn emit_checked_region<'a, 'p>(
-    owner: &mut dyn PreparedSuiteEmitter<'a, 'p>,
-    checked: &'p RegisteredFunction,
-    steps: &'p [crate::frontend::SuiteOperation],
-    inputs: FrameInputs<'_, 'p>,
-) {
+    let checked = &suite.checked;
     let Some(enclosing) = owner.enter_checked_slots(checked.region()) else {
         return;
     };
     let mut frame = Frame {
         code: FrameOwner::Prepared(owner),
         names: Some(&checked.local_names),
-        inputs,
+        inputs: FrameInputs::Region(suite),
         fixed_sites: None,
     };
     let body = &checked.function.body;
     let mut offset = 0;
-    for step in steps {
+    for step in &suite.residual {
         frame.checked_statements(&body[offset..step.at]);
         offset = step.at;
         if !frame.next_statement() {
@@ -471,7 +458,7 @@ enum FrameInputs<'f, 'p> {
     Handles(&'f [String]),
     Prepared(&'f crate::frontend::PhysicalInputs),
     Statement(&'f [crate::frontend::PhysicalOperand]),
-    Region(&'p crate::frontend::PreparedRegion),
+    Region(&'p crate::frontend::RegisteredSuite),
 }
 
 /// The registered binder owns the scope, argument identities and frame.
@@ -531,13 +518,6 @@ impl<'f, 'a, 'p> Frame<'f, 'a, 'p> {
         let mut statement_frame = self.reborrow();
         statement_frame.inputs = FrameInputs::Statement(inputs);
         CheckedBody::registered(statement_frame).emit_statement(statement);
-    }
-
-    pub(crate) fn emit_region(
-        owner: &'f mut dyn PreparedSuiteEmitter<'a, 'p>,
-        region: &'p crate::frontend::PreparedRegion,
-    ) {
-        emit_checked_region(owner, &region.checked, &[], FrameInputs::Region(region));
     }
 
     /// Bind the owned occurrence slots used by the checked operation.
@@ -696,10 +676,6 @@ impl Frame<'_, '_, '_> {
         CheckedValue::handle(self.checked_sequence(values, display, |code, operand| {
             code.evaluate_handle(operand)
         }))
-    }
-
-    pub(super) fn has_region_inputs(&self) -> bool {
-        matches!(self.inputs, FrameInputs::Region(_))
     }
 
     pub(super) fn bound_condition(&mut self, expr: &Expr) -> Option<String> {

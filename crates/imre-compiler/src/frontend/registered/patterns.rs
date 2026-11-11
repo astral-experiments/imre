@@ -10,7 +10,7 @@ impl SuitePreparation<'_> {
         branch: &ast::StmtMatch,
         kind: RegisteredScope,
         suspended: bool,
-    ) -> PatternResult<PreparedRegion> {
+    ) -> PatternResult<RegisteredSuite> {
         let patterns = prepare_patterns(branch, self.source)?;
         let operand = |prepare: &mut Self, expr: &ast::Expr| {
             prepare.owned_operand(expr, kind, suspended, |scope| scope.frame_value(expr))
