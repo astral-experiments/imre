@@ -706,7 +706,7 @@ fn scan_imports(
     }
     imports_from_body(
         &module.text,
-        module_source::into_body(module.parsed),
+        &mut module_source::into_body(module.parsed),
         getter,
         file_alternative.map(|(path, _)| path),
     )
@@ -714,15 +714,15 @@ fn scan_imports(
 
 fn imports_from_body(
     normalized: &str,
-    mut body: ast::Suite,
+    body: &mut [Stmt],
     getter: Option<&mut Imports>,
     file_alternative: Option<&Path>,
 ) -> Result<Imports, String> {
-    let error = ModuleSyntaxError::in_body(normalized, &body);
+    let error = ModuleSyntaxError::in_body(normalized, body);
     // The optional file must satisfy the emitter's checks before registration.
     // Use its discovery tree for both checking and collecting the lowered imports.
     let checked_names = file_alternative
-        .map(|path| module_source::lower(path, normalized, &mut body))
+        .map(|path| module_source::lower(path, normalized, body))
         .transpose()?;
     if let Some(diagnostic) = error {
         return Ok(Imports {
@@ -731,19 +731,16 @@ fn imports_from_body(
         });
     }
     let mut imports = Imports::default();
-    if imre_ast::future_import(&body, "barry_as_FLUFL") {
+    if imre_ast::future_import(body, "barry_as_FLUFL") {
         imports.module_flags |= imre_ast::code_flags::FUTURE_BARRY_AS_BDFL;
     }
-    imports.private_names = checked_names.unwrap_or_else(|| imre_ast::lower(&mut body));
+    imports.private_names = checked_names.unwrap_or_else(|| imre_ast::lower(body));
     if imports.private_names.string_annotations {
         imports.module_flags |= imre_ast::code_flags::FUTURE_ANNOTATIONS;
     }
-    imports.runtime_imports = body.iter().any(|stmt| {
-        matches!(stmt, Stmt::FunctionDef(function) if function_type_params(function, imports.private_names.string_annotations, false, Some(&imports.private_names)).is_some())
-    });
     let mut getter_body = Vec::new();
     if getter.is_some() {
-        for stmt in &mut body {
+        for stmt in body.iter_mut() {
             if let Stmt::FunctionDef(function) = stmt
                 && function.name.as_str() == "__getattr__"
             {
@@ -751,7 +748,7 @@ fn imports_from_body(
             }
         }
     }
-    imports.visit_body(&body);
+    imports.visit_body(body);
     if let Some(getter) = getter
         && !getter_body.is_empty()
     {
@@ -916,34 +913,35 @@ pub(crate) fn compile(
     let modules = checked_graph.map_or(&[][..], |graph| graph.modules.as_slice());
     let entry_file = file_entry
         .and_then(|graph| CheckedFile::entry(graph, entry_identity.as_deref().unwrap_or(path)));
+    let checked_entry = matches!(operation, Some(ObjectOperation::CheckedEntry));
+    let entry_imports = |text: &str, mut body: ast::Suite| -> Result<Imports, String> {
+        let mut imports = imports_from_body(text, &mut body, None, None)?;
+        // Generic functions can admit an unresolved entry. A runtime-class import
+        // also needs the entry's own request when checking its first-party callers.
+        if module_entry.is_none()
+            && (!checked_entry || typed_graph.is_some_and(|graph| graph.imports_runtime_class))
+            && imports.invalid_executable.is_none()
+            && !imports.runtime_imports
+        {
+            imports.runtime_imports = body.iter().any(|stmt| {
+                matches!(stmt, Stmt::FunctionDef(function) if function_type_params(function, imports.private_names.string_annotations, false, Some(&imports.private_names)).is_some())
+            });
+        }
+        Ok(imports)
+    };
     let mut file_source = None;
     let mut first = if let Some(file) = entry_file {
         let module = file.parsed(modules);
-        imports_from_body(
-            &module.text,
-            module_source::into_body(module.parsed),
-            None,
-            None,
-        )?
+        entry_imports(&module.text, module_source::into_body(module.parsed))?
     } else {
         let module = match read_import_source(&src, kind) {
             Ok(ImportSource::Module(module)) => module,
             _ => return Ok(None),
         };
         if in_memory {
-            imports_from_body(
-                &module.text,
-                module_source::into_body(module.parsed),
-                None,
-                None,
-            )?
+            entry_imports(&module.text, module_source::into_body(module.parsed))?
         } else {
-            let imports = imports_from_body(
-                &module.text,
-                module.parsed.syntax().body.clone(),
-                None,
-                None,
-            )?;
+            let imports = entry_imports(&module.text, module.parsed.syntax().body.clone())?;
             file_source = Some(module);
             imports
         }
@@ -978,10 +976,16 @@ pub(crate) fn compile(
         || first.runtime_imports
         || (first.uses_import_builtin && startup.is_some())
         || provider_script;
-    let object_entry = first.invalid_executable.is_some()
-        || entry_requests_objects
-        || (operation.is_some() && !ordered_command)
-        || (object_imports && !first.names.is_empty());
+    let object_entry = match operation {
+        Some(
+            ObjectOperation::CheckedEntry | ObjectOperation::Builtin | ObjectOperation::ClassLayout,
+        ) => true,
+        None | Some(ObjectOperation::OrderedCommandImport) => {
+            first.invalid_executable.is_some()
+                || entry_requests_objects
+                || (object_imports && !first.names.is_empty())
+        }
+    };
     // Existing object imports keep their normal project-module lookup. Only a new
     // startup fallback needs to verify that the imported provider is bundled.
     let consider_startup =
@@ -1417,7 +1421,7 @@ pub(crate) fn compile(
             && (!provider_script || owner == "__main__")
             && !through_getter
             && imports.uses_machinery_export("ModuleSpec")
-            && !matches!(operation, Some(ObjectOperation::CheckedEntry))
+            && !checked_entry
             && (owner == "__main__"
                 || machinery_graph
                     .is_none_or(|graph| graph.modules.iter().any(|m| m.name == owner)))
@@ -1907,7 +1911,7 @@ pub(crate) fn compile(
                     let imports = match parsed.map(|file| file.parsed(modules)) {
                         Some(module) => imports_from_body(
                             &module.text,
-                            module_source::into_body(module.parsed),
+                            &mut module_source::into_body(module.parsed),
                             None,
                             None,
                         ),
