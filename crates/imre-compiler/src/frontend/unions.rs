@@ -292,6 +292,9 @@ impl Checker<'_> {
     /// annotations such as list[int] never become runtime class objects.
     fn instance_types(&self, expression: &ast::Expr) -> Result<Vec<InstanceType>, String> {
         use InstanceType::{Deque, Exact, List, Tuple};
+        if matches!(self.resolve(expression), Some(Binding::RegisteredClass(_))) {
+            return Err(self.scoped_builtin_error("isinstance with a Python class", expression));
+        }
         let classinfo = expression
             .as_subscript_expr()
             .map_or(expression, |item| item.value.as_ref());

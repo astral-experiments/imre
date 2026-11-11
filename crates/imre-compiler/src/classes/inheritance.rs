@@ -6,19 +6,23 @@ use ruff_text_size::Ranged;
 pub(super) fn resolve(
     graph: &SourceGraph,
     nodes: &[(DefinitionId, &ast::StmtClassDef)],
-    ids: &HashMap<DefinitionId, usize>,
+    ids: &mut HashMap<DefinitionId, usize>,
     exceptions: &exceptions::Declarations,
-) -> Result<Vec<Class>, Diagnostic> {
+) -> Result<(Vec<Class>, HashSet<DefinitionId>), Diagnostic> {
+    struct Layouts {
+        fixed: Vec<Option<Class>>,
+        registered: HashSet<DefinitionId>,
+    }
     fn build(
         id: usize,
         graph: &SourceGraph,
         nodes: &[(DefinitionId, &ast::StmtClassDef)],
         ids: &HashMap<DefinitionId, usize>,
         exceptions: &exceptions::Declarations,
-        classes: &mut [Option<Class>],
+        layouts: &mut Layouts,
         path: &mut Vec<usize>,
     ) -> Result<(), Diagnostic> {
-        if classes[id].is_some() {
+        if layouts.fixed[id].is_some() || layouts.registered.contains(&nodes[id].0) {
             return Ok(());
         }
         let (definition, node) = nodes[id];
@@ -126,14 +130,19 @@ pub(super) fn resolve(
                             );
                         }
                         let next = ids[&source];
-                        build(next, graph, nodes, ids, exceptions, classes, path)?;
+                        build(next, graph, nodes, ids, exceptions, layouts, path)?;
+                        if layouts.registered.contains(&source) {
+                            layouts.registered.insert(definition);
+                            path.pop();
+                            return Ok(());
+                        }
                         if let Some(first) = base {
-                            let parent: &Class = classes[first].as_ref().unwrap();
+                            let parent: &Class = layouts.fixed[first].as_ref().unwrap();
                             if parent.bases.contains(&next) {
                                 continue;
                             }
                             if args.args.len() == 2 && first != next {
-                                let second = classes[next].as_ref().unwrap();
+                                let second = layouts.fixed[next].as_ref().unwrap();
                                 if method_only_mixin(graph, second) {
                                     mixin = Some(next);
                                     continue;
@@ -188,7 +197,7 @@ pub(super) fn resolve(
             module,
             definition,
             node,
-            [base, mixin].map(|parent| parent.map(|id| (id, classes[id].as_ref().unwrap()))),
+            [base, mixin].map(|parent| parent.map(|id| (id, layouts.fixed[id].as_ref().unwrap()))),
             exceptions,
             &mut decorators,
         );
@@ -197,7 +206,11 @@ pub(super) fn resolve(
         {
             return Err(error);
         }
-        let mut class = class?;
+        let Some(mut class) = class? else {
+            layouts.registered.insert(definition);
+            path.pop();
+            return Ok(());
+        };
         if leading_mixin {
             // The independent root has no ancestors. It precedes the entire storage lineage.
             class.bases.rotate_right(1);
@@ -222,16 +235,36 @@ pub(super) fn resolve(
                 exceptions::install_argument_slot(&mut class, module);
             }
         }
-        classes[id] = Some(class);
+        layouts.fixed[id] = Some(class);
         path.pop();
         Ok(())
     }
-    let mut classes = (0..nodes.len()).map(|_| None).collect::<Vec<_>>();
+    let mut layouts = Layouts {
+        fixed: (0..nodes.len()).map(|_| None).collect(),
+        registered: HashSet::new(),
+    };
     let mut path = Vec::new();
     for id in 0..nodes.len() {
-        build(id, graph, nodes, ids, exceptions, &mut classes, &mut path)?;
+        build(id, graph, nodes, ids, exceptions, &mut layouts, &mut path)?;
     }
-    Ok(classes.into_iter().map(Option::unwrap).collect())
+    let mut fixed = layouts.fixed.into_iter().flatten().collect::<Vec<_>>();
+    if !layouts.registered.is_empty() {
+        ids.clear();
+        ids.extend(
+            fixed
+                .iter()
+                .enumerate()
+                .map(|(id, class)| (class.definition, id)),
+        );
+        let native = |id: usize| ids[&nodes[id].0];
+        for class in &mut fixed {
+            class.storage_base = class.storage_base.map(native);
+            for base in &mut class.bases {
+                *base = native(*base);
+            }
+        }
+    }
+    Ok((fixed, layouts.registered))
 }
 
 /// A root mixin supplies ordinary methods without declaring receiver storage.
@@ -435,16 +468,18 @@ pub(super) fn annotated_fields(
     }
 }
 
+/// Returns whether an unannotated argument supplies an instance field.
 pub(super) fn infer_fields(
     graph: &SourceGraph,
     module: usize,
     init: &ast::StmtFunctionDef,
     fields: &mut Vec<Field>,
-) {
+) -> bool {
+    let mut open_parameter_field = false;
     let params = init
         .parameters
         .iter_non_variadic_params()
-        .filter_map(|p| p.annotation().map(|ann| (p.name().as_str(), ann)))
+        .map(|p| (p.name().as_str(), p.annotation()))
         .collect::<HashMap<_, _>>();
     for stmt in &init.body {
         let ast::Stmt::Assign(assign) = stmt else {
@@ -461,8 +496,9 @@ pub(super) fn infer_fields(
             continue;
         }
         let ann = match &*assign.value {
-            ast::Expr::Name(name) if let Some(&ann) = params.get(name.id.as_str()) => {
-                Some(ann.clone())
+            ast::Expr::Name(name) if let Some(annotation) = params.get(name.id.as_str()) => {
+                open_parameter_field |= annotation.is_none();
+                annotation.cloned()
             }
             value if let Some(annotation) = scalar_field_annotation(graph, module, value) => {
                 Some(annotation)
@@ -475,7 +511,9 @@ pub(super) fn infer_fields(
                 let [ast::Expr::Name(input)] = call.arguments.args.as_ref() else {
                     continue;
                 };
-                let Some(ast::Expr::Subscript(annotated)) = params.get(input.id.as_str()) else {
+                let Some(ast::Expr::Subscript(annotated)) =
+                    params.get(input.id.as_str()).copied().flatten()
+                else {
                     continue;
                 };
                 let mut list = annotated.clone();
@@ -523,5 +561,41 @@ pub(super) fn infer_fields(
                 compare: true,
             });
         }
+    }
+    open_parameter_field
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn object_fields_keep_native_and_python_bases_distinct() {
+        let source = r#"class Open:
+    def __init__(self, value):
+        self.value = value
+
+class Fixed:
+    value: int
+    def __init__(self, value: int):
+        self.value = value
+
+class OpenChild(Open):
+    pass
+
+class FixedChild(Fixed):
+    pass
+"#;
+        let graph = SourceGraph::single(source).unwrap();
+        let classes = Classes::collect(&graph).unwrap();
+        let id = |statement| DefinitionId {
+            module: 0,
+            statement,
+        };
+        assert_eq!(classes.registered_classes, HashSet::from([id(0), id(2)]));
+        assert_eq!(classes.ids[&id(1)], 0);
+        let child = &classes.definitions[classes.ids[&id(3)]];
+        assert_eq!(child.storage_base, Some(0));
+        assert_eq!(child.bases, [0]);
     }
 }
