@@ -651,7 +651,8 @@ fn object_fallback(
             .as_ref()
             .is_some_and(|g| g.needs_object_runtime.get() || g.traceback_objects);
     let check_returns = |graph: Option<&mut modules::SourceGraph>,
-                         entry_requests_objects: bool|
+                         entry_requests_objects: bool,
+                         registrations: Option<&dynamic::RegisteredSources<'_>>|
      -> Result<(), String> {
         if let Some(graph) = graph.filter(|g| !g.has_checked_only_import) {
             let requested = graph.check_fallback_calls.get();
@@ -698,22 +699,22 @@ fn object_fallback(
             } else {
                 analysis::FallbackCalls::None
             };
-            let runtime_provider = graph
-                .modules
-                .iter()
-                .position(|module| module.is_bundled("socketserver"));
             let check = |session: &mut analysis::Session| {
                 session.check_fallback_contracts(
                     skipped.as_deref(),
                     &overloads,
                     checked_calls,
-                    runtime_provider,
+                    // A replaced adapter is an import dependency. Its checked spans
+                    // and layout errors belong to the original fixed source.
+                    (0..graph.modules.len()).filter(|id| {
+                        registrations.is_none_or(|r| !r.provider_sources.contains_key(id))
+                    }),
                     checked_file.then_some(&graph.modules),
                 )
             };
-            if incremental {
-                // The incremental compiler may retain a live Salsa handle for layout queries.
-                check(&mut graph.session.diagnostic_copy()?)?;
+            let replaced = registrations.filter(|r| !r.provider_sources.is_empty());
+            if incremental || replaced.is_some() {
+                check(&mut graph.session.copy_for_diagnostics(None, replaced)?)?;
             } else {
                 graph.session.with_diagnostic_rules(check)?;
             }
@@ -723,7 +724,11 @@ fn object_fallback(
     let check = |mut checked_graph: Option<&mut modules::SourceGraph>,
                  entry_requests_objects,
                  registered: Option<dynamic::RegisteredSources<'_>>| {
-        check_returns(checked_graph.as_deref_mut(), entry_requests_objects)?;
+        check_returns(
+            checked_graph.as_deref_mut(),
+            entry_requests_objects,
+            registered.as_ref(),
+        )?;
         if let Some(registered) = registered {
             let layouts = analysis::check_registered_project(
                 registered.root,

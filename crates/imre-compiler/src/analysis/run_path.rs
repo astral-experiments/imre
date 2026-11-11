@@ -31,7 +31,7 @@ impl Session {
             (model.resolve_module(Some("runpy"), 0)?.file(&self.db) == Some(file)).then_some(file)
         });
         let copy = shadow
-            .map(|f| self.copy_for_diagnostics(Some(f)))
+            .map(|f| self.copy_for_diagnostics(Some(f), None))
             .transpose()?;
         let session = copy.as_ref().unwrap_or(self);
         for (id, source) in sources.filter(|(_, source)| source.check_execution) {
