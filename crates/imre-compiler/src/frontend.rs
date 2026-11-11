@@ -1474,9 +1474,8 @@ fn lower_graph(
         return Ok(crate::CheckedProgram::Registered(None));
     }
     if let Some(error) = graph.deferred_object_error.take() {
-        if named {
-            finish_named(&mut completed);
-        } else if error.kind.is_object() {
+        completed.place(graph, &inference.source_checks);
+        if named || error.kind.is_object() {
             capture();
         }
         return Err(error);
