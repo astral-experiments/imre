@@ -295,14 +295,12 @@ impl CheckedSites {
         });
     }
 
-    pub(crate) fn place_statements<'p>(
+    pub(crate) fn place_statement<'p>(
         &mut self,
-        body: &[ir::Statement],
+        statement: &ir::Statement,
         definitions: &mut impl SiteDefinitions<'p>,
     ) {
-        RequiredSite::visit(body, Some(definitions.literal_sites()), &mut |site| {
-            self.place(site, definitions)
-        });
+        statement.operands(|operand| self.place_operand(operand, definitions));
     }
 
     pub(crate) fn annotation_string(

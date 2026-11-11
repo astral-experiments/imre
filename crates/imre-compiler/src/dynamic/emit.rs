@@ -1054,9 +1054,9 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
         sites.place(RequiredSite::Definition(site), &mut definitions);
     }
 
-    fn place_statements(&mut self, body: &[crate::ir::Statement]) {
+    fn place_statement(&mut self, statement: &crate::ir::Statement) {
         let (sites, mut definitions) = self.definitions();
-        sites.place_statements(body, &mut definitions);
+        sites.place_statement(statement, &mut definitions);
     }
 }
 
@@ -3674,6 +3674,65 @@ mod tests {
         });
         assert_eq!(stored, 1);
         assert_ne!(module.standalone().unwrap(), before);
+    }
+
+    #[test]
+    fn checked_raise_places_only_reached_statements_declarations() {
+        let source = concat!(
+            "try:\n",
+            "    raise (lambda: RuntimeError('raised child'))() from (lambda: KeyError('cause child'))()\n",
+            "    def dead_in_try(): return 'dead handler body'\n",
+            "except RuntimeError:\n",
+            "    def caught(): return 'handled child'\n",
+            "raise RuntimeError('stop')\n",
+            "def dead_at_module(): return 'dead module body'\n",
+        );
+        let module = PreparedBody::module(
+            "example",
+            Path::new("example.py"),
+            source,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let mut output = Output::default();
+        let file = output.data(b"example.py");
+        module.emit(&mut output, 0, &file).unwrap();
+        for literal in ["raised child", "cause child", "handled child"] {
+            assert!(output.strings.contains_key(literal.as_bytes()), "{literal}");
+        }
+        for literal in ["dead handler body", "dead module body"] {
+            assert!(
+                !output.strings.contains_key(literal.as_bytes()),
+                "{literal}"
+            );
+        }
+    }
+
+    #[test]
+    fn checked_raise_preserves_the_following_declarations_located_refusal() {
+        let source = concat!(
+            "raise RuntimeError('stop')\n",
+            "async def update(values):\n",
+            "    values += [lambda v=await get(x): v for x in [0]]\n",
+        );
+        let path = Path::new("example.py");
+        let parsed = ParsedModule::parse(path, source.into()).unwrap();
+        let diagnostic = PreparedBody::from_parsed(
+            "example",
+            path,
+            parsed,
+            0,
+            ModuleOrigin::Program(None),
+            LiteralSites::default(),
+            None,
+        )
+        .err()
+        .expect("located declaration refusal");
+        assert_eq!(
+            diagnostic,
+            "example.py:3:15: cannot compile this comprehension ahead of time (through 3:54)"
+        );
     }
 
     #[test]

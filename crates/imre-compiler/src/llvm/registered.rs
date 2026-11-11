@@ -264,7 +264,7 @@ pub(crate) trait PreparedSuiteEmitter<'a, 'p>:
         operand: Option<&Expr>,
     ) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites);
     fn place_definition(&mut self, site: TextSize);
-    fn place_statements(&mut self, body: &[Statement]);
+    fn place_statement(&mut self, statement: &Statement);
 }
 
 /// Evaluate an operand in its lexical activation, with the same demand used by
@@ -462,7 +462,7 @@ impl<'f, 'a, 'p> Frame<'f, 'a, 'p> {
         self.raise_operands(exception, cause, Self::evaluate_handle);
     }
 
-    fn next_statement(&mut self) -> bool {
+    pub(super) fn next_statement(&mut self) -> bool {
         if self.body.terminated {
             if self.module_annotation_sites.is_none() {
                 return false;
@@ -474,13 +474,10 @@ impl<'f, 'a, 'p> Frame<'f, 'a, 'p> {
         true
     }
 
-    /// Reserve the lexical children of the next executable body before their first use.
-    pub(super) fn place_function_sites(&mut self, body: &[Statement]) {
-        if !body.is_empty()
-            && self.next_statement()
-            && let FrameOwner::Prepared(owner) = &mut self.code
-        {
-            owner.place_statements(body);
+    /// Nested suites place their own operands when the checked emitter enters them.
+    pub(super) fn place_statement(&mut self, statement: &Statement) {
+        if let FrameOwner::Prepared(owner) = &mut self.code {
+            owner.place_statement(statement);
         }
     }
 

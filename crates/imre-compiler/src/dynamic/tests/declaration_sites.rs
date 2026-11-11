@@ -1,6 +1,16 @@
 use crate::dynamic::emit::{ModuleOrigin, Output, PreparedBody, RegisteredFrame};
 use std::path::Path;
 
+fn place_statements<'p>(
+    sites: &mut crate::dynamic::emit::CheckedSites,
+    body: &[crate::ir::Statement],
+    mut definitions: crate::dynamic::emit::LexicalDefinitions<'_, 'p>,
+) {
+    for statement in body {
+        sites.place_statement(statement, &mut definitions);
+    }
+}
+
 #[test]
 fn checked_module_places_class_generator_and_following_lambda() {
     use crate::dynamic::emit::SourcePositions;
@@ -55,9 +65,10 @@ fn checked_module_places_class_generator_and_following_lambda() {
     else {
         panic!("expected the function, lambda, class, generator and final lambda");
     };
-    sites.place_statements(
+    place_statements(
+        &mut sites,
         body,
-        &mut location.definitions(&mut frame, "", &module.source.scopes.module_globals, false),
+        location.definitions(&mut frame, "", &module.source.scopes.module_globals, false),
     );
     assert_eq!(sites.definitions.len(), 2);
     assert_eq!(sites.lambdas.len(), 2);
@@ -73,9 +84,10 @@ fn checked_module_places_class_generator_and_following_lambda() {
         location.callable_code.borrow()[first]
     );
     let count = frame.output.count;
-    sites.place_statements(
+    place_statements(
+        &mut sites,
         body,
-        &mut location.definitions(&mut frame, "", &module.source.scopes.module_globals, false),
+        location.definitions(&mut frame, "", &module.source.scopes.module_globals, false),
     );
     assert_eq!(frame.output.count, count);
 }
@@ -130,9 +142,10 @@ fn checked_module_places_both_plain_and_generic_aliases_before_their_following_l
         assert_eq!(alias.to_u32(), 18);
         let first = frame.output.count;
         let symbol = |index: u32| format!("@code_site{}", first + index);
-        sites.place_statements(
+        place_statements(
+            &mut sites,
             body,
-            &mut location.definitions(&mut frame, "", &module.source.scopes.module_globals, false),
+            location.definitions(&mut frame, "", &module.source.scopes.module_globals, false),
         );
         assert_eq!(sites.definitions[class].definition.code, symbol(0));
         assert_eq!(
@@ -141,9 +154,10 @@ fn checked_module_places_both_plain_and_generic_aliases_before_their_following_l
         );
         assert_eq!(sites.lambdas[last].code, symbol(2));
         let count = frame.output.count;
-        sites.place_statements(
+        place_statements(
+            &mut sites,
             body,
-            &mut location.definitions(&mut frame, "", &module.source.scopes.module_globals, false),
+            location.definitions(&mut frame, "", &module.source.scopes.module_globals, false),
         );
         assert_eq!(frame.output.count, count);
     }
