@@ -1054,6 +1054,25 @@ impl Emitter<'_, '_> {
         )
     }
 
+    /// A value-struct field reader can use a snapshot of its receiver.
+    fn direct_call(&mut self, id: usize, args: &CallArgs, ty: Type) -> Value {
+        if let [arg] = args.values.as_slice()
+            && self.module.types.is_value_struct(arg.ty)
+            && structs::field_reader(&self.module.functions[id])
+            && let Some(snapshot) = self.struct_snapshot(arg)
+        {
+            return self.user_call(
+                id,
+                ty,
+                &[&snapshot],
+                args.exhaustive_enum_match,
+                args.site.fixed(),
+            );
+        }
+        let values = self.call_operands(args);
+        self.native_call(callables::NativeCallTarget::Function(id), args, values, ty)
+    }
+
     /// Captures in source order, preserving earlier owners across later argument
     /// effects and errors. Parameter reordering happens only after this step.
     fn call_operands(&mut self, args: &CallArgs) -> Vec<Operand> {
@@ -3125,6 +3144,29 @@ impl Emitter<'_, '_> {
         name
     }
 
+    /// Build a builtin or named exception from its optional message.
+    fn exception_value(&mut self, kind: u32, message: Option<&Expr>) -> Value {
+        let message = message.map(|message| self.operand(message));
+        let pointer = message
+            .as_ref()
+            .map_or("null", |message| message.value.operand.as_str());
+        let call = if kind >= 256 {
+            let descriptor = self.output.global_ref(format!("exception_type_{kind}"));
+            format!("call ptr @imre_named_exception_new(ptr @{descriptor}, ptr {pointer})")
+        } else {
+            format!("call ptr @imre_exception_new(i32 {kind}, ptr {pointer})")
+        };
+        let value = Value {
+            ty: Type::Exception,
+            operand: self.instruction(call),
+            small_integer: false,
+        };
+        if let Some(message) = &message {
+            self.release_operand(message);
+        }
+        value
+    }
+
     fn exception_frame(&mut self, exception: &str, origin: &ir::FixedOrigin) -> String {
         let file = self.frame_string(&origin.frame.filename);
         let name = self.frame_string(&origin.frame.function);
@@ -3151,141 +3193,6 @@ impl Emitter<'_, '_> {
         };
         value.small_integer |= self.ranges.integer(expression).is_some();
         self.owned(value)
-    }
-
-    fn other_expression(&mut self, expression: &Expr) -> Value {
-        match &expression.kind {
-            ExprKind::Unary(_, _)
-            | ExprKind::Scope { .. }
-            | ExprKind::Int(_)
-            | ExprKind::Float(_)
-            | ExprKind::Str(_)
-            | ExprKind::Bytes(_)
-            | ExprKind::Bool(_)
-            | ExprKind::None
-            | ExprKind::Local(_)
-            | ExprKind::Bind(..)
-            | ExprKind::Invoke { .. }
-            | ExprKind::Binary(..)
-            | ExprKind::Boolean(..)
-            | ExprKind::BooleanValue(..)
-            | ExprKind::Conditional(..)
-            | ExprKind::Builtin(..) => unreachable!("shared IR expression"),
-            ExprKind::List(_) | ExprKind::Tuple(_) | ExprKind::Set { .. } | ExprKind::Dict(_) => {
-                unreachable!("shared checked display")
-            }
-            ExprKind::Present(expression_value) => {
-                let value = self.operand(expression_value);
-                let value = self.own_operand(value);
-                self.present(value, expression.ty)
-            }
-            ExprKind::Absent(expression_value) => {
-                let value = self.expr(expression_value);
-                self.release(&value);
-                Value {
-                    ty: expression.ty,
-                    operand: "0".to_owned(),
-                    small_integer: false,
-                }
-            }
-            ExprKind::Unwrap(receiver) => {
-                let receiver = self.operand(receiver);
-                if expression.ty == Type::Float {
-                    let value = self.call("imre_float_unbox", Type::Float, &[&receiver.value]);
-                    self.release_operand(&receiver);
-                    return value;
-                }
-                let receiver = self.own_operand(receiver);
-                self.forget(&receiver);
-                let word = if expression.ty == Type::Bool {
-                    self.instruction(format!("sub i64 {}, 1", receiver.operand))
-                } else {
-                    receiver.operand
-                };
-                self.decode_word(word, expression.ty)
-            }
-            ExprKind::Compare(..) => unreachable!("checked comparison"),
-            ExprKind::Call(id, args) => {
-                if let [arg] = args.values.as_slice()
-                    && self.module.types.is_value_struct(arg.ty)
-                    && structs::field_reader(&self.module.functions[*id])
-                    && let Some(snapshot) = self.struct_snapshot(arg)
-                {
-                    return self.user_call(
-                        *id,
-                        expression.ty,
-                        &[&snapshot],
-                        args.exhaustive_enum_match,
-                        args.site.fixed(),
-                    );
-                }
-                let values = self.call_operands(args);
-                self.native_call(
-                    callables::NativeCallTarget::Function(*id),
-                    args,
-                    values,
-                    expression.ty,
-                )
-            }
-            ExprKind::Callable { function, receiver } => {
-                self.callable_value(expression.ty, *function, receiver.as_deref())
-            }
-            ExprKind::Construct { initializer, args } => {
-                // A type call keeps its own arguments while __init__ runs.
-                // Its stack releases them in reverse source order on return.
-                let mut values = self.call_operands(args);
-                let object = self.record(expression.ty);
-                let mut inputs = vec![&object];
-                inputs.extend(args.order.iter().map(|&index| &values[index].value));
-                for input in &inputs {
-                    if self.resource_types.contains(&input.ty) {
-                        self.retain(input);
-                    }
-                }
-                self.user_call(*initializer, Type::None, &inputs, false, None);
-                if values
-                    .iter()
-                    .any(|arg| self.resource_types.contains(&arg.value.ty))
-                {
-                    values.reverse();
-                }
-                for arg in &values {
-                    self.release_operand(arg);
-                }
-                object
-            }
-            ExprKind::Exception { kind, message } => {
-                let message = message.as_ref().map(|message| self.operand(message));
-                let pointer = message
-                    .as_ref()
-                    .map_or("null", |message| message.value.operand.as_str());
-                let call = if *kind >= 256 {
-                    let descriptor = self.output.global_ref(format!("exception_type_{kind}"));
-                    format!("call ptr @imre_named_exception_new(ptr @{descriptor}, ptr {pointer})")
-                } else {
-                    format!("call ptr @imre_exception_new(i32 {kind}, ptr {pointer})")
-                };
-                let value = Value {
-                    ty: Type::Exception,
-                    operand: self.instruction(call),
-                    small_integer: false,
-                };
-                if let Some(message) = &message {
-                    self.release_operand(message);
-                }
-                value
-            }
-            ExprKind::Field(receiver, field) => {
-                if let Some(snapshot) = self.struct_snapshot(receiver) {
-                    let ptr = self.field_pointer(&snapshot, *field);
-                    return self.field_value(&ptr, expression.ty);
-                }
-                let receiver = self.immediate_receiver(receiver);
-                let value = self.get_field(&receiver.value, *field, expression.ty);
-                self.release_operand(&receiver);
-                value
-            }
-        }
     }
 
     /// Transfers an overwritten string only after every suffix has evaluated.
@@ -9726,6 +9633,48 @@ impl Emitter<'_, '_> {
             operand,
             small_integer: false,
         }
+    }
+
+    /// Move the payload out of an owned nullable word. A boxed float releases its box after the read.
+    fn unwrap_optional(&mut self, receiver: &Expr, ty: Type) -> Value {
+        let receiver = self.operand(receiver);
+        if ty == Type::Float {
+            let value = self.call("imre_float_unbox", Type::Float, &[&receiver.value]);
+            self.release_operand(&receiver);
+            return value;
+        }
+        let receiver = self.own_operand(receiver);
+        self.forget(&receiver);
+        let word = if ty == Type::Bool {
+            self.instruction(format!("sub i64 {}, 1", receiver.operand))
+        } else {
+            receiver.operand
+        };
+        self.decode_word(word, ty)
+    }
+
+    /// Keep resource arguments alive through __init__ and release them in reverse source order.
+    fn construct_record(&mut self, ty: Type, initializer: usize, args: &CallArgs) -> Value {
+        let mut values = self.call_operands(args);
+        let object = self.record(ty);
+        let mut inputs = vec![&object];
+        inputs.extend(args.order.iter().map(|&index| &values[index].value));
+        for input in &inputs {
+            if self.resource_types.contains(&input.ty) {
+                self.retain(input);
+            }
+        }
+        self.user_call(initializer, Type::None, &inputs, false, None);
+        if values
+            .iter()
+            .any(|arg| self.resource_types.contains(&arg.value.ty))
+        {
+            values.reverse();
+        }
+        for arg in &values {
+            self.release_operand(arg);
+        }
+        object
     }
 
     /// The zeroed payload is safe to destroy before every initializer completes.

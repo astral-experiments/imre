@@ -516,7 +516,7 @@ impl<'f, 'a, 'p> Frame<'f, 'a, 'p> {
     }
 }
 
-impl Frame<'_, '_, '_> {
+impl<'f> Frame<'f, '_, '_> {
     pub(super) fn next_fixed_site(&self) -> Option<TextRange> {
         let (function, next) = self.fixed_sites?;
         let i = next.get();
@@ -534,25 +534,25 @@ impl Frame<'_, '_, '_> {
         }
     }
 
-    pub(super) fn load_fixed_field(&mut self, receiver: &Expr, range: TextRange) -> CheckedValue {
-        let (function, _) = self
-            .fixed_sites
-            .expect("placed field belongs to a fixed body");
-        let field = function
-            .fixed_fields
-            .as_ref()
-            .and_then(|fields| fields.get(&range))
-            .expect("placed field has a physical attribute");
-        self.located_value(range, field.position, |frame| {
-            let value = frame.attribute_operation(
-                ir::AttributeAction::Load,
-                &field.name,
-                range,
-                std::iter::once(receiver),
-                Self::evaluate_handle,
-            );
-            CheckedValue::handle(value)
-        })
+    pub(super) fn fixed_field(&self, range: TextRange) -> Option<&'f crate::frontend::FixedField> {
+        let (function, _) = self.fixed_sites?;
+        function.fixed_fields.as_ref()?.get(&range)
+    }
+
+    pub(super) fn load_fixed_field(
+        &mut self,
+        receiver: &Expr,
+        range: TextRange,
+        name: &str,
+    ) -> CheckedValue {
+        let value = self.attribute_operation(
+            ir::AttributeAction::Load,
+            name,
+            range,
+            std::iter::once(receiver),
+            Self::evaluate_handle,
+        );
+        CheckedValue::handle(value)
     }
 
     pub(super) fn statement_site(&mut self, range: TextRange, simple: Option<TextRange>) {
