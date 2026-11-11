@@ -104,7 +104,8 @@ impl EagerDisplay for SourceScope<'_> {
         output: Output<'_>,
         body: impl FnOnce(&mut Self) -> StdResult<Vec<Statement>, ()>,
     ) -> StdResult<Vec<Statement>, ()> {
-        let (binding, body) = self.iteration_body(target, &input, body)?;
+        let binding = input.bind_target(self, target)?;
+        let body = self.in_loop(LoopScope::WithCursor, body)?;
         Ok(match output {
             Output::Generator(item) => generators::clause(
                 input,
