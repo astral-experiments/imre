@@ -349,13 +349,16 @@ fn callable_target(call: &ast::ExprCall) -> ir::RegisteredCallTarget {
     }
 }
 
-/// A live exec lookup still sees the original literal and namespace arguments.
-pub(crate) fn fixed_exec_literal(call: &ast::ExprCall) -> Option<&ast::ExprStringLiteral> {
+/// A source operand whose literal value can be checked at this exec call.
+pub(crate) fn exec_source_operand(call: &ast::ExprCall) -> Option<&ast::Expr> {
     if call.func.as_name_expr()?.id.as_str() != "exec" {
         return None;
     }
     let args = &call.arguments.args;
-    let literal = args.first()?.as_string_literal_expr()?;
+    let source = args.first()?;
+    if !matches!(source, ast::Expr::StringLiteral(_) | ast::Expr::Name(_)) {
+        return None;
+    }
     if args.len() > 3 || args.iter().any(ast::Expr::is_starred_expr) {
         return None;
     }
@@ -371,7 +374,7 @@ pub(crate) fn fixed_exec_literal(call: &ast::ExprCall) -> Option<&ast::ExprStrin
             return None;
         }
     }
-    Some(literal)
+    Some(source)
 }
 
 /// Ruff replaces lone surrogates in its UTF-8 view. The compiled source must

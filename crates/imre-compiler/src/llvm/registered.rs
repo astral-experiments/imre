@@ -1308,7 +1308,7 @@ impl<'f> Frame<'f, '_, '_> {
         self.code.assign_owned_name(&scope, &name, handle, None);
     }
 
-    pub(super) fn exec_literal_at(&mut self, site: TextRange) -> Option<(String, u32)> {
+    pub(super) fn exec_literal_at(&mut self, site: TextRange) -> Option<sites::CompiledExec> {
         self.code.parts().1.exec_literals.get(&site).cloned()
     }
 

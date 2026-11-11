@@ -522,11 +522,12 @@ impl<'a> Visitor<'a> for Imports {
                 .as_name_expr()
                 .is_some_and(|name| name.id == "exec")
         {
-            if crate::frontend::fixed_exec_literal(call).is_some() {
+            let source = crate::frontend::exec_source_operand(call);
+            if source.is_some() {
                 self.literal_calls.push(call.range());
-            } else {
-                self.has_open_exec = true;
             }
+            // Until binding resolution, a name can still hold arbitrary source.
+            self.has_open_exec |= !source.is_some_and(Expr::is_string_literal_expr);
         }
         // A literal __import__ call cannot select a different provider at execution.
         if let Expr::Call(call) = e

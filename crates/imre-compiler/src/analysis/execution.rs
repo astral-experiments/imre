@@ -147,17 +147,9 @@ struct Escape<'a, 'db> {
 impl<'ast> Escape<'ast, '_> {
     // Follow simple aliases to the value that was actually assigned. A return or
     // parameter annotation alone cannot establish the native entry of a code object.
-    fn assigned_value(&self, mut value: &'ast Expr) -> Option<&'ast Expr> {
-        let mut seen = std::collections::HashSet::new();
-        while let Some(def) = self.session.file_binding(self.model.file(), value)
-            && let DefinitionKind::Assignment(assignment) = def.kind(self.model.db())
-        {
-            if !seen.insert(def) || assignment.unpack().is_some() {
-                return None;
-            }
-            value = assignment.value(self.parsed);
-        }
-        Some(value)
+    fn assigned_value(&self, value: &'ast Expr) -> Option<&'ast Expr> {
+        self.session
+            .assigned_value(self.model.file(), self.parsed, value, |_| true)
     }
 
     fn declared_function(
@@ -832,7 +824,12 @@ impl<'a> Visitor<'a> for Escape<'a, '_> {
             && let Some(source_callable) = source_callable
             && let Some(operand) = call.arguments.args.first()
             && !(source_callable == SourceCallable::Builtin(ExecutionIntrinsic::Exec)
-                && crate::frontend::fixed_exec_literal(call).is_some())
+                && (crate::frontend::exec_source_operand(call)
+                    .is_some_and(Expr::is_string_literal_expr)
+                    || self
+                        .session
+                        .selected_exec_literal(self.model.file(), self.parsed, self.model, call)
+                        .is_some()))
             && !self.has_executable_entry(operand)
         {
             self.first = Some(self.required(
@@ -943,6 +940,56 @@ impl Session {
             .unwrap_or(false)
     }
 
+    fn assigned_value<'a>(
+        &self,
+        file: File,
+        parsed: &'a ParsedModuleRef,
+        mut value: &'a Expr,
+        follow: impl Fn(&Expr) -> bool,
+    ) -> Option<&'a Expr> {
+        let mut seen = std::collections::HashSet::new();
+        while follow(value)
+            && let Some(def) = self.file_binding(file, value)
+            && let DefinitionKind::Assignment(assignment) = def.kind(&self.db)
+        {
+            if !seen.insert(def) || assignment.unpack().is_some() {
+                return None;
+            }
+            value = assignment.value(parsed);
+        }
+        Some(value)
+    }
+
+    fn selected_exec_literal<'a>(
+        &self,
+        file: File,
+        parsed: &'a ParsedModuleRef,
+        model: &SemanticModel<'_>,
+        call: &'a ExprCall,
+    ) -> Option<&'a ruff_python_ast::ExprStringLiteral> {
+        let operand = crate::frontend::exec_source_operand(call)?;
+        if ExecutionIntrinsic::resolve(model, &call.func) != Some(ExecutionIntrinsic::Exec)
+            || self.reads_custom_builtins(file, parsed, &call.func)
+        {
+            return None;
+        }
+        self.assigned_value(file, parsed, operand, Expr::is_name_expr)?
+            .as_string_literal_expr()
+    }
+
+    pub(crate) fn fixed_exec_call(&self, module: usize, call: &ExprCall) -> bool {
+        let Some(operand) = crate::frontend::exec_source_operand(call) else {
+            return false;
+        };
+        if operand.is_string_literal_expr() {
+            return self.is_stdlib_function(module, &call.func, "builtins", "exec");
+        }
+        let file = self.files[module];
+        let model = SemanticModel::new(&self.db, self.db.program_file(file));
+        self.selected_exec_literal(file, &self.parsed(file), &model, call)
+            .is_some()
+    }
+
     /// Resolve fixed operands after the selected parent's immediate imports are registered.
     /// Each returned parse supplies the next level's imports and its eventual checked module.
     pub(crate) fn select_literal_level(
@@ -966,23 +1013,19 @@ impl Session {
                 else {
                     return None;
                 };
-                if call.range() != range
-                    || ExecutionIntrinsic::resolve(&model, &call.func)
-                        != Some(ExecutionIntrinsic::Exec)
-                    || self.reads_custom_builtins(parent, parsed, &call.func)
-                {
+                if call.range() != range {
                     return None;
                 }
-                let literal = call.arguments.args.first()?.as_string_literal_expr()?;
+                let literal = self.selected_exec_literal(parent, parsed, &model, call)?;
+                let operand = call.arguments.args.first()?.start();
                 let module = crate::frontend::exec_literal_text(literal, source)
                     .map_err(str::to_owned)
-                    .and_then(|text| {
-                        self.parse_literal(parent, literal.start(), text, inherited_flags)
-                    });
+                    .and_then(|text| self.parse_literal(parent, operand, text, inherited_flags));
                 Some((
                     LiteralSite {
                         call: range,
-                        operand: literal.start(),
+                        operand,
+                        text: literal.value.to_str().into(),
                     },
                     module,
                 ))
