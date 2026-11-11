@@ -465,12 +465,8 @@ impl<'a> PreparedBody<'a> {
                 },
             );
         }
-        let mut prepare = crate::frontend::SuitePreparation::new(
-            &operations,
-            values,
-            &body,
-            python_optimization == 0,
-        );
+        let mut prepare =
+            crate::frontend::SuitePreparation::new(&operations, values, python_optimization == 0);
         prepare.literal_refusals = exec_literals.has_refusals().then_some(&exec_literals);
         prepare.sites.expressions = logicals;
         // Preparing inner declarations first lets their binding sites consume
@@ -1770,8 +1766,7 @@ mod tests {
             _ => None,
         })
         .collect();
-        let mut suites =
-            SuitePreparation::new(&prepared.source.namespace_operations, source, body, true);
+        let mut suites = SuitePreparation::new(&prepared.source.namespace_operations, source, true);
         suites.sites.expressions = logicals;
         let initializer = suites.suite(body, RegisteredScope::Module);
         let class_bodies = suites.class_suites(
@@ -2557,7 +2552,6 @@ mod tests {
         let mut physical = crate::frontend::SuitePreparation::new(
             &module.source.namespace_operations,
             source,
-            &def.body,
             true,
         );
         physical.sites.expressions = lexical;
@@ -2709,12 +2703,7 @@ mod tests {
             lambdas: Some(&missing),
             ..module.source.registered_source()
         };
-        let mut plan = SuitePreparation::new(
-            &module.source.namespace_operations,
-            source,
-            &function.body,
-            true,
-        );
+        let mut plan = SuitePreparation::new(&module.source.namespace_operations, source, true);
         plan.sites.expressions = lexical;
         let body = plan.named_body(
             &function.body,
@@ -4076,7 +4065,6 @@ mod tests {
         let mut physical = crate::frontend::SuitePreparation::new(
             &prepared.source.namespace_operations,
             source,
-            &function.body,
             true,
         );
         physical.sites.expressions = lexical;
@@ -5509,12 +5497,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             lambdas: Some(&missing),
             ..module.source.registered_source()
         };
-        let mut plan = SuitePreparation::new(
-            &module.source.namespace_operations,
-            values,
-            &function.body,
-            true,
-        );
+        let mut plan = SuitePreparation::new(&module.source.namespace_operations, values, true);
         plan.sites.expressions = lexical;
         let body = plan.named_body(
             &function.body,
@@ -5836,7 +5819,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             };
             let kind = RegisteredScope::Function { is_async: false };
             let mut physical =
-                SuitePreparation::new(&module.source.namespace_operations, source, &def.body, true);
+                SuitePreparation::new(&module.source.namespace_operations, source, true);
             physical.sites.expressions = lexical;
             let body = physical.named_body(&def.body, kind, true, false);
             module.source.statement_sites = physical.sites;

@@ -448,7 +448,7 @@ mod tests {
             ..context.context(text)
         };
         let operations = HashMap::new();
-        let mut preparation = SuitePreparation::new(&operations, source, statements, true);
+        let mut preparation = SuitePreparation::new(&operations, source, true);
         let suite = preparation.physical_suite(
             statements,
             RegisteredScope::Module,

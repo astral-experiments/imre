@@ -229,7 +229,6 @@ pub(super) fn generator_body(
     let preparation = SuitePreparation::new(
         &operations,
         source.context(&module.source),
-        &physical.body,
         optimization == 0,
     );
     preparation
@@ -1125,7 +1124,6 @@ pub(crate) enum PreparedRefusal {
 pub(crate) struct StatementSites {
     pub(crate) expressions: booleans::ExpressionSites,
     omit_assertions: bool,
-    pub(crate) contexts: HashMap<TextRange, Vec<ir::ContextSite>>,
 }
 
 fn for_pull(loop_: &ast::StmtFor) -> Option<ir::AsyncPull> {
@@ -1167,43 +1165,6 @@ fn if_clauses(branch: &ast::StmtIf) -> impl Iterator<Item = (Option<&ast::Expr>,
     )
 }
 
-fn statement_sites(
-    body: &[ast::Stmt],
-    source: values::RegisteredSource<'_>,
-    assertions_enabled: bool,
-) -> StatementSites {
-    use ast::statement_visitor::{StatementVisitor, walk_stmt};
-
-    struct Collector<'a> {
-        source: values::RegisteredSource<'a>,
-        sites: StatementSites,
-    }
-
-    impl<'a> StatementVisitor<'a> for Collector<'_> {
-        fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
-            if let ast::Stmt::With(with) = stmt {
-                let inputs = with
-                    .items
-                    .iter()
-                    .map(|item| context_site(self.source.text, &item.context_expr, with.is_async))
-                    .collect();
-                self.sites.contexts.insert(stmt.range(), inputs);
-            }
-            walk_stmt(self, stmt);
-        }
-    }
-
-    let mut collector = Collector {
-        source,
-        sites: StatementSites {
-            omit_assertions: !assertions_enabled,
-            ..StatementSites::default()
-        },
-    };
-    collector.visit_body(body);
-    collector.sites
-}
-
 #[derive(Clone, Copy)]
 enum SuiteSelection {
     All,
@@ -1224,13 +1185,15 @@ impl<'a> SuitePreparation<'a> {
     pub(crate) fn new(
         operations: &'a HashMap<TextRange, Expr>,
         source: values::RegisteredSource<'a>,
-        body: &[ast::Stmt],
         assertions_enabled: bool,
     ) -> Self {
         Self {
             operations,
             source,
-            sites: statement_sites(body, source, assertions_enabled),
+            sites: StatementSites {
+                omit_assertions: !assertions_enabled,
+                ..StatementSites::default()
+            },
             declaration_refusals: HashMap::new(),
             literal_refusals: None,
             refusal: None,
@@ -1750,10 +1713,10 @@ impl<'a> SuitePreparation<'a> {
         let mut region = RegisteredSuite::new(scope.finish(Vec::new()), Vec::new());
         let mut managers = Vec::with_capacity(stmt.items.len());
         let mut refused_binding = None;
-        for (index, (item, binding)) in stmt.items.iter().zip(bindings).enumerate() {
+        for (item, binding) in stmt.items.iter().zip(bindings) {
             let manager = self.physical_operand(&item.context_expr, kind, selection, suspended);
             let manager = region.operand(manager, Type::PythonObject);
-            let site = self.sites.contexts[&stmt.range()][index];
+            let site = context_site(self.source.text, &item.context_expr, stmt.is_async);
             let manager = values::located(site.range, site.anchor, manager);
             match binding {
                 Ok(binding) => {
@@ -2578,7 +2541,7 @@ impl statements::StatementLowering for SourceScope<'_> {
                 ))
             }
             ast::Stmt::With(stmt) if !stmt.is_async || self.async_iteration() => Ok((
-                self.with_items(&stmt.items, &self.sites.contexts[&stmt.range()], &stmt.body)?,
+                self.with_items(&stmt.items, stmt.is_async, &stmt.body)?,
                 true,
             )),
             ast::Stmt::While(loop_) => {
@@ -3062,21 +3025,21 @@ impl SourceScope<'_> {
     fn with_items(
         &mut self,
         items: &[ast::WithItem],
-        inputs: &[ir::ContextSite],
+        is_async: bool,
         suite: &[ast::Stmt],
     ) -> StdResult<Vec<Statement>, ()> {
         let Some((item, rest)) = items.split_first() else {
             return self.suite(suite);
         };
         let manager = self.frame_value(&item.context_expr).ok_or(())?;
-        let (input, remaining) = inputs.split_first().expect("with input");
         let binding = item
             .optional_vars
             .as_ref()
             .map(|target| self.with_binding(target))
             .transpose()?;
-        let body = self.with_items(rest, remaining, suite)?;
-        Ok(vec![input.protect(manager, binding, body)])
+        let body = self.with_items(rest, is_async, suite)?;
+        let site = context_site(self.source.text, &item.context_expr, is_async);
+        Ok(vec![site.protect(manager, binding, body)])
     }
 
     fn in_loop<T>(&mut self, kind: LoopScope, lower: impl FnOnce(&mut Self) -> T) -> T {
@@ -3482,7 +3445,7 @@ mod tests {
         source: values::RegisteredSource<'_>,
     ) -> Option<RegisteredFunction> {
         let operations = prepared_sites(stmts, source, false).operations;
-        SuitePreparation::new(&operations, source, stmts, true)
+        SuitePreparation::new(&operations, source, true)
             .complete(stmts, kind)
             .map(|plan| plan.checked)
     }
@@ -3496,7 +3459,7 @@ mod tests {
         let literals = values::ModuleSource::new(module);
         // Leave out the alias operation that its lexical scope normally prepares.
         let operations = HashMap::new();
-        let mut prepare = SuitePreparation::new(&operations, literals.context(text), body, true);
+        let mut prepare = SuitePreparation::new(&operations, literals.context(text), true);
         let suite = prepare.suite(body, RegisteredScope::Module);
         let Some(PreparedRefusal::Operand((range, reason))) = suite.refusal else {
             panic!("the omitted alias must report a ranged operand diagnostic");
@@ -3534,7 +3497,7 @@ mod tests {
             .body;
         let literals = values::ModuleSource::new(module);
         let operations = HashMap::new();
-        let mut prepare = SuitePreparation::new(&operations, literals.context(text), body, true);
+        let mut prepare = SuitePreparation::new(&operations, literals.context(text), true);
         let suite = prepare.named_body(
             body,
             RegisteredScope::Function { is_async: false },
@@ -3616,7 +3579,7 @@ mod tests {
         };
         let stmts = std::slice::from_ref(stmt);
         let operations = HashMap::new();
-        let mut preparation = SuitePreparation::new(&operations, source, stmts, true);
+        let mut preparation = SuitePreparation::new(&operations, source, true);
         let plan = preparation.suite(stmts, RegisteredScope::Function { is_async: false });
         assert!(plan.fully_checked());
         let [_, Statement::If(_, succeeds, fails)] = plan.checked.function.body.as_slice() else {
@@ -3645,7 +3608,7 @@ mod tests {
         let literals = values::ModuleSource::new(module);
         let operations = HashMap::new();
         let prepare = |enabled| {
-            SuitePreparation::new(&operations, literals.context(text), body, enabled)
+            SuitePreparation::new(&operations, literals.context(text), enabled)
                 .suite(body, RegisteredScope::Function { is_async: false })
         };
         let plan = prepare(true);
@@ -3739,12 +3702,11 @@ mod tests {
         for def in &module.parsed.syntax().body {
             let def = def.as_function_def_stmt().unwrap();
             let prepare = |enabled| {
-                SuitePreparation::new(&operations, literals.context(text), &def.body, enabled)
-                    .function_suite(
-                        &def.body,
-                        RegisteredScope::Function { is_async: false },
-                        true,
-                    )
+                SuitePreparation::new(&operations, literals.context(text), enabled).function_suite(
+                    &def.body,
+                    RegisteredScope::Function { is_async: false },
+                    true,
+                )
             };
             let plan = prepare(true);
             assert!(plan.fully_checked());
@@ -3968,7 +3930,7 @@ mod tests {
         let literals = values::ModuleSource::new(module);
         let source = literals.context(text);
         let operations = prepared_sites(stmts, source, false).operations;
-        let mut prepare = SuitePreparation::new(&operations, source, stmts, true);
+        let mut prepare = SuitePreparation::new(&operations, source, true);
         let plan = prepare.suite(stmts, RegisteredScope::Module);
         assert!(
             plan.checked
@@ -4021,7 +3983,7 @@ mod tests {
         let operands = prepared_sites(&stmts, source, false);
         let ops = operands.operations;
         assert_eq!(operands.module_annotations.fields.len(), 2);
-        let mut prepare = SuitePreparation::new(&ops, source, &stmts, true);
+        let mut prepare = SuitePreparation::new(&ops, source, true);
         let plan = prepare.suite(&stmts, RegisteredScope::Module);
         assert_eq!(plan.operands.len(), 1);
         // Only the generator RHS needs an external operand. After storing it, the
@@ -5511,30 +5473,40 @@ mod tests {
     }
 
     #[test]
-    fn context_sites_are_prepared_for_every_manager_before_lowering() {
+    fn checked_managers_retain_their_source_sites() {
         let text = "async def capture():\n    async with manager:\n        pass\nwith λ[0], install(2):\n    pass\n";
         let graph = SourceGraph::single(text).unwrap();
         let module = &graph.modules[graph.entry];
-        let sites = statement_sites(
-            &module.parsed.syntax().body,
-            values::ModuleSource::new(module).context(text),
-            true,
-        );
-        let mut anchors: Vec<_> = sites
-            .contexts
-            .values()
-            .flatten()
-            .map(|site| {
-                (
-                    &text[site.range],
-                    &text[site.range.start().to_usize()..site.anchor.to_usize()],
-                )
-            })
-            .collect();
+        let (definition, rest) = module.parsed.syntax().body.split_first().unwrap();
+        let capture = definition.as_function_def_stmt().unwrap();
+        let source = values::ModuleSource::new(module);
+        let mut anchors = Vec::new();
+        for (body, scope) in [
+            (rest, RegisteredScope::Module),
+            (
+                capture.body.as_slice(),
+                RegisteredScope::Function { is_async: true },
+            ),
+        ] {
+            let checked = registered_suite(body, scope, source.context(text)).unwrap();
+            ir::walk_statements(&checked.function.body, &mut |stmt| {
+                if let Statement::With { site, .. } = stmt {
+                    anchors.push((
+                        &text[site.range],
+                        &text[site.range.start().to_usize()..site.anchor.to_usize()],
+                        site.is_async,
+                    ));
+                }
+            });
+        }
         anchors.sort_unstable();
         assert_eq!(
             anchors,
-            [("install(2)", "install"), ("manager", ""), ("λ[0]", "λ")]
+            [
+                ("install(2)", "install", false),
+                ("manager", "", true),
+                ("λ[0]", "λ", false)
+            ]
         );
     }
 
