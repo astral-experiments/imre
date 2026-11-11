@@ -1669,19 +1669,7 @@ pub(super) fn builtin_slot(
             return Ok(integer::exact_value(ctx, object));
         }
         if method == "__str__" {
-            if object == storage {
-                return Ok(object);
-            }
-            let copy = match ctx.heap.get(storage) {
-                Value::Str(text) if text.is_empty() => return Ok(ctx.text("")),
-                Value::Str(text) => Value::Str(
-                    crate::Str::try_new(text.as_str())
-                        .map_err(|_| Error::new("MemoryError", ""))?,
-                ),
-                Value::SurrogateStr(points) => Value::SurrogateStr(super::super::copy_ids(points)?),
-                _ => unreachable!("validated str receiver"),
-            };
-            return ctx.heap.fresh_string(copy);
+            return ctx.unchanged_string(object, storage);
         }
         let text = match ctx.heap.get(storage) {
             Value::Bool(value) if owner == "int" => u8::from(*value).to_string(),

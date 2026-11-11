@@ -1659,6 +1659,60 @@ fn split_codepoints(
     }
 }
 
+/// Work in UTF-8 bytes for scalar strings and Python code points for surrogate strings.
+fn remove_affix(ctx: &mut Context, receiver: Id, name: &str, affix: Id) -> Result<Id> {
+    fn remainder<T: PartialEq>(
+        source: &[T],
+        affix: &[T],
+        prefix: bool,
+    ) -> Option<std::ops::Range<usize>> {
+        if affix.is_empty() {
+            return None;
+        }
+        if prefix {
+            source.starts_with(affix).then(|| affix.len()..source.len())
+        } else {
+            source
+                .ends_with(affix)
+                .then(|| 0..source.len() - affix.len())
+        }
+    }
+
+    let storage = ctx
+        .string_storage(receiver)
+        .expect("validated str receiver");
+    let needle = ctx.string_storage(affix).ok_or_else(|| {
+        let kind = if affix == NONE {
+            "None"
+        } else {
+            ctx.type_name(affix)
+        };
+        let kind = &kind[..kind.floor_char_boundary(50)];
+        type_error(format!("{name}() argument must be str, not {kind}"))
+    })?;
+    let prefix = name == "removeprefix";
+    match (ctx.heap.get(storage), ctx.heap.get(needle)) {
+        (Value::Str(source), Value::Str(affix)) => {
+            if let Some(range) = remainder(source.as_bytes(), affix.as_bytes(), prefix) {
+                let part = crate::Str::try_new(&source[range])
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                return Ok(ctx.text(part));
+            }
+        }
+        (Value::SurrogateStr(source), _) => {
+            let affix = ctx.string_codepoints(needle)?;
+            if let Some(range) = remainder(source, &affix, prefix) {
+                let points = super::super::copy_ids(&source[range])?;
+                return Ok(ctx.text_codepoints(points));
+            }
+        }
+        // A string with a surrogate cannot be contained in a scalar string.
+        (Value::Str(_), Value::SurrogateStr(_)) => {}
+        _ => unreachable!("validated str operands"),
+    }
+    ctx.unchanged_string(receiver, storage)
+}
+
 /// Strip matching Python code points while keeping scalar strings in UTF-8.
 fn strip_string(ctx: &mut Context, receiver: Id, name: &str, chars: Option<Id>) -> Result<Id> {
     let chars = chars
@@ -3121,6 +3175,11 @@ pub(super) fn method(
             None => ctx.string_storage(receiver).unwrap(),
         });
     }
+    if owner == "str" && matches!(name, "removeprefix" | "removesuffix") {
+        let method = format!("{}.{name}", ctx.type_name(receiver));
+        let affix = one_positional_arg(&method, args, kwargs)?;
+        return remove_affix(ctx, receiver, name, affix);
+    }
     if owner == "str" && matches!(name, "split" | "rsplit") {
         return split_string(ctx, receiver, name, args, kwargs);
     }
@@ -3166,17 +3225,67 @@ pub(super) fn method(
                 _ => source.to_uppercase(),
             }))
         }
-        "removeprefix" | "removesuffix" => {
-            positional(name, kwargs)?;
-            arity(name, args, 1, 1)?;
-            let affix = ctx.str_value(args[0])?;
-            let stripped = if name == "removeprefix" {
-                source.strip_prefix(affix)
-            } else {
-                source.strip_suffix(affix)
-            };
-            Ok(ctx.text(stripped.unwrap_or(&source)))
-        }
         _ => Err(type_error(format!("unsupported string method {name}"))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dynamic::ffi::new_context;
+
+    #[test]
+    fn unchanged_affixes_preserve_exact_strings_and_copy_subclasses() {
+        let mut ctx = new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let base = ctx.builtin("str");
+        let scope = ctx.scope("Text", None);
+        let class = ctx
+            .allocate_class("Text".into(), scope, vec![base])
+            .unwrap();
+        let empty = ctx.text("");
+        let missing = ctx.text("absent");
+        let exact = ctx.text("αβ".repeat(171));
+        let single = ctx.text("a");
+        let surrogate = ctx.text_codepoints(vec![0xd800, u32::from('β')]);
+
+        for source in [empty, exact, single, surrogate] {
+            let child = ctx.call(class, vec![source], Vec::new()).unwrap();
+            for name in ["removeprefix", "removesuffix"] {
+                for affix in [empty, missing] {
+                    assert_eq!(
+                        method(&mut ctx, "str", name, &[source, affix], &[]).unwrap(),
+                        source
+                    );
+                    let copy = method(&mut ctx, "str", name, &[child, affix], &[]).unwrap();
+                    assert_eq!(ctx.type_name(copy), "str");
+                    assert_eq!(
+                        ctx.string_codepoints(copy).unwrap(),
+                        ctx.string_codepoints(source).unwrap()
+                    );
+                    assert_ne!(copy, child);
+                    if source != empty {
+                        assert_ne!(copy, source);
+                        assert_ne!(
+                            copy,
+                            method(&mut ctx, "str", name, &[child, affix], &[]).unwrap()
+                        );
+                    } else {
+                        assert_eq!(copy, empty);
+                    }
+                }
+            }
+        }
+        let prefix = ctx.text_codepoints(vec![0xd800]);
+        let suffix = ctx.text("β");
+        let rest = method(&mut ctx, "str", "removeprefix", &[surrogate, prefix], &[]).unwrap();
+        assert_eq!(ctx.str_value(rest).unwrap(), "β");
+        let rest = method(&mut ctx, "str", "removesuffix", &[surrogate, suffix], &[]).unwrap();
+        assert_eq!(&*ctx.string_codepoints(rest).unwrap(), &[0xd800]);
+        let number = ctx.int(17);
+        let error = method(&mut ctx, "str", "removeprefix", &[exact, number], &[]).unwrap_err();
+        assert_eq!(
+            error.message,
+            "removeprefix() argument must be str, not int"
+        );
     }
 }
