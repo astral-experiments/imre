@@ -1526,7 +1526,8 @@ print(Token().clean())
         reachable(&source.replace("print(42)", "print(cold())")).unwrap();
         assert!(reachable(&source.replace("ConfigParser", "Missing")).is_err());
 
-        let missing = "import configparser\n\ndef cold():\n    return configparser.Missing()\n\nprint(42)\n";
+        let missing =
+            "import configparser\n\ndef cold():\n    return configparser.Missing()\n\nprint(42)\n";
         reachable(missing).unwrap();
         let error = reachable(&missing.replace("print(42)", "print(cold())"));
         assert!(matches!(error, Err(message) if message.contains("4:12:")));
