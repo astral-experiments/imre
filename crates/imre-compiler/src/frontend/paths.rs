@@ -303,6 +303,9 @@ impl Checker<'_> {
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
         let name = attribute.attr.as_str();
+        if receiver.ty == Type::Path && name == "touch" {
+            return self.registered_method_call(call, attribute, receiver, Type::None);
+        }
         if receiver.ty == Type::Path && name == "samefile" {
             return self.path_samefile(receiver, call);
         }
