@@ -2978,6 +2978,13 @@ enum LexicalFrame {
     Positioned(Arc<ir::FixedFrame>),
 }
 
+/// The compiler only retains these facts while the handler's binding is unchanged.
+struct CaughtException {
+    slot: usize,
+    builtin_class: Option<&'static str>,
+    fields: processes::CapturedFields,
+}
+
 struct Checker<'a> {
     frame: LexicalFrame,
     unhighlighted_call: Option<TextRange>,
@@ -3031,7 +3038,7 @@ struct Checker<'a> {
     joined_lines: joined_lines::Plan,
     consuming_lists: consuming_lists::Plan,
     namespace_guards: Vec<(usize, usize)>,
-    captured_process_errors: Vec<processes::CapturedFields>,
+    caught_exceptions: Vec<CaughtException>,
     returns: Type,
     /// Inferred containers can acquire a new storage layout at an outermost plain assignment.
     inferred_containers: HashSet<usize>,
@@ -3122,7 +3129,7 @@ impl<'a> Checker<'a> {
             joined_lines: joined_lines::Plan::default(),
             consuming_lists: consuming_lists::Plan::default(),
             namespace_guards: Vec::new(),
-            captured_process_errors: Vec::new(),
+            caught_exceptions: Vec::new(),
             returns: Type::None,
             inferred_containers: HashSet::new(),
             declared_slots: HashMap::new(),
@@ -6692,6 +6699,13 @@ impl<'a> Checker<'a> {
         }
     }
 
+    fn caught_exception(&self, slot: usize) -> Option<&CaughtException> {
+        self.caught_exceptions
+            .iter()
+            .rev()
+            .find(|value| value.slot == slot)
+    }
+
     fn exception_origin(&mut self, exception: Expr, site: &impl Ranged) -> Expr {
         Expr {
             ty: Type::Exception,
@@ -6781,6 +6795,32 @@ impl<'a> Checker<'a> {
                 _ => None,
             },
         }
+    }
+
+    /// A literal builtin constructor cannot raise another exception of its own class.
+    /// A handler naming that exact class therefore knows the class of the caught value.
+    fn directly_raised_builtin(body: &[Statement], handlers: &[u32]) -> Option<&'static str> {
+        let [Statement::Raise(Some(raised))] = body else {
+            return None;
+        };
+        let ExprKind::Builtin(Builtin::ExceptionOrigin(_), operands) = &raised.kind else {
+            return None;
+        };
+        let [value] = operands.as_slice() else {
+            return None;
+        };
+        let ExprKind::Exception { kind, message } = &value.kind else {
+            return None;
+        };
+        if handlers != [*kind]
+            || message
+                .as_deref()
+                .is_some_and(|arg| !matches!(&arg.kind, ExprKind::Str(_)))
+        {
+            return None;
+        }
+        let class = imre_ast::exceptions::Kind::try_from_raw(*kind)?;
+        (exception_kind(class.name()) == Some(*kind)).then_some(class.name())
     }
 
     /// A handler may run after any failing operation, before its assignment has
@@ -6901,16 +6941,18 @@ impl<'a> Checker<'a> {
                 })
                 .transpose()?;
             let before_handler = name.and_then(|_| self.take_breaks());
-            let capture_depth = self.captured_process_errors.len();
+            let capture_depth = self.caught_exceptions.len();
             if let (Some(slot), Some(target)) = (name, &handler.name)
                 && !narrowing::assigned_names(&handler.body).contains(target.as_str())
             {
-                let view =
-                    processes::process_error_view(slot, &try_.body, &body, self.types, &kinds);
-                self.captured_process_errors.push(view);
+                self.caught_exceptions.push(CaughtException {
+                    slot,
+                    builtin_class: Self::directly_raised_builtin(&body, &kinds),
+                    fields: processes::process_error_view(&try_.body, &body, self.types, &kinds),
+                });
             }
             let (handler_body, falls) = self.block(&handler.body)?;
-            self.captured_process_errors.truncate(capture_depth);
+            self.caught_exceptions.truncate(capture_depth);
             if let Some(name) = name {
                 self.assigned.remove(&name);
                 self.narrowed.remove_mut(&name);
@@ -9424,6 +9466,23 @@ impl<'a> Checker<'a> {
                 return self.task_await(value, false, awaited);
             }
             ast::Expr::Attribute(attribute) => {
+                if attribute.attr.as_str() == "__qualname__"
+                    && self.registered.is_none()
+                    && !self.globals.registered_initializers
+                    && let Some(call) = attribute.value.as_call_expr()
+                    && self.unshadowed_builtin(&call.func, "type")
+                    && let [argument] = call.arguments.args.as_ref()
+                    && call.arguments.keywords.is_empty()
+                    && let Some(slot) = argument
+                        .as_name_expr()
+                        .and_then(|name| self.names.get(name.id.as_str()))
+                    && let Some(class) = self
+                        .caught_exception(*slot)
+                        .and_then(|caught| caught.builtin_class)
+                {
+                    let exception = self.expr(argument)?;
+                    return Ok(partials::after(exception, unpacking::string(class)));
+                }
                 if self.boxed_deque_descriptor(attribute) {
                     return Err(self.scoped_builtin_error(
                         &format!("collections.deque.{}", attribute.attr.as_str()),
@@ -9945,11 +10004,8 @@ impl<'a> Checker<'a> {
                     if attribute.attr.as_str() == "args"
                         && let ExprKind::Local(slot) = receiver.kind
                         && let Some(issue) = self
-                            .captured_process_errors
-                            .iter()
-                            .rev()
-                            .find(|capture| capture.slot == slot)
-                            .and_then(|capture| capture.tree_issue)
+                            .caught_exception(slot)
+                            .and_then(|caught| caught.fields.tree_issue)
                     {
                         return Ok(Expr {
                             ty: self.types.tuple(vec![self.types.list(issue)]),

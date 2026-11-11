@@ -117,9 +117,8 @@ fn timeout_field_type(graph: &SourceGraph) -> Option<Type> {
     }
 }
 
-/// The handler slot and any argument or capture layout shared by its producers.
+/// Argument and capture layouts shared by the producers of a caught exception.
 pub(super) struct CapturedFields {
-    pub(super) slot: usize,
     pub(super) tree_issue: Option<Type>,
     argv: Option<Type>,
     capture: Option<ProcessCapture>,
@@ -140,7 +139,6 @@ fn error_stream(types: &Types, capture: ProcessCapture, stdout: bool, timeout: b
 
 /// Explicit raises, user calls, and task or context resumption can propagate an error from elsewhere.
 pub(super) fn process_error_view(
-    slot: usize,
     source: &[ast::Stmt],
     body: &[Statement],
     types: &Types,
@@ -263,7 +261,6 @@ pub(super) fn process_error_view(
         argv.insert(command);
     });
     CapturedFields {
-        slot,
         tree_issue: if precise && !other_shutil && kinds == [64] {
             tree_issue
         } else {
@@ -1636,10 +1633,7 @@ impl Checker<'_> {
         attribute: &ast::ExprAttribute,
     ) -> Option<Expr> {
         let local = if let ExprKind::Local(slot) = receiver.kind {
-            self.captured_process_errors
-                .iter()
-                .rev()
-                .find(|capture| capture.slot == slot)
+            self.caught_exception(slot).map(|caught| &caught.fields)
         } else {
             None
         };
@@ -1689,13 +1683,8 @@ impl Checker<'_> {
                     .value
                     .as_name_expr()
                     .and_then(|name| self.names.get(name.id.as_str()))
-                    .and_then(|slot| {
-                        self.captured_process_errors
-                            .iter()
-                            .rev()
-                            .find(|capture| capture.slot == *slot)
-                    })
-                    .and_then(|capture| capture.argv);
+                    .and_then(|slot| self.caught_exception(*slot))
+                    .and_then(|caught| caught.fields.argv);
                 let ty = local
                     .or_else(|| error_field_type(self.graph, self.types, 0, true))
                     .ok_or_else(|| {
