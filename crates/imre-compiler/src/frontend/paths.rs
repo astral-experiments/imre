@@ -781,7 +781,7 @@ impl Checker<'_> {
                     "binary Path.open does not accept an encoding",
                 ));
             }
-            self.utf8_encoding_keyword(encoding)?;
+            self.utf8_encoding_keyword(encoding, is_utf8_codec)?;
         }
         let path = operation(PathOperation::Text, Type::Str, vec![receiver]);
         let mut args = vec![path];
