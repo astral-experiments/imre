@@ -2444,6 +2444,19 @@ def present_after_exhaustion(value: int | None) -> int:
     }
 
     #[test]
+    fn a_discarded_exception_call_still_needs_its_class_namespace() {
+        let directory = tempfile::tempdir().unwrap();
+        let main = directory.path().join("main.py");
+        std::fs::write(
+            directory.path().join("model.py"),
+            "class Defect(ValueError):\n    def __init__(self, line=None):\n        if line is not None:\n            super().__init__(line)\n        self.line = line\n        print(line)\n",
+        )
+        .unwrap();
+        std::fs::write(&main, "from model import Defect\nDefect()\nprint(17)\n").unwrap();
+        super::compile_file(&main, None, &CompileOptions::default()).unwrap();
+    }
+
+    #[test]
     fn an_installed_exception_class_read_needs_a_python_frame() {
         let directory = tempfile::tempdir().unwrap();
         let installed = tempfile::tempdir().unwrap();

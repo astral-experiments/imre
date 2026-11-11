@@ -31,6 +31,18 @@ def current():
     assert msg["X-Trace"] == "wire"
     assert msg.get_payload(decode=True) == b"broken\nbody\xff"
     assert [type(defect) for defect in msg.defects] == [MissingHeaderBodySeparatorDefect]
+
+    # BaseException saves the caller's positional arguments before __init__.
+    assert MissingHeaderBodySeparatorDefect().args == ()
+    assert MissingHeaderBodySeparatorDefect(line=None).args == ()
+    defect = MissingHeaderBodySeparatorDefect(None)
+    assert defect.args == (None,)
+    defect.__init__("first")
+    defect.__init__(None)
+    try:
+        raise defect
+    except MissingHeaderBodySeparatorDefect as caught:
+        assert caught is defect and caught.line is None and caught.args == ("first",)
     parser = FeedParser()
     parser.feed("broken head")
     parser.feed("er\r\nbody")

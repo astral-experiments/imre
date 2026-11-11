@@ -6910,6 +6910,11 @@ impl<'a> Checker<'a> {
                         {
                             return Ok(kind);
                         }
+                        if matches!(self.resolve(target), Some(Binding::RegisteredClass(_))) {
+                            return Err(
+                                self.scoped_builtin_error("a Python exception class", target)
+                            );
+                        }
                         if let Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
                             name @ ("_pickle.PickleError"
                             | "_pickle.PicklingError"
@@ -8014,6 +8019,10 @@ impl<'a> Checker<'a> {
             });
         }
         let binding = self.resolve(expression);
+        if matches!(binding, Some(Binding::RegisteredClass(_))) {
+            self.require_registered_operation(expression);
+            return Ok(Expr::unrepresented());
+        }
         if binding == Some(Binding::RuntimeClass) {
             return Err(self.object_export_error("a class defined in a module guard", expression));
         }
@@ -12032,6 +12041,10 @@ impl<'a> Checker<'a> {
             return self.json_encode(call, op);
         }
         let binding = self.resolve(&call.func);
+        if matches!(binding, Some(Binding::RegisteredClass(_))) {
+            self.require_registered_operation(call.func.as_ref());
+            return self.call_with_target(call, Expr::unrepresented());
+        }
         let gzip = binding == Some(Binding::Intrinsic(Intrinsic::GzipOpen));
         let imported_open = binding == Some(Binding::Intrinsic(Intrinsic::BuiltinsOpen))
             && match &*call.func {
