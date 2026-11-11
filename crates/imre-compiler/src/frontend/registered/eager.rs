@@ -1,7 +1,7 @@
 //! Eager displays in prepared Python suites use the checked frontend's loop traversal.
 
 use super::*;
-use crate::frontend::comprehensions::{EagerDisplay, async_pull, dict_entry};
+use crate::frontend::comprehensions::{Collector, EagerDisplay, async_pull};
 use imre_ast::comprehension::{Output, Plan};
 
 pub(super) struct Namespace {
@@ -63,30 +63,15 @@ impl SourceScope<'_> {
                 parent.into_iter().collect(),
             ),
         ));
-        let empty = match plan.output {
-            Output::List(_) => ExprKind::List(Vec::new()),
-            Output::Set(_) => ExprKind::Set {
-                element: Type::PythonObject,
-                values: Vec::new(),
-            },
-            Output::Dict(..) => ExprKind::Dict(Vec::new()),
-            Output::Generator(_) => return None,
-        };
         let result = self.hidden(Type::PythonObject);
-        prefix.push(Statement::Assign(
-            result,
-            Expr {
-                ty: Type::PythonObject,
-                kind: empty,
-            },
-        ));
         let outer = self.comprehension.replace(Namespace {
             slot: namespace,
             targets,
         });
-        let loops = self.eager_loop(&plan, input, (), result);
+        let body =
+            self.comprehension_body(&plan, input, Collector::Display(None), result, |_, _| {});
         self.comprehension = outer;
-        prefix.extend(loops.ok()?);
+        prefix.extend(body.ok()?.1);
         // A walrus writes into the enclosing activation. Release only the display's private slots.
         let exported: HashSet<_> = self.names.values().copied().collect();
         let clear = (first_private..self.locals.len())
@@ -105,7 +90,6 @@ impl SourceScope<'_> {
 
 impl EagerDisplay for SourceScope<'_> {
     type Input = pipelines::Prepared;
-    type Destination = ();
     type Error = ();
 
     fn input(&mut self, clause: &ast::Comprehension) -> StdResult<pipelines::Prepared, ()> {
@@ -137,36 +121,34 @@ impl EagerDisplay for SourceScope<'_> {
         self.ordinary_operand(test).ok_or(())
     }
 
-    fn collect(
+    fn collection_locals(&self) -> &[Type] {
+        &self.locals
+    }
+
+    fn collection_key(
+        &mut self,
+        key: &ast::Expr,
+        _: Option<Type>,
+        _: Option<(usize, usize)>,
+    ) -> StdResult<(usize, Expr), ()> {
+        let value = self.ordinary_operand(key).ok_or(())?;
+        Ok((self.hidden(Type::PythonObject), value))
+    }
+
+    fn collection_value(
         &mut self,
         output: Output<'_>,
-        (): (),
-        result: usize,
-        _: &[Expr],
-    ) -> StdResult<Vec<Statement>, ()> {
-        let collection = Expr::local(result, Type::PythonObject);
-        Ok(match output {
-            Output::List(item) | Output::Set(item) => {
-                let op = if matches!(output, Output::Set(_)) {
-                    Builtin::SetAdd
-                } else {
-                    Builtin::Append
-                };
-                let item =
-                    values::collection_item(item, |value| self.ordinary_operand(value).ok_or(()))?;
-                vec![Statement::Expr(operation(
-                    op,
-                    Type::None,
-                    vec![collection, item],
-                ))]
-            }
-            Output::Dict(key, value) => {
-                let key = self.ordinary_operand(key).ok_or(())?;
-                let captured = self.hidden(Type::PythonObject);
-                let value = self.ordinary_operand(value).ok_or(())?;
-                vec![dict_entry(&self.locals, result, captured, key, value)]
-            }
-            Output::Generator(_) => return Err(()),
-        })
+        _: Collector,
+        _: usize,
+        key: Option<&Expr>,
+        _: Option<(usize, usize)>,
+    ) -> StdResult<Expr, ()> {
+        if key.is_some() {
+            self.ordinary_operand(output.value()).ok_or(())
+        } else {
+            values::collection_item(output.value(), |value| {
+                self.ordinary_operand(value).ok_or(())
+            })
+        }
     }
 }
