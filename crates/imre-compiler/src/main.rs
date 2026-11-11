@@ -366,7 +366,7 @@ fn run() -> Result<ExitCode, String> {
                     .source_files()
                     .map(|(path, _, _)| path.as_path())
                     .chain(options.bundled_provider_archive.as_deref()),
-                &sources,
+                sources,
                 &runtime,
                 &output,
                 None,
