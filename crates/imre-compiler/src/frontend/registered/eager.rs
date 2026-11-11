@@ -84,7 +84,7 @@ impl SourceScope<'_> {
             slot: namespace,
             targets,
         });
-        let loops = self.eager_loop(&plan, 0, None, input, (), result);
+        let loops = self.eager_loop(&plan, input, (), result);
         self.comprehension = outer;
         prefix.extend(loops.ok()?);
         // A walrus writes into the enclosing activation. Release only the display's private slots.
@@ -136,8 +136,6 @@ impl EagerDisplay for SourceScope<'_> {
     fn filter(&mut self, test: &ast::Expr) -> StdResult<Expr, ()> {
         self.ordinary_operand(test).ok_or(())
     }
-
-    fn invalid_edges(&self, _: &Plan<'_>) {}
 
     fn collect(
         &mut self,

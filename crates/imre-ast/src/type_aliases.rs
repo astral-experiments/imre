@@ -198,7 +198,7 @@ impl<'a> Rhs<'a> {
             in_iterable: self.in_iterable,
         };
         let mut inner_iterable = None;
-        for step in &plan.steps {
+        for step in plan.steps() {
             match *step {
                 Step::Open { iterable, .. } => inner_iterable = Some(iterable),
                 Step::Next { target, .. } => {
@@ -218,7 +218,6 @@ impl<'a> Rhs<'a> {
                         child.visit_expr(key);
                     }
                 }
-                Step::Close { .. } | Step::End => {}
             }
         }
         self.error = child.error;

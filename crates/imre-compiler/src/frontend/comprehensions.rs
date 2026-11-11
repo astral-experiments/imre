@@ -123,7 +123,6 @@ pub(super) trait EagerDisplay: Sized {
         body: impl FnOnce(&mut Self) -> StdResult<Vec<Statement>, Self::Error>,
     ) -> StdResult<Vec<Statement>, Self::Error>;
     fn filter(&mut self, test: &ast::Expr) -> StdResult<Expr, Self::Error>;
-    fn invalid_edges(&self, plan: &Plan<'_>) -> Self::Error;
     fn collect(
         &mut self,
         output: Output<'_>,
@@ -132,36 +131,26 @@ pub(super) trait EagerDisplay: Sized {
         conditions: &[Expr],
     ) -> StdResult<Vec<Statement>, Self::Error>;
 
-    fn eager_filters(
-        &mut self,
-        plan: &Plan<'_>,
-        pull: usize,
-        parent: Option<usize>,
-    ) -> StdResult<(usize, Vec<Expr>), Self::Error> {
-        let filters = plan
-            .loop_filters(pull, parent)
-            .ok_or_else(|| self.invalid_edges(plan))?;
-        let accepted = filters.end;
-        let mut conditions = Vec::with_capacity(filters.len());
-        for step in &plan.steps[filters] {
-            let Step::Filter { test, .. } = step else {
-                unreachable!("validated filters")
-            };
-            conditions.push(self.filter(test)?);
-        }
-        Ok((accepted, conditions))
+    fn eager_filters(&mut self, steps: &[Step<'_>]) -> StdResult<Vec<Expr>, Self::Error> {
+        steps
+            .iter()
+            .map(|step| {
+                let Step::Filter { test, .. } = step else {
+                    unreachable!("a pull owns a contiguous range of filters")
+                };
+                self.filter(test)
+            })
+            .collect()
     }
 
     fn eager_loop(
         &mut self,
         plan: &Plan<'_>,
-        pc: usize,
-        parent: Option<usize>,
         input: Self::Input,
         destination: Self::Destination,
         result: usize,
     ) -> StdResult<Vec<Statement>, Self::Error> {
-        self.comprehension_loop(plan, pc, parent, input, &mut |lower, output, conditions| {
+        self.comprehension_loop(plan, 0, input, &mut |lower, output, conditions| {
             lower.collect(output, destination, result, conditions)
         })
     }
@@ -170,21 +159,26 @@ pub(super) trait EagerDisplay: Sized {
         &mut self,
         plan: &Plan<'p>,
         pc: usize,
-        parent: Option<usize>,
         input: Self::Input,
         emit: &mut impl FnMut(&mut Self, Output<'p>, &[Expr]) -> StdResult<Vec<Statement>, Self::Error>,
     ) -> StdResult<Vec<Statement>, Self::Error> {
-        let Step::Next { depth, target, .. } = plan.steps[pc] else {
+        let Step::Next {
+            depth,
+            target,
+            accepted,
+            ..
+        } = plan.steps()[pc]
+        else {
             unreachable!("an iterator is followed by its pull")
         };
         self.before_pull(plan, depth);
         self.with_target(target, input, plan.output, |lower| {
-            let (next, conditions) = lower.eager_filters(plan, pc, parent)?;
-            let mut body = match plan.steps[next] {
+            let conditions = lower.eager_filters(&plan.steps()[pc + 1..accepted])?;
+            let mut body = match plan.steps()[accepted] {
                 Step::Emit { output, .. } => emit(lower, output, &conditions)?,
                 Step::Open { depth, .. } => {
                     let input = lower.input(&plan.clauses[depth])?;
-                    lower.comprehension_loop(plan, next + 1, Some(pc), input, emit)?
+                    lower.comprehension_loop(plan, accepted + 1, input, emit)?
                 }
                 _ => unreachable!("an accepted input opens an iterator or emits"),
             };
@@ -248,14 +242,6 @@ impl EagerDisplay for Checker<'_> {
         let condition = self.condition(test)?;
         self.apply_facts(test, true);
         Ok(condition)
-    }
-
-    fn invalid_edges(&self, plan: &Plan<'_>) -> Failure {
-        error(
-            self.source,
-            plan.outer,
-            "unsupported comprehension loop edges",
-        )
     }
 
     fn collect(
@@ -1013,7 +999,7 @@ impl Checker<'_> {
         collector: Collector,
         result: usize,
     ) -> Result<(Type, Vec<Statement>), String> {
-        let loops = self.eager_loop(display, 0, None, input, collector, result)?;
+        let loops = self.eager_loop(display, input, collector, result)?;
         let ty = self.locals[result];
         let empty = match (collector, display.output) {
             (Collector::Display(_), Output::List(_)) => ExprKind::List(Vec::new()),
@@ -1043,15 +1029,6 @@ impl Checker<'_> {
                 self.narrowed.remove_mut(slot);
             }
         }
-    }
-
-    pub(super) fn comprehension_filters(
-        &mut self,
-        plan: &Plan<'_>,
-        pull: usize,
-        parent: Option<usize>,
-    ) -> Result<(usize, Vec<Expr>), String> {
-        self.eager_filters(plan, pull, parent)
     }
 
     fn comprehension_leaf(

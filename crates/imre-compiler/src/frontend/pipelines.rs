@@ -4,6 +4,7 @@
 
 use imre_ast::comprehension::{Plan, Step};
 
+use super::comprehensions::EagerDisplay;
 use super::*;
 use crate::ir::TextOperation;
 
@@ -2399,7 +2400,7 @@ impl Checker<'_> {
             binding: Vec<Statement>,
             filters: Vec<Expr>,
             accepted: usize,
-            exhausted: usize,
+            parent: Option<usize>,
         }
         first.evaluate.append(&mut first.acquire);
         let mut input = first;
@@ -2409,9 +2410,9 @@ impl Checker<'_> {
             let Step::Next {
                 depth,
                 target,
-                exhausted,
-                ..
-            } = plan.steps[pc]
+                accepted,
+                parent,
+            } = plan.steps()[pc]
             else {
                 unreachable!("an iterator is followed by its pull");
             };
@@ -2431,17 +2432,16 @@ impl Checker<'_> {
             }
             self.forget_comprehension_writes(&plan, depth);
             let binding = self.bind_iterator_pattern(target, input.value)?;
-            let parent = pulls.last().map(|outer| outer.pc);
-            let (accepted, filters) = self.comprehension_filters(&plan, pc, parent)?;
+            let filters = self.eager_filters(&plan.steps()[pc + 1..accepted])?;
             pulls.push(Pull {
                 pc,
                 input,
                 binding,
                 filters,
                 accepted,
-                exhausted,
+                parent,
             });
-            match plan.steps[accepted] {
+            match plan.steps()[accepted] {
                 Step::Open { iterable, .. } => {
                     let source = self.expansion_input(iterable, None)?;
                     input = self.prepare_iteration(source, iterable, false)?;
@@ -2491,7 +2491,7 @@ impl Checker<'_> {
             .iter()
             .flat_map(|pull| pull.input.writes.iter().copied())
             .collect::<HashSet<_>>();
-        for expression in plan.steps.iter().filter_map(|step| match step {
+        for expression in plan.steps().iter().filter_map(|step| match step {
             Step::Filter { test, .. } => Some(*test),
             Step::Emit { output, .. } => Some(output.value()),
             _ => None,
@@ -2517,7 +2517,7 @@ impl Checker<'_> {
         ]);
         let mut cases = Vec::new();
         for pull in pulls.iter().rev() {
-            let mut accepted = match plan.steps[pull.accepted] {
+            let mut accepted = match plan.steps()[pull.accepted] {
                 Step::Emit { .. } => vec![
                     Statement::Assign(value, yielded.clone()),
                     Statement::Assign(ready, Expr::boolean(true)),
@@ -2537,16 +2537,12 @@ impl Checker<'_> {
             let mut available = pull.binding.clone();
             available.push(Statement::Clear(pull.input.value));
             available.extend(accepted);
-            let Step::Close { next, .. } = plan.steps[pull.exhausted] else {
-                unreachable!("exhaustion releases the iterator");
-            };
-            let (roots, jump) = match plan.steps[next] {
-                Step::End => (&clear, Statement::Assign(done, Expr::boolean(true))),
-                Step::Next { .. } => (
+            let (roots, jump) = match pull.parent {
+                Some(parent) => (
                     &pull.input.clear,
-                    Statement::Assign(resume_pc, Expr::integer(next as i64)),
+                    Statement::Assign(resume_pc, Expr::integer(parent as i64)),
                 ),
-                _ => unreachable!("closing returns to the parent pull or finishes"),
+                None => (&clear, Statement::Assign(done, Expr::boolean(true))),
             };
             let mut exhausted: Vec<_> = roots.iter().copied().map(Statement::Clear).collect();
             exhausted.push(jump);
