@@ -616,6 +616,22 @@ impl Context {
         }
     }
 
+    /// An unchanged Unicode result retains an exact receiver and copies a subclass.
+    fn unchanged_string(&mut self, receiver: Id, storage: Id) -> Result<Id> {
+        if receiver == storage {
+            return Ok(receiver);
+        }
+        let copy = match self.heap.get(storage) {
+            Value::Str(text) if text.is_empty() => return Ok(self.text("")),
+            Value::Str(text) => Value::Str(
+                crate::Str::try_new(text.as_str()).map_err(|_| Error::new("MemoryError", ""))?,
+            ),
+            Value::SurrogateStr(points) => Value::SurrogateStr(copy_ids(points)?),
+            _ => unreachable!("validated str receiver"),
+        };
+        self.heap.fresh_string(copy)
+    }
+
     fn memoryview_owner(owner: Option<Id>) -> Result<Id> {
         owner.ok_or_else(|| {
             Error::new(
