@@ -36,6 +36,20 @@ def check_registered_entry_operand(imre, root, run):
         assert result.returncode and not result.stdout, result
         assert b"checked_operand.py:3:18: Imre: expected int, got bool" in result.stderr, result
 
+    saved = (
+        "def model(value: int) -> int:\n"
+        "    items = [3]\n    items.append(True)\n    return items[0] + value\n"
+        "def stop() -> int:\n    print('stopped')\n    raise SystemExit(13)\n"
+        "saved = stop\ndef stop() -> int:\n    return 7\n"
+    )
+    entry.write_text(saved + "print(model(saved()))\n")
+    result = run(imre, "-m", entry.stem)
+    assert (result.returncode, result.stdout, result.stderr) == (13, b"stopped\n", b""), result
+    entry.write_text(saved + "print(model(stop()))\n")
+    result = run(imre, "-m", entry.stem)
+    assert result.returncode and not result.stdout, result
+    assert b"checked_operand.py:3:18: Imre: expected int, got bool" in result.stderr, result
+
     entry.write_text(
         "def show(): print(1)\n"
         "def model():\n    items: list[int] = []\n    items.append(True)\n"
