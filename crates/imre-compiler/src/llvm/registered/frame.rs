@@ -2142,9 +2142,11 @@ impl RegisteredFrame<'_, '_> {
         )
     }
 
-    pub(crate) fn declare_global(&mut self, name: &str) {
-        let name = self.code_name(name);
-        self.op("declare_global", &[&self.scope.clone(), &name]);
+    pub(crate) fn declare_globals(&mut self, globals: &BTreeSet<String>) {
+        for name in globals {
+            let name = self.code_name(name);
+            self.op("declare_global", &[&self.scope.clone(), &name]);
+        }
     }
 }
 

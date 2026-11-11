@@ -12,7 +12,7 @@ use super::prepare::PreparedUnit;
 use crate::CodegenUnit;
 use crate::frontend::function_scope::{CallableMetadata, ClassBindings, NamedFunction};
 use crate::frontend::module_source::{self, ParsedModule};
-use crate::frontend::{ParameterEvaluator, RegisteredGenerator, RegisteredLambda};
+use crate::frontend::{ParameterEvaluator, RegisteredGenerator, RegisteredLambda, RequiredSite};
 use crate::ir::RegisteredTypeParameter;
 use crate::llvm::ModuleLauncher;
 use crate::llvm::registered::sites::{
@@ -23,8 +23,6 @@ use crate::llvm::registered::{
     ABI, AnnotationScope, Output, RegisteredFrame, SourcePositions, sites,
 };
 use serde_json::json;
-
-mod statements;
 
 #[derive(Clone, Copy, Default)]
 pub(super) struct PhysicalFile {
@@ -634,10 +632,7 @@ impl<'a> PreparedBody<'a> {
         let frame = if initializer.fully_checked() {
             location.emit_checked_body(frame, sites, &initializer.checked, globals, "", false)
         } else {
-            let mut function = location.function(frame, sites, String::new(), false);
-            function.declare_globals(globals);
-            crate::llvm::registered::emit_prepared_suite(&mut function, initializer);
-            function.frame
+            location.emit_mixed_suite(frame, sites, initializer, globals, String::new(), false)
         };
         let code =
             frame.finish_module(|frame, sites| location.define_module_annotations(frame, sites));
@@ -845,21 +840,26 @@ impl SourceMap<'_> {
 }
 
 impl SourceMap<'_> {
-    fn function<'a, 'p>(
+    fn emit_mixed_suite<'a, 'p>(
         &'p self,
-        frame: RegisteredFrame<'a, 'p>,
+        mut frame: RegisteredFrame<'a, 'p>,
         sites: sites::CheckedSites,
+        suite: &'p crate::frontend::RegisteredSuite,
+        globals: &'p BTreeSet<String>,
         prefix: String,
         in_function: bool,
-    ) -> Function<'a, 'p> {
-        Function {
+    ) -> RegisteredFrame<'a, 'p> {
+        frame.declare_globals(globals);
+        let mut function = Function {
             sites,
             frame,
             source: self,
             in_function,
-            declared_globals: Default::default(),
+            declared_globals: globals,
             prefix,
-        }
+        };
+        crate::llvm::registered::emit_prepared_suite(&mut function, suite);
+        function.frame
     }
 
     fn emit_checked_body<'a, 'p>(
@@ -871,9 +871,7 @@ impl SourceMap<'_> {
         prefix: &str,
         in_function: bool,
     ) -> RegisteredFrame<'a, 'p> {
-        for name in globals {
-            frame.declare_global(name);
-        }
+        frame.declare_globals(globals);
         sites.place_statements(
             &checked.function.body,
             &mut self.definitions(&mut frame, prefix, globals, in_function),
@@ -900,8 +898,6 @@ impl SourceMap<'_> {
             self.module_start,
         );
         frame.async_generator = suspension == imre_ast::code_flags::ASYNC_GENERATOR;
-        let source_function =
-            |frame, sites, prefix| self.function(frame, sites, prefix, in_function);
         let mut sites = sites::CheckedSites::default();
         let frame = match body {
             Body::Checked(checked, globals) => self.emit_checked_body(
@@ -935,10 +931,14 @@ impl SourceMap<'_> {
                         in_function,
                     )
                 } else {
-                    let mut f = source_function(frame, sites, prefix.clone());
-                    f.declare_globals(globals);
-                    crate::llvm::registered::emit_prepared_suite(&mut f, &prepared.body);
-                    f.frame
+                    self.emit_mixed_suite(
+                        frame,
+                        sites,
+                        &prepared.body,
+                        globals,
+                        prefix.clone(),
+                        in_function,
+                    )
                 };
                 self.finish_class_annotations(
                     &mut frame,
@@ -950,11 +950,8 @@ impl SourceMap<'_> {
                 frame
             }
             Body::Suite(suite) => {
-                let mut f = source_function(frame, sites, prefix);
                 let globals = &self.scopes.functions[&start.expect("function definition")].globals;
-                f.declare_globals(globals);
-                crate::llvm::registered::emit_prepared_suite(&mut f, suite);
-                f.frame
+                self.emit_mixed_suite(frame, sites, suite, globals, prefix, in_function)
             }
             Body::CheckedProvider(provider, scope) => {
                 frame.annotation_scope = scope;
@@ -1038,10 +1035,33 @@ impl Function<'_, '_> {
         let definitions = self.source.definitions(
             &mut self.frame,
             &self.prefix,
-            &self.declared_globals,
+            self.declared_globals,
             self.in_function,
         );
         (&mut self.sites, definitions)
+    }
+}
+
+impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<'a, 'p> {
+    fn frame_and_sites(
+        &mut self,
+        operand: Option<&crate::ir::Expr>,
+    ) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites) {
+        if let Some(operand) = operand {
+            let (sites, mut definitions) = self.definitions();
+            sites.place_operand(operand, &mut definitions);
+        }
+        (&mut self.frame, &self.sites)
+    }
+
+    fn place_definition(&mut self, site: TextSize) {
+        let (sites, mut definitions) = self.definitions();
+        sites.place(RequiredSite::Definition(site), &mut definitions);
+    }
+
+    fn place_statements(&mut self, body: &[crate::ir::Statement]) {
+        let (sites, mut definitions) = self.definitions();
+        sites.place_statements(body, &mut definitions);
     }
 }
 
@@ -1553,7 +1573,7 @@ struct Function<'a, 'p> {
     frame: RegisteredFrame<'a, 'p>,
     source: &'p SourceMap<'p>,
     prefix: String,
-    declared_globals: std::collections::BTreeSet<String>,
+    declared_globals: &'p BTreeSet<String>,
     in_function: bool,
 }
 
@@ -1572,11 +1592,11 @@ impl std::ops::DerefMut for Function<'_, '_> {
 }
 
 #[cfg(test)]
+#[path = "tests"]
 mod tests {
     mod declaration_sites;
     use super::super::prepare::ModuleSource;
     use super::*;
-    use crate::frontend::RequiredSite;
     use crate::llvm::registered::permanent;
 
     fn emit_modules(
