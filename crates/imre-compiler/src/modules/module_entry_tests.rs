@@ -184,23 +184,21 @@ fn demanded_shipped_classes_use_the_defining_source() {
     fs::write(&entry,"import asyncio as tasks\nimport traceback as tb\nfrom helper import F, S\ntasks.Future\ntb.FrameSummary\n").unwrap();
     let graph = SourceGraph::load(&entry, Some(root.path()), &[]).unwrap();
     let module = &graph.modules[graph.entry];
-    assert!(
-        graph
-            .session
-            .shipped_class("traceback", "format_exc")
-            .is_none()
-    );
+    assert!(matches!(
+        graph.session.shipped_declaration("traceback", "format_exc"),
+        Some(Binding::RegisteredFunction(_))
+    ));
     // asyncio imports tasks with a wildcard. Its explicit __all__ omits this class.
     assert!(
         graph
             .session
-            .shipped_class("asyncio.tasks", "_GatheringFuture")
+            .shipped_declaration("asyncio.tasks", "_GatheringFuture")
             .is_some()
     );
     assert!(
         graph
             .session
-            .shipped_class("asyncio", "_GatheringFuture")
+            .shipped_declaration("asyncio", "_GatheringFuture")
             .is_none()
     );
     for (pos, alias, class, filename) in [
@@ -239,4 +237,50 @@ fn explicit_shipped_class_import_uses_its_verified_alias() {
         Default::default(),
     )
     .unwrap();
+}
+
+#[test]
+fn shipped_function_imports_keep_the_defining_name_range() {
+    use super::Binding;
+    use ruff_text_size::Ranged;
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("app.py");
+    fs::write(
+        &path,
+        "import urllib.request as request\nfrom urllib.request import parse_http_list as parse, getproxies\nrequest.getproxies\n",
+    )
+    .unwrap();
+    let graph = SourceGraph::load(&path, Some(dir.path()), &[]).unwrap();
+    let module = &graph.modules[graph.entry];
+    let (file, parsed, _) = graph
+        .session
+        .selected_file(&Path::new(crate::dynamic::BUNDLED_SOURCE_ROOT).join("urllib/request.py"))
+        .unwrap();
+    for (local, name) in [
+        ("parse", "parse_http_list"),
+        ("getproxies", "getproxies_environment"),
+    ] {
+        let function = parsed
+            .suite()
+            .iter()
+            .filter_map(ruff_python_ast::Stmt::as_function_def_stmt)
+            .find(|def| def.name.as_str() == name)
+            .unwrap();
+        let expected = Some(Binding::RegisteredFunction(ruff_db::files::FileRange::new(
+            file,
+            function.name.range(),
+        )));
+        assert_eq!(module.export(local), expected);
+        if local == "getproxies" {
+            let qualified = &module.parsed.suite()[2].as_expr_stmt().unwrap().value;
+            assert_eq!(graph.resolve(graph.entry, qualified), expected);
+        }
+    }
+    assert!(
+        graph
+            .session
+            .shipped_declaration("urllib.request", "_opener")
+            .is_none()
+    );
 }

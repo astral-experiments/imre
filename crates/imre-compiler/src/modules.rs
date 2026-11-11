@@ -573,6 +573,8 @@ pub(crate) enum Binding {
     Definition(DefinitionId),
     /// The owning Python module initializes the checked class object.
     RegisteredClass(ruff_db::files::FileRange),
+    /// A Python function bound by the selected module's actual initializer.
+    RegisteredFunction(ruff_db::files::FileRange),
     /// The module initializer establishes this binding when its guard executes.
     ConditionalValue,
     /// A class defined by the runtime arm of a TYPE_CHECKING guard.
@@ -583,6 +585,12 @@ pub(crate) enum Binding {
     TypeAlias(ModuleId, usize),
     IntrinsicModule(IntrinsicModule),
     Intrinsic(Intrinsic),
+}
+
+impl Binding {
+    pub(crate) fn is_registered_callable(self) -> bool {
+        matches!(self, Self::RegisteredClass(_) | Self::RegisteredFunction(_))
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -2868,6 +2876,8 @@ pub(crate) struct SourceModule {
     pub(crate) optional_imports: HashMap<TextRange, Vec<String>>,
     /// First physical binding of each mutable module value.
     pub(crate) rebound_values: HashSet<usize>,
+    /// The real initializer must bind these imports even if the callable is never read.
+    pub(crate) registered_imports: HashMap<usize, TextRange>,
     /// Mutable exports read at the source from-import, keyed by statement.
     pub(crate) snapshots: HashMap<usize, ImportSnapshot>,
     /// Executable entry statements, or inactive main guards that still require checking.
@@ -3891,6 +3901,7 @@ impl SourceGraph {
                 let module = &self.modules[*id];
                 *id != self.entry
                     || !module.snapshots.is_empty()
+                    || !module.registered_imports.is_empty()
                     || entry_declarations
                     || !module.entry_globals.is_empty()
                     || !module.overloads.is_empty()
@@ -4247,9 +4258,7 @@ impl SourceGraph {
                 return None;
             }
             stdlib_symbol_or_else(&self.modules, namespace, attr.attr.as_str(), || {
-                self.session
-                    .shipped_class(owner, attr.attr.as_str())
-                    .map(Binding::RegisteredClass)
+                self.session.shipped_declaration(owner, attr.attr.as_str())
             })
         })?;
         if let Binding::Definition(id) = binding
@@ -4523,6 +4532,7 @@ fn resolve_binding(
                 }
                 Binding::Definition(_)
                 | Binding::RegisteredClass(_)
+                | Binding::RegisteredFunction(_)
                 | Binding::ConditionalValue
                 | Binding::RuntimeClass
                 | Binding::Value(_)
@@ -4860,6 +4870,7 @@ impl<'a> Loader<'a> {
             entry_globals: Vec::new(),
             optional_imports: HashMap::new(),
             rebound_values: HashSet::new(),
+            registered_imports: HashMap::new(),
             snapshots: HashMap::new(),
             executable: Vec::new(),
         });
@@ -5761,7 +5772,7 @@ impl<'a> Loader<'a> {
                             } else {
                                 self.session.prepare_shipped_source(&name)?;
                                 stdlib_symbol_or_else(&self.modules, module, member, || {
-                                    self.session.shipped_class(&name, member).map(Binding::RegisteredClass)
+                                    self.session.shipped_declaration(&name, member)
                                 })
                             }
                         }
@@ -5785,9 +5796,15 @@ impl<'a> Loader<'a> {
                                 self.session.prepare_shipped_source(&child_name)?;
                             }
                         }
+                        if matches!(binding, Binding::RegisteredFunction(_)) {
+                            self.modules[id]
+                                .registered_imports
+                                .entry(index)
+                                .or_insert(alias.range());
+                        }
                         if binding
                             == Binding::Intrinsic(Intrinsic::Fnmatch(FnmatchOperation::Parts))
-                            || matches!(binding, Binding::RegisteredClass(_))
+                            || binding.is_registered_callable()
                             || binding == Binding::IntrinsicModule(IntrinsicModule::ReConstants)
                             || module == IntrinsicModule::EmailHeaderValueParser
                             || matches!(

@@ -8190,7 +8190,7 @@ impl<'a> Checker<'a> {
             });
         }
         let binding = self.resolve(expression);
-        if matches!(binding, Some(Binding::RegisteredClass(_))) {
+        if binding.is_some_and(Binding::is_registered_callable) {
             self.require_registered_operation(expression)?;
             return Ok(Expr::unrepresented());
         }
@@ -12219,7 +12219,7 @@ impl<'a> Checker<'a> {
             return self.json_encode(call, op);
         }
         let binding = self.resolve(&call.func);
-        if matches!(binding, Some(Binding::RegisteredClass(_))) {
+        if binding.is_some_and(Binding::is_registered_callable) {
             self.require_registered_operation(call.func.as_ref())?;
             return self.call_with_target(call, Expr::unrepresented());
         }
