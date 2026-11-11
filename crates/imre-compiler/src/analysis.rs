@@ -389,6 +389,31 @@ impl Session {
             .any(|item| item.declaration.definition().is_some())
     }
 
+    /// A scope with only local values cannot refine an imported callee or a record field.
+    pub(crate) fn function_uses_only_locals(
+        &self,
+        module: usize,
+        function: &ruff_python_ast::StmtFunctionDef,
+    ) -> bool {
+        use ty_python_core::scope::NodeWithScopeRef;
+
+        let file = self.db.program_file(self.files[module]);
+        let index = ty_python_core::semantic_index(&self.db, file);
+        let Some(scope) = index.try_node_scope(NodeWithScopeRef::Function(function)) else {
+            return false;
+        };
+        let places = index.place_table(scope);
+        !function.is_async
+            && !scope.is_generator_function(index)
+            && index.child_scopes(scope).next().is_none()
+            && places.members().next().is_none()
+            && places.symbols().all(|symbol| symbol.is_local())
+            && !index
+                .use_def_map(scope)
+                .definitions_with_usage()
+                .any(|(_, definition, _)| definition.kind(&self.db).is_import())
+    }
+
     /// Query the already indexed declarations in this physical scope.
     pub(crate) fn has_annotated_empty_list(
         &self,
