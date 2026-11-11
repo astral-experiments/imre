@@ -2456,6 +2456,25 @@ def present_after_exhaustion(value: int | None) -> int:
     }
 
     #[test]
+    fn an_unrelated_exception_does_not_change_a_proven_handler_class() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("main.py");
+        let compile = |raised: &str| {
+            std::fs::write(
+                &path,
+                format!("class Detail(ValueError):\n    pass\ntry:\n    raise {raised}('marker')\nexcept ValueError as error:\n    print(type(error).__qualname__)\n"),
+            )
+            .unwrap();
+            super::compile_file(&path, None, &CompileOptions::default())
+                .unwrap()
+                .llvm_ir
+        };
+        let scoped_lookup = "define internal i64 @imre_boxed_named_op(";
+        assert!(!compile("ValueError").contains(scoped_lookup));
+        assert!(compile("Detail").contains(scoped_lookup));
+    }
+
+    #[test]
     fn handler_flow_requires_a_direct_unconditional_raise() {
         let source = r#"
 class Policy:
