@@ -6,13 +6,11 @@ use crate::ir::{ContextBinding, ContextSite, Expr, Statement};
 use crate::llvm::{Completion, finally::Finalbody};
 use ruff_text_size::TextRange;
 
-/// An acquired manager owns both the normal and exceptional exit edges.
-pub(crate) struct ContextRegion {
+/// The exit callable and enclosing exception captured on successful entry.
+struct ContextRegion {
     site: ContextSite,
     callable: String,
     caught: String,
-    error: String,
-    done: String,
 }
 
 impl RegisteredFrame<'_, '_> {
@@ -137,57 +135,15 @@ impl RegisteredFrame<'_, '_> {
         }
     }
 
-    /// Leave an enclosing manager on return, break or continue. An awaited exit drops
-    /// its callable before resuming the transfer into the next enclosing cleanup.
-    pub(crate) fn leave_context(
-        &mut self,
-        context: &ContextRegion,
-        discarded: &mut Vec<(usize, String)>,
-    ) {
-        if context.site.is_async {
-            let index = self
-                .live
-                .iter()
-                .rposition(|value| value == &context.callable)
-                .unwrap();
-            discarded.push((index, self.live.remove(index)));
-        }
-        self.exit_context(context, None);
-    }
-
-    fn begin_context(&mut self, site: ContextSite, callable: String) -> (ContextRegion, String) {
-        let error = self.name("b");
-        let done = self.name("b");
-        let outer = std::mem::replace(&mut self.body.error_target, error.clone());
-        self.live.push(callable.clone());
-        (
-            ContextRegion {
-                site,
-                callable,
-                caught: self.caught.last().cloned().unwrap_or_else(|| "0".into()),
-                error,
-                done,
-            },
-            outer,
-        )
-    }
-
-    fn end_context(&mut self, region: ContextRegion, outer: String) {
-        self.live.pop();
-        self.body.error_target = outer;
-        if !self.body.terminated {
-            self.exit_context(&region, None);
-            self.jump(&region.done);
-        }
-        let exception = self.take_context_error(&region.error, &region.callable);
-        let result = self.exit_context(&region, Some(&exception));
+    fn exceptional_exit(&mut self, region: &ContextRegion, failed: &str, done: &str) {
+        let exception = self.take_context_error(failed, &region.callable);
+        let result = self.exit_context(region, Some(&exception));
         // Sync exit and resumed async exit have already tested the result under the body exception.
         let suppress = self.value(&format!("icmp eq i64 {result}, {}", super::permanent::TRUE));
         let propagate = self.name("b");
-        self.branch(&suppress, &region.done, &propagate);
+        self.branch(&suppress, done, &propagate);
         self.label(&propagate);
         self.raise(&exception, None, true);
-        self.label(&region.done);
     }
 }
 
@@ -235,11 +191,6 @@ impl<'p> Frame<'_, '_, 'p> {
             // must see only the regions outside the cleanup currently being run.
             let mut region = self.regions.pop().unwrap();
             match &mut region {
-                Region::Context { exit, outer } => {
-                    self.body.error_target.clone_from(outer);
-                    self.leave_context(exit, &mut discarded);
-                    self.flush_check();
-                }
                 Region::Slots(slots) => self.clear_slots(slots),
                 Region::Finally(finalbody) => {
                     self.flush_check();
@@ -283,10 +234,6 @@ impl<'p> Frame<'_, '_, 'p> {
 
 pub(super) enum Region {
     Slots(Vec<usize>),
-    Context {
-        exit: ContextRegion,
-        outer: String,
-    },
     Finally(Finalbody<String>),
     ExceptionName {
         name: String,
@@ -320,19 +267,31 @@ impl Frame<'_, '_, '_> {
             let (exit, value) = self.enter_sync(&manager, site);
             (exit, value, None)
         };
-        let (exit, outer) = self.begin_context(site, exit);
-        self.regions.push(Region::Context { exit, outer });
-        if let Some(binding) = binding {
-            self.store_private(binding.entered, &value);
-            self.emit_suite(&binding.body);
-        }
-        if let Some(mark) = above_exit {
-            self.discard_truth(&mark);
-        }
-        self.emit_suite(body);
-        let Some(Region::Context { exit, outer }) = self.regions.pop() else {
-            unreachable!("active context region")
+        let context = ContextRegion {
+            site,
+            callable: exit,
+            caught: self.caught.last().cloned().unwrap_or_else(|| "0".into()),
         };
-        self.end_context(exit, outer);
+        let failed = self.name("b");
+        let done = self.name("b");
+        self.live.push(context.callable.clone());
+        let (region, _) = self.protected_exits(&failed, &done, |frame| {
+            if let Some(binding) = binding {
+                frame.store_private(binding.entered, &value);
+                frame.emit_suite(&binding.body);
+            }
+            if let Some(mark) = above_exit {
+                frame.discard_truth(&mark);
+            }
+            frame.emit_suite(body);
+        });
+        self.live.pop();
+
+        self.exceptional_exit(&context, &failed, &done);
+        self.finish_exits(region, |frame, _| {
+            frame.exit_context(&context, None);
+            None
+        });
+        self.label(&done);
     }
 }
