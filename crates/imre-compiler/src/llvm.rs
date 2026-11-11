@@ -1887,7 +1887,7 @@ impl Emitter<'_, '_> {
 
     /// Compare the decoded cursor to its count so LLVM can use the same
     /// induction variable for the loop bound and the element address.
-    fn while_condition(&mut self, test: &Expr, contiguous_sum: bool) -> String {
+    fn contiguous_sum_condition(&mut self, test: &Expr, contiguous_sum: bool) -> Option<String> {
         if contiguous_sum
             && let ExprKind::Compare(values, ops) = &test.kind
             && let ([cursor, length], [CmpOp::Lt]) = (values.as_slice(), ops.as_slice())
@@ -1900,9 +1900,9 @@ impl Emitter<'_, '_> {
             let count = self.instruction(format!("lshr i64 {}, 1", length.value.operand));
             self.release_operand(&length);
             self.release_operand(&cursor);
-            self.instruction(format!("icmp ult i64 {index}, {count}"))
+            Some(self.instruction(format!("icmp ult i64 {index}, {count}")))
         } else {
-            self.expr(test).operand
+            None
         }
     }
 

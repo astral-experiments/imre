@@ -281,17 +281,17 @@ impl CheckedBody<'_, '_, '_, '_> {
             |this, yes, no| {
                 if let Entry::Native(e) = &mut this.0 {
                     e.check_interrupt();
-                    let bit = e.while_condition(
+                    if let Some(bit) = e.contiguous_sum_condition(
                         test,
                         optimized.as_ref().is_some_and(|(_, _, s)| s.is_some()),
-                    );
-                    e.branch(&bit, yes, no);
-                } else {
-                    if let Some(mark) = &mark {
-                        this.python().begin_step(mark);
+                    ) {
+                        e.branch(&bit, yes, no);
+                        return;
                     }
-                    this.branch_condition(test, yes, no);
+                } else if let Some(mark) = &mark {
+                    this.python().begin_step(mark);
                 }
+                this.branch_condition(test, yes, no);
             },
             |this, edges, ()| {
                 match &mut this.0 {
@@ -516,8 +516,10 @@ impl CheckedBody<'_, '_, '_, '_> {
             Self::body,
             [(Some(test), (yes, facts.as_ref())), (None, (no, None))],
             |code, test, t, f| {
-                if let Some(facts) = &facts {
-                    let bit = code.fixed().expr(test).operand;
+                if let Some(facts) = &facts
+                    && (!facts.small_slots.is_empty() || facts.window.is_some())
+                {
+                    let bit = code.test_operand(test);
                     code.fixed().if_edges(stmt, &bit, facts, t, f);
                 } else {
                     code.branch_condition(test, t, f);

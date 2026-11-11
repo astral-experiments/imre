@@ -416,8 +416,7 @@ impl Emitter<'_, '_> {
         self.periodic_struct_sum(&plan, body, &view.length.operand, &index_mask, ordinary);
         self.start(&condition);
         self.check_interrupt();
-        let more = self.while_condition(test, false);
-        self.branch(&more, &visit, exhausted);
+        CheckedBody::native(self).branch_condition(test, &visit, exhausted);
         self.start(&visit);
 
         self.block(&body[..2]);
