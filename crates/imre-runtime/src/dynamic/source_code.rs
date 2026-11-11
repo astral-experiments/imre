@@ -6,7 +6,7 @@ mod comprehensions;
 use annotations::CONDITIONAL;
 
 use std::borrow::Cow;
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -40,7 +40,6 @@ struct Program {
     nested_global: bool,
     class_scope: bool,
     class_cell: bool,
-    method_scope: bool,
     class_nonlocal: bool,
     has_named_bindings: bool,
     doc: Option<ruff_text_size::TextRange>,
@@ -53,7 +52,6 @@ struct Program {
     interactive: bool,
     locals: indexmap::IndexSet<String>,
     directives: HashMap<String, (ScopeDirective, ruff_text_size::TextRange)>,
-    reads: BTreeSet<String>,
     private_names: Option<Rc<imre_ast::Names>>,
     template_expressions: Rc<HashMap<ruff_text_size::TextSize, String>>,
     items: Vec<SourceItem>,
@@ -61,9 +59,6 @@ struct Program {
     deferred_annotations: Vec<(String, ast::Expr)>,
     // Indices of the class declarations guarded by the private annotation cell.
     conditional_fields: Vec<usize>,
-    class_binds_conditional_name: bool,
-    // Keep anonymous scopes alive while the shared constant pool borrows their literals.
-    expression_scopes: HashMap<TextRange, Box<Program>>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -220,8 +215,6 @@ enum SourceItem {
         subject: ast::Expr,
         cases: Vec<SourceCase>,
     },
-    EnterComprehension(HashSet<String>),
-    LeaveComprehension,
     Name(ast::Identifier),
     Keywords(Vec<ast::Identifier>),
     EnterWith(ast::WithItem),
@@ -444,8 +437,10 @@ fn invalid_target(error: InvalidTarget) -> Error {
 
 /// Constants shared by code objects produced by one source compilation.
 #[derive(Default)]
-struct SharedConstants<'a> {
-    text: HashMap<Cow<'a, str>, Id>,
+struct SharedConstants {
+    // Compare the spelling on the live constant, so pooling never borrows from a child AST.
+    text: hashbrown::HashTable<(u64, Id)>,
+    hasher: std::hash::RandomState,
     surrogate_text: HashMap<Vec<u32>, Id>,
     literal_tuples: HashMap<Vec<Id>, Id>,
 }
@@ -473,25 +468,13 @@ impl<'a> TemplateSegment<'a> {
     }
 }
 
-/// Names bound by enclosing inlined set comprehensions accompany each pending expression.
-type ScopedExpression<'a> = (&'a ast::Expr, Option<Rc<HashSet<String>>>);
-
-#[derive(Default)]
-struct ExpressionInput<'a> {
-    body: Option<&'a ast::Expr>,
-    bound: Option<Rc<HashSet<String>>>,
-}
-
 /// Collect names and string constants without recursing through an expression's left spine.
 struct CompiledStrings<'a, 'ctx> {
     heap: &'ctx mut value::Heap,
-    shared: &'ctx mut SharedConstants<'a>,
+    shared: &'ctx mut SharedConstants,
     spellings: &'ctx StringReplacements,
     roots: Vec<Id>,
-    pending: Vec<ScopedExpression<'a>>,
-    bound: Option<Rc<HashSet<String>>>,
-    comprehension_reads: BTreeSet<String>,
-    reads: &'ctx mut BTreeSet<String>,
+    pending: Vec<&'a ast::Expr>,
     directives: &'ctx HashMap<String, (ScopeDirective, ruff_text_size::TextRange)>,
     exhausted: bool,
 }
@@ -501,7 +484,7 @@ impl<'a> ast::visitor::Visitor<'a> for CompiledStrings<'a, '_> {
         if self.pending.try_reserve(1).is_err() {
             self.exhausted = true;
         } else {
-            self.pending.push((expr, self.bound.clone()));
+            self.pending.push(expr);
         }
     }
 
@@ -520,7 +503,24 @@ impl<'a> ast::visitor::Visitor<'a> for CompiledStrings<'a, '_> {
     }
 }
 
-impl<'a> CompiledStrings<'a, '_> {
+impl<'a, 'ctx> CompiledStrings<'a, 'ctx> {
+    fn new(
+        heap: &'ctx mut value::Heap,
+        shared: &'ctx mut SharedConstants,
+        spellings: &'ctx StringReplacements,
+        directives: &'ctx HashMap<String, (ScopeDirective, TextRange)>,
+    ) -> Self {
+        Self {
+            heap,
+            shared,
+            spellings,
+            directives,
+            pending: Vec::new(),
+            roots: Vec::new(),
+            exhausted: false,
+        }
+    }
+
     fn keep(&mut self, id: Id) -> Result<()> {
         self.roots
             .try_reserve(1)
@@ -530,18 +530,25 @@ impl<'a> CompiledStrings<'a, '_> {
     }
 
     fn text(&mut self, text: Cow<'a, str>) -> Result<Id> {
-        if let Some(&id) = self.shared.text.get(text.as_ref()) {
+        use std::hash::BuildHasher;
+        let hash = self.shared.hasher.hash_one(text.as_ref());
+        if let Some(&(_, id)) = self.shared.text.find(
+            hash,
+            |&(_, id)| matches!(self.heap.get(id), Value::Str(s) if s.as_str() == text.as_ref()),
+        ) {
             return Ok(id);
         }
         self.shared
             .text
-            .try_reserve(1)
+            .try_reserve(1, |entry| entry.0)
             .map_err(|_| crate::Error::allocation())?;
         let id = self
             .heap
             .source_string_constant(&text)
             .ok_or_else(crate::Error::allocation)?;
-        self.shared.text.insert(text, id);
+        self.shared
+            .text
+            .insert_unique(hash, (hash, id), |entry| entry.0);
         Ok(id)
     }
 
@@ -704,10 +711,10 @@ impl<'a> CompiledStrings<'a, '_> {
     fn check_directive_reads(&mut self) -> Result<()> {
         use ast::visitor::Visitor;
         let roots = std::mem::take(&mut self.pending);
-        for (root, _) in &roots {
+        for root in &roots {
             self.visit_expr(root);
         }
-        while let Some((expr, _)) = self.pending.pop() {
+        while let Some(expr) = self.pending.pop() {
             match expr {
                 ast::Expr::Name(name) => {
                     if let Some((kind, position)) = self.directives.get(name.id.as_str())
@@ -739,34 +746,17 @@ impl<'a> CompiledStrings<'a, '_> {
         Ok(())
     }
 
-    fn scan(&mut self, unlowered_yield: &mut bool) -> Result<(bool, Vec<ScopedExpression<'a>>)> {
+    fn scan(&mut self, unlowered_yield: &mut bool) -> Result<Vec<&'a ast::Expr>> {
         use ast::visitor::Visitor;
         let mut functions = Vec::new();
         if !self.directives.is_empty() {
             self.check_directive_reads()?;
         }
-        let mut class_cell = false;
-        while let Some((expr, bound)) = self.pending.pop() {
-            self.bound = bound;
+        while let Some(expr) = self.pending.pop() {
             match expr {
                 // A yield still present in an expression has no suspension instruction.
                 ast::Expr::Yield(_) | ast::Expr::YieldFrom(_) => *unlowered_yield = true,
                 ast::Expr::Name(name) => {
-                    if !self
-                        .bound
-                        .as_ref()
-                        .is_some_and(|names| names.contains(name.id.as_str()))
-                    {
-                        class_cell |= matches!(name.id.as_str(), "super" | "__class__");
-                        if name.ctx == ast::ExprContext::Load {
-                            if self.bound.is_some() {
-                                // Like nested functions, the comprehension body skips a class namespace.
-                                self.comprehension_reads.insert(name.id.to_string());
-                            } else {
-                                self.reads.insert(name.id.to_string());
-                            }
-                        }
-                    }
                     self.heap.code_name(name.id.as_str());
                 }
                 ast::Expr::Attribute(attr) => {
@@ -776,7 +766,7 @@ impl<'a> CompiledStrings<'a, '_> {
                     functions
                         .try_reserve(1)
                         .map_err(|_| Error::new("MemoryError", ""))?;
-                    functions.push((expr, self.bound.clone()));
+                    functions.push(expr);
                     if let Some(parameters) = &lambda.parameters {
                         self.visit_parameters(parameters);
                     }
@@ -786,17 +776,13 @@ impl<'a> CompiledStrings<'a, '_> {
                     functions
                         .try_reserve(1)
                         .map_err(|_| Error::new("MemoryError", ""))?;
-                    functions.push((expr, self.bound.clone()));
+                    functions.push(expr);
                     self.visit_expr(&outer_clause(&genexpr.generators).iter);
                     continue;
                 }
                 expr if let Some(plan) = Plan::from_expr(expr) => {
                     self.visit_expr(plan.outer);
-                    let mut names = plan.try_target_names().map_err(invalid_target)?;
-                    if let Some(enclosing) = &self.bound {
-                        names.extend(enclosing.iter().cloned());
-                    }
-                    self.bound = Some(Rc::new(names));
+                    plan.try_target_names().map_err(invalid_target)?;
                     plan.visit_body(|operand| self.visit_expr(operand));
                     continue;
                 }
@@ -828,7 +814,96 @@ impl<'a> CompiledStrings<'a, '_> {
         if self.exhausted {
             return Err(Error::new("MemoryError", ""));
         }
-        Ok((class_cell, functions))
+        Ok(functions)
+    }
+
+    fn prepare_children(
+        &mut self,
+        functions: Vec<&'a ast::Expr>,
+        filename: &SourceFilename,
+        has_named_bindings: bool,
+        module: bool,
+    ) -> Result<()> {
+        use ast::visitor::Visitor;
+        enum Child<'a> {
+            Expression(&'a ast::Expr),
+            Lowered(Box<Program>),
+        }
+        let mut children = HashMap::new();
+        children
+            .try_reserve(functions.len())
+            .map_err(|_| crate::Error::allocation())?;
+        for expr in functions {
+            let child = match expr {
+                ast::Expr::Lambda(lambda) => {
+                    let new_program =
+                        || Program::new(filename.clone(), "<lambda>", has_named_bindings);
+                    let mut declared = has_named_bindings.then(new_program);
+                    if let Some(child) = &mut declared {
+                        let mut named = NamedBindings::default();
+                        named.visit_expr(&lambda.body);
+                        named.declare(child)?;
+                    }
+                    if let Some(plan) = OperandPlan::for_function(&lambda.body, FunctionKind::Plain)
+                    {
+                        let mut child = declared.unwrap_or_else(new_program);
+                        let value = child.lower_operand(*lambda.body.clone(), &plan)?;
+                        if value.is_none() {
+                            child.kind = FunctionKind::GeneratorLambda;
+                        }
+                        child.items.push(SourceItem::Return(value));
+                        Child::Lowered(Box::new(child))
+                    } else {
+                        Child::Expression(&lambda.body)
+                    }
+                }
+                ast::Expr::Generator(genexpr) => {
+                    let mut child = Program::new(filename.clone(), "<genexpr>", has_named_bindings);
+                    if has_named_bindings {
+                        let mut bindings = NamedBindings::default();
+                        bindings.visit_expr(expr);
+                        for (name, offset, _) in bindings.targets {
+                            let kind = if module
+                                || matches!(
+                                    self.directives.get(&name),
+                                    Some((ScopeDirective::Global, _))
+                                ) {
+                                ScopeDirective::Global
+                            } else {
+                                ScopeDirective::Nonlocal
+                            };
+                            child
+                                .directives
+                                .insert(name, (kind, TextRange::empty(offset)));
+                        }
+                    }
+                    child.lower_genexpr(genexpr)?;
+                    Child::Lowered(Box::new(child))
+                }
+                _ => unreachable!("anonymous function expression"),
+            };
+            children.insert(expr.range(), child);
+        }
+        for child in children.into_values() {
+            let roots = match child {
+                Child::Expression(body) => {
+                    let directives = HashMap::new();
+                    let mut strings =
+                        CompiledStrings::new(self.heap, self.shared, self.spellings, &directives);
+                    strings.visit_expr(body);
+                    let nested = strings.scan(&mut false)?;
+                    strings.prepare_children(nested, filename, has_named_bindings, false)?;
+                    strings.finish()
+                }
+                Child::Lowered(mut program) => {
+                    program.prepare_strings(self.heap, self.shared, self.spellings)?
+                }
+            };
+            if roots != NONE {
+                self.keep(roots)?;
+            }
+        }
+        Ok(())
     }
 
     fn finish(self) -> Id {
@@ -1049,57 +1124,28 @@ fn check_single_input(body: &[ast::Stmt], tokens: &ast::token::Tokens) -> Result
 
 impl Program {
     /// Keep each code object's constants alive, including constants owned by unexecuted children.
-    fn prepare_strings<'a>(
-        &'a mut self,
+    fn prepare_strings(
+        &mut self,
         heap: &mut value::Heap,
-        shared: &mut SharedConstants<'a>,
+        shared: &mut SharedConstants,
         spellings: &StringReplacements,
-        line_at: &impl Fn(usize) -> u32,
-    ) -> Result<(Id, &'a BTreeSet<String>)> {
-        self.prepare_scope_strings(heap, shared, spellings, line_at, None, None)
+    ) -> Result<Id> {
+        self.prepare_scope_strings(heap, shared, spellings, None)
     }
 
     fn prepare_scope_strings<'a>(
         &'a mut self,
         heap: &mut value::Heap,
-        shared: &mut SharedConstants<'a>,
+        shared: &mut SharedConstants,
         spellings: &StringReplacements,
-        line_at: &impl Fn(usize) -> u32,
-        annotation_class: Option<&indexmap::IndexSet<String>>,
-        lambda_body: Option<&'a ast::Expr>,
-    ) -> Result<(Id, &'a BTreeSet<String>)> {
+        expression_body: Option<&'a ast::Expr>,
+    ) -> Result<Id> {
         use ast::visitor::Visitor;
-        let class_parameters = self.class_parameter_header();
-        let nested_scope_flags = self.nested_scope_flags();
-        let mut nested_reads = BTreeSet::new();
         let stringized = self.string_annotations();
-        let class_locals = self.class_scope.then_some(&self.locals);
-        let mut strings = CompiledStrings {
-            reads: &mut self.reads,
-            directives: &self.directives,
-            heap,
-            shared,
-            spellings,
-            roots: Vec::new(),
-            pending: Vec::new(),
-            bound: None,
-            comprehension_reads: BTreeSet::new(),
-            exhausted: false,
-        };
-        let mut enclosing_bindings = Vec::new();
+        let mut strings = CompiledStrings::new(heap, shared, spellings, &self.directives);
         let mut prepared_generators = Vec::new();
         for op in &mut self.items {
             match op {
-                SourceItem::EnterComprehension(targets) => {
-                    let mut bound = targets.clone();
-                    if let Some(parent) = &strings.bound {
-                        bound.extend(parent.iter().cloned());
-                    }
-                    enclosing_bindings.push(strings.bound.replace(Rc::new(bound)));
-                }
-                SourceItem::LeaveComprehension => {
-                    strings.bound = enclosing_bindings.pop().expect("comprehension bindings");
-                }
                 SourceItem::Eval(ast::Expr::StringLiteral(doc))
                     if self.scope_flags & code_flags::HAS_DOCSTRING != 0
                         && self.doc == Some(doc.range()) =>
@@ -1130,7 +1176,7 @@ impl Program {
                     }
                 }
                 SourceItem::MakeGenerator(expr) => {
-                    prepared_generators.push((&*expr, strings.bound.clone()));
+                    prepared_generators.push(&*expr);
                 }
                 SourceItem::EnterWith(item) => {
                     strings.visit_expr(&item.context_expr);
@@ -1192,41 +1238,16 @@ impl Program {
                 SourceItem::StringAnnotation(name, expr) => strings.annotation(name, expr, true)?,
                 SourceItem::ClassAnnotator(provider)
                 | SourceItem::ModuleAnnotations(Some(provider)) => {
-                    nested_reads.extend(
-                        strings
-                            .annotation_code(provider, class_locals, line_at)?
-                            .iter()
-                            .cloned(),
-                    );
+                    strings.annotation_code(provider, self.class_scope)?;
                 }
                 SourceItem::Define(definition) | SourceItem::ReturnClass(definition) => {
-                    let params = definition.kind.type_params();
-                    let mut inherit_reads = |reads: &BTreeSet<String>| {
-                        nested_reads.extend(
-                            reads
-                                .iter()
-                                .filter(|name| {
-                                    !params.is_some_and(|params| {
-                                        params.iter().any(|p| p.name().as_str() == name.as_str())
-                                    })
-                                })
-                                .cloned(),
-                        );
-                    };
                     if let Some(provider) = &mut definition.annotate {
-                        inherit_reads(strings.annotation_code(provider, class_locals, line_at)?);
+                        strings.annotation_code(provider, self.class_scope)?;
                     }
                     let child =
                         Rc::get_mut(&mut definition.body).expect("newly lowered child code");
                     strings.heap.code_name(&definition.binding);
-                    if let DefinitionKind::ClassParameters(params) = &definition.kind {
-                        child
-                            .locals
-                            .extend(params.iter().map(|p| p.name().to_string()));
-                    }
-                    let (roots, reads) =
-                        child.prepare_strings(strings.heap, strings.shared, spellings, line_at)?;
-                    inherit_reads(reads);
+                    let roots = child.prepare_strings(strings.heap, strings.shared, spellings)?;
                     if roots != NONE {
                         strings.keep(roots)?;
                     }
@@ -1265,162 +1286,19 @@ impl Program {
                 }
             }
         }
-        if let Some(body) = lambda_body {
+        if let Some(body) = expression_body {
             strings.visit_expr(body);
         }
-        let (class_cell, mut functions) = strings.scan(&mut self.unlowered_yield)?;
+        let mut functions = strings.scan(&mut self.unlowered_yield)?;
         functions.extend(prepared_generators);
-        self.class_cell |= class_cell;
-        self.expression_scopes
-            .try_reserve(functions.len())
-            .map_err(|_| Error::new("MemoryError", ""))?;
-        let mut scope_inputs = HashMap::<_, ExpressionInput>::new();
-        for (expr, bound) in functions {
-            let in_comprehension = bound.is_some();
-            if let Some(names) = bound {
-                scope_inputs.entry(expr.range()).or_default().bound = Some(names);
-            }
-            let name = if matches!(expr, ast::Expr::Lambda(_)) {
-                "<lambda>"
-            } else {
-                "<genexpr>"
-            };
-            let mut child = Self::new(self.filename.clone(), name, self.has_named_bindings);
-            child.scope_flags = nested_scope_flags;
-            child.strip_docstrings = self.strip_docstrings;
-
-            child.qualname = Self::qualified_name(&self.qualname, self.class_scope, name);
-            child.template_expressions = self.template_expressions.clone();
-            child.private_names = self.private_names.clone();
-            child.first_line = line_at(expr.start().to_usize());
-            let params = match expr {
-                ast::Expr::Lambda(lambda) => {
-                    child.method_scope = !in_comprehension && self.class_scope;
-                    if self.has_named_bindings {
-                        let mut named = NamedBindings::default();
-                        named.visit_expr(&lambda.body);
-                        named.declare(&mut child)?;
-                    }
-                    if let Some(plan) = OperandPlan::for_function(&lambda.body, child.kind) {
-                        let value = child.lower_operand(*lambda.body.clone(), &plan)?;
-                        if value.is_none() {
-                            child.kind = FunctionKind::GeneratorLambda;
-                        }
-                        child.items.push(SourceItem::Return(value));
-                    } else {
-                        scope_inputs.entry(expr.range()).or_default().body = Some(&lambda.body);
-                    }
-                    lambda.parameters.as_deref()
-                }
-                ast::Expr::Generator(genexpr) => {
-                    // Assignment expressions in the deferred frame still bind in the
-                    // containing code unit. Nested lambdas have their own bindings.
-                    if self.has_named_bindings {
-                        let mut bindings = NamedBindings::default();
-                        bindings.visit_expr(expr);
-                        for (name, offset, _) in bindings.targets {
-                            let kind = if self.name == "<module>"
-                                || matches!(
-                                    self.directives.get(&name),
-                                    Some((ScopeDirective::Global, _))
-                                ) {
-                                ScopeDirective::Global
-                            } else {
-                                ScopeDirective::Nonlocal
-                            };
-                            child
-                                .directives
-                                .insert(name, (kind, ruff_text_size::TextRange::empty(offset)));
-                        }
-                    }
-                    child.lower_genexpr(genexpr)?;
-                    None
-                }
-                _ => unreachable!("anonymous function expression"),
-            };
-            child.scope_flags |= code_flags::function_flags(
-                params,
-                in_comprehension,
-                !in_comprehension && self.class_scope,
-            );
-            if let Some(params) = params {
-                child
-                    .locals
-                    .extend(params.iter().map(|p| p.name().to_string()));
-            }
-            self.expression_scopes.insert(expr.range(), Box::new(child));
-        }
-        for (range, child) in &mut self.expression_scopes {
-            let input = scope_inputs.get(range);
-            let bound = input.and_then(|input| input.bound.as_ref());
-            let (roots, reads) = child.prepare_scope_strings(
-                strings.heap,
-                strings.shared,
-                spellings,
-                line_at,
-                None,
-                input.and_then(|input| input.body),
-            )?;
-            let captured = reads
-                .iter()
-                .filter(|n| !bound.is_some_and(|b| b.contains(n.as_str())));
-            if !self.class_scope && !self.locals.contains("__class__") {
-                self.class_cell |= captured.clone().any(|n| n == "__class__" || n == "super");
-            }
-            nested_reads.extend(captured.cloned());
-            if roots != NONE {
-                strings.keep(roots)?;
-            }
-        }
-        nested_reads.append(&mut strings.comprehension_reads);
+        strings.prepare_children(
+            functions,
+            &self.filename,
+            self.has_named_bindings,
+            self.name == "<module>",
+        )?;
         self.string_roots = strings.finish();
-        if class_parameters {
-            // Captured parameters are cells. Only uncaptured (fast) parameters
-            // bypass the enclosing class namespace when evaluating explicit bases.
-            self.locals.retain(|name| !nested_reads.contains(name));
-        }
-        // An annotation's class-local name falls back to globals when the class
-        // dictionary lacks it. Functions nested inside the annotation skip the class.
-        if let Some(class) = annotation_class {
-            self.class_binds_conditional_name = !self.conditional_fields.is_empty()
-                && class.contains(CONDITIONAL)
-                && !self.directives.contains_key(CONDITIONAL);
-            self.reads
-                .retain(|name| name == "__classdict__" || !class.contains(name));
-        }
-        if !self.method_scope
-            && self.class_cell
-            && self.reads.contains("super")
-            && self.reads.contains(CONDITIONAL)
-        {
-            self.reads.insert("__class__".into());
-        }
-        // Even a nonlocal that is only assigned or deleted needs an enclosing cell.
-        self.reads.extend(
-            self.directives
-                .iter()
-                .filter(|(_, (kind, _))| *kind == ScopeDirective::Nonlocal)
-                .map(|(name, _)| name.clone()),
-        );
-        if self.class_scope {
-            self.reads.retain(|name| {
-                !matches!(self.directives.get(name), Some((ScopeDirective::Global, _)))
-            });
-            // Methods skip the class namespace when resolving free variables.
-            self.reads.retain(|name| !self.locals.contains(name));
-            self.reads.extend(nested_reads);
-        } else {
-            self.reads.extend(nested_reads);
-            self.reads.retain(|name| {
-                !self.locals.contains(name)
-                    && !matches!(self.directives.get(name), Some((ScopeDirective::Global, _)))
-            });
-        }
-        // Implicit guard reads still use the cell when the expression names an explicit global.
-        if !self.conditional_fields.is_empty() {
-            self.reads.insert(CONDITIONAL.into());
-        }
-        Ok((self.string_roots, &self.reads))
+        Ok(self.string_roots)
     }
 
     fn declare(
@@ -1542,10 +1420,6 @@ impl Program {
         Ok(())
     }
 
-    fn class_parameter_header(&self) -> bool {
-        matches!(self.items.first(), Some(SourceItem::ReturnClass(_)))
-    }
-
     fn nested_program(&self, name: &str) -> Self {
         let mut child = Self::new(self.filename.clone(), name, self.has_named_bindings);
 
@@ -1579,7 +1453,6 @@ impl Program {
             nested_global: false,
             class_scope: false,
             class_cell: false,
-            method_scope: false,
             class_nonlocal: false,
             has_named_bindings,
             doc: None,
@@ -1592,15 +1465,12 @@ impl Program {
             interactive: false,
             locals: indexmap::IndexSet::new(),
             directives: HashMap::new(),
-            reads: BTreeSet::new(),
 
             private_names: None,
             template_expressions: Rc::default(),
             items: Vec::new(),
             deferred_annotations: Vec::new(),
             conditional_fields: Vec::new(),
-            class_binds_conditional_name: false,
-            expression_scopes: HashMap::new(),
         }
     }
 
@@ -2112,7 +1982,6 @@ impl Program {
                 Stmt::FunctionDef(mut s) => {
                     let line = lines.partition_point(|n| *n <= s.start().to_usize()) as u32;
                     let mut child = self.definition_body(&s.name, &s.decorator_list, line, lines);
-                    child.method_scope = self.class_scope && s.type_params.is_none();
                     if let Some(params) = &s.type_params {
                         child.validate_type_params(params, "function")?;
                     }
@@ -2962,7 +2831,7 @@ impl Context {
             parsed.tokens(),
             parsed.syntax(),
         ));
-        match parsed.into_syntax() {
+        let expression_body = match parsed.into_syntax() {
             ast::Mod::Expression(expression) => {
                 if code.has_named_bindings {
                     use ast::visitor::Visitor;
@@ -2970,7 +2839,7 @@ impl Context {
                     named.visit_expr(&expression.body);
                     named.declare(&mut code)?;
                 }
-                code.items.push(SourceItem::Return(Some(*expression.body)));
+                Some(expression.body)
             }
             ast::Mod::Module(module) => {
                 let mut body = module.body;
@@ -3018,13 +2887,14 @@ impl Context {
                     }
                     return Err(error);
                 }
+                None
             }
-        }
-        code.prepare_strings(
+        };
+        code.prepare_scope_strings(
             &mut self.heap,
             &mut SharedConstants::default(),
             &spellings,
-            &|offset| lines.partition_point(|n| *n <= offset) as u32,
+            expression_body.as_deref(),
         )?;
         if let Some(issue) = pending_syntax(self, &code)? {
             return Err(issue);
