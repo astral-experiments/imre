@@ -2305,11 +2305,23 @@ pub(crate) fn compile(
                 .functions = Some(bodies);
         }
     }
+    let providers = options
+        .bundled_provider_archive
+        .as_deref()
+        .filter(|_| keep_docstrings && matches!(mode, crate::CompilationMode::Build(_)))
+        .and_then(provider_archive::Providers::read)
+        .unwrap_or_default();
     let mut prepared = prepare::units(
         (&sources, &builtins),
         entry_source,
         python_optimization,
-        Path::new(bundled_root),
+        (
+            Path::new(bundled_root),
+            options
+                .target_os
+                .is_none_or(|os| os == std::env::consts::OS)
+                .then_some(&providers),
+        ),
         &module_errors,
         &registrations,
         layouts,
@@ -2384,17 +2396,11 @@ pub(crate) fn compile(
         "command_source":command,"path0_bytes":path0_bytes,"packaged_file_module":packaged_file_module,
         "command":in_memory,"module_entry":module_entry,"path_entry":options.path_entry,"paths":paths,
     });
-    let providers = options
-        .bundled_provider_archive
-        .as_deref()
-        .filter(|_| keep_docstrings)
-        .and_then(provider_archive::symbols)
-        .unwrap_or_default();
     let (units, used_archive) = emit::emit(
         units,
         &config.to_string(),
         python_optimization,
-        &providers,
+        &providers.symbols,
         layout,
     )?;
     Ok(Some(crate::CompilationResult::Built(UnitCompilation {

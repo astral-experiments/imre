@@ -31,7 +31,10 @@ pub(crate) fn write(directory: &Path) -> Result<(), String> {
             })
             .and_then(|body| body.standalone());
         match compiled {
-            Ok((symbol, ir)) => fs::write(directory.join(format!("{symbol}.ll")), ir),
+            Ok((symbol, mut ir)) => {
+                super::provider_archive::seal(&mut ir, &symbol, name, &path, source);
+                fs::write(directory.join(format!("{symbol}.ll")), ir)
+            }
             Err(reason) => {
                 // The ordinary compiler still diagnoses a module it cannot lower when selected.
                 eprintln!("skipping bundled provider {name}: {reason}");
