@@ -708,7 +708,7 @@ impl ParameterAnnotations {
     fn prepare(
         def: &ast::StmtFunctionDef,
         source: values::RegisteredSource<'_>,
-        operands: &mut HashMap<TextSize, Expr>,
+        operand: &mut dyn FnMut(&ast::Expr, bool) -> Option<Expr>,
         string_annotations: bool,
     ) -> Option<Box<Self>> {
         let annotations = parameter_annotations(&def.parameters, def.returns.as_deref());
@@ -728,11 +728,10 @@ impl ParameterAnnotations {
             &statement_sites,
         );
         for (name, expression) in annotations {
-            let site = expression.start();
             if let Some(reference) = scalar_reference(expression) {
                 references.insert(name.to_owned(), reference);
             }
-            let value = operands.remove(&site);
+            let value = operand(expression, false);
             entries.push((
                 DeferredAnnotation::new(name.to_owned(), expression, value, &mut scope),
                 None,
@@ -917,17 +916,42 @@ pub(crate) struct RegisteredSites<'a> {
     pub(crate) class_annotation_bindings: HashMap<TextSize, RegisteredBindings>,
 }
 
-pub(crate) fn registered_sites<'a>(
+pub(crate) fn registered_sites<'a, R>(
     body: &'a [ast::Stmt],
     names: &imre_ast::Names,
     source: values::RegisteredSource<'_>,
-    operands: HashMap<TextSize, Expr>,
+    bundled: bool,
+    prepare_child: impl Fn(
+        &str,
+        &ruff_python_parser::Parsed<ast::ModExpression>,
+    ) -> Option<AnnotationBody<R>>,
+) -> (RegisteredSites<'a>, HashMap<TextSize, AnnotationBody<R>>) {
+    let mut children = HashMap::new();
+    let sites = collect_sites(body, names, source, |expr, module| {
+        super::annotation_operands::annotation_operand(
+            expr,
+            module,
+            source,
+            names.string_annotations,
+            bundled,
+            &mut children,
+            &prepare_child,
+        )
+    });
+    (sites, children)
+}
+
+pub(super) fn collect_sites<'a>(
+    body: &'a [ast::Stmt],
+    names: &imre_ast::Names,
+    source: values::RegisteredSource<'_>,
+    mut operand: impl FnMut(&ast::Expr, bool) -> Option<Expr>,
 ) -> RegisteredSites<'a> {
     use ast::statement_visitor::{StatementVisitor, walk_stmt};
     struct Collector<'s, 'a> {
         names: &'s imre_ast::Names,
         source: values::RegisteredSource<'s>,
-        operands: HashMap<TextSize, Expr>,
+        operand: &'s mut dyn FnMut(&ast::Expr, bool) -> Option<Expr>,
         annotations: SourceScope<'s>,
         scope: RegisteredScope,
         in_unprepared_generic: bool,
@@ -962,7 +986,7 @@ pub(crate) fn registered_sites<'a>(
                     let annotations = ParameterAnnotations::prepare(
                         def,
                         self.source,
-                        &mut self.operands,
+                        self.operand,
                         self.names.string_annotations,
                     );
                     let parameters = def.type_params.as_deref().filter(|_| {
@@ -1018,18 +1042,15 @@ pub(crate) fn registered_sites<'a>(
                     };
 
                     let name = name.id.to_string();
+                    let module = matches!(self.scope, RegisteredScope::Module);
+                    let operand = (self.operand)(&ann.annotation, module);
                     let (annotation, values) = if self.names.string_annotations {
-                        let site = ann.annotation.start();
                         (
                             ir::NamespaceAnnotation::String { name },
-                            vec![
-                                self.operands
-                                    .remove(&site)
-                                    .expect("prepared postponed annotation"),
-                            ],
+                            vec![operand.expect("prepared postponed annotation")],
                         )
                     } else {
-                        let fields = if matches!(self.scope, RegisteredScope::Module) {
+                        let fields = if module {
                             &mut self.output.module_annotations.fields
                         } else {
                             &mut self.output.class_annotations
@@ -1039,7 +1060,7 @@ pub(crate) fn registered_sites<'a>(
                             DeferredAnnotation::new(
                                 name.clone(),
                                 &ann.annotation,
-                                self.operands.remove(&ann.annotation.start()),
+                                operand,
                                 &mut self.annotations,
                             ),
                         );
@@ -1069,7 +1090,7 @@ pub(crate) fn registered_sites<'a>(
     let mut sites = Collector {
         names,
         source,
-        operands,
+        operand: &mut operand,
         annotations: SourceScope::new(
             RegisteredScope::Function { is_async: false },
             source,
@@ -3523,14 +3544,14 @@ mod tests {
     ) -> RegisteredSites<'a> {
         let default_names = imre_ast::Names::default();
         let names = source.private_names.unwrap_or(&default_names);
-        let strings = annotation_operands(
+        registered_sites(
             stmts,
-            names.string_annotations,
+            names,
             source,
             bundled,
             crate::frontend::annotation_operands::test_annotation_body,
-        );
-        registered_sites(stmts, names, source, strings.values)
+        )
+        .0
     }
 
     pub(super) fn registered_suite(
@@ -3664,7 +3685,14 @@ mod tests {
         let mut body = module.parsed.syntax().body.clone();
         let names = imre_ast::lower(&mut body);
         let literals = values::ModuleSource::new(module);
-        let sites = registered_sites(&body, &names, literals.context(source), HashMap::new());
+        let sites = registered_sites(
+            &body,
+            &names,
+            literals.context(source),
+            false,
+            super::super::annotation_operands::test_annotation_body,
+        )
+        .0;
         let [
             DeclarationSite::Class(_),
             DeclarationSite::Function(method),
