@@ -1,6 +1,6 @@
 //! Shared traversal of loop and unpacking IR for fixed and registered entries.
-use super::{CheckedBody, CheckedValue, Entry, Expr, ExprKind, Statement};
-use crate::ir::IterNextKind;
+use super::{CheckedBody, CheckedValue, Entry, Expr, ExprKind, FrameEmitter, Statement};
+use crate::ir::{ItemUpdate, IterNextKind};
 use crate::llvm::{Cleanup, Completion, Emitter, LoopTarget};
 
 #[derive(Clone)]
@@ -276,6 +276,72 @@ impl CheckedBody<'_, '_, '_, '_> {
         match &mut self.0 {
             Entry::Native(_) => value,
             Entry::Registered(frame) => CheckedValue::handle(frame.materialize(&value)),
+        }
+    }
+
+    pub(super) fn augment_item(&mut self, table: &Expr, key: &Expr, op: ItemUpdate, rhs: &Expr) {
+        let nonnegative = matches!(&self.0, Entry::Native(e) if e.nonnegative_index(key));
+        let table = self.store_operand(table);
+        let key = self.store_operand(key);
+        if let ItemUpdate::Fixed(op) = op
+            && self
+                .fixed()
+                .accumulate_int_item(table.fixed_value(), key.fixed_value(), op, rhs)
+        {
+            self.release_input(key);
+            self.release_input(table);
+            return;
+        }
+
+        // The RHS can replace the entry or raise. Keep the target and its old value
+        // in their original representation until the in-place result has been stored.
+        let old = match op {
+            ItemUpdate::Fixed(_) => {
+                let e = self.fixed();
+                let table = table.fixed_value();
+                let element = e
+                    .module
+                    .types
+                    .indexed_element(table.ty)
+                    .or_else(|| e.module.types.mapping(table.ty).map(|(_, value)| value))
+                    .unwrap();
+                CheckedValue::owned(e.get_item(table, key.fixed_value(), element, nonnegative))
+            }
+            ItemUpdate::Protocol(_) => CheckedValue::handle(
+                self.python()
+                    .op("get", &[table.rooted_handle(), key.rooted_handle()]),
+            ),
+        };
+        let right = self.store_operand(rhs);
+        let value = match op {
+            ItemUpdate::Fixed(op) => CheckedValue::owned(self.fixed().binary(
+                op,
+                old.fixed_value(),
+                right.fixed_value(),
+            )),
+            ItemUpdate::Protocol(op) => CheckedValue::handle(self.python().inplace(
+                op,
+                old.rooted_handle(),
+                right.rooted_handle(),
+            )),
+        };
+        match op {
+            ItemUpdate::Fixed(_) => self.fixed().set_item(
+                table.fixed_value(),
+                key.fixed_value(),
+                value.fixed_value(),
+                nonnegative,
+            ),
+            ItemUpdate::Protocol(_) => {
+                self.python().put_item(
+                    table.rooted_handle(),
+                    key.rooted_handle(),
+                    value.rooted_handle(),
+                );
+            }
+        }
+        for operand in [value, right, old, key, table] {
+            self.release_input(operand);
         }
     }
 

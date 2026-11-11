@@ -115,6 +115,20 @@ impl CheckedValue {
             None,
         )
     }
+    fn fixed_value(&self) -> &Value {
+        let Self::Native(operand, None) = self else {
+            unreachable!("fixed-layout operand")
+        };
+        &operand.value
+    }
+
+    fn rooted_handle(&self) -> &str {
+        let Self::Handle { id, .. } = self else {
+            unreachable!("materialized Python operand")
+        };
+        id
+    }
+
     pub(super) fn into_native(self) -> Operand {
         let Self::Native(operand, None) = self else {
             unreachable!("native ABI operand")
@@ -694,9 +708,8 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                     Entry::Registered(frame) => frame.assign(*slot, value),
                 }
             }
-            Statement::AugmentItem(receiver, key, crate::ir::ItemUpdate::Protocol(op), rhs) => {
-                self.python()
-                    .augment_item(op, receiver, key, rhs, CheckedFrame::evaluate_handle);
+            Statement::AugmentItem(receiver, key, op, rhs) => {
+                self.augment_item(receiver, key, *op, rhs)
             }
             Statement::Expr(expr) => {
                 let consumed = match &mut self.0 {

@@ -2970,6 +2970,7 @@ impl Emitter<'_, '_> {
             | Statement::With { .. }
             | Statement::Clear(_)
             | Statement::SetItem(..)
+            | Statement::AugmentItem(..)
             | Statement::Match(..)
             | Statement::If(..)
             | Statement::While(..)
@@ -3017,57 +3018,6 @@ impl Emitter<'_, '_> {
                 // Both runtime helpers always set an error; their success edge
                 // is unreachable, but uses the same immediate-check protocol.
                 self.body.end("unreachable");
-            }
-            Statement::AugmentItem(_, _, ir::ItemUpdate::Protocol(_), _) => {
-                unreachable!("Python item update in fixed calling convention")
-            }
-            Statement::AugmentItem(list, index, ir::ItemUpdate::Fixed(op), expression) => {
-                // Augmented assignment instead roots the target and old item first.
-                let nonnegative = self.nonnegative_index(index);
-                let list = self.operand(list);
-                let index = self.operand(index);
-                let element = self
-                    .module
-                    .types
-                    .indexed_element(list.value.ty)
-                    .or_else(|| {
-                        self.module
-                            .types
-                            .mapping(list.value.ty)
-                            .map(|(_, value)| value)
-                    })
-                    .unwrap();
-                // A local integer, immediate literal or rooted field load cannot raise or
-                // change the mapping between reading its entry and replacing its value.
-                let pure_right = matches!(expression.kind, ExprKind::Local(_))
-                    || expression.tagged_integer_literal().is_some()
-                    || matches!(&expression.kind, ExprKind::Field(parent, _) if matches!(parent.kind, ExprKind::Local(_)) && matches!(parent.ty, Type::Class(_)));
-                if matches!(list.value.ty, Type::Dict(_))
-                    && matches!(
-                        index.value.ty,
-                        Type::Str | Type::Int | Type::Bytes | Type::Bool
-                    )
-                    && self.module.types.mapping(list.value.ty) == Some((index.value.ty, Type::Int))
-                    && expression.ty == Type::Int
-                    && pure_right
-                    && matches!(op, Binary::Add | Binary::Subtract)
-                {
-                    let right = self.operand(expression);
-                    let key = self.key_word(&index.value);
-                    let operation = u32::from(matches!(op, Binary::Subtract));
-                    self.checked_line(format!("call void @imre_dict_accumulate_int(ptr {}, i64 {key}, i64 {}, i32 {operation})", list.value.operand, right.value.operand));
-                    self.release_operand(&right);
-                } else {
-                    let old = self.get_item(&list.value, &index.value, element, nonnegative);
-                    let right = self.operand(expression);
-                    let value = self.binary(*op, &old, &right.value);
-                    self.set_item(&list.value, &index.value, &value, nonnegative);
-                    self.release(&value);
-                    self.release_operand(&right);
-                    self.release(&old);
-                }
-                self.release_operand(&index);
-                self.release_operand(&list);
             }
             Statement::SetField(receiver, field, expression) => {
                 let value = self.operand(expression);
@@ -10154,6 +10104,31 @@ impl Emitter<'_, '_> {
         self.ranges
             .integer(expression)
             .is_some_and(|range| range.min >= 0)
+    }
+
+    /// Combine the lookup and store only when the RHS cannot raise or change the entry.
+    fn accumulate_int_item(&mut self, table: &Value, key: &Value, op: Binary, rhs: &Expr) -> bool {
+        let pure_rhs = matches!(rhs.kind, ExprKind::Local(_))
+            || rhs.tagged_integer_literal().is_some()
+            || matches!(&rhs.kind, ExprKind::Field(parent, _) if matches!(parent.kind, ExprKind::Local(_)) && matches!(parent.ty, Type::Class(_)));
+        if !matches!(table.ty, Type::Dict(_))
+            || !matches!(key.ty, Type::Str | Type::Int | Type::Bytes | Type::Bool)
+            || self.module.types.mapping(table.ty) != Some((key.ty, Type::Int))
+            || rhs.ty != Type::Int
+            || !pure_rhs
+            || !matches!(op, Binary::Add | Binary::Subtract)
+        {
+            return false;
+        }
+        let right = self.operand(rhs);
+        let key = self.key_word(key);
+        let operation = u32::from(matches!(op, Binary::Subtract));
+        self.checked_line(format!(
+            "call void @imre_dict_accumulate_int(ptr {}, i64 {key}, i64 {}, i32 {operation})",
+            table.operand, right.value.operand
+        ));
+        self.release_operand(&right);
+        true
     }
 
     /// Fuses a copy only within the same rooted list local. Both index reads
