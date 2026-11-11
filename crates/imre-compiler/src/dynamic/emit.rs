@@ -4174,7 +4174,7 @@ mod tests {
     }
 
     #[test]
-    fn checked_and_physical_matches_own_their_suspended_subject() {
+    fn checked_matches_own_their_suspended_subject() {
         let selector = "\n            try:\n                raise LookupError(item)\n            except (await Select(item)):\n                return item";
         let manager = "\n            with manager(await key(item)): pass";
         let loop_default = concat!(
@@ -4189,14 +4189,14 @@ mod tests {
             "                child = await asyncio.create_subprocess_exec('/bin/sh', '-c', 'exit 7', stdout=DEVNULL)\n",
             "                assert await child.wait() == 7",
         );
-        for (body, physical) in [
-            ("return item", false),
-            ("raise await failure(item)", false),
-            ("del table[await key(item)]", false),
-            (selector, false),
-            (manager, false),
-            (loop_default, false),
-            (protected, true),
+        for body in [
+            "return item",
+            "raise await failure(item)",
+            "del table[await key(item)]",
+            selector,
+            manager,
+            loop_default,
+            protected,
         ] {
             let source = format!(
                 "async def evaluate(seed):\n    match sink(await gate(), second=left() + table()[(lambda: seed)()]):\n        case prior if decline(prior): return prior\n        case item: {body}\nstate: int\n"
@@ -4214,7 +4214,7 @@ mod tests {
                 .unwrap();
             let start = function.start();
             let suite = prepared.source.function_bodies[&start].suite().unwrap();
-            assert_eq!(suite.fully_checked(), !physical);
+            assert!(suite.fully_checked(), "{body}");
             crate::verify::registered(suite.checked.region()).unwrap();
             let original = prepared.standalone().unwrap();
             let function = prepared.syntax.as_mut().unwrap().to_mut()[0]
@@ -4223,12 +4223,12 @@ mod tests {
             function.body.clear();
             assert_eq!(prepared.standalone().unwrap(), original);
             let suite = test_function_suite(&mut prepared.source, start);
+            let [_, crate::ir::Statement::Match(subject, cases), ..] =
+                &mut suite.checked.function.body[..]
+            else {
+                panic!("expected a checked match")
+            };
             if body == selector || body == manager {
-                let [_, crate::ir::Statement::Match(_, cases), ..] =
-                    &mut suite.checked.function.body[..]
-                else {
-                    panic!("expected a checked match")
-                };
                 match &mut cases[1].body[..] {
                     [_, crate::ir::Statement::Try { handlers, .. }] if body == selector => {
                         let crate::ir::ExceptionMatcher::Object(range, operand) =
@@ -4245,22 +4245,11 @@ mod tests {
                     }
                     _ => panic!("expected the checked capture-case operation"),
                 }
-                assert_ne!(prepared.standalone().unwrap(), original);
-            } else if physical {
-                let Ok(crate::frontend::SourceEffect::Region(region)) =
-                    &mut suite.residual[0].effect
-                else {
-                    panic!("expected a mixed match")
-                };
-                let crate::frontend::PhysicalOperand::Checked(subject) = &mut region.operands[0]
-                else {
-                    panic!("expected a checked subject")
-                };
-                crate::verify::registered(subject.region()).unwrap();
-                subject.value = crate::ir::Expr::none();
-                crate::verify::registered(subject.region()).unwrap();
-                assert_ne!(prepared.standalone().unwrap(), original);
+            } else {
+                *subject = crate::ir::Expr::none();
             }
+            crate::verify::registered(suite.checked.region()).unwrap();
+            assert_ne!(prepared.standalone().unwrap(), original);
         }
     }
 
