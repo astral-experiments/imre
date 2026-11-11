@@ -4,7 +4,9 @@ use crate::StrOwner;
 mod captures;
 
 use captures::AnchoredCaptures;
+use imre_regex::{LiteralPattern, flags};
 use std::cell::Cell;
+use std::ffi::c_void;
 use std::ptr;
 
 use memchr::memmem::Finder;
@@ -15,8 +17,14 @@ use regex_syntax::hir::{Hir, HirKind, literal::Extractor};
 
 use super::{Error, Int, Kind, Object, Storage, StorageCell, Str, fail, finish, object};
 
+enum Spelling {
+    Text(StrOwner),
+    Bytes(crate::BytesOwner),
+}
+
 pub(super) struct Pattern {
-    spelling: StrOwner,
+    spelling: Spelling,
+    flags: i64,
     regex: Regex,
     cache: meta::Cache,
     slots: Vec<Option<NonMaxUsize>>,
@@ -58,14 +66,40 @@ fn leading_literal(hir: &Hir) -> Option<&[u8]> {
 impl Pattern {
     #[cfg(test)]
     fn new(source: &str) -> Self {
-        Self::with_spelling(source, source)
+        Self::from_text(source, source, false)
     }
 
-    fn with_spelling(source: &str, spelling: &str) -> Self {
-        let hir = regex_syntax::Parser::new()
-            .parse(source)
-            .expect("validated fixed regex");
+    fn from_text(source: &str, spelling: &str, verbose: bool) -> Self {
+        Self::from_literal(LiteralPattern {
+            bytes: false,
+            supplied_flags: 0,
+            verbose,
+            source,
+            spelling: spelling.as_bytes(),
+        })
+    }
+
+    fn from_literal(literal: LiteralPattern<'_>) -> Self {
+        let spelling = if literal.bytes {
+            Spelling::Bytes(super::bytes::copied_bytes(literal.spelling))
+        } else {
+            Spelling::Text(super::text::owned_string(
+                str::from_utf8(literal.spelling).expect("text regex spelling"),
+            ))
+        };
+        let mut flags = i64::from(literal.supplied_flags);
+        if literal.verbose {
+            flags |= flags::VERBOSE;
+        }
+        if !literal.bytes && flags & flags::ASCII == 0 {
+            flags |= flags::UNICODE;
+        }
+        let text = !literal.bytes;
+        let hir =
+            imre_regex::fixed_hir(literal.source, literal.bytes, flags & flags::MULTILINE != 0)
+                .expect("validated fixed regex");
         let regex = Regex::builder()
+            .configure(Regex::config().utf8_empty(text))
             .build_from_hir(&hir)
             .expect("validated fixed regex");
         let cache = regex.create_cache();
@@ -75,7 +109,8 @@ impl Pattern {
             .longest_common_prefix()
             .and_then(|s| s.first().copied())
             .filter(u8::is_ascii);
-        let anchored = if first.is_some() || hir.properties().explicit_captures_len() != 0 {
+        let anchored = if text && (first.is_some() || hir.properties().explicit_captures_len() != 0)
+        {
             AnchoredCaptures::new(&hir, first)
         } else {
             None
@@ -121,7 +156,8 @@ impl Pattern {
             })
             .collect();
         Self {
-            spelling: StrOwner::new(Str::from(spelling.to_owned())),
+            spelling,
+            flags,
             regex,
             cache,
             slots,
@@ -205,8 +241,8 @@ impl Pattern {
 
     /// The start is already known for match(). A single bounded capture pass
     /// avoids rediscovering the match boundaries before extracting its groups.
-    fn match_start(&mut self, text: &str) -> bool {
-        if !self.could_match(text.as_bytes(), true) {
+    fn match_start(&mut self, text: &[u8]) -> bool {
+        if !self.could_match(text, true) {
             return false;
         }
         let input = Input::new(text).anchored(Anchored::Yes);
@@ -236,8 +272,7 @@ impl Pattern {
         Spans::new::<POSITIONED>(&self.slots[..visible], text_len, char_start)
     }
 
-    fn search(&mut self, text: &str) -> bool {
-        let bytes = text.as_bytes();
+    fn search(&mut self, bytes: &[u8]) -> bool {
         if !self.could_match(bytes, false) {
             return false;
         }
@@ -248,7 +283,7 @@ impl Pattern {
             let Some(at) = memchr::memchr(first, bytes) else {
                 return false;
             };
-            let input = Input::new(text)
+            let input = Input::new(bytes)
                 .span(at..bytes.len())
                 .anchored(Anchored::Yes);
             // One anchored attempt avoids the general engine's forward/reverse
@@ -268,23 +303,23 @@ impl Pattern {
         self.regex
             .search_slots_with(
                 &mut self.cache,
-                &Input::new(text).span(start..bytes.len()),
+                &Input::new(bytes).span(start..bytes.len()),
                 &mut self.slots,
             )
             .is_some()
     }
 }
 
-pub(super) struct Match {
+pub(super) struct Match<T = StrOwner> {
     pattern: crate::ObjectOwner,
-    text: StrOwner,
+    text: T,
     spans: Spans,
 }
 
 // Directly storing short capture snapshots must fit an existing Object payload.
 const _: () = assert!(size_of::<Match>() <= size_of::<super::mappings::MappingIterator>());
 
-enum Spans {
+pub(super) enum Spans {
     Short {
         len: u8,
         slots: [u16; 10],
@@ -381,25 +416,18 @@ fn handle(storage: Storage) -> *const Object {
     crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(storage))))
 }
 
-/// Instantiates a literal already validated by the compiler with this regex engine.
+/// Materialize the compiler's validated regex using the original Python spelling.
 ///
 /// # Safety
-/// `data` holds the original UTF-8 spelling and the translated UTF-8 pattern,
-/// separated by 0xff. The compiler has validated the translated pattern.
+/// The static buffer must encode one complete checked LiteralPattern.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_regex_literal(data: *const u8, len: usize) -> *const Object {
     // SAFETY: the compiler emits initialized static bytes of this length.
-    let bytes = unsafe { std::slice::from_raw_parts(data, len) };
-    let separator = memchr::memchr(0xff, bytes).expect("missing regex literal separator");
-    let (spelling, source) = bytes.split_at(separator);
-    // SAFETY: both ranges come from complete Rust strings emitted by the compiler.
-    let pattern = unsafe {
-        Pattern::with_spelling(
-            str::from_utf8_unchecked(&source[1..]),
-            str::from_utf8_unchecked(spelling),
-        )
-    };
-    handle(Storage::RegexPattern(Box::new(pattern)))
+    let data = unsafe { std::slice::from_raw_parts(data, len) };
+    let literal = LiteralPattern::decode(data).expect("validated fixed regex literal");
+    handle(Storage::RegexPattern(Box::new(Pattern::from_literal(
+        literal,
+    ))))
 }
 
 /// Emit the match spans or the gaps before, between and after them.
@@ -749,14 +777,36 @@ pub unsafe extern "C" fn imre_regex_collect_unicode_runs(
 /// # Safety
 /// `pattern` must be a rooted compiled pattern.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_regex_spelling(pattern: *const Object) -> *const Str {
-    // SAFETY: the caller keeps the pattern alive throughout the borrow.
+pub unsafe extern "C" fn imre_regex_spelling(pattern: *const Object) -> *const c_void {
+    // SAFETY: the caller roots the pattern; the result owns the declared string or bytes.
     unsafe {
         object(pattern).0.with(|storage| {
             let Storage::RegexPattern(pattern) = storage else {
                 unreachable!()
             };
-            StrOwner::into_raw(pattern.spelling.clone())
+            match &pattern.spelling {
+                Spelling::Text(text) => StrOwner::into_raw(text.clone()).cast(),
+                Spelling::Bytes(bytes) => crate::BytesOwner::into_raw(bytes.clone()).cast(),
+            }
+        })
+    }
+}
+
+/// Read the effective Python flags of a compiled pattern.
+///
+/// # Safety
+/// The caller roots a compiled text or bytes pattern.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_regex_flags(pattern: *const Object) -> usize {
+    // SAFETY: reading immutable flags cannot reenter the borrowed pattern.
+    unsafe {
+        object(pattern).0.with(|storage| {
+            let Storage::RegexPattern(pattern) = storage else {
+                unreachable!()
+            };
+            Int::small(pattern.flags)
+                .expect("checked regex flag bits")
+                .into_raw()
         })
     }
 }
@@ -771,9 +821,10 @@ pub unsafe extern "C" fn imre_unittest_compile_pattern(spelling: *const Str) -> 
     // SAFETY: the caller retains its string for this call.
     let spelling = unsafe { &*spelling };
     match imre_regex::translate(spelling, false) {
-        Ok(pattern) => handle(Storage::RegexPattern(Box::new(Pattern::with_spelling(
+        Ok(pattern) => handle(Storage::RegexPattern(Box::new(Pattern::from_text(
             &pattern.source,
             spelling,
+            pattern.verbose,
         )))),
         Err(reason) => {
             Error::new(
@@ -800,7 +851,7 @@ pub unsafe extern "C" fn imre_regex_search_text(
     // SAFETY: the caller retains the string for the full call.
     let spelling = unsafe { &*spelling };
     let compiled = match imre_regex::translate(spelling, verbose) {
-        Ok(pattern) => Pattern::with_spelling(&pattern.source, spelling),
+        Ok(pattern) => Pattern::from_text(&pattern.source, spelling, pattern.verbose),
         Err(reason) => {
             Error::new(
                 Kind::NotImplementedError,
@@ -814,7 +865,14 @@ pub unsafe extern "C" fn imre_regex_search_text(
         Box::new(compiled),
     ))));
     // SAFETY: the local owner and caller respectively root the pattern and text.
-    unsafe { match_text(crate::ObjectOwner::as_ptr(&pattern), text, anchored) }
+    unsafe {
+        imre_regex_execute(
+            crate::ObjectOwner::as_ptr(&pattern),
+            text.cast(),
+            0,
+            u32::from(anchored),
+        )
+    }
 }
 
 /// Substitute all matches; a miss retains the original string.
@@ -849,56 +907,67 @@ pub unsafe extern "C" fn imre_regex_sub(
     }
 }
 
-/// Returns a rooted snapshot of the leftmost match, or a null optional on a miss.
+/// Execute Pattern.search or Pattern.match against an evaluated text or bytes subject.
 ///
 /// # Safety
-/// Both arguments are rooted handles of the declared types. The search cannot reenter.
+/// The caller roots a compiled pattern and a subject of the indicated kind. The
+/// result, when present, owns the subject and uses its original offset units.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_regex_search(
+pub unsafe extern "C" fn imre_regex_execute(
     pattern: *const Object,
-    text: *const Str,
+    subject: *const c_void,
+    subject_bytes: u32,
+    anchored: u32,
 ) -> *const Object {
-    // SAFETY: both published entry points have the same rooted arguments.
-    unsafe { match_text(pattern, text, false) }
-}
-
-/// Match a fixed pattern at the start of the string.
-///
-/// # Safety
-/// The compiled pattern and string must both be rooted for this call.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_regex_match(
-    pattern: *const Object,
-    text: *const Str,
-) -> *const Object {
-    // SAFETY: the arguments remain rooted until the match snapshot is complete.
-    unsafe { match_text(pattern, text, true) }
-}
-
-unsafe fn match_text(pattern: *const Object, text: *const Str, anchored: bool) -> *const Object {
-    // SAFETY: both inputs outlive the search. Mutating engine scratch cannot call
-    // user code, and only copied capture spans escape this private storage borrow.
-    unsafe {
+    // SAFETY: matching cannot reenter the pattern. Validate the subject kind before
+    // borrowing its representation, then retain that same typed owner on a hit.
+    let result = unsafe {
         object(pattern).0.with_mut(|storage| {
             let Storage::RegexPattern(compiled) = storage else {
-                fail("SystemError", "expected a compiled regex");
+                unreachable!()
             };
-            let found = if anchored {
-                compiled.match_start((&*text).as_str())
+            let bytes = matches!(compiled.spelling, Spelling::Bytes(_));
+            if bytes != (subject_bytes != 0) {
+                return Err(Error::new(
+                    Kind::TypeError,
+                    if bytes {
+                        "cannot use a bytes pattern on a string-like object"
+                    } else {
+                        "cannot use a string pattern on a bytes-like object"
+                    },
+                ));
+            }
+            let input: &[u8] = if bytes {
+                &*subject.cast::<crate::Bytes>()
             } else {
-                compiled.search(&*text)
+                (&*subject.cast::<Str>()).as_bytes()
+            };
+            let found = if anchored != 0 {
+                compiled.match_start(input)
+            } else {
+                compiled.search(input)
             };
             if !found {
-                return ptr::null();
+                return Ok(ptr::null());
             }
-            let spans = compiled.visible_spans::<false>((&*text).len(), 0);
-            handle(Storage::RegexMatch(Match {
-                pattern: crate::ObjectOwner::acquire_word(pattern as usize),
-                text: crate::StrOwner::acquire_word(text as usize),
-                spans,
+            let spans = compiled.visible_spans::<false>(input.len(), 0);
+            let pattern = crate::ObjectOwner::acquire_word(pattern as usize);
+            Ok(handle(if bytes {
+                Storage::RegexBytesMatch(Match {
+                    pattern,
+                    text: crate::acquire_bytes(subject as usize),
+                    spans,
+                })
+            } else {
+                Storage::RegexMatch(Match {
+                    pattern,
+                    text: StrOwner::acquire_word(subject as usize),
+                    spans,
+                })
             }))
         })
-    }
+    };
+    finish(result, ptr::null())
 }
 
 /// A one-shot cursor over a statically nonempty pattern; each match snapshots
@@ -1004,7 +1073,52 @@ unsafe fn retained_cursor(pattern: *const Object, text: *const Str) -> FindIter 
     }
 }
 
-impl Match {
+/// Python text indices count code points; binary captures use the engine's byte indices.
+pub(super) trait Subject {
+    const KIND: u32;
+    fn offset(&self, spans: &Spans, byte: usize) -> usize;
+    fn owned_slice(&self, start: usize, end: usize) -> usize;
+    fn write_slice(&self, start: usize, end: usize, out: &mut String) -> std::fmt::Result;
+}
+
+impl Subject for StrOwner {
+    const KIND: u32 = 3;
+    fn offset(&self, spans: &Spans, byte: usize) -> usize {
+        spans.char_offset(self, byte)
+    }
+    fn owned_slice(&self, start: usize, end: usize) -> usize {
+        let part = if start == 0 && end == self.len() {
+            self.clone()
+        } else {
+            super::text::owned_string(&self[start..end])
+        };
+        StrOwner::into_raw(part) as usize
+    }
+    fn write_slice(&self, start: usize, end: usize, out: &mut String) -> std::fmt::Result {
+        super::exceptions::write_quoted_repr(&self[start..end], out)
+    }
+}
+
+impl Subject for crate::BytesOwner {
+    const KIND: u32 = 8;
+    fn offset(&self, _spans: &Spans, byte: usize) -> usize {
+        byte
+    }
+    fn owned_slice(&self, start: usize, end: usize) -> usize {
+        let part = if start == 0 && end == self.len() {
+            self.clone()
+        } else {
+            super::bytes::copied_bytes(&self[start..end])
+        };
+        crate::BytesOwner::into_raw(part) as usize
+    }
+    fn write_slice(&self, start: usize, end: usize, out: &mut String) -> std::fmt::Result {
+        super::write_bytes_repr(out, &self[start..end]);
+        Ok(())
+    }
+}
+
+impl<T: Subject> Match<T> {
     pub(super) fn write_repr(&self, output: &mut impl std::fmt::Write) -> std::fmt::Result {
         let (start, end) = self
             .spans
@@ -1012,7 +1126,7 @@ impl Match {
             .flatten()
             .expect("a match owns group zero");
         let mut text = String::new();
-        super::exceptions::write_quoted_repr(&self.text[start..end], &mut text)?;
+        self.text.write_slice(start, end, &mut text)?;
         // CPython's %.50R precision applies to the quoted spelling in code points.
         if let Some((cut, _)) = text.char_indices().nth(50) {
             text.truncate(cut);
@@ -1020,22 +1134,30 @@ impl Match {
         write!(
             output,
             "<re.Match object; span=({}, {}), match={text}>",
-            self.spans.char_offset(&self.text, start),
-            self.spans.char_offset(&self.text, end),
+            self.text.offset(&self.spans, start),
+            self.text.offset(&self.spans, end)
         )
     }
 
-    /// Empty captures own an empty string. Only nonparticipating groups return null.
-    fn substring(&self, span: Option<(usize, usize)>) -> *const Str {
-        match span {
-            Some((0, end)) if end == self.text.len() => {
-                StrOwner::into_raw(StrOwner::clone(&self.text))
+    /// Nonparticipating captures return a null optional, even when empty slices are possible.
+    fn substring(&self, span: Option<(usize, usize)>) -> usize {
+        span.map_or(0, |(start, end)| self.text.owned_slice(start, end))
+    }
+
+    unsafe fn group(&self, selector: usize, named: u32) -> Result<*const c_void, Error> {
+        // SAFETY: the caller roots the match and selector.
+        Ok(self.substring(unsafe { self.span(selector, named) }?) as *const c_void)
+    }
+
+    unsafe fn bound(&self, selector: usize, named: u32, end: u32) -> Result<usize, Error> {
+        // SAFETY: the caller roots the match and selector.
+        Ok(match unsafe { self.span(selector, named)? } {
+            Some((a, b)) => {
+                Int::from_usize(self.text.offset(&self.spans, if end == 0 { a } else { b }))
+                    .into_raw()
             }
-            Some((start, end)) => {
-                StrOwner::into_raw(StrOwner::new(Str::new(&self.text[start..end])))
-            }
-            None => ptr::null(),
-        }
+            None => Int::small(-1).unwrap().into_raw(),
+        })
     }
 
     /// Distinguishes an unknown selector (IndexError) from a nonparticipating group.
@@ -1073,30 +1195,22 @@ impl Match {
     }
 }
 
-impl Storage {
-    fn regex_match(&self) -> &Match {
-        match self {
-            Self::RegexMatch(value) => value,
-            _ => fail("SystemError", "expected a regex match"),
-        }
-    }
-}
-
-/// Returns an owned substring, including a live empty string for an empty capture.
+/// Return the selected capture with the original subject's type and spelling.
 ///
 /// # Safety
-/// Root a Match and one canonical int (`named == 0`) or string (`named != 0`).
+/// Root a Match and one canonical int (named == 0) or string (named != 0).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_regex_group(
     value: *const Object,
     selector: usize,
     named: u32,
-) -> *const Str {
-    // SAFETY: the match and selector are rooted; no borrowed substring escapes.
+) -> *const c_void {
+    // SAFETY: the match and selector remain rooted; no borrowed slice escapes.
     let result = unsafe {
-        object(value).0.with(|storage| {
-            let matched = storage.regex_match();
-            Ok(matched.substring(matched.span(selector, named)?))
+        object(value).0.with(|storage| match storage {
+            Storage::RegexMatch(m) => m.group(selector, named),
+            Storage::RegexBytesMatch(m) => m.group(selector, named),
+            _ => fail("SystemError", "expected a regex match"),
         })
     };
     finish(result, ptr::null())
@@ -1105,45 +1219,47 @@ pub unsafe extern "C" fn imre_regex_group(
 /// Copies the named captures in declaration order into a fresh mutable mapping.
 ///
 /// # Safety
-/// The caller roots a live match. It owns its pattern and matched text throughout.
+/// The caller roots a live match. It owns its pattern and matched subject throughout.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_regex_groupdict(value: *const Object) -> *const Object {
-    use super::mappings::Mapping;
-    use super::words::{NULLABLE, OwnedWord, WordKind};
-    let key_kind = WordKind::new(3);
-    let value_kind = WordKind::new(3 | NULLABLE);
-    let mut entries = Mapping::new(key_kind.raw(), value_kind.raw());
-    // SAFETY: immutable match and pattern borrows cannot overlap a mutation.
-    // Each inserted word transfers exactly the owned Rc produced below, or None.
-    let inserted = unsafe {
-        object(value).0.with(|storage| {
-            let matched = storage.regex_match();
-            matched.pattern.0.with(|storage| {
+    // SAFETY: the caller roots the match during this borrow.
+    let result = unsafe {
+        object(value).0.with(|storage| match storage {
+            Storage::RegexMatch(m) => m.groupdict(),
+            Storage::RegexBytesMatch(m) => m.groupdict(),
+            _ => fail("SystemError", "expected a regex match"),
+        })
+    };
+    finish(result, ptr::null())
+}
+
+impl<T: Subject> Match<T> {
+    fn groupdict(&self) -> Result<*const Object, Error> {
+        use super::mappings::Mapping;
+        use super::words::{NULLABLE, OwnedWord, WordKind};
+        let key_kind = WordKind::new(3);
+        let value_kind = WordKind::new(T::KIND | NULLABLE);
+        let mut entries = Mapping::new(key_kind.raw(), value_kind.raw());
+        // SAFETY: this read only uses immutable capture metadata, while the match owns its pattern.
+        unsafe {
+            self.pattern.0.with(|storage| {
                 let Storage::RegexPattern(pattern) = storage else {
                     unreachable!()
                 };
-                // Frozen capture names belong to the pattern. Each fresh
-                // dictionary retains those same immutable keys.
                 for (index, name) in &pattern.named_groups {
                     let key = StrOwner::into_raw(StrOwner::clone(name)) as usize;
-                    let capture = matched.substring(matched.spans.get(*index).unwrap()) as usize;
+                    let capture = self.substring(self.spans.get(*index).unwrap());
                     entries.insert_unique(
                         OwnedWord::from_owned(key, key_kind),
                         OwnedWord::from_owned(capture, value_kind),
                     )?;
                 }
-                Ok(())
+                Ok(handle(Storage::Dictionary(
+                    crate::objects::mappings::TableOwner::new(entries),
+                )))
             })
-        })
-    };
-    crate::finish(
-        inserted.map(|()| {
-            handle(Storage::Dictionary(
-                crate::objects::mappings::TableOwner::new(entries),
-            ))
-        }),
-        std::ptr::null(),
-    )
+        }
+    }
 }
 
 /// Checks participation without allocating the capture substring.
@@ -1159,10 +1275,12 @@ pub unsafe extern "C" fn imre_regex_present(
     // SAFETY: the match and selector are rooted throughout this read.
     let result = unsafe {
         object(value).0.with(|storage| {
-            storage
-                .regex_match()
-                .span(selector, named)
-                .map(|span| u32::from(span.is_some()))
+            match storage {
+                Storage::RegexMatch(m) => m.span(selector, named),
+                Storage::RegexBytesMatch(m) => m.span(selector, named),
+                _ => fail("SystemError", "expected a regex match"),
+            }
+            .map(|span| u32::from(span.is_some()))
         })
     };
     finish(result, 0)
@@ -1181,17 +1299,10 @@ pub unsafe extern "C" fn imre_regex_bound(
 ) -> usize {
     // SAFETY: the caller roots both handles. Every regex span is a UTF-8 boundary.
     let result = unsafe {
-        object(value).0.with(|storage| {
-            let matched = storage.regex_match();
-            Ok(match matched.span(selector, named)? {
-                Some((start, stop)) => Int::from_usize(
-                    matched
-                        .spans
-                        .char_offset(&matched.text, if end == 0 { start } else { stop }),
-                )
-                .into_raw(),
-                None => Int::small(-1).unwrap().into_raw(),
-            })
+        object(value).0.with(|storage| match storage {
+            Storage::RegexMatch(m) => m.bound(selector, named, end),
+            Storage::RegexBytesMatch(m) => m.bound(selector, named, end),
+            _ => fail("SystemError", "expected a regex match"),
         })
     };
     finish(result, 1)
@@ -1211,15 +1322,25 @@ mod tests {
             let text = StrOwner::new(Str::from(text));
             // SAFETY: the helper owns each ABI handle until its last access.
             unsafe {
-                let bytes = [spelling.as_bytes(), &[0xff], pattern.as_bytes()].concat();
+                let bytes = LiteralPattern {
+                    source: pattern,
+                    spelling: spelling.as_bytes(),
+                    bytes: false,
+                    supplied_flags: 0,
+                    verbose: false,
+                }
+                .encode();
                 let compiled =
                     crate::ObjectOwner::from_raw(imre_regex_literal(bytes.as_ptr(), bytes.len()));
-                let original =
-                    StrOwner::from_raw(imre_regex_spelling(crate::ObjectOwner::as_ptr(&compiled)));
+                let original = StrOwner::from_raw(
+                    imre_regex_spelling(crate::ObjectOwner::as_ptr(&compiled)).cast(),
+                );
                 assert_eq!(original.as_str(), spelling);
-                let found = crate::ObjectOwner::from_raw(imre_regex_search(
+                let found = crate::ObjectOwner::from_raw(imre_regex_execute(
                     crate::ObjectOwner::as_ptr(&compiled),
-                    StrOwner::as_ptr(&text),
+                    StrOwner::as_ptr(&text).cast(),
+                    0,
+                    0,
                 ));
                 let m = crate::ObjectOwner::as_ptr(&found);
                 let last = Str::new("last");
@@ -1232,7 +1353,9 @@ mod tests {
                     Some(prefix_chars as i64 + 2)
                 );
                 assert_eq!(
-                    *StrOwner::from_raw(imre_regex_group(m, &last as *const Str as usize, 1)),
+                    *StrOwner::from_raw(
+                        imre_regex_group(m, &last as *const Str as usize, 1).cast()
+                    ),
                     "f"
                 );
                 assert_eq!(imre_regex_present(m, 5, 0), 0);
@@ -1255,21 +1378,21 @@ mod tests {
         let mut pattern = Pattern::new(r"^(one.+)|\P{any}|(.* two .*)|\P{any}|(three.*)");
         assert!(!pattern.could_match(b"ordinary line", true));
         for text in ["one!", "a two b", "three"] {
-            assert!(pattern.match_start(text));
+            assert!(pattern.match_start(text.as_bytes()));
         }
 
         let mut empty = Pattern::new(r"^(one.+)|\P{any}|()");
-        assert!(empty.match_start("ordinary line"));
+        assert!(empty.match_start(b"ordinary line"));
     }
 
     #[test]
     fn failed_first_prefix_and_bounded_engine_limit_fall_back() {
         let mut pattern = Pattern::new("a[ab]+Z");
-        assert!(pattern.search("a!abc abbaZ"));
+        assert!(pattern.search(b"a!abc abbaZ"));
         assert_eq!(pattern.slots[0].unwrap().get(), 6);
         let limit = pattern.anchored.as_ref().unwrap().max_haystack_len();
         let long = format!("a{}Z", "b".repeat(limit + 1));
-        assert!(pattern.search(&long));
+        assert!(pattern.search(long.as_bytes()));
         assert_eq!(pattern.slots[1].unwrap().get(), long.len());
     }
 
@@ -1289,7 +1412,7 @@ mod tests {
                     &mut expected,
                 )
                 .is_some();
-            assert_eq!(pattern.match_start(text), found);
+            assert_eq!(pattern.match_start(text.as_bytes()), found);
             if found {
                 assert_eq!(pattern.slots, expected);
             }
@@ -1306,30 +1429,36 @@ mod tests {
             let pattern = crate::ObjectOwner::from_raw(handle(Storage::RegexPattern(Box::new(
                 Pattern::new(source),
             ))));
-            let matched = crate::ObjectOwner::from_raw(imre_regex_search(
+            let matched = crate::ObjectOwner::from_raw(imre_regex_execute(
                 crate::ObjectOwner::as_ptr(&pattern),
-                StrOwner::as_ptr(&text),
+                StrOwner::as_ptr(&text).cast(),
+                0,
+                0,
             ));
             let other = StrOwner::new(Str::new("xyyΠ"));
-            drop(crate::ObjectOwner::from_raw(imre_regex_search(
+            drop(crate::ObjectOwner::from_raw(imre_regex_execute(
                 crate::ObjectOwner::as_ptr(&pattern),
-                StrOwner::as_ptr(&other),
+                StrOwner::as_ptr(&other).cast(),
+                0,
+                0,
             )));
             let miss = StrOwner::new(Str::new("xyz"));
             assert!(
-                imre_regex_search(
+                imre_regex_execute(
                     crate::ObjectOwner::as_ptr(&pattern),
-                    StrOwner::as_ptr(&miss)
+                    StrOwner::as_ptr(&miss).cast(),
+                    0,
+                    0
                 )
                 .is_null()
             );
             drop((pattern, text));
             let m = crate::ObjectOwner::as_ptr(&matched);
-            assert_eq!(*StrOwner::from_raw(imre_regex_group(m, 1, 0)), "Π");
+            assert_eq!(*StrOwner::from_raw(imre_regex_group(m, 1, 0).cast()), "Π");
             assert!(imre_regex_group(m, 3, 0).is_null());
             let empty = Str::new("empty");
             assert_eq!(
-                *StrOwner::from_raw(imre_regex_group(m, &empty as *const Str as usize, 1)),
+                *StrOwner::from_raw(imre_regex_group(m, &empty as *const Str as usize, 1).cast()),
                 ""
             );
             assert_eq!(

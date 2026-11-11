@@ -90,7 +90,7 @@ impl Emitter<'_, '_> {
             Type::Str => &mut self.string_literals,
             Type::Bytes => &mut self.bytes_literals,
             Type::Int => &mut self.integer_literals,
-            Type::RegexPattern => &mut self.regex_literals,
+            Type::RegexPattern | Type::RegexBytesPattern => &mut self.regex_literals,
             _ => unreachable!("unsupported pooled literal type"),
         };
         if let Some(&id) = pool.get(contents) {

@@ -376,6 +376,8 @@ impl Types {
             | Type::ZipInfo
             | Type::CsvReader
             | Type::RegexPattern
+            | Type::RegexBytesPattern
+            | Type::RegexBytesMatch
             | Type::RegexMatch
             | Type::JsonRoot
             | Type::JsonValue
@@ -940,6 +942,8 @@ impl Types {
             | Type::ZipInfo
             | Type::CsvReader
             | Type::RegexPattern
+            | Type::RegexBytesPattern
+            | Type::RegexBytesMatch
             | Type::RegexMatch
             | Type::ContextVar(_)
             | Type::ContextToken(_)

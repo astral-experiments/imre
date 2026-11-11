@@ -605,6 +605,10 @@ unsafe fn write_repr_with(
                 },
                 ReprTask::Object(owner, position) => {
                     object(owner).0.with(|storage| match storage {
+                        Storage::RegexBytesMatch(matched) => {
+                            matched.write_repr(output)?;
+                            Ok(None)
+                        }
                         Storage::RegexMatch(matched) => {
                             matched.write_repr(output)?;
                             Ok(None)

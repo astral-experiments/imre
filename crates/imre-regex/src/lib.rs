@@ -42,8 +42,51 @@ pub fn ascii_class(escape: char) -> Option<&'static str> {
 /// The engine expression and capture layout corresponding to a Python pattern.
 pub struct FixedPattern {
     pub source: String,
+    pub verbose: bool,
     pub may_match_empty: bool,
     pub groups: Vec<Capture>,
+}
+
+/// CPython's regex flag bits, shared by checked patterns and the registered re module.
+pub mod flags {
+    pub const IGNORECASE: i64 = 2;
+    pub const LOCALE: i64 = 4;
+    pub const MULTILINE: i64 = 8;
+    pub const DOTALL: i64 = 16;
+    pub const UNICODE: i64 = 32;
+    pub const VERBOSE: i64 = 64;
+    pub const DEBUG: i64 = 128;
+    pub const ASCII: i64 = 256;
+}
+
+/// The immutable input used to intern and materialize a checked pattern.
+/// The translated source is UTF-8 even when the original spelling is arbitrary bytes.
+pub struct LiteralPattern<'a> {
+    pub bytes: bool,
+    pub supplied_flags: u16,
+    pub verbose: bool,
+    pub source: &'a str,
+    pub spelling: &'a [u8],
+}
+
+impl<'a> LiteralPattern<'a> {
+    pub fn encode(&self) -> Vec<u8> {
+        let [lo, hi] = self.supplied_flags.to_le_bytes();
+        let header = [u8::from(self.bytes), u8::from(self.verbose), lo, hi];
+        [&header[..], self.source.as_bytes(), &[0xff], self.spelling].concat()
+    }
+
+    pub fn decode(data: &'a [u8]) -> Option<Self> {
+        let ([bytes, verbose, lo, hi], payload) = data.split_first_chunk::<4>()?;
+        let separator = payload.iter().position(|&b| b == 0xff)?;
+        Some(Self {
+            bytes: *bytes != 0,
+            supplied_flags: u16::from_le_bytes([*lo, *hi]),
+            verbose: *verbose != 0,
+            source: str::from_utf8(&payload[..separator]).ok()?,
+            spelling: &payload[separator + 1..],
+        })
+    }
 }
 
 /// Preserve byte literals outside ASCII in the regex parser's text input.
@@ -594,7 +637,13 @@ pub fn translate_pattern_with_line_mode(
         Grammar::Standard { multiline },
         None,
     )?;
-    analyze(translated.source, translated.groups)
+    analyze(
+        translated.source,
+        translated.groups,
+        translated.verbose,
+        alphabet == Alphabet::Bytes,
+        multiline,
+    )
 }
 
 /// Normalize a text pattern requiring a lookaround without accepting backend-specific syntax.
@@ -1033,6 +1082,7 @@ fn skip_comment(input: &mut impl Iterator<Item = char>) -> Result<(), String> {
 /// Translation and capture information produced in one pass over the Python spelling.
 pub struct TokenizedPattern {
     pub source: String,
+    verbose: bool,
     pub groups: Vec<Option<String>>,
     pub minimum_width: u64,
 }
@@ -1699,17 +1749,37 @@ fn tokenize(
         };
     }
     Ok(TokenizedPattern {
+        verbose,
         source: output,
         groups,
         minimum_width: width.width().min,
     })
 }
 
-fn analyze(output: String, groups: Vec<Option<String>>) -> Result<FixedPattern, String> {
+/// Parse the native matcher source with the indicated Python subject and line mode.
+pub fn fixed_hir(
+    source: &str,
+    bytes: bool,
+    multiline: bool,
+) -> Result<regex_syntax::hir::Hir, String> {
+    regex_syntax::ParserBuilder::new()
+        .unicode(!bytes)
+        .utf8(!bytes)
+        .multi_line(multiline)
+        .build()
+        .parse(source)
+        .map_err(|e| e.to_string())
+}
+
+fn analyze(
+    output: String,
+    groups: Vec<Option<String>>,
+    verbose: bool,
+    bytes: bool,
+    multiline: bool,
+) -> Result<FixedPattern, String> {
     let output = preserve_zero_repeat_groups(output)?;
-    let hir = regex_syntax::Parser::new()
-        .parse(&output)
-        .map_err(|e| e.to_string())?;
+    let hir = fixed_hir(&output, bytes, multiline)?;
     let mut required = vec![false; groups.len()];
     required[0] = true;
     let mut nodes = vec![(&hir, true)];
@@ -1736,7 +1806,13 @@ fn analyze(output: String, groups: Vec<Option<String>>) -> Result<FixedPattern, 
         };
         nodes.extend(node.kind().subs().iter().map(|sub| (sub, always)));
     }
-    let regex = regex::Regex::new(&output).map_err(|e| e.to_string())?;
+    // The checked HIR enforces text boundaries. This builder validates engine size
+    // and capture numbering for either alphabet, without observing match offsets.
+    let regex = regex::bytes::RegexBuilder::new(&output)
+        .unicode(!bytes)
+        .multi_line(multiline)
+        .build()
+        .map_err(|e| e.to_string())?;
     if !regex
         .capture_names()
         .filter(|name| *name != Some("imre.eol"))
@@ -1745,6 +1821,7 @@ fn analyze(output: String, groups: Vec<Option<String>>) -> Result<FixedPattern, 
         return Err("regex optimization would change the Python capture groups".into());
     }
     Ok(FixedPattern {
+        verbose,
         source: output,
         may_match_empty: hir.properties().minimum_len() == Some(0),
         groups: groups

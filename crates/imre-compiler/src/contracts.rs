@@ -538,6 +538,8 @@ impl Builtin {
             | Self::RegexRunCount { .. }
             | Self::RegexSub(_)
             | Self::UnittestCompilePattern
+            | Self::RegexSearch
+            | Self::RegexMatchStart
             | Self::RegexSearchText { .. }
             | Self::StringIterationList
             | Self::StringJoin
@@ -633,9 +635,8 @@ impl Builtin {
             | Self::LiteralStringView
             | Self::RStrip
             | Self::RegexCompile { .. }
+            | Self::RegexFlags
             | Self::RegexSpelling
-            | Self::RegexSearch
-            | Self::RegexMatchStart
             | Self::Split
             | Self::SourceModule
             | Self::SourceModuleAttribute { .. }

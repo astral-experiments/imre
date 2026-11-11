@@ -183,6 +183,8 @@ impl Type {
             | Self::CsvReader
             | Self::Patch(_)
             | Self::RegexPattern
+            | Self::RegexBytesPattern
+            | Self::RegexBytesMatch
             | Self::JsonRoot
             | Self::JsonValue
             | Self::JsonObject
@@ -4436,6 +4438,8 @@ impl Emitter<'_, '_> {
                 | Type::Patch(_)
                 | Type::LogManager
                 | Type::RegexPattern
+                | Type::RegexBytesPattern
+                | Type::RegexBytesMatch
                 | Type::JsonRoot
                 | Type::JsonValue
                 | Type::JsonObject
@@ -5152,11 +5156,27 @@ impl Emitter<'_, '_> {
                 returns,
                 &[&args[0].value],
             ),
-            Builtin::RegexCompile { source, spelling } => {
-                // A non-UTF-8 byte separates the original spelling from the engine pattern.
-                let bytes = [spelling.as_bytes(), &[0xff], source.as_bytes()].concat();
-                self.pooled_literal(&bytes, returns)
+            Builtin::RegexCompile {
+                spelling,
+                supplied_flags,
+                pattern,
+            } => {
+                let (bytes, spelling) = match spelling {
+                    ir::Constant::Text(spelling) => (false, spelling.as_slice()),
+                    ir::Constant::Bytes(spelling) => (true, spelling.as_slice()),
+                    _ => unreachable!("fixed regex spelling is str or bytes"),
+                };
+                let payload = imre_regex::LiteralPattern {
+                    bytes,
+                    spelling,
+                    source: &pattern.source,
+                    supplied_flags: *supplied_flags,
+                    verbose: pattern.verbose,
+                }
+                .encode();
+                self.pooled_literal(&payload, returns)
             }
+            Builtin::RegexFlags => self.call("imre_regex_flags", returns, &[&args[0].value]),
             Builtin::RegexSpelling => self.call("imre_regex_spelling", returns, &[&args[0].value]),
             Builtin::UnittestCompilePattern => Value {
                 ty: returns,
@@ -5507,14 +5527,12 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::RegexSearch | Builtin::RegexMatchStart => {
-                let operation = if matches!(builtin, Builtin::RegexMatchStart) {
-                    "match"
-                } else {
-                    "search"
-                };
-                let pointer = self.instruction(format!(
-                    "call ptr @imre_regex_{operation}(ptr {}, ptr {})",
-                    args[0].value.operand, args[1].value.operand
+                let pointer = self.checked_instruction(format!(
+                    "call ptr @imre_regex_execute(ptr {}, ptr {}, i32 {}, i32 {})",
+                    args[0].value.operand,
+                    args[1].value.operand,
+                    u32::from(args[1].value.ty == Type::Bytes),
+                    u32::from(matches!(builtin, Builtin::RegexMatchStart)),
                 ));
                 Value {
                     ty: returns,
@@ -11473,6 +11491,7 @@ declare ptr @imre_str_interned_literal(ptr, i64)
 declare ptr @imre_sys_intern(ptr)
 declare i32 @imre_sys_is_interned(ptr)
 declare ptr @imre_regex_literal(ptr, i64)
+declare i64 @imre_regex_flags(ptr)
 declare ptr @imre_regex_spelling(ptr)
 declare ptr @imre_unittest_compile_pattern(ptr)
 declare i64 @imre_patch_len(ptr)
@@ -11484,7 +11503,7 @@ declare ptr @imre_patch_hunks(ptr)
 declare ptr @imre_patch_path(ptr)
 declare i64 @imre_patch_source_start(ptr)
 declare ptr @imre_patch_hunk_text(ptr)
-declare ptr @imre_regex_search(ptr, ptr)
+declare ptr @imre_regex_execute(ptr, ptr, i32, i32)
 declare ptr @imre_regex_search_text(ptr, ptr, i1, i1)
 declare ptr @imre_regex_sub(ptr, ptr, ptr, i64)
 declare ptr @imre_regex_collect_runs(ptr, ptr, i32)
@@ -11492,7 +11511,6 @@ declare ptr @imre_regex_collect_bytes_runs(ptr, ptr, i32)
 declare ptr @imre_regex_collect_literals(ptr, ptr, i64, i32)
 declare ptr @imre_regex_collect_rows(ptr, ptr, i64, ptr, i32)
 declare ptr @imre_regex_collect_unicode_runs(ptr, ptr, i64, i32)
-declare ptr @imre_regex_match(ptr, ptr)
 declare ptr @imre_log_file_new(ptr, ptr, i64, i64, i64, i1, i1, i64, i64)
 declare ptr @imre_calendar_delta(i32, i64, i64, i64, i64, i64, i64, i64)
 declare ptr @imre_calendar_datetime(i64, i64, i64, i64, i64, i64, i64, i64, i64)
@@ -12087,7 +12105,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(llvm.matches("call ptr @imre_regex_literal(").count(), 1);
-        assert_eq!(llvm.matches("call ptr @imre_regex_search(").count(), 2);
+        assert_eq!(llvm.matches("call ptr @imre_regex_execute(").count(), 2);
         let cleanup = llvm
             .split_once("define internal void @imre_clear_literals(")
             .unwrap()

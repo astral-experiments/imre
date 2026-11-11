@@ -1028,6 +1028,7 @@ pub(crate) enum Intrinsic {
     RegexVerbose,
     RegexUnicode,
     RegexAscii,
+    RegexMultiline,
     RegexPattern,
     RegexMatch,
     StrEnum,
@@ -2363,6 +2364,7 @@ impl IntrinsicModule {
             (Self::Re, "VERBOSE") => Intrinsic::RegexVerbose,
             (Self::Re, "UNICODE") => Intrinsic::RegexUnicode,
             (Self::Re, "ASCII" | "A") => Intrinsic::RegexAscii,
+            (Self::Re, "MULTILINE" | "M") => Intrinsic::RegexMultiline,
             (Self::Re, "Pattern") => Intrinsic::RegexPattern,
             (Self::Re, "Match") => Intrinsic::RegexMatch,
             (Self::Enum, "StrEnum") => Intrinsic::StrEnum,
@@ -3417,16 +3419,6 @@ impl SourceGraph {
         self.session
             .is_regex_pattern(module, &attr.value)
             .then_some(method)
-    }
-
-    /// A pattern created in an imported helper can reach a boxed method in another module.
-    pub(crate) fn uses_boxed_pattern_method(&self) -> bool {
-        self.modules.iter().enumerate().any(|(id, module)| {
-            !module.bundled
-                && ast::helpers::any_over_body(&module.parsed.syntax().body, |expr| {
-                    self.boxed_pattern_method(id, expr).is_some()
-                })
-        })
     }
 
     /// A first-party loader can select object execution before a typed call in another module.

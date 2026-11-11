@@ -120,7 +120,6 @@ impl Revision {
 struct Context {
     shapes: usize,
     helpers: usize,
-    regexes: usize,
     globals: usize,
     class_bindings: usize,
 }
@@ -130,7 +129,6 @@ impl Context {
         Self {
             shapes: checker.types.shape_count(),
             helpers: checker.helpers.len(),
-            regexes: checker.globals.regex_literals.borrow().len(),
             globals: checker.globals.types().len(),
             class_bindings: checker.globals.class_data.borrow().binding_count(),
         }
@@ -247,7 +245,6 @@ impl CallerCache {
             && sums.is_empty()
             && before.shapes == types.shape_count()
             && before.helpers == helpers.len()
-            && before.regexes == globals.regex_literals.borrow().len()
             && before.globals == globals.types().len()
             && before.class_bindings == globals.class_data.borrow().binding_count()
             && diagnostics == graph.checked_diagnostic_count(module)

@@ -306,6 +306,7 @@ enum Storage {
     LogRecord(Box<logging::record::Record>),
     LogFormatter(Box<logging::formatter::Formatter>),
     RegexMatch(regexes::Match),
+    RegexBytesMatch(regexes::Match<crate::BytesOwner>),
     Json(json::readonly::View),
     JsonEncoder {
         ensure_ascii: bool,

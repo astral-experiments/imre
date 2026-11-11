@@ -154,6 +154,8 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
         | Type::JsonDecoder
         | Type::JsonEncoder
         | Type::CsvReader
+        | Type::RegexBytesPattern
+        | Type::RegexBytesMatch
         | Type::RegexPattern
         | Type::RegexMatch
         | Type::ObjectValue
@@ -299,6 +301,8 @@ fn contains_opaque(ty: Type, types: &Types) -> bool {
             | Type::Hash
             | Type::JsonDecoder
             | Type::JsonEncoder
+            | Type::RegexBytesPattern
+            | Type::RegexBytesMatch
             | Type::RegexPattern
             | Type::RegexMatch
             | Type::StringKeys
