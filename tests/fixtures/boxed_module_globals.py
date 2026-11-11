@@ -153,3 +153,20 @@ def current():
 
 if __name__ == '__main__':
     current()
+
+    class Key:
+        def __hash__(self):
+            return hash("globals")
+
+        def __eq__(self, other):
+            return other == "globals"
+
+    def read_globals():
+        return globals()
+
+    owner = globals()
+    key = Key()
+    owner[key] = lambda: 37
+    print(globals(), read_globals())
+    del owner[key]
+    print(globals() is owner, read_globals() is owner)
