@@ -409,6 +409,7 @@ pub(super) fn capture(
             &helpers,
             private.as_ref().unwrap_or(globals),
         );
+        checker.optional_registered_body = solved;
         // The fixed checker validated this physical signature in the settled round.
         checker.checked_callback_effects =
             solved && matches!(mode, Capture::Entry(checked) if checked.contains(&signature.id));

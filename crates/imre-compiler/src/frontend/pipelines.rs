@@ -1376,11 +1376,11 @@ impl Checker<'_> {
         &mut self,
         iterable: Expr,
         node: &impl Ranged,
-    ) -> Prepared {
-        self.require_registered_operation(node);
+    ) -> Result<Prepared, String> {
+        self.require_registered_operation(node)?;
         let value = self.hidden(Type::PythonObject);
         let ready = self.hidden(Type::Bool);
-        Prepared {
+        Ok(Prepared {
             evaluate: vec![Statement::Expr(iterable)],
             acquire: Vec::new(),
             next: vec![
@@ -1399,7 +1399,7 @@ impl Checker<'_> {
             eager_list: None,
             writes: HashSet::new(),
             clear: vec![value, ready],
-        }
+        })
     }
 
     pub(super) fn prepare_cursor(&mut self, cursor: Expr, element: Type) -> Prepared {

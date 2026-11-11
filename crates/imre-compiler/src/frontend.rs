@@ -3036,6 +3036,8 @@ struct Checker<'a> {
     registered: Option<&'a registered::values::ModuleSource>,
     bound_function_imports: bool,
     checked_callback_effects: bool,
+    /// Only a complete body can be retained by a solved-signature registration trial.
+    optional_registered_body: bool,
     /// The first operation whose execution requires a different representation. All
     /// later source operations still see the facts from the ordinary checker.
     unrepresented: std::cell::RefCell<Option<Failure>>,
@@ -3135,6 +3137,7 @@ impl<'a> Checker<'a> {
             registered: None,
             bound_function_imports: false,
             checked_callback_effects: false,
+            optional_registered_body: false,
             unrepresented: Default::default(),
             namespace_calls: HashSet::new(),
             module_namespace: Default::default(),
@@ -4903,7 +4906,7 @@ impl<'a> Checker<'a> {
         if iterable.ty == Type::PythonObject && self.graph.modules[self.module].is_program_source()
         {
             return Ok(Iteration::Prepared(
-                self.prepare_object_iteration(iterable, node),
+                self.prepare_object_iteration(iterable, node)?,
             ));
         }
         if let Some(prepared) = self.record_iteration(&iterable, node)? {
@@ -5638,14 +5641,19 @@ impl<'a> Checker<'a> {
         Ok(falls_through)
     }
 
-    fn require_registered_operation(&self, site: &impl Ranged) {
-        self.unrepresented.borrow_mut().get_or_insert_with(|| {
+    fn require_registered_operation(&self, site: &impl Ranged) -> Result<(), String> {
+        let mut missing = self.unrepresented.borrow_mut();
+        let failure = missing.get_or_insert_with(|| {
             self.classified_error(
                 Kind::ScopedObject,
                 site,
                 "operation requires its compiled object representation",
             )
         });
+        if self.optional_registered_body {
+            return Err(failure.clone());
+        }
+        Ok(())
     }
 
     fn missing_operation(&self, failure: &Failure) -> bool {
@@ -5655,7 +5663,7 @@ impl<'a> Checker<'a> {
         self.unrepresented
             .borrow_mut()
             .get_or_insert_with(|| failure.clone());
-        true
+        !self.optional_registered_body
     }
 
     /// Check-only operands cannot leave the source region in an executable body.
@@ -5715,7 +5723,7 @@ impl<'a> Checker<'a> {
                     ..
                 })]
             ) {
-                self.require_registered_operation(statement);
+                self.require_registered_operation(statement)?;
             }
             return Ok((body, falls_through));
         }
@@ -5738,7 +5746,7 @@ impl<'a> Checker<'a> {
                 _ => false,
             };
             if !supported {
-                self.require_registered_operation(statement);
+                self.require_registered_operation(statement)?;
             }
         }
         let entry = self.ordinary_entry();
@@ -7823,7 +7831,7 @@ impl<'a> Checker<'a> {
             }
             // The public registered operand selector owns the receiver and call proof.
             // Continue checking the source even when this activation cannot emit the operation.
-            self.require_registered_operation(expression);
+            self.require_registered_operation(expression)?;
         }
         self.fixed_expr(expression)
     }
@@ -8081,7 +8089,7 @@ impl<'a> Checker<'a> {
         }
         let binding = self.resolve(expression);
         if matches!(binding, Some(Binding::RegisteredClass(_))) {
-            self.require_registered_operation(expression);
+            self.require_registered_operation(expression)?;
             return Ok(Expr::unrepresented());
         }
         if binding == Some(Binding::RuntimeClass) {
@@ -12110,7 +12118,7 @@ impl<'a> Checker<'a> {
         }
         let binding = self.resolve(&call.func);
         if matches!(binding, Some(Binding::RegisteredClass(_))) {
-            self.require_registered_operation(call.func.as_ref());
+            self.require_registered_operation(call.func.as_ref())?;
             return self.call_with_target(call, Expr::unrepresented());
         }
         let gzip = binding == Some(Binding::Intrinsic(Intrinsic::GzipOpen));
