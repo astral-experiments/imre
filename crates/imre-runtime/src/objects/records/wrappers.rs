@@ -131,4 +131,53 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn a_cache_owns_its_original_after_its_public_link_changes() {
+        use crate::objects::records::{imre_callable_init_cache, weak::WeakRecord};
+
+        let info = RecordSemantics {
+            kind: PYTHON_FUNCTION,
+            flags: 0,
+            name: std::ptr::null(),
+            name_len: 0,
+            qualified_name: std::ptr::null(),
+            qualified_name_len: 0,
+            fields: std::ptr::null(),
+        };
+        let cache_kinds = [0, 6, 6, 0, 0];
+        let cache_layout = RecordDescriptor {
+            length: 5,
+            kinds: cache_kinds.as_ptr(),
+            semantics: &info,
+        };
+        let function_layout = RecordDescriptor {
+            length: 3,
+            ..cache_layout
+        };
+        // SAFETY: the descriptors outlive all records. Each stored field owns one reference.
+        unsafe {
+            let original = imre_record_new(&function_layout);
+            let replacement = imre_record_new(&function_layout);
+            let cache = imre_record_new(&cache_layout);
+            let old = WeakRecord::new(original);
+            let new = WeakRecord::new(replacement);
+            cache.add(1).write(original as usize);
+            imre_callable_init_cache(cache, original, 4, 1);
+            let held = imre_function_get_wrapped(cache);
+            assert_eq!(held, original.cast_const());
+
+            // Transfer the replacement's reference into the public field.
+            imre_record_release(link(cache).replace(replacement));
+            imre_record_release(held);
+            assert!(old.is_live());
+            let held = imre_function_get_wrapped(cache);
+            assert_eq!(held, replacement.cast_const());
+            imre_record_release(cache);
+            assert!(old.upgrade().is_none());
+            assert!(new.is_live());
+            imre_record_release(held);
+            assert!(new.upgrade().is_none());
+        }
+    }
 }

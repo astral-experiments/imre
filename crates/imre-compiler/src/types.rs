@@ -147,7 +147,7 @@ struct Storage {
     shapes: Vec<Shape>,
     has_module_spec: bool,
     named_tuples: HashMap<DefinitionId, Rc<NamedTuple>>,
-    cache_adapters: HashMap<usize, CachePolicy>,
+    cache_adapters: HashMap<usize, (CachePolicy, Option<usize>)>,
     source_sites: HashMap<(usize, u32), Rc<FunctionSite>>,
     document_list_sites: HashSet<(usize, u32, Option<usize>)>,
     function_sites: HashMap<usize, Rc<FunctionSite>>,
@@ -1524,13 +1524,33 @@ impl Types {
 
     /// A module cache keeps its declaration's identity when bound to another name.
     pub(crate) fn declared_cache(&self, callable: Type, id: usize, policy: CachePolicy) -> Type {
-        self.0.borrow_mut().cache_adapters.insert(id, policy);
+        self.0
+            .borrow_mut()
+            .cache_adapters
+            .entry(id)
+            .or_insert((policy, None));
         Type::Callable(self.intern(Shape::DeclaredCache(callable, id)))
     }
 
     /// Adapter identity survives storage in a parameter or return typed as Callable.
     pub(crate) fn cache_adapter(&self, function: usize) -> Option<CachePolicy> {
-        self.0.borrow().cache_adapters.get(&function).copied()
+        self.0
+            .borrow()
+            .cache_adapters
+            .get(&function)
+            .map(|&(policy, _)| policy)
+    }
+
+    /// A decorated module function is still the first value of its cache's public link.
+    pub(crate) fn register_cache_body(&self, wrapper: usize, raw: usize, policy: CachePolicy) {
+        self.0
+            .borrow_mut()
+            .cache_adapters
+            .insert(wrapper, (policy, Some(raw)));
+    }
+
+    pub(crate) fn original_cache_body(&self, function: usize) -> Option<usize> {
+        self.0.borrow().cache_adapters.get(&function)?.1
     }
 
     pub(crate) fn cache_declaration(&self, ty: Type) -> Option<(Type, usize)> {
@@ -1538,6 +1558,16 @@ impl Types {
         match self.0.borrow().shapes.get(id) {
             Some(Shape::DeclaredCache(callable, declaration)) => Some((*callable, *declaration)),
             _ => None,
+        }
+    }
+
+    /// A cache exposes a replaceable callable independent of its cache policy.
+    pub(crate) fn wrapped_link_type(&self, owner: Type) -> Type {
+        if self.cached_function(owner).is_some() || self.cache_declaration(owner).is_some() {
+            self.wrapped_signature(owner)
+                .expect("cache wraps a callable")
+        } else {
+            owner
         }
     }
 
@@ -1566,7 +1596,10 @@ impl Types {
         id: usize,
         policy: CachePolicy,
     ) -> Type {
-        self.0.borrow_mut().cache_adapters.insert(id, policy);
+        self.0
+            .borrow_mut()
+            .cache_adapters
+            .insert(id, (policy, None));
         Type::Callable(self.intern(Shape::CachedCallable(layout)))
     }
 

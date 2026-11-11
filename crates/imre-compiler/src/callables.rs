@@ -43,6 +43,13 @@ impl TargetCollector {
                 bound: receiver.is_some(),
             };
             self.targets.0.entry(value.ty).or_default().push(target);
+            if let Some(raw) = types.original_cache_body(*function) {
+                let signature = types.wrapped_signature(value.ty).unwrap_or(value.ty);
+                self.targets.0.entry(signature).or_default().push(Target {
+                    function: raw,
+                    bound: false,
+                });
+            }
             if let Some(signature) = types.wrapped_signature(value.ty) {
                 // A wrapper can cross a plain Callable parameter or return
                 // without losing its real invocation target.

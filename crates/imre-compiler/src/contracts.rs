@@ -1124,7 +1124,9 @@ impl Builtin {
                 byte.is_ascii() && signature(&[Type::Str], Type::Iterator)
             }
             Self::FunctionWrappedSet => {
-                matches!(result, Type::Callable(_)) && signature(&[result, result], result)
+                matches!(args, [owner, target] if matches!(result, Type::Callable(_))
+                    && owner.ty == result
+                    && types.wrapped_link_type(result) == types.wrapped_link_type(target.ty))
             }
             Self::IsCoroutineFunction => {
                 matches!(args, [arg] if matches!(arg.ty, Type::Callable(_))) && result == Type::Bool
@@ -1133,7 +1135,8 @@ impl Builtin {
                 matches!(result, Type::Callable(_)) && signature(&[result], result)
             }
             Self::FunctionWrappedGet(_) => {
-                matches!(result, Type::Callable(_)) && signature(&[result], result)
+                matches!(args, [owner] if matches!(result, Type::Callable(_))
+                    && types.wrapped_link_type(owner.ty) == result)
             }
             Self::WrapperAttributes(fields) => {
                 args.is_empty() && result == types.tuple(vec![Type::Str; fields.names().len()])

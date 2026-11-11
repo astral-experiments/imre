@@ -444,26 +444,20 @@ impl Checker<'_> {
         if attribute.attr.as_str() != "__wrapped__" || !matches!(receiver.ty, Type::Callable(_)) {
             return None;
         }
-        Some(
-            if let Some(layout) = self.types.cached_function(receiver.ty) {
-                context_field(receiver.clone(), layout, 0, layout.callable)
+        self.wrapper_link.set(true);
+        // A load spanning lines is positioned at the attribute name.
+        let range =
+            if self.source_line(attribute.start()) == self.source_line(attribute.attr.start()) {
+                attribute.range()
             } else {
-                self.wrapper_link.set(true);
-                // A load spanning lines is positioned at the attribute name.
-                let range = if self.source_line(attribute.start())
-                    == self.source_line(attribute.attr.start())
-                {
-                    attribute.range()
-                } else {
-                    attribute.attr.range()
-                };
-                builtin(
-                    Builtin::FunctionWrappedGet(self.fixed_origin(range, None)),
-                    receiver.ty,
-                    vec![receiver.clone()],
-                )
-            },
-        )
+                attribute.attr.range()
+            };
+        let target = self.types.wrapped_link_type(receiver.ty);
+        Some(builtin(
+            Builtin::FunctionWrappedGet(self.fixed_origin(range, None)),
+            target,
+            vec![receiver.clone()],
+        ))
     }
 
     pub(super) fn cache_control(
@@ -525,9 +519,10 @@ impl Checker<'_> {
                 return self.cache_parameters(None, Some(wrapper), call).map(Some);
             }
             if name == "__wrapped__" {
-                return self
-                    .invoke(call, context_field(wrapper, layout, 0, layout.callable))
-                    .map(Some);
+                let target = self
+                    .wrapped_function(&wrapper, attr)
+                    .expect("cache wrapper attribute");
+                return self.invoke(call, target).map(Some);
             }
             (
                 context_field(wrapper, layout, 1, layout.table.cache_state()),
