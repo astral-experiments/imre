@@ -20,7 +20,7 @@ use crate::llvm::registered::sites::{
     Declaration,
 };
 use crate::llvm::registered::{
-    ABI, AnnotationScope, Output, RegisteredFrame, SourcePositions, sites,
+    ABI, AnnotationScope, Output, RegisteredBody, RegisteredFrame, SourcePositions, sites,
 };
 use serde_json::json;
 
@@ -470,7 +470,7 @@ impl<'a> PreparedBody<'a> {
             header.prepare_signature(def, site.thread_entry, python_annotations);
             let suspended = header.metadata.suspension_flags() != 0;
             let body = if let Some(checked) = program_bodies.and_then(|bodies| bodies.get(&start)) {
-                FunctionBody::Program(checked)
+                FunctionBody::Function(checked)
             } else {
                 let kind = crate::frontend::RegisteredScope::Function {
                     is_async: def.is_async,
@@ -483,7 +483,7 @@ impl<'a> PreparedBody<'a> {
                 )))
             };
             let refusal = match &body {
-                FunctionBody::Program(checked) => {
+                FunctionBody::Function(checked) => {
                     prepare.checked_declaration_refusal(&checked.function.body)
                 }
                 FunctionBody::Suite(suite) => suite.refusal,
@@ -629,11 +629,14 @@ impl<'a> PreparedBody<'a> {
             self.docstring.as_deref(),
         );
         let globals = &self.source.scopes.module_globals;
-        let frame = if initializer.fully_checked() {
-            location.emit_checked_body(frame, sites, &initializer.checked, globals, "", false)
-        } else {
-            location.emit_mixed_suite(frame, sites, initializer, globals, String::new(), false)
-        };
+        let frame = location.emit_body(
+            frame,
+            sites,
+            RegisteredBody::Suite(initializer),
+            globals,
+            "",
+            false,
+        );
         let code =
             frame.finish_module(|frame, sites| location.define_module_annotations(frame, sites));
         match output.diagnostic.take() {
@@ -691,13 +694,9 @@ enum Body<'a> {
         &'a crate::frontend::RegisteredClass,
         &'a crate::frontend::function_scope::classes::ClassScope,
     ),
-    Suite(&'a crate::frontend::RegisteredSuite),
     CheckedProvider(&'a crate::frontend::CheckedProvider, AnnotationScope),
     /// Named bodies carry their lexical global declarations into the checked frame.
-    Checked(
-        &'a crate::frontend::RegisteredFunction,
-        Option<&'a BTreeSet<String>>,
-    ),
+    Registered(RegisteredBody<'a>, Option<&'a BTreeSet<String>>),
     Operand(
         TextRange,
         &'a crate::frontend::RegisteredOperand,
@@ -727,14 +726,11 @@ struct TypeAliasDefinition {
     parameters: Option<crate::frontend::TypeParameterValues>,
 }
 
-/// Graph analysis owns program entries; physical preparation owns the other function suites.
-enum FunctionBody<'a> {
-    Program(&'a crate::frontend::RegisteredFunction),
-    Suite(Box<crate::frontend::RegisteredSuite>),
-}
+/// The graph owns analyzed functions. Source preparation owns the suites it builds.
+type FunctionBody<'a> = RegisteredBody<'a, Box<crate::frontend::RegisteredSuite>>;
 
+#[cfg(test)]
 impl FunctionBody<'_> {
-    #[cfg(test)]
     fn fully_checked(&self) -> bool {
         self.suite()
             .is_none_or(crate::frontend::RegisteredSuite::fully_checked)
@@ -742,14 +738,14 @@ impl FunctionBody<'_> {
 
     fn suite(&self) -> Option<&crate::frontend::RegisteredSuite> {
         match self {
-            Self::Program(_) => None,
+            Self::Function(_) => None,
             Self::Suite(suite) => Some(suite),
         }
     }
 
     fn checked(&self) -> &crate::frontend::RegisteredFunction {
         match self {
-            Self::Program(checked) => checked,
+            Self::Function(checked) => checked,
             Self::Suite(suite) => &suite.checked,
         }
     }
@@ -790,13 +786,11 @@ struct SourceInfo<'a> {
 
 impl SourceInfo<'_> {
     fn function_body(&self, site: TextSize) -> Body<'_> {
-        let plan = &self.function_bodies[&site];
-        if let Some(suite) = plan.suite().filter(|suite| !suite.fully_checked()) {
-            Body::Suite(suite)
-        } else {
-            let globals = &self.scopes.functions[&site].globals;
-            Body::Checked(plan.checked(), Some(globals))
-        }
+        let body = match &self.function_bodies[&site] {
+            FunctionBody::Function(checked) => RegisteredBody::Function(checked),
+            FunctionBody::Suite(suite) => RegisteredBody::Suite(suite.as_ref()),
+        };
+        Body::Registered(body, Some(&self.scopes.functions[&site].globals))
     }
 
     /// Keep documentation attached to the bundled definition, even when callers rebind its name.
@@ -841,13 +835,13 @@ impl SourceMap<'_> {
 }
 
 impl SourceMap<'_> {
-    fn emit_mixed_suite<'a, 'p>(
+    fn emit_body<'a, 'p>(
         &'p self,
         mut frame: RegisteredFrame<'a, 'p>,
-        sites: sites::CheckedSites,
-        suite: &'p crate::frontend::RegisteredSuite,
-        globals: &'p BTreeSet<String>,
-        prefix: String,
+        sites: CheckedSites,
+        body: RegisteredBody<'p>,
+        globals: &BTreeSet<String>,
+        prefix: &str,
         in_function: bool,
     ) -> RegisteredFrame<'a, 'p> {
         frame.declare_globals(globals);
@@ -859,26 +853,8 @@ impl SourceMap<'_> {
             declared_globals: globals,
             prefix,
         };
-        crate::llvm::registered::emit_prepared_suite(&mut function, suite);
+        body.emit(&mut function);
         function.frame
-    }
-
-    fn emit_checked_body<'a, 'p>(
-        &'p self,
-        mut frame: RegisteredFrame<'a, 'p>,
-        mut sites: sites::CheckedSites,
-        checked: &crate::frontend::RegisteredFunction,
-        globals: &BTreeSet<String>,
-        prefix: &str,
-        in_function: bool,
-    ) -> RegisteredFrame<'a, 'p> {
-        frame.declare_globals(globals);
-        sites.place_statements(
-            &checked.function.body,
-            &mut self.definitions(&mut frame, prefix, globals, in_function),
-        );
-        frame.checked_body(checked, &sites);
-        frame
     }
 
     fn code(
@@ -901,10 +877,10 @@ impl SourceMap<'_> {
         frame.async_generator = suspension == imre_ast::code_flags::ASYNC_GENERATOR;
         let mut sites = sites::CheckedSites::default();
         let frame = match body {
-            Body::Checked(checked, globals) => self.emit_checked_body(
+            Body::Registered(body, globals) => self.emit_body(
                 frame,
                 sites,
-                checked,
+                body,
                 globals.unwrap_or(&BTreeSet::new()),
                 &prefix,
                 in_function,
@@ -922,25 +898,14 @@ impl SourceMap<'_> {
                     frame.bind("__doc__", &value);
                 }
                 let globals = &class.bindings.globals;
-                let mut frame = if prepared.body.fully_checked() {
-                    self.emit_checked_body(
-                        frame,
-                        sites,
-                        &prepared.body.checked,
-                        globals,
-                        &prefix,
-                        in_function,
-                    )
-                } else {
-                    self.emit_mixed_suite(
-                        frame,
-                        sites,
-                        &prepared.body,
-                        globals,
-                        prefix.clone(),
-                        in_function,
-                    )
-                };
+                let mut frame = self.emit_body(
+                    frame,
+                    sites,
+                    RegisteredBody::Suite(&prepared.body),
+                    globals,
+                    &prefix,
+                    in_function,
+                );
                 self.finish_class_annotations(
                     &mut frame,
                     &prefix,
@@ -950,17 +915,13 @@ impl SourceMap<'_> {
                 );
                 frame
             }
-            Body::Suite(suite) => {
-                let globals = &self.scopes.functions[&start.expect("function definition")].globals;
-                self.emit_mixed_suite(frame, sites, suite, globals, prefix, in_function)
-            }
             Body::CheckedProvider(provider, scope) => {
                 frame.annotation_scope = scope;
                 match provider {
-                    Ok(checked) => self.emit_checked_body(
+                    Ok(checked) => self.emit_body(
                         frame,
                         sites,
-                        checked,
+                        RegisteredBody::Function(checked),
                         &BTreeSet::new(),
                         &prefix,
                         in_function,
@@ -1031,11 +992,11 @@ impl<'p> SourceMap<'p> {
     }
 }
 
-impl Function<'_, '_> {
+impl Function<'_, '_, '_> {
     fn definitions(&mut self) -> (&mut CheckedSites, LexicalDefinitions<'_, '_>) {
         let definitions = self.source.definitions(
             &mut self.frame,
-            &self.prefix,
+            self.prefix,
             self.declared_globals,
             self.in_function,
         );
@@ -1043,7 +1004,7 @@ impl Function<'_, '_> {
     }
 }
 
-impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<'a, 'p> {
+impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<'a, 'p, '_> {
     fn frame_and_sites(
         &mut self,
         operand: Option<&crate::ir::Expr>,
@@ -1076,7 +1037,7 @@ impl sites::SiteDefinitions for LexicalDefinitions<'_, '_> {
                 metadata: &lambda.metadata,
                 comprehension,
             },
-            Body::Checked(body, None),
+            Body::Registered(RegisteredBody::Function(body), None),
         )
     }
 
@@ -1124,7 +1085,7 @@ impl sites::SiteDefinitions for LexicalDefinitions<'_, '_> {
         let definition = self.compile_callable(
             site.start(),
             Callable::Generator(body),
-            Body::Checked(&body.body, None),
+            Body::Registered(RegisteredBody::Function(&body.body), None),
         );
         let targets = self.source.scopes.comprehension_targets[&site].clone();
         CompiledGenerator {
@@ -1569,24 +1530,24 @@ impl SourceMap<'_> {
     }
 }
 
-struct Function<'a, 'p> {
+struct Function<'a, 'p, 'scope> {
     sites: sites::CheckedSites,
     frame: RegisteredFrame<'a, 'p>,
     source: &'p SourceMap<'p>,
-    prefix: String,
-    declared_globals: &'p BTreeSet<String>,
+    prefix: &'scope str,
+    declared_globals: &'scope BTreeSet<String>,
     in_function: bool,
 }
 
 /// A prepared suite uses the activation's roots, exception state and lexical exits.
-impl<'a, 'p> std::ops::Deref for Function<'a, 'p> {
+impl<'a, 'p> std::ops::Deref for Function<'a, 'p, '_> {
     type Target = RegisteredFrame<'a, 'p>;
     fn deref(&self) -> &Self::Target {
         &self.frame
     }
 }
 
-impl std::ops::DerefMut for Function<'_, '_> {
+impl std::ops::DerefMut for Function<'_, '_, '_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.frame
     }
@@ -1708,7 +1669,7 @@ mod tests {
     ) -> &'s mut crate::frontend::RegisteredSuite {
         match source.function_bodies.get_mut(&start).unwrap() {
             FunctionBody::Suite(suite) => suite,
-            FunctionBody::Program(_) => panic!("expected the physical suite of a named function"),
+            FunctionBody::Function(_) => panic!("expected the physical suite of a named function"),
         }
     }
 

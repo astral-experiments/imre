@@ -233,7 +233,7 @@ impl<'f, 'p> Frame<'f, '_, 'p> {
         if self.body.terminated
             && let Some(child) = self.prepared_child(body)
         {
-            super::emit_prepared_suite(self.code.prepared_owner(), child);
+            super::RegisteredBody::Suite(child).emit(self.code.prepared_owner());
         } else {
             self.emit_suite(body);
         }
