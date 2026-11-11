@@ -55,7 +55,7 @@ struct Position {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Diagnostic<M = String> {
     message: M,
-    position: Option<Position>,
+    position: Option<Box<Position>>,
     path: Option<PathBuf>,
     pub(crate) kind: Kind,
     following: Box<[Diagnostic<M>]>,
@@ -89,13 +89,13 @@ impl<M> Diagnostic<M> {
         let line = prefix.bytes().filter(|&byte| byte == b'\n').count() + 1;
         let column = prefix.rsplit('\n').next().unwrap_or("").chars().count() + 1;
         Self {
-            position: Some(Position {
+            position: Some(Box::new(Position {
                 range,
                 entry_statement: None,
                 expected_from: None,
                 line,
                 column,
-            }),
+            })),
             ..Self::plain(message)
         }
     }
