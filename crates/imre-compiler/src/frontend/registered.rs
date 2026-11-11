@@ -75,6 +75,14 @@ impl<'a> RegisteredRegion<'a> {
     }
 
     pub(crate) fn private_slots(self) -> std::collections::BTreeSet<usize> {
+        self.frame_slots(|_, _| {})
+    }
+
+    /// Collect private slots and report the iterator kinds needed by this frame.
+    pub(crate) fn frame_slots(
+        self,
+        mut cursor: impl FnMut(usize, ir::IterNextKind),
+    ) -> std::collections::BTreeSet<usize> {
         let mut slots = std::collections::BTreeSet::new();
         self.walk(&mut |node, _| match node {
             ir::Node::Statement(Statement::Scope { clear, .. })
@@ -83,6 +91,9 @@ impl<'a> RegisteredRegion<'a> {
                 ..
             }) => {
                 slots.extend(clear);
+            }
+            ir::Node::Statement(Statement::IterNext { iterator, kind, .. }) => {
+                cursor(*iterator, *kind);
             }
             _ => {}
         });
