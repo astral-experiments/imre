@@ -3,6 +3,7 @@
 use super::frame::SourcePosition;
 use super::{Frame, FrameEmitter, RegisteredFrame};
 use crate::ir::{ContextBinding, ContextSite, Expr, Statement};
+use crate::llvm::{Completion, finally::Finalbody};
 use ruff_text_size::TextRange;
 
 /// An acquired manager owns both the normal and exceptional exit edges.
@@ -190,18 +191,9 @@ impl RegisteredFrame<'_, '_> {
 }
 
 impl<'p> Frame<'_, '_, 'p> {
-    pub(super) fn emit_finally(&mut self, suite: &Finally<'p>) {
-        match suite {
-            Finally::Checked(statements) => self.emit_suite(statements),
-            Finally::Prepared(body) => {
-                super::RegisteredBody::Suite(*body).emit(self.code.prepared_owner())
-            }
-        }
-    }
-
     pub(super) fn return_from_regions(&mut self, value: String) {
         self.live.push(value.clone());
-        self.exit_regions(0, Some(&value));
+        self.exit_regions(0, &Completion::Return(value.clone()));
         self.live.pop();
         if !self.body.terminated {
             self.return_value(&value);
@@ -216,12 +208,21 @@ impl<'p> Frame<'_, '_, 'p> {
             Statement::Exhaust => (&target.edges.exhausted, target.step_depth),
             _ => unreachable!("loop transfer"),
         };
-        let label = label.clone();
-        self.exit_regions(depth, None);
+        self.jump_from_regions(label.clone(), depth);
+    }
+
+    pub(super) fn jump_from_regions(&mut self, label: String, depth: usize) {
+        self.exit_regions(
+            depth,
+            &Completion::Jump {
+                label: label.clone(),
+                depth,
+            },
+        );
         self.jump(&label);
     }
 
-    fn exit_regions(&mut self, depth: usize, pending_return: Option<&str>) {
+    fn exit_regions(&mut self, depth: usize, completion: &Completion<String>) {
         if self.regions.len() == depth {
             return;
         }
@@ -231,37 +232,17 @@ impl<'p> Frame<'_, '_, 'p> {
         while self.regions.len() > depth && !self.body.terminated {
             // An exit inside a final suite can override the original transfer. It
             // must see only the regions outside the cleanup currently being run.
-            let region = self.regions.pop().unwrap();
-            match &region {
+            let mut region = self.regions.pop().unwrap();
+            match &mut region {
                 Region::Context { exit, outer } => {
                     self.body.error_target.clone_from(outer);
                     self.leave_context(exit, &mut discarded);
                     self.flush_check();
                 }
                 Region::Slots(slots) => self.clear_slots(slots),
-                Region::Finally {
-                    body,
-                    outer,
-                    loops,
-                    caught,
-                } => {
-                    self.body.error_target.clone_from(outer);
-                    let inner_loops = self.loops.split_off(*loops);
-                    let inner_handlers = self.caught.split_off(*caught);
-                    let value = pending_return.filter(|value| *value != "0");
-                    if let Some(value) = value {
-                        self.regions.push(Region::Pending {
-                            value: value.into(),
-                            enclosing: None,
-                            outer: outer.clone(),
-                        });
-                    }
-                    self.emit_finally(body);
-                    if value.is_some() {
-                        self.regions.pop();
-                    }
-                    self.caught.extend(inner_handlers);
-                    self.loops.extend(inner_loops);
+                Region::Finally(finalbody) => {
+                    self.flush_check();
+                    finalbody.enter(&mut self.body, completion.clone(), None);
                 }
                 Region::ExceptionName { name, outer } => {
                     self.body.error_target.clone_from(outer);
@@ -274,22 +255,19 @@ impl<'p> Frame<'_, '_, 'p> {
                     outer,
                 } => {
                     self.body.error_target.clone_from(outer);
-                    let done = enclosing.as_ref().map(|caught| {
-                        let pending = self.value(&format!("icmp ne i64 {value}, 0"));
-                        let restore = self.name("b");
-                        let done = self.name("b");
-                        self.branch(&pending, &restore, &done);
-                        self.label(&restore);
+                    let pending = self.value(&format!("icmp ne i64 {value}, 0"));
+                    let release = self.name("b");
+                    let done = self.name("b");
+                    self.branch(&pending, &release, &done);
+                    self.label(&release);
+                    if let Some(caught) = enclosing {
                         self.op("restore_caught", &[caught]);
-                        done
-                    });
+                    }
                     let index = self.live.iter().rposition(|v| v == value).unwrap();
                     discarded.push((index, self.live.remove(index)));
                     self.release_target(None);
-                    if let Some(done) = done {
-                        self.jump(&done);
-                        self.label(&done);
-                    }
+                    self.jump(&done);
+                    self.label(&done);
                 }
             }
             left.push(region);
@@ -302,23 +280,13 @@ impl<'p> Frame<'_, '_, 'p> {
     }
 }
 
-pub(crate) enum Finally<'p> {
-    Checked(std::rc::Rc<[Statement]>),
-    Prepared(&'p crate::frontend::RegisteredSuite),
-}
-
-pub(crate) enum Region<'p> {
+pub(super) enum Region {
     Slots(Vec<usize>),
     Context {
         exit: ContextRegion,
         outer: String,
     },
-    Finally {
-        body: Finally<'p>,
-        outer: String,
-        loops: usize,
-        caught: usize,
-    },
+    Finally(Finalbody<String>),
     ExceptionName {
         name: String,
         outer: String,

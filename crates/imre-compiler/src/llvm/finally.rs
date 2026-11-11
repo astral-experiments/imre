@@ -1,20 +1,20 @@
-use super::{Cleanup, Completion, Emitter, Statement, Type, Value};
+use super::{Cleanup, Completion, Emitter, Statement, Type, Value, body::FunctionBody};
 
 /// The LLVM predecessors of one lexical finalbody. The pending action and its
 /// owners remain distinct even when several protected exits share a destination.
-pub(super) struct Finalbody {
-    entry: String,
-    edges: Vec<Edge>,
+pub(super) struct Finalbody<V = Value> {
+    pub(super) entry: String,
+    edges: Vec<Edge<V>>,
 }
 
-struct Edge {
+pub(super) struct Edge<V> {
     from: String,
-    completion: Completion,
-    exception: Option<(Value, Value)>,
+    pub(super) completion: Completion<V>,
+    pub(super) exception: Option<(V, V)>,
 }
 
 impl<T> Completion<T> {
-    fn map_return<U>(&self, f: impl FnOnce(&T) -> U) -> Completion<U> {
+    pub(super) fn map_return<U>(&self, f: impl FnOnce(&T) -> U) -> Completion<U> {
         match self {
             Self::Return(value) => Completion::Return(f(value)),
             Self::Jump { label, depth } => Completion::Jump {
@@ -26,12 +26,55 @@ impl<T> Completion<T> {
     }
 }
 
-impl Finalbody {
-    fn phi(
+impl<V> Finalbody<V> {
+    pub(super) fn new(entry: String) -> Self {
+        Self {
+            entry,
+            edges: Vec::new(),
+        }
+    }
+
+    /// Save this predecessor's completion before transferring to the single cleanup.
+    pub(super) fn enter(
+        &mut self,
+        body: &mut FunctionBody,
+        completion: Completion<V>,
+        exception: Option<(V, V)>,
+    ) {
+        self.edges.push(Edge {
+            from: body.current.clone(),
+            completion,
+            exception,
+        });
+        body.jump(&self.entry);
+    }
+
+    pub(super) fn completions<T: PartialEq>(
         &self,
-        out: &mut Emitter<'_, '_>,
+        out: &mut FunctionBody,
+        returned: impl Fn(&V) -> T,
+    ) -> (Vec<Completion<T>>, String) {
+        let mut targets = Vec::new();
+        let tag = self.phi(out, "i32", |edge| {
+            let target = edge.completion.map_return(&returned);
+            let index = targets
+                .iter()
+                .position(|seen| *seen == target)
+                .unwrap_or_else(|| {
+                    let index = targets.len();
+                    targets.push(target);
+                    index
+                });
+            index.to_string()
+        });
+        (targets, tag)
+    }
+
+    pub(super) fn phi(
+        &self,
+        out: &mut FunctionBody,
         ty: &str,
-        operand: impl Fn(&Edge) -> String,
+        mut operand: impl FnMut(&Edge<V>) -> String,
     ) -> String {
         if let [edge] = self.edges.as_slice() {
             return operand(edge);
@@ -44,14 +87,16 @@ impl Finalbody {
             .join(", ");
         out.instruction(format!("phi {ty} {incoming}"))
     }
+}
 
+impl Finalbody {
     fn owner(
         &self,
         out: &mut Emitter<'_, '_>,
         ty: Type,
-        get: impl Fn(&Edge) -> Option<&Value>,
+        get: impl Fn(&Edge<Value>) -> Option<&Value>,
     ) -> Value {
-        let operand = self.phi(out, ty.llvm(), |edge| {
+        let operand = self.phi(&mut out.body, ty.llvm(), |edge| {
             get(edge).map_or_else(|| ty.initial().to_owned(), |value| value.operand.clone())
         });
         Value {
@@ -66,10 +111,7 @@ impl Emitter<'_, '_> {
     pub(super) fn push_finalbody(&mut self) {
         let entry = self.label();
         self.cleanups.push(Cleanup::Finally(self.finalbodies.len()));
-        self.finalbodies.push(Finalbody {
-            entry,
-            edges: Vec::new(),
-        });
+        self.finalbodies.push(Finalbody::new(entry));
     }
 
     pub(super) fn enter_finalbody(&mut self, region: usize, completion: Completion) {
@@ -82,13 +124,7 @@ impl Emitter<'_, '_> {
         } else {
             None
         };
-        let region = &mut self.finalbodies[region];
-        region.edges.push(Edge {
-            from: self.body.current.clone(),
-            completion,
-            exception,
-        });
-        self.body.jump(&region.entry);
+        self.finalbodies[region].enter(&mut self.body, completion, exception);
     }
 
     /// A transfer out of the cleanup replaces the pending exception only on
@@ -118,21 +154,7 @@ impl Emitter<'_, '_> {
         }
         let before = self.body.code.len();
         let previous_bytes = self.cleanup_bytes;
-        let mut targets = Vec::new();
-        for edge in &region.edges {
-            let target = edge.completion.map_return(|value| value.ty);
-            if !targets.contains(&target) {
-                targets.push(target);
-            }
-        }
-        let tag = region.phi(self, "i32", |edge| {
-            let target = edge.completion.map_return(|value| value.ty);
-            targets
-                .iter()
-                .position(|t| *t == target)
-                .unwrap()
-                .to_string()
-        });
+        let (targets, tag) = region.completions(&mut self.body, |value| value.ty);
         let returned = targets.iter().find_map(|target| match target {
             Completion::Return(ty) => {
                 Some(region.owner(self, *ty, |edge| match &edge.completion {
