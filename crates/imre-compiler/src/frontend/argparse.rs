@@ -1061,7 +1061,7 @@ impl Parsers {
                         continue;
                     };
                     if graph.resolve(module_id, &ctor.func)
-                        != Some(Binding::Intrinsic(Intrinsic::ArgumentParser))
+                        != Some(Binding::Intrinsic(Intrinsic::ARGUMENT_PARSER))
                     {
                         continue;
                     }
