@@ -681,11 +681,12 @@ impl Reachable {
                             accessors.insert(method.name.as_str());
                         }
                         if let ast::Stmt::Assign(assign) = item
-                            && let Some((get, set)) =
+                            && let Some(operands) =
                                 crate::classes::property_accessors(graph, id.module, &assign.value)
                         {
-                            accessors.insert(get);
-                            accessors.extend(set);
+                            accessors.extend(operands.iter().filter_map(|operand| {
+                                operand.as_name_expr().map(|name| name.id.as_str())
+                            }));
                         }
                     }
                     for item in &class.body {

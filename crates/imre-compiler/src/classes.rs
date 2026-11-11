@@ -645,7 +645,7 @@ fn collect_class(
     let mut methods: Vec<ast::StmtFunctionDef> = Vec::new();
     let mut method_kinds = Vec::new();
     let mut needs_object_layout = false;
-    let mut has_async_iterator = false;
+    let mut builds_python_namespace = false;
     let mut initializer = None;
     for (ordinal, statement) in node.body.iter().enumerate() {
         // A type-only method declaration may have a separate runtime signature.
@@ -1076,7 +1076,7 @@ fn collect_class(
                         &format!("{name} must be an instance method taking only self"),
                     ));
                 }
-                has_async_iterator |= async_iterator;
+                builds_python_namespace |= async_iterator;
                 if name == "__init__" {
                     if kind != MethodKind::Instance {
                         return Err(
@@ -1096,22 +1096,39 @@ fn collect_class(
             ast::Stmt::Assign(assign)
                 if let [ast::Expr::Name(name)] = assign.targets.as_slice()
                     && !class_bindings.contains("property")
-                    && let Some((read, write)) =
+                    && let Some(accessors) =
                         property_accessors(graph, definition.module, &assign.value) =>
             {
                 if !names.insert(name.id.to_string()) {
                     return Err(module.diagnostic(name, "duplicate property binding"));
                 }
-                for (accessor, kind, arity) in [
-                    (Some(read), MethodKind::Property, 1),
-                    (write, MethodKind::PropertySetter, 2),
-                ] {
-                    let Some(accessor) = accessor else { continue };
+                for (index, operand) in accessors.iter().enumerate() {
+                    let Some(accessor) = operand.as_name_expr() else {
+                        // Reading a write-only property raises through the Python descriptor.
+                        builds_python_namespace |= index == 0;
+                        continue;
+                    };
+                    let accessor = accessor.id.as_str();
+                    let (kind, arity) = if index == 0 {
+                        (MethodKind::Property, 1)
+                    } else {
+                        (MethodKind::PropertySetter, 2)
+                    };
                     let Some((method, _)) = methods
                         .iter()
                         .zip(&method_kinds)
                         .find(|(m, k)| m.name.as_str() == accessor && **k == MethodKind::Instance)
                     else {
+                        if !class_bindings.contains(accessor)
+                            && let Some(Binding::Definition(id)) =
+                                graph.resolve(definition.module, operand)
+                            && graph.modules[id.module].parsed.syntax().body[id.statement]
+                                .is_function_def_stmt()
+                        {
+                            // The class captures the existing function from its defining module.
+                            builds_python_namespace = true;
+                            continue;
+                        }
                         return Err(module.diagnostic(
                             assign,
                             "property accessors must be preceding instance methods",
@@ -1485,9 +1502,8 @@ fn collect_class(
             |name| hook_writes(name, None),
         )?;
     }
-    // Iteration creates an async generator through the Python class namespace.
-    // Keep checking the whole declaration before choosing its representation.
-    if has_async_iterator {
+    // Finish validating the declaration before constructing its Python namespace.
+    if builds_python_namespace {
         return Ok(None);
     }
     Ok(Some(Class {
@@ -1522,7 +1538,7 @@ pub(crate) fn property_accessors<'a>(
     graph: &SourceGraph,
     module: usize,
     value: &'a ast::Expr,
-) -> Option<(&'a str, Option<&'a str>)> {
+) -> Option<&'a [ast::Expr]> {
     let ast::Expr::Call(call) = value else {
         return None;
     };
@@ -1532,13 +1548,12 @@ pub(crate) fn property_accessors<'a>(
     {
         return None;
     }
-    match call.arguments.args.as_ref() {
-        [ast::Expr::Name(get)] => Some((get.id.as_str(), None)),
-        [ast::Expr::Name(get), ast::Expr::Name(set)] => {
-            Some((get.id.as_str(), Some(set.id.as_str())))
-        }
-        _ => None,
-    }
+    let args = call.arguments.args.as_ref();
+    ((1..=2).contains(&args.len())
+        && args
+            .iter()
+            .all(|arg| arg.is_name_expr() || arg.is_none_literal_expr()))
+    .then_some(args)
 }
 
 /// Resolve declarations whose descriptor cannot bind an instance: a sealed
