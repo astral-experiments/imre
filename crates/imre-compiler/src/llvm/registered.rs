@@ -23,7 +23,7 @@ use ruff_python_ast::CmpOp;
 use ruff_python_ast::UnaryOp;
 use sites::CheckedSites;
 
-use crate::llvm::operations::{CheckedBody, CheckedValue, LoopEdges};
+use crate::llvm::operations::{CheckedBody, CheckedValue, LoopEdges, ValueUse};
 use context::Region;
 use std::cell::Cell;
 use std::collections::HashMap;
@@ -580,7 +580,8 @@ impl Frame<'_, '_, '_> {
     }
 
     pub(crate) fn evaluate_handle(&mut self, expr: &Expr) -> String {
-        let value = self.evaluate(expr);
+        let value =
+            CheckedBody::registered(self.reborrow()).value_for(expr, ValueUse::PythonHandle);
         self.materialize(&value)
     }
 
@@ -1376,9 +1377,7 @@ impl Frame<'_, '_, '_> {
                     self.code
                         .line(&format!("call void @imre_int_retain(i64 {word})"));
                 }
-                self.code.checked(&format!(
-                    "call i64 @imre_dyn_take_int(ptr %ctx, i64 {word})"
-                ))
+                self.code.take_integer(word)
             }
         }
     }
@@ -1492,6 +1491,10 @@ impl RegisteredFrame<'_, '_> {
     /// The heap takes the reference even if adding its temporary root fails.
     fn move_integer(&mut self, slot: usize, word: &str) -> String {
         self.line(&format!("store i64 1, ptr %int_owner{slot}"));
+        self.take_integer(word)
+    }
+
+    pub(super) fn take_integer(&mut self, word: &str) -> String {
         self.checked(&format!(
             "call i64 @imre_dyn_take_int(ptr %ctx, i64 {word})"
         ))

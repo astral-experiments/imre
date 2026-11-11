@@ -131,9 +131,9 @@ fn captured_publish_emits_its_registered_callback_and_error_return() {
     assert!(body.contains(&format!(
         "call void @imre_dyn_call_position(ptr %ctx, ptr @pos{pos})"
     )));
-    assert!(body.contains("store i64 1, ptr %int_owner0"));
+    assert_eq!(body.matches("call i64 @imre_dyn_take_int(").count(), 1);
+    assert!(!body.contains("%int_owner"));
     let (_, failure) = body.split_once("\nfailed:\n").unwrap();
-    assert!(failure.contains("call void @imre_int_release("));
     assert!(failure.contains("ret i64 0"));
 }
 
@@ -280,6 +280,8 @@ fn integer_product_consumes_its_operands_without_reprojecting_the_sum() {
     );
     assert_eq!(body.matches("call i64 @int_add(").count(), 1);
     assert_eq!(body.matches("call i64 @int_mul(").count(), 1);
+    let (_, failure) = body.split_once("\nfailed:\n").unwrap();
+    assert!(failure.contains("call void @imre_int_release("));
     for op in [plus, product] {
         assert_eq!(
             body.matches(&format!("call i64 @imre_dyn_op_at(ptr %ctx, ptr {op},"))

@@ -39,10 +39,17 @@ pub(crate) enum CheckedValue {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum ValueUse {
+pub(super) enum ValueUse {
     General,
+    PythonHandle,
     IntegerOperand,
     FinalIntegerOperand,
+}
+
+impl ValueUse {
+    fn needs_integer(self) -> bool {
+        matches!(self, Self::IntegerOperand | Self::FinalIntegerOperand)
+    }
 }
 
 /// Only the checked operation that owns a physical location may pass it to a
@@ -81,8 +88,8 @@ impl CheckedValue {
             (Self::Handle { exact_word: a, .. }, Self::Handle { exact_word: b, .. }) => {
                 match (a, b) {
                     (Some(_), Some(_)) => true,
-                    (Some(_), None) => right == Type::Int || usage != ValueUse::General,
-                    (None, Some(_)) => left == Type::Int || usage != ValueUse::General,
+                    (Some(_), None) => right == Type::Int || usage.needs_integer(),
+                    (None, Some(_)) => left == Type::Int || usage.needs_integer(),
                     (None, None) => left == Type::Int || right == Type::Int,
                 }
             }
@@ -90,7 +97,10 @@ impl CheckedValue {
         }
     }
 
-    fn frame_integer(value: Value, frame: &mut CheckedFrame<'_, '_, '_>) -> Self {
+    fn frame_integer(value: Value, frame: &mut CheckedFrame<'_, '_, '_>, usage: ValueUse) -> Self {
+        if usage == ValueUse::PythonHandle {
+            return Self::handle(frame.take_integer(&value.operand));
+        }
         let owner = frame.own_word(&value.operand);
         Self::Native(
             Operand {
@@ -304,9 +314,13 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
     }
 
     fn evaluate(&mut self, expr: &Expr) -> CheckedValue {
+        self.evaluate_for(expr, ValueUse::General)
+    }
+
+    fn evaluate_for(&mut self, expr: &Expr, usage: ValueUse) -> CheckedValue {
         match &mut self.0 {
             Entry::Native(emitter) => CheckedValue::owned(emitter.expr(expr)),
-            Entry::Registered(_) => self.emit_value(expr),
+            Entry::Registered(_) => self.value_for(expr, usage),
         }
     }
 
@@ -459,6 +473,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         left: &CheckedValue,
         right: &CheckedValue,
         span: Option<[usize; 4]>,
+        usage: ValueUse,
     ) -> CheckedValue {
         let (a, check_a) = self.integer_operand(left);
         let (b, check_b) = self.integer_operand(right);
@@ -490,7 +505,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         };
         let exact = |code: &mut Self| {
             let value = code.body().integer_arithmetic(op, &a, &b);
-            CheckedValue::frame_integer(value, code.python())
+            CheckedValue::frame_integer(value, code.python(), usage)
         };
         let Some(guard) = guard else {
             return exact(self);
@@ -623,14 +638,13 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 || expr.ty == Type::PythonObject
                 || checked_ints)
             || op == Binary::Modulo && checked_ints;
-        let (left_use, right_use) = if arithmetic
-            && (op == Binary::Multiply || checked_ints || usage != ValueUse::General)
-        {
-            // The left operand must be ready before the right can call Python.
-            (ValueUse::IntegerOperand, ValueUse::FinalIntegerOperand)
-        } else {
-            (ValueUse::General, ValueUse::General)
-        };
+        let (left_use, right_use) =
+            if arithmetic && (op == Binary::Multiply || checked_ints || usage.needs_integer()) {
+                // The left operand must be ready before the right can call Python.
+                (ValueUse::IntegerOperand, ValueUse::FinalIntegerOperand)
+            } else {
+                (ValueUse::General, ValueUse::General)
+            };
         // On a placed body the cursor follows execution's preorder walk. Read
         // each operand's range before evaluating it, including an entire nested lhs.
         let mut operand = |expr, usage| {
@@ -662,7 +676,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 || checked_ints
                 || a.can_use_integer_arithmetic(left.ty, &b, right.ty, usage)
             {
-                self.integer_arithmetic(op, &a, &b, span)
+                self.integer_arithmetic(op, &a, &b, span, usage)
             } else {
                 self.python_binary(op, &a, &b, span)
             }
@@ -680,7 +694,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         self.value_for(expr, ValueUse::General)
     }
 
-    fn value_for(&mut self, expr: &Expr, usage: ValueUse) -> CheckedValue {
+    pub(super) fn value_for(&mut self, expr: &Expr, usage: ValueUse) -> CheckedValue {
         if let Entry::Registered(frame) = &mut self.0
             && let Some(range) = frame.next_fixed_site()
         {
@@ -890,7 +904,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                     }
                     Entry::Registered(_) => false,
                 };
-                let value = self.evaluate(expr);
+                let value = self.evaluate_for(expr, ValueUse::PythonHandle);
                 match &mut self.0 {
                     Entry::Native(emitter) => emitter.assign_native(*slot, value, previous_small),
                     Entry::Registered(frame) => frame.assign(*slot, value),
@@ -914,7 +928,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             }
             Statement::Match(subject, cases) => self.emit_prepared_match(subject, cases),
             Statement::Return(expr) => {
-                let value = self.evaluate(expr);
+                let value = self.evaluate_for(expr, ValueUse::PythonHandle);
                 match &mut self.0 {
                     Entry::Native(emitter) => emitter.return_result(value),
                     Entry::Registered(frame) => frame.return_result(value),
