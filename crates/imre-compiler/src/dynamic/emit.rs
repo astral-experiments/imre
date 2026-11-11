@@ -87,13 +87,7 @@ pub(super) fn emit(
     let split = !matches!(layout, crate::CodegenLayout::Whole);
     let mut units = Vec::new();
     let mut used_archive = false;
-    let mut root = ModuleLauncher::new(
-        config,
-        python_optimization < 2,
-        units_to_emit.iter().any(|unit| unit.zip.is_some()),
-        units_to_emit.iter().any(|unit| unit.builtin),
-        units_to_emit.iter().any(|unit| unit.initializer.is_err()),
-    );
+    let mut root = ModuleLauncher::new(config, python_optimization < 2);
     // The requested whole IR and split native root share their exact prefix.
     // Fork only when the split layout acquires its first independent local unit.
     let mut whole: Option<ModuleLauncher> = None;
@@ -6500,6 +6494,16 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
                     "builtin_source"
                 ],
             );
+            let mut declared: Vec<_> = ir
+                .lines()
+                .filter_map(|line| line.strip_prefix("declare void @imre_dyn_register_"))
+                .map(|line| line.split_once('(').unwrap().0)
+                .collect();
+            let mut used: Vec<_> = calls.iter().map(|(name, _)| *name).collect();
+            declared.sort_unstable();
+            used.sort_unstable();
+            used.dedup();
+            assert_eq!(declared, used);
             let constant = |encoded: &str| {
                 let suffix = format!(r#"c"{encoded}\00""#);
                 ir.lines()
