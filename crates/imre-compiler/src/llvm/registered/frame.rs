@@ -1771,6 +1771,7 @@ pub(crate) trait FrameEmitter<'a, 'p>:
         op: &Builtin,
         target: &'e T,
         mut args: impl Iterator<Item = &'e T>,
+        exec: Option<(String, u32)>,
         mut evaluate: impl FnMut(&mut Self, &T) -> String,
     ) -> String {
         match op {
@@ -1786,7 +1787,7 @@ pub(crate) trait FrameEmitter<'a, 'p>:
                 self.release_owned_operands(&mark);
                 result
             }
-            Builtin::RegisteredCall(call) => self.call_value(call, target, args, evaluate),
+            Builtin::RegisteredCall(call) => self.call_value(call, target, args, exec, evaluate),
             Builtin::RegisteredAttribute {
                 action,
                 name,
@@ -1831,6 +1832,7 @@ pub(crate) trait FrameEmitter<'a, 'p>:
         call: &ir::RegisteredCall,
         target: &T,
         mut args: impl Iterator<Item = &'e T>,
+        exec: Option<(String, u32)>,
         mut evaluate: impl FnMut(&mut Self, &T) -> String,
     ) -> String {
         use ir::{RegisteredArguments, RegisteredCallTarget};
@@ -1868,6 +1870,12 @@ pub(crate) trait FrameEmitter<'a, 'p>:
                 (callee, bound, attribute.end())
             }),
         };
+        let fixed_arguments = |frame: &mut Self, mut values: Vec<String>| {
+            if let Some(child) = &exec {
+                frame.link_exec_operand(&callable, &mut values[0], child);
+            }
+            frame.handle_array(&values)
+        };
         let operands = match &call.arguments {
             RegisteredArguments::Positional => {
                 let receiver_slot = receiver.is_some();
@@ -1875,7 +1883,7 @@ pub(crate) trait FrameEmitter<'a, 'p>:
                     .into_iter()
                     .chain(args.map(|a| evaluate(self, a)))
                     .collect();
-                let (array, count) = self.handle_array(&values);
+                let (array, count) = fixed_arguments(self, values);
                 if let Some((index, range)) = call.partition_field {
                     let span = self.expression_range_span(range, call.range.end(), b'[');
                     let get_position =
@@ -1896,7 +1904,7 @@ pub(crate) trait FrameEmitter<'a, 'p>:
             }
             RegisteredArguments::Keywords { positional, names } => {
                 let values: Vec<_> = args.map(|a| evaluate(self, a)).collect();
-                let (array, _) = self.handle_array(&values);
+                let (array, _) = fixed_arguments(self, values);
                 CallArguments::FixedKeywords {
                     array,
                     positional: *positional,
@@ -2151,6 +2159,23 @@ impl RegisteredFrame<'_, '_> {
 }
 
 impl RegisteredFrame<'_, '_> {
+    pub(crate) fn link_exec_operand(
+        &mut self,
+        callable: &str,
+        source: &mut String,
+        (entry, flags): &(String, u32),
+    ) {
+        if !self.output.declarations.exec_operand {
+            self.output
+                .functions
+                .push_str("declare i64 @imre_dyn_exec_operand(ptr, i64, i64, ptr, i32)\n");
+            self.output.declarations.exec_operand = true;
+        }
+        *source = self.checked(&format!(
+            "call i64 @imre_dyn_exec_operand(ptr %ctx, i64 {callable}, i64 {source}, ptr {entry}, i32 {flags})"
+        ));
+    }
+
     pub(crate) fn invoke(&mut self, callable: &str, values: &[&str]) -> String {
         self.invoke_at(callable, values, None)
     }

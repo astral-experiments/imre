@@ -20,7 +20,7 @@ use std::sync::Arc;
 use ruff_db::diagnostic::{Diagnostic, DiagnosticId, DisplayDiagnosticConfig, Severity};
 use ruff_db::files::{File, Files, system_path_to_file};
 use ruff_db::parsed::ParsedModuleRef;
-use ruff_db::system::{InMemorySystem, System, SystemPathBuf};
+use ruff_db::system::{InMemorySystem, System, SystemPath, SystemPathBuf};
 use ruff_db::vendored::VendoredFileSystem;
 use ruff_python_ast::token::{TokenKind, Tokens};
 use ruff_python_ast::visitor::{Visitor, walk_stmt};
@@ -433,7 +433,7 @@ impl Session {
             sources
                 .clone()
                 .filter(|(_, source)| source.check_execution)
-                .map(|(id, source)| (id, source.path)),
+                .map(|(id, source)| (id, source.path, source.has_open_exec)),
             captures,
         );
         let files = self.check_run_path_callers(sources, has_file_body);
@@ -444,16 +444,68 @@ impl Session {
     }
 }
 
+impl Session {
+    pub(crate) fn registered_syntax<'a>(
+        slot: &'a mut Option<Self>,
+        root: &Path,
+        roots: &[PathBuf],
+    ) -> Result<&'a mut Self, String> {
+        Ok(match slot {
+            Some(session) => session,
+            slot @ None => slot.insert(Self::with_storage(
+                root,
+                roots,
+                salsa::Storage::default(),
+                true,
+            )?),
+        })
+    }
+
+    /// Make the actual selected provider visible before resolving candidate callees.
+    /// Sync parent directories too: an earlier level may have looked up a missing package.
+    pub(crate) fn seed(&mut self, path: &Path, source: &str) -> Result<(), String> {
+        let source = crate::normalize_source(source, crate::SourceKind::DecodedFile)?;
+        let text = imre_ast::indentation::prepare(&source);
+        let origin = SystemPath::new(path.to_str().ok_or("module paths must be valid UTF-8")?);
+        let fs = self.db.system.fs();
+        let missing: Vec<_> = origin
+            .parent()
+            .into_iter()
+            .flat_map(SystemPath::ancestors)
+            .take_while(|dir| !fs.is_directory(dir))
+            .collect();
+        fs.write_file_all(origin, text.text.as_bytes())
+            .map_err(|error| error.to_string())?;
+        for directory in missing.into_iter().rev() {
+            File::sync_path(&mut self.db, directory);
+        }
+        File::sync_path(&mut self.db, origin);
+        Ok(())
+    }
+    pub(crate) fn selected_file(
+        &self,
+        path: &Path,
+    ) -> Result<(File, ParsedModuleRef, ruff_db::source::SourceText), String> {
+        let origin = path.to_str().ok_or("module paths must be valid UTF-8")?;
+        let file = system_path_to_file(&self.db, origin).map_err(|e| e.to_string())?;
+        Ok((
+            file,
+            self.parsed(file),
+            ruff_db::source::source_text(&self.db, file),
+        ))
+    }
+}
+
 /// Validate each native initializer at its own origin. Text retained for a
 /// later file import has no executable body at this stage.
 pub(crate) fn check_native_syntax<'a>(
     root: &Path,
+    mut scratch: Option<Session>,
     checked: Option<&crate::modules::SourceGraph>,
     modules: impl Iterator<Item = &'a (String, PathBuf, String)>,
     is_alternative: impl Fn(&Path) -> bool,
     module_errors: &mut HashMap<PathBuf, Box<crate::dynamic::ModuleSyntaxError>>,
 ) -> Result<(), String> {
-    let mut scratch = None;
     for (name, path, source) in modules {
         let input = imre_ast::indentation::prepare(source);
         let cached = checked.and_then(|graph| {
@@ -470,15 +522,7 @@ pub(crate) fn check_native_syntax<'a>(
         let (session, file) = if let Some(cached) = cached {
             cached
         } else {
-            let session = match &mut scratch {
-                Some(session) => session,
-                slot @ None => slot.insert(Session::with_storage(
-                    root,
-                    &[],
-                    salsa::Storage::default(),
-                    true,
-                )?),
-            };
+            let session = Session::registered_syntax(&mut scratch, root, &[])?;
             let origin = path.to_str().ok_or("module paths must be valid UTF-8")?;
             let file = session.write_file(origin, &input.text)?;
             file.sync(&mut session.db);
@@ -802,6 +846,20 @@ impl Session {
         let input = imre_ast::indentation::prepare(source);
         check_source_complexity(&input.text).map_err(|error| format!("{path}: {error}"))?;
         let file = self.write_file(path, &input.text)?;
+        let (parsed, spreads) = self.checked_parse(file, path, source, &input, kind)?;
+        self.files.push(file);
+        self.tuple_spreads.push(spreads);
+        Ok(parsed)
+    }
+
+    fn checked_parse(
+        &self,
+        file: File,
+        path: &str,
+        source: &str,
+        input: &imre_ast::indentation::Source<'_>,
+        kind: crate::SourceKind,
+    ) -> Result<(ParsedModuleRef, HashMap<TextSize, usize>), String> {
         let parsed = self.parsed(file);
         if let Some(issue) = input.first_issue(parsed.errors().first()) {
             return Err(format!("{path}: {issue}"));
@@ -842,9 +900,7 @@ impl Session {
         };
         inferred_shapes::check(&parsed.syntax().body, parsed.tokens().len())
             .map_err(|error| format!("{path}: {error}"))?;
-        self.files.push(file);
-        self.tuple_spreads.push(spreads);
-        Ok(parsed)
+        Ok((parsed, spreads))
     }
 
     fn semantic_syntax_error(
@@ -1173,8 +1229,15 @@ impl Session {
         module: usize,
         expression: &Expr,
     ) -> Option<ty_python_core::definition::Definition<'_>> {
-        let index =
-            ty_python_core::semantic_index(&self.db, self.db.program_file(self.files[module]));
+        self.file_binding(self.files[module], expression)
+    }
+
+    fn file_binding(
+        &self,
+        file: File,
+        expression: &Expr,
+    ) -> Option<ty_python_core::definition::Definition<'_>> {
+        let index = ty_python_core::semantic_index(&self.db, self.db.program_file(file));
         let scope = index.try_expression_scope_id(expression)?;
         let use_id = index.try_expression_use_id(expression.into())?;
         let mut bindings = index.use_def_map(scope).bindings_at_use(use_id);

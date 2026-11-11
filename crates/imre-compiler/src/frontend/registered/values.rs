@@ -343,6 +343,50 @@ fn callable_target(call: &ast::ExprCall) -> ir::RegisteredCallTarget {
     }
 }
 
+/// A live exec lookup still sees the original literal and namespace arguments.
+pub(crate) fn fixed_exec_literal(call: &ast::ExprCall) -> Option<&ast::ExprStringLiteral> {
+    if call.func.as_name_expr()?.id.as_str() != "exec" {
+        return None;
+    }
+    let args = &call.arguments.args;
+    let literal = args.first()?.as_string_literal_expr()?;
+    if args.len() > 3 || args.iter().any(ast::Expr::is_starred_expr) {
+        return None;
+    }
+    let mut globals = args.len() >= 2;
+    let mut locals = args.len() >= 3;
+    for keyword in &call.arguments.keywords {
+        let present = match keyword.arg.as_ref()?.as_str() {
+            "globals" => &mut globals,
+            "locals" => &mut locals,
+            _ => return None,
+        };
+        if std::mem::replace(present, true) {
+            return None;
+        }
+    }
+    Some(literal)
+}
+
+/// Ruff replaces lone surrogates in its UTF-8 view. The compiled source must
+/// represent the actual Python string, including concatenated raw/cooked parts.
+pub(crate) fn exec_literal_text<'a>(
+    literal: &'a ast::ExprStringLiteral,
+    outer: &str,
+) -> StdResult<&'a str, &'static str> {
+    let text = literal.value.to_str();
+    if text.contains(char::REPLACEMENT_CHARACTER)
+        && literal.value.iter().any(|part| {
+            !part.flags.prefix().is_raw()
+                && imre_ast::strings::replacements(&outer[part.content_range()])
+                    .any(|point| point != u32::from(char::REPLACEMENT_CHARACTER))
+        })
+    {
+        return Err("exec source contains a surrogate that cannot be encoded as UTF-8");
+    }
+    Ok(text)
+}
+
 fn call_site(call: &ast::ExprCall, target: ir::RegisteredCallTarget) -> ir::RegisteredCall {
     ir::RegisteredCall {
         range: call.range(),

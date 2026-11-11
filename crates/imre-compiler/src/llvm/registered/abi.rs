@@ -108,6 +108,7 @@ pub(crate) struct Declarations {
     pub(crate) emitted_guarded_lit: bool,
     pub(crate) emitted_guarded_named_op: bool,
     pub(crate) registered_expression: bool,
+    pub(crate) exec_operand: bool,
     pub(crate) checked_integer_add: bool,
     pub(crate) checked_integer_subtract: bool,
     pub(crate) checked_integer_multiply: bool,

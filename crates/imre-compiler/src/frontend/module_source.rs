@@ -8,9 +8,9 @@ use ruff_python_parser::Parsed;
 use ruff_text_size::{TextRange, TextSize};
 
 /// Text and syntax in the same coordinate system. Discovery normalizes physical newlines.
-pub(crate) struct ParsedModule<'a> {
-    pub(crate) text: Cow<'a, str>,
-    pub(crate) parsed: Cow<'a, Parsed<ast::ModModule>>,
+pub(crate) struct ParsedModule<'text, 'syntax> {
+    pub(crate) text: Cow<'text, str>,
+    pub(crate) parsed: Cow<'syntax, Parsed<ast::ModModule>>,
 }
 
 /// Only name lowering requires a mutable body. Keep the checked graph's tokens in place.
@@ -42,7 +42,7 @@ impl CheckedFile {
             .then_some(Self(id))
     }
 
-    pub(crate) fn parsed(self, modules: &[crate::modules::SourceModule]) -> ParsedModule<'_> {
+    pub(crate) fn parsed(self, modules: &[crate::modules::SourceModule]) -> ParsedModule<'_, '_> {
         let module = &modules[self.0];
         ParsedModule {
             text: Cow::Borrowed(&module.source),
@@ -58,7 +58,7 @@ impl CheckedFile {
     }
 }
 
-impl<'a> ParsedModule<'a> {
+impl<'a> ParsedModule<'a, '_> {
     pub(crate) fn parse(path: &Path, text: Cow<'a, str>) -> Result<Self, String> {
         let parsed = imre_ast::indentation::prepare(&text)
             .parse_module()
@@ -151,7 +151,17 @@ pub(crate) fn lower(
     source: &str,
     body: &mut [ast::Stmt],
 ) -> Result<imre_ast::Names, String> {
-    let private_names = imre_ast::lower(body);
+    lower_with_future(path, source, body, false)
+}
+
+pub(crate) fn lower_with_future(
+    path: &Path,
+    source: &str,
+    body: &mut [ast::Stmt],
+    inherited_annotations: bool,
+) -> Result<imre_ast::Names, String> {
+    let string_annotations = inherited_annotations || imre_ast::future_annotations(body);
+    let private_names = imre_ast::lower_in(body, "", string_annotations);
     if source.contains("nonlocal") {
         super::function_scope::check_nonlocals(source, body)
             .map_err(|error| format!("{}:{error}", path.display()))?;

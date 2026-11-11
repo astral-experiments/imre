@@ -529,8 +529,18 @@ impl Context {
                 )?);
             }
         };
+        Ok(self.native_module_code(entry, filename, flags))
+    }
+
+    /// Each execution of compiled source gets its own module code and nested definition cache.
+    pub(super) fn native_module_code(
+        &mut self,
+        entry: value::Code,
+        filename: Id,
+        flags: Option<u32>,
+    ) -> Id {
         let name_id = self.text("<module>");
-        Ok(self.alloc(Value::Code(value::CodeObject {
+        self.alloc(Value::Code(value::CodeObject {
             compilation_constants: Default::default(),
             parsed_parameters: Default::default(),
             varnames: NONE,
@@ -550,7 +560,7 @@ impl Context {
             flags: flags.unwrap_or(0),
             flags_complete: flags.is_some(),
             generator_lambda: false,
-        })))
+        }))
     }
 
     /// Resolve bytes read from a physical origin to its compiled module code, preserving

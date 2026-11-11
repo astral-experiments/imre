@@ -490,10 +490,18 @@ impl<'f, 'a, 'p> Frame<'f, 'a, 'p> {
         inputs: &'f crate::frontend::PhysicalInputs,
         condition: bool,
     ) -> String {
-        if let Some(operands) = inputs.eager_operands() {
-            let handles: Vec<_> = operands
+        let handles = inputs.eager_operands().map(|operands| {
+            operands
                 .map(|child| emit_operand(owner, child, false))
-                .collect();
+                .collect::<Vec<_>>()
+        });
+        if matches!(
+            &inputs.operation.kind,
+            ExprKind::Builtin(Builtin::RegisteredCall(_), _)
+        ) {
+            owner.frame_and_sites(Some(&inputs.operation));
+        }
+        if let Some(handles) = handles {
             let (code, sites) = owner.frame_and_sites(None);
             return code.with_checked_frame(sites, None, |mut enclosing| {
                 let mut frame = enclosing.reborrow();
@@ -1348,13 +1356,26 @@ impl Frame<'_, '_, '_> {
         self.code.assign_owned_name(&scope, &name, handle, None);
     }
 
+    pub(super) fn exec_literal_at(&mut self, site: TextRange) -> Option<(String, u32)> {
+        self.code.parts().1.exec_literals.get(&site).cloned()
+    }
+
     pub(crate) fn object_operation(&mut self, op: &Builtin, operands: &[Expr]) -> CheckedValue {
         let (target, args) = operands
             .split_first()
             .expect("checked object operation has a target");
-        let handle = FrameEmitter::object_operation(self, op, target, args.iter(), |code, expr| {
-            code.evaluate_handle(expr)
-        });
+        let exec = match op {
+            Builtin::RegisteredCall(call) => self.exec_literal_at(call.range),
+            _ => None,
+        };
+        let handle = FrameEmitter::object_operation(
+            self,
+            op,
+            target,
+            args.iter(),
+            exec,
+            Self::evaluate_handle,
+        );
         CheckedValue::handle(handle)
     }
 

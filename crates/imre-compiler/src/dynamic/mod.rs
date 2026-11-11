@@ -2,6 +2,7 @@
 
 mod emit;
 mod import_module;
+pub(crate) mod literal;
 mod prepare;
 mod provider_archive;
 pub(crate) mod provider_pack;
@@ -12,6 +13,7 @@ use std::path::{Path, PathBuf};
 use ruff_python_ast::name::UnqualifiedName;
 use ruff_python_ast::visitor::{self, Visitor};
 use ruff_python_ast::{self as ast, Expr, Stmt};
+use ruff_text_size::{Ranged, TextRange};
 
 use crate::frontend::module_source::{self, CheckedFile, ParsedModule};
 use crate::{CompileOptions, SourceInputs, SourceKind, UnitCompilation};
@@ -98,6 +100,40 @@ impl ModuleSyntaxError {
         }
     }
 
+    /// Binding and future errors have a shared precedence for files and literal modules.
+    pub(crate) fn in_body(source: &str, body: &[ast::Stmt]) -> Option<Self> {
+        let bindings = imre_ast::executable::BindingErrors::check(body, source);
+        let future = imre_ast::future_import_error(body);
+        let validate_at_origin =
+            future.is_none() && bindings.symbol.is_none() && bindings.pattern.is_none();
+        let mut error = bindings
+            .first_symbol(future)
+            .map(|(range, reason)| Self::new(source, range, reason.to_owned(), false))
+            .or_else(|| {
+                let issue = bindings.handler?;
+                let mut error = Self::new(
+                    source,
+                    issue.location.unwrap_or(issue.range),
+                    issue.message.to_owned(),
+                    true,
+                );
+                if issue.location.is_none() {
+                    error.position = None;
+                }
+                error.range = issue.range;
+                Some(error)
+            })
+            .or_else(|| {
+                bindings.pattern.map(|(range, reason)| {
+                    Self::new(source, range, reason.checked().into_owned(), true)
+                })
+            });
+        if let Some(diagnostic) = &mut error {
+            diagnostic.validate_at_origin = validate_at_origin;
+        }
+        error
+    }
+
     /// Parser diagnostics use character columns and include the offending line in SyntaxError.args.
     fn from_parser(source: &str, error: ruff_python_parser::ParseError) -> Self {
         let range = error.location;
@@ -125,6 +161,8 @@ struct Imports {
     invalid_executable: Option<Box<ModuleSyntaxError>>,
     uses_import_builtin: bool,
     uses_exec: bool,
+    literal_calls: Vec<TextRange>,
+    has_open_exec: bool,
     computed_import: bool,
     imports_logging: bool,
     sys_names: HashSet<String>,
@@ -165,6 +203,39 @@ fn literal_path(expr: &Expr) -> Option<PathBuf> {
             }
         }
         _ => None,
+    }
+}
+
+/// A root's child imports follow its physical source's original registration queue.
+#[derive(Default)]
+struct LiteralImports {
+    forest: literal::LiteralForest,
+    pending_roots: Vec<(usize, u32, Vec<TextRange>)>,
+    origins: HashMap<usize, (bool, bool, ImportOrigin)>,
+    seeded_winners: usize,
+    open_exec: HashSet<usize>,
+}
+
+impl LiteralImports {
+    fn register(
+        &mut self,
+        unit: usize,
+        imports: &mut Imports,
+        package: bool,
+        selected: bool,
+        origin: ImportOrigin,
+    ) {
+        if imports.has_open_exec {
+            self.open_exec.insert(unit);
+        }
+        if !imports.literal_calls.is_empty() {
+            self.pending_roots.push((
+                unit,
+                imports.module_flags,
+                std::mem::take(&mut imports.literal_calls),
+            ));
+            self.origins.insert(unit, (package, selected, origin));
+        }
     }
 }
 
@@ -444,6 +515,18 @@ impl<'a> Visitor<'a> for Imports {
         visitor::walk_stmt(self, s);
     }
     fn visit_expr(&mut self, e: &'a Expr) {
+        if let Expr::Call(call) = e
+            && call
+                .func
+                .as_name_expr()
+                .is_some_and(|name| name.id == "exec")
+        {
+            if crate::frontend::fixed_exec_literal(call).is_some() {
+                self.literal_calls.push(call.range());
+            } else {
+                self.has_open_exec = true;
+            }
+        }
         // A literal __import__ call cannot select a different provider at execution.
         if let Expr::Call(call) = e
             && matches!(&*call.func, Expr::Name(name) if name.id == "__import__")
@@ -574,7 +657,7 @@ pub(crate) fn function_type_params<'a>(
 }
 
 enum ImportSource<'a> {
-    Module(ParsedModule<'a>),
+    Module(ParsedModule<'a, 'a>),
     Invalid(Box<ModuleSyntaxError>),
 }
 
@@ -634,40 +717,13 @@ fn imports_from_body(
     getter: Option<&mut Imports>,
     file_alternative: Option<&Path>,
 ) -> Result<Imports, String> {
-    let bindings = imre_ast::executable::BindingErrors::check(&body, normalized);
-    let future = imre_ast::future_import_error(&body);
-    let validate_at_origin =
-        future.is_none() && bindings.symbol.is_none() && bindings.pattern.is_none();
-    let error = bindings
-        .first_symbol(future)
-        .map(|(range, reason)| ModuleSyntaxError::new(normalized, range, reason.to_owned(), false))
-        .or_else(|| {
-            let issue = bindings.handler?;
-            let mut error = ModuleSyntaxError::new(
-                normalized,
-                issue.location.unwrap_or(issue.range),
-                issue.message.to_owned(),
-                true,
-            );
-            if issue.location.is_none() {
-                error.position = None;
-            }
-            error.range = issue.range;
-            Some(error)
-        })
-        .or_else(|| {
-            bindings.pattern.map(|(range, reason)| {
-                ModuleSyntaxError::new(normalized, range, reason.checked().into_owned(), true)
-            })
-        });
+    let error = ModuleSyntaxError::in_body(normalized, &body);
     // The optional file must satisfy the emitter's checks before registration.
     // Use its discovery tree for both checking and collecting the lowered imports.
     let checked_names = file_alternative
         .map(|path| module_source::lower(path, normalized, &mut body))
         .transpose()?;
-    if let Some(mut diagnostic) = error {
-        // Discovery records the error. Only selection as the checked entry diagnoses it here.
-        diagnostic.validate_at_origin = validate_at_origin;
+    if let Some(diagnostic) = error {
         return Ok(Imports {
             invalid_executable: Some(Box::new(diagnostic)),
             ..Imports::default()
@@ -704,6 +760,8 @@ fn imports_from_body(
         getter.get_data_names = std::mem::take(&mut imports.get_data_names);
         getter.machinery_names.clone_from(&imports.machinery_names);
         getter.visit_body(&getter_body);
+        imports.literal_calls.append(&mut getter.literal_calls);
+        imports.has_open_exec |= getter.has_open_exec;
     }
     Ok(imports)
 }
@@ -726,6 +784,7 @@ pub(crate) enum ObjectOperation {
 
 #[derive(Clone, Copy)]
 pub(crate) struct RegisteredSource<'a> {
+    pub(crate) has_open_exec: bool,
     /// This registration can start the application before any custom startup module runs.
     pub(crate) initial: bool,
     /// The ordinary launcher selected this source to execute in the startup namespace.
@@ -748,6 +807,7 @@ impl<'a> RegisteredSource<'a> {
         checked_module: Option<crate::modules::ModuleId>,
     ) -> Self {
         Self {
+            has_open_exec: false,
             name,
             path,
             source,
@@ -1037,6 +1097,7 @@ pub(crate) fn compile(
     let mut inputs = SourceInputs::default();
     let mut archives = HashMap::new();
     let mut registrations = emit::RegisteredBodies::default();
+    let mut syntax = None;
     for path in options
         .extension_paths
         .iter()
@@ -1121,6 +1182,8 @@ pub(crate) fn compile(
     let mut named_registrations = None;
     let mut ordinary_registrations = None;
     let python_optimization = startup.map_or(0, |(flags, _)| flags.optimize);
+    let mut literals = LiteralImports::default();
+    literals.register(0, &mut first, false, true, ImportOrigin::File);
     let keep_docstrings = python_optimization < 2;
     let mut shadowed_imports = VecDeque::new();
     let mut file_origins = Vec::new();
@@ -1141,8 +1204,63 @@ pub(crate) fn compile(
     loop {
         // Everything named by the entry, declarations, and ordinary file imports
         // is drained before lazy providers and bulk wheel/archive members.
-        if selected_work.is_empty() && work.is_empty() {
-            named_registrations.get_or_insert(selected_sources.len());
+        if selected_work.is_empty() && work.is_empty() && named_registrations.is_none() {
+            if !literals.origins.is_empty() {
+                // A wildcard or explicit import can bind exec in the caller. Populate
+                // its type database with the actual selected providers before resolving
+                // another level, including providers named only by a decoded module.
+                let session =
+                    crate::analysis::Session::registered_syntax(&mut syntax, &root, &roots)?;
+                for &(unit, _, _) in &selected_sources[literals.seeded_winners..] {
+                    let (_, path, source) = &sources[unit];
+                    if !path.starts_with(bundled_root) && !module_errors.contains_key(path) {
+                        session.seed(path, source)?;
+                    }
+                }
+                literals.seeded_winners = selected_sources.len();
+                let mut imports = literals.forest.advance(session);
+                for (unit, flags, candidates) in literals.pending_roots.drain(..) {
+                    let (file, parsed, source) = session.selected_file(&sources[unit].1)?;
+                    let sites = session.select_literal_level(
+                        file,
+                        &parsed,
+                        source.as_str(),
+                        flags,
+                        &candidates,
+                    );
+                    let names = literals.forest.record_root(unit, sites);
+                    imports.push((unit, names));
+                }
+                for (unit, names) in imports {
+                    if names.is_empty() {
+                        continue;
+                    }
+                    let (package, selected, origin) = literals.origins[&unit];
+                    let mut hints = Imports::default();
+                    for name in names {
+                        hints.add(0, &name);
+                    }
+                    let queue = if selected {
+                        &mut selected_work
+                    } else {
+                        &mut work
+                    };
+                    queue.push_back(((sources[unit].0.clone(), package, hints), origin));
+                }
+                if !selected_work.is_empty() || !work.is_empty() || literals.forest.has_pending() {
+                    continue;
+                }
+                for (unit, sites) in
+                    std::mem::take(&mut literals.forest).finish(session, python_optimization)
+                {
+                    registrations
+                        .checked_units
+                        .entry(unit)
+                        .or_default()
+                        .literal_sites = sites;
+                }
+            }
+            named_registrations = Some(selected_sources.len());
         }
         let (item, selected) = if let Some(next) = selected_work.pop_front() {
             (next, true)
@@ -1500,7 +1618,7 @@ pub(crate) fn compile(
                         }
                         if let Some(package) = archive.package(&prefix) {
                             if let Some(member) = archive.module(&prefix)
-                                && let Ok(imports) = scan_imports(
+                                && let Ok(mut imports) = scan_imports(
                                     &member.source,
                                     SourceKind::DecodedFile,
                                     None,
@@ -1517,6 +1635,15 @@ pub(crate) fn compile(
                                 if let Some(error) = imports.invalid_executable {
                                     module_errors.insert(member.path.clone(), error);
                                 } else {
+                                    if winner && named_registrations.is_none() {
+                                        literals.register(
+                                            sources.len(),
+                                            &mut imports,
+                                            package,
+                                            select_member && filesystem_import,
+                                            ImportOrigin::file(filesystem_import),
+                                        );
+                                    }
                                     let queue = if winner && select_member && filesystem_import {
                                         &mut selected_work
                                     } else {
@@ -1724,7 +1851,7 @@ pub(crate) fn compile(
                         ),
                         None => scan_imports(&src, kind, None, alternative),
                     };
-                    let imports = match imports {
+                    let mut imports = match imports {
                         Ok(imports) => imports,
                         Err(_) if file_alternatives => continue,
                         Err(error) => return Err(format!("{}: {error}", path.display())),
@@ -1759,6 +1886,15 @@ pub(crate) fn compile(
                         if let Some(error) = imports.invalid_executable {
                             module_errors.insert(path.clone(), error);
                         } else {
+                            if winner && named_registrations.is_none() {
+                                literals.register(
+                                    sources.len(),
+                                    &mut imports,
+                                    package,
+                                    select_member && filesystem_import,
+                                    ImportOrigin::file(filesystem_import),
+                                );
+                            }
                             let queue = if winner && select_member && filesystem_import {
                                 &mut selected_work
                             } else if shadowed && ordinary_registrations.is_none() {
@@ -1934,6 +2070,7 @@ pub(crate) fn compile(
             // scope: owning a declaration does not prove that a call will reach it.
             let mut registration =
                 RegisteredSource::new(&sources[id], program && application, module);
+            registration.has_open_exec = literals.open_exec.contains(&id);
             registration.declares_signatures = application;
             registration.check_execution |= application;
             registration.main_body = match module_entry {
@@ -2005,6 +2142,7 @@ pub(crate) fn compile(
     let namespace_portions: HashSet<_> = inputs.directories.iter().map(|(path, _)| path).collect();
     crate::analysis::check_native_syntax(
         &root,
+        syntax,
         project.as_ref(),
         sources
             .iter()

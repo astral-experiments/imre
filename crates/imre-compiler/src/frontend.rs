@@ -135,12 +135,12 @@ pub(crate) use registered::type_alias_body;
 #[cfg(test)]
 pub(crate) use registered::values::registered_value;
 pub(crate) use registered::values::{
-    RegisteredSource, literal_replacements, module_literal_replacements, packed_arguments,
-    push_codepoints,
+    RegisteredSource, exec_literal_text, fixed_exec_literal, literal_replacements,
+    module_literal_replacements, packed_arguments, push_codepoints,
 };
 pub(crate) use registered::{
     AnnotationProvider, CheckedProvider, DeclarationSite, DeferredAnnotation, ModuleAnnotations,
-    ParameterAnnotations, ParameterEvaluator, PhysicalOperand, RegisteredBindings,
+    ParameterAnnotations, ParameterEvaluator, PhysicalOperand, PreparedRefusal, RegisteredBindings,
     RegisteredFunction, RegisteredGenerator, RegisteredLambda, RegisteredScope, RegisteredSuite,
     SuitePreparation, TypeParameterValues, annotation_expression, place_fixed_function,
     registered_sites, registered_type_alias,
@@ -10080,6 +10080,14 @@ impl<'a> Checker<'a> {
             // A registered initializer already owns the namespace returned by globals().
             self.namespace_calls.insert(call.range());
             return Ok(registered::values::name_call(call, "globals", vec![]));
+        }
+        if fixed_exec_literal(call).is_some()
+            && self
+                .graph
+                .session
+                .is_stdlib_function(self.module, &call.func, "builtins", "exec")
+        {
+            return Err(self.scoped_builtin_error("exec", call));
         }
         if self.unshadowed_builtin(&call.func, "range") {
             return self.range_value(call);
