@@ -3243,7 +3243,7 @@ impl<'a> Checker<'a> {
                     bound && !self.module_scope
                 }
                 Some(Binding::Definition(id)) => {
-                    matches!(ty, Type::Callable(_)) && self.functions.contains_key(id)
+                    (bound || matches!(ty, Type::Callable(_))) && self.functions.contains_key(id)
                 }
                 _ => false,
             }
