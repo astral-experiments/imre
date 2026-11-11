@@ -2226,9 +2226,12 @@ impl Session {
                 Some(declarations),
             );
             for error in file_errors(&self.db, checked) {
-                let original = error
-                    .range
-                    .and_then(|range| native?.matching_contract(path, range, error.rule.as_str()));
+                let original = native.and_then(|report| {
+                    let (owner, parameter) = error.parameter?;
+                    let module = self.files.iter().position(|&file| file == owner)?;
+                    modules[module].project_path()?;
+                    report.matching_declared_argument(path, error.range?, module, parameter)
+                });
                 errors.push(original.map_or_else(|| error.rendered.clone(), ToString::to_string));
             }
         }
@@ -2485,6 +2488,7 @@ fn fallback_data_module(parsed: &ParsedModuleRef) -> bool {
 struct CheckedError {
     rule: DiagnosticId,
     range: Option<TextRange>,
+    parameter: Option<(File, TextRange)>,
     rendered: String,
 }
 
@@ -2514,21 +2518,6 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<CheckedEr
         .iter()
         .filter(|diagnostic| {
             diagnostic.severity() >= Severity::Error
-                && checked.declarations(db).is_none_or(|sources| {
-                    if diagnostic.id().is_lint_named("invalid-return-type") {
-                        primary_range(diagnostic, file)
-                            .and_then(|range| return_scope(db, file, range))
-                            .is_some_and(|scope| {
-                                sources
-                                    .result_scopes(db)
-                                    .binary_search(&(file, scope))
-                                    .is_ok()
-                            })
-                    } else {
-                        diagnostic.id().is_lint_named("invalid-argument-type")
-                            && declared_parameter(diagnostic, sources.parameters(db))
-                    }
-                })
                 && (full
                     || diagnostic.id().as_str() != "invalid-assignment"
                     || checked.first_party(db)
@@ -2564,15 +2553,34 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<CheckedEr
                                 .any(|scope| scope.covers(diagnostic.id().as_str(), range))
                     })
         })
-        .map(|diagnostic| CheckedError {
-            rule: diagnostic.id(),
-            range: primary_range(diagnostic, file),
-            rendered: diagnostic
-                .display(
-                    &(db as &dyn ruff_db::Db),
-                    &DisplayDiagnosticConfig::new("imre"),
-                )
-                .to_string(),
+        .filter_map(|diagnostic| {
+            let range = primary_range(diagnostic, file);
+            let parameter = match checked.declarations(db) {
+                Some(sources) if diagnostic.id().is_lint_named("invalid-argument-type") => {
+                    Some(declared_parameter(diagnostic, sources.parameters(db))?)
+                }
+                Some(sources) if diagnostic.id().is_lint_named("invalid-return-type") => {
+                    let scope = return_scope(db, file, range?)?;
+                    sources
+                        .result_scopes(db)
+                        .binary_search(&(file, scope))
+                        .ok()?;
+                    None
+                }
+                Some(_) => return None,
+                None => None,
+            };
+            Some(CheckedError {
+                rule: diagnostic.id(),
+                range,
+                parameter,
+                rendered: diagnostic
+                    .display(
+                        &(db as &dyn ruff_db::Db),
+                        &DisplayDiagnosticConfig::new("imre"),
+                    )
+                    .to_string(),
+            })
         })
         .collect()
 }
@@ -2702,13 +2710,28 @@ fn return_scope(db: &dyn Db, file: File, range: TextRange) -> Option<FileScopeId
 /// ty identifies the matched source parameter in an argument diagnostic. Use that
 /// resolution for plain functions, constructors and methods, including inherited
 /// and imported declarations. A runtime builtin has no project or SDK parameter.
-fn declared_parameter(diagnostic: &Diagnostic, parameters: &[(File, TextRange)]) -> bool {
-    diagnostic.sub_diagnostics().iter().flat_map(|sub| sub.annotations()).any(|label| {
-        let span = label.get_span();
-        !label.is_primary() && matches!((span.file(), span.range()),
-            (ruff_db::diagnostic::UnifiedFile::Ty(owner), Some(range))
-            if parameters.iter().any(|(file, parameter)| file == owner && parameter.contains_range(range)))
-    })
+fn declared_parameter(
+    diagnostic: &Diagnostic,
+    parameters: &[(File, TextRange)],
+) -> Option<(File, TextRange)> {
+    diagnostic
+        .sub_diagnostics()
+        .iter()
+        .flat_map(|sub| sub.annotations())
+        .find_map(|label| {
+            let span = label.get_span();
+            let ruff_db::diagnostic::UnifiedFile::Ty(owner) = span.file() else {
+                return None;
+            };
+            let range = span.range()?;
+            if label.is_primary() {
+                return None;
+            }
+            parameters
+                .iter()
+                .copied()
+                .find(|(file, parameter)| file == owner && parameter.contains_range(range))
+        })
 }
 
 /// Leave argument conversion on vendored callables to Python.
