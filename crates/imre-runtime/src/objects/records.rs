@@ -233,8 +233,7 @@ pub unsafe extern "C" fn imre_callable_init_cache(
     // SAFETY: the cache owns source independently of the target it invokes.
     unsafe {
         debug_assert_eq!(descriptor(destination).length, 5);
-        imre_record_retain(source);
-        destination.add(2).write(source as usize);
+        wrappers::write_wrapped(destination, source);
         if descriptor(source).length == 5 {
             destination.add(3).write(*source.add(3));
             destination.add(4).write(*source.add(4));
