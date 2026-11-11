@@ -181,7 +181,8 @@ impl RegisteredFrame<'_, '_> {
         }
         let exception = self.take_context_error(&region.error, &region.callable);
         let result = self.exit_context(&region, Some(&exception));
-        let suppress = self.truth(&result);
+        // Sync exit and resumed async exit have already tested the result under the body exception.
+        let suppress = self.value(&format!("icmp eq i64 {result}, {}", super::permanent::TRUE));
         let propagate = self.name("b");
         self.branch(&suppress, &region.done, &propagate);
         self.label(&propagate);
