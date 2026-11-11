@@ -19,13 +19,9 @@ impl Program {
     }
 
     /// Visit the outer iterable before entering the implicit comprehension scope.
-    pub(super) fn lower_eager_comprehension(
-        &mut self,
-        comp: &Plan<'_>,
-        operand: &OperandPlan,
-    ) -> Result<()> {
+    pub(super) fn lower_eager_comprehension(&mut self, comp: &Plan<'_>) -> Result<()> {
         let targets = comp.try_target_names().map_err(invalid_target)?;
-        self.record_expression(comp.outer.clone(), operand.function)?;
+        self.record_expression(comp.outer.clone(), true)?;
         self.items.push(SourceItem::EnterComprehension(targets));
         self.lower_comprehension_body(comp)?;
         self.items.push(SourceItem::LeaveComprehension);
@@ -42,8 +38,7 @@ impl Program {
                     if matches!(comp.output, Output::Generator(_)) {
                         self.declare_target(target)?;
                     }
-                    if self.kind.is_async() && imre_ast::comprehension::expression_suspends(target)
-                    {
+                    if self.kind.is_async() {
                         self.lower_suspended_target(target)?;
                     } else {
                         self.items.push(SourceItem::Discard(target.clone()));
