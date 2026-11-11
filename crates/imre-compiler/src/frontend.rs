@@ -6606,9 +6606,7 @@ impl<'a> Checker<'a> {
             ));
         }
         if manager.ty == Type::GeneratorContext {
-            return self
-                .generator_scope(out, item, remaining, body, manager)
-                .map(Break);
+            return Ok(Continue(self.enter_generator_context(out, item, manager)?));
         }
         let stored = self.types.directory_value(manager.ty);
         let archive = manager.ty == Type::ZipFile;

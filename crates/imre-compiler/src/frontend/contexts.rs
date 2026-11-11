@@ -170,27 +170,24 @@ pub(super) fn enter_python(
 }
 
 impl Checker<'_> {
-    pub(super) fn generator_scope(
+    pub(super) fn enter_generator_context<'s>(
         &mut self,
-        out: &mut Vec<Statement>,
+        out: &'s mut Vec<Statement>,
         item: &ast::WithItem,
-        rest: &[ast::WithItem],
-        suite: &[ast::Stmt],
         manager: Expr,
-    ) -> Result<bool, String> {
+    ) -> Result<&'s mut Vec<Statement>, String> {
         let slot = self.hidden(manager.ty);
         let mut protected = Vec::new();
         if let Some(target) = &item.optional_vars {
             protected.push(self.assign(target, Expr::none())?);
         }
-        let (body, falls) = self.with_items(rest, suite)?;
         let exception = self.hidden(Type::Exception);
         let handled = op(
             Op::ContextThrow,
             Type::Bool,
             vec![self.local(slot), self.local(exception)],
         );
-        let suite = enter_native(
+        Ok(enter_native(
             out,
             vec![
                 Statement::Assign(slot, manager),
@@ -204,7 +201,6 @@ impl Checker<'_> {
             }],
             Statement::Expr(op(Op::ContextExit, Type::None, vec![self.local(slot)])),
             vec![slot],
-        );
-        Ok(finish(suite, (body, falls)))
+        ))
     }
 }
