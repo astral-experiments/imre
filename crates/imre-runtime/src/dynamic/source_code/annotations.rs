@@ -223,6 +223,7 @@ impl<'a> CompiledStrings<'a, '_> {
             self.spellings,
             line_at,
             class_locals,
+            None,
         )?;
         if roots != NONE {
             self.keep(roots)?;

@@ -107,81 +107,82 @@ enum EnclosingBinding {
 /// after collecting code metadata; untouched subtrees are visited in place.
 struct OperandPlan {
     sites: smallvec::SmallVec<[ruff_text_size::TextSize; 1]>,
-    function: bool,
 }
 
 impl OperandPlan {
-    fn new(root: &ast::Expr, kind: FunctionKind, function: bool) -> Self {
+    fn new(root: &ast::Expr, kind: FunctionKind) -> Self {
         let mut sites = smallvec::SmallVec::new();
-        if kind.is_async() || function {
-            let mut work = smallvec::SmallVec::<[&ast::Expr; 8]>::new();
-            work.push(root);
-            while let Some(expr) = work.pop() {
-                match expr {
-                    ast::Expr::Await(a) if kind.is_async() => {
-                        sites.push(a.start());
-                        work.push(&a.value);
-                    }
-                    ast::Expr::Yield(y) => {
-                        sites.push(y.start());
-                        work.extend(y.value.as_deref());
-                    }
-                    ast::Expr::YieldFrom(y) => {
-                        sites.push(y.start());
-                        work.push(&y.value);
-                    }
-                    expr if let Some(comp) = Plan::from_expr(expr) => {
-                        if comp.suspends() {
-                            sites.push(expr.start());
-                        }
-                    }
-                    ast::Expr::Tuple(ast::ExprTuple { elts, .. })
-                    | ast::Expr::List(ast::ExprList { elts, .. })
-                        if !elts.iter().any(ast::Expr::is_starred_expr) =>
-                    {
-                        work.extend(elts.iter());
-                    }
-                    ast::Expr::BinOp(b) => work.extend([&*b.left, &*b.right]),
-                    ast::Expr::Compare(c) => work.extend(c.operands.iter()),
-                    ast::Expr::BoolOp(b) => work.extend(b.values.iter()),
-                    ast::Expr::UnaryOp(u) => work.push(&u.operand),
-                    ast::Expr::Attribute(a) => work.push(&a.value),
-                    ast::Expr::Subscript(s) => work.extend([&*s.value, &*s.slice]),
-                    ast::Expr::Slice(s) => {
-                        work.extend(
-                            [s.lower.as_deref(), s.upper.as_deref(), s.step.as_deref()]
-                                .into_iter()
-                                .flatten(),
-                        );
-                    }
-                    ast::Expr::Named(n) => work.push(&n.value),
-                    ast::Expr::Dict(d) => {
-                        for item in &d.items {
-                            work.extend(item.key.as_ref());
-                            work.push(&item.value);
-                        }
-                    }
-                    ast::Expr::Set(s) => {
-                        work.extend(s.elts.iter().map(|item| match item {
-                            ast::Expr::Starred(star) => star.value.as_ref(),
-                            item => item,
-                        }));
-                    }
-                    ast::Expr::If(b) => work.extend([&*b.body, &*b.test, &*b.orelse]),
-                    ast::Expr::Call(c)
-                        if !c.arguments.args.iter().any(ast::Expr::is_starred_expr)
-                            && c.arguments.keywords.iter().all(|kw| kw.arg.is_some()) =>
-                    {
-                        work.push(&c.func);
-                        work.extend(c.arguments.args.iter());
-                        work.extend(c.arguments.keywords.iter().map(|kw| &kw.value));
-                    }
-                    _ => {}
+        let mut work = smallvec::SmallVec::<[&ast::Expr; 8]>::new();
+        work.push(root);
+        while let Some(expr) = work.pop() {
+            match expr {
+                ast::Expr::Await(a) if kind.is_async() => {
+                    sites.push(a.start());
+                    work.push(&a.value);
                 }
+                ast::Expr::Yield(y) => {
+                    sites.push(y.start());
+                    work.extend(y.value.as_deref());
+                }
+                ast::Expr::YieldFrom(y) => {
+                    sites.push(y.start());
+                    work.push(&y.value);
+                }
+                expr if let Some(comp) = Plan::from_expr(expr) => {
+                    if comp.suspends() {
+                        sites.push(expr.start());
+                    }
+                }
+                ast::Expr::Tuple(ast::ExprTuple { elts, .. })
+                | ast::Expr::List(ast::ExprList { elts, .. })
+                    if !elts.iter().any(ast::Expr::is_starred_expr) =>
+                {
+                    work.extend(elts.iter());
+                }
+                ast::Expr::BinOp(b) => work.extend([&*b.left, &*b.right]),
+                ast::Expr::Compare(c) => work.extend(c.operands.iter()),
+                ast::Expr::BoolOp(b) => work.extend(b.values.iter()),
+                ast::Expr::UnaryOp(u) => work.push(&u.operand),
+                ast::Expr::Attribute(a) => work.push(&a.value),
+                ast::Expr::Subscript(s) => work.extend([&*s.value, &*s.slice]),
+                ast::Expr::Slice(s) => {
+                    work.extend(
+                        [s.lower.as_deref(), s.upper.as_deref(), s.step.as_deref()]
+                            .into_iter()
+                            .flatten(),
+                    );
+                }
+                ast::Expr::Named(n) => work.push(&n.value),
+                ast::Expr::Dict(d) => {
+                    for item in &d.items {
+                        work.extend(item.key.as_ref());
+                        work.push(&item.value);
+                    }
+                }
+                ast::Expr::Set(s) => {
+                    work.extend(s.elts.iter().map(|item| match item {
+                        ast::Expr::Starred(star) => star.value.as_ref(),
+                        item => item,
+                    }));
+                }
+                ast::Expr::If(b) => work.extend([&*b.body, &*b.test, &*b.orelse]),
+                ast::Expr::Call(c)
+                    if !c.arguments.args.iter().any(ast::Expr::is_starred_expr)
+                        && c.arguments.keywords.iter().all(|kw| kw.arg.is_some()) =>
+                {
+                    work.push(&c.func);
+                    work.extend(c.arguments.args.iter());
+                    work.extend(c.arguments.keywords.iter().map(|kw| &kw.value));
+                }
+                _ => {}
             }
-            sites.sort_unstable();
         }
-        Self { sites, function }
+        sites.sort_unstable();
+        Self { sites }
+    }
+
+    fn for_function(expr: &ast::Expr, kind: FunctionKind) -> Option<Self> {
+        (kind.is_async() || code_flags::yields_in_expression(expr)).then(|| Self::new(expr, kind))
     }
 
     fn suspends(&self, expr: &ast::Expr) -> bool {
@@ -474,6 +475,12 @@ impl<'a> TemplateSegment<'a> {
 
 /// Names bound by enclosing inlined set comprehensions accompany each pending expression.
 type ScopedExpression<'a> = (&'a ast::Expr, Option<Rc<HashSet<String>>>);
+
+#[derive(Default)]
+struct ExpressionInput<'a> {
+    body: Option<&'a ast::Expr>,
+    bound: Option<Rc<HashSet<String>>>,
+}
 
 /// Collect names and string constants without recursing through an expression's left spine.
 struct CompiledStrings<'a, 'ctx> {
@@ -1049,7 +1056,7 @@ impl Program {
         spellings: &StringReplacements,
         line_at: &impl Fn(usize) -> u32,
     ) -> Result<(Id, &'a BTreeSet<String>)> {
-        self.prepare_scope_strings(heap, shared, spellings, line_at, None)
+        self.prepare_scope_strings(heap, shared, spellings, line_at, None, None)
     }
 
     fn prepare_scope_strings<'a>(
@@ -1059,6 +1066,7 @@ impl Program {
         spellings: &StringReplacements,
         line_at: &impl Fn(usize) -> u32,
         annotation_class: Option<&indexmap::IndexSet<String>>,
+        lambda_body: Option<&'a ast::Expr>,
     ) -> Result<(Id, &'a BTreeSet<String>)> {
         use ast::visitor::Visitor;
         let class_parameters = self.class_parameter_header();
@@ -1257,17 +1265,20 @@ impl Program {
                 }
             }
         }
+        if let Some(body) = lambda_body {
+            strings.visit_expr(body);
+        }
         let (class_cell, mut functions) = strings.scan(&mut self.unlowered_yield)?;
         functions.extend(prepared_generators);
         self.class_cell |= class_cell;
         self.expression_scopes
             .try_reserve(functions.len())
             .map_err(|_| Error::new("MemoryError", ""))?;
-        let mut comprehension_sites = HashMap::new();
+        let mut scope_inputs = HashMap::<_, ExpressionInput>::new();
         for (expr, bound) in functions {
             let in_comprehension = bound.is_some();
             if let Some(names) = bound {
-                comprehension_sites.insert(expr.range(), names);
+                scope_inputs.entry(expr.range()).or_default().bound = Some(names);
             }
             let name = if matches!(expr, ast::Expr::Lambda(_)) {
                 "<lambda>"
@@ -1290,14 +1301,15 @@ impl Program {
                         named.visit_expr(&lambda.body);
                         named.declare(&mut child)?;
                     }
-                    let end = match child.lower_suspension(*lambda.body.clone(), true)? {
-                        Some(body) => SourceItem::Return(Some(body)),
-                        None => {
+                    if let Some(plan) = OperandPlan::for_function(&lambda.body, child.kind) {
+                        let value = child.lower_operand(*lambda.body.clone(), &plan)?;
+                        if value.is_none() {
                             child.kind = FunctionKind::GeneratorLambda;
-                            SourceItem::Return(None)
                         }
-                    };
-                    child.items.push(end);
+                        child.items.push(SourceItem::Return(value));
+                    } else {
+                        scope_inputs.entry(expr.range()).or_default().body = Some(&lambda.body);
+                    }
                     lambda.parameters.as_deref()
                 }
                 ast::Expr::Generator(genexpr) => {
@@ -1339,9 +1351,16 @@ impl Program {
             self.expression_scopes.insert(expr.range(), Box::new(child));
         }
         for (range, child) in &mut self.expression_scopes {
-            let bound = comprehension_sites.get(range);
-            let (roots, reads) =
-                child.prepare_strings(strings.heap, strings.shared, spellings, line_at)?;
+            let input = scope_inputs.get(range);
+            let bound = input.and_then(|input| input.bound.as_ref());
+            let (roots, reads) = child.prepare_scope_strings(
+                strings.heap,
+                strings.shared,
+                spellings,
+                line_at,
+                None,
+                input.and_then(|input| input.body),
+            )?;
             let captured = reads
                 .iter()
                 .filter(|n| !bound.is_some_and(|b| b.contains(n.as_str())));
@@ -1586,11 +1605,18 @@ impl Program {
     }
 
     fn lower_suspension(&mut self, expr: ast::Expr, function: bool) -> Result<Option<ast::Expr>> {
-        if function && !self.kind.is_async() && !code_flags::yields_in_expression(&expr) {
+        if !function {
+            if matches!(expr, ast::Expr::Yield(_) | ast::Expr::YieldFrom(_)) {
+                self.invalid_transfer(expr.range(), "'yield' outside function")?;
+                self.kind = FunctionKind::Generator;
+            }
             return Ok(Some(expr));
         }
-        let plan = OperandPlan::new(&expr, self.kind, function);
-        self.lower_operand(expr, &plan)
+        if let Some(plan) = OperandPlan::for_function(&expr, self.kind) {
+            self.lower_operand(expr, &plan)
+        } else {
+            Ok(Some(expr))
+        }
     }
 
     fn lower_operand(&mut self, expr: ast::Expr, plan: &OperandPlan) -> Result<Option<ast::Expr>> {
@@ -1600,29 +1626,25 @@ impl Program {
     }
 
     fn emit_operand(&mut self, expr: ast::Expr, plan: &OperandPlan) -> Result<Option<ast::Expr>> {
-        if matches!(expr, ast::Expr::Yield(_) | ast::Expr::YieldFrom(_)) {
-            if !plan.function {
-                self.invalid_transfer(expr.range(), "'yield' outside function")?;
-            }
-            if self.kind != FunctionKind::AsyncGenerator {
-                self.kind = FunctionKind::Generator;
-            }
+        if matches!(expr, ast::Expr::Yield(_) | ast::Expr::YieldFrom(_))
+            && self.kind != FunctionKind::AsyncGenerator
+        {
+            self.kind = FunctionKind::Generator;
         }
         if !plan.suspends(&expr) {
             return Ok(Some(expr));
         }
         if let ast::Expr::Generator(genexpr) = &expr {
-            if let Some(outer) = self.lower_suspension(
-                outer_clause(&genexpr.generators).iter.clone(),
-                plan.function,
-            )? {
+            if let Some(outer) =
+                self.lower_suspension(outer_clause(&genexpr.generators).iter.clone(), true)?
+            {
                 self.items.push(SourceItem::Discard(outer));
             }
             self.items.push(SourceItem::MakeGenerator(expr));
             return Ok(None);
         }
         if let Some(comp) = Plan::from_expr(&expr) {
-            self.lower_eager_comprehension(&comp, plan)?;
+            self.lower_eager_comprehension(&comp)?;
             return Ok(None);
         }
         match expr {
