@@ -14,6 +14,7 @@ pub(crate) use type_parameters::{
     TypeParameterScope, boxed_function_type_params, check_nonlocals, type_parameter_scope,
 };
 
+use imre_ast::comprehension::Plan;
 use ruff_python_ast as ast;
 use ruff_python_ast::visitor::{self, Visitor};
 use ruff_text_size::{Ranged, TextRange, TextSize};
@@ -374,7 +375,6 @@ pub(crate) struct ScopeFacts {
     pub(crate) functions: HashMap<TextSize, NamedFunction>,
     pub(crate) lambdas: HashMap<TextSize, FunctionScope>,
     pub(crate) aliases: HashMap<TextSize, FunctionScope>,
-    pub(crate) generators: HashMap<TextRange, FunctionScope>,
     pub(crate) classes: HashMap<TextSize, classes::ClassScope>,
     pub(crate) annotations: annotations::AnnotationScopes,
     pub(crate) module_globals: BTreeSet<String>,
@@ -393,6 +393,7 @@ impl ScopeFacts {
         body: &'a [ast::Stmt],
         names: &imre_ast::Names,
         alias_site: impl FnMut(&'a ast::StmtTypeAlias, Option<TextSize>),
+        generator_site: impl FnMut(TextRange, &Plan<'a>, FunctionScope),
     ) -> Self {
         let mut scopes = Self::default();
         Collector {
@@ -400,6 +401,7 @@ impl ScopeFacts {
             names,
             scope: Scope::Module,
             alias_site,
+            generator_site,
         }
         .visit_body(body);
         scopes
@@ -413,14 +415,19 @@ enum Scope {
     Function,
 }
 
-struct Collector<'a, A> {
+struct Collector<'a, A, G> {
     scopes: &'a mut ScopeFacts,
     names: &'a imre_ast::Names,
     scope: Scope,
     alias_site: A,
+    generator_site: G,
 }
 
-impl<'a, A: FnMut(&'a ast::StmtTypeAlias, Option<TextSize>)> Visitor<'a> for Collector<'_, A> {
+impl<'a, A, G> Visitor<'a> for Collector<'_, A, G>
+where
+    A: FnMut(&'a ast::StmtTypeAlias, Option<TextSize>),
+    G: FnMut(TextRange, &Plan<'a>, FunctionScope),
+{
     fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
         let strings = self.names.string_annotations;
         let parent = self.scope;
@@ -515,16 +522,18 @@ impl<'a, A: FnMut(&'a ast::StmtTypeAlias, Option<TextSize>)> Visitor<'a> for Col
             self.scopes
                 .lambdas
                 .insert(lambda.start(), FunctionScope::lambda(lambda, strings));
-        } else if let ast::Expr::Generator(generator) = expr {
-            let plan = imre_ast::comprehension::Plan::generator(generator);
+        }
+        visitor::walk_expr(self, expr);
+        if let ast::Expr::Generator(generator) = expr {
+            let plan = Plan::generator(generator);
             let mut names = class_metadata::generator_scope(&plan, strings);
             let captures_class = names.reads.contains("__class__");
             names.locals.insert(".0".into());
-            self.scopes.generators.insert(
+            (self.generator_site)(
                 expr.range(),
+                &plan,
                 FunctionScope::new(names, None, captures_class),
             );
         }
-        visitor::walk_expr(self, expr);
     }
 }

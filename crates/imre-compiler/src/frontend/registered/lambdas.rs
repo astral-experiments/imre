@@ -185,8 +185,6 @@ async def factory(seed, rows, mark):
             .into_syntax()
             .body;
         let names = imre_ast::lower(&mut body);
-        let mut scopes =
-            crate::frontend::function_scope::ScopeFacts::prepare(&body, &names, |_, _| {});
         let source = values::RegisteredSource {
             operand_types: None,
             text,
@@ -198,8 +196,8 @@ async def factory(seed, rows, mark):
             lambdas: None,
             private_names: Some(&names),
         };
-        let generators =
-            RegisteredGenerator::collect(&body, source, std::mem::take(&mut scopes.generators));
+        let (mut scopes, generators) =
+            RegisteredGenerator::collect_scopes(&body, &names, source, |_, _| {});
         let source = values::RegisteredSource {
             generators: Some(&generators),
             ..source

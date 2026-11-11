@@ -408,13 +408,10 @@ impl<'a> PreparedBody<'a> {
         };
         let mut aliases = Vec::new();
         let mut logicals = crate::frontend::ExpressionSites::default();
-        let mut scopes = crate::frontend::function_scope::ScopeFacts::prepare(
-            &body,
-            &private_names,
-            |alias, class| aliases.push((alias, class)),
-        );
-        let generators =
-            RegisteredGenerator::collect(&body, values, std::mem::take(&mut scopes.generators));
+        let (mut scopes, generators) =
+            RegisteredGenerator::collect_scopes(&body, &private_names, values, |alias, class| {
+                aliases.push((alias, class))
+            });
         let values = crate::frontend::RegisteredSource {
             generators: Some(&generators),
             ..values
@@ -1734,12 +1731,12 @@ mod tests {
             lambdas: Some(&missing),
             ..prepared.source.registered_source()
         };
-        let scopes = crate::frontend::function_scope::ScopeFacts::prepare(
+        let (_, generators) = RegisteredGenerator::collect_scopes(
             body,
             &prepared.source.private_names,
+            source,
             |_, _| {},
         );
-        let generators = RegisteredGenerator::collect(body, source, scopes.generators);
         let source = RegisteredSource {
             generators: Some(&generators),
             ..source
