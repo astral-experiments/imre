@@ -427,6 +427,7 @@ fn retained_native_candidate_registers_its_original_source_owner() {
     let compilation = crate::dynamic::compile(
         (
             crate::ProgramEntry::File(&entry, None),
+            None,
             Default::default(),
             &mut Default::default(),
         ),
@@ -469,6 +470,7 @@ fn retained_native_candidate_registers_its_original_source_owner() {
     let error = crate::dynamic::compile(
         (
             crate::ProgramEntry::File(&entry, None),
+            None,
             Default::default(),
             &mut Default::default(),
         ),
