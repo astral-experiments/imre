@@ -32,6 +32,7 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
     let has_slot = |slot: &usize| private.contains(slot) || checked.local_names.contains_key(slot);
     let mut supported = true;
     let mut cause_wrapper = None;
+    // This visit reaches suspensions inside eager scopes and protected binding suites.
     ir::walk_nodes(body, &mut |node, _| {
         let expr = match node {
             ir::Node::Statement(stmt) => {
@@ -46,6 +47,7 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
                     }
                     Statement::Return(_)
                     | Statement::Expr(_)
+                    | Statement::Scope { .. }
                     | Statement::While(..)
                     | Statement::Break
                     | Statement::Continue
@@ -68,13 +70,12 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
                                 })
                             })
                     }
-                    Statement::With { binding, body, .. } => {
+                    Statement::With { binding, .. } => {
                         uses_python_protocol = true;
-                        binding.as_ref().is_none_or(|binding| {
-                            private.contains(&binding.entered) && !suspends(&binding.body)
-                        }) && !suspends(body)
+                        binding
+                            .as_ref()
+                            .is_none_or(|binding| private.contains(&binding.entered))
                     }
-                    Statement::Scope { body, .. } => !suspends(body),
                     Statement::SetItem(receiver, _, _)
                     | Statement::AugmentItem(receiver, _, ir::ItemUpdate::Protocol(_), _) => {
                         uses_python_protocol |= receiver.ty == Type::PythonObject;
@@ -125,17 +126,8 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
             | ExprKind::Float(_)
             | ExprKind::Str(_)
             | ExprKind::Bytes(_)
-            | ExprKind::Not(_) => true,
-            ExprKind::Scope { body, value, .. } => {
-                let mut suspension = false;
-                ir::walk_operand_expressions(value, &mut |expr| {
-                    suspension |= matches!(
-                        expr.kind,
-                        ExprKind::Builtin(Builtin::RegisteredSuspend(..), _)
-                    )
-                });
-                !suspends(body) && !suspension
-            }
+            | ExprKind::Not(_)
+            | ExprKind::Scope { .. } => true,
             ExprKind::Conditional(..) | ExprKind::BooleanValue(..) | ExprKind::Boolean(..) => true,
             ExprKind::Dict { entries, .. } => entries.is_empty(),
             ExprKind::Builtin(op, args) if let Some(iteration) = op.iteration_operands(args) => {
@@ -239,17 +231,6 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
         .iter()
         .any(|slot| checked.function.locals[*slot] == Type::PythonObject);
     supported && (!has_live_parameter || uses_python_protocol)
-}
-
-fn suspends(body: &[Statement]) -> bool {
-    let mut suspension = false;
-    ir::walk_expressions(body, &mut |expr| {
-        suspension |= matches!(
-            expr.kind,
-            ExprKind::Builtin(Builtin::RegisteredSuspend(..), _)
-        )
-    });
-    suspension
 }
 
 #[derive(Default)]
