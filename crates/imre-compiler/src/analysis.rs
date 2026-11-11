@@ -413,11 +413,12 @@ impl Session {
             .any(|item| item.declaration.definition().is_some())
     }
 
-    /// A scope with only local values cannot refine an imported callee or a record field.
-    pub(crate) fn function_uses_only_locals(
+    /// This scope has only local values and the supplied fixed globals, with no member or import bindings.
+    pub(crate) fn function_uses_fixed_names(
         &self,
         module: usize,
         function: &ruff_python_ast::StmtFunctionDef,
+        fixed_global: impl Fn(&str) -> bool,
     ) -> bool {
         use ty_python_core::scope::NodeWithScopeRef;
 
@@ -431,7 +432,9 @@ impl Session {
             && !scope.is_generator_function(index)
             && index.child_scopes(scope).next().is_none()
             && places.members().next().is_none()
-            && places.symbols().all(|symbol| symbol.is_local())
+            && places
+                .symbols()
+                .all(|symbol| symbol.is_local() || fixed_global(symbol.name().as_str()))
             && !index
                 .use_def_map(scope)
                 .definitions_with_usage()
