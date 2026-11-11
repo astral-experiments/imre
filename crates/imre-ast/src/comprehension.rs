@@ -1,6 +1,6 @@
 //! Python comprehension control flow, independent of iterator and value representation.
 //!
-//! The caller acquires the outer iterator in the enclosing scope. All steps then
+//! The caller acquires the outer iterator in the enclosing scope. Clauses then
 //! execute with every target local to a single comprehension scope. A generator
 //! retains that scope and its active iterators between emissions.
 
@@ -43,7 +43,7 @@ pub enum Output<'a> {
 }
 
 impl<'a> Output<'a> {
-    /// Inspect syntax without building a plan, for scope and validation passes.
+    /// Read the result and clauses of a comprehension expression.
     pub fn from_expr(expr: &'a ast::Expr) -> Option<(Self, &'a [ast::Comprehension])> {
         Some(match expr {
             ast::Expr::ListComp(c) => (Self::List(&c.elt), &c.generators),
@@ -85,42 +85,17 @@ impl<'a> Output<'a> {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
-pub enum Step<'a> {
-    /// Evaluate an inner iterable after its enclosing target and filters.
-    Open {
-        depth: usize,
-        iterable: &'a ast::Expr,
-        is_async: bool,
-    },
-    /// Pull one item and bind it. Only exhaustion from the pull follows this edge.
-    Next {
-        depth: usize,
-        target: &'a ast::Expr,
-        /// First operation after the filters for this pull.
-        accepted: usize,
-        /// On exhaustion resume the enclosing pull, or finish the outer iterator.
-        parent: Option<usize>,
-    },
-    Filter {
-        test: &'a ast::Expr,
-        reject: usize,
-    },
-    /// Insert or yield. The next pull resumes at the same innermost iterator.
-    Emit {
-        output: Output<'a>,
-        resume: usize,
-    },
+/// An operand evaluated inside the comprehension, including its assignment targets.
+#[derive(Clone, Copy)]
+pub enum BodyOperand<'a> {
+    Target(&'a ast::Expr),
+    Value(&'a ast::Expr),
 }
 
 pub struct Plan<'a> {
     pub outer: &'a ast::Expr,
-    pub outer_async: bool,
-    pub output: Output<'a>,
-    pub depths: usize,
-    steps: Vec<Step<'a>>,
-    /// Original clause nodes for syntax diagnostics and typed specialization.
     pub clauses: &'a [ast::Comprehension],
+    pub output: Output<'a>,
 }
 
 /// The only clause whose iterable expression is evaluated by the caller.
@@ -142,48 +117,11 @@ impl<'a> Plan<'a> {
 
     pub fn new(clauses: &'a [ast::Comprehension], output: Output<'a>) -> Self {
         let outer = outer_clause(clauses);
-        let mut parent = None;
-        let mut steps = Vec::new();
-        for (depth, clause) in clauses.iter().enumerate() {
-            if depth > 0 {
-                steps.push(Step::Open {
-                    depth,
-                    iterable: &clause.iter,
-                    is_async: clause.is_async,
-                });
-            }
-            let head = steps.len();
-            steps.push(Step::Next {
-                depth,
-                target: &clause.target,
-                accepted: head + 1 + clause.ifs.len(),
-                parent,
-            });
-            parent = Some(head);
-            steps.extend(
-                clause
-                    .ifs
-                    .iter()
-                    .map(|test| Step::Filter { test, reject: head }),
-            );
-        }
-        steps.push(Step::Emit {
-            output,
-            resume: parent.expect("a comprehension has an outer pull"),
-        });
         Self {
             outer: &outer.iter,
-            outer_async: outer.is_async,
-            output,
-            depths: clauses.len(),
-            steps,
             clauses,
+            output,
         }
-    }
-
-    /// The immutable instruction sequence with its prepared branch destinations.
-    pub fn steps(&self) -> &[Step<'a>] {
-        &self.steps
     }
 
     pub fn target_names(&self) -> HashSet<String> {
@@ -207,25 +145,32 @@ impl<'a> Plan<'a> {
         invalid: impl Fn(InvalidTarget) -> Result<(), InvalidTarget>,
     ) -> Result<T, InvalidTarget> {
         let mut names = T::default();
-        for step in &self.steps {
-            if let Step::Next { target, .. } = step {
-                visit_target_names(target, &mut names, &invalid)?;
-            }
+        for clause in self.clauses {
+            visit_target_names(&clause.target, &mut names, &invalid)?;
         }
         Ok(names)
     }
 
-    /// Visit the operands of a successful body pass in execution order, including
-    /// binding targets. The caller evaluates `outer` separately. A name used
-    /// there may also occur in a body operand. Capture analysis resolves these
-    /// occurrences against their lexical bindings.
+    /// The enclosing scope evaluates the outer iterable. The body opens each
+    /// subsequent iterable, binds its target, tests its filters and evaluates the output.
+    pub fn body_operands(&self) -> impl Iterator<Item = BodyOperand<'a>> {
+        self.clauses
+            .iter()
+            .enumerate()
+            .flat_map(|(depth, clause)| {
+                (depth > 0)
+                    .then_some(BodyOperand::Value(&clause.iter))
+                    .into_iter()
+                    .chain(std::iter::once(BodyOperand::Target(&clause.target)))
+                    .chain(clause.ifs.iter().map(BodyOperand::Value))
+            })
+            .chain(self.output.elements().map(BodyOperand::Value))
+    }
+
     pub fn visit_body(&self, mut visit: impl FnMut(&'a ast::Expr)) {
-        for step in &self.steps {
-            match *step {
-                Step::Next { target, .. } => visit(target),
-                Step::Open { iterable, .. } => visit(iterable),
-                Step::Filter { test, .. } => visit(test),
-                Step::Emit { output, .. } => output.elements().for_each(&mut visit),
+        for operand in self.body_operands() {
+            match operand {
+                BodyOperand::Value(expr) | BodyOperand::Target(expr) => visit(expr),
             }
         }
     }
@@ -365,31 +310,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn loop_filters_follow_their_pull_and_enclosing_loop() {
-        let expression =
-            ruff_python_parser::parse_expression("(y for x in xs if x if f(x) for y in x if y)")
-                .unwrap();
+    fn nested_clauses_keep_their_filters_and_targets_in_source_order() {
+        let text = "(y for x in xs if x if f(x) for y in x if y)";
+        let expression = ruff_python_parser::parse_expression(text).unwrap();
         let plan = Plan::from_expr(expression.expr()).unwrap();
-        assert!(matches!(
-            plan.steps(),
+        use ruff_text_size::Ranged;
+        let observed = plan
+            .body_operands()
+            .map(|operand| match operand {
+                BodyOperand::Target(expr) => ("bind", &text[expr.range()]),
+                BodyOperand::Value(expr) => ("read", &text[expr.range()]),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            observed,
             [
-                Step::Next {
-                    accepted: 3,
-                    parent: None,
-                    ..
-                },
-                Step::Filter { reject: 0, .. },
-                Step::Filter { reject: 0, .. },
-                Step::Open { depth: 1, .. },
-                Step::Next {
-                    accepted: 6,
-                    parent: Some(0),
-                    ..
-                },
-                Step::Filter { reject: 4, .. },
-                Step::Emit { resume: 4, .. },
+                ("bind", "x"),
+                ("read", "x"),
+                ("read", "f(x)"),
+                ("read", "x"),
+                ("bind", "y"),
+                ("read", "y"),
+                ("read", "y")
             ]
-        ));
+        );
     }
 
     #[test]

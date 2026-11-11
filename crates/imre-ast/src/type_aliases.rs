@@ -5,7 +5,7 @@ use ruff_python_ast::visitor::{self, Visitor};
 use ruff_python_ast::{self as ast, Expr, Stmt};
 use ruff_text_size::{Ranged, TextRange};
 
-use crate::comprehension::{Output, Plan, Step};
+use crate::comprehension::{Output, Plan};
 
 /// The independently evaluated values on a declared type parameter.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -197,28 +197,22 @@ impl<'a> Rhs<'a> {
             comprehension: Some(expr),
             in_iterable: self.in_iterable,
         };
-        let mut inner_iterable = None;
-        for step in plan.steps() {
-            match *step {
-                Step::Open { iterable, .. } => inner_iterable = Some(iterable),
-                Step::Next { target, .. } => {
-                    // Symbol analysis checks a binding before its inner iterable.
-                    child.visit_expr(target);
-                    if let Some(iterable) = inner_iterable.take() {
-                        child.in_iterable = true;
-                        child.visit_expr(iterable);
-                        child.in_iterable = self.in_iterable;
-                    }
-                }
-                Step::Filter { test, .. } => child.visit_expr(test),
-                Step::Emit { output, .. } => {
-                    // CPython visits a dict's value first when selecting a symbol error.
-                    child.visit_expr(output.value());
-                    if let Some(key) = output.key() {
-                        child.visit_expr(key);
-                    }
-                }
+        for (depth, clause) in plan.clauses.iter().enumerate() {
+            // Symbol analysis checks a binding before its inner iterable.
+            child.visit_expr(&clause.target);
+            if depth > 0 {
+                child.in_iterable = true;
+                child.visit_expr(&clause.iter);
+                child.in_iterable = self.in_iterable;
             }
+            for test in &clause.ifs {
+                child.visit_expr(test);
+            }
+        }
+        // CPython visits a dict's value first when selecting a symbol error.
+        child.visit_expr(plan.output.value());
+        if let Some(key) = plan.output.key() {
+            child.visit_expr(key);
         }
         self.error = child.error;
         if self.error.is_none()

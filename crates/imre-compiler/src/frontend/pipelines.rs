@@ -2,7 +2,7 @@
 //! iterator acquisition, and each pull stay separate so composition preserves
 //! Python's lazy evaluation and mutation checks without escaping iterator values.
 
-use imre_ast::comprehension::{Plan, Step};
+use imre_ast::comprehension::Plan;
 
 use super::comprehensions::EagerDisplay;
 use super::*;
@@ -2391,31 +2391,18 @@ impl Checker<'_> {
         // Suspended generators can observe later enclosing writes. Facts about
         // those mutable slots must be proved again inside the lazy body.
         self.narrowed = assignments::Narrowed::new();
-        // Collapse each pull and its guard chain into one typed resume case.
-        // Store the plan's jump destinations so exhaustion and suspension use
-        // the same backedges as eager iteration.
+        // Each live iterator has one resume case, in clause order.
         struct Pull {
-            pc: usize,
             input: Prepared,
             binding: Vec<Statement>,
             filters: Vec<Expr>,
-            accepted: usize,
-            parent: Option<usize>,
         }
         first.evaluate.append(&mut first.acquire);
         let mut input = first;
-        let mut pc = 0;
-        let mut pulls: Vec<Pull> = Vec::with_capacity(plan.depths);
+        let mut pulls: Vec<Pull> = Vec::with_capacity(plan.clauses.len());
         let yielded = loop {
-            let Step::Next {
-                depth,
-                target,
-                accepted,
-                parent,
-            } = plan.steps()[pc]
-            else {
-                unreachable!("an iterator is followed by its pull");
-            };
+            let depth = pulls.len();
+            let clause = &plan.clauses[depth];
             if depth != 0 {
                 // Only private target slots remain stable while execution
                 // pauses inside a nested iterator.
@@ -2431,29 +2418,22 @@ impl Checker<'_> {
                 }
             }
             self.forget_comprehension_writes(&plan, depth);
-            let binding = self.bind_iterator_pattern(target, input.value)?;
-            let filters = self.eager_filters(&plan.steps()[pc + 1..accepted])?;
+            let binding = self.bind_iterator_pattern(&clause.target, input.value)?;
+            let filters = self.eager_filters(clause)?;
             pulls.push(Pull {
-                pc,
                 input,
                 binding,
                 filters,
-                accepted,
-                parent,
             });
-            match plan.steps()[accepted] {
-                Step::Open { iterable, .. } => {
-                    let source = self.expansion_input(iterable, None)?;
-                    input = self.prepare_iteration(source, iterable, false)?;
-                    pc = accepted + 1;
-                }
-                Step::Emit { output, .. } => {
-                    break match element {
-                        Some(ty) => self.expr_expected(output.value(), ty)?,
-                        None => self.expr(output.value())?,
-                    };
-                }
-                _ => unreachable!("a successful guard opens an iterator or emits"),
+            if let Some(inner) = plan.clauses.get(depth + 1) {
+                let source = self.expansion_input(&inner.iter, None)?;
+                input = self.prepare_iteration(source, &inner.iter, false)?;
+            } else {
+                let item = plan.output.value();
+                break match element {
+                    Some(ty) => self.expr_expected(item, ty)?,
+                    None => self.expr(item)?,
+                };
             }
         };
         let value = self.hidden(yielded.ty);
@@ -2491,11 +2471,12 @@ impl Checker<'_> {
             .iter()
             .flat_map(|pull| pull.input.writes.iter().copied())
             .collect::<HashSet<_>>();
-        for expression in plan.steps().iter().filter_map(|step| match step {
-            Step::Filter { test, .. } => Some(*test),
-            Step::Emit { output, .. } => Some(output.value()),
-            _ => None,
-        }) {
+        for expression in plan
+            .clauses
+            .iter()
+            .flat_map(|clause| &clause.ifs)
+            .chain(std::iter::once(plan.output.value()))
+        {
             for name in narrowing::expression_assignments(expression) {
                 if let Some(slot) = self.names.get(&name) {
                     self.narrowed.remove_mut(slot);
@@ -2516,20 +2497,20 @@ impl Checker<'_> {
             Statement::Assign(done, Expr::boolean(false)),
         ]);
         let mut cases = Vec::new();
-        for pull in pulls.iter().rev() {
-            let mut accepted = match plan.steps()[pull.accepted] {
-                Step::Emit { .. } => vec![
+        for (depth, pull) in pulls.iter().enumerate().rev() {
+            let mut accepted = if let Some(child) = pulls.get(depth + 1) {
+                let mut initialize = child.input.evaluate.clone();
+                initialize.extend(child.input.acquire.clone());
+                initialize.push(Statement::Assign(
+                    resume_pc,
+                    Expr::integer((depth + 1) as i64),
+                ));
+                initialize
+            } else {
+                vec![
                     Statement::Assign(value, yielded.clone()),
                     Statement::Assign(ready, Expr::boolean(true)),
-                ],
-                Step::Open { depth, .. } => {
-                    let child = &pulls[depth];
-                    let mut initialize = child.input.evaluate.clone();
-                    initialize.extend(child.input.acquire.clone());
-                    initialize.push(Statement::Assign(resume_pc, Expr::integer(child.pc as i64)));
-                    initialize
-                }
-                _ => unreachable!("validated when checking this pull"),
+                ]
             };
             for condition in pull.filters.iter().rev() {
                 accepted = vec![Statement::If(condition.clone(), accepted, Vec::new())];
@@ -2537,12 +2518,13 @@ impl Checker<'_> {
             let mut available = pull.binding.clone();
             available.push(Statement::Clear(pull.input.value));
             available.extend(accepted);
-            let (roots, jump) = match pull.parent {
-                Some(parent) => (
+            let (roots, jump) = if depth == 0 {
+                (&clear, Statement::Assign(done, Expr::boolean(true)))
+            } else {
+                (
                     &pull.input.clear,
-                    Statement::Assign(resume_pc, Expr::integer(parent as i64)),
-                ),
-                None => (&clear, Statement::Assign(done, Expr::boolean(true))),
+                    Statement::Assign(resume_pc, Expr::integer((depth - 1) as i64)),
+                )
             };
             let mut exhausted: Vec<_> = roots.iter().copied().map(Statement::Clear).collect();
             exhausted.push(jump);
@@ -2556,7 +2538,7 @@ impl Checker<'_> {
                 compare(
                     Compare::Equal,
                     self.local(resume_pc),
-                    Expr::integer(pull.pc as i64),
+                    Expr::integer(depth as i64),
                 ),
                 step,
                 cases,
