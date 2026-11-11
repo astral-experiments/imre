@@ -308,7 +308,7 @@ impl Plan<'_> {
                         aliases[slot] = None;
                     }
                 }
-                Statement::Expr(value) | Statement::Return(value) | Statement::Assert(value) => {
+                Statement::Expr(value) | Statement::Return(value) => {
                     if !self.expression(value, aliases) {
                         return false;
                     }

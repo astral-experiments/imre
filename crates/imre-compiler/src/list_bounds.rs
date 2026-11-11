@@ -130,7 +130,7 @@ impl Analysis<'_> {
                         state[slot] = None;
                     }
                 }
-                Statement::Expr(value) | Statement::Return(value) | Statement::Assert(value) => {
+                Statement::Expr(value) | Statement::Return(value) => {
                     self.expression(value, state);
                 }
                 Statement::Match(..) => {
@@ -530,10 +530,9 @@ fn readonly(expression: &Expr) -> bool {
 /// local identities must separately reject writes to those locals.
 pub(crate) fn block_readonly(body: &[Statement]) -> bool {
     body.iter().all(|statement| match statement {
-        Statement::Assign(_, value)
-        | Statement::Expr(value)
-        | Statement::Return(value)
-        | Statement::Assert(value) => readonly(value),
+        Statement::Assign(_, value) | Statement::Expr(value) | Statement::Return(value) => {
+            readonly(value)
+        }
         Statement::Scope { body, .. } => block_readonly(body),
         Statement::If(test, yes, no) | Statement::While(test, yes, no) => {
             readonly(test) && block_readonly(yes) && block_readonly(no)

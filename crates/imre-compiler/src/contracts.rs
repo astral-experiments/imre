@@ -1684,7 +1684,6 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_float_parse"
                 | "imre_bytes_float"
                 | "imre_int_true_divide"
-                | "imre_assert_fail"
                 | "imre_range_step_zero"
                 | "imre_list_repeat"
                 | "imre_list_slice"

@@ -3538,7 +3538,6 @@ pub(crate) enum Statement {
     Continue,
     /// A compiler-owned iterator reached its end; unlike break, this runs else.
     Exhaust,
-    Assert(Expr),
     /// A successfully acquired exit protects the target binding and suite.
     With {
         manager: Expr,
@@ -3596,10 +3595,9 @@ macro_rules! pattern_expressions {
 macro_rules! statement_children {
     ($statement:expr, $expression:expr, $suite:expr) => {
         match $statement {
-            Statement::Assign(_, value)
-            | Statement::Expr(value)
-            | Statement::Return(value)
-            | Statement::Assert(value) => ($expression)(value),
+            Statement::Assign(_, value) | Statement::Expr(value) | Statement::Return(value) => {
+                ($expression)(value)
+            }
             Statement::SetItem(a, b, c) | Statement::AugmentItem(a, b, _, c) => {
                 for value in [a, b, c] {
                     ($expression)(value);

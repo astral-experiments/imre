@@ -6386,22 +6386,19 @@ impl<'a> Checker<'a> {
             ast::Stmt::Assert(assert) => {
                 let test = self.condition(&assert.test)?;
                 let successful = self.local_state();
-                let result = if let Some(message) = &assert.msg {
-                    let message = self.expr_expected(message, Type::Str)?;
-                    Statement::If(
-                        test,
-                        Vec::new(),
-                        vec![Statement::raise(Expr {
-                            ty: Type::Exception,
-                            kind: ExprKind::Exception {
-                                kind: 9,
-                                message: Some(Box::new(message)),
-                            },
-                        })],
-                    )
-                } else {
-                    Statement::Assert(test)
-                };
+                let message = assert
+                    .msg
+                    .as_deref()
+                    .map(|message| self.expr_expected(message, Type::Str).map(Box::new))
+                    .transpose()?;
+                let result = Statement::If(
+                    test,
+                    Vec::new(),
+                    vec![Statement::raise(Expr {
+                        ty: Type::Exception,
+                        kind: ExprKind::Exception { kind: 9, message },
+                    })],
+                );
                 self.restore_state(successful);
                 self.apply_facts(&assert.test, true);
                 Some(result)

@@ -1050,16 +1050,6 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                     orelse,
                 );
             }
-            Statement::Assert(test) => {
-                let code = self.fixed();
-                let test = code.expr(test);
-                let (success, fail) = (code.label(), code.label());
-                code.branch(&test.operand, &success, &fail);
-                code.start(&fail);
-                code.checked_line("call void @imre_assert_fail()");
-                code.body.end("unreachable");
-                code.start(&success);
-            }
         }
     }
 

@@ -11490,7 +11490,6 @@ declare i64 @imre_list_view_index(i64, i64) nounwind
 declare ptr @imre_list_repeat(ptr, i64)
 declare ptr @imre_list_slice(ptr, i64, i64, i64)
 declare ptr @imre_seq_slice(ptr, i64, i64, i64)
-declare void @imre_assert_fail()
 declare void @imre_range_step_zero()
 declare i64 @llvm.abs.i64(i64, i1 immarg)
 declare i64 @llvm.ctpop.i64(i64)
