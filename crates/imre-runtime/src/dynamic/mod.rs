@@ -2359,15 +2359,11 @@ impl Context {
             .str_value(targets)?
             .split_ascii_whitespace()
             .map(str::to_owned)
-            .collect();
-        Ok(self.comprehension_scope_with_targets(parent, targets))
+            .collect::<std::collections::HashSet<_>>();
+        Ok(self.comprehension_scope_with_locals(parent, targets.into()))
     }
 
-    fn comprehension_scope_with_targets(
-        &mut self,
-        parent: Id,
-        targets: std::collections::HashSet<String>,
-    ) -> Id {
+    fn comprehension_scope_with_locals(&mut self, parent: Id, locals: value::DeclaredLocals) -> Id {
         let enclosing = self.scope_data(parent);
         let module = enclosing.module.clone();
         let (parent, kind) =
@@ -2384,7 +2380,7 @@ impl Context {
             unreachable!()
         };
         frame.comprehension = Some(kind);
-        frame.closure.declared = targets.into();
+        frame.closure.declared = locals;
         frame.closure.declared_complete = true;
         scope
     }

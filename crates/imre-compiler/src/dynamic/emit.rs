@@ -17,8 +17,7 @@ use crate::frontend::{ParameterEvaluator, RegisteredGenerator, RegisteredLambda,
 use crate::ir::RegisteredTypeParameter;
 use crate::llvm::ModuleLauncher;
 use crate::llvm::registered::sites::{
-    CheckedSites, CompiledAlias, CompiledDefinition, CompiledGenerator, CompiledTypeParameters,
-    Declaration,
+    CheckedSites, CompiledAlias, CompiledDefinition, CompiledTypeParameters, Declaration,
 };
 use crate::llvm::registered::{
     ABI, AnnotationScope, Output, RegisteredBody, RegisteredFrame, SourcePositions, sites,
@@ -1150,18 +1149,13 @@ impl<'p> sites::SiteDefinitions<'p> for LexicalDefinitions<'_, 'p> {
         (namespace, parameters, class.range)
     }
 
-    fn generator(&mut self, site: TextRange) -> CompiledGenerator {
+    fn generator(&mut self, site: TextRange) -> CompiledDefinition {
         let body = &self.source.generators[&site];
-        let definition = self.compile_callable(
+        self.compile_callable(
             site.start(),
             Callable::Generator(body),
             Body::Registered(RegisteredBody::Function(&body.body), None),
-        );
-        let targets = self.source.scopes.comprehension_targets[&site].clone();
-        CompiledGenerator {
-            definition,
-            targets,
-        }
+        )
     }
 
     fn type_alias(&mut self, site: TextSize) -> Result<CompiledAlias, String> {

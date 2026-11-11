@@ -171,11 +171,6 @@ impl CompiledDefinition {
     }
 }
 
-pub(crate) struct CompiledGenerator {
-    pub(crate) definition: CompiledDefinition,
-    pub(crate) targets: String,
-}
-
 pub(crate) struct CompiledAlias {
     pub(crate) definition: CompiledDefinition,
     pub(crate) parameters: Option<CompiledTypeParameters>,
@@ -219,7 +214,7 @@ pub(crate) trait SiteDefinitions<'p> {
         &mut self,
         site: TextSize,
     ) -> (CompiledDefinition, CompiledTypeParameters, TextRange);
-    fn generator(&mut self, site: TextRange) -> CompiledGenerator;
+    fn generator(&mut self, site: TextRange) -> CompiledDefinition;
     fn type_alias(&mut self, site: TextSize) -> Result<CompiledAlias, String>;
     fn annotation_string(&mut self, site: TextSize) -> String;
 }
@@ -232,7 +227,7 @@ pub(crate) struct CheckedSites {
     pub(crate) class_namespaces:
         HashMap<TextSize, (CompiledDefinition, CompiledTypeParameters, TextRange)>,
     pub(crate) lambdas: HashMap<TextSize, CompiledDefinition>,
-    pub(crate) generators: HashMap<TextRange, CompiledGenerator>,
+    pub(crate) generators: HashMap<TextRange, CompiledDefinition>,
     pub(crate) aliases: HashMap<TextSize, Result<CompiledAlias, String>>,
 }
 
@@ -321,10 +316,8 @@ impl CheckedSites {
         scope: &str,
         cursor: &str,
     ) -> String {
-        let child = &self.generators[&site];
-        let function = child.definition.bind_defaults(frame, scope, &[]);
-        let targets = frame.text(&child.targets);
-        frame.op("generator", &[&function, cursor, &targets])
+        let function = self.generators[&site].bind_defaults(frame, scope, &[]);
+        frame.op("generator", &[&function, cursor])
     }
 
     pub(crate) fn bind_lambda(
