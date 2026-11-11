@@ -50,8 +50,8 @@ impl CheckedFile {
         }
     }
 
-    pub(crate) fn entry(graph: &crate::modules::SourceGraph, path: &Path) -> Option<Self> {
-        if graph.modules[graph.entry].path != std::path::absolute(path).ok()? {
+    pub(crate) fn entry(graph: &crate::modules::SourceGraph, identity: &Path) -> Option<Self> {
+        if graph.modules[graph.entry].path != identity {
             return None;
         }
         Self::select(graph, graph.entry)

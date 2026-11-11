@@ -42,14 +42,29 @@ impl Default for RegisteredOutputStarted {
     }
 }
 
-fn assert_refusal_before_llvm(entry: &Path, expected: &str, builds: &[CompileOptions]) {
+fn assert_source_diagnostic(actual: &str, file: &Path, expected: &str) {
+    let path = actual
+        .strip_suffix(expected)
+        .unwrap_or_else(|| panic!("expected {}{expected}, got {actual}", file.display()));
+    assert_eq!(
+        Path::new(path).canonicalize().unwrap(),
+        file.canonicalize().unwrap()
+    );
+}
+
+fn assert_refusal_before_llvm(
+    entry: &Path,
+    file: &Path,
+    expected: &str,
+    builds: &[CompileOptions],
+) {
     let (diagnostic, events) = observe_preparation(|| check_file(entry, None).unwrap_err());
-    assert_eq!(diagnostic, expected);
+    assert_source_diagnostic(&diagnostic, file, expected);
     assert!(!events.iter().any(|event| matches!(event, Phase::Llvm)));
     for options in builds {
         let (diagnostic, events) =
             observe_preparation(|| compile_file(entry, None, options).err().unwrap());
-        assert_eq!(diagnostic, expected);
+        assert_source_diagnostic(&diagnostic, file, expected);
         assert!(!events.iter().any(|event| matches!(event, Phase::Llvm)));
     }
 }
@@ -79,10 +94,8 @@ fn imported_operand_refusal_precedes_llvm_emission() {
     };
     assert_refusal_before_llvm(
         &main,
-        &format!(
-            "{}:4:15: cannot compile this comprehension ahead of time (through 4:57)",
-            source.display()
-        ),
+        &source,
+        ":4:15: cannot compile this comprehension ahead of time (through 4:57)",
         &[CompileOptions::default(), script, named],
     );
 
@@ -107,10 +120,15 @@ fn imported_operand_refusal_precedes_llvm_emission() {
         );
         assert_eq!(prepared < events.len(), build);
         for file in [&main, &source] {
+            let identity = file.canonicalize().unwrap();
             let observed: Vec<_> = events
                 .iter()
                 .filter_map(|event| match event {
-                    Phase::Prepared(path, borrowed) if path == file => Some(*borrowed),
+                    Phase::Prepared(path, borrowed)
+                        if path.canonicalize().ok().as_ref() == Some(&identity) =>
+                    {
+                        Some(*borrowed)
+                    }
                     _ => None,
                 })
                 .collect();
@@ -132,9 +150,9 @@ fn conditional_operands_refuse_only_on_reachable_edges() {
         std::fs::write(&entry, source).unwrap();
         assert_refusal_before_llvm(
             &entry,
+            &entry,
             &format!(
-                "{}:{line}:{from}: cannot compile this comprehension ahead of time (through {line}:{to})",
-                entry.display()
+                ":{line}:{from}: cannot compile this comprehension ahead of time (through {line}:{to})"
             ),
             &[CompileOptions::default()],
         );
@@ -165,9 +183,9 @@ fn indirect_literal_operand_refusal_precedes_llvm_emission() {
         std::fs::write(&entry, caller(child)).unwrap();
         assert_refusal_before_llvm(
             &entry,
+            &entry,
             &format!(
-                "{}:4:10: Imre: {prefix}<string>:4:15: cannot compile this comprehension ahead of time (through 4:57)",
-                entry.display()
+                ":4:10: Imre: {prefix}<string>:4:15: cannot compile this comprehension ahead of time (through 4:57)"
             ),
             &[CompileOptions::default()],
         );
@@ -193,13 +211,11 @@ fn imported_checked_function_retains_its_literal_call_site() {
     .unwrap();
     assert_refusal_before_llvm(
         &entry,
-        &format!(
-            concat!(
-                "{}:2:10: Imre: <string>:1:6: Imre: this call may select builtins.exec ",
-                "without a linked body for its source. Define the handlers as Python functions ",
-                "and select one by name, or declare the finite modules with --include-module."
-            ),
-            rules.display(),
+        &rules,
+        concat!(
+            ":2:10: Imre: <string>:1:6: Imre: this call may select builtins.exec ",
+            "without a linked body for its source. Define the handlers as Python functions ",
+            "and select one by name, or declare the finite modules with --include-module."
         ),
         &[CompileOptions::default()],
     );
@@ -269,9 +285,9 @@ fn suspended_assignment_refusal_precedes_llvm_emission() {
         std::fs::write(&main, body).unwrap();
         assert_refusal_before_llvm(
             &main,
+            &main,
             &format!(
-                "{}:12:{col}: cannot compile this comprehension ahead of time (through 12:{end})",
-                main.display()
+                ":12:{col}: cannot compile this comprehension ahead of time (through 12:{end})"
             ),
             &[CompileOptions::default()],
         );
@@ -326,16 +342,17 @@ fn a_file_build_records_the_root_of_its_registered_package() {
     let package = root.join("parcel");
     std::fs::create_dir(&package).unwrap();
     let initializer = package.join("__init__.py");
-    std::fs::write(&initializer, "def program(): return 'printf'\n").unwrap();
+    std::fs::write(&initializer, "def program(): return 112\n").unwrap();
     let entry = package.join("__main__.py");
     std::fs::write(
         &entry,
-        "import os, sys\nfrom parcel import program\nif __name__ == '__main__':\n    cmd = program()\n    os.execvp(cmd, [cmd, *sys.argv[1:]])\n",
+        "from parcel import program\nbuffer = bytearray()\nbuffer.append(program())\nprint(buffer)\n",
     )
     .unwrap();
 
     let compilation = compile_file(&entry, None, &CompileOptions::default()).unwrap();
     let inputs = compilation.source_inputs;
+    assert!(inputs.boxed_imports);
     assert!(inputs.files.iter().any(|(path, _, _)| path == &initializer));
     assert!(inputs.fresh());
     std::fs::write(root.join("__init__.py"), "").unwrap();
@@ -396,13 +413,10 @@ fn required_object_call_keeps_its_admission_reason() {
         CheckedProgram::Runtime(reason) => panic!("unexpected lowering refusal: {reason}"),
         _ => panic!("the checked formatting operation requires a registered entry"),
     };
-    let expected = format!(
-        "{}:2:14: Imre: this f-string field requires native Python object operations",
-        path.display()
-    );
+    let expected = ":2:14: Imre: this f-string field requires native Python object operations";
     assert_eq!(reason.kind, LoweringKind::Ordinary);
-    assert_eq!(reason.to_string(), expected);
-    assert_eq!(check_file(&path, None).unwrap_err(), expected);
+    assert_source_diagnostic(&reason.to_string(), &path, expected);
+    assert_source_diagnostic(&check_file(&path, None).unwrap_err(), &path, expected);
 }
 
 #[test]
@@ -421,18 +435,16 @@ fn interleaved_import_preserves_another_modules_list_contract() {
         "def score() -> int:\n    values: list[int] = [1]\n    values.append(True)\n    return values[0]\n",
     )
     .unwrap();
-    let expected = format!(
-        "{}:3:19: Imre: expected int, got bool; annotations are enforced contracts",
-        scores.display()
-    );
-    assert_eq!(check_file(&entry, None).unwrap_err(), expected);
+    let expected = ":3:19: Imre: expected int, got bool; annotations are enforced contracts";
+    assert_source_diagnostic(&check_file(&entry, None).unwrap_err(), &scores, expected);
     let options = CompileOptions {
         sitecustomize: true,
         ..Default::default()
     };
-    assert_eq!(
-        compile_file(&entry, None, &options).err().unwrap(),
-        expected
+    assert_source_diagnostic(
+        &compile_file(&entry, None, &options).err().unwrap(),
+        &scores,
+        expected,
     );
 }
 
@@ -488,10 +500,9 @@ fn dormant_thread_keeps_an_imported_modules_exact_types() {
     ] {
         std::fs::write(&scores, source).unwrap();
         let error = format!(
-            "{}:{position}: Imre: expected int, got bool; annotations are enforced contracts",
-            scores.display()
+            ":{position}: Imre: expected int, got bool; annotations are enforced contracts"
         );
-        assert_refusal_before_llvm(&entry, &error, &[CompileOptions::default()]);
+        assert_refusal_before_llvm(&entry, &scores, &error, &[CompileOptions::default()]);
     }
     for source in [
         "def measure():\n    value = 1\n    value = 'ready'\n    print(value)\n",
@@ -538,9 +549,6 @@ fn retained_generator_propagates_its_nested_definition_refusal() {
         "state: int\n",
     );
     std::fs::write(&entry, source).unwrap();
-    let expected = format!(
-        "{}:7:19: cannot compile this comprehension ahead of time (through 7:61)",
-        entry.display()
-    );
-    assert_refusal_before_llvm(&entry, &expected, &[CompileOptions::default()]);
+    let expected = ":7:19: cannot compile this comprehension ahead of time (through 7:61)";
+    assert_refusal_before_llvm(&entry, &entry, expected, &[CompileOptions::default()]);
 }

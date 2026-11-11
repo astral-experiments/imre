@@ -910,7 +910,8 @@ pub(crate) fn compile(
         SourceKind::File
     };
     let modules = checked_graph.map_or(&[][..], |graph| graph.modules.as_slice());
-    let entry_file = file_entry.and_then(|graph| CheckedFile::entry(graph, path));
+    let entry_file = file_entry
+        .and_then(|graph| CheckedFile::entry(graph, entry_identity.as_deref().unwrap_or(path)));
     let mut file_source = None;
     let mut first = if let Some(file) = entry_file {
         let module = file.parsed(modules);
