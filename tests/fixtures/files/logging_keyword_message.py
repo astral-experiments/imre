@@ -20,3 +20,4 @@ def level() -> int:
 logging.basicConfig(stream=sys.stdout, level=logging.INFO, format="%(name)s %(message)s")
 logging.info(msg="from root")
 receiver().log(msg=message(), level=level())
+print(receiver().isEnabledFor(level=level()))
