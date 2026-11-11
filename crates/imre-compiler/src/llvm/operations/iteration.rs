@@ -300,28 +300,14 @@ impl CheckedBody<'_, '_, '_, '_> {
                 right.rooted_handle(),
             )),
         };
-        match op {
-            ItemUpdate::Fixed(_) => self.fixed().set_item(
-                table.fixed_value(),
-                key.fixed_value(),
-                value.fixed_value(),
-                nonnegative,
-            ),
-            ItemUpdate::Protocol(_) => {
-                self.python().put_item(
-                    table.rooted_handle(),
-                    key.rooted_handle(),
-                    value.rooted_handle(),
-                );
-            }
-        }
+        self.write_item(&table, &key, &value, None, nonnegative);
         for operand in [value, right, old, key, table] {
             self.release_input(operand);
         }
     }
 
     pub(super) fn store_item(&mut self, table: &Expr, key: &Expr, value: &Expr) {
-        let fixed = match &mut self.0 {
+        let (buffer, nonnegative, mark) = match &mut self.0 {
             Entry::Native(e) => {
                 if e.copy_item(table, key, value) {
                     return;
@@ -334,57 +320,71 @@ impl CheckedBody<'_, '_, '_, '_> {
                     }
                     _ => None,
                 };
-                Some((slot, e.nonnegative_index(key)))
+                (slot, e.nonnegative_index(key), None)
             }
-            Entry::Registered(_) => None,
-        };
-        let mark = match &mut self.0 {
             Entry::Registered(f) => {
                 let target = f.target_mark();
                 let operands = target.clone().unwrap_or_else(|| f.temporary_mark());
-                Some((target, operands))
+                (None, false, Some((target, operands)))
             }
-            _ => None,
         };
         let value = self.store_operand(value);
         let table = self.store_operand(table);
         let key = self.store_operand(key);
-        match &mut self.0 {
-            Entry::Registered(f) => {
-                let v = value.into_handle();
-                let b = table.into_handle();
-                let k = key.into_handle();
-                f.op("put", &[&b, &k, &v]);
-                // STORE_SUBSCR pops key and receiver before the RHS. The target
-                // checkpoint also releases any earlier snapshot of a taken slot.
-                let (target, operands) = mark.expect("registered store marks");
-                f.release_owned_operands(&operands);
-                f.release_target(target.as_deref());
+        self.write_item(&table, &key, &value, buffer, nonnegative);
+        if let Some((target, operands)) = mark {
+            // STORE_SUBSCR pops key and receiver before the RHS. The target
+            // checkpoint also releases any earlier snapshot of a taken slot.
+            let f = self.python();
+            f.release_owned_operands(&operands);
+            f.release_target(target.as_deref());
+        } else {
+            let e = self.fixed();
+            let (list, index, value) =
+                (table.into_native(), key.into_native(), value.into_native());
+            if e.module.types.mapping(list.value.ty).is_some()
+                && e.module
+                    .types
+                    .may_own_file(value.value.ty, &e.module.class_fields, true)
+            {
+                // The assignment's stack keeps the RHS alive while the
+                // temporary dictionary releases its remaining entries.
+                e.release_operand(&list);
+                e.release_operand(&index);
+                e.release_operand(&value);
+            } else {
+                e.release_operand(&value);
+                e.release_operand(&index);
+                e.release_operand(&list);
             }
+        }
+    }
+
+    /// Write already evaluated operands while their statement still holds its owners.
+    fn write_item(
+        &mut self,
+        table: &CheckedValue,
+        key: &CheckedValue,
+        value: &CheckedValue,
+        buffer: Option<usize>,
+        nonnegative: bool,
+    ) {
+        match &mut self.0 {
             Entry::Native(e) => {
-                let (list, index, value) =
-                    (table.into_native(), key.into_native(), value.into_native());
-                let (fixed_slot, nonnegative) = fixed.expect("native store layout");
-                if let Some(slot) = fixed_slot {
-                    e.fixed_int_set(slot, &index.value, &value.value);
+                let key = key.fixed_value();
+                let value = value.fixed_value();
+                if let Some(slot) = buffer {
+                    e.fixed_int_set(slot, key, value);
                 } else {
-                    e.set_item(&list.value, &index.value, &value.value, nonnegative);
+                    e.set_item(table.fixed_value(), key, value, nonnegative);
                 }
-                if e.module.types.mapping(list.value.ty).is_some()
-                    && e.module
-                        .types
-                        .may_own_file(value.value.ty, &e.module.class_fields, true)
-                {
-                    // The assignment's stack keeps the RHS alive while the
-                    // temporary dictionary releases its remaining entries.
-                    e.release_operand(&list);
-                    e.release_operand(&index);
-                    e.release_operand(&value);
-                } else {
-                    e.release_operand(&value);
-                    e.release_operand(&index);
-                    e.release_operand(&list);
-                }
+            }
+            Entry::Registered(f) => {
+                f.put_item(
+                    table.rooted_handle(),
+                    key.rooted_handle(),
+                    value.rooted_handle(),
+                );
             }
         }
     }

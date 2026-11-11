@@ -59,13 +59,6 @@ impl CheckedValue {
             exact_word: None,
         }
     }
-    pub(crate) fn into_handle(self) -> String {
-        let Self::Handle { id, .. } = self else {
-            unreachable!("handle-producing expression")
-        };
-        id
-    }
-
     pub(crate) fn rooted_integer(id: String, n: i64) -> Self {
         Self::Handle {
             id,
