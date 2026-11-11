@@ -7636,13 +7636,17 @@ impl Emitter<'_, '_> {
             Builtin::Repr => self.value_repr(&args[0].value),
             Builtin::BaseObjectRepr => {
                 let receiver = &args[0].value;
-                let name = receiver.ty.builtin_scalar_name().expect("checked builtin class");
+                let name = receiver
+                    .ty
+                    .builtin_scalar_name()
+                    .expect("checked builtin class");
                 let class = self.byte_array(name.as_bytes().to_vec());
                 Value {
                     ty: Type::Str,
                     operand: self.checked_instruction(format!(
                         "call ptr @imre_object_base_repr(ptr {}, ptr @{class}, i64 {})",
-                        receiver.operand, name.len()
+                        receiver.operand,
+                        name.len()
                     )),
                     small_integer: false,
                 }
