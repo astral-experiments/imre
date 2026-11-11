@@ -1,5 +1,7 @@
 """Decimal construction and spelling used by serializers under the default context."""
 
+from _imre_decimal_ratio import _coefficient_as_int, _unsigned_ratio
+
 
 class DecimalException(ArithmeticError):
     pass
@@ -114,22 +116,11 @@ class Decimal:
             raise OverflowError("cannot convert Infinity to integer ratio")
 
         coefficient, exponent = _parts(text)
-        digits = coefficient.lstrip("-")
-        # A Decimal coefficient can exceed the limit for int(string).
-        first = len(digits) % 18 or 18
-        numerator = int(digits[:first])
-        for start in range(first, len(digits), 18):
-            numerator = numerator * 10**18 + int(digits[start:start + 18])
+        magnitude = _coefficient_as_int(coefficient.lstrip("-"))
+        numerator, denominator = _unsigned_ratio(magnitude, exponent)
         if coefficient.startswith("-"):
             numerator = -numerator
-        scale = 10**abs(exponent)
-        if exponent >= 0:
-            return numerator * scale, 1
-
-        divisor, remainder = scale, abs(numerator)
-        while remainder:
-            divisor, remainder = remainder, divisor % remainder
-        return numerator // divisor, scale // divisor
+        return numerator, denominator
 
     def __bool__(self) -> bool:
         mantissa, marker, exponent = self._text.lstrip("-").partition("E")
