@@ -206,7 +206,7 @@ mod tests {
             fixed.ir.0.functions[0].body.as_slice(),
             [Statement::Return(Expr {
                 ty: Type::Str,
-                kind: ExprKind::Binary(Binary::Concat, ..),
+                kind: ExprKind::Binary(Binary::Add, ..),
             })]
         ));
     }

@@ -402,11 +402,7 @@ impl Interval {
                     max: self.max.map(|value| value >> shift.min(127)),
                 }
             }
-            Binary::Power
-            | Binary::MatrixMultiply
-            | Binary::Divide
-            | Binary::Repeat
-            | Binary::Concat => Self::UNKNOWN,
+            Binary::Power | Binary::MatrixMultiply | Binary::Divide => Self::UNKNOWN,
         }
     }
 }
@@ -904,7 +900,11 @@ impl Analyzer {
             ExprKind::Binary(op, left, right) => {
                 let left = self.expression(left, state, record);
                 let right = self.expression(right, state, record);
-                left.binary(*op, right)
+                if expression.ty == Type::Int {
+                    left.binary(*op, right)
+                } else {
+                    Interval::UNKNOWN
+                }
             }
             ExprKind::Negate(value) => self.expression(value, state, record).negate(),
             ExprKind::Boolean(and, values) => {

@@ -31,7 +31,7 @@ pub(super) fn string(value: impl Into<String>) -> Expr {
 pub(super) fn concat(left: Expr, right: Expr) -> Expr {
     Expr {
         ty: Type::Str,
-        kind: ExprKind::Binary(Binary::Concat, Box::new(left), Box::new(right)),
+        kind: ExprKind::Binary(Binary::Add, Box::new(left), Box::new(right)),
     }
 }
 

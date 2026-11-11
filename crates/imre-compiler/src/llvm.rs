@@ -3703,8 +3703,6 @@ impl Emitter<'_, '_> {
                 }
                 Binary::Power
                 | Binary::MatrixMultiply
-                | Binary::Repeat
-                | Binary::Concat
                 | Binary::BitAnd
                 | Binary::BitOr
                 | Binary::BitXor
@@ -3723,35 +3721,49 @@ impl Emitter<'_, '_> {
             Binary::Power | Binary::MatrixMultiply => {
                 unreachable!("fixed operator was checked")
             }
-            Binary::Repeat => {
-                let (list, count) = if matches!(
+            Binary::Add if matches!(left.ty, Type::Str | Type::Bytes) && left.ty == right.ty => {
+                self.call(
+                    if left.ty == Type::Bytes {
+                        "imre_bytes_concat"
+                    } else {
+                        "imre_str_concat"
+                    },
                     left.ty,
-                    Type::ListInt | Type::List(_) | Type::Bytes | Type::Str
-                ) {
+                    &[left, right],
+                )
+            }
+            Binary::Add
+                if matches!(left.ty, Type::Optional(_) | Type::None)
+                    || matches!(right.ty, Type::Optional(_) | Type::None) =>
+            {
+                let left = self.word(left);
+                let right = self.word(right);
+                let operand = self.checked_pointer(format!(
+                    "call ptr @imre_optional_str_concat(i64 {left}, i64 {right})"
+                ));
+                self.owned(Value {
+                    ty: Type::Str,
+                    operand,
+                    small_integer: false,
+                })
+            }
+            Binary::Add if let Some(element) = self.module.types.element(left.ty) => {
+                self.concat_lists(left, right, element)
+            }
+            Binary::Multiply if let Some(sequence) = Type::repeated_sequence(left.ty, right.ty) => {
+                let (value, count) = if sequence == left.ty {
                     (left, right)
                 } else {
                     (right, left)
                 };
-                let name = if list.ty == Type::Str {
-                    "imre_str_repeat"
-                } else if list.ty == Type::Bytes {
-                    "imre_bytes_repeat"
-                } else if list.ty == Type::ListInt {
-                    "imre_list_repeat"
-                } else {
-                    "imre_seq_repeat"
+                let name = match sequence {
+                    Type::Str => "imre_str_repeat",
+                    Type::Bytes => "imre_bytes_repeat",
+                    Type::ListInt => "imre_list_repeat",
+                    _ => "imre_seq_repeat",
                 };
-                self.call(name, list.ty, &[list, count])
+                self.call(name, sequence, &[value, count])
             }
-            Binary::Concat => self.call(
-                if left.ty == Type::Bytes {
-                    "imre_bytes_concat"
-                } else {
-                    "imre_str_concat"
-                },
-                left.ty,
-                &[left, right],
-            ),
             Binary::Add | Binary::Subtract | Binary::Multiply | Binary::Modulo => {
                 self.integer_arithmetic(op, &left.operand, &right.operand)
             }
@@ -3796,11 +3808,7 @@ impl Emitter<'_, '_> {
                     (left.min >= 0 && right.min > 0) || (left.max <= 0 && right.max < 0);
                 Some(!same_sign)
             }
-            Binary::Power
-            | Binary::MatrixMultiply
-            | Binary::Divide
-            | Binary::Repeat
-            | Binary::Concat => None,
+            Binary::Power | Binary::MatrixMultiply | Binary::Divide => None,
         }
     }
 
@@ -3915,11 +3923,7 @@ impl Emitter<'_, '_> {
                 };
                 self.instruction(format!("{instruction} i64 {left}, {right}"))
             }
-            Binary::Power
-            | Binary::MatrixMultiply
-            | Binary::Divide
-            | Binary::Repeat
-            | Binary::Concat => {
+            Binary::Power | Binary::MatrixMultiply | Binary::Divide => {
                 unreachable!("only proved integer arithmetic")
             }
         };
@@ -6358,17 +6362,6 @@ impl Emitter<'_, '_> {
                 )
             }
             Builtin::SysArgv => self.call("imre_sys_argv", returns, &[]),
-            Builtin::OptionalStrConcat => {
-                let left = self.word(&args[0].value);
-                let right = self.word(&args[1].value);
-                Value {
-                    ty: Type::Str,
-                    operand: self.checked_instruction(format!(
-                        "call ptr @imre_optional_str_concat(i64 {left}, i64 {right})"
-                    )),
-                    small_integer: false,
-                }
-            }
             Builtin::SysOrigArgv => self.call("imre_sys_orig_argv", returns, &[]),
             Builtin::StringTupleContains => self.call(
                 "imre_str_tuple_contains",
@@ -10295,7 +10288,7 @@ fn concat_leaves<'e>(emitter: &Emitter<'_, '_>, expression: &'e Expr) -> Vec<&'e
     fn visit<'a>(emitter: &Emitter<'_, '_>, expression: &'a Expr, output: &mut Vec<&'a Expr>) {
         if let ExprKind::Builtin(Builtin::FormatJoin, parts) = &expression.kind {
             output.extend(parts);
-        } else if let ExprKind::Binary(Binary::Concat, left, right) = &expression.kind {
+        } else if let Some((left, right)) = expression.string_addends() {
             // A completed left addition can raise before the right operand runs.
             // An in-bounds ASCII lookup with an already evaluated index is
             // also an immutable read. The range proof alone does not establish
@@ -12271,6 +12264,16 @@ print(show("x"))
         let effect = body("later() % 4");
         let (before, _) = effect.split_once("call i64 @fn_1(").unwrap();
         assert!(before.contains("call ptr @imre_str_concat_parts("));
+    }
+
+    #[test]
+    fn list_addition_polls_while_copying_into_a_fresh_list() {
+        let body = function_body(
+            "def joined(left: list[int], right: list[int]) -> list[int]:\n    return left + right\nprint(joined([1], [2]))",
+        );
+        assert_eq!(body.matches("call ptr @imre_list_new(").count(), 1);
+        assert_eq!(body.matches("call i1 @imre_typed_interrupt(").count(), 2);
+        assert_eq!(body.matches("call i32 @imre_list_append(").count(), 2);
     }
 
     #[test]

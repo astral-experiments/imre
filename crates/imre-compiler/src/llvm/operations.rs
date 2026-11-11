@@ -460,12 +460,6 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         {
             return value;
         }
-        // A body placed from a native definition now receives Python handles.
-        let op = match (fixed_site, op) {
-            (true, Binary::Concat) => Binary::Add,
-            (true, Binary::Repeat) => Binary::Multiply,
-            _ => op,
-        };
         let checked_ints =
             left.checked_operand_type() == Type::Int && right.checked_operand_type() == Type::Int;
         let arithmetic = matches!(op, Binary::Add | Binary::Subtract | Binary::Multiply)
@@ -961,7 +955,7 @@ impl Emitter<'_, '_> {
         right: &Expr,
         expression: &Expr,
     ) -> Option<CheckedValue> {
-        if matches!(op, Binary::Concat) && expression.ty == Type::Str {
+        if expression.string_addends().is_some() {
             return Some(CheckedValue::owned(self.concat(expression)));
         }
         if matches!(op, Binary::Add)

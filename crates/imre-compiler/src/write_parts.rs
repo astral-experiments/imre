@@ -61,9 +61,9 @@ fn write_wrapper(function: &Function) -> Option<Write> {
     let ExprKind::Local(file) = file.kind else {
         return None;
     };
-    let (value, suffix) = match &text.kind {
-        ExprKind::Binary(Binary::Concat, left, right) if matches!(right.kind, ExprKind::Str(_)) => {
-            (left.as_ref(), Some(right.as_ref().clone()))
+    let (value, suffix) = match text.string_addends() {
+        Some((left, right)) if matches!(right.kind, ExprKind::Str(_)) => {
+            (left, Some(right.clone()))
         }
         _ => (text, None),
     };
@@ -85,14 +85,14 @@ fn fuse(statement: &mut Statement, writes: &[Option<Write>]) {
         && let Some(write) = &writes[*id]
         && args.values.len() == 2
         && args.order[write.file_parameter] == 0
-        && matches!(args.values[1].kind, ExprKind::Binary(Binary::Concat, ..))
+        && args.values[1].string_addends().is_some()
     {
         let mut args = std::mem::take(&mut args.values);
         if let Some(suffix) = &write.suffix {
             let text = args.pop().unwrap();
             args.push(Expr {
                 ty: Type::Str,
-                kind: ExprKind::Binary(Binary::Concat, Box::new(text), Box::new(suffix.clone())),
+                kind: ExprKind::Binary(Binary::Add, Box::new(text), Box::new(suffix.clone())),
             });
         }
         *call = Expr {

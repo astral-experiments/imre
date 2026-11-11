@@ -127,6 +127,52 @@ impl Emitter<'_, '_> {
         }
     }
 
+    /// Both operands have been evaluated and are rooted across the copy. Each
+    /// loop polls before its length check and owns only the current element.
+    pub(in crate::llvm) fn concat_lists(
+        &mut self,
+        left: &Value,
+        right: &Value,
+        element: Type,
+    ) -> Value {
+        let result = self.display_mutable(left.ty);
+        let cursor = self.entry_alloca("i64");
+        for source in [left, right] {
+            // Zero and each following index use the small tagged integer representation.
+            self.line(format!("store i64 1, ptr {cursor}"));
+            super::iteration::loop_region(
+                self,
+                |e| &mut e.body,
+                Self::label,
+                |e, edges| e.jump(&edges.step),
+                |e, yes, no| {
+                    e.check_interrupt();
+                    let index = Value {
+                        ty: Type::Int,
+                        operand: e.instruction(format!("load i64, ptr {cursor}")),
+                        small_integer: true,
+                    };
+                    let length = e.list_length(source);
+                    let more = e.instruction(format!(
+                        "icmp ult i64 {}, {}",
+                        index.operand, length.operand
+                    ));
+                    e.branch(&more, yes, no);
+                    index
+                },
+                |e, _, index| {
+                    let item = e.get_item(source, &index, element, true);
+                    e.append(&result, &item);
+                    e.release(&item);
+                    let next = e.instruction(format!("add nuw nsw i64 {}, 2", index.operand));
+                    e.line(format!("store i64 {next}, ptr {cursor}"));
+                },
+                None::<fn(&mut Self)>,
+            );
+        }
+        result
+    }
+
     fn display_mutable(&mut self, ty: Type) -> Value {
         if ty == Type::ListInt {
             self.call("imre_list_new", ty, &[])

@@ -13,7 +13,7 @@ pub(super) fn fixed_locals(f: &Function) -> Vec<bool> {
             && value.ty == Type::ListInt
             && matches!(
                 value.kind,
-                ExprKind::List(_) | ExprKind::Binary(Binary::Repeat, _, _)
+                ExprKind::List(_) | ExprKind::Binary(Binary::Multiply, _, _)
             )
             && !f.params.contains(slot)
         {

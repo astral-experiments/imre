@@ -830,7 +830,6 @@ impl Builtin {
             | Self::OsLinesep
             | Self::OsPathsep
             | Self::OsSeparator { .. }
-            | Self::OptionalStrConcat
             | Self::SysOrigArgv
             | Self::DocCaptureStart
             | Self::DocCaptureTake
@@ -1195,25 +1194,33 @@ impl Binary {
             | Self::Divide
             | Self::FloorDivide
             | Self::Modulo
-            | Self::Repeat
             | Self::LeftShift
             | Self::RightShift => true,
             Self::Add
             | Self::Subtract
             | Self::Multiply
-            | Self::Concat
             | Self::BitAnd
             | Self::BitOr
             | Self::BitXor => false,
         }
     }
 
-    /// Includes checked byte concatenation and conversion of mixed integer/float operands.
+    /// Includes sequence allocation, optional string errors and mixed numeric conversion.
     pub(crate) fn may_raise_with_operands(self, left: Type, right: Type) -> bool {
         self.may_raise()
             || left == Type::PythonObject
             || right == Type::PythonObject
-            || (matches!(self, Self::Concat) && matches!(left, Type::Str | Type::Bytes))
+            || (self == Self::Add
+                && matches!(
+                    left,
+                    Type::Str
+                        | Type::Bytes
+                        | Type::ListInt
+                        | Type::List(_)
+                        | Type::Optional(_)
+                        | Type::None
+                ))
+            || (self == Self::Multiply && Type::repeated_sequence(left, right).is_some())
             || matches!(
                 (left, right),
                 (Type::Int, Type::Float) | (Type::Float, Type::Int)
