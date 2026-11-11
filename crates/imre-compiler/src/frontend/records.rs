@@ -782,6 +782,14 @@ impl Checker<'_> {
         } else {
             let binding = self.graph.resolve(self.module, expression);
             if let Some(Binding::Definition(definition)) = binding {
+                if self
+                    .classes
+                    .declarations
+                    .registered_exceptions
+                    .contains(&definition)
+                {
+                    return Some(Binding::RegisteredClass(definition));
+                }
                 let namedtuple = self.types.namedtuple(definition).is_some();
                 if namedtuple
                     && root.as_name_expr().is_some_and(|name| {

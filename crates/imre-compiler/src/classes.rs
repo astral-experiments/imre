@@ -42,6 +42,7 @@ pub(crate) struct Classes {
     /// Data members only need rebindable storage when some source writes that attribute.
     pub(crate) attribute_writes: HashMap<String, HashSet<Type>>,
     pub(crate) exceptions: HashMap<DefinitionId, u32>,
+    pub(crate) registered_exceptions: HashSet<DefinitionId>,
     pub(crate) exception_declarations: Vec<crate::types::NamedException>,
     pub(crate) ids: HashMap<DefinitionId, usize>,
 }
@@ -305,6 +306,7 @@ impl Classes {
             attribute_writes,
             ids,
             exceptions: resolved.ids,
+            registered_exceptions: resolved.registered,
             exception_declarations: resolved.named,
         })
     }

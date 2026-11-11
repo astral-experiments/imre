@@ -123,8 +123,9 @@ pub(crate) fn explicit_message_initializer<'a>(
     .then_some((base, values))
 }
 
-/// A fixed payload must establish its base arguments exactly once before it can escape.
-fn validate_layout(module: &SourceModule, node: &ast::StmtClassDef) -> Result<(), String> {
+/// A fixed record stores the base arguments during straight-line initialization.
+/// Conditional initialization uses the ordinary Python exception instance.
+fn fixed_layout(module: &SourceModule, node: &ast::StmtClassDef) -> Result<bool, String> {
     let methods = node
         .body
         .iter()
@@ -141,16 +142,17 @@ fn validate_layout(module: &SourceModule, node: &ast::StmtClassDef) -> Result<()
         matches!(stmt, ast::Stmt::Expr(e) if matches!(&*e.value, ast::Expr::Call(c)
             if super_init(c) || init.name.as_str() == "__init__" && explicit_message_initializer(module, c).is_some()))
     }).count();
-    if calls != 1
-        || !init.body.iter().all(|stmt| match stmt {
-            ast::Stmt::Expr(_) | ast::Stmt::Assign(_) | ast::Stmt::Pass(_) => true,
-            ast::Stmt::AnnAssign(field) => field.value.is_some(),
-            _ => false,
-        })
-    {
+    if !init.body.iter().all(|stmt| match stmt {
+        ast::Stmt::Expr(_) | ast::Stmt::Assign(_) | ast::Stmt::Pass(_) => true,
+        ast::Stmt::AnnAssign(field) => field.value.is_some(),
+        _ => false,
+    }) {
+        return Ok(false);
+    }
+    if calls != 1 {
         return Err(module.error(init,"an exception payload must initialize its message exactly once in a straight-line constructor"));
     }
-    Ok(())
+    Ok(true)
 }
 
 /// C3 merge rejects inconsistent or repeated bases before any descriptor is emitted.
@@ -181,6 +183,7 @@ pub(super) struct Declarations {
     pub ids: HashMap<DefinitionId, u32>,
     pub named: Vec<NamedException>,
     pub layouts: HashSet<DefinitionId>,
+    pub registered: HashSet<DefinitionId>,
     /// A concrete descendant shares one compatible record prefix with its parent.
     pub storage_parent: HashMap<DefinitionId, DefinitionId>,
 }
@@ -188,6 +191,7 @@ pub(super) fn collect(graph: &SourceGraph) -> Result<Declarations, String> {
     let mut ids: HashMap<DefinitionId, u32> = HashMap::new();
     let mut named: Vec<NamedException> = Vec::new();
     let mut layouts = HashSet::new();
+    let mut registered = HashSet::new();
     let mut storage_parent = HashMap::new();
     let mut implementation = HashMap::<DefinitionId, DefinitionId>::new();
     loop {
@@ -213,6 +217,7 @@ pub(super) fn collect(graph: &SourceGraph) -> Result<Declarations, String> {
                 let mut bases = Vec::new();
                 let mut mros = Vec::new();
                 let mut storage = None;
+                let mut registered_base = false;
                 for base in &arguments.args {
                     let (id, mro) = match graph.resolve(module_id, base) {
                         None => {
@@ -231,6 +236,7 @@ pub(super) fn collect(graph: &SourceGraph) -> Result<Declarations, String> {
                             let Some(&id) = ids.get(&parent) else {
                                 break;
                             };
+                            registered_base |= registered.contains(&parent);
                             if layouts.contains(&parent) {
                                 match storage {
                                     None => storage = Some(parent),
@@ -281,19 +287,23 @@ pub(super) fn collect(graph: &SourceGraph) -> Result<Declarations, String> {
                             "custom import exception payload layouts are unsupported",
                         ));
                     }
-                    if storage.is_none()
+                    let own_initializer = storage.is_none()
                         || node
                             .body
                             .iter()
                             .filter_map(ast::Stmt::as_function_def_stmt)
-                            .any(|f| matches!(f.name.as_str(), "__init__" | "__post_init__"))
-                    {
-                        validate_layout(module, node)?;
+                            .any(|f| matches!(f.name.as_str(), "__init__" | "__post_init__"));
+                    if !registered_base && own_initializer {
+                        registered_base = !fixed_layout(module, node)?;
                     }
-                    layouts.insert(def);
-                    implementation.insert(def, def);
+                    if !registered_base {
+                        layouts.insert(def);
+                        implementation.insert(def, def);
+                    }
                 }
-                if let Some(parent) = storage {
+                if registered_base {
+                    registered.insert(def);
+                } else if let Some(parent) = storage {
                     storage_parent.insert(def, parent);
                     layouts.insert(def);
                     let origin = implementation[&parent];
@@ -327,6 +337,7 @@ pub(super) fn collect(graph: &SourceGraph) -> Result<Declarations, String> {
         ids,
         named,
         layouts,
+        registered,
         storage_parent,
     })
 }

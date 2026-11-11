@@ -571,6 +571,8 @@ pub(crate) struct DefinitionId {
 pub(crate) enum Binding {
     Module(ModuleId),
     Definition(DefinitionId),
+    /// The owning Python module initializes the checked class object.
+    RegisteredClass(DefinitionId),
     /// The module initializer establishes this binding when its guard executes.
     ConditionalValue,
     /// A class defined by the runtime arm of a TYPE_CHECKING guard.
@@ -4489,6 +4491,7 @@ fn resolve_binding(
                     stdlib_attribute(modules, module, target, attribute)
                 }
                 Binding::Definition(_)
+                | Binding::RegisteredClass(_)
                 | Binding::ConditionalValue
                 | Binding::RuntimeClass
                 | Binding::Value(_)
