@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::frontend::comprehensions::EagerDisplay;
-use crate::frontend::function_scope::{CallableMetadata, FunctionScope};
+use crate::frontend::function_scope::{CallableMetadata, FunctionScope, ScopeFacts};
 use imre_ast::comprehension::Plan;
 
 pub(crate) struct RegisteredGenerator {
@@ -15,53 +15,34 @@ impl RegisteredGenerator {
         self.metadata.suspension_flags() == imre_ast::code_flags::ASYNC_GENERATOR
     }
 
-    /// Bind inner generator activations before any enclosing operand refers to them.
-    pub(crate) fn collect(
-        body: &[ast::Stmt],
+    /// Prepare nested generator activations as their lexical scopes close.
+    pub(crate) fn collect_scopes<'a>(
+        body: &'a [ast::Stmt],
+        names: &imre_ast::Names,
         source: values::RegisteredSource<'_>,
-        scopes: HashMap<TextRange, FunctionScope>,
-    ) -> HashMap<TextRange, Self> {
-        use ast::visitor::{Visitor, walk_expr};
-        struct Collector<'a> {
-            source: values::RegisteredSource<'a>,
-            sites: HashMap<TextRange, RegisteredGenerator>,
-            scopes: HashMap<TextRange, FunctionScope>,
-        }
-        impl<'a> Visitor<'a> for Collector<'_> {
-            fn visit_expr(&mut self, expr: &'a ast::Expr) {
-                stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || walk_expr(self, expr));
-                if let ast::Expr::Generator(generator) = expr
-                    && let Some(child) = RegisteredGenerator::prepare(
-                        generator,
-                        values::RegisteredSource {
-                            generators: Some(&self.sites),
-                            ..self.source
-                        },
-                        &self.scopes[&generator.range()],
-                    )
-                {
-                    self.sites.insert(generator.range(), child);
-                }
+        alias_site: impl FnMut(&'a ast::StmtTypeAlias, Option<TextSize>),
+    ) -> (ScopeFacts, HashMap<TextRange, Self>) {
+        let mut sites = HashMap::new();
+        let scopes = ScopeFacts::prepare(body, names, alias_site, |range, plan, scope| {
+            let source = values::RegisteredSource {
+                generators: Some(&sites),
+                ..source
+            };
+            let child = stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
+                Self::prepare(plan, source, &scope)
+            });
+            if let Some(child) = child {
+                sites.insert(range, child);
             }
-        }
-        if scopes.is_empty() {
-            return HashMap::new();
-        }
-        let mut collector = Collector {
-            source,
-            scopes,
-            sites: HashMap::new(),
-        };
-        collector.visit_body(body);
-        collector.sites
+        });
+        (scopes, sites)
     }
 
     fn prepare(
-        generator: &ast::ExprGenerator,
+        plan: &Plan<'_>,
         source: values::RegisteredSource<'_>,
         scope_facts: &FunctionScope,
     ) -> Option<Self> {
-        let plan = Plan::generator(generator);
         let is_async = plan.body_suspends();
 
         // The constructor installs the target declarations and the acquired cursor in
@@ -75,7 +56,7 @@ impl RegisteredGenerator {
             &sites,
         );
         scope.generator_expression = true;
-        let outer = imre_ast::comprehension::outer_clause(&generator.generators);
+        let outer = imre_ast::comprehension::outer_clause(plan.clauses);
         let (cursor, kind) = match comprehensions::async_pull(outer) {
             Some(pull) => (values::name_binding(".0"), ir::IterNextKind::Async(pull)),
             None => (
@@ -91,7 +72,7 @@ impl RegisteredGenerator {
             scope.hidden(ty)
         });
         let mut body = scope
-            .comprehension_loop(&plan, 0, input, &mut |scope, output, _| {
+            .comprehension_loop(plan, 0, input, &mut |scope, output, _| {
                 let item = output.value();
                 let yield_item = |value| {
                     Statement::Expr(operation(
@@ -176,12 +157,13 @@ mod tests {
     fn prepared(module: &crate::modules::SourceModule) -> HashMap<TextRange, RegisteredGenerator> {
         let body = &module.parsed.syntax().body;
         let literals = values::ModuleSource::new(module);
-        let scopes = crate::frontend::function_scope::ScopeFacts::prepare(
+        let (_, generators) = RegisteredGenerator::collect_scopes(
             body,
             &Default::default(),
+            literals.context(&module.source),
             |_, _| {},
         );
-        RegisteredGenerator::collect(body, literals.context(&module.source), scopes.generators)
+        generators
     }
 
     #[test]
