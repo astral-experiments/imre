@@ -158,11 +158,6 @@ impl OperandPlan {
 /// Parsed items used to construct and validate code-object metadata.
 enum SourceItem {
     Discard(ast::Expr),
-    Import {
-        module: String,
-        alias: Option<String>,
-    },
-    From(String, Vec<(String, String)>),
     Define(Definition),
     Annotations(Vec<(String, ast::Expr)>),
     Docstring(ast::StringLiteralValue),
@@ -173,7 +168,7 @@ enum SourceItem {
         cases: Vec<SourceCase>,
     },
     Name(ast::Identifier),
-    Keywords(Vec<ast::Identifier>),
+    Names(Vec<ast::name::Name>),
 }
 
 struct SourceCase {
@@ -1109,7 +1104,7 @@ impl Program {
                 SourceItem::Name(name) => {
                     strings.heap.code_name(name.as_str());
                 }
-                SourceItem::Keywords(names) => {
+                SourceItem::Names(names) => {
                     for name in names {
                         strings.heap.code_name(name.as_str());
                     }
@@ -1133,21 +1128,6 @@ impl Program {
                     let text = imre_ast::strings::clean_doc(doc.to_str());
                     let id = strings.text(text.into())?;
                     strings.keep(id)?;
-                }
-                SourceItem::Import { module, alias } => {
-                    for part in module.split('.') {
-                        strings.heap.code_name(part);
-                    }
-                    if let Some(alias) = alias {
-                        strings.heap.code_name(alias);
-                    }
-                }
-                SourceItem::From(module, bindings) => {
-                    strings.heap.code_name(module);
-                    for (name, alias) in bindings {
-                        strings.heap.code_name(name);
-                        strings.heap.code_name(alias);
-                    }
                 }
                 SourceItem::Annotations(entries) => {
                     strings.annotation_scope(
@@ -1401,10 +1381,10 @@ impl Program {
                 }
                 let mut keywords = Vec::new();
                 for kw in call.arguments.keywords {
-                    keywords.push(kw.arg.expect("fixed keyword"));
+                    keywords.push(kw.arg.expect("fixed keyword").id);
                     self.record_operand(kw.value, plan)?;
                 }
-                self.items.push(SourceItem::Keywords(keywords));
+                self.items.push(SourceItem::Names(keywords));
             }
             ast::Expr::Tuple(ast::ExprTuple { elts, .. })
             | ast::Expr::List(ast::ExprList { elts, .. })
@@ -1731,16 +1711,17 @@ impl Program {
                     continue;
                 }
                 Stmt::Import(s) if !s.is_lazy => {
-                    for name in &s.names {
-                        let module = name.name.to_string();
-                        let alias = name.asname.as_ref().map(ToString::to_string);
-                        let local = alias
-                            .as_deref()
-                            .unwrap_or_else(|| module.split('.').next().unwrap());
+                    let mut names = Vec::with_capacity(s.names.len());
+                    for alias in s.names {
+                        let mut parts = alias.name.as_str().split('.');
+                        let root = parts.next().unwrap();
+                        let local = alias.asname.as_ref().map_or(root, |name| name.as_str());
                         self.locals.insert(local.to_owned());
-                        self.items.push(SourceItem::Import { module, alias });
+                        names.push(ast::name::Name::new(root));
+                        names.extend(parts.map(ast::name::Name::new));
+                        names.extend(alias.asname.map(|name| name.id));
                     }
-                    continue;
+                    SourceItem::Names(names)
                 }
                 Stmt::Assert(s) => {
                     self.items.push(SourceItem::Discard(*s.test));
@@ -1750,11 +1731,12 @@ impl Program {
                     continue;
                 }
                 Stmt::ImportFrom(s) if !s.is_lazy => {
-                    let module = s.module.as_ref().map_or("", |module| module.as_str());
-                    let mut names = vec![];
-                    for alias in &s.names {
-                        let local = alias.asname.as_ref().unwrap_or(&alias.name).to_string();
-                        if alias.name.as_str() == "*" {
+                    let mut names = Vec::with_capacity(1 + 2 * s.names.len());
+                    names.push(s.module.map_or_else(ast::name::Name::empty, |name| name.id));
+                    for alias in s.names {
+                        let name = alias.name.id;
+                        let local = alias.asname.map_or_else(|| name.clone(), |alias| alias.id);
+                        if name.as_str() == "*" {
                             if function || self.class_scope {
                                 return Err(Error::new(
                                     "SyntaxError",
@@ -1762,11 +1744,12 @@ impl Program {
                                 ));
                             }
                         } else {
-                            self.locals.insert(local.clone());
+                            self.locals.insert(local.to_string());
                         }
-                        names.push((alias.name.to_string(), local));
+                        names.push(name);
+                        names.push(local);
                     }
-                    SourceItem::From(module.to_owned(), names)
+                    SourceItem::Names(names)
                 }
                 Stmt::TypeAlias(s)
                     if !self.class_scope && (!function || s.type_params.is_some()) =>
