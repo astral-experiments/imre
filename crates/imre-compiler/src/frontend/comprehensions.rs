@@ -237,18 +237,24 @@ pub(super) trait EagerDisplay: Sized {
         self.before_pull(plan, depth);
         self.with_target(&clause.target, input, plan.output, |lower| {
             let conditions = lower.eager_filters(clause)?;
-            let mut body = if let Some(inner) = plan.clauses.get(depth + 1) {
+            let body = if let Some(inner) = plan.clauses.get(depth + 1) {
                 let input = lower.input(inner)?;
                 lower.comprehension_loop(plan, depth + 1, input, emit)?
             } else {
                 emit(lower, plan.output, &conditions)?
             };
-            for condition in conditions.into_iter().rev() {
-                body = vec![Statement::If(condition, body, Vec::new())];
-            }
-            Ok(body)
+            Ok(filter_suite(conditions, body))
         })
     }
+}
+
+/// A rejected filter skips the remaining predicates and the whole accepted suite,
+/// including acquisition of the next clause's iterator.
+pub(super) fn filter_suite(conditions: Vec<Expr>, mut accepted: Vec<Statement>) -> Vec<Statement> {
+    for condition in conditions.into_iter().rev() {
+        accepted = vec![Statement::If(condition, accepted, Vec::new())];
+    }
+    accepted
 }
 
 pub(super) fn async_pull(clause: &ast::Comprehension) -> Option<ir::AsyncPull> {

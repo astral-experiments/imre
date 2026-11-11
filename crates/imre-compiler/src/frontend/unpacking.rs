@@ -1046,18 +1046,6 @@ impl Checker<'_> {
     ) -> Result<Vec<Statement>, String> {
         bind_targets(self, target, value, None)
     }
-
-    /// An iterator's private fixed tuple cannot be rebound by source targets.
-    /// Reuse that root while snapshotting all fields before user stores, making
-    /// the aggregate projection-only and eligible for scalar replacement.
-    pub(super) fn bind_iterator_pattern(
-        &mut self,
-        target: &ast::Expr,
-        source: usize,
-    ) -> Result<Vec<Statement>, String> {
-        let stable = matches!(self.locals[source], Type::Tuple(_)).then_some(source);
-        bind_targets(self, target, self.local(source), stable)
-    }
 }
 
 impl PatternBinder for Checker<'_> {

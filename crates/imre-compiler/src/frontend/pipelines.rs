@@ -5,7 +5,7 @@
 use imre_ast::comprehension::Plan;
 use ruff_python_ast::UnaryOp;
 
-use super::comprehensions::EagerDisplay;
+use super::comprehensions::{EagerDisplay, filter_suite};
 use super::*;
 use crate::ir::TextOperation;
 
@@ -154,6 +154,18 @@ impl Prepared {
             reads |= matches!(expr.kind, ExprKind::Local(read) if read == slot);
         });
         reads
+    }
+
+    /// A private fixed tuple can supply its fields directly. Other rows follow
+    /// ordinary unpacking and snapshot their elements before the target stores.
+    pub(super) fn bind_target<B: unpacking::PatternBinder>(
+        &self,
+        binder: &mut B,
+        target: &ast::Expr,
+    ) -> StdResult<Vec<Statement>, B::Error> {
+        let row = binder.pattern_local(self.value);
+        let stable = matches!(row.ty, Type::Tuple(_)).then_some(self.value);
+        unpacking::bind_targets(binder, target, row, stable)
     }
 
     /// Execute one pull per iteration and release the cursor before running the exhaustion suite.
@@ -2416,7 +2428,7 @@ impl Checker<'_> {
                 }
             }
             self.forget_comprehension_writes(&plan, depth);
-            let binding = self.bind_iterator_pattern(&clause.target, input.value)?;
+            let binding = input.bind_target(self, &clause.target)?;
             let filters = self.eager_filters(clause)?;
             pulls.push(Pull {
                 input,
@@ -2495,30 +2507,21 @@ impl Checker<'_> {
             Statement::Assign(done, Expr::boolean(false)),
         ]);
         let mut cases = Vec::new();
-        for (depth, pull) in pulls.iter().enumerate().rev() {
-            let mut accepted = if let Some(child) = pulls.get(depth + 1) {
-                let mut initialize = child.input.evaluate.clone();
-                initialize.extend(child.input.acquire.clone());
-                initialize.push(Statement::Assign(
-                    resume_pc,
-                    Expr::integer((depth + 1) as i64),
-                ));
-                initialize
-            } else {
-                vec![
-                    Statement::Assign(value, yielded.clone()),
-                    Statement::Assign(ready, Expr::boolean(true)),
-                ]
-            };
-            for condition in pull.filters.iter().rev() {
-                accepted = vec![Statement::If(condition.clone(), accepted, Vec::new())];
-            }
-            let mut available = pull.binding.clone();
+        let mut accepted = vec![
+            Statement::Assign(value, yielded),
+            Statement::Assign(ready, Expr::boolean(true)),
+        ];
+        for (depth, pull) in pulls.into_iter().enumerate().rev() {
+            let mut available = pull.binding;
             available.push(Statement::Clear(pull.input.value));
-            available.extend(accepted);
+            available.extend(filter_suite(pull.filters, accepted));
+            // An outer clause opens this iterator only after its own filters pass.
+            accepted = pull.input.evaluate;
             let (roots, jump) = if depth == 0 {
                 (&clear, Statement::Assign(done, Expr::boolean(true)))
             } else {
+                accepted.extend(pull.input.acquire);
+                accepted.push(Statement::Assign(resume_pc, Expr::integer(depth as i64)));
                 (
                     &pull.input.clear,
                     Statement::Assign(resume_pc, Expr::integer((depth - 1) as i64)),
@@ -2526,7 +2529,7 @@ impl Checker<'_> {
             };
             let mut exhausted: Vec<_> = roots.iter().copied().map(Statement::Clear).collect();
             exhausted.push(jump);
-            let mut step = pull.input.next.clone();
+            let mut step = pull.input.next;
             step.push(Statement::If(
                 self.local(pull.input.ready),
                 self.generator_body(available),
@@ -2915,7 +2918,7 @@ impl Checker<'_> {
         }
         let before = self.assigned.clone();
         let mut facts = self.narrowed.clone();
-        let binding = self.bind_iterator_pattern(target, input.value)?;
+        let binding = input.bind_target(self, target)?;
         assignments::forget_binding_writes(&mut facts, &binding);
         self.loop_breaks.push(None);
         let body = lower_body(self)?;

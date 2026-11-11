@@ -3228,22 +3228,6 @@ impl SourceScope<'_> {
         }
     }
 
-    fn iteration_body(
-        &mut self,
-        target: &ast::Expr,
-        input: &pipelines::Prepared,
-        body: impl FnOnce(&mut Self) -> StdResult<Vec<Statement>, ()>,
-    ) -> StdResult<(Vec<Statement>, Vec<Statement>), ()> {
-        let binding = unpacking::bind_targets(
-            self,
-            target,
-            Expr::local(input.value, Type::PythonObject),
-            None,
-        )?;
-        let body = self.in_loop(LoopScope::WithCursor, body)?;
-        Ok((binding, body))
-    }
-
     fn for_binding(
         &mut self,
         loop_: &ast::StmtFor,
