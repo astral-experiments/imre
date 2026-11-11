@@ -138,6 +138,7 @@ fn sealed_package_child(name: &str) -> bool {
 /// Python source modules bundled for runtime imports.
 pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
+        "bisect" => bundled_source!("bisect.py"),
         "unittest.main" => bundled_source!("unittest/main.py"),
         "unittest.result" => bundled_source!("unittest/result.py"),
         "unittest.runner" => bundled_source!("unittest/runner.py"),
@@ -6326,7 +6327,8 @@ impl<'a> Loader<'a> {
             // The checked socketserver provides the synchronous server and handler bases.
             "http.server" => bundled_source!("http/server.py"),
             _ => {
-                registered_namespace = source_exports;
+                // bisect selects its optional accelerator in its module initializer.
+                registered_namespace = source_exports || name == "bisect";
                 bundled_runtime_source(name)
             }
         };

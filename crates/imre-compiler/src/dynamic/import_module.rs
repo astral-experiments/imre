@@ -64,7 +64,6 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
         }
         // CPython 3.14.5 Lib/linecache.py. See licenses/CPython.txt.
         "linecache" => bundled_source!("linecache.py"),
-        "bisect" => bundled_source!("bisect.py"),
         "urllib.error" => bundled_source!("urllib/error.py"),
         "urllib.request" => bundled_source!("urllib/request.py"),
         // CPython 3.14.5 Lib/urllib/robotparser.py. See licenses/CPython.txt.

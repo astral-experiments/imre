@@ -856,6 +856,14 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "bisect_from_its_module_initializer": {
+        "main.py": (
+            "import bisect\nfrom bisect import bisect_left\n"
+            "right = bisect.bisect_right\n"
+            "values = [1, 2, 2, 4]\n"
+            "print(bisect_left(values, 2), right(values, 2), bisect.bisect is right)\n"
+        ),
+    },
     "definition_after_execution": {"main.py": ORDERED_DEFINITIONS, "helper.py": HELPER},
     "class_after_execution": {
         "main.py": (
