@@ -372,6 +372,7 @@ pub(crate) fn analyze_program(
     let mut function_link_types = HashSet::new();
     let mut link_owners = BTreeMap::<usize, Vec<&Expr>>::new();
     let mut declared_caches = HashSet::new();
+    let mut cache_views = Vec::new();
     let mut targets = crate::callables::TargetCollector::default();
     for (id, function) in module.functions.iter().chain([&module.entry]).enumerate() {
         // The tags are needed only for this post-specialization inventory.
@@ -391,6 +392,11 @@ pub(crate) fn analyze_program(
                 return;
             };
             targets.inspect(&module.types, expr);
+            if let ExprKind::Callable { function, .. } = expr.kind
+                && module.types.cache_adapter(function).is_some()
+            {
+                cache_views.push(expr.ty);
+            }
             let ExprKind::Builtin(builtin, args) = &expr.kind else {
                 return;
             };
@@ -399,6 +405,14 @@ pub(crate) fn analyze_program(
                     let owner = &args[0];
                     function_link_types.insert(owner.ty);
                     link_owners.entry(id).or_default().push(owner);
+                }
+                Builtin::RecordView
+                    if (module.types.cached_function(args[0].ty).is_some()
+                        || module.types.cache_declaration(args[0].ty).is_some())
+                        && module.types.wrapped_signature(args[0].ty) == Some(expr.ty) =>
+                {
+                    // Only this checked conversion lets a cache reach an ordinary Callable.
+                    cache_views.push(expr.ty);
                 }
                 Builtin::ModuleCache(id) => {
                     declared_caches.insert(*id);
@@ -411,33 +425,52 @@ pub(crate) fn analyze_program(
         }
     }
     let callable_targets = targets.finish();
+    let cached = |id| declared_caches.contains(&id) || module.types.cache_adapter(id).is_some();
+    const SIGNATURE: &str = "Imre: wrapper links require a callable signature with known native functions or source methods";
     if function_link_types.iter().any(|&ty| {
         let targets = callable_targets.get(ty);
         module.types.dispatcher(ty).is_some()
             || targets.is_empty()
             || targets.iter().any(|target| {
                 let function = &module.functions[target.function];
-                target.bound && !matches!(function.locals[function.params[0]], Type::Class(_))
-                    || declared_caches.contains(&target.function)
-                    || module.types.cache_adapter(target.function).is_some()
+                target.bound
+                    && !cached(target.function)
+                    && !matches!(function.locals[function.params[0]], Type::Class(_))
             })
     }) {
-        return Err(Unsupported(
-            "Imre: wrapper links require a callable signature with known native functions or source methods",
-        ));
+        return Err(Unsupported(SIGNATURE));
     }
+    let cache_operand = |ty| {
+        module.types.cached_function(ty).is_some()
+            || module.types.cache_declaration(ty).is_some()
+            || cache_views.contains(&ty)
+            || callable_targets.get(ty).iter().any(|target| {
+                declared_caches.contains(&target.function)
+                    && module.types.cache_adapter(target.function).is_none()
+            })
+    };
     for (id, mut owners) in link_owners {
         owners.retain(|owner| {
-            callable_targets
-                .get(owner.ty)
-                .iter()
-                .any(|target| target.bound)
+            cache_operand(owner.ty)
+                || callable_targets
+                    .get(owner.ty)
+                    .iter()
+                    .any(|target| target.bound && !cached(target.function))
         });
         if owners.is_empty() {
             continue;
         }
         let function = module.functions.get(id).unwrap_or(&module.entry);
-        if !ir::plain_link_owners(function, &owners) {
+        ir::retain_unknown_link_owners(function, &mut owners, |operand| {
+            matches!(operand.kind, ExprKind::Callable { function, receiver: None }
+                if !cached(function)
+                    && module.types.constructor_base(operand.ty).is_none()
+                    && function_link_types.contains(&operand.ty))
+        });
+        if owners.iter().any(|owner| cache_operand(owner.ty)) {
+            return Err(Unsupported(SIGNATURE));
+        }
+        if !owners.is_empty() {
             return Err(Unsupported(
                 "Imre: native wrapper links require a plain function as their owner",
             ));

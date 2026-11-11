@@ -3890,7 +3890,11 @@ pub(crate) fn propagate_copy_facts(proven: &mut [bool], copies: &[(usize, usize)
 }
 
 /// Only a plain function owns the writable third word used by wrapper links.
-pub(crate) fn plain_link_owners(function: &Function, owners: &[&Expr]) -> bool {
+pub(crate) fn retain_unknown_link_owners(
+    function: &Function,
+    owners: &mut Vec<&Expr>,
+    linked: impl Fn(&Expr) -> bool,
+) {
     fn origin(value: &Expr) -> &ExprKind {
         match &value.kind {
             ExprKind::Builtin(Builtin::FunctionWrappedSet, args) => origin(&args[0]),
@@ -3899,6 +3903,7 @@ pub(crate) fn plain_link_owners(function: &Function, owners: &[&Expr]) -> bool {
         }
     }
 
+    let plain_function = |kind: &ExprKind| matches!(kind, ExprKind::Builtin(Builtin::StaticFunction(_), args) if linked(&args[0]));
     let mut plain = vec![true; function.locals.len()];
     for &parameter in &function.params {
         plain[parameter] = false;
@@ -3914,16 +3919,15 @@ pub(crate) fn plain_link_owners(function: &Function, owners: &[&Expr]) -> bool {
         Node::Statement(Statement::Move(target, source)) => copies.push((*source, *target)),
         _ => node_writes(node, &mut |slot, value| match value.map(origin) {
             Some(ExprKind::Local(source)) => copies.push((*source, slot)),
-            Some(ExprKind::Builtin(Builtin::StaticFunction(_), _)) => {}
+            Some(kind) if plain_function(kind) => {}
             _ => plain[slot] = false,
         }),
     });
     propagate_copy_facts(&mut plain, &copies);
-    owners.iter().all(|owner| match origin(owner) {
-        ExprKind::Local(slot) => plain[*slot],
-        ExprKind::Builtin(Builtin::StaticFunction(_), _) => true,
-        _ => false,
-    })
+    owners.retain(|owner| match origin(owner) {
+        ExprKind::Local(slot) => !plain[*slot],
+        kind => !plain_function(kind),
+    });
 }
 
 /// Visits every local write in a suite. Only ordinary assignments carry a right-hand side.
