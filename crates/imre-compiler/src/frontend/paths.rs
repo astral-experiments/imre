@@ -996,8 +996,7 @@ impl Checker<'_> {
         returns: Type,
         arguments: ir::CallArgs,
     ) -> Expr {
-        let (scope, args) = self.held_path_arguments(arguments);
-        scope.finish(operation(kind, returns, args))
+        self.ordered_builtin(Builtin::Path(kind), returns, arguments)
     }
 
     /// Construct the iterator at the call site. Globs bind and validate their pattern
