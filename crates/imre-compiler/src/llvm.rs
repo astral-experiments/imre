@@ -2168,30 +2168,29 @@ impl Emitter<'_, '_> {
         }
     }
 
-    /// Only errors from the try body enter these handlers. Handler and else
-    /// failures first execute finally, then continue to an enclosing handler.
-    fn try_statement(
-        &mut self,
-        body: &[Statement],
-        handlers: &[ExceptHandler],
-        orelse: &[Statement],
-        finalbody: &[Statement],
-    ) {
-        if handlers.is_empty()
-            && orelse.is_empty()
-            && finalbody.iter().all(|statement| {
-                matches!(
-                    statement,
-                    Statement::Expr(Expr {
-                        kind: ExprKind::None,
-                        ..
-                    })
-                )
-            })
-        {
-            self.block(body);
-            return;
+    fn caught_arm(&mut self, handler: &ExceptHandler, exception: &Value, exit: &Completion) {
+        let name = handler.name;
+        let previous = self.call("imre_exception_swap_active", Type::Exception, &[exception]);
+        self.forget(&previous);
+        if let Some(name) = name {
+            self.store(name, exception);
+        } else {
+            self.release(exception);
         }
+        self.cleanups.push(Cleanup::Active { previous, name });
+        self.block(&handler.body);
+        if !self.body.terminated {
+            self.route(exit.clone());
+        }
+        self.cleanups.pop();
+    }
+
+    /// Preserve enclosing expression owners until a transfer leaves the protected scope.
+    fn with_try_cleanups(
+        &mut self,
+        finalbody: &[Statement],
+        protected: impl FnOnce(&mut Self, Completion),
+    ) {
         if self.try_nesting == 0 {
             self.cleanup_bytes = 0;
         }
@@ -2207,58 +2206,13 @@ impl Emitter<'_, '_> {
         if !finalbody.is_empty() {
             self.push_finalbody();
         }
-        let dispatch = self.label();
-        let catches_error = !handlers.is_empty() || !finalbody.is_empty();
-        operations::CheckedBody::native(self).protected_suites(
-            body,
-            orelse,
-            catches_error.then_some(dispatch.as_str()),
-        );
-        if !self.body.terminated {
-            self.route(Completion::Jump {
+        protected(
+            self,
+            Completion::Jump {
                 label: end.clone(),
                 depth,
-            });
-        }
-        if !handlers.is_empty() {
-            self.start(&dispatch);
-            let exception = self.call("imre_error_take", Type::Exception, &[]);
-            let unmatched = operations::CheckedBody::native(self).ordinary_handlers(
-                handlers,
-                &exception.operand,
-                |code, handler| {
-                    let code = code.fixed();
-                    let name = handler.name;
-                    let previous =
-                        code.call("imre_exception_swap_active", Type::Exception, &[&exception]);
-                    code.forget(&previous);
-                    if let Some(name) = name {
-                        code.store(name, &exception);
-                    } else {
-                        code.release(&exception);
-                    }
-                    code.cleanups.push(Cleanup::Active { previous, name });
-                    code.block(&handler.body);
-                    if !code.body.terminated {
-                        code.route(Completion::Jump {
-                            label: end.clone(),
-                            depth,
-                        });
-                    }
-                    code.cleanups.pop();
-                },
-            );
-            if unmatched {
-                self.void_call("imre_error_set", &[&exception]);
-                self.release(&exception);
-                self.route(Completion::Error);
-            }
-        } else if catches_error {
-            // Every failure in this protected body shares its pending-error
-            // cleanup. Outer protected bodies provide their own landing pads.
-            self.start(&dispatch);
-            self.route(Completion::Error);
-        }
+            },
+        );
         if !finalbody.is_empty() {
             self.cleanups.truncate(depth);
             self.emit_finalbody(finalbody);

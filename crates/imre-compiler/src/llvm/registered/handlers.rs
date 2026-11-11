@@ -8,7 +8,7 @@ use crate::llvm::{Completion, finally::Finalbody};
 impl RegisteredFrame<'_, '_> {
     /// The normal else edge skips the handlers. On the error edge, keep the
     /// pending exception live and active until handler dispatch is complete.
-    fn enter_handlers(&mut self, handler: &str) -> (String, String) {
+    pub(in crate::llvm) fn enter_handlers(&mut self, handler: &str) -> (String, String) {
         let done = self.name("b");
         self.jump(&done);
         self.label(handler);
@@ -18,7 +18,7 @@ impl RegisteredFrame<'_, '_> {
         (exception, done)
     }
 
-    fn leave_handlers(&mut self, done: &str) {
+    pub(in crate::llvm) fn leave_handlers(&mut self, done: &str) {
         self.caught.pop();
         self.live.pop();
         self.label(done);
@@ -107,7 +107,11 @@ impl<'f, 'p> Frame<'f, '_, 'p> {
         true
     }
 
-    fn finalized(&mut self, body: &[Statement], protected: impl FnOnce(&mut Self)) {
+    pub(in crate::llvm) fn finalized(
+        &mut self,
+        body: &[Statement],
+        protected: impl FnOnce(&mut Self),
+    ) {
         let failed = self.name("b");
         let done = self.name("b");
         let (mut region, normal) = self.protected_exits(&failed, &done, protected);
@@ -157,7 +161,12 @@ impl<'f, 'p> Frame<'f, '_, 'p> {
     }
 
     /// A named handler clears its binding on every path out of the body.
-    fn caught_arm(&mut self, handler: &ExceptHandler, exception: &str, done: &str) {
+    pub(in crate::llvm) fn caught_arm(
+        &mut self,
+        handler: &ExceptHandler,
+        exception: &str,
+        done: &str,
+    ) {
         if let Some(name) = self.handler_name(handler) {
             self.code.bind(name, exception);
             let failed = self.name("b");
@@ -183,38 +192,8 @@ impl<'f, 'p> Frame<'f, '_, 'p> {
         }
     }
 
-    /// Run the else suite outside the protected body, then dispatch any pending exception.
-    fn protected(
-        &mut self,
-        body: &[Statement],
-        handlers: &[ExceptHandler],
-        otherwise: &[Statement],
-        is_star: bool,
-    ) {
-        if handlers.is_empty() {
-            self.emit_handler_suite(body);
-            return;
-        }
-        let handler = self.name("b");
-        CheckedBody::registered(self.reborrow()).protected_suites(body, otherwise, Some(&handler));
-        let (exception, done) = self.enter_handlers(&handler);
-        if is_star {
-            self.groups(handlers, &exception, &done);
-        } else {
-            let unmatched = CheckedBody::registered(self.reborrow()).ordinary_handlers(
-                handlers,
-                &exception,
-                |code, handler| code.python().caught_arm(handler, &exception, &done),
-            );
-            if unmatched {
-                self.raise(&exception, None, true);
-            }
-        }
-        self.leave_handlers(&done);
-    }
-
     /// Split a pending group in source order and retain both halves until the handlers finish.
-    fn groups(&mut self, handlers: &[ExceptHandler], exc: &str, done: &str) {
+    pub(in crate::llvm) fn groups(&mut self, handlers: &[ExceptHandler], exc: &str, done: &str) {
         let raised = self.op("list", &[]);
         self.live.push(raised.clone());
         let roots = self.live.len();
@@ -343,24 +322,6 @@ pub(super) fn supported(handlers: &[ExceptHandler], finalbody: &[Statement]) -> 
 impl<'p> Frame<'_, '_, 'p> {
     fn prepared_child(&self, body: &[Statement]) -> Option<&'p crate::frontend::RegisteredSuite> {
         self.suite?.child_suite(body)
-    }
-
-    pub(in crate::llvm) fn try_region(
-        &mut self,
-        body: &[Statement],
-        handlers: &[ExceptHandler],
-        otherwise: &[Statement],
-        finalbody: &[Statement],
-    ) {
-        let stars = handlers
-            .first()
-            .is_some_and(|handler| matches!(handler.matcher, ExceptionMatcher::Subgroup(..)));
-        let run = |frame: &mut Self| frame.protected(body, handlers, otherwise, stars);
-        if finalbody.is_empty() {
-            run(self);
-            return;
-        }
-        self.finalized(finalbody, run);
     }
 
     pub(crate) fn emit_suite(&mut self, suite: &[Statement]) {
