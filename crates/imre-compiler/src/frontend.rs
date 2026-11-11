@@ -13145,6 +13145,27 @@ impl<'a> Checker<'a> {
                         Type::ObjectValue,
                     );
                 }
+                if attribute.attr.as_str() == "__repr__"
+                    && self.unshadowed_builtin(&attribute.value, "object")
+                    && self.graph.session.is_known_class(
+                        self.module,
+                        &attribute.value,
+                        ty_python_semantic::types::KnownClass::Object,
+                    )
+                    && registered::values::fixed_positional_arguments(call)
+                    && let [arg] = call.arguments.args.as_slice()
+                {
+                    let value = self.expr(arg)?;
+                    if matches!(value.ty, Type::Str | Type::StrLiteral(_)) {
+                        return Ok(Expr {
+                            ty: Type::Str,
+                            kind: ExprKind::Builtin(
+                                Builtin::BaseObjectRepr,
+                                vec![Self::string_value(value)],
+                            ),
+                        });
+                    }
+                }
                 return Err(error(
                     self.source,
                     call,

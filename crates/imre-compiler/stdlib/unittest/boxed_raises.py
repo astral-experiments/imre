@@ -2,15 +2,6 @@
 import traceback as _traceback
 
 
-def _boxed_format_message(self, msg, standardMsg):
-    # In short-message mode the original message object becomes the exception argument.
-    if not self.longMessage:
-        return msg or standardMsg
-    if msg is None:
-        return standardMsg
-    return standardMsg + " : " + str(msg)
-
-
 def _is_subtype(expected, basetype):
     if isinstance(expected, tuple):
         return all(_is_subtype(e, basetype) for e in expected)
@@ -199,7 +190,6 @@ def assertNotRegex(self, text, unexpected_regex, msg=None):
 TestCase.assertRegex = assertRegex
 TestCase.assertNotRegex = assertNotRegex
 TestCase.assertRaisesRegex = assertRaisesRegex
-TestCase._formatMessage = _boxed_format_message
 TestCase.assertRaises = assertRaises
 TestCase._assertNotWarns = _assertNotWarns
 TestCase.assertWarns = assertWarns

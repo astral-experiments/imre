@@ -7634,6 +7634,19 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::Repr => self.value_repr(&args[0].value),
+            Builtin::BaseObjectRepr => {
+                let receiver = &args[0].value;
+                let name = receiver.ty.builtin_scalar_name().expect("checked builtin class");
+                let class = self.byte_array(name.as_bytes().to_vec());
+                Value {
+                    ty: Type::Str,
+                    operand: self.checked_instruction(format!(
+                        "call ptr @imre_object_base_repr(ptr {}, ptr @{class}, i64 {})",
+                        receiver.operand, name.len()
+                    )),
+                    small_integer: false,
+                }
+            }
             Builtin::DefaultRecordRepr => {
                 self.call("imre_record_default_repr", Type::Str, &[&args[0].value])
             }
@@ -11124,6 +11137,7 @@ declare i32 @imre_builtin_issubclass(ptr, ptr) nounwind
 declare i32 @imre_sequence_equal(ptr, ptr) nounwind
 declare i32 @imre_tuple_compare(ptr, ptr) nounwind
 declare ptr @imre_value_repr(i64, i32)
+declare ptr @imre_object_base_repr(ptr, ptr, i64)
 declare ptr @imre_record_default_repr(ptr)
 declare void @imre_object_retain(ptr)
 declare void @imre_object_release(ptr)

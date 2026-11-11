@@ -46,6 +46,13 @@ def _inequality_message(first: str, second: str) -> str:
     return left + " != " + right
 
 
+def _safe_repr(value):
+    try:
+        return repr(value)
+    except Exception:
+        return object.__repr__(value)
+
+
 def _kept_lines(text: str) -> list[str]:
     lines: list[str] = []
     start = 0
@@ -188,12 +195,16 @@ class TestCase(_SuiteMember):
     def id(self) -> str:
         return self.__class__.__module__ + "." + self.__class__.__qualname__ + "." + self._testMethodName
 
-    def _formatMessage(self, msg: str | None, standardMsg: str) -> str:
+    def _formatMessage(self, msg, standardMsg):
+        short = not self.longMessage
         if msg is None:
             return standardMsg
-        if self.longMessage:
-            return standardMsg + " : " + msg
-        return msg or standardMsg
+        if short:
+            return msg or standardMsg
+        try:
+            return f"{standardMsg!s} : {msg!s}"
+        except UnicodeDecodeError:
+            return f"{_safe_repr(standardMsg)!s} : {_safe_repr(msg)!s}"
 
     def fail(self, msg: str | None = None) -> None:
         if msg is None:

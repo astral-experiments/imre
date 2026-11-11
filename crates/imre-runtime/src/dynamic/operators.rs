@@ -2784,7 +2784,7 @@ impl Context {
             Value::Native(name) => name.clone(),
             _ => self.type_name(receiver).to_owned(),
         };
-        format!("<{name} object at {receiver:#x}>")
+        crate::objects::base_object_repr(&name, receiver).to_string()
     }
 
     pub(super) fn qualified_class_name(&self, class: Id, scope: Id) -> String {

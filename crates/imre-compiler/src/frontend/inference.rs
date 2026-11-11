@@ -1439,17 +1439,23 @@ impl Checker<'_> {
                         }
                         return checker.direct_value(supplied, node, ty, parameter.sign_only);
                     }
-                    // Keep annotations fixed. For inferred arguments, select the tagged
-                    // spelling or string-list layout from both sides of the call.
+                    // An inferred argument can supply the optional layout for a prior
+                    // None or its payload, or the union of two supported text layouts.
                     let types = checker.types;
                     if inference.pending.borrow()[signature.id].inferred_params[index]
-                        && (matches!(ty, Type::Str | Type::Bytes)
+                        && (matches!(ty, Type::None | Type::Str | Type::Bytes)
                             || types.element(ty) == Some(Type::Str))
                     {
                         let lines = types.list(Type::Str);
                         let wider = |other| {
                             if ty == other {
                                 return None;
+                            }
+                            if types
+                                .payload(other)
+                                .is_some_and(|payload| ty == Type::None || ty == payload)
+                            {
+                                return Some(other);
                             }
                             types.union(&[ty, other]).filter(|&union| {
                                 types.members(union).is_some_and(|members| {

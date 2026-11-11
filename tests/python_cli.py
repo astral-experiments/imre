@@ -4764,6 +4764,7 @@ for name in ("md4", "ripemd160"):
             "boxed_unittest_not_equal.py",
             "boxed_unittest_ordering.py",
             "boxed_unittest_assert_raises.py",
+            "boxed_unittest_format_message.py",
             "boxed_unittest_assert_warns.py",
             "boxed_unittest_assert_logs.py",
             "boxed_unittest_assert_regex.py",
