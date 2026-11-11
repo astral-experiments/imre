@@ -645,6 +645,7 @@ fn collect_class(
     let mut methods: Vec<ast::StmtFunctionDef> = Vec::new();
     let mut method_kinds = Vec::new();
     let mut needs_object_layout = false;
+    let mut has_async_iterator = false;
     let mut initializer = None;
     for (ordinal, statement) in node.body.iter().enumerate() {
         // A type-only method declaration may have a separate runtime signature.
@@ -906,10 +907,15 @@ fn collect_class(
                         module.diagnostic(method, "class finalizers require the object runtime");
                     return Err(error.classified(Kind::ClassLayout));
                 }
-                let unary_protocol = matches!(
-                    name,
-                    "__str__" | "__repr__" | "__bool__" | "__index__" | "__iter__" | "__copy__"
-                ) || (mapping && name == "__len__");
+                let async_iterator = name == "__aiter__"
+                    && method.is_async
+                    && imre_ast::code_flags::is_generator(&method.body);
+                let unary_protocol = async_iterator
+                    || matches!(
+                        name,
+                        "__str__" | "__repr__" | "__bool__" | "__index__" | "__iter__" | "__copy__"
+                    )
+                    || (mapping && name == "__len__");
                 if name.starts_with("__")
                     && !matches!(
                         name,
@@ -1070,6 +1076,7 @@ fn collect_class(
                         &format!("{name} must be an instance method taking only self"),
                     ));
                 }
+                has_async_iterator |= async_iterator;
                 if name == "__init__" {
                     if kind != MethodKind::Instance {
                         return Err(
@@ -1477,6 +1484,11 @@ fn collect_class(
             },
             |name| hook_writes(name, None),
         )?;
+    }
+    // Iteration creates an async generator through the Python class namespace.
+    // Keep checking the whole declaration before choosing its representation.
+    if has_async_iterator {
+        return Ok(None);
     }
     Ok(Some(Class {
         definition,
