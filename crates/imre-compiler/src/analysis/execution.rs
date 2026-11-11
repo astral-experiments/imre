@@ -465,23 +465,23 @@ impl<'ast> Escape<'ast, '_> {
         if !follows_open_source && !captured {
             return None;
         }
-        let actual: Vec<_> = call
-            .arguments
-            .iter_source_order()
-            .filter_map(|arg| {
-                self.argument_fact(arg.value())
-                    .map(|source| (arg.value().range(), source))
+        let parsed = self.session.parsed(owner);
+        let function = declaration.node(&parsed);
+        let bound = crate::frontend::fixed_call_arguments(call, &function.parameters)?;
+        let callbacks: Vec<_> = bound
+            .into_iter()
+            .filter_map(|(parameter, argument)| {
+                self.argument_fact(argument)
+                    .map(|fact| (parameter.name().range(), fact))
             })
             .collect();
         let callback = captured
-            && actual
+            && callbacks
                 .iter()
                 .any(|(_, fact)| matches!(fact, ArgumentFact::Source(_)));
         if !follows_open_source && !callback {
             return None;
         }
-        let parsed = self.session.parsed(owner);
-        let function = declaration.node(&parsed);
         if !callback
             && (!function.decorator_list.is_empty()
                 || function.is_async
@@ -494,19 +494,10 @@ impl<'ast> Escape<'ast, '_> {
         {
             return None;
         }
-        let bound = crate::frontend::fixed_call_arguments(call, &function.parameters)?;
         let model = SemanticModel::new(self.model.db(), self.model.db().program_file(owner));
         let path = owner.path(self.model.db()).as_system_path()?.as_std_path();
         let mut nested = self.session.execution_visitor(path, &parsed, &model);
-        nested.callbacks = bound
-            .into_iter()
-            .filter_map(|(p, arg)| {
-                actual
-                    .iter()
-                    .find(|(r, _)| *r == arg.range())
-                    .map(|(_, target)| (p.name().range(), *target))
-            })
-            .collect();
+        nested.callbacks = callbacks;
         nested.visit_body(&function.body);
         nested.first.filter(|error| {
             callback || error.source == SourceCallable::Builtin(ExecutionIntrinsic::Exec)
