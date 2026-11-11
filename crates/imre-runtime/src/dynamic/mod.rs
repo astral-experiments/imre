@@ -3508,6 +3508,7 @@ impl Context {
     unsafe fn run_module_frame(context: *mut Self, entry: Code) -> Result<Id> {
         // SAFETY: the module frame roots the scope through native reentry.
         let scope = unsafe { &*context }.heap.current_scope();
+        // SAFETY: the caller keeps the entry loaded, and no context borrow spans the native call.
         let result = unsafe { entry(context, scope) };
         // SAFETY: the native initializer has returned to the owner of the context.
         let ctx = unsafe { &mut *context };
