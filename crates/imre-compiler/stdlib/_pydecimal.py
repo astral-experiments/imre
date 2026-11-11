@@ -63,6 +63,7 @@ __libmpdec_version__ = "2.4.2" # compatible libmpdec version
 import math as _math
 import numbers as _numbers
 import sys
+from _imre_decimal_ratio import _coefficient_as_int, _unsigned_ratio
 
 try:
     from collections import namedtuple as _namedtuple
@@ -477,18 +478,6 @@ def _coefficient_digits(text):
     if not text.isascii():
         text = ''.join(str(int(char)) for char in text)
     return text.lstrip('0') or '0'
-
-
-def _coefficient_as_int(digits, modulus=None):
-    # A Decimal coefficient can exceed the limit for int(string). For hashing,
-    # reduce each block so no intermediate grows with the coefficient length.
-    first = len(digits) % 18 or 18
-    value = int(digits[:first])
-    for start in range(first, len(digits), 18):
-        value = value * 10**18 + int(digits[start:start + 18])
-        if modulus is not None:
-            value %= modulus
-    return value
 
 
 def _unsigned_coefficient(integer):
@@ -1036,29 +1025,7 @@ class Decimal(object):
         if not self:
             return 0, 1
 
-        # Find n, d in lowest terms such that abs(self) == n / d;
-        # we'll deal with the sign later.
-        n = _coefficient_as_int(self._int)
-        if self._exp >= 0:
-            # self is an integer.
-            n, d = n * 10**self._exp, 1
-        else:
-            # Find d2, d5 such that abs(self) = n / (2**d2 * 5**d5).
-            d5 = -self._exp
-            while d5 > 0 and n % 5 == 0:
-                n //= 5
-                d5 -= 1
-
-            # (n & -n).bit_length() - 1 counts trailing zeros in binary
-            # representation of n (provided n is nonzero).
-            d2 = -self._exp
-            shift2 = min((n & -n).bit_length() - 1, d2)
-            if shift2:
-                n >>= shift2
-                d2 -= shift2
-
-            d = 5**d5 << d2
-
+        n, d = _unsigned_ratio(_coefficient_as_int(self._int), self._exp)
         if self._sign:
             n = -n
         return n, d

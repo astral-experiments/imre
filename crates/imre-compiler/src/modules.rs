@@ -268,6 +268,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "re" => bundled_source!("re/__init__.py"),
         "re._constants" => bundled_source!("re/_constants.py"),
         "decimal" => bundled_source!("decimal.py"),
+        "_imre_decimal_ratio" => bundled_source!("_imre_decimal_ratio.py"),
         // CPython 3.14.5 Lib/py_compile.py. See stdlib/docstrings/LICENSE.
         "py_compile" => bundled_source!("py_compile.py"),
         "pyexpat" => bundled_source!("pyexpat.py"),
