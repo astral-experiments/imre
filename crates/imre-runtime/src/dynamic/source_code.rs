@@ -38,7 +38,6 @@ struct Program {
     class_cell: bool,
     class_nonlocal: bool,
     has_named_bindings: bool,
-    doc: Option<ruff_text_size::TextRange>,
     strip_docstrings: bool,
     kind: FunctionKind,
     scope_flags: u32,
@@ -178,7 +177,6 @@ impl OperandPlan {
 
 /// Parsed items used to construct and validate code-object metadata.
 enum SourceItem {
-    Eval(ast::Expr),
     Discard(ast::Expr),
     AugAssign(ast::StmtAugAssign),
     DeleteName(String),
@@ -191,7 +189,7 @@ enum SourceItem {
     From(String, Vec<(String, String)>),
     Define(Definition),
     Annotations(Vec<(String, ast::Expr)>),
-    ModuleDoc(String),
+    Docstring(ast::StringLiteralValue),
     StringAnnotation(String, ast::Expr),
     MakeGenerator(ast::Expr),
     Raise(ast::StmtRaise),
@@ -1137,15 +1135,7 @@ impl Program {
         let mut items = std::mem::take(&mut self.items);
         for op in &mut items {
             match op {
-                SourceItem::Eval(ast::Expr::StringLiteral(doc))
-                    if self.scope_flags & code_flags::HAS_DOCSTRING != 0
-                        && self.doc == Some(doc.range()) =>
-                {
-                    let text = imre_ast::strings::clean_doc(doc.value.to_str());
-                    let id = strings.text(text.into())?;
-                    strings.keep(id)?;
-                }
-                SourceItem::Eval(e) | SourceItem::Discard(e) => strings.visit_expr(e),
+                SourceItem::Discard(e) => strings.visit_expr(e),
                 SourceItem::Name(name) => {
                     strings.heap.code_name(name.as_str());
                 }
@@ -1196,8 +1186,9 @@ impl Program {
                     strings.visit_expr(&stmt.target);
                     strings.visit_expr(&stmt.value);
                 }
-                SourceItem::ModuleDoc(text) => {
-                    let id = strings.text(text.as_str().into())?;
+                SourceItem::Docstring(doc) => {
+                    let text = imre_ast::strings::clean_doc(doc.to_str());
+                    let id = strings.text(text.into())?;
                     strings.keep(id)?;
                 }
                 SourceItem::Import { module, alias } => {
@@ -1414,7 +1405,6 @@ impl Program {
             class_cell: false,
             class_nonlocal: false,
             has_named_bindings,
-            doc: None,
             strip_docstrings: false,
             kind: FunctionKind::Plain,
             scope_flags: 0,
@@ -1627,20 +1617,23 @@ impl Program {
     fn lower_namespace(&mut self, mut body: ast::Suite, function: bool) -> Result<()> {
         let class = self.class_scope;
         if !self.interactive
-            && let Some(ast::Stmt::Expr(first)) = body.first()
-            && let ast::Expr::StringLiteral(doc) = first.value.as_ref()
+            && (self.strip_docstrings || !class)
+            && body.first().is_some_and(ast::helpers::is_docstring_stmt)
         {
-            if self.strip_docstrings {
-                body.remove(0);
-            } else if function || class {
+            let first = body.remove(0).expr_stmt().unwrap();
+            if !self.strip_docstrings {
                 if function {
                     self.scope_flags |= code_flags::HAS_DOCSTRING;
                 }
-                self.doc = Some(doc.range());
-            } else {
-                let text = imre_ast::strings::clean_doc(doc.value.to_str());
-                self.items.push(SourceItem::ModuleDoc(text));
-                body.remove(0);
+                // A pending symbol error can exclude the entire function suite.
+                if !function
+                    || self
+                        .syntax_limit
+                        .is_none_or(|limit| first.start() < limit.start())
+                {
+                    let doc = first.value.string_literal_expr().unwrap();
+                    self.items.push(SourceItem::Docstring(doc.value));
+                }
             }
         }
         self.lower(body, function, None)?;
@@ -1709,10 +1702,10 @@ impl Program {
                     self.declare(ScopeDirective::Nonlocal, &s.names, s.range())?;
                     continue;
                 }
-                Stmt::Expr(s) => match self.lower_suspension(*s.value, function)? {
-                    Some(expr) => SourceItem::Eval(expr),
-                    None => continue,
-                },
+                Stmt::Expr(s) => {
+                    self.record_expression(*s.value, function)?;
+                    continue;
+                }
                 Stmt::Assign(s) => {
                     for target in &s.targets {
                         self.declare_target(target)?;
