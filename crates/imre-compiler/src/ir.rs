@@ -316,6 +316,19 @@ impl Type {
         }
     }
 
+    /// The checked sequence layout multiplied by an integer in either operand order.
+    pub(crate) fn repeated_sequence(left: Self, right: Self) -> Option<Self> {
+        let sequence = match (left, right) {
+            (sequence, Self::Int) | (Self::Int, sequence) => sequence,
+            _ => return None,
+        };
+        matches!(
+            sequence,
+            Self::Str | Self::Bytes | Self::ListInt | Self::List(_)
+        )
+        .then_some(sequence)
+    }
+
     pub(crate) fn is_path(self) -> bool {
         matches!(self, Self::Path | Self::PurePath(_))
     }
@@ -744,12 +757,22 @@ impl Expr {
         }
     }
 
-    /// Both exact string addition and a joined f-string supply native text fragments.
+    /// Only two native strings can contribute fragments without running another operation.
+    pub(crate) fn string_addends(&self) -> Option<(&Self, &Self)> {
+        if let ExprKind::Binary(Binary::Add, left, right) = &self.kind
+            && self.ty == Type::Str
+            && left.ty == Type::Str
+            && right.ty == Type::Str
+        {
+            Some((left, right))
+        } else {
+            None
+        }
+    }
+
     pub(crate) fn is_string_concat(&self) -> bool {
-        matches!(
-            self.kind,
-            ExprKind::Binary(Binary::Concat, ..) | ExprKind::Builtin(Builtin::FormatJoin, _)
-        )
+        self.string_addends().is_some()
+            || matches!(self.kind, ExprKind::Builtin(Builtin::FormatJoin, _))
     }
 
     /// The freshly allocated list has no externally visible alias during argument evaluation.
@@ -1051,8 +1074,6 @@ pub(crate) enum Binary {
     RightShift,
     Power,
     MatrixMultiply,
-    Repeat,
-    Concat,
 }
 
 impl From<ruff_python_ast::Operator> for Binary {
@@ -1079,9 +1100,9 @@ impl From<ruff_python_ast::Operator> for Binary {
 impl Binary {
     pub(crate) fn protocol(self) -> &'static str {
         match self {
-            Self::Add | Self::Concat => "+",
+            Self::Add => "+",
             Self::Subtract => "-",
-            Self::Multiply | Self::Repeat => "*",
+            Self::Multiply => "*",
             Self::Divide => "/",
             Self::FloorDivide => "//",
             Self::Modulo => "%",
@@ -2098,7 +2119,6 @@ pub(crate) enum Builtin {
     StringListNonempty,
     RStrip,
     SysArgv,
-    OptionalStrConcat,
     SysOrigArgv,
     CanElideMapperFrames([usize; 2]),
     SysGetFrameModuleName,

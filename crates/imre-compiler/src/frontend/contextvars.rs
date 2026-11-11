@@ -245,7 +245,7 @@ impl Checker<'_> {
         let message = Expr {
             ty: Type::Str,
             kind: ExprKind::Binary(
-                Binary::Concat,
+                Binary::Add,
                 Box::new(unpacking::string("a ContextVar key was expected, got ")),
                 Box::new(repr),
             ),

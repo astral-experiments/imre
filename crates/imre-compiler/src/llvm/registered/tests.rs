@@ -288,16 +288,25 @@ fn captured_float_product_uses_the_registered_multiply_protocol() {
 }
 
 #[test]
-fn placed_multiplication_keeps_the_exact_integer_guard_and_python_protocol() {
+fn placed_arithmetic_keeps_the_python_operator_and_integer_guards() {
     use crate::ir::{Binary, ExprKind, Statement};
 
-    for (signature, result, call, sequence) in [
-        ("a: float, b: float", "float", "2.5, 3.0", false),
-        ("a: str, b: int", "str", "'a', 3", true),
+    for (op, signature, result, call) in [
+        (Binary::Multiply, "a: float, b: float", "float", "2.5, 3.0"),
+        (Binary::Multiply, "a: str, b: int", "str", "'a', 3"),
+        (Binary::Add, "a: str, b: str", "str", "'a', 'b'"),
+        (
+            Binary::Add,
+            "a: list[int], b: list[int]",
+            "list[int]",
+            "[1], [2]",
+        ),
+        (Binary::Add, "a: str | None, b: str", "str", "'a', 'b'"),
     ] {
+        let operator = op.protocol();
         let source = format!(
             "class Receiver:\n    def read(self, value: int) -> int:\n        return value\n\
-             def product({signature}) -> {result}:\n    return a * b\nprint(product({call}))\n"
+             def combine({signature}) -> {result}:\n    return a {operator} b\nprint(combine({call}))\n"
         );
         let mut graph = SourceGraph::single(&source).unwrap();
         let crate::CheckedProgram::Native(mut fixed) = crate::checked_lower(&mut graph).unwrap()
@@ -311,28 +320,32 @@ fn placed_multiplication_keeps_the_exact_integer_guard_and_python_protocol() {
             panic!()
         };
         assert!(matches!(
-            (&value.kind, sequence),
-            (ExprKind::Binary(Binary::Repeat, ..), true)
-                | (ExprKind::Binary(Binary::Multiply, ..), false)
+            &value.kind,
+            ExprKind::Binary(actual, ..) if *actual == op
         ));
         let placed = crate::frontend::place_fixed_function(function, frame);
         let mut output = Output::default();
-        let file = output.data(b"product.py");
-        let positions = SourcePositions::new(Path::new("product.py"), &source, &file);
+        let file = output.data(b"combine.py");
+        let positions = SourcePositions::new(Path::new("combine.py"), &source, &file);
         let mut frame = RegisteredFrame::new(&mut output, &positions, false, 0, 0.into());
         RegisteredBody::Function(&placed)
             .emit_on(FrameOwner::Registered(&mut frame, &CheckedSites::default()));
         frame.finish_callable(None);
-        let star = output.data(b"*");
+        let operator = output.data(operator.as_bytes());
         let body = &output.functions;
         assert_eq!(
             body.matches("call i64 @imre_dyn_exact_int_word(").count(),
-            2
+            if op == Binary::Multiply { 2 } else { 0 }
         );
-        assert_eq!(body.matches("call i64 @int_mul(").count(), 1);
         assert_eq!(
-            body.matches(&format!("call i64 @imre_dyn_op_at(ptr %ctx, ptr {star},"))
-                .count(),
+            body.matches("call i64 @int_mul(").count(),
+            usize::from(op == Binary::Multiply)
+        );
+        assert_eq!(
+            body.matches(&format!(
+                "call i64 @imre_dyn_op_at(ptr %ctx, ptr {operator},"
+            ))
+            .count(),
             1
         );
     }

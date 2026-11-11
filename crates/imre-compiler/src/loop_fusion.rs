@@ -312,6 +312,12 @@ fn loop_prefix(
 
 /// A callback could observe intermediate ownership while a producer is rescheduled.
 fn observable_consumer(expr: &Expr) -> bool {
+    if matches!(expr.kind, ExprKind::Binary(Binary::Add, ..)) {
+        // A list copy can allocate and optional string addition can raise before
+        // the following iteration. Keep those effects in the original loop.
+        return matches!(expr.ty, Type::ListInt | Type::List(_))
+            || (expr.ty == Type::Str && expr.string_addends().is_none());
+    }
     !matches!(
         &expr.kind,
         ExprKind::Int(_)

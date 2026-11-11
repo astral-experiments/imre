@@ -4311,9 +4311,11 @@ impl<'a> Checker<'a> {
             ast::Expr::BinOp(binary)
                 if binary.op == ast::Operator::Add && self.types.element(concrete).is_some() =>
             {
-                let left = self.expr_expected(&binary.left, concrete)?;
-                let right = self.expr_expected(&binary.right, concrete)?;
-                self.concat_lists(left, right, expression)?
+                self.with_expression_site(expression, |checker| {
+                    let left = checker.expr_expected(&binary.left, concrete)?;
+                    let right = checker.expr_expected(&binary.right, concrete)?;
+                    checker.binary_expr(binary.op, left, right, binary)
+                })?
             }
             ast::Expr::BinOp(binary)
                 if binary.op == ast::Operator::Mult && self.types.element(concrete).is_some() =>
@@ -7394,7 +7396,6 @@ impl<'a> Checker<'a> {
                 right.ty = left.ty;
             }
             self.expect(left.ty, right.ty, binary)?;
-            return self.concat_lists(left, right, binary);
         }
         if self.types.is_counter(left.ty) && self.types.is_counter(right.ty) {
             return self.counter_math(binary.op, left, right, false, binary);
@@ -7415,18 +7416,6 @@ impl<'a> Checker<'a> {
                 .any(|ty| matches!(ty, Type::Class(id) if self.decimal_class(id)))
         {
             return Err(self.scoped_builtin_error("Decimal arithmetic", node));
-        }
-        let optional_str = |ty| self.types.payload(ty) == Some(Type::Str);
-        if op == ast::Operator::Add
-            && (optional_str(left.ty) || optional_str(right.ty))
-            && [left.ty, right.ty]
-                .into_iter()
-                .all(|ty| matches!(ty, Type::Str | Type::None) || optional_str(ty))
-        {
-            return Ok(Expr {
-                ty: Type::Str,
-                kind: ExprKind::Builtin(Builtin::OptionalStrConcat, vec![left, right]),
-            });
         }
         if op == ast::Operator::Mod
             && let Some(formatted) = single_dispatch::format_argument(self.types, &left, &right)
@@ -7507,22 +7496,27 @@ impl<'a> Checker<'a> {
             if matches!(left, Type::Deque(_)) || matches!(right, Type::Deque(_)) {
                 return Err(self.object_builtin_error("collections.deque repetition", node));
             }
-            if (self.types.element(left).is_some() || matches!(left, Type::Bytes | Type::Str))
-                && right == Type::Int
-            {
-                return Ok((Binary::Repeat, left));
-            }
-            if left == Type::Int
-                && (self.types.element(right).is_some() || matches!(right, Type::Bytes | Type::Str))
-            {
-                return Ok((Binary::Repeat, right));
+            if let Some(sequence) = Type::repeated_sequence(left, right) {
+                return Ok((Binary::Multiply, sequence));
             }
         }
-        if op == ast::Operator::Add && matches!(left, Type::Deque(_)) {
-            return Err(self.object_builtin_error("collections.deque concatenation", node));
-        }
-        if op == ast::Operator::Add && matches!(left, Type::Str | Type::Bytes) && right == left {
-            return Ok((Binary::Concat, left));
+        if op == ast::Operator::Add {
+            if matches!(left, Type::Deque(_)) {
+                return Err(self.object_builtin_error("collections.deque concatenation", node));
+            }
+            if left == right
+                && (matches!(left, Type::Str | Type::Bytes) || self.types.element(left).is_some())
+            {
+                return Ok((Binary::Add, left));
+            }
+            let optional_str = |ty| self.types.payload(ty) == Some(Type::Str);
+            if (optional_str(left) || optional_str(right))
+                && [left, right]
+                    .into_iter()
+                    .all(|ty| matches!(ty, Type::Str | Type::None) || optional_str(ty))
+            {
+                return Ok((Binary::Add, Type::Str));
+            }
         }
         if !matches!(left, Type::Int | Type::Float) || !matches!(right, Type::Int | Type::Float) {
             return Err(error(
@@ -7640,7 +7634,7 @@ impl<'a> Checker<'a> {
         };
         let message = Expr {
             ty: Type::Str,
-            kind: ExprKind::Binary(Binary::Concat, Box::new(prefix), Box::new(spelling)),
+            kind: ExprKind::Binary(Binary::Add, Box::new(prefix), Box::new(spelling)),
         };
         let error = Expr {
             ty: Type::Exception,
@@ -7727,14 +7721,24 @@ impl<'a> Checker<'a> {
     }
 
     fn typed_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+        self.with_expression_site(expression, |checker| {
+            match checker.lower_expression(expression) {
+                Err(failure) if checker.missing_operation(&failure) => Ok(Expr::unrepresented()),
+                result => result,
+            }
+        })
+    }
+
+    fn with_expression_site(
+        &mut self,
+        expression: &ast::Expr,
+        lower: impl FnOnce(&mut Self) -> Result<Expr, String>,
+    ) -> Result<Expr, String> {
         let parent = self
             .fixed_sites
             .as_mut()
             .and_then(|sites| sites.enter(expression.range()));
-        let value = match self.lower_expression(expression) {
-            Err(failure) if self.missing_operation(&failure) => Expr::unrepresented(),
-            result => result?,
-        };
+        let value = lower(self)?;
         if let Some(sites) = &mut self.fixed_sites
             && !sites.leave(parent)
         {
