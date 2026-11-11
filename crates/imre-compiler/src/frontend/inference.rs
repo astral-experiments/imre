@@ -315,6 +315,8 @@ enum SignatureUse {
 #[derive(Clone, Copy)]
 enum ReturnDiscovery {
     Declared,
+    /// The checked body has no arguments, source callees or mutable layout inputs.
+    Independent,
     Body,
     Waiting(u32),
     Checked,
@@ -652,7 +654,10 @@ impl Inference {
 
     pub(super) fn layout_changed(&self) {
         for function in &mut *self.pending.borrow_mut() {
-            if !matches!(function.discovery, ReturnDiscovery::Declared) {
+            if !matches!(
+                function.discovery,
+                ReturnDiscovery::Declared | ReturnDiscovery::Independent
+            ) {
                 function.returns = None;
             }
         }
@@ -909,6 +914,7 @@ impl Inference {
                     let signatures = self.pending.borrow();
                     let pending = &signatures[signature.id];
                     let skip = match pending.discovery {
+                        ReturnDiscovery::Independent => continue,
                         ReturnDiscovery::Waiting(callee) => {
                             signatures[callee as usize].returns.is_none()
                         }
@@ -945,7 +951,9 @@ impl Inference {
                     && signature.params.iter().all(|param| {
                         param.ty == Type::PythonObject || param.ty.builtin_scalar_name().is_some()
                     })
-                    && graph.session.function_uses_only_locals(*module, function)
+                    && graph
+                        .session
+                        .function_uses_fixed_names(*module, function, |_| false)
                 {
                     continue;
                 }
@@ -1075,7 +1083,22 @@ impl Inference {
                     if checked_return {
                         checked_bodies.insert(signature.id);
                     }
-                    if retrying {
+                    if infer_return
+                        && signature.params.is_empty()
+                        && !signature.registered_frame()
+                        && self.pending.borrow()[signature.id].returns == Some(Type::None)
+                        && checker.calls.is_empty()
+                        && checker.class_reads.borrow().is_empty()
+                        && graph
+                            .session
+                            .function_uses_fixed_names(*module, function, |name| {
+                                exception_kind(name).is_some()
+                                    && !graph.modules[*module].bindings.contains_key(name)
+                            })
+                    {
+                        self.pending.borrow_mut()[signature.id].discovery =
+                            ReturnDiscovery::Independent;
+                    } else if retrying {
                         self.pending.borrow_mut()[signature.id].discovery =
                             ReturnDiscovery::Checked;
                     }
