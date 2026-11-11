@@ -158,9 +158,6 @@ impl OperandPlan {
 /// Parsed items used to construct and validate code-object metadata.
 enum SourceItem {
     Discard(ast::Expr),
-    AugAssign(ast::StmtAugAssign),
-    DeleteName(String),
-    DeleteItem(ast::ExprSubscript),
     Import {
         module: String,
         alias: Option<String>,
@@ -1132,17 +1129,6 @@ impl Program {
                 SourceItem::MakeGenerator(expr) => {
                     prepared_generators.push(&*expr);
                 }
-                SourceItem::DeleteName(name) => {
-                    strings.heap.code_name(name);
-                }
-                SourceItem::DeleteItem(item) => {
-                    strings.visit_expr(&item.value);
-                    strings.visit_expr(&item.slice);
-                }
-                SourceItem::AugAssign(stmt) => {
-                    strings.visit_expr(&stmt.target);
-                    strings.visit_expr(&stmt.value);
-                }
                 SourceItem::Docstring(doc) => {
                     let text = imre_ast::strings::clean_doc(doc.to_str());
                     let id = strings.text(text.into())?;
@@ -1706,12 +1692,14 @@ impl Program {
                     for target in s.targets {
                         match target {
                             ast::Expr::Name(name) => {
-                                let name = name.id.to_string();
-                                self.locals.insert(name.clone());
-                                self.items.push(SourceItem::DeleteName(name));
+                                self.locals.insert(name.id.to_string());
+                                self.items.push(SourceItem::Name(ast::Identifier::new(
+                                    name.id, name.range,
+                                )));
                             }
                             ast::Expr::Subscript(item) => {
-                                self.items.push(SourceItem::DeleteItem(item));
+                                self.items.push(SourceItem::Discard(*item.value));
+                                self.items.push(SourceItem::Discard(*item.slice));
                             }
                             ast::Expr::Attribute(attr) => {
                                 self.items.push(SourceItem::Discard(*attr.value));
@@ -1724,7 +1712,8 @@ impl Program {
                 }
                 Stmt::AugAssign(s) => {
                     self.declare_target(&s.target)?;
-                    SourceItem::AugAssign(s)
+                    self.items.push(SourceItem::Discard(*s.target));
+                    SourceItem::Discard(*s.value)
                 }
                 Stmt::Return(s) => {
                     if !function {
