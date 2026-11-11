@@ -874,9 +874,10 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 handlers,
                 orelse,
                 finalbody,
-            } if matches!(self.0, Entry::Registered(_)) => {
-                self.python().try_region(body, handlers, orelse, finalbody);
-            }
+            } => match &mut self.0 {
+                Entry::Native(code) => code.try_statement(body, handlers, orelse, finalbody),
+                Entry::Registered(frame) => frame.try_region(body, handlers, orelse, finalbody),
+            },
             Statement::With {
                 manager,
                 site,

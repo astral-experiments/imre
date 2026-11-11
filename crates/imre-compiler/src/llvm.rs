@@ -2945,6 +2945,7 @@ impl Emitter<'_, '_> {
             | Statement::Return(_)
             | Statement::Raise(_)
             | Statement::Scope { .. }
+            | Statement::Try { .. }
             | Statement::With { .. }
             | Statement::Clear(_)
             | Statement::SetItem(..)
@@ -2979,12 +2980,6 @@ impl Emitter<'_, '_> {
                 let value = self.take_slot(*source);
                 self.store(*target, &value);
             }
-            Statement::Try {
-                body,
-                handlers,
-                orelse,
-                finalbody,
-            } => self.try_statement(body, handlers, orelse, finalbody),
             Statement::SetField(receiver, field, expression) => {
                 let value = self.operand(expression);
                 let receiver = self.operand(receiver);
