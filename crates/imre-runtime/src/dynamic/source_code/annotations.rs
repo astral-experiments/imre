@@ -113,10 +113,10 @@ impl Program {
         Ok(())
     }
 
-    pub(super) fn annotation_program(
+    pub(super) fn function_annotations(
         &self,
         function: &mut ast::StmtFunctionDef,
-    ) -> Result<Option<Box<Program>>> {
+    ) -> Result<Vec<(String, ast::Expr)>> {
         // CPython emits ordinary positional annotations before the positional-only group.
         let params = &mut function.parameters;
         let mut entries: Vec<_> = params
@@ -135,9 +135,6 @@ impl Program {
                     .map(|expr| ("return".to_owned(), *expr)),
             )
             .collect();
-        if entries.is_empty() {
-            return Ok(None);
-        }
         let stringized = self.string_annotations();
         for (_, expr) in &mut entries {
             validate(expr, true)?;
@@ -145,19 +142,7 @@ impl Program {
                 *expr = string_literal(expr);
             }
         }
-        Ok(Some(self.annotation_provider(entries, Vec::new())))
-    }
-
-    pub(super) fn annotation_provider(
-        &self,
-        entries: Vec<(String, ast::Expr)>,
-        conditional_fields: Vec<usize>,
-    ) -> Box<Program> {
-        let mut provider = self.nested_program("__annotate__");
-        provider.private_names = self.private_names.clone();
-        provider.conditional_fields = conditional_fields;
-        provider.items.push(SourceItem::Annotations(entries));
-        Box::new(provider)
+        Ok(entries)
     }
 }
 
@@ -182,22 +167,27 @@ impl<'a> CompiledStrings<'a, '_> {
         Ok(())
     }
 
-    pub(super) fn annotation_code(
+    pub(super) fn annotation_scope(
         &mut self,
-        provider: &mut Program,
+        entries: &[(String, ast::Expr)],
         class_scope: bool,
+        stringized: bool,
+        has_named_bindings: bool,
     ) -> Result<()> {
+        let mut directives = HashMap::new();
         if class_scope {
-            // A global declared by the class also bypasses its dictionary in the annotation scope.
+            // A class global also bypasses the class dictionary in its annotation scope.
             for (name, (kind, _)) in self.directives {
                 if *kind == ScopeDirective::Global {
-                    provider
-                        .directives
-                        .insert(name.clone(), (*kind, Default::default()));
+                    directives.insert(name.clone(), (*kind, Default::default()));
                 }
             }
         }
-        let roots = provider.prepare_strings(self.heap, self.shared, self.spellings)?;
+        let mut strings = CompiledStrings::new(self.heap, self.shared, self.spellings, &directives);
+        for (name, expr) in entries {
+            strings.annotation(name, expr, stringized)?;
+        }
+        let roots = strings.finish_nested_scope(has_named_bindings)?;
         if roots != NONE {
             self.keep(roots)?;
         }
