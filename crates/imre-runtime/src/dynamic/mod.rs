@@ -5145,8 +5145,6 @@ impl Context {
                 }
             }
             "collections" => {
-                let deque = self.builtin(deque::CLASS);
-                self.bind(scope, "deque", deque);
                 let namedtuple = self.builtin("collections.namedtuple");
                 self.bind(scope, "_namedtuple_factory", namedtuple);
                 self.bind(scope, "namedtuple", namedtuple);

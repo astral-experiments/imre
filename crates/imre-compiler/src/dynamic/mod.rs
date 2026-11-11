@@ -2557,7 +2557,7 @@ fn runtime_sources(
     let collections = (!seen("collections")).then_some((
         "collections",
         "collections/__init__.py",
-        NAMEDTUPLE_COLLECTIONS,
+        COLLECTIONS_BOOTSTRAP,
     ));
     collections
         .into_iter()
@@ -2641,7 +2641,7 @@ fn builtin_sources(
     ]
 }
 
-const NAMEDTUPLE_COLLECTIONS: &str = include_str!("../../stdlib/collections/namedtuple_repr.py");
+const COLLECTIONS_BOOTSTRAP: &str = include_str!("../../stdlib/collections/bootstrap.py");
 const SEALED_IO: &str = include_str!("../../stdlib/io.py");
 const FIXED_UTF_PROVIDERS: &[(&str, &str)] = &[
     ("encodings.utf_16_le", "encodings/utf_16_le.py"),

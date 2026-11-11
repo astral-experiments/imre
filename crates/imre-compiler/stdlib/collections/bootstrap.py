@@ -1,5 +1,13 @@
 import sys as _sys
 
+try:
+    from _collections import deque
+except ImportError:
+    pass
+else:
+    from _collections_abc import MutableSequence as _MutableSequence
+    _MutableSequence.register(deque)
+
 
 def namedtuple(typename, field_names, *, rename=False, defaults=None, module=None):
     result = _namedtuple_factory(typename, field_names, rename=rename, defaults=defaults, module=module)
