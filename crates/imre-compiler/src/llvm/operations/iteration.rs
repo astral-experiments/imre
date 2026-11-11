@@ -400,10 +400,6 @@ impl CheckedBody<'_, '_, '_, '_> {
             Entry::Native(emitter) => Some(emitter.if_facts(test, yes)),
             Entry::Registered(_) => None,
         };
-        let resumable = matches!(
-            test.kind,
-            ExprKind::Builtin(crate::ir::Builtin::RegisteredInput(_), _)
-        );
         super::join::choose(
             self,
             Self::body,
@@ -425,7 +421,6 @@ impl CheckedBody<'_, '_, '_, '_> {
                     code.fixed().leave_if_body(facts);
                 }
             },
-            resumable,
         );
     }
 }

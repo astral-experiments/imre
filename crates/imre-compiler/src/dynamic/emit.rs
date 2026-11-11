@@ -3775,6 +3775,48 @@ mod tests {
     }
 
     #[test]
+    fn a_physical_if_places_the_following_declaration_on_its_normal_edge() {
+        let path = Path::new("example.py");
+        for (otherwise, continues) in [
+            ("", true),
+            ("        else:\n            pass\n", true),
+            ("        else:\n            raise SystemExit(2)\n", false),
+        ] {
+            let source = format!(
+                concat!(
+                    "class Choice:\n",
+                    "    def run[T: int](self, flag):\n",
+                    "        if flag:\n",
+                    "            raise SystemExit(1)\n",
+                    "{}",
+                    "        async def refused(values):\n",
+                    "            values += [lambda v=await get(x): v for x in [0]]\n",
+                ),
+                otherwise,
+            );
+            let parsed = ParsedModule::parse(path, source.as_str().into()).unwrap();
+            let module = PreparedBody::from_parsed(
+                "example",
+                path,
+                parsed,
+                0,
+                ModuleOrigin::Program(None),
+                LiteralSites::default(),
+                None,
+            );
+            if continues {
+                let error = module.err().expect("reachable declaration must be checked");
+                assert!(
+                    error.contains("cannot compile this comprehension"),
+                    "{error}"
+                );
+            } else {
+                module.unwrap().standalone().unwrap();
+            }
+        }
+    }
+
+    #[test]
     fn checked_raise_preserves_the_following_declarations_located_refusal() {
         let source = concat!(
             "raise RuntimeError('stop')\n",
