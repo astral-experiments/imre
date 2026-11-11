@@ -45,7 +45,6 @@ pub(super) fn symbol(owner: IntrinsicModule, name: &str) -> Option<Binding> {
         return Some(Binding::IntrinsicModule(M::Declaration(child)));
     }
     let symbol = match (owner, name) {
-        (M::Declaration("configparser"), "ConfigParser") => "configparser.ConfigParser",
         (M::Declaration("email.message"), "Message") => "email.message.Message",
         (M::Declaration("email.policy"), "compat32") => "email.policy.compat32",
         _ => return None,

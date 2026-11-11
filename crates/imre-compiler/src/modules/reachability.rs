@@ -1522,12 +1522,13 @@ print(Token().clean())
         let source = "from configparser import ConfigParser as parser\ndef cold():\n    return parser()\nprint(42)\n";
         reachable(source).unwrap();
         crate::check(source).unwrap();
-        assert!(
-            reachable(&source.replace("print(42)", "print(cold())"))
-                .unwrap_err()
-                .contains("configparser.ConfigParser")
-        );
+        reachable(&source.replace("print(42)", "print(cold())")).unwrap();
         assert!(reachable(&source.replace("ConfigParser", "Missing")).is_err());
+
+        let missing = "import configparser\n\ndef cold():\n    return configparser.Missing()\n\nprint(42)\n";
+        reachable(missing).unwrap();
+        let error = reachable(&missing.replace("print(42)", "print(cold())"));
+        assert!(matches!(error, Err(message) if message.contains("4:12:")));
         assert!(reachable("import this\nprint(42)\n").is_err());
     }
 
