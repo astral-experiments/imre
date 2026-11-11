@@ -6583,20 +6583,16 @@ impl<'a> Checker<'a> {
         if let Type::Class(class) = manager.ty
             && self.unittest_context(class)
         {
-            return Ok(Break(contexts::finish(
-                out,
-                self.assert_raises_scope(item, remaining, body, class, manager)?,
-            )));
+            self.assert_raises_scope(out, item, remaining, body, class, manager)?;
+            return Ok(Break(true));
         }
         if let Type::Class(class) = manager.ty {
             let record = &self.classes.declarations.definitions[class];
             if record.name == "_SubTestContext"
                 && self.graph.modules[record.definition.module].is_bundled("unittest")
             {
-                return Ok(Break(contexts::finish(
-                    out,
-                    self.subtest_scope(item, remaining, body, class, manager)?,
-                )));
+                self.subtest_scope(out, item, remaining, body, class, manager)?;
+                return Ok(Break(true));
             }
         }
         if self.types.payload(manager.ty).unwrap_or(manager.ty) == Type::HandlerLock {

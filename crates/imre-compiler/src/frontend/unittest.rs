@@ -1007,16 +1007,40 @@ impl Checker<'_> {
         })
     }
 
-    /// A runner may suppress a subtest exception, so execution after the with
-    /// cannot depend on assignments made by the rest of the protected suite.
+    /// A suppressing manager can resume after any throwing point in the protected suite.
+    fn suppressed_with_body(
+        &mut self,
+        remaining: &[ast::WithItem],
+        suite: &[ast::Stmt],
+    ) -> Result<Vec<Statement>, String> {
+        let incoming = self.local_state();
+        let (protected, _) = self.with_items(remaining, suite)?;
+        self.restore_state(incoming);
+        if !remaining.is_empty() {
+            self.narrowed = assignments::Narrowed::new();
+        }
+        for name in narrowing::assigned_names(suite) {
+            if let Some(slot) = self.names.get(&name) {
+                self.narrowed.remove_mut(slot);
+            }
+        }
+        for name in narrowing::deleted_names(suite) {
+            if let Some(slot) = self.names.get(&name) {
+                self.assigned.remove(slot);
+            }
+        }
+        Ok(protected)
+    }
+
     pub(super) fn subtest_scope(
         &mut self,
+        out: &mut Vec<Statement>,
         item: &ast::WithItem,
         remaining: &[ast::WithItem],
         suite: &[ast::Stmt],
         class: usize,
         manager: Expr,
-    ) -> Result<(Vec<Statement>, bool), String> {
+    ) -> Result<(), String> {
         let saved = self.hidden(manager.ty);
         let exc = self.hidden(Type::Exception);
         let methods = &self.classes.methods[class];
@@ -1038,64 +1062,37 @@ impl Checker<'_> {
                 },
             )?);
         }
-        let incoming = self.local_state();
-        let (nested, _) = self.with_items(remaining, suite)?;
-        protected.extend(nested);
-        self.restore_state(incoming);
-        if !remaining.is_empty() {
-            self.narrowed = assignments::Narrowed::new();
-        }
-        for name in narrowing::assigned_names(suite) {
-            if let Some(slot) = self.names.get(&name) {
-                self.narrowed.remove_mut(slot);
-            }
-        }
-        for name in narrowing::deleted_names(suite) {
-            if let Some(slot) = self.names.get(&name) {
-                self.assigned.remove(slot);
-            }
-        }
+        protected.extend(self.suppressed_with_body(remaining, suite)?);
         let handled = call(handle, Type::Bool, vec![self.local(saved), self.local(exc)]);
-        Ok((
-            vec![Statement::Scope {
-                body: vec![
-                    Statement::Assign(saved, manager),
-                    Statement::Expr(call(enter, Type::None, vec![self.local(saved)])),
-                    Statement::Try {
-                        body: protected,
-                        handlers: vec![ir::ExceptHandler {
-                            matcher: crate::ir::ExceptionMatcher::Categories(vec![]),
-                            name: Some(exc),
-                            body: vec![Statement::If(
-                                handled,
-                                vec![],
-                                vec![Statement::Raise(None)],
-                            )],
-                        }],
-                        orelse: vec![],
-                        finalbody: vec![Statement::Expr(call(
-                            leave,
-                            Type::None,
-                            vec![self.local(saved)],
-                        ))],
-                    },
-                ],
-                clear: vec![saved],
+        contexts::enter_native(
+            out,
+            vec![
+                Statement::Assign(saved, manager),
+                Statement::Expr(call(enter, Type::None, vec![self.local(saved)])),
+            ],
+            protected,
+            vec![ir::ExceptHandler {
+                matcher: crate::ir::ExceptionMatcher::Categories(vec![]),
+                name: Some(exc),
+                body: vec![Statement::If(handled, vec![], vec![Statement::Raise(None)])],
             }],
-            true,
-        ))
+            Statement::Expr(call(leave, Type::None, vec![self.local(saved)])),
+            vec![saved],
+        );
+        Ok(())
     }
 
     /// A normal exit (including return, break and continue) must raise an
     /// assertion failure. A thrown exception is suppressed only if it matches.
     pub(super) fn assert_raises_scope(
         &mut self,
+        out: &mut Vec<Statement>,
         item: &ast::WithItem,
         remaining: &[ast::WithItem],
         suite: &[ast::Stmt],
         class: usize,
         manager: Expr,
-    ) -> Result<(Vec<Statement>, bool), String> {
+    ) -> Result<(), String> {
         let root = self.hidden(manager.ty);
         let exceptional = self.hidden(Type::Bool);
         let mut enter = vec![
@@ -1112,25 +1109,10 @@ impl Checker<'_> {
             }
             enter.push(self.assign(target, self.local(root))?);
         }
-        let incoming = self.local_state();
         let earlier_breaks = self.take_breaks();
-        let (protected, _) = self.with_items(remaining, suite)?;
+        let protected = self.suppressed_with_body(remaining, suite)?;
         self.take_breaks();
         self.include_breaks(earlier_breaks);
-        self.restore_state(incoming);
-        if !remaining.is_empty() {
-            self.narrowed = assignments::Narrowed::new();
-        }
-        for name in narrowing::assigned_names(suite) {
-            if let Some(slot) = self.names.get(&name) {
-                self.narrowed.remove_mut(slot);
-            }
-        }
-        for name in narrowing::deleted_names(suite) {
-            if let Some(slot) = self.names.get(&name) {
-                self.assigned.remove(slot);
-            }
-        }
         let fields = &self.classes.declarations.definitions[class].fields;
         let index = |name| fields.iter().position(|f| f.name == name).unwrap();
         let expected = Expr {
@@ -1166,9 +1148,11 @@ impl Checker<'_> {
             ty: Type::None,
             kind: ExprKind::Call(missing, ir::CallArgs::positional(vec![self.local(root)])),
         });
-        enter.push(Statement::Try {
-            body: protected,
-            handlers: vec![ir::ExceptHandler {
+        contexts::enter_native(
+            out,
+            enter,
+            protected,
+            vec![ir::ExceptHandler {
                 matcher: crate::ir::ExceptionMatcher::Categories(vec![]),
                 name: Some(exc),
                 body: vec![
@@ -1176,15 +1160,9 @@ impl Checker<'_> {
                     Statement::If(matches, vec![store, search], vec![Statement::Raise(None)]),
                 ],
             }],
-            orelse: vec![],
-            finalbody: vec![Statement::If(self.local(exceptional), vec![], vec![fail])],
-        });
-        Ok((
-            vec![Statement::Scope {
-                body: enter,
-                clear: vec![root, exceptional],
-            }],
-            true,
-        ))
+            Statement::If(self.local(exceptional), vec![], vec![fail]),
+            vec![root, exceptional],
+        );
+        Ok(())
     }
 }
