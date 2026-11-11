@@ -243,12 +243,19 @@ mod tests {
         assert_eq!(cases[0].pattern.names, ["item", "tail", "rest"]);
         assert!(matches!(cases[0].pattern.test, MatchTest::Mapping(..)));
         assert!(matches!(cases[1].pattern.test, MatchTest::Or(..)));
-        assert_eq!(cases[1].captures, [cases[0].captures[0]]);
+        let [item, tail, rest] = cases[0].captures[..] else {
+            panic!("expected three mapping captures");
+        };
+        assert_eq!(cases[1].captures, [item]);
         let mut words = vec![];
-        ir::walk_expressions(&suite.function.body, &mut |expr| {
-            if let ExprKind::Builtin(Builtin::RegisteredName(name), _) = &expr.kind {
-                words.push(name.as_str());
+        let mut capture_reads = vec![];
+        ir::walk_expressions(&suite.function.body, &mut |expr| match &expr.kind {
+            ExprKind::Builtin(Builtin::RegisteredName(name), _) => words.push(name.as_str()),
+            ExprKind::Local(slot) => {
+                words.push(suite.local_names[slot].name.as_str());
+                capture_reads.push(*slot);
             }
+            _ => {}
         });
         assert_eq!(
             words,
@@ -256,5 +263,6 @@ mod tests {
                 "subject", "keys", "models", "allowed", "item", "use", "item", "tail", "rest"
             ]
         );
+        assert_eq!(capture_reads, [item, item, tail, rest]);
     }
 }
