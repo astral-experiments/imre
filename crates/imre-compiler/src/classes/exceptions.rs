@@ -142,11 +142,10 @@ fn validate_layout(module: &SourceModule, node: &ast::StmtClassDef) -> Result<()
             if super_init(c) || init.name.as_str() == "__init__" && explicit_message_initializer(module, c).is_some()))
     }).count();
     if calls != 1
-        || init.body.iter().any(|s| {
-            !matches!(
-                s,
-                ast::Stmt::Expr(_) | ast::Stmt::Assign(_) | ast::Stmt::Pass(_)
-            )
+        || !init.body.iter().all(|stmt| match stmt {
+            ast::Stmt::Expr(_) | ast::Stmt::Assign(_) | ast::Stmt::Pass(_) => true,
+            ast::Stmt::AnnAssign(field) => field.value.is_some(),
+            _ => false,
         })
     {
         return Err(module.error(init,"an exception payload must initialize its message exactly once in a straight-line constructor"));

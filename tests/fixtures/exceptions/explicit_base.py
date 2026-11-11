@@ -2,7 +2,7 @@ class ParseProblem(Exception):
     def __init__(self, message: str, stdout: str | None = None, stderr: str | None = None, code: int = 2) -> None:
         Exception.__init__(self, message, stdout, stderr)
         self.message = message
-        self.stdout = stdout
+        self.stdout: str | None = stdout
         self.stderr = stderr
         self.code = code
 
