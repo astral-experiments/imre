@@ -429,7 +429,7 @@ impl Checker<'_> {
                         Expr {
                             ty: element.unwrap(),
                             kind: ExprKind::Builtin(
-                                Builtin::ListGet,
+                                Builtin::ListGet(None),
                                 vec![source.clone(), Expr::integer(i)],
                             ),
                         }

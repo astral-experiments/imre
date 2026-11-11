@@ -5288,7 +5288,7 @@ impl<'a> Checker<'a> {
                         } else if matches!(self.locals[captured], Type::List(_)) {
                             Builtin::SequenceGetInBounds
                         } else {
-                            Builtin::ListGet
+                            Builtin::ListGet(None)
                         },
                         vec![self.local(captured), self.local(cursor)],
                     ),
@@ -6070,7 +6070,7 @@ impl<'a> Checker<'a> {
                     let value = if ty == Type::Float && value.ty == Type::Int {
                         Expr {
                             ty: Type::Float,
-                            kind: ExprKind::Builtin(Builtin::Float, vec![value]),
+                            kind: ExprKind::Builtin(Builtin::Float(None), vec![value]),
                         }
                     } else {
                         value
@@ -6791,7 +6791,29 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn fixed_origin(&mut self, range: TextRange, callee_end: Option<TextSize>) -> ir::FixedOrigin {
+    fn checked_builtin_call(
+        &mut self,
+        operation: fn(Option<Box<ir::FixedOrigin>>) -> Builtin,
+        call: &ast::ExprCall,
+        args: &[Expr],
+    ) -> Builtin {
+        let builtin = operation(None);
+        if builtin.contract(args).may_raise {
+            operation(Some(Box::new(self.call_origin(call))))
+        } else {
+            builtin
+        }
+    }
+
+    fn call_origin(&mut self, call: &ast::ExprCall) -> ir::FixedOrigin {
+        self.fixed_origin(call.range(), Some((call.func.end(), b'(')))
+    }
+
+    fn fixed_origin(
+        &mut self,
+        range: TextRange,
+        delimiter: Option<(TextSize, u8)>,
+    ) -> ir::FixedOrigin {
         let (line, line_start) =
             self.graph
                 .session
@@ -6801,13 +6823,13 @@ impl<'a> Checker<'a> {
                 return None;
             }
             let start = range.start() - line_start;
-            let split = match callee_end {
-                Some(prefix) => {
+            let split = match delimiter {
+                Some((prefix, opener)) => {
                     imre_ast::traceback_delimiter(
                         self.source.as_bytes(),
                         prefix.to_usize(),
                         range.end().to_usize(),
-                        b'(',
+                        opener,
                     )? - line_start.to_usize()
                 }
                 None => start.to_usize(),
@@ -7904,8 +7926,7 @@ impl<'a> Checker<'a> {
                     // A conversion can return an unchanged, already positioned operand.
                     && matches!(args.site, ir::CallSite::None)
                 {
-                    args.site =
-                        ir::CallSite::Fixed(self.fixed_origin(call.range(), Some(call.func.end())));
+                    args.site = ir::CallSite::Fixed(self.call_origin(call));
                 }
                 Ok(result)
             }
@@ -9592,7 +9613,13 @@ impl<'a> Checker<'a> {
                 }
                 (
                     element,
-                    ExprKind::Builtin(Builtin::ListGet, vec![list, index]),
+                    ExprKind::Builtin(
+                        Builtin::ListGet(Some(Box::new(self.fixed_origin(
+                            subscript.range(),
+                            Some((subscript.value.end(), b'[')),
+                        )))),
+                        vec![list, index],
+                    ),
                 )
             }
             ast::Expr::Await(awaited) => {
@@ -11949,7 +11976,7 @@ impl<'a> Checker<'a> {
                     Type::Float => value,
                     Type::Int | Type::Bool => Expr {
                         ty: Type::Float,
-                        kind: ExprKind::Builtin(Builtin::Float, vec![value]),
+                        kind: ExprKind::Builtin(Builtin::Float(None), vec![value]),
                     },
                     _ => {
                         return Err(error(
@@ -13846,7 +13873,7 @@ impl<'a> Checker<'a> {
                 } else {
                     Expr {
                         ty: Type::Int,
-                        kind: ExprKind::Builtin(Builtin::Int, vec![value]),
+                        kind: ExprKind::Builtin(Builtin::Int(None), vec![value]),
                     }
                 };
                 return Ok(Expr {
@@ -13915,20 +13942,26 @@ impl<'a> Checker<'a> {
                     && matches!(args[0].ty, Type::Union(_))
                     && args[0].ty == self.types.string_or_int() =>
             {
-                return Ok(self.integer_from_text_or_int(args.into_iter().next().unwrap()));
+                return Ok(self.integer_from_text_or_int(args.into_iter().next().unwrap(), call));
             }
             "int"
                 if let [text, base] = args.as_slice()
                     && text.ty == Type::Str
                     && matches!(&base.kind, ExprKind::Int(n) if n == "16") =>
             {
-                (Builtin::Int, Type::Int)
+                (
+                    self.checked_builtin_call(Builtin::Int, call, &args),
+                    Type::Int,
+                )
             }
             "int"
                 if args.len() == 1
                     && matches!(args[0].ty, Type::Int | Type::Float | Type::Bool | Type::Str) =>
             {
-                (Builtin::Int, Type::Int)
+                (
+                    self.checked_builtin_call(Builtin::Int, call, &args),
+                    Type::Int,
+                )
             }
             "float"
                 if args.len() == 1
@@ -13949,7 +13982,10 @@ impl<'a> Checker<'a> {
                         Type::Int | Type::Float | Type::Bool | Type::Str | Type::Bytes
                     ) =>
             {
-                (Builtin::Float, Type::Float)
+                (
+                    self.checked_builtin_call(Builtin::Float, call, &args),
+                    Type::Float,
+                )
             }
             "len" if args.len() == 1 && args[0].ty == Type::Context => {
                 (Builtin::ContextVar(ir::ContextOperation::Len), Type::Int)
@@ -14044,15 +14080,6 @@ impl<'a> Checker<'a> {
                 return Ok(self.registered_builtin_call(call, name, args));
             }
             _ => return Err(error(self.source, call, UNSUPPORTED_ARGUMENTS)),
-        };
-        // Each parse failure can become a separate link in a finally's exception chain.
-        let builtin = if matches!(builtin, Builtin::Int)
-            && args[0].ty == Type::Str
-            && self.finally_scope != FinallyScope::Outside
-        {
-            Builtin::IntFromText(self.fixed_origin(call.range(), Some(call.func.end())))
-        } else {
-            builtin
         };
         Ok(Expr {
             ty,
@@ -14334,6 +14361,57 @@ fn literal_binding_names(suite: &[ast::Stmt]) -> Option<std::collections::HashSe
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn checked_conversions_keep_their_operand_fault_sites() {
+        use crate::ir::{Builtin, ExprKind, walk_expressions};
+        use crate::modules::SourceGraph;
+
+        let source = concat!(
+            "def pick(text: str, index: int) -> int:\n",
+            "    values = [text, 17]\n",
+            "    return int(values[index])\n",
+            "def field(text: str) -> int:\n",
+            "    return int(text.split()[1])\n",
+            "print(pick('1', 0), field('1 2'))\n",
+        );
+        let graph = SourceGraph::single(source).unwrap();
+        let mut module = super::lower(&graph).unwrap();
+        let mut sites = Vec::new();
+        for f in &module.functions {
+            walk_expressions(&f.body, &mut |value| {
+                let (operation, site) = match &value.kind {
+                    ExprKind::Builtin(Builtin::Int(Some(site)), _) => ("int", site),
+                    ExprKind::Builtin(Builtin::ListGet(Some(site)), _) => ("index", site),
+                    _ => return,
+                };
+                sites.push((site.line, operation, site.span));
+            });
+        }
+        sites.sort();
+        assert_eq!(
+            sites,
+            [
+                (3, "index", Some([15, 21, 28])),
+                (3, "int", None),
+                (5, "index", Some([15, 27, 30])),
+                (5, "int", None),
+            ]
+        );
+
+        crate::split_fields::specialize(&mut module);
+        let mut fused = Vec::new();
+        for f in &module.functions {
+            walk_expressions(&f.body, &mut |value| {
+                if let ExprKind::Builtin(Builtin::SplitIntField(1, sites), _) = &value.kind {
+                    let index = sites.index.as_ref().unwrap();
+                    let conversion = sites.conversion.as_ref().unwrap();
+                    fused.push((index.line, index.span, conversion.line, conversion.span));
+                }
+            });
+        }
+        assert_eq!(fused, [(5, Some([15, 27, 30]), 5, None)]);
+    }
+
     #[test]
     fn fixed_open_diagnostics_preserve_literal_errors() {
         use crate::modules::SourceGraph;

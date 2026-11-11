@@ -943,6 +943,13 @@ pub(crate) struct FixedOrigin {
     pub span: Option<[u32; 3]>,
 }
 
+/// A fused split-field conversion retains the origins of both checked operations.
+#[derive(Clone)]
+pub(crate) struct SplitFieldOrigins {
+    pub index: Option<Box<FixedOrigin>>,
+    pub conversion: Option<Box<FixedOrigin>>,
+}
+
 /// The checked position belongs to the call's fixed or Python invocation path.
 #[derive(Clone)]
 pub(crate) enum CallSite {
@@ -1422,7 +1429,7 @@ impl Builtin {
             Self::RegisteredIter(op) => one().map(|value| Iter(value, *op)),
             Self::RegisteredPairNeedsRow => one().map(PairNeedsRow),
             Self::Bool => one().map(Truth),
-            Self::ListGet => two().map(Get),
+            Self::ListGet(_) => two().map(Get),
             Self::Append | Self::SetAdd => two().map(Insert),
             Self::RegisteredUnpack {
                 count,
@@ -1791,9 +1798,8 @@ pub(crate) enum Builtin {
     IntegerPower,
     ModularPower,
     NegativeIntegerPower,
-    Int,
-    IntFromText(FixedOrigin),
-    Float,
+    Int(Option<Box<FixedOrigin>>),
+    Float(Option<Box<FixedOrigin>>),
     /// Represents an exact integer by its sign for a proved zero-comparison parameter.
     IntExtremum {
         minimum: bool,
@@ -1906,7 +1912,7 @@ pub(crate) enum Builtin {
         positive_sign: u8,
     },
     TupleGet,
-    ListGet,
+    ListGet(Option<Box<FixedOrigin>>),
     /// A live-length guard proves a private cursor or constant index is in
     /// bounds, with no intervening mutation or user code. Returns an owned
     /// element of a generic typed list; the index is canonical and nonnegative.
@@ -1927,24 +1933,26 @@ pub(crate) enum Builtin {
     /// Extend a proven periodic packed prefix and return the ordinal where normal iteration resumes.
     StructCyclePrefix,
     /// The guarded loop proves all elements fit i32 and cannot be replaced.
-    ListGetI32,
+    ListGetI32(Option<Box<FixedOrigin>>),
     /// Reads a checked index from the stable buffer in a guarded loop body.
-    ListGetStable,
+    ListGetStable(Option<Box<FixedOrigin>>),
     /// Internal operations on the spare capacity of a single guarded leaf loop.
     BeginListAppends(usize),
     FinishListAppends(usize),
     AppendInWindow(usize),
-    GetInAppendWindow(usize),
+    GetInAppendWindow(usize, Option<Box<FixedOrigin>>),
     GetBoundedInAppendWindow {
         output: usize,
         min: i64,
         max: i64,
+        origin: Option<Box<FixedOrigin>>,
     },
     /// Every call site and intervening operation preserve these exact element
     /// bounds. The access still checks its index and returns a tagged-small Int.
     ListGetBounded {
         min: i64,
         max: i64,
+        origin: Option<Box<FixedOrigin>>,
     },
     /// A canonical reduction loop proves its direct source/cursor access is
     /// in bounds before advancing. The rooted list cannot change during the
@@ -2094,13 +2102,13 @@ pub(crate) enum Builtin {
     IsBuiltinSubclass,
     Split,
     /// Parse a single field of an exact no-separator str.split() as a decimal integer.
-    SplitIntField(u32),
+    SplitIntField(u32, Box<SplitFieldOrigins>),
     /// Prepare small decimal fields from one private immutable split source.
     SplitIntSource(u8),
-    SplitIntCached(u32),
+    SplitIntCached(u32, Box<SplitFieldOrigins>),
     SplitTextSource(u8),
     SplitTextLen,
-    SplitTextField(u8),
+    SplitTextField(u8, Option<Box<FixedOrigin>>),
     SplitLines,
     /// Only the first line and a joined remainder can be observed.
     JoinedSplitLines,

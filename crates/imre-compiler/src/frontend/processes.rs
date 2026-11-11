@@ -1104,7 +1104,7 @@ impl Checker<'_> {
                 }
                 let value = checker.expr(arg)?;
                 if value.ty == Type::Bool {
-                    return Ok(Expr { ty: Type::Int, kind: ExprKind::Builtin(Builtin::Int, vec![value]) });
+                    return Ok(Expr { ty: Type::Int, kind: ExprKind::Builtin(Builtin::Int(None), vec![value]) });
                 }
                 return if name == "process_group" {
                     checker.coerce(value, checker.types.optional(Type::Int), arg)

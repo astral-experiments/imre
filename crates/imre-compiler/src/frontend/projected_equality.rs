@@ -349,7 +349,7 @@ impl Checker<'_> {
         let mut project = |input: Input| {
             let root = self.hidden(input.item);
             let get = if input.list.ty == Type::ListInt {
-                Builtin::ListGet
+                Builtin::ListGet(None)
             } else {
                 Builtin::SequenceGetInBounds
             };

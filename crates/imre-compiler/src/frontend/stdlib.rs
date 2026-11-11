@@ -77,9 +77,9 @@ pub(super) fn unary_float_builtin(builtin: Builtin, value: Expr) -> Option<Expr>
     let (builtin, conversion, ty) = match (builtin, value.ty) {
         // A Python int can have a finite logarithm even when float(int) overflows.
         (Builtin::FloatLog10, Type::Int | Type::Bool) => {
-            (Builtin::IntLog10, Builtin::Int, Type::Int)
+            (Builtin::IntLog10, Builtin::Int(None), Type::Int)
         }
-        (op, Type::Float | Type::Int | Type::Bool) => (op, Builtin::Float, Type::Float),
+        (op, Type::Float | Type::Int | Type::Bool) => (op, Builtin::Float(None), Type::Float),
         _ => return None,
     };
     let number = Expr {
@@ -909,7 +909,7 @@ impl Checker<'_> {
         if value.ty == Type::Bool {
             value = Expr {
                 ty: Type::Int,
-                kind: ExprKind::Builtin(Builtin::Int, vec![value]),
+                kind: ExprKind::Builtin(Builtin::Int(None), vec![value]),
             };
         }
         if !matches!(value.ty, Type::Int | Type::Float) {
@@ -1149,7 +1149,7 @@ impl Checker<'_> {
                     if value.ty == Type::Bool {
                         value = Expr {
                             ty: Type::Int,
-                            kind: ExprKind::Builtin(Builtin::Int, vec![value]),
+                            kind: ExprKind::Builtin(Builtin::Int(None), vec![value]),
                         };
                     }
                     Builtin::HexFormat { width, zero, upper }
@@ -1162,7 +1162,7 @@ impl Checker<'_> {
                     if value.ty != Type::Float {
                         value = Expr {
                             ty: Type::Float,
-                            kind: ExprKind::Builtin(Builtin::Float, vec![value]),
+                            kind: ExprKind::Builtin(Builtin::Float(None), vec![value]),
                         };
                     }
                     Builtin::FloatFormat {
@@ -1303,7 +1303,7 @@ impl Checker<'_> {
         if value.ty == Type::Bool {
             value = Expr {
                 ty: Type::Int,
-                kind: ExprKind::Builtin(Builtin::Int, vec![value]),
+                kind: ExprKind::Builtin(Builtin::Int(None), vec![value]),
             };
         }
         let digits = |value| Expr {

@@ -87,17 +87,18 @@ fn propose(statement: &mut Statement) -> bool {
     ir::walk_expressions_mut(&mut narrow, &mut |value| {
         if let ExprKind::Builtin(operation, args) = &mut value.kind {
             match operation {
-                Builtin::ListGetStable => {
+                Builtin::ListGetStable(origin) => {
                     if let ExprKind::Local(slot) = args[0].kind {
                         inputs.insert(slot);
-                        *operation = Builtin::ListGetI32;
+                        *operation = Builtin::ListGetI32(origin.take());
                     } else {
                         eligible = false;
                     }
                 }
-                Builtin::GetInAppendWindow(slot) if *slot == *output => {
+                Builtin::GetInAppendWindow(slot, origin) if *slot == *output => {
                     *operation = Builtin::GetBoundedInAppendWindow {
                         output: *output,
+                        origin: origin.take(),
                         min: LOW,
                         max: HIGH,
                     };

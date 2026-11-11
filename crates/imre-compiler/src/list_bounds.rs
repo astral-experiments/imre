@@ -283,13 +283,16 @@ impl Analysis<'_> {
                     Builtin::Slice if expression.ty == Type::ListInt && arguments_readonly => {
                         facts.first().copied().flatten()
                     }
-                    Builtin::ListGet if arguments_readonly && args[0].ty == Type::ListInt => {
+                    Builtin::ListGet(origin)
+                        if arguments_readonly && args[0].ty == Type::ListInt =>
+                    {
                         if matches!(self, Self::Rewrite)
                             && let Some(bounds) = facts.first().copied().flatten()
                         {
                             *operation = Builtin::ListGetBounded {
                                 min: bounds.min,
                                 max: bounds.max,
+                                origin: origin.take(),
                             };
                         }
                         None
@@ -533,7 +536,7 @@ mod tests {
         let mut reads = Vec::new();
         for function in module.functions.iter().chain([&module.entry]) {
             walk_expressions(&function.body, &mut |value| {
-                if let ExprKind::Builtin(Builtin::ListGetBounded { min, max }, _) = value.kind {
+                if let ExprKind::Builtin(Builtin::ListGetBounded { min, max, .. }, _) = value.kind {
                     reads.push((min, max));
                 }
             });

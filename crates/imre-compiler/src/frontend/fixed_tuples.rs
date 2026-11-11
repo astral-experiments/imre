@@ -196,7 +196,7 @@ impl Checker<'_> {
             .map(|index| Expr {
                 ty: element,
                 kind: ExprKind::Builtin(
-                    Builtin::ListGet,
+                    Builtin::ListGet(None),
                     vec![self.local(slot), Expr::integer(index)],
                 ),
             })

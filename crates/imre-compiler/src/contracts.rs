@@ -69,9 +69,9 @@ impl Builtin {
                 }
             }
             Self::SplitIntSource(_) | Self::SplitTextSource(_) | Self::SplitTextLen | Self::StringSliceEqual => Contract::new(false, PreservesLists),
-            Self::SplitTextField(_) => Contract::new(true, PreservesLists),
+            Self::SplitTextField(..) => Contract::new(true, PreservesLists),
             Self::StringTupleContains => Contract::new(false, PreservesLists),
-            Self::SplitIntField(_) | Self::SplitIntCached(_) | Self::StringListNonempty | Self::StringListContains | Self::StringListFilter(_) | Self::FilterCharacterSet(_) => {
+            Self::SplitIntField(..) | Self::SplitIntCached(..) | Self::StringListNonempty | Self::StringListContains | Self::StringListFilter(_) | Self::FilterCharacterSet(_) => {
                 Contract::new(true, PreservesLists)
             }
             Self::Random(crate::ir::RandomOperation::Shuffle) => Contract::new(true, Unknown),
@@ -425,12 +425,12 @@ impl Builtin {
                 args.first().is_none_or(|arg| arg.ty != Type::Bytes),
                 PreservesLists,
             ),
-            Self::Int | Self::IntFromText(_) => Contract::new(
+            Self::Int(_) => Contract::new(
                 args.first()
                     .is_none_or(|arg| !matches!(arg.ty, Type::Int | Type::Bool)),
                 PreservesLists,
             ),
-            Self::Float => Contract::new(
+            Self::Float(_) => Contract::new(
                 args.first()
                     .is_none_or(|arg| !matches!(arg.ty, Type::Float | Type::Bool)),
                 PreservesLists,
@@ -524,13 +524,13 @@ impl Builtin {
             | Self::JsonLen
             | Self::JsonSelect(_)
             | Self::TupleGet
-            | Self::ListGet
+            | Self::ListGet(_)
             | Self::ListGetBounded { .. }
             | Self::CacheProbe(_)
             | Self::CacheInsert(_)
             | Self::EmptyPartial
-            | Self::ListGetI32
-            | Self::ListGetStable
+            | Self::ListGetI32(_)
+            | Self::ListGetStable(_)
             | Self::ListSliceSum
             | Self::Slice
             | Self::StringFormat
@@ -670,7 +670,7 @@ impl Builtin {
             | Self::AppendInWindow(_)
             | Self::BeginListAppends(_)
             | Self::FinishListAppends(_)
-            | Self::GetInAppendWindow(_)
+            | Self::GetInAppendWindow(..)
             | Self::GetBoundedInAppendWindow { .. }
             | Self::JoinBufferAppend
             | Self::SortByKeys => {
@@ -944,10 +944,10 @@ impl Builtin {
                     && matches!(args, [buffer] if types.element(buffer.ty) == Some(Type::Str))
             }
             Self::TryDigitSums(_) => signature(&[Type::Str], Type::Int),
-            Self::ListGetI32 | Self::ListGetStable => {
+            Self::ListGetI32(_) | Self::ListGetStable(_) => {
                 signature(&[Type::ListInt, Type::Int], Type::Int)
             }
-            Self::ListGetBounded { min, max } | Self::ListGetBoundedInBounds { min, max } => {
+            Self::ListGetBounded { min, max, .. } | Self::ListGetBoundedInBounds { min, max } => {
                 signature(&[Type::ListInt, Type::Int], Type::Int)
                     && bounds(*min, *max)
                     && (!matches!(self, Self::ListGetBoundedInBounds { .. })
@@ -994,7 +994,7 @@ impl Builtin {
             Self::ListPresent => signature(&[Type::ListInt], Type::Bool),
             Self::BeginListAppends(_) | Self::FinishListAppends(_) => signature(&[], Type::None),
             Self::AppendInWindow(_) => signature(&[Type::ListInt, Type::Int], Type::None),
-            Self::GetInAppendWindow(_) => signature(&[Type::ListInt, Type::Int], Type::Int),
+            Self::GetInAppendWindow(..) => signature(&[Type::ListInt, Type::Int], Type::Int),
             Self::GetBoundedInAppendWindow { min, max, .. } => {
                 signature(&[Type::ListInt, Type::Int], Type::Int) && bounds(*min, *max)
             }
@@ -1093,7 +1093,7 @@ impl Builtin {
                     }]
                 ) && signature(&[Type::Str], Type::Int)
             }
-            Self::SplitTextField(i) => {
+            Self::SplitTextField(i, _) => {
                 *i < 8
                     && matches!(
                         args,
@@ -1104,7 +1104,7 @@ impl Builtin {
                     )
                     && signature(&[Type::Str], Type::Str)
             }
-            Self::SplitIntCached(index) => {
+            Self::SplitIntCached(index, _) => {
                 *index < 8
                     && matches!(
                         args,
@@ -1115,7 +1115,7 @@ impl Builtin {
                     )
                     && signature(&[Type::Str], Type::Int)
             }
-            Self::SplitIntField(_) => signature(&[Type::Str], Type::Int),
+            Self::SplitIntField(..) => signature(&[Type::Str], Type::Int),
             Self::MatchingSplitIter(_) => {
                 signature(&[Type::Str, Type::Str, Type::Int], Type::Iterator)
             }

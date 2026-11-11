@@ -166,7 +166,7 @@ fn expression_period(
                 .max(expression_period(b, ordinal, written, known)?),
         ),
         ExprKind::Negate(x) => expression_period(x, ordinal, written, known),
-        ExprKind::Builtin(Builtin::Float, args) if args.len() == 1 => {
+        ExprKind::Builtin(Builtin::Float(_), args) if args.len() == 1 => {
             expression_period(&args[0], ordinal, written, known)
         }
         _ => None,

@@ -154,7 +154,7 @@ fn prefix_local(value: &Expr) -> Option<usize> {
         {
             source
         }
-        (Builtin::ListGet, [split, index]) => {
+        (Builtin::ListGet(_), [split, index]) => {
             let (false, [source, separator, _]) = split.selected_split_args(index)? else {
                 return None;
             };

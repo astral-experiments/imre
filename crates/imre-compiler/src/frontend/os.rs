@@ -230,7 +230,7 @@ impl Checker<'_> {
             if value.ty == Type::Bool {
                 Ok(Expr {
                     ty: Type::Int,
-                    kind: ExprKind::Builtin(Builtin::Int, vec![value]),
+                    kind: ExprKind::Builtin(Builtin::Int(None), vec![value]),
                 })
             } else {
                 checker.coerce(value, Type::Int, arg)

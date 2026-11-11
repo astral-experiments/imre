@@ -240,7 +240,7 @@ impl Checker<'_> {
         let cell = self.cmp_field(key, frame, 1);
         Expr {
             ty: self.types.element(cell.ty).unwrap(),
-            kind: ExprKind::Builtin(Builtin::ListGet, vec![cell, Expr::integer(0)]),
+            kind: ExprKind::Builtin(Builtin::ListGet(None), vec![cell, Expr::integer(0)]),
         }
     }
 

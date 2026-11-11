@@ -452,7 +452,7 @@ impl Checker<'_> {
             literal = Self::string_value(literal);
         }
         if value.ty == Type::Bool && matches!(literal.ty, Type::Int | Type::Float) {
-            value = builtin(Type::Int, Builtin::Int, vec![value]);
+            value = builtin(Type::Int, Builtin::Int(None), vec![value]);
         }
         if value.ty == literal.ty
             || (matches!(value.ty, Type::Int | Type::Float)
@@ -700,7 +700,7 @@ impl Checker<'_> {
             let item = if let Some(element) = element {
                 builtin(
                     element,
-                    Builtin::ListGet,
+                    Builtin::ListGet(None),
                     vec![value.clone(), Expr::integer(position)],
                 )
             } else {

@@ -238,7 +238,7 @@ impl Checker<'_> {
         {
             return Ok(Expr {
                 ty: self.types.element(ty).expect("module cell"),
-                kind: ExprKind::Builtin(Builtin::ListGet, vec![storage, Expr::integer(0)]),
+                kind: ExprKind::Builtin(Builtin::ListGet(None), vec![storage, Expr::integer(0)]),
             });
         }
         Ok(storage)

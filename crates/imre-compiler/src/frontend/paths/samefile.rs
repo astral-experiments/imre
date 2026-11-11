@@ -264,7 +264,7 @@ impl Checker<'_> {
             Type::Int | Type::Float => field,
             Type::Bool => Expr {
                 ty: Type::Int,
-                kind: ExprKind::Builtin(Builtin::Int, vec![field]),
+                kind: ExprKind::Builtin(Builtin::Int(None), vec![field]),
             },
             Type::None
             | Type::Str

@@ -7,12 +7,15 @@ use ty_python_semantic::types::KnownClass;
 impl Checker<'_> {
     /// int() on a closed string/integer value preserves the integer or parses the
     /// string. Keep the original value alive and evaluate it only once.
-    pub(super) fn integer_from_text_or_int(&mut self, value: Expr) -> Expr {
+    pub(super) fn integer_from_text_or_int(&mut self, value: Expr, call: &ast::ExprCall) -> Expr {
         let (slot, test, text, integer) = self.protocol_alternatives(value.ty).unwrap();
         debug_assert_eq!((text.ty, integer.ty), (Type::Str, Type::Int));
         let parsed = Expr {
             ty: Type::Int,
-            kind: ExprKind::Builtin(Builtin::Int, vec![text]),
+            kind: ExprKind::Builtin(
+                Builtin::Int(Some(Box::new(self.call_origin(call)))),
+                vec![text],
+            ),
         };
         Expr {
             ty: Type::Int,
@@ -277,7 +280,7 @@ impl Checker<'_> {
             .map(|value| {
                 let cast = match value.ty {
                     Type::Int => return value,
-                    Type::Bool => Builtin::Int,
+                    Type::Bool => Builtin::Int(None),
                     _ => Builtin::UnionProject,
                 };
                 Expr {

@@ -138,7 +138,7 @@ struct Column {
 
 /// Finds a read of exactly the element produced for this ordinal.
 fn row_read(expr: &Expr, index: usize) -> Option<usize> {
-    let ExprKind::Builtin(Builtin::ListGet, args) = &expr.kind else {
+    let ExprKind::Builtin(Builtin::ListGet(_), args) = &expr.kind else {
         return None;
     };
     let [collection, offset] = args.as_slice() else {
@@ -333,7 +333,7 @@ fn observable_consumer(expr: &Expr) -> bool {
             | ExprKind::Negate(_)
             | ExprKind::Boolean(..)
             | ExprKind::Conditional(..)
-            | ExprKind::Builtin(Builtin::ListGet | Builtin::TupleGet | Builtin::Len, _)
+            | ExprKind::Builtin(Builtin::ListGet(_) | Builtin::TupleGet | Builtin::Len, _)
     ) && !matches!(&expr.kind, ExprKind::Field(base,_) if matches!(base.ty,Type::Tuple(_)))
 }
 

@@ -2000,6 +2000,17 @@ pub extern "C" fn imre_error_pending() -> u32 {
     u32::from(PENDING_PRESENT.get())
 }
 
+/// Test a checked failure without moving its pending exception or changing its context.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_error_matches(expected_kind: u32) -> u32 {
+    PENDING.with_borrow(|slot| {
+        slot.as_ref().map_or(0, |pending| {
+            // SAFETY: the pending slot roots this exception throughout the read.
+            unsafe { imre_exception_matches(crate::ObjectOwner::as_ptr(pending), expected_kind) }
+        })
+    })
+}
+
 /// Transfers the pending reference to the caller and clears pending state.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_error_take() -> *const Object {

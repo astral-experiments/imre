@@ -106,7 +106,7 @@ pub(super) fn select(f: &Function) -> Vec<bool> {
         ExprKind::Builtin(op, args)
             if matches!(
                 op,
-                Builtin::Bool | Builtin::SplitIntField(_) | Builtin::SplitIntCached(_)
+                Builtin::Bool | Builtin::SplitIntField(_, _) | Builtin::SplitIntCached(_, _)
             ) || affix(op, args) =>
         {
             if let Some(s) = args.first().and_then(local) {
@@ -212,7 +212,7 @@ impl Emitter<'_, '_> {
                 self.start(&end);
                 self.instruction(format!("phi i1 [false, %{before}], [{same}, %{compare}]"))
             }
-        } else if let Builtin::SplitIntField(index) = op {
+        } else if let Builtin::SplitIntField(index, _) = op {
             let (data, len) = self.line_data(slot);
             let operand = self.checked_instruction(format!(
                 "call i64 @imre_span_split_int_field(ptr {data}, i64 {len}, i32 {index})"

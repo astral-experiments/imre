@@ -48,7 +48,7 @@ impl Checker<'_> {
             if expr.ty == Type::Bool {
                 Expr {
                     ty: Type::Int,
-                    kind: ExprKind::Builtin(Builtin::Int, vec![expr]),
+                    kind: ExprKind::Builtin(Builtin::Int(None), vec![expr]),
                 }
             } else {
                 expr
