@@ -1951,7 +1951,7 @@ def check_unittest_module_main(imre, root, run):
     )
     declared = {"IMREFLAGS": f"--include-module {package.name}.sample"}
     passing = "cli_test_package.sample.Passing"
-    ok = run(imre, "-m", "unittest", "-v", passing, passing + ".test_one", extra=declared)
+    ok = run(imre, "-B", "--include-module", f"{package.name}.sample", "-m", "unittest", "-v", passing, passing + ".test_one")
     assert ok.returncode == 0 and ok.stdout == (passing + ".test_one\n").encode() * 2, ok
     assert ok.stderr.count(f"test_one ({passing}.test_one) ... ok".encode()) == 2, ok
     failing = "cli_test_package.sample.Failing.test_one"
@@ -2369,7 +2369,7 @@ def main():
             "assert __name__ == '__main__' and __file__ == sys.argv[0]\n"
             "print(__package__, sys.argv[1:])\n"
         )
-        compare("-Bm", "module_pkg.child", "-m", "tail")
+        compare("-Bm", "module_pkg.child", "-m", "tail", "--include-module", "untouched")
         compare("-B", "-mmodule_pkg", "tail")
 
         json_input = root / "input.json"
