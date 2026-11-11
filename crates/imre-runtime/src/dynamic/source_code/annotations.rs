@@ -169,7 +169,6 @@ impl Program {
         );
         provider.first_line = line;
         provider.private_names = self.private_names.clone();
-        provider.template_expressions = self.template_expressions.clone();
         provider.conditional_fields = conditional_fields;
         provider.items.push(SourceItem::Annotations(entries));
         Rc::new(provider)

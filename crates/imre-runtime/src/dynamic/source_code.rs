@@ -53,7 +53,6 @@ struct Program {
     locals: indexmap::IndexSet<String>,
     directives: HashMap<String, (ScopeDirective, ruff_text_size::TextRange)>,
     private_names: Option<Rc<imre_ast::Names>>,
-    template_expressions: Rc<HashMap<ruff_text_size::TextSize, String>>,
     items: Vec<SourceItem>,
     // Declarations in source lowering order, including nested suites.
     deferred_annotations: Vec<(String, ast::Expr)>,
@@ -1467,7 +1466,6 @@ impl Program {
             directives: HashMap::new(),
 
             private_names: None,
-            template_expressions: Rc::default(),
             items: Vec::new(),
             deferred_annotations: Vec::new(),
             conditional_fields: Vec::new(),
@@ -1673,7 +1671,6 @@ impl Program {
             child.qualname = Self::qualified_name(&self.qualname, self.class_scope, original);
         }
         child.private_names = self.private_names.clone();
-        child.template_expressions = self.template_expressions.clone();
         child.first_line = decorators.first().map_or(line, |d| {
             lines.partition_point(|n| *n <= d.start().to_usize()) as u32
         });
@@ -2826,11 +2823,6 @@ impl Context {
         code.scope_flags = inherited;
         code.strip_docstrings = self.config["optimize"].as_i64().unwrap_or(0) >= 2;
         code.interactive = interactive;
-        code.template_expressions = Rc::new(imre_ast::strings::template_expressions(
-            source,
-            parsed.tokens(),
-            parsed.syntax(),
-        ));
         let expression_body = match parsed.into_syntax() {
             ast::Mod::Expression(expression) => {
                 if code.has_named_bindings {
