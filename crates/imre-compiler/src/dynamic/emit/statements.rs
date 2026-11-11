@@ -1,6 +1,6 @@
 use super::sites::CheckedSites;
 use super::{Function, RegisteredFrame};
-use crate::frontend::{PhysicalOperand, RequiredSite, SourceEffect};
+use crate::frontend::RequiredSite;
 use ruff_text_size::TextSize;
 
 impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<'a, 'p> {
@@ -23,14 +23,6 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
     fn place_statements(&mut self, body: &[crate::ir::Statement]) {
         let (sites, mut definitions) = self.definitions();
         sites.place_statements(body, &mut definitions);
-    }
-
-    fn emit_effect(
-        &mut self,
-        effect: &'p SourceEffect,
-    ) -> Option<(&'p crate::ir::Statement, &'p [PhysicalOperand])> {
-        let SourceEffect::Value(statement, inputs) = effect;
-        Some((statement, inputs))
     }
 }
 

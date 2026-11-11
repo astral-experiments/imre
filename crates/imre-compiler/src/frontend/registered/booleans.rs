@@ -426,9 +426,7 @@ mod tests {
 
     #[test]
     fn a_partial_bare_target_evaluates_each_bound_under_its_discard_mark() {
-        use super::super::{
-            PhysicalOperand, RegisteredScope, SourceEffect, SuitePreparation, SuiteSelection,
-        };
+        use super::super::{PhysicalOperand, RegisteredScope, SuitePreparation, SuiteSelection};
         let text = "owner()[(lambda: start())():stop()]: Unused\n";
         let graph = crate::modules::SourceGraph::single(text).unwrap();
         let module = &graph.modules[graph.entry];
@@ -448,23 +446,22 @@ mod tests {
             SuiteSelection::Physical,
             false,
         );
-        let [site] = &suite.residual[..] else {
-            panic!("expected one partial annotation")
-        };
-        let Ok(SourceEffect::Value(statement, inputs)) = &site.effect else {
-            panic!("expected a checked statement")
-        };
+        assert!(suite.refusals.is_empty());
+        let inputs = &suite.operands;
         assert!(matches!(
-            &inputs[..],
+            inputs.as_slice(),
             [
                 PhysicalOperand::Checked(_),
                 PhysicalOperand::Residual(_),
                 PhysicalOperand::Checked(_)
             ]
         ));
-        assert!(matches!(statement.as_ref(), ir::Statement::Expr(value)
+        assert!(
+            matches!(suite.checked.function.body.as_slice(), [.., ir::Statement::Expr(value)]
             if matches!(&value.kind, ir::ExprKind::Builtin(ir::Builtin::RegisteredDiscard, slots)
-                if slots.len() == inputs.len())));
+                if slots.len() == inputs.len() && slots.iter().enumerate().all(|(slot, input)|
+                    matches!(input.kind, ir::ExprKind::Builtin(ir::Builtin::RegisteredInput(i), _) if i == slot))))
+        );
     }
 
     #[test]

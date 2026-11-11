@@ -284,11 +284,6 @@ pub(crate) trait PreparedSuiteEmitter<'a, 'p>:
     ) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites);
     fn place_definition(&mut self, site: TextSize);
     fn place_statements(&mut self, body: &[Statement]);
-    /// Return an ordinary checked statement for the enclosing frame to emit with its inputs.
-    fn emit_effect(
-        &mut self,
-        effect: &'p crate::frontend::SourceEffect,
-    ) -> Option<(&'p Statement, &'p [crate::frontend::PhysicalOperand])>;
 }
 
 /// Evaluate an operand in its lexical activation, with the same demand used by
@@ -348,7 +343,7 @@ pub(crate) fn emit_physical_operand<'a, 'p>(
     }
 }
 
-/// Emit checked statements and the operations that interrupt them in one activation.
+/// Emit checked statements, reporting a deferred refusal at its execution position.
 pub(crate) fn emit_prepared_suite<'a, 'p>(
     owner: &mut dyn PreparedSuiteEmitter<'a, 'p>,
     suite: &'p crate::frontend::RegisteredSuite,
@@ -365,21 +360,14 @@ pub(crate) fn emit_prepared_suite<'a, 'p>(
     };
     let body = &checked.function.body;
     let mut offset = 0;
-    for step in &suite.residual {
+    for step in &suite.refusals {
         frame.checked_statements(&body[offset..step.at]);
         offset = step.at;
         if !frame.next_statement() {
             continue;
         }
-        let owner = frame.code.prepared_owner();
-        match &step.effect {
-            Ok(effect) => {
-                if let Some((statement, inputs)) = owner.emit_effect(effect) {
-                    frame.emit_with_operands(statement, inputs);
-                }
-            }
-            Err((range, reason)) => owner.refuse_at(*range, reason),
-        }
+        let (range, reason) = step.diagnostic;
+        frame.refuse_at(range, reason);
     }
     frame.checked_statements(&body[offset..]);
     frame.restore_checked_slots(enclosing);
@@ -457,7 +445,6 @@ impl std::ops::DerefMut for FrameOwner<'_, '_, '_> {
 enum FrameInputs<'f, 'p> {
     Handles(&'f [String]),
     Prepared(&'f crate::frontend::PhysicalInputs),
-    Statement(&'f [crate::frontend::PhysicalOperand]),
     Region(&'p crate::frontend::RegisteredSuite),
 }
 
@@ -508,16 +495,6 @@ impl<'f, 'a, 'p> Frame<'f, 'a, 'p> {
             self.code.prepared_owner().place_statements(body);
             self.emit_suite(body);
         }
-    }
-
-    fn emit_with_operands(
-        &mut self,
-        statement: &Statement,
-        inputs: &[crate::frontend::PhysicalOperand],
-    ) {
-        let mut statement_frame = self.reborrow();
-        statement_frame.inputs = FrameInputs::Statement(inputs);
-        CheckedBody::registered(statement_frame).emit_statement(statement);
     }
 
     /// Bind the owned occurrence slots used by the checked operation.
@@ -687,7 +664,6 @@ impl Frame<'_, '_, '_> {
 
     fn registered_input(&mut self, index: usize, condition: bool) -> String {
         let operand = match self.inputs {
-            FrameInputs::Statement(inputs) => &inputs[index],
             FrameInputs::Region(region) => &region.operands[index],
             _ => unreachable!("bound operand outside its owning checked region"),
         };
@@ -701,7 +677,7 @@ impl Frame<'_, '_, '_> {
 
     pub(crate) fn lookup_local(&mut self, slot: usize) -> String {
         match self.inputs {
-            FrameInputs::Region(_) | FrameInputs::Statement(_) | FrameInputs::Handles([]) => {}
+            FrameInputs::Region(_) | FrameInputs::Handles([]) => {}
             FrameInputs::Handles(inputs) => return inputs[slot].clone(),
             FrameInputs::Prepared(inputs) => {
                 return emit_operand(self.code.prepared_owner(), inputs.operand(slot), false);
@@ -1248,8 +1224,9 @@ impl Frame<'_, '_, '_> {
                         code.evaluate_handle(&operands[index])
                     })
                 });
-                if matches!(self.inputs, FrameInputs::Statement(_)) {
-                    // Report a refused header input before compiling the nested body.
+                if matches!(site, ir::DefinitionSite::Class { .. })
+                    && !self.code.parts().1.definitions.contains_key(&site.start())
+                {
                     self.code.prepared_owner().place_definition(site.start());
                 }
                 let (code, sites) = self.code.parts();
