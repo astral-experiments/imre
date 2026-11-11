@@ -14,17 +14,14 @@ impl Program {
             FunctionKind::Generator
         };
         self.lower_comprehension_body(&plan)?;
-        self.locals.insert(".0".into());
         Ok(())
     }
 
     /// Visit the outer iterable before entering the implicit comprehension scope.
     pub(super) fn lower_eager_comprehension(&mut self, comp: &Plan<'_>) -> Result<()> {
-        let targets = comp.try_target_names().map_err(invalid_target)?;
+        comp.try_target_names().map_err(invalid_target)?;
         self.record_expression(comp.outer.clone(), true)?;
-        self.items.push(SourceItem::EnterComprehension(targets));
         self.lower_comprehension_body(comp)?;
-        self.items.push(SourceItem::LeaveComprehension);
         Ok(())
     }
 

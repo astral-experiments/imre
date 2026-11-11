@@ -171,9 +171,6 @@ impl Program {
         provider.private_names = self.private_names.clone();
         provider.template_expressions = self.template_expressions.clone();
         provider.conditional_fields = conditional_fields;
-        if owner.is_some() && self.class_scope && !self.string_annotations() {
-            provider.reads.insert("__classdict__".into());
-        }
         provider.items.push(SourceItem::Annotations(entries));
         Rc::new(provider)
     }
@@ -203,11 +200,10 @@ impl<'a> CompiledStrings<'a, '_> {
     pub(super) fn annotation_code(
         &mut self,
         provider: &'a mut Rc<Program>,
-        class_locals: Option<&indexmap::IndexSet<String>>,
-        line_at: &impl Fn(usize) -> u32,
-    ) -> Result<&'a BTreeSet<String>> {
+        class_scope: bool,
+    ) -> Result<()> {
         let provider = Rc::get_mut(provider).expect("new annotation code");
-        if class_locals.is_some() {
+        if class_scope {
             // A global declared by the class also bypasses its dictionary in the annotation scope.
             for (name, (kind, _)) in self.directives {
                 if *kind == ScopeDirective::Global {
@@ -217,18 +213,11 @@ impl<'a> CompiledStrings<'a, '_> {
                 }
             }
         }
-        let (roots, reads) = provider.prepare_scope_strings(
-            self.heap,
-            self.shared,
-            self.spellings,
-            line_at,
-            class_locals,
-            None,
-        )?;
+        let roots = provider.prepare_strings(self.heap, self.shared, self.spellings)?;
         if roots != NONE {
             self.keep(roots)?;
         }
-        Ok(reads)
+        Ok(())
     }
 }
 
