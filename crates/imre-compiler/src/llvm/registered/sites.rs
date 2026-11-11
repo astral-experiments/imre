@@ -376,17 +376,13 @@ impl CheckedSites {
 }
 
 impl RegisteredFrame<'_, '_> {
-    pub(crate) fn mark_annotation(&mut self, site: TextSize, name: &str) {
+    pub(crate) fn mark_class_annotation(&mut self, site: TextSize, name: &str) {
         let key = self.code_name(name);
-        if let Some(sites) = &mut self.module_annotation_sites {
-            let index = sites.len();
-            sites.push(site);
-            let index = self.integer(index);
-            self.op("mark_module_annotation", &[&self.scope.clone(), &index]);
-        } else {
-            let offset = site.to_u32();
-            self.checked(&format!("call i64 @imre_dyn_mark_class_annotation(ptr %ctx, i64 {}, i64 {key}, i32 {offset})", self.scope));
-        }
+        let offset = site.to_u32();
+        self.checked(&format!(
+            "call i64 @imre_dyn_mark_class_annotation(ptr %ctx, i64 {}, i64 {key}, i32 {offset})",
+            self.scope
+        ));
     }
 
     pub(crate) fn bind_type_parameters(

@@ -139,10 +139,10 @@ pub(crate) use registered::values::{
 };
 pub(crate) use registered::{
     AnnotationProvider, CheckedProvider, DeclarationSite, DeferredAnnotation, FrameInputs,
-    ModuleAnnotations, ParameterAnnotations, ParameterEvaluator, PhysicalOperand, PreparedRefusal,
-    RegisteredBindings, RegisteredFunction, RegisteredGenerator, RegisteredLambda, RegisteredScope,
-    RegisteredSuite, SuitePreparation, TypeParameterValues, annotation_expression,
-    place_fixed_function, registered_sites, registered_type_alias,
+    ParameterAnnotations, ParameterEvaluator, PhysicalOperand, PreparedRefusal, RegisteredBindings,
+    RegisteredFunction, RegisteredGenerator, RegisteredLambda, RegisteredScope, RegisteredSuite,
+    SuitePreparation, TypeParameterValues, annotation_expression, place_fixed_function,
+    registered_sites, registered_type_alias,
 };
 pub(crate) use registered::{LocalBinding, RegisteredClass, RegisteredOperand, RegisteredRegion};
 #[cfg(test)]

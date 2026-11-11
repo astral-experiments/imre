@@ -628,7 +628,7 @@ impl<'a> PreparedBody<'a> {
             #[cfg(test)]
             namespace_operations: operations,
             type_aliases,
-            module_annotations: sites.module_annotations,
+            module_annotations: sites.module_annotations.into_body(),
             function_bodies,
             class_bodies,
             initializer,
@@ -732,6 +732,9 @@ impl<'a> PreparedBody<'a> {
             positions: &positions,
         };
         let sites = sites::CheckedSites::default();
+        if let Some(body) = &self.source.module_annotations {
+            location.define_module_annotations(&mut frame, body);
+        }
         frame.begin_module(
             self.source.scopes.module_annotations,
             self.source.private_names.string_annotations,
@@ -750,8 +753,7 @@ impl<'a> PreparedBody<'a> {
             "",
             false,
         );
-        let code =
-            frame.finish_module(|frame, sites| location.define_module_annotations(frame, sites));
+        let code = frame.finish_module();
         match output.diagnostic.take() {
             Some(diagnostic) => Err(diagnostic),
             None => Ok(code),
@@ -914,7 +916,7 @@ struct SourceInfo<'a> {
     statement_sites: crate::frontend::StatementSites,
     #[cfg(test)]
     namespace_operations: HashMap<ruff_text_size::TextRange, crate::ir::Expr>,
-    module_annotations: crate::frontend::ModuleAnnotations,
+    module_annotations: Option<crate::frontend::AnnotationProvider>,
     function_bodies: HashMap<ruff_text_size::TextSize, FunctionBody<'a>>,
     class_bodies: HashMap<ruff_text_size::TextSize, crate::frontend::RegisteredClass>,
     initializer: Option<crate::frontend::RegisteredSuite>,
@@ -1699,11 +1701,14 @@ impl SourceMap<'_> {
         CompiledDefinition::new(code, signature, "__annotate__", qualname, annotation_scope)
     }
 
-    fn define_module_annotations(&self, frame: &mut RegisteredFrame<'_, '_>, sites: &[TextSize]) {
-        let body = self.module_annotations.module_body(sites);
+    fn define_module_annotations(
+        &self,
+        frame: &mut RegisteredFrame<'_, '_>,
+        body: &crate::frontend::AnnotationProvider,
+    ) {
         let compiled = self.annotation_provider(
             frame.output,
-            &body,
+            body,
             AnnotationScope::Plain,
             self.module_start,
             json!({
@@ -3908,6 +3913,21 @@ mod tests {
         assert!(llvm.contains("setup_module_annotations"));
         assert!(llvm.contains("__annotate__"));
         assert_eq!(llvm.matches(" = private constant %code_site").count(), 1);
+    }
+
+    #[test]
+    fn an_unreached_module_declaration_keeps_its_provider_without_a_runtime_mark() {
+        let module = PreparedBody::module(
+            "annotations",
+            Path::new("annotations.py"),
+            "while False:\n    hidden: int\n",
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let (_, llvm) = module.standalone().unwrap();
+        assert!(llvm.contains("__annotate__"));
+        assert!(!llvm.contains("mark_module_annotation"));
     }
 
     #[test]
