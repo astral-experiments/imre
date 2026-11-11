@@ -1175,13 +1175,13 @@ impl RegisteredSuite {
         bind_operand(&mut self.operands, value, ty)
     }
 
-    fn push_refusal(&mut self, (range, reason): OperandRefusal) {
+    fn refused_operand(&mut self, (range, reason): OperandRefusal) -> Statement {
         let rejected = booleans::OwnedExpression {
             range,
             selected: std::rc::Rc::new(booleans::Selection::Refused(range, reason)),
         };
         let value = self.operand(PhysicalOperand::Residual(rejected), Type::PythonObject);
-        self.checked.function.body.push(Statement::Expr(value));
+        Statement::Expr(value)
     }
 
     fn child(&mut self, suite: RegisteredSuite) -> Vec<Statement> {
@@ -1532,7 +1532,8 @@ impl<'a> SuitePreparation<'a> {
                 .take()
                 .unwrap_or(PreparedRefusal::Operand(refusal));
             self.refusal = preceding.or(live.then_some(first));
-            suite.push_refusal(refusal);
+            let refused = suite.refused_operand(refusal);
+            suite.checked.function.body.push(refused);
         }
         if live {
             self.refusal = self
@@ -1616,10 +1617,24 @@ impl<'a> SuitePreparation<'a> {
         selection: SuiteSelection,
         suspended: bool,
     ) -> PhysicalOperand {
-        self.owned_operand(expr, kind, suspended, |scope| match (kind, selection) {
-            (RegisteredScope::Function { .. }, SuiteSelection::Physical) => scope.operand(expr),
-            _ => scope.ordinary_operand(expr),
-        })
+        let value = self.selected_operand(expr, kind, selection, suspended);
+        self.refusal = self.refusal.or_else(|| self.operand_refusal(&value));
+        value
+    }
+
+    fn selected_operand(
+        &self,
+        expr: &ast::Expr,
+        kind: RegisteredScope,
+        selection: SuiteSelection,
+        suspended: bool,
+    ) -> PhysicalOperand {
+        let operand =
+            RegisteredOperand::prepare_with(self.source, kind, |scope| match (kind, selection) {
+                (RegisteredScope::Function { .. }, SuiteSelection::Physical) => scope.operand(expr),
+                _ => scope.ordinary_operand(expr),
+            });
+        self.retain_operand(expr, kind, suspended, operand)
     }
 
     fn owned_operand(
@@ -1804,60 +1819,38 @@ impl<'a> SuitePreparation<'a> {
     ) -> RegisteredSuite {
         let mut scope = SourceScope::new(kind, self.source, self.operations, &self.sites);
         scope.report_child_refusals = true;
-        let bindings: Vec<_> = stmt
-            .items
-            .iter()
-            .map(|item| {
-                item.optional_vars
-                    .as_deref()
-                    .map(|target| {
-                        scope.with_binding(target).map_err(|()| {
-                            scope.refusal.take().unwrap_or((
-                                target.range(),
-                                "cannot compile this assignment target ahead of time",
-                            ))
-                        })
-                    })
-                    .transpose()
-            })
-            .collect();
-        let mut region = RegisteredSuite::new(scope.finish(Vec::new()), Vec::new());
-        let mut body = Vec::new();
-        let mut protected = &mut body;
+        let mut operands = Vec::new();
+        let mut managers = Vec::with_capacity(stmt.items.len());
         let mut refused_binding = None;
-        for (item, binding) in stmt.items.iter().zip(bindings) {
-            let manager = self.physical_operand(&item.context_expr, kind, selection, suspended);
-            let manager = region.operand(manager, Type::PythonObject);
+        for item in &stmt.items {
+            let input = self.selected_operand(&item.context_expr, kind, selection, suspended);
+            self.refusal = self.refusal.or_else(|| self.operand_refusal(&input));
             let site = context_site(self.source.text, &item.context_expr, stmt.is_async);
+            let manager = bind_operand(&mut operands, input, Type::PythonObject);
             let manager = values::located(site.range, site.anchor, manager);
+            let binding = scope.with_binding(item);
             match binding {
                 Ok(binding) => {
                     self.refusal = self.refusal.or_else(|| {
                         self.literal_refusal(RegionRoot::Suite(&binding.as_ref()?.body))
                     });
-                    protected = contexts::enter_python(protected, site, manager, binding);
+                    managers.push((site, manager, binding));
                 }
                 Err(fault) => {
-                    protected = contexts::enter_python(protected, site, manager, None);
+                    managers.push((site, manager, None));
                     refused_binding = Some(fault);
                     break;
                 }
             }
         }
-        // A manager can itself contain a refused operand. Visit it before its binding.
-        let suite = if let Some(fault) = refused_binding {
-            let refusal = PreparedRefusal::Operand(fault);
-            self.refusal.get_or_insert(refusal);
-            let mut suite = self.region(kind);
-            suite.push_refusal(fault);
-            suite.refusal = Some(refusal);
-            suite.falls_through = false;
-            suite
+        let mut region = RegisteredSuite::new(scope.finish(Vec::new()), operands);
+        let child = if let Some(fault) = refused_binding {
+            self.refusal.get_or_insert(PreparedRefusal::Operand(fault));
+            vec![region.refused_operand(fault)]
         } else {
-            self.physical_suite(&stmt.body, kind, selection, suspended)
+            region.child(self.physical_suite(&stmt.body, kind, selection, suspended))
         };
-        let falls = suite.falls_through;
-        contexts::finish(protected, (region.child(suite), falls));
+        let body = contexts::python_with(managers, child);
         region.checked.function.body.push(Statement::Expr(operation(
             Builtin::RegisteredStatement(stmt.range(), None),
             Type::None,
@@ -3107,7 +3100,13 @@ impl SourceScope<'_> {
         self.block(stmts).map(|(body, _)| body)
     }
 
-    fn with_binding(&mut self, target: &ast::Expr) -> StdResult<ir::ContextBinding, ()> {
+    fn with_binding(
+        &mut self,
+        item: &ast::WithItem,
+    ) -> StdResult<Option<ir::ContextBinding>, OperandRefusal> {
+        let Some(target) = item.optional_vars.as_deref() else {
+            return Ok(None);
+        };
         let slot = self.hidden(Type::PythonObject);
         let value = Expr::local(slot, Type::PythonObject);
         // Unpacking consumes the container before any individual target can suspend.
@@ -3116,16 +3115,21 @@ impl SourceScope<'_> {
         } else {
             value
         };
-        let (body, _) = self.with_binding_operands(|scope| {
-            unpacking::bind_input(scope, target, value, None, false)
-        })?;
-        Ok(ir::ContextBinding {
+        let (body, _) = self
+            .with_binding_operands(|scope| unpacking::bind_input(scope, target, value, None, false))
+            .map_err(|()| {
+                self.refusal.unwrap_or((
+                    target.range(),
+                    "cannot compile this assignment target ahead of time",
+                ))
+            })?;
+        Ok(Some(ir::ContextBinding {
             entered: slot,
             body: vec![Statement::Scope {
                 body,
                 clear: vec![slot],
             }],
-        })
+        }))
     }
 
     fn with_items(
@@ -3137,27 +3141,16 @@ impl SourceScope<'_> {
         let mut managers = Vec::with_capacity(items.len());
         for item in items {
             let manager = self.frame_value(&item.context_expr).ok_or(())?;
-            let binding = item
-                .optional_vars
-                .as_ref()
-                .map(|target| self.with_binding(target))
-                .transpose()?;
+            let binding = self.with_binding(item).map_err(|_| ())?;
             managers.push((&item.context_expr, manager, binding));
         }
         // A rejected complete suite does not need protocol traceback anchors.
-        let child = self.block(suite)?;
-        contexts::with_items(
-            self,
-            managers,
-            |scope, (expr, manager, binding), protected| {
-                let site = context_site(scope.source.text, expr, is_async);
-                Ok(contexts::Protected::Continue(contexts::enter_python(
-                    protected, site, manager, binding,
-                )))
-            },
-            |_| Ok(child),
-        )
-        .map(|(body, _)| body)
+        let child = self.suite(suite)?;
+        let source = self.source.text;
+        let managers = managers.into_iter().map(|(expr, manager, binding)| {
+            (context_site(source, expr, is_async), manager, binding)
+        });
+        Ok(contexts::python_with(managers, child))
     }
 
     fn in_loop<T>(&mut self, kind: LoopScope, lower: impl FnOnce(&mut Self) -> T) -> T {

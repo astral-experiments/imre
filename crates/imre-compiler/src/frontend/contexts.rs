@@ -152,21 +152,27 @@ pub(super) fn enter_native(
     )
 }
 
-pub(super) fn enter_python(
-    enclosing: &mut Vec<Statement>,
-    site: ir::ContextSite,
-    manager: Expr,
-    binding: Option<ir::ContextBinding>,
-) -> &mut Vec<Statement> {
-    open(
-        enclosing,
-        Statement::With {
-            manager,
-            site,
-            binding,
-            body: Vec::new(),
+pub(super) fn python_with(
+    managers: impl IntoIterator<Item = (ir::ContextSite, Expr, Option<ir::ContextBinding>)>,
+    body: Vec<Statement>,
+) -> Vec<Statement> {
+    let Ok((statements, _)) = with_items(
+        &mut (),
+        managers,
+        |(), (site, manager, binding), protected| {
+            Ok(Protected::Continue(open(
+                protected,
+                Statement::With {
+                    manager,
+                    site,
+                    binding,
+                    body: Vec::new(),
+                },
+            )))
         },
-    )
+        |()| Ok::<_, std::convert::Infallible>((body, true)),
+    );
+    statements
 }
 
 impl Checker<'_> {
