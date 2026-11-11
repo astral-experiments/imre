@@ -1012,12 +1012,6 @@ pub(crate) fn registered_sites<'a>(
     sites.output
 }
 
-/// A build diagnostic at the statement that would have executed it.
-pub(crate) struct SuiteRefusal {
-    pub(crate) at: usize,
-    pub(crate) diagnostic: OperandRefusal,
-}
-
 /// Preparation retains syntax for statements whose operations remain to be selected.
 struct PendingStatement<'s> {
     at: usize,
@@ -1058,12 +1052,11 @@ pub(crate) struct RegisteredSuite {
     pub(crate) checked: RegisteredFunction,
     pub(crate) operands: Vec<PhysicalOperand>,
     pub(crate) suites: Vec<RegisteredSuite>,
-    pub(crate) refusals: Vec<SuiteRefusal>,
 }
 
 impl RegisteredSuite {
     pub(crate) fn fully_checked(&self) -> bool {
-        self.refusals.is_empty() && self.operands.is_empty() && self.suites.is_empty()
+        self.operands.is_empty() && self.suites.is_empty()
     }
 
     pub(crate) fn child_suite(&self, body: &[Statement]) -> Option<&RegisteredSuite> {
@@ -1084,7 +1077,6 @@ impl RegisteredSuite {
             checked,
             operands,
             suites: Vec::new(),
-            refusals: Vec::new(),
             refusal: None,
             falls_through: true,
         }
@@ -1092,6 +1084,15 @@ impl RegisteredSuite {
 
     pub(crate) fn operand(&mut self, value: PhysicalOperand, ty: Type) -> Expr {
         bind_operand(&mut self.operands, value, ty)
+    }
+
+    fn push_refusal(&mut self, (range, reason): OperandRefusal) {
+        let rejected = booleans::OwnedExpression {
+            range,
+            selected: std::rc::Rc::new(booleans::Selection::Refused(range, reason)),
+        };
+        let value = self.operand(PhysicalOperand::Residual(rejected), Type::PythonObject);
+        self.checked.function.body.push(Statement::Expr(value));
     }
 
     fn child(&mut self, suite: RegisteredSuite) -> Vec<Statement> {
@@ -1430,10 +1431,7 @@ impl<'a> SuitePreparation<'a> {
             };
             let first = self.refusal.take().unwrap_or(refusal);
             self.refusal = preceding.or(live.then_some(first));
-            suite.refusals.push(SuiteRefusal {
-                at: suite.checked.function.body.len(),
-                diagnostic: refusal,
-            });
+            suite.push_refusal(refusal);
         }
         if live {
             self.refusal = self
@@ -1696,15 +1694,11 @@ impl<'a> SuitePreparation<'a> {
         // A manager can itself contain a refused operand. Visit it before its binding.
         let suite = if let Some(fault) = refused_binding {
             self.refusal.get_or_insert(fault);
-            RegisteredSuite {
-                refusals: vec![SuiteRefusal {
-                    at: 0,
-                    diagnostic: fault,
-                }],
-                refusal: Some(fault),
-                falls_through: false,
-                ..self.region(kind)
-            }
+            let mut suite = self.region(kind);
+            suite.push_refusal(fault);
+            suite.refusal = Some(fault);
+            suite.falls_through = false;
+            suite
         } else {
             self.physical_suite(&stmt.body, kind, selection, suspended)
         };
@@ -3419,10 +3413,24 @@ mod tests {
             .expect("the omitted alias has a ranged diagnostic");
         assert_eq!(&text[range], "type Alias = int");
         assert_eq!(reason, "cannot compile this statement ahead of time");
-        let [step] = &suite.refusals[..] else {
-            panic!("expected the omitted alias")
+        let [operand] = suite.operands.as_slice() else {
+            panic!("expected the omitted alias operand")
         };
-        assert_eq!(step.diagnostic, (range, reason));
+        assert_eq!(operand.refusal(), Some((range, reason)));
+        let body = &suite.checked.function.body;
+        let at = body
+            .iter()
+            .position(|stmt| {
+                matches!(
+                    stmt,
+                    Statement::Expr(Expr {
+                        kind: ExprKind::Builtin(Builtin::RegisteredInput(0), _),
+                        ..
+                    })
+                )
+            })
+            .expect("the omitted alias is evaluated between the two assignments");
+        assert!(at > 0 && at + 1 < body.len());
     }
 
     #[test]
@@ -3443,7 +3451,7 @@ mod tests {
             true,
             false,
         );
-        assert!(suite.refusals.is_empty());
+        assert!(suite.refusal.is_none());
         assert!(!suite.fully_checked());
         assert_eq!(suite.operands.len(), 1);
         assert!(suite.checked.function.body.iter().any(|statement| matches!(
@@ -3552,7 +3560,6 @@ mod tests {
         let plan = prepare(true);
         assert_eq!(plan.checked.local_names.len(), 1);
         assert_eq!(plan.checked.local_names[&0].name, "selected");
-        assert!(plan.refusals.is_empty());
         let assertion = body[0].as_assert_stmt().unwrap();
         let Some(Statement::Expr(checkpoint)) = plan.checked.function.body.first() else {
             panic!("expected a checkpoint before the physical assertion");
@@ -3880,7 +3887,7 @@ mod tests {
                 .iter()
                 .any(|stmt| matches!(stmt, Statement::If(..)))
         );
-        assert!(plan.refusals.is_empty());
+        assert!(plan.operands.is_empty());
         assert!(plan.checked.function.body.iter().any(|stmt| matches!(
             stmt,
             Statement::Expr(Expr {
@@ -3925,7 +3932,6 @@ mod tests {
         assert_eq!(operands.module_annotations.fields.len(), 2);
         let mut prepare = SuitePreparation::new(&ops, source, &stmts, true);
         let plan = prepare.suite(&stmts, RegisteredScope::Module);
-        assert!(plan.refusals.is_empty());
         assert_eq!(plan.operands.len(), 1);
         // Only the generator RHS needs an external operand. After storing it, the
         // namespace records y's annotation before executing the final import.

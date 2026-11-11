@@ -1736,7 +1736,6 @@ mod tests {
     fn residual_occurrence(
         suite: &mut crate::frontend::RegisteredSuite,
     ) -> &mut crate::frontend::OwnedExpression {
-        assert!(suite.refusals.is_empty());
         let [crate::frontend::PhysicalOperand::Residual(value)] = suite.operands.as_mut_slice()
         else {
             panic!("expected one owned expression");
@@ -1913,7 +1912,7 @@ mod tests {
         inject_residual_child_module(&mut module);
 
         let plan = module.initializer();
-        assert!(plan.refusals.is_empty());
+        assert!(plan.refusal.is_none());
         let assignments: Vec<_> = input_statements(plan)
             .map(|(_, statement)| {
                 let crate::ir::Statement::Assign(_, value) = statement else {
@@ -2617,7 +2616,7 @@ mod tests {
         assert_eq!(module.standalone().unwrap(), original);
 
         let plan = test_function_suite(&mut module.source, function_start);
-        assert!(plan.refusals.is_empty());
+        assert!(plan.refusal.is_none());
         let [region] = plan.suites.as_mut_slice() else {
             panic!("expected the prepared while");
         };
@@ -2864,7 +2863,7 @@ mod tests {
         assert_eq!(module.standalone().unwrap(), before);
 
         let suite = module.source.initializer.as_mut().unwrap();
-        assert!(suite.refusals.is_empty());
+        assert!(suite.refusal.is_none());
         let statements: Vec<_> = input_statements(suite).collect();
         let [(_, statement)] = statements.as_slice() else {
             panic!("expected one mixed class header");
@@ -3901,7 +3900,7 @@ mod tests {
             panic!("expected the mixed context");
         };
         let body = &mut region.suites[0];
-        assert!(body.refusals.is_empty());
+        assert!(body.refusal.is_none());
         assert!(matches!(
             input_statements(body).next().unwrap().1,
             crate::ir::Statement::Expr(_)
@@ -4132,7 +4131,7 @@ mod tests {
         .unwrap();
 
         inject_residual_child_module(&mut prepared);
-        assert!(prepared.initializer().refusals.is_empty());
+        assert!(prepared.initializer().refusal.is_none());
         let [branch] = prepared.initializer().suites.as_slice() else {
             panic!("expected a prepared conditional");
         };
@@ -4173,7 +4172,7 @@ mod tests {
         assert_eq!(prepared.standalone().unwrap(), original);
 
         let middle = &mut region(&mut prepared).suites[1];
-        assert!(middle.refusals.is_empty());
+        assert!(middle.refusal.is_none());
         let [operand @ PhysicalOperand::Residual(_)] = middle.operands.as_mut_slice() else {
             panic!("expected only the call to need its source operand");
         };
@@ -4434,7 +4433,7 @@ mod tests {
         ));
         assert!(region.suites[0].fully_checked());
         let mixed = &region.suites[1];
-        assert!(mixed.refusals.is_empty());
+        assert!(mixed.refusal.is_none());
         let positions: Vec<_> = input_statements(mixed).map(|(at, _)| at).collect();
         assert!(
             matches!(positions.as_slice(), [at] if *at > 0 && *at + 1 < mixed.checked.function.body.len())
@@ -5606,7 +5605,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             module.source.statement_sites = physical.sites;
             install_test_function_body(&mut module.source, def, body);
             let suite = test_function_suite(&mut module.source, function);
-            assert!(suite.refusals.is_empty());
+            assert!(suite.refusal.is_none());
             let Some(Statement::If(test, success, failure)) = suite.checked.function.body.get(1)
             else {
                 panic!("expected a conditional assertion")
@@ -5686,7 +5685,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
 
         fn region<'a>(module: &'a mut PreparedBody) -> &'a mut RegisteredSuite {
             let suite = module.source.initializer.as_mut().unwrap();
-            assert!(suite.refusals.is_empty());
+            assert!(suite.refusal.is_none());
             let [region] = suite.suites.as_mut_slice() else {
                 panic!("expected the prepared while");
             };
@@ -5722,7 +5721,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             assert!(module.standalone().unwrap() != original);
             *else_block(region(&mut module)) = otherwise;
             let child = &mut region(&mut module).suites[0];
-            assert!(child.refusals.is_empty());
+            assert!(child.refusal.is_none());
             let body = std::mem::take(&mut child.checked.function.body);
             assert!(!body.is_empty());
             assert!(module.standalone().unwrap() != original);
@@ -5740,6 +5739,50 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             }
             assert!(module.standalone().unwrap() != original);
         }
+    }
+
+    #[test]
+    fn rejected_assignment_target_is_read_at_its_original_statement() {
+        let source = concat!(
+            "async def get(x):\n    return x\n\n",
+            "async def update(values):\n",
+            "    values[[lambda v=await get(x): v for x in [0]][0]()] = 'stored'\n",
+            "    return values[0]\n\n",
+            "try:\n    update({}).send(None)\n",
+            "except StopIteration as exc:\n    print(exc.value)\n",
+        );
+        let mut module = PreparedBody::module_with_syntax(
+            "target",
+            Path::new("target.py"),
+            source,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let expected =
+            "target.py:5:12: cannot compile this comprehension ahead of time (through 5:51)";
+        assert_eq!(module.standalone().unwrap_err(), expected);
+
+        let function = module.syntax.as_mut().unwrap().to_mut()[1]
+            .as_function_def_stmt_mut()
+            .unwrap();
+        let site = function.start();
+        function.body.clear();
+        assert_eq!(module.standalone().unwrap_err(), expected);
+
+        let suite = test_function_suite(&mut module.source, site);
+        let [crate::frontend::PhysicalOperand::Residual(input)] = suite.operands.as_mut_slice()
+        else {
+            panic!("expected the rejected assignment target");
+        };
+        assert_eq!(
+            &source[input.range],
+            "[lambda v=await get(x): v for x in [0]]"
+        );
+        input.selected = std::rc::Rc::new(crate::frontend::ExpressionSelection::Checked(
+            crate::ir::Expr::none(),
+        ));
+        assert!(module.standalone().is_ok());
     }
 
     #[test]
@@ -6538,7 +6581,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         let suite = &prepared.source.class_bodies[&class_start].body;
         crate::verify::registered(suite.checked.region()).unwrap();
         assert!(!suite.checked.region().private_slots().is_empty());
-        assert!(suite.refusals.is_empty());
+        assert!(suite.refusal.is_none());
         let statements: Vec<_> = input_statements(suite)
             .map(|(_, statement)| statement)
             .collect();
@@ -6624,7 +6667,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             [_, crate::ir::Statement::Match(..)]
         ));
         let suite = &region.suites[0];
-        assert!(suite.refusals.is_empty());
+        assert!(suite.refusal.is_none());
         let statements: Vec<_> = input_statements(suite).collect();
         let [(at, crate::ir::Statement::Expr(value))] = statements.as_slice() else {
             panic!("expected one external deletion operand");
@@ -6666,7 +6709,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         let initializer = prepared.initializer();
         let suite = initializer;
         crate::verify::registered(suite.checked.region()).unwrap();
-        assert!(suite.refusals.is_empty());
+        assert!(suite.refusal.is_none());
         let statements: Vec<_> = input_statements(suite).collect();
         let [(at, crate::ir::Statement::Expr(value))] = statements.as_slice() else {
             panic!("only the last deletion needs external inputs");

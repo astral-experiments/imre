@@ -358,18 +358,7 @@ pub(crate) fn emit_prepared_suite<'a, 'p>(
         inputs: FrameInputs::Region(suite),
         fixed_sites: None,
     };
-    let body = &checked.function.body;
-    let mut offset = 0;
-    for step in &suite.refusals {
-        frame.checked_statements(&body[offset..step.at]);
-        offset = step.at;
-        if !frame.next_statement() {
-            continue;
-        }
-        let (range, reason) = step.diagnostic;
-        frame.refuse_at(range, reason);
-    }
-    frame.checked_statements(&body[offset..]);
+    frame.checked_statements(&checked.function.body);
     frame.restore_checked_slots(enclosing);
 }
 
