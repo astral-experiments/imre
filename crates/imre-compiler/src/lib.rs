@@ -263,6 +263,9 @@ pub struct SourceInputs {
     #[serde(skip)]
     pub relink_site_wheel: bool,
     pub files: Vec<(PathBuf, PathBuf, String)>,
+    /// Physical sources supplying type declarations without a runtime import.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub declaration_files: Vec<(PathBuf, PathBuf, String)>,
     pub missing: Vec<PathBuf>,
     /// File-kind queries that affect import admission without reading a provider's contents.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
@@ -279,6 +282,11 @@ pub struct SourceInputs {
 }
 
 impl SourceInputs {
+    /// Every physical source read by this compilation, including type-only imports.
+    pub fn source_files(&self) -> impl Iterator<Item = &(PathBuf, PathBuf, String)> {
+        self.files.iter().chain(&self.declaration_files)
+    }
+
     pub fn fresh(&self) -> bool {
         self.missing
             .iter()
@@ -298,8 +306,9 @@ impl SourceInputs {
             && self.directories.iter().all(|(p, identity)| {
                 p.is_dir() && p.canonicalize().is_ok_and(|now| &now == identity)
             })
-            && self.files.iter().all(|(p, identity, digest)| {
-                p.canonicalize().is_ok_and(|now| &now == identity)
+            && self.source_files().all(|(p, identity, digest)| {
+                !digest.is_empty()
+                    && p.canonicalize().is_ok_and(|now| &now == identity)
                     && std::fs::read(p)
                         .is_ok_and(|bytes| blake3::hash(&bytes).to_hex().as_str() == digest)
             })
