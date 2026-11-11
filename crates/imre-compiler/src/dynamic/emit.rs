@@ -1168,7 +1168,7 @@ impl<'p> sites::SiteDefinitions<'p> for LexicalDefinitions<'_, 'p> {
         &self.source.info.exec_literals
     }
 
-    fn exec_literal(&mut self, site: TextRange) -> Option<(String, u32)> {
+    fn exec_literal(&mut self, site: TextRange) -> Option<sites::CompiledExec> {
         let child = self.source.exec_literals.body(site)?;
         if self.output.diagnostic.is_some() {
             return None;
@@ -1187,7 +1187,7 @@ impl<'p> sites::SiteDefinitions<'p> for LexicalDefinitions<'_, 'p> {
                 let file = self.output.data(b"<string>");
                 // A decoded module interns its own constants when its prologue runs.
                 let parent_names = std::mem::take(&mut self.output.interned_identifiers);
-                let compiled = child.emit(self.output, self.source.unit, &file);
+                let compiled = child.body.emit(self.output, self.source.unit, &file);
                 self.output.interned_identifiers = parent_names;
                 match compiled {
                     Ok(symbol) => entry.insert(symbol),
@@ -1198,7 +1198,11 @@ impl<'p> sites::SiteDefinitions<'p> for LexicalDefinitions<'_, 'p> {
                 }
             }
         };
-        Some((entry.clone(), child.source.future_flags))
+        Some(sites::CompiledExec {
+            entry: entry.clone(),
+            flags: child.body.source.future_flags,
+            source: self.output.data(child.text.as_bytes()),
+        })
     }
 
     fn lambda(&mut self, site: TextSize, comprehension: bool) -> CompiledDefinition {
@@ -1865,7 +1869,9 @@ mod tests {
         let text = concat!(
             "def install(scope):\n",
             "    exec('class Entry: value = 1', scope)\n",
-            "    exec('class Entry: value = 2', scope)\n",
+            "    code = 'class Entry: value = 2'\n",
+            "    alias = code\n",
+            "    exec(alias, scope)\n",
             "install({'__name__': 'app'})\n",
         );
         let ir = crate::compile(text, &crate::CompileOptions::default()).unwrap();

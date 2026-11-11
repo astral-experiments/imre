@@ -1651,7 +1651,7 @@ pub(crate) trait FrameEmitter<'a, 'p>:
         op: &Builtin,
         target: &'e T,
         mut args: impl Iterator<Item = &'e T>,
-        exec: Option<(String, u32)>,
+        exec: Option<super::sites::CompiledExec>,
         mut evaluate: impl FnMut(&mut Self, &T) -> String,
     ) -> String {
         match op {
@@ -1712,7 +1712,7 @@ pub(crate) trait FrameEmitter<'a, 'p>:
         call: &ir::RegisteredCall,
         target: &T,
         mut args: impl Iterator<Item = &'e T>,
-        exec: Option<(String, u32)>,
+        exec: Option<super::sites::CompiledExec>,
         mut evaluate: impl FnMut(&mut Self, &T) -> String,
     ) -> String {
         use ir::{RegisteredArguments, RegisteredCallTarget};
@@ -2043,16 +2043,17 @@ impl RegisteredFrame<'_, '_> {
         &mut self,
         callable: &str,
         source: &mut String,
-        (entry, flags): &(String, u32),
+        child: &super::sites::CompiledExec,
     ) {
         if !self.output.declarations.exec_operand {
             self.output
                 .functions
-                .push_str("declare i64 @imre_dyn_exec_operand(ptr, i64, i64, ptr, i32)\n");
+                .push_str("declare i64 @imre_dyn_exec_operand(ptr, i64, i64, ptr, i32, ptr)\n");
             self.output.declarations.exec_operand = true;
         }
         *source = self.checked(&format!(
-            "call i64 @imre_dyn_exec_operand(ptr %ctx, i64 {callable}, i64 {source}, ptr {entry}, i32 {flags})"
+            "call i64 @imre_dyn_exec_operand(ptr %ctx, i64 {callable}, i64 {source}, ptr {}, i32 {}, ptr {})",
+            child.entry, child.flags, child.source
         ));
     }
 

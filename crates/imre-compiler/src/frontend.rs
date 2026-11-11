@@ -134,7 +134,7 @@ pub(crate) use registered::type_alias_body;
 pub(crate) use registered::values::registered_value;
 pub(crate) use registered::values::{
     ModuleSource as RegisteredModuleSource, RegisteredSource, exec_literal_text,
-    fixed_exec_literal, literal_replacements, module_literal_replacements, packed_arguments,
+    exec_source_operand, literal_replacements, module_literal_replacements, packed_arguments,
     push_codepoints,
 };
 pub(crate) use registered::{
@@ -10488,12 +10488,7 @@ impl<'a> Checker<'a> {
             self.namespace_calls.insert(call.range());
             return Ok(registered::values::name_call(call, "globals", vec![]));
         }
-        if fixed_exec_literal(call).is_some()
-            && self
-                .graph
-                .session
-                .is_stdlib_function(self.module, &call.func, "builtins", "exec")
-        {
+        if self.graph.session.fixed_exec_call(self.module, call) {
             return Err(self.scoped_builtin_error("exec", call));
         }
         if self.unshadowed_builtin(&call.func, "range") {

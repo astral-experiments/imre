@@ -15,23 +15,36 @@ use crate::frontend::module_source::ParsedModule;
 
 /// The existing IR call range identifies the operation. Python reports its source
 /// argument's position when a selected child cannot be compiled.
-#[derive(Clone, Copy)]
 pub(crate) struct LiteralSite {
     pub(crate) call: TextRange,
     pub(crate) operand: TextSize,
+    /// Decoded operand before the child parser normalizes physical newlines.
+    pub(crate) text: Box<str>,
+}
+
+pub(super) struct PreparedLiteral {
+    pub(super) body: PreparedBody<'static>,
+    pub(super) text: Box<str>,
 }
 
 /// One source slot's checked operands. Different modules named "<string>" have
 /// independent tables, and a live rebinding still receives the original string.
 #[derive(Clone, Default)]
 pub(crate) struct LiteralSites {
-    sites: HashMap<TextRange, Result<Rc<PreparedBody<'static>>, (TextSize, String)>>,
+    sites: HashMap<TextRange, Result<Rc<PreparedLiteral>, (TextSize, String)>>,
 }
 
 impl LiteralSites {
-    fn insert(&mut self, site: LiteralSite, body: Result<Rc<PreparedBody<'static>>, String>) {
-        self.sites
-            .insert(site.call, body.map_err(|reason| (site.operand, reason)));
+    fn insert(&mut self, site: LiteralSite, body: Result<PreparedBody<'static>, String>) {
+        let entry = body
+            .map(|body| {
+                Rc::new(PreparedLiteral {
+                    body,
+                    text: site.text,
+                })
+            })
+            .map_err(|reason| (site.operand, reason));
+        self.sites.insert(site.call, entry);
     }
 
     pub(crate) fn contains(&self, site: TextRange) -> bool {
@@ -51,7 +64,7 @@ impl LiteralSites {
     pub(super) fn body(
         &self,
         site: TextRange,
-    ) -> Option<Result<&PreparedBody<'static>, (TextSize, &str)>> {
+    ) -> Option<Result<&PreparedLiteral, (TextSize, &str)>> {
         Some(
             self.sites
                 .get(&site)?
@@ -229,8 +242,7 @@ impl LiteralForest {
             let module = session
                 .check_literal(&node.source)
                 .and_then(|()| node.source.prepare(python_optimization, node.children));
-            self.table(node.parent)
-                .insert(node.site, module.map(Rc::new));
+            self.table(node.parent).insert(node.site, module);
         }
         self.roots.into_iter().collect()
     }

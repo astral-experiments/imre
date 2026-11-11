@@ -1285,7 +1285,7 @@ pub(super) unsafe extern "C" fn imre_dyn_bind_expression(ctx: *mut Context, text
         .insert(text, LinkedSource::Expression(entry));
 }
 
-/// Select the prelinked module only when the evaluated target is Python's exec builtin.
+/// Select the prelinked module for the actual builtin and the exact source at this call.
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_exec_operand(
     ctx: *mut Context,
@@ -1293,10 +1293,13 @@ pub(super) unsafe extern "C" fn imre_dyn_exec_operand(
     text: Id,
     entry: Code,
     flags: u32,
+    expected: *const c_char,
 ) -> Id {
-    // SAFETY: the caller supplies its active interpreter and the compiled literal's module entry.
-    let ctx = unsafe { &mut *ctx };
-    if !matches!(ctx.heap.get(callable), Value::Native(name) if name == "exec") {
+    // SAFETY: compiled callers supply an active context and static NUL-terminated UTF-8 source.
+    let (ctx, expected) = unsafe { (&mut *ctx, cstr(expected)) };
+    if !matches!(ctx.heap.get(callable), Value::Native(name) if name == "exec")
+        || !matches!(ctx.heap.get(text), Value::Str(value) if value.as_str() == expected)
+    {
         return text;
     }
     if let Err(error) = ctx.heap.reserve_temporaries(3) {

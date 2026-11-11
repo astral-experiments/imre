@@ -209,10 +209,17 @@ pub(crate) struct Declaration {
     pub(crate) type_params: Option<CompiledTypeParameters>,
 }
 
+#[derive(Clone)]
+pub(crate) struct CompiledExec {
+    pub(crate) entry: String,
+    pub(crate) flags: u32,
+    pub(crate) source: String,
+}
+
 /// Compile a declaration in its lexical scope when the enclosing frame first needs its site.
 pub(crate) trait SiteDefinitions<'p> {
     fn literal_sites(&self) -> &'p crate::dynamic::literal::LiteralSites;
-    fn exec_literal(&mut self, site: TextRange) -> Option<(String, u32)>;
+    fn exec_literal(&mut self, site: TextRange) -> Option<CompiledExec>;
     fn lambda(&mut self, site: TextSize, comprehension: bool) -> CompiledDefinition;
     fn declaration(&mut self, site: TextSize) -> Declaration;
     fn class_namespace(
@@ -226,7 +233,7 @@ pub(crate) trait SiteDefinitions<'p> {
 
 #[derive(Default)]
 pub(crate) struct CheckedSites {
-    pub(crate) exec_literals: HashMap<TextRange, (String, u32)>,
+    pub(crate) exec_literals: HashMap<TextRange, CompiledExec>,
     pub(crate) annotation_strings: HashMap<TextSize, String>,
     pub(crate) definitions: HashMap<TextSize, Declaration>,
     pub(crate) class_namespaces:
