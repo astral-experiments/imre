@@ -4686,7 +4686,7 @@ mod tests {
         let module = graph.entry;
         let definitions = &graph.modules[module].parsed.syntax().body;
         let types = Types::default();
-        let classes = ClassInfo::new(&graph, &types).unwrap();
+        let (classes, _) = ClassInfo::new(&graph, &types).unwrap();
         let inference = inference::Inference::default();
         let mut signatures = HashMap::new();
         for (statement, definition) in definitions.iter().enumerate() {

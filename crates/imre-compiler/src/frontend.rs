@@ -217,6 +217,8 @@ impl Signature {
     }
 }
 
+type InitializerDefaults = HashMap<usize, Vec<(usize, Expr)>>;
+
 struct ClassInfo {
     parsers: argparse::Parsers,
     declarations: Classes,
@@ -239,8 +241,12 @@ struct ClassInfo {
 
 impl ClassInfo {
     /// Resolves all nominal field types before checking constructors and methods.
-    fn new(graph: &SourceGraph, types: &Types) -> StdResult<Self, Diagnostic> {
+    fn new(
+        graph: &SourceGraph,
+        types: &Types,
+    ) -> StdResult<(Self, InitializerDefaults), Diagnostic> {
         let mut declarations = Classes::collect(graph)?;
+        let mut initializer_defaults = InitializerDefaults::new();
         types.set_exception_declarations(declarations.exception_declarations.clone());
         types.set_value_structs(
             declarations
@@ -312,7 +318,8 @@ impl ClassInfo {
                 class
                     .fields
                     .iter()
-                    .map(|field| {
+                    .enumerate()
+                    .map(|(field_index, field)| {
                         if field.name == crate::classes::EXCEPTION_ARGS_SLOT
                             || class.forwarder.is_some()
                         {
@@ -352,12 +359,22 @@ impl ClassInfo {
                                 };
                                 return Ok(Type::WeakProxy(id));
                             }
-                            records::field_default(
+                            if let Some(default) = records::field_default(
                                 field,
                                 ty,
                                 types,
                                 &graph.modules[field.module].source,
-                            )?;
+                            )? && class.generated_initializer
+                                && matches!(
+                                    field.default,
+                                    Some(crate::classes::FieldDefault::Factory(_))
+                                )
+                            {
+                                initializer_defaults
+                                    .entry(class_id)
+                                    .or_default()
+                                    .push((field_index, default));
+                            }
                             if callables::contains_callable(ty, types) {
                                 Err(diagnostic_message(
                                     &graph.modules[field.module].source,
@@ -473,7 +490,7 @@ impl ClassInfo {
             }
         }
         let parsers = argparse::Parsers::collect(graph, types, &mut declarations, &mut fields)?;
-        Ok(Self {
+        let classes = Self {
             parsers,
             truth_dispatch,
             methods: vec![HashMap::new(); fields.len()],
@@ -489,7 +506,8 @@ impl ClassInfo {
             contexts: HashSet::new(),
             declarations,
             fields,
-        })
+        };
+        Ok((classes, initializer_defaults))
     }
 
     fn cyclic_field_root(fields: &[Vec<Type>], types: &Types) -> Option<usize> {
@@ -712,7 +730,7 @@ fn lower_graph(
     let types = Types::default();
     typing::collect_sites(graph, &types);
     namedtuples::collect(graph, &types)?;
-    let mut classes = ClassInfo::new(graph, &types)?;
+    let (mut classes, mut initializer_defaults) = ClassInfo::new(graph, &types)?;
     dataclass_values::validate(&classes, graph, &types)?;
     let mut signatures = HashMap::new();
     let inference = inference::Inference::default();
@@ -963,7 +981,22 @@ fn lower_graph(
                 if signature.returns != Type::None {
                     return Err(module.diagnostic(&method, "__init__ must return None"));
                 }
-                records::factory_defaults(&mut signature, class, &types, &module.source)?;
+                if let Some(defaults) = initializer_defaults.remove(&class_id) {
+                    for (index, value) in defaults {
+                        let field = &class.fields[index];
+                        let parameter = signature
+                            .params
+                            .iter_mut()
+                            .skip(1)
+                            .find(|parameter| parameter.name == field.name)
+                            .unwrap();
+                        parameter.default = if parameter.ty == value.ty {
+                            Some(value)
+                        } else {
+                            records::field_default(field, parameter.ty, &types, &module.source)?
+                        };
+                    }
+                }
                 if class.generated_initializer {
                     records::private_initializer_parameters(&mut method, module);
                 }
