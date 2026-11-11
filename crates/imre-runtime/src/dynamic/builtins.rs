@@ -2378,7 +2378,7 @@ pub(super) fn call(
                 };
                 Ok(ctx.alloc(Value::MappingProxy(dict)))
             }
-            "_int_getset" => integer::rational_field(ctx, method, args),
+            "_int_getset" => integer::field(ctx, method, args),
             "_float_getset" => float::component(ctx, method, args, kwargs),
             "int" if method == "__getnewargs__" => {
                 let receiver = noargs_method_receiver(ctx, owner, method, args, kwargs)?;

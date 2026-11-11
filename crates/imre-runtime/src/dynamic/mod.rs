@@ -2973,12 +2973,12 @@ impl Context {
     }
 
     /// Register a builtin number's read-only fields and expose the declaring descriptors.
-    fn install_numeric_dictionary(
+    fn install_numeric_dictionary<const N: usize>(
         &mut self,
         class: Id,
         owner: &'static str,
         methods: &[&str],
-        fields: [&'static str; 2],
+        fields: [&'static str; N],
     ) {
         for field in fields {
             let get = self.builtin(&format!("_{owner}_getset.{field}"));
@@ -3429,9 +3429,12 @@ impl Context {
                 let dictionary = self.dict(entries);
                 self.native_type_dicts.insert(value, dictionary);
             }
-            "int" => {
-                self.install_numeric_dictionary(value, "int", methods, ["numerator", "denominator"])
-            }
+            "int" => self.install_numeric_dictionary(
+                value,
+                "int",
+                methods,
+                ["real", "imag", "numerator", "denominator"],
+            ),
             "float" => self.install_numeric_dictionary(value, "float", methods, ["real", "imag"]),
             _ if !entries.is_empty() && !self.native_type_dicts.contains_key(&value) => {
                 if name == "function" {

@@ -32,15 +32,18 @@ pub(super) fn truncate_real(ctx: &mut Context, receiver: Id) -> Result<Id> {
     }
 }
 
-/// Both read-only rational fields use the stored integer, bypassing subclass conversions.
-pub(super) fn rational_field(ctx: &mut Context, field: &str, args: &[Id]) -> Result<Id> {
+/// Read an integer getset field without invoking subclass conversions.
+pub(super) fn field(ctx: &mut Context, field: &str, args: &[Id]) -> Result<Id> {
     let [receiver] = *args else {
         return Err(type_error("expected one integer getset receiver"));
     };
     let value = ctx.scalar_value(receiver);
     match ctx.heap.get(value) {
-        Value::Int(_) | Value::Bool(_) if field == "denominator" => Ok(ctx.int(1)),
-        Value::Int(_) | Value::Bool(_) => Ok(exact_value(ctx, receiver)),
+        Value::Int(_) | Value::Bool(_) => match field {
+            "denominator" => Ok(ctx.int(1)),
+            "imag" => Ok(ctx.int(0)),
+            _ => Ok(exact_value(ctx, receiver)),
+        },
         _ => Err(type_error(format!(
             "descriptor '{field}' for 'int' objects doesn't apply to a '{}' object",
             ctx.type_name(receiver)
