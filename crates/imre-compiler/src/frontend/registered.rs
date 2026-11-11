@@ -5129,6 +5129,57 @@ mod tests {
     }
 
     #[test]
+    fn runtime_string_format_retains_the_checked_sum_and_keyword_operand() {
+        let source = concat!(
+            "def render(template: str, left: int, right: int, label):\n",
+            "    template.format(left + right, name=label)\n",
+        );
+        let graph = SourceGraph::single(source).unwrap();
+        let _ = super::super::lower(&graph);
+        let bodies = graph.registered_functions();
+        let body = &bodies[&graph.entry][&TextSize::default()];
+        assert!(crate::llvm::registered::supports(body));
+
+        let mut adds = 0;
+        let mut calls = 0;
+        let mut methods = Vec::new();
+        let mut slots = Vec::new();
+        ir::walk_expressions(&body.function.body, &mut |value| match &value.kind {
+            ExprKind::Binary(Binary::Add, left, right) => {
+                assert_eq!(
+                    (left.ty, right.ty, value.ty),
+                    (Type::Int, Type::Int, Type::Int)
+                );
+                adds += 1;
+            }
+            ExprKind::Builtin(Builtin::RegisteredAttribute { name, .. }, receiver) => {
+                assert_eq!(receiver[0].ty, Type::Str);
+                methods.push(name.as_str());
+            }
+            ExprKind::Builtin(Builtin::RegisteredCall(call), operands) => {
+                assert_eq!(
+                    &source[call.range],
+                    "template.format(left + right, name=label)"
+                );
+                assert_eq!(
+                    call.arguments,
+                    ir::RegisteredArguments::Keywords {
+                        positional: 1,
+                        names: vec!["name".into()],
+                    }
+                );
+                assert_eq!(operands.len(), 3);
+                calls += 1;
+            }
+            ExprKind::Local(slot) => slots.push(*slot),
+            _ => {}
+        });
+        assert_eq!((adds, calls), (1, 1));
+        assert_eq!(methods, ["format"]);
+        assert_eq!(slots, body.function.params);
+    }
+
+    #[test]
     fn checked_capture_requires_an_object_receiver_for_late_method_lookup() {
         for expression in [
             "n.unknown",
