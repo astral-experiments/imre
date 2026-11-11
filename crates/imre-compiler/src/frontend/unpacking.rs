@@ -469,6 +469,7 @@ impl Checker<'_> {
                     )));
                 }
                 let receiver = self.expr(&subscript.value)?;
+                self.keep_module_list_layout(&receiver);
                 if receiver.ty == Type::PythonObject {
                     let index = if self.registered.is_some() {
                         registered::values::index_key(&subscript.slice, &mut |expr| {

@@ -1699,6 +1699,61 @@ print("result", call(b=2, a=1))
     }
 
     #[test]
+    fn module_list_writes_respect_the_element_declaration() {
+        let project = tempfile::tempdir().unwrap();
+        let path = project.path().join("app.py");
+        let body = "def record():\n    events.append('rhs')\n";
+        for declaration in ["events = []", "events: list[str] = []"] {
+            std::fs::write(
+                &path,
+                format!("{declaration}\n{body}record()\nprint(events)\n"),
+            )
+            .unwrap();
+            super::check_file(&path, None).unwrap();
+        }
+
+        std::fs::write(&path, format!("events: list[int] = []\n{body}")).unwrap();
+        let error = super::check_file(&path, None).unwrap_err();
+        assert!(
+            error.contains("app.py:3:19: Imre: expected int, got str"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn mixed_appends_keep_the_original_module_list_layout() {
+        let project = tempfile::tempdir().unwrap();
+        let path = project.path().join("app.py");
+        for (first, second, line) in [("7", "'rhs'", 7), ("'rhs'", "7", 4)] {
+            let source = format!(
+                "events = []\n\ndef first():\n    events.append({first})\n\ndef second():\n    events.append({second})\n\nfirst()\nsecond()\n"
+            );
+            std::fs::write(&path, source).unwrap();
+            let error = super::check_file(&path, None).unwrap_err();
+            assert!(
+                error.contains(&format!("app.py:{line}:19: Imre: expected int, got str")),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn indexed_store_keeps_the_original_module_list_layout() {
+        let project = tempfile::tempdir().unwrap();
+        let path = project.path().join("app.py");
+        std::fs::write(
+            &path,
+            "events = []\n\ndef replace():\n    events[0] = 7\n\ndef add():\n    events.append('rhs')\n\nadd()\nreplace()\n",
+        )
+        .unwrap();
+        let error = super::check_file(&path, None).unwrap_err();
+        assert!(
+            error.contains("app.py:7:19: Imre: expected int, got str"),
+            "{error}"
+        );
+    }
+
+    #[test]
     fn native_bytearray_construction_preserves_object_fallback() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("main.py");

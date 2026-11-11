@@ -331,6 +331,19 @@ pub(crate) fn check_registered_project<'a>(
 }
 
 impl Session {
+    /// A plain store can still initialize a name declared by an earlier annotation.
+    pub(crate) fn unannotated_module_store(&self, module: usize, target: &Expr) -> bool {
+        let file = self.db.program_file(self.files[module]);
+        let index = ty_python_core::semantic_index(&self.db, file);
+        let Some([definition]) = index.try_definitions(target.into()) else {
+            return false;
+        };
+        !index
+            .use_def_map(FileScopeId::global())
+            .declarations_at_binding(*definition)
+            .any(|item| item.declaration.definition().is_some())
+    }
+
     /// Query the already indexed declarations in this physical scope.
     pub(crate) fn has_annotated_empty_list(
         &self,

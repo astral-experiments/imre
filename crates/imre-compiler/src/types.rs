@@ -149,6 +149,7 @@ struct Storage {
     named_tuples: HashMap<DefinitionId, Rc<NamedTuple>>,
     cache_adapters: HashMap<usize, (CachePolicy, Option<usize>)>,
     source_sites: HashMap<(usize, u32), Rc<FunctionSite>>,
+    module_list_appends: HashMap<DefinitionId, ModuleListAppends>,
     document_list_sites: HashSet<(usize, u32, Option<usize>)>,
     function_sites: HashMap<usize, Rc<FunctionSite>>,
     coroutine_targets: HashMap<usize, CoroutineTarget>,
@@ -166,6 +167,15 @@ struct Storage {
     concrete_subclasses: HashMap<usize, Vec<Type>>,
 }
 
+/// Only an unannotated allocation with exclusively string appends needs a
+/// different layout from the ordinary empty-list initializer.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ModuleListAppends {
+    Unseen,
+    Strings,
+    Other,
+}
+
 /// An annotation and a matching inferred literal always receive the same identity.
 /// Interior mutability lets independent function checkers share this compilation's
 /// type universe without retaining references into its growable storage.
@@ -176,6 +186,36 @@ pub(crate) struct Types(RefCell<Storage>);
 pub(crate) struct ShapePrefix(Vec<Shape>);
 
 impl Types {
+    pub(crate) fn infer_module_list(&self, owner: DefinitionId) {
+        self.0
+            .borrow_mut()
+            .module_list_appends
+            .insert(owner, ModuleListAppends::Unseen);
+    }
+
+    pub(crate) fn module_list_uses_strings(&self, owner: DefinitionId) -> Option<bool> {
+        self.0
+            .borrow()
+            .module_list_appends
+            .get(&owner)
+            .map(|state| *state == ModuleListAppends::Strings)
+    }
+
+    pub(crate) fn observe_module_list_use(&self, owner: DefinitionId, string_append: bool) -> bool {
+        let mut storage = self.0.borrow_mut();
+        let state = storage
+            .module_list_appends
+            .get_mut(&owner)
+            .expect("tracked module list");
+        let previous = *state;
+        if !string_append {
+            *state = ModuleListAppends::Other;
+        } else if previous == ModuleListAppends::Unseen {
+            *state = ModuleListAppends::Strings;
+        }
+        (*state == ModuleListAppends::Strings) != (previous == ModuleListAppends::Strings)
+    }
+
     pub(crate) fn collects_document_lists(
         &self,
         module: usize,
