@@ -1886,6 +1886,20 @@ print(is_number(3))
     }
 
     #[test]
+    fn file_iterator_classes_check_the_next_method_return_type() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("main.py");
+        let source = "class Items:\n    def __iter__(self):\n        return self\n    def __next__(self) -> int:\n        return 3\nprint(next(Items()))\n";
+        let mut compiler = super::IncrementalCompiler::default();
+        std::fs::write(&path, source).unwrap();
+        compiler.check_file(&path, None).unwrap();
+
+        std::fs::write(&path, source.replace("return 3", "return 'bad'")).unwrap();
+        let error = compiler.check_file(&path, None).unwrap_err();
+        assert!(error.contains("invalid-return-type"), "{error}");
+    }
+
+    #[test]
     fn nonconvergent_list_hints_preserve_diagnostics_and_later_checks() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("subject.py");
