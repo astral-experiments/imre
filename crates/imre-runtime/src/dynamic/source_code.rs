@@ -161,7 +161,6 @@ enum SourceItem {
     AugAssign(ast::StmtAugAssign),
     DeleteName(String),
     DeleteItem(ast::ExprSubscript),
-    DeleteAttr(ast::ExprAttribute),
     Import {
         module: String,
         alias: Option<String>,
@@ -172,15 +171,12 @@ enum SourceItem {
     Docstring(ast::StringLiteralValue),
     StringAnnotation(String, ast::Expr),
     MakeGenerator(ast::Expr),
-    Raise(ast::StmtRaise),
-    Assert(ast::StmtAssert),
     Match {
         subject: ast::Expr,
         cases: Vec<SourceCase>,
     },
     Name(ast::Identifier),
     Keywords(Vec<ast::Identifier>),
-    EnterWith(ast::WithItem),
 }
 
 struct SourceCase {
@@ -1134,28 +1130,12 @@ impl Program {
                 SourceItem::MakeGenerator(expr) => {
                     prepared_generators.push(&*expr);
                 }
-                SourceItem::EnterWith(item) => {
-                    strings.visit_expr(&item.context_expr);
-                    if let Some(target) = &item.optional_vars {
-                        strings.visit_expr(target);
-                    }
-                }
                 SourceItem::DeleteName(name) => {
                     strings.heap.code_name(name);
                 }
                 SourceItem::DeleteItem(item) => {
                     strings.visit_expr(&item.value);
                     strings.visit_expr(&item.slice);
-                }
-                SourceItem::DeleteAttr(attr) => {
-                    strings.visit_expr(&attr.value);
-                    strings.heap.code_name(attr.attr.as_str());
-                }
-                SourceItem::Assert(stmt) => {
-                    strings.visit_expr(&stmt.test);
-                    if let Some(message) = &stmt.msg {
-                        strings.visit_expr(message);
-                    }
                 }
                 SourceItem::AugAssign(stmt) => {
                     strings.visit_expr(&stmt.target);
@@ -1231,14 +1211,6 @@ impl Program {
                             type_params: None,
                         } => strings.visit_arguments(args),
                         _ => {}
-                    }
-                }
-                SourceItem::Raise(statement) => {
-                    if let Some(e) = &statement.exc {
-                        strings.visit_expr(e);
-                    }
-                    if let Some(e) = &statement.cause {
-                        strings.visit_expr(e);
                     }
                 }
             }
@@ -1740,7 +1712,8 @@ impl Program {
                                 self.items.push(SourceItem::DeleteItem(item));
                             }
                             ast::Expr::Attribute(attr) => {
-                                self.items.push(SourceItem::DeleteAttr(attr));
+                                self.items.push(SourceItem::Discard(*attr.value));
+                                self.items.push(SourceItem::Name(attr.attr));
                             }
                             _ => return Err(unsupported("deletion target")),
                         }
@@ -1760,7 +1733,12 @@ impl Program {
                     }
                     continue;
                 }
-                Stmt::Raise(s) => SourceItem::Raise(s),
+                Stmt::Raise(s) => {
+                    for expr in s.exc.into_iter().chain(s.cause) {
+                        self.items.push(SourceItem::Discard(*expr));
+                    }
+                    continue;
+                }
                 Stmt::Import(s) if !s.is_lazy => {
                     for name in &s.names {
                         let module = name.name.to_string();
@@ -1773,7 +1751,13 @@ impl Program {
                     }
                     continue;
                 }
-                Stmt::Assert(s) => SourceItem::Assert(s),
+                Stmt::Assert(s) => {
+                    self.items.push(SourceItem::Discard(*s.test));
+                    if let Some(message) = s.msg {
+                        self.items.push(SourceItem::Discard(*message));
+                    }
+                    continue;
+                }
                 Stmt::ImportFrom(s) if !s.is_lazy => {
                     let module = s.module.as_ref().map_or("", |module| module.as_str());
                     let mut names = vec![];
@@ -1933,11 +1917,11 @@ impl Program {
                         }
                         if s.is_async {
                             self.record_expression(item.context_expr, function)?;
-                            if let Some(target) = item.optional_vars {
-                                self.items.push(SourceItem::Discard(*target));
-                            }
                         } else {
-                            self.items.push(SourceItem::EnterWith(item));
+                            self.items.push(SourceItem::Discard(item.context_expr));
+                        }
+                        if let Some(target) = item.optional_vars {
+                            self.items.push(SourceItem::Discard(*target));
                         }
                     }
                     self.lower(s.body, function, active.as_deref_mut())?;
