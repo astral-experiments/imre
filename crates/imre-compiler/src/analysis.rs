@@ -2095,7 +2095,11 @@ impl Session {
         // contract. Check the same declared signatures when lowering stops at a
         // representation choice, or registration selects a different source graph.
         let mut rules = RuleSelection::default();
-        for name in ["invalid-argument-type", "invalid-return-type"] {
+        for name in [
+            "invalid-argument-type",
+            "invalid-return-type",
+            "invalid-assignment",
+        ] {
             rules.enable(
                 default_lint_registry()
                     .get(name)
@@ -2201,6 +2205,7 @@ impl Session {
         }
         let mut parameters = Vec::new();
         let mut result_scopes = Vec::new();
+        let mut class_files = Vec::new();
         for (module, &file) in modules.iter().zip(&self.files) {
             if !module.supplies_declarations() {
                 continue;
@@ -2210,9 +2215,13 @@ impl Session {
             let parsed = ruff_db::parsed::parsed_module(&self.db, source.python_file(&self.db))
                 .load(&self.db);
             for scope in index.scope_ids() {
-                if let ty_python_core::scope::NodeWithScopeKind::Function(function) =
-                    scope.node(&self.db)
+                use ty_python_core::scope::NodeWithScopeKind;
+                let owner = scope.node(&self.db);
+                if matches!(owner, NodeWithScopeKind::Class(_)) && class_files.last() != Some(&file)
                 {
+                    class_files.push(file);
+                }
+                if let NodeWithScopeKind::Function(function) = owner {
                     let function = function.node(&parsed);
                     // A generator's annotation describes the iterator, including a separate
                     // completion value. Leave that contract with the generator checker.
@@ -2232,11 +2241,13 @@ impl Session {
                 }
             }
         }
-        if parameters.is_empty() && result_scopes.is_empty() {
+        if parameters.is_empty() && result_scopes.is_empty() && class_files.is_empty() {
             return Ok(());
         }
         result_scopes.sort_unstable();
-        let declarations = DeclaredSignatures::new(&self.db, parameters, result_scopes);
+        class_files.sort_unstable();
+        let declarations =
+            DeclaredSignatures::new(&self.db, parameters, result_scopes, class_files);
         let mut errors = Vec::new();
         for (index, (module, &file)) in modules.iter().zip(&self.files).enumerate() {
             let Some(path) = module.project_path() else {
@@ -2328,6 +2339,7 @@ struct CheckedFile<'db> {
 struct DeclaredSignatures<'db> {
     parameters: Vec<(File, TextRange)>,
     result_scopes: Vec<(File, FileScopeId)>,
+    class_files: Vec<File>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -2588,7 +2600,24 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<CheckedEr
             let range = primary_range(diagnostic, file);
             let parameter = match checked.declarations(db) {
                 Some(sources) if diagnostic.id().is_lint_named("invalid-argument-type") => {
-                    Some(declared_parameter(diagnostic, sources.parameters(db))?)
+                    let parameter = declared_parameter(diagnostic, sources.parameters(db));
+                    if parameter.is_none()
+                        && !has_declared_nominal_target(
+                            db,
+                            file,
+                            diagnostic,
+                            sources.class_files(db),
+                        )
+                    {
+                        return None;
+                    }
+                    parameter
+                }
+                Some(sources) if diagnostic.id().is_lint_named("invalid-assignment") => {
+                    if !has_declared_nominal_target(db, file, diagnostic, sources.class_files(db)) {
+                        return None;
+                    }
+                    None
                 }
                 Some(sources) if diagnostic.id().is_lint_named("invalid-return-type") => {
                     let scope = return_scope(db, file, range?)?;
@@ -2619,7 +2648,6 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<CheckedEr
 /// Literal initializers of scalar names are independent of the operation that required boxing.
 fn scalar_initializer(db: &dyn Db, file: File, range: TextRange) -> bool {
     use ruff_python_ast::{AnyNodeRef, find_node::covering_node};
-    use ty_python_semantic::types::Type;
 
     let file = db.program_file(file);
     let parsed = ruff_db::parsed::parsed_module(db, file.python_file(db)).load(db);
@@ -2658,38 +2686,243 @@ fn scalar_initializer(db: &dyn Db, file: File, range: TextRange) -> bool {
         return false;
     }
     let model = SemanticModel::new(db, file);
-    let Some(mut declared) = assignment.annotation.inferred_type(&model) else {
-        return false;
-    };
+    annotation_type(db, &model, &assignment.annotation)
+        .is_some_and(|declared| concrete_scalar(db, &model.program_environment(), declared))
+}
+
+fn annotation_type<'db>(
+    db: &'db dyn Db,
+    model: &SemanticModel<'db>,
+    annotation: &Expr,
+) -> Option<ty_python_semantic::types::Type<'db>> {
+    use ty_python_semantic::types::Type;
+
+    let mut declared = annotation.inferred_type(model)?;
     let env = model.program_environment();
     let mut seen = std::collections::HashSet::new();
     while let Type::TypeAlias(alias) = declared {
-        // The expanded value alone can be a scalar recovered from a malformed cycle.
-        // Follow the declaration's inferred RHS before accepting its expanded value.
-        use ty_python_core::definition::DefinitionKind;
-        use ty_python_semantic::types::{KnownInstanceType, TypeDefinition};
-
-        let object = Type::KnownInstance(KnownInstanceType::TypeAliasType(alias));
-        let Some(TypeDefinition::TypeAlias(definition)) = object.definition(db, &env) else {
-            return false;
-        };
+        let (definition, value) = with_alias_value(db, &env, alias, |definition, _, _, value| {
+            (definition, value)
+        })?;
         if !seen.insert(definition) {
-            return false;
+            return None;
         }
-        let DefinitionKind::TypeAlias(node) = definition.kind(db) else {
-            return false;
-        };
-        let parsed = ruff_db::parsed::parsed_module(db, definition.python_file(db)).load(db);
-        let model = SemanticModel::new(db, definition.program_file(db));
-        let Some(rhs) = node.node(&parsed).value.inferred_type(&model) else {
-            return false;
-        };
-        if !matches!(rhs, Type::TypeAlias(_)) && rhs != alias.value_type(db) {
-            return false;
-        }
-        declared = rhs;
+        declared = value;
     }
-    concrete_scalar(db, &env, declared)
+    Some(declared)
+}
+
+fn with_alias_value<'db, T>(
+    db: &'db dyn Db,
+    env: &ty_python_semantic::types::ProgramEnvironment<'db>,
+    alias: ty_python_semantic::types::TypeAliasType<'db>,
+    visit: impl FnOnce(
+        ty_python_core::definition::Definition<'db>,
+        &SemanticModel<'db>,
+        &Expr,
+        ty_python_semantic::types::Type<'db>,
+    ) -> T,
+) -> Option<T> {
+    use ty_python_core::definition::DefinitionKind;
+    use ty_python_semantic::types::{KnownInstanceType, Type, TypeDefinition};
+
+    let object = Type::KnownInstance(KnownInstanceType::TypeAliasType(alias));
+    let TypeDefinition::TypeAlias(definition) = object.definition(db, env)? else {
+        return None;
+    };
+    let DefinitionKind::TypeAlias(node) = definition.kind(db) else {
+        return None;
+    };
+    let parsed = ruff_db::parsed::parsed_module(db, definition.python_file(db)).load(db);
+    let model = SemanticModel::new(db, definition.program_file(db));
+    let expression = node.node(&parsed).value.as_ref();
+    let value = expression.inferred_type(&model)?;
+    // A malformed cycle may recover a scalar during expansion. Keep its declared RHS authoritative.
+    if !matches!(value, Type::TypeAlias(_)) && value != alias.value_type(db) {
+        return None;
+    }
+    Some(visit(definition, &model, expression, value))
+}
+
+fn source_class_annotation(
+    db: &dyn Db,
+    file: File,
+    range: TextRange,
+    at_annotation: bool,
+    class_files: &[File],
+) -> bool {
+    use ruff_python_ast::{AnyNodeRef, find_node::covering_node};
+
+    let program = db.program_file(file);
+    let parsed = ruff_db::parsed::parsed_module(db, program.python_file(db)).load(db);
+    let nodes = covering_node(parsed.syntax().into(), range);
+    let Some(annotation) = nodes.ancestors().find_map(|node| match node {
+        AnyNodeRef::Parameter(parameter) => parameter.annotation.as_deref(),
+        AnyNodeRef::StmtAnnAssign(assignment) => Some(assignment.annotation.as_ref()),
+        _ => None,
+    }) else {
+        return false;
+    };
+    if at_annotation && annotation.range() != range {
+        return false;
+    }
+    contains_source_class(
+        db,
+        &SemanticModel::new(db, program),
+        annotation,
+        class_files,
+        &mut std::collections::HashSet::new(),
+    )
+}
+
+fn contains_source_class<'db>(
+    db: &'db dyn Db,
+    model: &SemanticModel<'db>,
+    annotation: &Expr,
+    class_files: &[File],
+    aliases: &mut std::collections::HashSet<ty_python_core::definition::Definition<'db>>,
+) -> bool {
+    use ruff_python_ast::helpers::any_over_expr;
+    use ty_python_semantic::types::{Type, TypeDefinition};
+
+    let env = model.program_environment();
+    let source_class = |ty: Type<'_>| {
+        matches!(ty.definition(db, &env), Some(TypeDefinition::StaticClass(class))
+            if class_files.binary_search(&class.file(db)).is_ok())
+    };
+    any_over_expr(annotation, |operand| {
+        if let Expr::StringLiteral(text) = operand {
+            return model
+                .enter_string_annotation(text)
+                .is_some_and(|(parsed, inner)| {
+                    contains_source_class(db, &inner, &parsed.syntax().body, class_files, aliases)
+                });
+        }
+        if !matches!(operand, Expr::Name(_) | Expr::Attribute(_)) {
+            return false;
+        }
+        match operand.inferred_type(model) {
+            Some(Type::TypeAlias(alias)) => {
+                with_alias_value(db, &env, alias, |definition, model, value, _| {
+                    aliases.insert(definition)
+                        && contains_source_class(db, model, value, class_files, aliases)
+                })
+                .unwrap_or(false)
+            }
+            Some(Type::Union(union)) => union.elements(db).iter().copied().any(source_class),
+            Some(ty) => source_class(ty),
+            None => false,
+        }
+    })
+}
+
+/// Resolve the source declaration for the operand that ty actually rejected.
+fn has_declared_nominal_target(
+    db: &dyn Db,
+    file: File,
+    diagnostic: &Diagnostic,
+    class_files: &[File],
+) -> bool {
+    use ruff_python_ast::{AnyNodeRef, find_node::covering_node};
+
+    if class_files.is_empty() {
+        return false;
+    }
+    let assignment = diagnostic.id().is_lint_named("invalid-assignment");
+    if assignment
+        && diagnostic
+            .annotations()
+            .iter()
+            .filter(|label| !label.is_primary())
+            .any(|label| {
+                let span = label.get_span();
+                let ruff_db::diagnostic::UnifiedFile::Ty(owner) = span.file() else {
+                    return false;
+                };
+                span.range().is_some_and(|range| {
+                    source_class_annotation(db, *owner, range, true, class_files)
+                })
+            })
+    {
+        return true;
+    }
+    let Some(range) = primary_range(diagnostic, file) else {
+        return false;
+    };
+    let program = db.program_file(file);
+    let parsed = ruff_db::parsed::parsed_module(db, program.python_file(db)).load(db);
+    let nodes = covering_node(parsed.syntax().into(), range);
+    let model = SemanticModel::new(db, program);
+    nodes
+        .ancestors()
+        .find_map(|node| match node {
+            AnyNodeRef::StmtAssign(statement) if assignment => {
+                Some(statement.targets.iter().any(|target| {
+                    if range != target.range() && range != statement.range() {
+                        return false;
+                    }
+                    let place = match target {
+                        Expr::Attribute(_) => target,
+                        Expr::Subscript(item) => item.value.as_ref(),
+                        _ => return false,
+                    };
+                    declared_nominal_place(db, &model, place, class_files)
+                }))
+            }
+            AnyNodeRef::ExprCall(call)
+                if !assignment && call.arguments.range().contains_range(range) =>
+            {
+                Some(call.func.as_attribute_expr().is_some_and(|method| {
+                    declared_nominal_place(db, &model, &method.value, class_files)
+                }))
+            }
+            _ => None,
+        })
+        .unwrap_or(false)
+}
+
+fn declared_nominal_place(
+    db: &dyn Db,
+    model: &SemanticModel<'_>,
+    receiver: &Expr,
+    class_files: &[File],
+) -> bool {
+    if let Expr::Attribute(attribute) = receiver {
+        return ty_python_semantic::definitions_for_attribute(model, attribute)
+            .iter()
+            .any(|declaration| {
+                let site = declaration.focus_range(db);
+                source_class_annotation(db, site.file(), site.range(), false, class_files)
+            });
+    }
+    let program = model.program_file();
+    let index = ty_python_core::semantic_index(db, program);
+    let Some(scope) = index.try_expression_scope_id(receiver) else {
+        return false;
+    };
+    let Some(use_id) = index.try_expression_use_id(receiver.into()) else {
+        return false;
+    };
+    let map = index.use_def_map(scope);
+    let parsed = ruff_db::parsed::parsed_module(db, model.python_file()).load(db);
+    let declared = |binding: ty_python_core::definition::Definition<'_>| {
+        source_class_annotation(
+            db,
+            model.file(),
+            binding.focus_range(db, &parsed).range(),
+            false,
+            class_files,
+        )
+    };
+    map.bindings_at_use(use_id)
+        .filter_map(|entry| entry.binding.definition())
+        .any(|binding| {
+            declared(binding)
+                || map
+                    .declarations_at_binding(binding)
+                    .filter_map(|entry| entry.declaration.definition())
+                    .any(declared)
+        })
 }
 
 fn concrete_scalar<'db>(

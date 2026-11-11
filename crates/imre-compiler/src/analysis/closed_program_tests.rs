@@ -1177,3 +1177,40 @@ fn run_path_can_enter_through_implicit_builtins() {
     .unwrap_err();
     assert!(error.contains("open executable filename"), "{error}");
 }
+
+#[test]
+fn python_instances_keep_their_declared_class_in_fields_and_containers() {
+    let project = tempdir().unwrap();
+    let main = project.path().join("main.py");
+    fs::write(
+        project.path().join("model.py"),
+        "class Item:\n    def __init__(self, value): self.value = value\n\
+         class Child(Item): pass\n\
+         class Other:\n    def __init__(self, value): self.value = value\n\
+         class Box:\n    def __init__(self): self.item: Item = Item(0)\n\
+         type Items = list[Item]\n",
+    )
+    .unwrap();
+    let imports = "from model import Box, Child, Item, Items, Other\n";
+    for (body, rule) in [
+        ("box = Box()\nbox.item = Other(1)\n", "invalid-assignment"),
+        (
+            "values: Items = [Item(0)]\nvalues.append(Other(1))\n",
+            "invalid-argument-type",
+        ),
+        (
+            "values: list[Item] = [Item(0)]\nvalues[0] = Other(1)\n",
+            "invalid-assignment",
+        ),
+    ] {
+        fs::write(&main, format!("{imports}{body}")).unwrap();
+        let error = crate::check_file(&main, None).unwrap_err();
+        assert!(error.contains(rule), "{error}");
+    }
+    fs::write(
+        &main,
+        format!("{imports}box = Box()\nbox.item = Child(1)\nvalues: Items = [Item(0)]\nvalues.append(Child(2))\n"),
+    )
+    .unwrap();
+    crate::check_file(&main, None).unwrap();
+}
