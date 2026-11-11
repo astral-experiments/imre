@@ -2072,33 +2072,52 @@ fn binary_replace(
     let new = ctx.native_buffer_bytes(new)?;
     let matches = memchr::memmem::Finder::new(old);
     let positions = || matches.find_iter(source).take(limit);
-    let count = if old.is_empty() && new.is_empty() {
-        0
+    // Equal-width replacements only need to know whether there is a first match.
+    let equal_width = old.len() == new.len();
+    let copy_limit = if equal_width {
+        if old.is_empty() || positions().next().is_none() {
+            0
+        } else {
+            limit
+        }
     } else {
         positions().count()
     };
-    let exact_bytes = matches!(ctx.heap.get(receiver), Value::Bytes(_));
-    if count == 0 && exact_bytes {
+    if copy_limit == 0 && matches!(ctx.heap.get(receiver), Value::Bytes(_)) {
         return Ok(receiver);
     }
-    let retained = source.len() - count * old.len();
-    let size = new
-        .len()
-        .checked_mul(count)
-        .and_then(|extra| retained.checked_add(extra))
-        .filter(|&len| len <= isize::MAX as usize)
-        .ok_or_else(|| Error::new("OverflowError", "replace bytes is too long"))?;
+    let size = if equal_width {
+        source.len()
+    } else {
+        let retained = source.len() - copy_limit * old.len();
+        new.len()
+            .checked_mul(copy_limit)
+            .and_then(|extra| retained.checked_add(extra))
+            .filter(|&len| len <= isize::MAX as usize)
+            .ok_or_else(|| Error::new("OverflowError", "replace bytes is too long"))?
+    };
     let mut result = Vec::new();
     result
         .try_reserve_exact(size)
         .map_err(|_| crate::Error::memory_error())?;
-    let mut copied = 0;
-    for start in positions().take(count) {
-        result.extend_from_slice(&source[copied..start]);
-        result.extend_from_slice(new);
-        copied = start + old.len();
+    if let ([old], [new]) = (old, new)
+        && limit >= source.len()
+        && copy_limit != 0
+    {
+        result.extend(
+            source
+                .iter()
+                .map(|&byte| if byte == *old { *new } else { byte }),
+        );
+    } else {
+        let mut copied = 0;
+        for start in positions().take(copy_limit) {
+            result.extend_from_slice(&source[copied..start]);
+            result.extend_from_slice(new);
+            copied = start + old.len();
+        }
+        result.extend_from_slice(&source[copied..]);
     }
-    result.extend_from_slice(&source[copied..]);
     Ok(ctx.alloc(
         if matches!(ctx.heap.get(ctx.scalar_value(receiver)), Value::Bytes(_)) {
             Value::Bytes(result)
