@@ -188,7 +188,7 @@ CPython 3.14.5 discovers **2,875 test occurrences** across these 19 families on 
 
 ### Whole-suite baselines for later additions
 
-We track these families separately to keep the original 16,202-test baseline comparable across revisions. Each row comes from complete runs of the upstream module. Across these 49 suites, 3,215 of 5,985 originals have paired passes. At both native tiers, `compileall` and `enum` stopped during import before any original test ran.
+We track these families separately to keep the original 16,202-test baseline comparable across revisions. Each row comes from complete runs of the upstream module. Across these 49 suites, 3,216 of 5,985 originals have paired passes. At both native tiers, `compileall` and `enum` stopped during import before any original test ran.
 
 | Module | Paired passes | Upstream tests | Stock CPython | Imre O0 and O3 |
 | --- | ---: | ---: | --- | --- |
@@ -225,7 +225,7 @@ We track these families separately to keep the original 16,202-test baseline com
 | `pyexpat` | 34 | 60 | 60 passed | 34 passed, 12 errors, 14 skipped (one during class setup) |
 | `queue` | 33 | 162 | 156 passed, 6 skipped | 33 passed, 85 skipped and 44 raised errors. Of the skips, 82 require the C implementation of _queue and three require a large-memory run. [Public revision](https://github.com/astral-experiments/imre/commit/cda138b4a157dd9d6fefaa21f3e5f6353d13db14). |
 | `quopri` | 11 | 11 | 11 passed | 11 passed. [Public revision](https://github.com/astral-experiments/imre/commit/8c4745e18f48eda34e0b2662493a630404ada941). |
-| `patma` | 318 | 328 | 328 passed | Both native runs completed all 328 originals. The ten methods that raised errors accounted for 11 unittest errors at each level. [Measured public revision](https://github.com/astral-experiments/imre/commit/50d815230102f1af732977dcec4bb7fc0e562d61) |
+| `patma` | 319 | 328 | 328 passed | Both native runs completed all 328 originals. Nine methods accounted for ten unittest errors at each optimization level. [Measured public revision](https://github.com/astral-experiments/imre/commit/e3c4dcacbfbf4bf6d1f7f4fddf3083d152a79364) |
 | `random` | 85 | 114 | 112 passed, 2 skipped | The intact module retained all 74 previously paired methods and gained eleven with the shared weighted sampler. Stock passed 112 and skipped two. [SystemRandom](https://github.com/astral-experiments/imre/pull/5963) · [Weighted choices](https://github.com/astral-experiments/imre/pull/5994) |
 | `range` | 29 | 29 | 29 passed | The public merge passed all 29 originals and 184 subtests in intact runs at both levels. Its first parent passed 28. The final method checks invalid argument counts. [#5887](https://github.com/astral-experiments/imre/pull/5887) · [#5900](https://github.com/astral-experiments/imre/pull/5900) |
 | `runpy` | 22 | 40 | 40 passed | All 40 originals ran on the parent and the merge at O0 and O3. Ten `RunPathTestCase` tests brought the paired count from 12 to 22. Each merge run had one failure and 17 errors. [Public merge #5758](https://github.com/astral-experiments/imre/commit/2a5b0e880d1067ae7f811e537fff17dcf5a07fa8). |
