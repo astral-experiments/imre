@@ -812,6 +812,8 @@ impl Checker<'_> {
                     })?;
                     let value = if let Some(element) = checker.types.element(params[index].ty) {
                         input.checked(checker, element, false, declaration(index))?
+                    } else if default_owner.is_none() {
+                        check(checker, index, input)?
                     } else {
                         input.value(checker)?
                     };
@@ -854,20 +856,22 @@ impl Checker<'_> {
                 }
             } else {
                 let ty = self.types.tuple(packed.iter().map(|arg| arg.ty).collect());
-                let expected = if let (Some(inference), Some((function, skip))) =
-                    (self.inference, default_owner)
-                {
-                    inference.learn_parameter(function, index + skip, ty);
-                    inference.parameter(function, index + skip)
-                } else {
-                    Some(params[index].ty)
-                };
-                if expected != Some(ty) {
-                    return Err(error(
-                        self.source,
-                        call,
-                        "an unannotated variadic parameter requires the same tuple shape at every call",
-                    ));
+                // A source function shares its inferred pack across calls. A builtin
+                // consumes this call's checked tuple directly.
+                if let Some((function, skip)) = default_owner {
+                    let expected = if let Some(inference) = self.inference {
+                        inference.learn_parameter(function, index + skip, ty);
+                        inference.parameter(function, index + skip)
+                    } else {
+                        Some(params[index].ty)
+                    };
+                    if expected != Some(ty) {
+                        return Err(error(
+                            self.source,
+                            call,
+                            "an unannotated variadic parameter requires the same tuple shape at every call",
+                        ));
+                    }
                 }
                 Expr {
                     ty,

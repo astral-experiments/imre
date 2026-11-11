@@ -27,7 +27,11 @@ impl Checker<'_> {
         Ok(value)
     }
 
-    fn check_record_value_type(&self, ty: Type, node: &impl Ranged) -> Result<(), String> {
+    pub(super) fn check_record_value_type(
+        &self,
+        ty: Type,
+        node: &impl Ranged,
+    ) -> Result<(), String> {
         if ty != Type::ObjectValue && !dataclass_values::can_format(ty, self.types, self.classes) {
             return Err(error(
                 self.source,
