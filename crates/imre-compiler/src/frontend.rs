@@ -6351,21 +6351,6 @@ impl<'a> Checker<'a> {
                 let (orelse, falls) = self.loop_else(&loop_.orelse, breaks, can_exhaust)?;
                 return Ok((vec![Statement::While(test, body, orelse)], falls));
             }
-            ast::Stmt::Break(_) | ast::Stmt::Continue(_) if !self.loop_breaks.is_empty() => {
-                if self.reachable && matches!(statement, ast::Stmt::Break(_)) {
-                    let mut exits = self.take_breaks();
-                    self.merge_exit(&mut exits);
-                    *self.loop_breaks.last_mut().unwrap() = exits;
-                }
-                return Ok((
-                    vec![if matches!(statement, ast::Stmt::Break(_)) {
-                        Statement::Break
-                    } else {
-                        Statement::Continue
-                    }],
-                    false,
-                ));
-            }
             ast::Stmt::Assert(assertion) if self.graph.python_optimization() > 0 => {
                 assertion_syntax::validate(self.source, assertion)?;
                 None
