@@ -1214,6 +1214,13 @@ impl Checker<'_> {
         module: &ModuleSource,
     ) -> Result<Option<Expr>, String> {
         let source = module.context(self.source);
+        if let ast::Expr::FString(value) = node
+            && self.optional_registered_body
+        {
+            let value = fstrings::registered_fstring(value, source, |child| self.expr(child))?;
+            self.live_protocol_parameters = true;
+            return Ok(Some(source.located(node, value)));
+        }
         if let ast::Expr::Generator(generator) = node
             && self.optional_registered_body
         {
@@ -1302,14 +1309,21 @@ impl Checker<'_> {
         }
         // These methods consume or produce an iterable through Python's string protocol.
         // A typed receiver in this frame can still be a subclass with an overriding method.
-        let string_method = self.optional_registered_body
-            && node
-                .as_call_expr()
-                .and_then(|call| source.direct_method(call))
-                .is_some_and(|method| {
-                    matches!(method.attr.as_str(), "join" | "split")
-                        && graph.session.scalar_type(owner, &method.value) == Some(Type::Str)
-                });
+        let method = node
+            .as_call_expr()
+            .filter(|_| self.optional_registered_body)
+            .and_then(|call| source.direct_method(call));
+        let string_method = method.is_some_and(|method| {
+            matches!(method.attr.as_str(), "join" | "split")
+                && graph.session.scalar_type(owner, &method.value) == Some(Type::Str)
+        });
+        // A Python frame reads this module binding before selecting the method.
+        let module_method = method.is_some_and(|method| {
+            matches!(
+                self.resolve(&method.value),
+                Some(Binding::Value(_) | Binding::ImportedValue(..))
+            )
+        });
         let Some(mut value) = operation(
             node,
             source,
@@ -1317,7 +1331,9 @@ impl Checker<'_> {
             string_method,
             // Even a skipped operand participates in static argument and result checking.
             |_| None,
-            |receiver| string_method || graph.session.is_dynamic_receiver(owner, receiver),
+            |receiver| {
+                string_method || module_method || graph.session.is_dynamic_receiver(owner, receiver)
+            },
             |child, _| self.expr(child),
         )?
         else {

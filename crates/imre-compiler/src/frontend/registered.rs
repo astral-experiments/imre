@@ -5203,6 +5203,35 @@ mod tests {
     }
 
     #[test]
+    fn solved_writer_formats_the_argument_and_loads_the_live_receiver() {
+        let source = concat!(
+            "from pathlib import Path\n",
+            "target = Path('output')\n",
+            "def notify(value: int, sink):\n    sink(value)\n",
+            "def write(label: str) -> None:\n    target.write_text(f'<{label}>')\n",
+        );
+        let graph = SourceGraph::single(source).unwrap();
+        let _ = super::super::lower(&graph);
+        let bodies = graph.registered_functions();
+        let offset = TextSize::try_from(source.find("def write").unwrap()).unwrap();
+        let body = &bodies[&graph.entry][&offset];
+        assert!(matches!(body.inputs, FrameInputs::Protocol { .. }));
+        let mut operations = Vec::new();
+        ir::walk_expressions(&body.function.body, &mut |expr| match &expr.kind {
+            ExprKind::Builtin(Builtin::RegisteredCall(call), _) if matches!(&call.target, ir::RegisteredCallTarget::Method { name, .. } if name == "write_text") =>
+            {
+                operations.push("write_text");
+            }
+            ExprKind::Builtin(Builtin::RegisteredName(name), _) if name == "target" => {
+                operations.push("target");
+            }
+            ExprKind::Builtin(Builtin::FormatField(_), _) => operations.push("format"),
+            _ => {}
+        });
+        assert_eq!(operations, ["write_text", "target", "format"]);
+    }
+
+    #[test]
     fn runtime_string_format_retains_the_checked_sum_and_keyword_operand() {
         let source = concat!(
             "def render(template: str, left: int, right: int, label):\n",
