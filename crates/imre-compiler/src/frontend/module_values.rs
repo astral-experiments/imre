@@ -936,103 +936,104 @@ impl Initialization {
     }
 }
 
-impl InitializationOrder {
+impl ModuleValues {
     /// Rejects early direct and transitive reads, including hidden comprehensions.
     /// Requiring every potential callee to be available is deliberately conservative.
-    pub fn validate(
+    pub(super) fn validate_initializers(
         &self,
-        initializer: usize,
+        initializers: impl IntoIterator<Item = (usize, InitializationOrder)>,
         graph: &SourceGraph,
         functions: &[ir::Function],
         binding_reads: &[HashSet<DefinitionId>],
         callables: &[DefinitionId],
         targets: &HashMap<Type, HashSet<usize>>,
-        globals: &ModuleValues,
     ) -> std::result::Result<(), String> {
-        let module = &graph.modules[self.module];
-        for checkpoint in &self.checkpoints {
-            let mut reads = HashSet::new();
-            let mut calls = Vec::new();
-            let mut references = Vec::new();
-            let mut visited = HashSet::new();
-            let mut required_bindings = checkpoint.binding_reads.clone();
-            // A deferred reader sees the most recently executed declaration. An immutable
-            // snapshot has just the one physical target it copied at its own store.
-            let current = |value: &Expr| {
-                globals
-                    .invoked_functions(value)?
-                    .iter()
-                    .rev()
-                    .copied()
-                    .find(|&id| checkpoint.definitions.contains(&callables[id]))
-            };
-            collect(
-                &functions[initializer].body[checkpoint.body.clone()],
-                &mut reads,
-                &mut calls,
-                &mut references,
-                targets,
-                &current,
-            );
-            while let Some(id) = calls.pop() {
-                if !visited.insert(id) {
-                    continue;
-                }
-                if let Some(definition) = callables.get(id)
-                    && !checkpoint.definitions.contains(definition)
-                {
-                    return Err(module.error(
-                        &module.parsed.syntax().body[checkpoint.statement],
-                        "module initialization calls a definition before it is available",
-                    ));
-                }
-                required_bindings.extend(&binding_reads[id]);
+        for (initializer, order) in initializers {
+            let module = &graph.modules[order.module];
+            for checkpoint in &order.checkpoints {
+                let mut reads = HashSet::new();
+                let mut calls = Vec::new();
+                let mut references = Vec::new();
+                let mut visited = HashSet::new();
+                let mut required_bindings = checkpoint.binding_reads.clone();
+                // A deferred reader sees the most recently executed declaration. An immutable
+                // snapshot has just the one physical target it copied at its own store.
+                let current = |value: &Expr| {
+                    self
+                        .invoked_functions(value)?
+                        .iter()
+                        .rev()
+                        .copied()
+                        .find(|&id| checkpoint.definitions.contains(&callables[id]))
+                };
                 collect(
-                    &functions[id].body,
+                    &functions[initializer].body[checkpoint.body.clone()],
                     &mut reads,
                     &mut calls,
                     &mut references,
                     targets,
                     &current,
                 );
-            }
-            if let Some(read) = required_bindings
-                .difference(&checkpoint.definitions)
-                .min_by_key(|read| (read.module, read.statement))
-            {
-                let reason = match graph.modules[read.module]
-                    .parsed
-                    .syntax()
-                    .body
-                    .get(read.statement)
+                while let Some(id) = calls.pop() {
+                    if !visited.insert(id) {
+                        continue;
+                    }
+                    if let Some(definition) = callables.get(id)
+                        && !checkpoint.definitions.contains(definition)
+                    {
+                        return Err(module.error(
+                            &module.parsed.syntax().body[checkpoint.statement],
+                            "module initialization calls a definition before it is available",
+                        ));
+                    }
+                    required_bindings.extend(&binding_reads[id]);
+                    collect(
+                        &functions[id].body,
+                        &mut reads,
+                        &mut calls,
+                        &mut references,
+                        targets,
+                        &current,
+                    );
+                }
+                if let Some(read) = required_bindings
+                    .difference(&checkpoint.definitions)
+                    .min_by_key(|read| (read.module, read.statement))
                 {
-                    None | Some(ast::Stmt::Import(_) | ast::Stmt::ImportFrom(_)) => {
-                        "module initialization references an import before its binding is available"
-                    }
-                    Some(ast::Stmt::FunctionDef(_)) => {
-                        "module initialization references a function before it is available"
-                    }
-                    _ => "module initialization references a class before it is available",
-                };
-                return Err(
-                    module.error(&module.parsed.syntax().body[checkpoint.statement], reason)
-                );
-            }
-            if references.iter().any(|&id| {
-                callables
-                    .get(id)
-                    .is_some_and(|definition| !checkpoint.definitions.contains(definition))
-            }) {
-                return Err(module.error(
-                    &module.parsed.syntax().body[checkpoint.statement],
-                    "module initialization references a function before it is available",
-                ));
-            }
-            if reads.iter().any(|&slot| slot >= checkpoint.initialized) {
-                return Err(module.error(
-                    &module.parsed.syntax().body[checkpoint.statement],
-                    "module initialization may read a value before it is initialized",
-                ));
+                    let reason = match graph.modules[read.module]
+                        .parsed
+                        .syntax()
+                        .body
+                        .get(read.statement)
+                    {
+                        None | Some(ast::Stmt::Import(_) | ast::Stmt::ImportFrom(_)) => {
+                            "module initialization references an import before its binding is available"
+                        }
+                        Some(ast::Stmt::FunctionDef(_)) => {
+                            "module initialization references a function before it is available"
+                        }
+                        _ => "module initialization references a class before it is available",
+                    };
+                    return Err(
+                        module.error(&module.parsed.syntax().body[checkpoint.statement], reason)
+                    );
+                }
+                if references.iter().any(|&id| {
+                    callables
+                        .get(id)
+                        .is_some_and(|definition| !checkpoint.definitions.contains(definition))
+                }) {
+                    return Err(module.error(
+                        &module.parsed.syntax().body[checkpoint.statement],
+                        "module initialization references a function before it is available",
+                    ));
+                }
+                if reads.iter().any(|&slot| slot >= checkpoint.initialized) {
+                    return Err(module.error(
+                        &module.parsed.syntax().body[checkpoint.statement],
+                        "module initialization may read a value before it is initialized",
+                    ));
+                }
             }
         }
         Ok(())
