@@ -532,6 +532,20 @@ impl Context {
         Ok(self.native_module_code(entry, filename, flags))
     }
 
+    fn compiled_file_code(
+        &mut self,
+        entry: ModuleInitializer,
+        path: &Path,
+        filename: Id,
+    ) -> Result<Id> {
+        let code = self.module_code_at(entry, path, filename)?;
+        let Value::Code(object) = self.heap.get_mut(code) else {
+            unreachable!()
+        };
+        object.bind_file_constants(filename);
+        Ok(code)
+    }
+
     /// Each execution of compiled source gets its own module code and nested definition cache.
     pub(super) fn native_module_code(
         &mut self,
@@ -584,7 +598,9 @@ impl Context {
             Err(error) => return Err(error),
         };
         let mut entries = self.sources.values().flatten().filter_map(|source| {
-            if source.path.as_os_str() != path.as_os_str() {
+            if source.path.as_os_str() != path.as_os_str()
+                && !matches!(source.code, ModuleInitializer::File { declared_open_path: Some(alias), .. } if alias.as_os_str() == path.as_os_str())
+            {
                 return None;
             }
             match source.code {
@@ -627,7 +643,7 @@ impl Context {
         if Sha256::digest(self.bytes_like(data)?).as_slice() != digest {
             return Ok(None);
         }
-        self.module_code_at(code, &path, filename).map(Some)
+        self.compiled_file_code(code, &path, filename).map(Some)
     }
 
     /// Resolve the file that runpy tried to open to the declaring loader’s native code.
@@ -645,7 +661,10 @@ impl Context {
                 else {
                     continue;
                 };
-                if open_path.as_os_str() != path.as_os_str() || self.sealed_native(name) {
+                if (open_path.as_os_str() != path.as_os_str()
+                    && source.path.as_os_str() != path.as_os_str())
+                    || self.sealed_native(name)
+                {
                     continue;
                 }
                 if let Some((_, previous, hash, future)) = selected
@@ -657,7 +676,7 @@ impl Context {
             }
         }
         selected
-            .map(|(code, ..)| self.module_code_at(code, &path, filename))
+            .map(|(code, ..)| self.compiled_file_code(code, &path, filename))
             .transpose()
     }
 

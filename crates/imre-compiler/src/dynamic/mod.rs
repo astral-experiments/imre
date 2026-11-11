@@ -1050,6 +1050,16 @@ pub(crate) fn compile(
         (true, Some(identity), None) => identity.parent().unwrap_or(&root).to_owned(),
         _ => root,
     };
+    // Keep the owning invocation's spelling for declared filenames without moving
+    // imports away from the physical script directory (e.g. under a symlink).
+    let invoked_root = entry_identity.as_ref().and_then(|identity| {
+        let relative = identity.strip_prefix(&root).ok()?;
+        let spelling = entry.ancestors().nth(relative.components().count())?;
+        (spelling != root
+            && !options.include_modules.is_empty()
+            && filesystem.canonicalize(spelling).ok().as_ref() == Some(&root))
+        .then(|| (root.clone(), spelling.to_owned()))
+    });
     let mut initial = Vec::new();
     let safe_path = startup.is_some_and(|(flags, _)| flags.safe_path);
     if options.path_entry {
@@ -1774,7 +1784,28 @@ pub(crate) fn compile(
                         && ordinary_registrations.is_none()
                         && options.include_modules.contains(&prefix)
                     {
-                        declared_open_path(&path, &identity, &mut inputs, &mut filesystem)?
+                        let open =
+                            declared_open_path(&path, &identity, &mut inputs, &mut filesystem)?;
+                        if open.as_deref() == Some(&path)
+                            && let Some((physical, spelling)) = &invoked_root
+                            && physical == root
+                            && let Ok(relative) = path.strip_prefix(root)
+                        {
+                            let alias = spelling.join(relative);
+                            let resolved = filesystem.canonicalize(&alias).ok();
+                            let same = resolved.as_ref() == Some(&identity);
+                            inputs
+                                .declared_file_resolutions
+                                .push((alias.clone(), resolved));
+                            if same {
+                                declared_open_path(&alias, &identity, &mut inputs, &mut filesystem)?
+                                    .or(open)
+                            } else {
+                                open
+                            }
+                        } else {
+                            open
+                        }
                     } else {
                         None
                     };
@@ -2068,6 +2099,7 @@ pub(crate) fn compile(
                 .is_none_or(|(root, _)| root == Path::new(bundled_root)));
     // Borrow the winners once discovery has finished growing the emitter's source table.
     let mut function_modules = Vec::new();
+    let mut declared_open_paths = HashSet::new();
     let selected_sources: Vec<_> = selected_sources
         .into_iter()
         .enumerate()
@@ -2083,6 +2115,14 @@ pub(crate) fn compile(
             // scope: owning a declaration does not prove that a call will reach it.
             let mut registration =
                 RegisteredSource::new(&sources[id], program && application, module);
+            if !module_errors.contains_key(registration.path)
+                && let Some(open) = registrations
+                    .checked_units
+                    .get(&id)
+                    .and_then(|unit| unit.run_path.as_deref())
+            {
+                declared_open_paths.insert(open.as_os_str());
+            }
             registration.has_open_exec = literals.open_exec.contains(&id);
             registration.unit = matches!(mode, crate::CompilationMode::Build(_)).then_some(id);
             registration.declares_signatures = application;
@@ -2150,11 +2190,12 @@ pub(crate) fn compile(
     }
     // file_code_from_bytes compares the original OS spelling and digest.
     let has_file_body = |filename: &str| {
-        selected_sources.iter().any(|s| {
-            s.path.as_os_str() == std::ffi::OsStr::new(filename)
-                && registrations.physical_files.contains_key(s.path)
-                && !module_errors.contains_key(s.path)
-        })
+        declared_open_paths.contains(std::ffi::OsStr::new(filename))
+            || selected_sources.iter().any(|s| {
+                s.path.as_os_str() == std::ffi::OsStr::new(filename)
+                    && registrations.physical_files.contains_key(s.path)
+                    && !module_errors.contains_key(s.path)
+            })
     };
     let mut layouts = Vec::new();
     check(

@@ -490,8 +490,16 @@ fn retained_native_candidate_registers_its_original_source_owner() {
 #[test]
 fn run_path_checks_the_bound_filename_and_linked_body() {
     let project = tempdir().unwrap();
-    let entry = project.path().join("main.py");
-    let report = project.path().join("report.py");
+    let root = project.path().join("files");
+    fs::create_dir(&root).unwrap();
+    #[cfg(unix)]
+    let root = {
+        let alias = project.path().join("invoked");
+        std::os::unix::fs::symlink(&root, &alias).unwrap();
+        alias
+    };
+    let entry = root.join("main.py");
+    let report = root.join("report.py");
     fs::write(&report, "print(__name__)\n").unwrap();
     let options = crate::CompileOptions {
         include_modules: ["report".to_owned()].into(),
@@ -503,8 +511,9 @@ fn run_path_checks_the_bound_filename_and_linked_body() {
     };
     let prefix = "from runpy import run_path as run\nimport sys\n";
     check(format!(
-        "{prefix}run(run_name='report', path_name={:?})",
-        report.to_str().unwrap()
+        "{prefix}run(run_name='report', path_name={:?})\nrun({:?})",
+        report.to_str().unwrap(),
+        report.canonicalize().unwrap().to_str().unwrap(),
     ))
     .unwrap();
     let error = check(format!(
