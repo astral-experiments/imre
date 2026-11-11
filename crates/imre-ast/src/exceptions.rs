@@ -38,6 +38,7 @@ macro_rules! exception_kinds {
         pub fn boxed_builtin_kind(name: &str) -> Option<Kind> {
             match name {
                 $(stringify!($builtin) => Some(Kind::$builtin),)*
+                "EnvironmentError" | "IOError" => Some(Kind::OSError),
                 _ => None,
             }
         }
@@ -144,16 +145,10 @@ exception_kinds! {
 
 /// Resolves an unqualified exception name accepted by the checked frontend.
 pub fn builtin_id(name: &str) -> Option<u32> {
-    let kind = match name {
-        "EnvironmentError" | "IOError" => Kind::OSError,
-        _ => match boxed_builtin_kind(name)? {
-            Kind::ChildProcessError | Kind::ProcessLookupError | Kind::BaseExceptionGroup => {
-                return None;
-            }
-            kind => kind,
-        },
-    };
-    Some(kind as u32)
+    match boxed_builtin_kind(name)? {
+        Kind::ChildProcessError | Kind::ProcessLookupError | Kind::BaseExceptionGroup => None,
+        kind => Some(kind as u32),
+    }
 }
 
 /// Indices used by typed warning filters and by the runtime's -W option.
