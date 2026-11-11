@@ -505,7 +505,7 @@ mod tests {
         assert!(
             loads
                 .iter()
-                .all(|expr| expr.node_index().load() == ast::AtomicNodeIndex::NONE.load())
+                .all(|expr| expr.node_index().load().as_u32().is_none())
         );
 
         let context = values::ModuleSource::new(module);

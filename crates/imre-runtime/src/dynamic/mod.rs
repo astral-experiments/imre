@@ -130,8 +130,9 @@ impl MainModuleFrame {
     /// The caller owns execution of the context with this frame on top, and the linked
     /// initializer remains loaded until it returns.
     unsafe fn run(self, context: *mut Context) -> Result<Id> {
-        // SAFETY: use the generated ABI before borrowing the context for frame cleanup.
+        // SAFETY: the caller keeps the initializer loaded and the prepared frame active.
         let value = unsafe { (self.entry)(context, self.scope) };
+        // SAFETY: the initializer has returned to the exclusive owner of the live Context.
         let ctx = unsafe { &mut *context };
         let result = ctx.finish_module_frame(self.code, self.entry, self.scope, value);
         ctx.finish_initialization(self.module);
