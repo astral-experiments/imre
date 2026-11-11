@@ -734,14 +734,14 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
 
     pub(crate) fn format_conversion(&mut self, value: &str, conversion: char) -> String {
         let flag = self.text(&conversion.to_string());
-        self.format_at_field("format_conversion", &[value, &flag])
+        self.op_at_current_range("format_conversion", &[value, &flag])
     }
 
     pub(crate) fn format_field(&mut self, value: &str, spec: &str) -> String {
-        self.format_at_field("format", &[value, "0", spec])
+        self.op_at_current_range("format", &[value, "0", spec])
     }
 
-    fn format_at_field(&mut self, op: &str, args: &[&str]) -> String {
+    pub(in crate::llvm) fn op_at_current_range(&mut self, op: &str, args: &[&str]) -> String {
         self.call_position(self.current_range);
         self.op(op, args)
     }
@@ -2215,7 +2215,7 @@ impl RegisteredFrame<'_, '_> {
     pub(crate) fn assertion_failure(
         &mut self,
         statement: TextSize,
-        test: TextSize,
+        test: TextRange,
         message: Option<&str>,
     ) {
         let statement_line = self.positions.line(statement);
@@ -2226,10 +2226,7 @@ impl RegisteredFrame<'_, '_> {
             Some(value) => self.invoke(&class, &[value]),
             None => class,
         };
-        let test_line = self.positions.line(test);
-        if test_line != statement_line {
-            self.set_statement_line(test_line);
-        }
+        self.replace_position(SourcePosition::Expression(test));
         self.raise(&error, None, false);
     }
 

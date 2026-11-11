@@ -2121,7 +2121,7 @@ pub(crate) enum Builtin {
     /// Raise AssertionError at this site after evaluating its optional message.
     RegisteredAssertionFailure {
         statement: ruff_text_size::TextSize,
-        test: ruff_text_size::TextSize,
+        test: ruff_text_size::TextRange,
     },
     RegisteredNamespaceAnnotation(NamespaceAnnotation),
     RegisteredAnnotationStart,

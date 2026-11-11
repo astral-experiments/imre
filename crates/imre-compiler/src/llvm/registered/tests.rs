@@ -403,7 +403,7 @@ fn checked_assertion_message_and_raise_use_the_failure_edge() {
         kind: ExprKind::Builtin(
             Builtin::RegisteredAssertionFailure {
                 statement: 0.into(),
-                test: 9.into(),
+                test: TextRange::new(9.into(), 14.into()),
             },
             vec![message],
         ),
@@ -429,8 +429,11 @@ fn checked_assertion_message_and_raise_use_the_failure_edge() {
         .unwrap();
     assert!(message.contains("@imre_dyn_lookup("));
     assert!(message.contains("label %caught,"));
+    let test_position = frame.output.positions[&[2, 2, 0, 5]];
     let (_, raise) = after_message
-        .split_once("call void @imre_dyn_set_statement_line(ptr %ctx, i32 2)")
+        .split_once(&format!(
+            "call void @imre_dyn_definition_position(ptr %ctx, ptr @pos{test_position})"
+        ))
         .unwrap();
     assert!(raise.contains("call i64 @imre_dyn_op_at("));
     assert!(raise.contains("br label %caught"));

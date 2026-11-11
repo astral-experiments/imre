@@ -2132,7 +2132,10 @@ pub(super) unsafe extern "C" fn imre_dyn_op_at(
     }
     let reraise = op == "reraise" && (a != NONE || ctx.heap.active_exception() != NONE);
     let mut result = ctx.op(op, a, b, c);
-    let format_field = matches!(op, "format" | "format_conversion");
+    let uniform_operand = matches!(
+        op,
+        "pos" | "neg" | "~" | "not" | "format" | "format_conversion"
+    );
     if matches!(
         op,
         "attr"
@@ -2146,12 +2149,12 @@ pub(super) unsafe extern "C" fn imre_dyn_op_at(
             | "async_exit_context"
             | "truth"
     ) || (b == TRUE && matches!(op, "lookup_enter" | "lookup_exit"))
-        || format_field
+        || uniform_operand
     {
         finish_operand_position(
             ctx,
             &mut result,
-            format_field.then_some(value::TracebackAnchor::Uniform),
+            uniform_operand.then_some(value::TracebackAnchor::Uniform),
         );
     }
     if reraise && let Err(error) = result {
