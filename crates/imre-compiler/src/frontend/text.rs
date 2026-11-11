@@ -476,7 +476,7 @@ impl Checker<'_> {
         if let ast::Expr::Dict(dict) = argument {
             if dict.items.is_empty() {
                 // The empty literal has no observable key/value layout.
-                return self.dictionary(dict, Some((Type::Int, Type::Int)));
+                return self.dictionary(dict, Some((Type::Int, Type::Int)), None);
             }
             // Choose the storage before lowering any operands. The ordinary dictionary
             // constructor then still evaluates every key and value once, in source order.
@@ -521,7 +521,7 @@ impl Checker<'_> {
                 ))
             })();
             if let Some(shape) = shape {
-                return self.dictionary(dict, Some(shape));
+                return self.dictionary(dict, Some(shape), None);
             }
         }
         self.expr(argument)

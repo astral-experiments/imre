@@ -465,6 +465,26 @@ fn dormant_thread_keeps_an_imported_modules_exact_types() {
             "def measure():\n    values: list[int] = [1]\n    values[0] = True\n    print(values)\n",
             "3:17",
         ),
+        (
+            "def measure():\n    values: list[int] = [True]\n    print(values)\n",
+            "2:26",
+        ),
+        (
+            "def take(values: list[int]):\n    return values\n\ndef measure():\n    print(take([True]))\n",
+            "5:17",
+        ),
+        (
+            "def measure():\n    values: dict[int, str] = {1: 'one'}\n    values[True] = 'new'\n",
+            "3:12",
+        ),
+        (
+            "def measure():\n    values: list[int] = [1]\n    alias = values\n    alias.append(True)\n",
+            "4:18",
+        ),
+        (
+            "def measure():\n    values: list[int] = [1]\n    def mutate():\n        values.append(True)\n    mutate()\n",
+            "4:23",
+        ),
     ] {
         std::fs::write(&scores, source).unwrap();
         let error = format!(
@@ -476,6 +496,23 @@ fn dormant_thread_keeps_an_imported_modules_exact_types() {
     for source in [
         "def measure():\n    value = 1\n    value = 'ready'\n    print(value)\n",
         "def measure():\n    values = [1]\n    values.append(True)\n    print(values)\n",
+        concat!(
+            "def measure():\n    typed: list[int] = [1]\n    other = [2]\n    alias = typed\n",
+            "    for alias in [other]:\n        pass\n    alias.append(True)\n",
+        ),
+        concat!(
+            "def measure():\n    typed: list[int] = [1]\n    other = [2]\n    alias = typed\n",
+            "    try:\n        alias = other\n    finally:\n        alias.append(True)\n",
+        ),
+        concat!(
+            "import sys\ndef measure():\n    declared: list[int] = [1]\n    inferred = [2]\n",
+            "    if sys.argv[-1] == 'typed':\n        alias = declared\n",
+            "    else:\n        alias = inferred\n    alias.append(True)\n",
+        ),
+        concat!(
+            "def measure():\n    values: list[int] = [1]\n    other = [2]\n    alias = values\n",
+            "    def change():\n        alias.append(True)\n    alias = other\n    change()\n",
+        ),
     ] {
         std::fs::write(&scores, source).unwrap();
         check_file(&entry, None).unwrap();

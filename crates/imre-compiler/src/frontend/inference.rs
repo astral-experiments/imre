@@ -920,14 +920,24 @@ impl Inference {
                     (infer_return || checker.discover_document_return.is_some()).then(Vec::new);
                 let mut checked_return = false;
                 let result = (|| {
-                    for (parameter, signature) in
-                        closed_calls::parameters(&function.parameters).zip(&signature.params)
+                    for (index, (parameter, layout)) in
+                        closed_calls::parameters(&function.parameters)
+                            .zip(&signature.params)
+                            .enumerate()
                     {
-                        checker.bind_parameter(parameter, signature.ty)?;
+                        checker.bind_parameter(
+                            parameter,
+                            layout.ty,
+                            signature.parameter_declaration(index),
+                        )?;
                     }
                     if let Some(keyword) = &function.parameters.kwarg {
                         let parameter = signature.params.last().expect("keyword-rest signature");
-                        checker.bind_parameter(keyword, parameter.ty)?;
+                        checker.bind_parameter(
+                            keyword,
+                            parameter.ty,
+                            signature.parameter_declaration(signature.params.len() - 1),
+                        )?;
                     }
                     checker.collect_local_definitions(&function.body)?;
                     let falls_through = checker.lower_block(&function.body, None)?;
@@ -1353,10 +1363,11 @@ impl Checker<'_> {
             &signature.params[skip..],
             receiver,
             scope,
-            Some((signature.id, skip)),
+            Some((signature, skip)),
             &mut |checker, index, argument| {
                 let index = index + skip;
                 let parameter = &signature.params[index];
+                let declaration = signature.parameter_declaration(index);
                 if selector_wait && parameter.name == "timeout" {
                     let node = argument.site();
                     let value = argument.value(checker)?;
@@ -1376,7 +1387,12 @@ impl Checker<'_> {
                     };
                 }
                 let Some(inference) = inference else {
-                    return argument.checked(checker, parameter.ty, parameter.sign_only);
+                    return argument.checked(
+                        checker,
+                        parameter.ty,
+                        parameter.sign_only,
+                        declaration,
+                    );
                 };
                 let node = argument.site();
                 let value = if let Some(ty) = inference.parameter(signature.id, index) {
@@ -1475,6 +1491,7 @@ impl Checker<'_> {
                             checker,
                             ty,
                             parameter.sign_only,
+                            declaration,
                             |checker, value, expected, site| {
                                 let expected = inference.document_parameter(
                                     signature.id,

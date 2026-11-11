@@ -17,7 +17,7 @@ use crate::types::Types;
 pub(crate) mod phase;
 // Checkers and their expression modules propagate signature dependencies with errors.
 // Terminal-only validation and the graph driver use the standard Result.
-use phase::{Diagnostic, Failure, Kind, Result};
+use phase::{Diagnostic, Failure, Kind, Result, TypeDeclaration};
 
 mod annotation_operands;
 mod annotations;
@@ -198,12 +198,17 @@ struct Signature {
     id: usize,
     physical_frame: bool,
     asynchronous: bool,
+    parameter_declarations: Arc<[Option<TypeDeclaration>]>,
     params: Vec<Parameter>,
     returns: Type,
     method: Option<records::MethodContext>,
 }
 
 impl Signature {
+    fn parameter_declaration(&self, index: usize) -> Option<TypeDeclaration> {
+        self.parameter_declarations.get(index).copied().flatten()
+    }
+
     fn registered_frame(&self) -> bool {
         self.method.is_none()
             && self
@@ -1692,14 +1697,23 @@ fn lower_function(
     checker.method_context(signature.method);
     checker.generator_item = classes.producer_items.get(&signature.id).copied();
     let mut params = Vec::new();
-    for (parameter, signature) in
-        closed_calls::parameters(&definition.parameters).zip(&signature.params)
+    for (index, (parameter, layout)) in closed_calls::parameters(&definition.parameters)
+        .zip(&signature.params)
+        .enumerate()
     {
-        params.push(checker.bind_parameter(parameter, signature.ty)?);
+        params.push(checker.bind_parameter(
+            parameter,
+            layout.ty,
+            signature.parameter_declaration(index),
+        )?);
     }
     if let Some(keyword) = &definition.parameters.kwarg {
         let parameter = signature.params.last().expect("keyword-rest signature");
-        params.push(checker.bind_parameter(keyword, parameter.ty)?);
+        params.push(checker.bind_parameter(
+            keyword,
+            parameter.ty,
+            signature.parameter_declaration(params.len()),
+        )?);
     }
     checker.consuming_lists = consuming_lists::find(&definition.body, |func| {
         checker.unshadowed_builtin(func, "sorted")
@@ -1875,6 +1889,18 @@ fn signature(
     }
     let mut params = Vec::new();
     let mut parameter_types = Vec::new();
+    let mut parameter_declarations = Vec::new();
+    let mut declare = |index: usize, module: ModuleId, annotation: Option<&ast::Expr>| {
+        if let Some(annotation) = annotation
+            && graph.modules[module].checks_source_contracts()
+        {
+            parameter_declarations.resize(index + 1, None);
+            parameter_declarations[index] = Some(TypeDeclaration {
+                module,
+                annotation: annotation.range(),
+            });
+        }
+    };
     let mut none_defaults = Vec::new();
     let mut document_parameters = Vec::new();
     for (index, parameter) in function.parameters.iter_non_variadic_params().enumerate() {
@@ -1916,6 +1942,10 @@ fn signature(
                     }
                     _ => None,
                 });
+        let annotation = parameter.annotation().filter(|value| {
+            graph.resolve(module, value) != Some(Binding::Intrinsic(Intrinsic::ArgparseNamespace))
+                && namedtuples::annotation(graph, module, value, types).is_none()
+        });
         let ty = if let Some(receiver) = receiver
             && index == 0
         {
@@ -1930,14 +1960,7 @@ fn signature(
             }
             Some(receiver)
         } else {
-            parameter
-                .annotation()
-                .filter(|value| {
-                    graph.resolve(module, value)
-                        != Some(Binding::Intrinsic(Intrinsic::ArgparseNamespace))
-                        && namedtuples::annotation(graph, module, value, types).is_none()
-                })
-                .map(|value| {
+            annotation.map(|value| {
                     if let ast::Expr::Subscript(sequence) = value
                         && annotations::sequence_annotation(graph.resolve(module, &sequence.value))
                     {
@@ -2051,6 +2074,7 @@ fn signature(
                 }
             })
             .transpose()?;
+        declare(params.len(), module, annotation);
         params.push(Parameter {
             name: parameter.name().to_string(),
             ty,
@@ -2083,6 +2107,7 @@ fn signature(
             None
         };
         parameter_types.push(ty);
+        declare(params.len(), module, pack.annotation());
         params.push(Parameter {
             name: pack.name.to_string(),
             ty: ty.unwrap_or(Type::None),
@@ -2101,6 +2126,7 @@ fn signature(
         })?;
         let element = pack_element(element)?;
         let ty = types.dict(Type::Str, element);
+        declare(params.len(), module, keyword.annotation());
         params.push(Parameter {
             name: keyword.name.to_string(),
             ty,
@@ -2166,6 +2192,7 @@ fn signature(
         id,
         physical_frame: false,
         asynchronous: function.is_async,
+        parameter_declarations: parameter_declarations.into(),
         params,
         returns: returns.unwrap_or(Type::None),
         method,
@@ -3008,6 +3035,8 @@ struct Checker<'a> {
     returns: Type,
     /// Inferred containers can acquire a new storage layout at an outermost plain assignment.
     inferred_containers: HashSet<usize>,
+    /// Annotations constrain later assignments to the same lexical slot.
+    declared_slots: HashMap<usize, TypeDeclaration>,
     /// Fresh annotated lists whose inner lists may come from a document.
     document_list_sites: HashMap<usize, u32>,
     nullable_assignments: HashMap<String, Type>,
@@ -3096,6 +3125,7 @@ impl<'a> Checker<'a> {
             captured_process_errors: Vec::new(),
             returns: Type::None,
             inferred_containers: HashSet::new(),
+            declared_slots: HashMap::new(),
             document_list_sites: HashMap::new(),
             nullable_assignments: HashMap::new(),
             bound_flags: HashMap::new(),
@@ -3138,9 +3168,17 @@ impl<'a> Checker<'a> {
             }
     }
 
-    fn bind_parameter(&mut self, parameter: &ast::Parameter, ty: Type) -> Result<usize, String> {
+    fn bind_parameter(
+        &mut self,
+        parameter: &ast::Parameter,
+        ty: Type,
+        declaration: Option<TypeDeclaration>,
+    ) -> Result<usize, String> {
         let slot = self.declare_binding(parameter.name().as_str(), ty, parameter, true)?;
         self.assigned.insert(slot);
+        if let Some(declaration) = declaration {
+            self.bind_declared_type(slot, declaration);
+        }
         Ok(slot)
     }
 
@@ -3804,7 +3842,22 @@ impl<'a> Checker<'a> {
 
     /// Context determines empty literals and optional elements at storage boundaries.
     fn expr_expected(&mut self, expression: &ast::Expr, expected: Type) -> Result<Expr, String> {
-        self.expr_expected_or(expression, expected, None)
+        self.expr_expected_from(expression, expected, None)
+    }
+
+    fn expr_expected_from(
+        &mut self,
+        expression: &ast::Expr,
+        expected: Type,
+        declaration: Option<TypeDeclaration>,
+    ) -> Result<Expr, String> {
+        self.expr_in_context(
+            expression,
+            expected,
+            |_, _| false,
+            Self::coerce,
+            declaration,
+        )
     }
 
     /// A partial can accept a sentinel in place of a parameter. Preserve its type
@@ -3825,7 +3878,7 @@ impl<'a> Checker<'a> {
         expected: Type,
         alternative: impl Fn(&Self, Type) -> bool,
     ) -> Result<Expr, String> {
-        self.expr_in_context(expression, expected, alternative, Self::coerce)
+        self.expr_in_context(expression, expected, alternative, Self::coerce, None)
     }
 
     /// Lower operands normally and let the destination check the resulting value.
@@ -3835,7 +3888,11 @@ impl<'a> Checker<'a> {
         expected: Type,
         alternative: impl Fn(&Self, Type) -> bool,
         coerce: impl Fn(&Self, Expr, Type, &ast::Expr) -> Result<Expr, String>,
+        declaration: Option<TypeDeclaration>,
     ) -> Result<Expr, String> {
+        let coerce = |checker: &Self, value, ty, site: &ast::Expr| {
+            coerce(checker, value, ty, site).map_err(|e| e.expected_from(declaration, site.range()))
+        };
         if self.registered.is_some() {
             let layout = self.types.payload(expected).unwrap_or(expected);
             let concrete_display = match expression {
@@ -4044,7 +4101,7 @@ impl<'a> Checker<'a> {
         }
         let value = match expression {
             ast::Expr::Dict(dict) if concrete == Type::ReadOnlyObjectMapping => {
-                let value = self.dictionary(dict, Some((Type::Str, Type::ObjectValue)))?;
+                let value = self.dictionary(dict, Some((Type::Str, Type::ObjectValue)), None)?;
                 self.coerce(value, concrete, expression)?
             }
             ast::Expr::Call(call)
@@ -4085,10 +4142,10 @@ impl<'a> Checker<'a> {
                 self.comprehension(expression, Some(concrete))?
             }
             ast::Expr::Dict(dict) if self.types.mapping(concrete).is_some() => {
-                self.dictionary(dict, self.types.mapping(concrete))?
+                self.dictionary(dict, self.types.mapping(concrete), declaration)?
             }
             ast::Expr::Set(set) if self.types.set_element(concrete).is_some() => {
-                self.set_literal(set, self.types.set_element(concrete))?
+                self.set_literal(set, self.types.set_element(concrete), declaration)?
             }
             ast::Expr::Call(call)
                 if self.types.element(concrete).is_some()
@@ -4199,7 +4256,7 @@ impl<'a> Checker<'a> {
                 let values = list
                     .elts
                     .iter()
-                    .map(|value| self.expr_expected(value, element))
+                    .map(|value| self.expr_expected_from(value, element, declaration))
                     .collect::<StdResult<Vec<_>, _>>()?;
                 Expr {
                     ty: concrete,
@@ -4227,7 +4284,7 @@ impl<'a> Checker<'a> {
                     .elts
                     .iter()
                     .zip(fields)
-                    .map(|(value, ty)| self.expr_expected(value, ty))
+                    .map(|(value, ty)| self.expr_expected_from(value, ty, declaration))
                     .collect::<StdResult<Vec<_>, _>>()?;
                 Expr {
                     ty: concrete,
@@ -4420,6 +4477,8 @@ impl<'a> Checker<'a> {
         for name in narrowing::assigned_names(body) {
             if let Some(slot) = self.names.get(&name) {
                 self.narrowed.remove_mut(slot);
+                self.assigned
+                    .set_type_source(*slot, self.declared_slots.get(slot).copied());
             }
         }
         for name in narrowing::deleted_names(body) {
@@ -4439,7 +4498,30 @@ impl<'a> Checker<'a> {
         Ok(())
     }
 
+    fn bind_declared_type(&mut self, slot: usize, declaration: TypeDeclaration) {
+        self.declared_slots.insert(slot, declaration);
+        self.assigned.set_type_source(slot, Some(declaration));
+    }
+
+    fn value_declaration(&self, value: &Expr) -> Option<TypeDeclaration> {
+        match &value.kind {
+            ExprKind::Local(slot) => self.assigned.type_source(*slot),
+            ExprKind::Present(inner) | ExprKind::Unwrap(inner) => self.value_declaration(inner),
+            ExprKind::Conditional(_, yes, no) => {
+                let source = self.value_declaration(yes)?;
+                (self.value_declaration(no) == Some(source)).then_some(source)
+            }
+            _ => None,
+        }
+    }
+
     fn assigned_value(&mut self, slot: usize, value: &Expr) {
+        let declaration = self
+            .declared_slots
+            .get(&slot)
+            .copied()
+            .or_else(|| self.value_declaration(value));
+        self.assigned.set_type_source(slot, declaration);
         if self.module_scope {
             self.namespace_assignment(slot, value);
         }
@@ -4490,6 +4572,7 @@ impl<'a> Checker<'a> {
         &mut self,
         dict: &ast::ExprDict,
         expected: Option<(Type, Type)>,
+        declaration: Option<TypeDeclaration>,
     ) -> Result<Expr, String> {
         if dict.items.iter().any(|item| item.key.is_none()) {
             return self.expanded_dictionary(dict, expected);
@@ -4511,8 +4594,8 @@ impl<'a> Checker<'a> {
                 .ok_or_else(|| error(self.source, dict, "dictionary expansion is unsupported"))?;
             let (key, value) = if let Some((key_type, value_type)) = types {
                 (
-                    self.expr_expected(key, key_type)?,
-                    self.expr_expected(&item.value, value_type)?,
+                    self.expr_expected_from(key, key_type, declaration)?,
+                    self.expr_expected_from(&item.value, value_type, declaration)?,
                 )
             } else {
                 let key_value = self.expr(key)?;
@@ -4547,7 +4630,12 @@ impl<'a> Checker<'a> {
     }
 
     /// Exact scalar elements keep hashing and equality free of user callbacks.
-    fn set_literal(&mut self, set: &ast::ExprSet, expected: Option<Type>) -> Result<Expr, String> {
+    fn set_literal(
+        &mut self,
+        set: &ast::ExprSet,
+        expected: Option<Type>,
+        declaration: Option<TypeDeclaration>,
+    ) -> Result<Expr, String> {
         if set
             .elts
             .iter()
@@ -4559,7 +4647,7 @@ impl<'a> Checker<'a> {
         let mut values = Vec::with_capacity(set.elts.len());
         for value in &set.elts {
             let checked = if let Some(element) = element {
-                self.expr_expected(value, element)?
+                self.expr_expected_from(value, element, declaration)?
             } else {
                 self.expr(value)?
             };
@@ -4943,7 +5031,7 @@ impl<'a> Checker<'a> {
             self.loop_breaks.push(None);
             let body = lower_body(self)?;
             let breaks = self.loop_breaks.pop().unwrap();
-            self.assigned = before;
+            self.assigned.after_iteration(before);
             self.narrowed = facts;
             let (mut orelse, falls) = self.loop_else(orelse, breaks, true)?;
             let cursor = self.hidden(Type::Int);
@@ -5220,7 +5308,7 @@ impl<'a> Checker<'a> {
         self.loop_breaks.push(None);
         body.extend(lower_body(self)?);
         let breaks = self.loop_breaks.pop().unwrap();
-        self.assigned = before;
+        self.assigned.after_iteration(before);
         self.narrowed = facts;
         let (mut orelse, falls) = self.loop_else(orelse, breaks, true)?;
         cleanup.extend(counter);
@@ -5389,7 +5477,7 @@ impl<'a> Checker<'a> {
                 } else if empty_list && later.iter().any(|s| matches!(s, ast::Stmt::Assign(a)
                     if matches!(&*a.value, ast::Expr::Name(value) if value.id == name.id)
                     && a.targets.iter().any(|target| matches!(target, ast::Expr::Subscript(sub)
-                        if matches!(&*sub.slice, ast::Expr::Slice(_)) && self.assignment_context(target, None) == Some(self.types.list(documents::ANY)))))) {
+                        if matches!(&*sub.slice, ast::Expr::Slice(_)) && self.target_context(target, None) == Some(self.types.list(documents::ANY)))))) {
                     Some(self.types.list(documents::ANY))
                 } else if empty_list || empty_set {
                     self.inserted_element(name.id.as_str(), empty_set, later)
@@ -5717,8 +5805,15 @@ impl<'a> Checker<'a> {
                     _ => None,
                 };
                 let ty = checked.as_ref().map_or(ty, |value| value.ty);
+                let declaration = TypeDeclaration {
+                    module: self.module,
+                    annotation: assign.annotation.range(),
+                };
                 let check_value = |checker: &mut Self, rhs: &ast::Expr| {
-                    checked.map_or_else(|| checker.expr_expected(rhs, ty), Ok)
+                    checked.map_or_else(
+                        || checker.expr_expected_from(rhs, ty, Some(declaration)),
+                        Ok,
+                    )
                 };
                 // A new outermost annotation dominates every subsequent read.
                 // Evaluate its RHS with the old binding; closures and nested
@@ -5731,9 +5826,12 @@ impl<'a> Checker<'a> {
                     && let Some(rhs) = &assign.value
                 {
                     let value = check_value(self, rhs)?;
-                    return Ok((self.replace_local(name.id.as_str(), old, ty, value), true));
+                    let statements = self.replace_local(name.id.as_str(), old, ty, value);
+                    self.bind_declared_type(self.names[name.id.as_str()], declaration);
+                    return Ok((statements, true));
                 }
                 let slot = self.declare(name.id.as_str(), ty, statement)?;
+                self.bind_declared_type(slot, declaration);
                 if let Some(site) = list_site {
                     self.document_list_sites.insert(slot, site);
                 } else {
@@ -6030,6 +6128,8 @@ impl<'a> Checker<'a> {
                 for name in narrowing::expression_assignments(&loop_.test) {
                     if let Some(slot) = self.names.get(&name) {
                         self.narrowed.remove_mut(slot);
+                        self.assigned
+                            .set_type_source(*slot, self.declared_slots.get(slot).copied());
                     }
                 }
                 let test = self.condition(&loop_.test)?;
@@ -6048,7 +6148,7 @@ impl<'a> Checker<'a> {
                 self.loop_breaks.push(None);
                 let (body, _) = self.block(&loop_.body)?;
                 let breaks = self.loop_breaks.pop().unwrap();
-                self.assigned = before;
+                self.assigned.after_iteration(before);
                 self.narrowed = facts;
                 self.apply_facts(&loop_.test, false);
                 if entered == Some(false) {
@@ -6721,6 +6821,7 @@ impl<'a> Checker<'a> {
         for name in narrowing::assigned_names(&try_.body) {
             if let Some(slot) = self.names.get(&name) {
                 handler_facts.remove_mut(slot);
+                handler_assigned.set_type_source(*slot, self.declared_slots.get(slot).copied());
             }
         }
         let mut handlers = Vec::new();
@@ -6857,6 +6958,8 @@ impl<'a> Checker<'a> {
         for name in narrowing::assigned_names(&protected) {
             if let Some(slot) = self.names.get(&name) {
                 self.narrowed.remove_mut(slot);
+                self.assigned
+                    .set_type_source(*slot, self.declared_slots.get(slot).copied());
             }
         }
         // Pending breaks must pass through finally. Its own transfers replace
@@ -6887,6 +6990,9 @@ impl<'a> Checker<'a> {
             }
             for slot in written.iter().chain(&deleted) {
                 pending.narrowed.remove_mut(slot);
+                pending
+                    .assigned
+                    .set_type_source(*slot, self.declared_slots.get(slot).copied());
             }
             pending.assigned.extend(&final_state.assigned);
             for (&slot, &ty) in &final_state.narrowed {
@@ -8371,9 +8477,9 @@ impl<'a> Checker<'a> {
                 {
                     return Ok(self.document_literal(expression, documents::MAP)?.unwrap());
                 }
-                return self.dictionary(dict, None);
+                return self.dictionary(dict, None, None);
             }
-            ast::Expr::Set(set) => return self.set_literal(set, None),
+            ast::Expr::Set(set) => return self.set_literal(set, None, None),
             ast::Expr::Tuple(tuple) => {
                 if tuple
                     .elts
@@ -12708,7 +12814,11 @@ impl<'a> Checker<'a> {
                         ));
                     }
                 };
-                let value = self.expr_expected(&call.arguments.args[0], element)?;
+                let value = self.expr_expected_from(
+                    &call.arguments.args[0],
+                    element,
+                    self.value_declaration(&receiver),
+                )?;
                 return Ok(Expr {
                     ty: Type::None,
                     kind: ExprKind::Builtin(builtin, vec![receiver, value]),
@@ -12741,6 +12851,7 @@ impl<'a> Checker<'a> {
             if attribute.attr.as_str() == "extend" && call.arguments.args.len() == 1 {
                 return self.extend_list(receiver, &call.arguments.args[0], call, append);
             }
+            let declaration = self.value_declaration(&receiver);
             let mut args = vec![receiver];
             let (builtin, ty) = match attribute.attr.as_str() {
                 "append" if call.arguments.args.len() == 1 => {
@@ -12761,7 +12872,7 @@ impl<'a> Checker<'a> {
                         }
                         self.coerce(value, element, arg)?
                     } else {
-                        self.expr_expected(arg, element)?
+                        self.expr_expected_from(arg, element, declaration)?
                     };
                     args.push(value);
                     (append, Type::None)

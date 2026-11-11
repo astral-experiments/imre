@@ -203,7 +203,7 @@ impl StatementLowering for Checker<'_> {
             } else if self.inferred_returns.is_some() {
                 self.expr(value)?
             } else {
-                self.expr_in_context(value, self.returns, |_, _| false, Self::coerce_return)?
+                self.expr_in_context(value, self.returns, |_, _| false, Self::coerce_return, None)?
             }
         } else {
             Expr::none()

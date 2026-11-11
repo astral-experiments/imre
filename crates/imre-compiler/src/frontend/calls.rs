@@ -353,10 +353,15 @@ impl<'a> Supplied<'a> {
         checker: &mut Checker<'_>,
         ty: Type,
         sign_only: bool,
+        declaration: Option<TypeDeclaration>,
     ) -> Result<Expr, String> {
-        self.check_with(checker, ty, sign_only, |checker, value, ty, site| {
-            checker.direct_value(value, site, ty, sign_only)
-        })
+        self.check_with(
+            checker,
+            ty,
+            sign_only,
+            declaration,
+            |checker, value, ty, site| checker.direct_value(value, site, ty, sign_only),
+        )
     }
 
     /// Check an operand in context. The destination sees only its evaluated value.
@@ -365,16 +370,18 @@ impl<'a> Supplied<'a> {
         checker: &mut Checker<'_>,
         ty: Type,
         sign_only: bool,
+        declaration: Option<TypeDeclaration>,
         coerce: impl Fn(&Checker<'_>, Expr, Type, &ast::Expr) -> Result<Expr, String>,
     ) -> Result<Expr, String> {
         if let Self::Source(node) = self
             && !sign_only
         {
-            return checker.expr_in_context(node, ty, |_, _| false, coerce);
+            return checker.expr_in_context(node, ty, |_, _| false, coerce, declaration);
         }
         let node = self.site();
         let value = self.value(checker)?;
         coerce(checker, value, ty, node)
+            .map_err(|error| error.expected_from(declaration, node.range()))
     }
 }
 
@@ -663,7 +670,7 @@ impl Checker<'_> {
             Some(scope),
             None,
             &mut |checker, index, argument| {
-                argument.checked(checker, params[index].ty, params[index].sign_only)
+                argument.checked(checker, params[index].ty, params[index].sign_only, None)
             },
         )
     }
@@ -699,9 +706,18 @@ impl Checker<'_> {
         params: &[Parameter],
         receiver: Option<Expr>,
         mut scope: Option<&mut ArgumentScope>,
-        default_owner: Option<(usize, usize)>,
+        source_signature: Option<(&Signature, usize)>,
         check: &mut dyn FnMut(&mut Self, usize, Supplied<'_>) -> Result<Expr, String>,
     ) -> Result<ir::CallArgs, String> {
+        let default_owner = source_signature.map(|(sig, skip)| (sig.id, skip));
+        let declaration = |index| {
+            source_signature.and_then(|(sig, skip)| sig.parameter_declaration(index + skip))
+        };
+        let mut check = |checker: &mut Self, index, input: Supplied<'_>| {
+            let range = input.site().range();
+            check(checker, index, input)
+                .map_err(|error| error.expected_from(declaration(index), range))
+        };
         let offset = usize::from(receiver.is_some());
         let mut values = Vec::new();
         if let Some(value) = receiver {
@@ -773,7 +789,8 @@ impl Checker<'_> {
                     .as_name_expr()
                     .is_some_and(|name| self.positional_pack.as_deref() == Some(name.id.as_str()))
             {
-                let value = self.expr_expected(&star.value, params[index].ty)?;
+                let value =
+                    self.expr_expected_from(&star.value, params[index].ty, declaration(index))?;
                 forwarded = Some(if let Some(scope) = scope.as_deref_mut() {
                     scope.hold(self, value)
                 } else {
@@ -793,7 +810,7 @@ impl Checker<'_> {
                         error(checker.source, arg, "too many positional arguments")
                     })?;
                     let value = if let Some(element) = checker.types.element(params[index].ty) {
-                        input.checked(checker, element, false)?
+                        input.checked(checker, element, false, declaration(index))?
                     } else {
                         input.value(checker)?
                     };
@@ -891,7 +908,7 @@ impl Checker<'_> {
                     .types
                     .mapping(params[index].ty)
                     .expect("typed keyword rest");
-                let value = self.expr_expected(&keyword.value, element)?;
+                let value = self.expr_expected_from(&keyword.value, element, declaration(index))?;
                 let value = if let Some(scope) = scope.as_deref_mut() {
                     scope.hold(self, value)
                 } else {

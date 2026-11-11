@@ -10,7 +10,7 @@ use ruff_python_ast::visitor::{Visitor, walk_comprehension, walk_expr};
 /// introduced by a walrus may acquire a slot while checking the first arm.
 #[derive(Clone)]
 pub(super) struct ConditionalFacts<'a> {
-    writes: Vec<(String, bool)>,
+    writes: Vec<(String, LocalAssignment)>,
     narrowed: Vec<(&'a str, Option<Type>)>,
 }
 
@@ -117,11 +117,8 @@ impl<'a> ConditionalFacts<'a> {
             writes: writes
                 .into_iter()
                 .map(|name| {
-                    let assigned = checker
-                        .names
-                        .get(&name)
-                        .is_some_and(|s| checker.assigned.contains(s));
-                    (name, assigned)
+                    let state = checker.assigned.state(checker.names.get(&name));
+                    (name, state)
                 })
                 .collect(),
             narrowed: flow
@@ -142,10 +139,7 @@ impl<'a> ConditionalFacts<'a> {
 
     fn read(&mut self, checker: &Checker<'_>) {
         for (name, assigned) in &mut self.writes {
-            *assigned = checker
-                .names
-                .get(name)
-                .is_some_and(|slot| checker.assigned.contains(slot));
+            *assigned = checker.assigned.state(checker.names.get(name));
         }
         for (name, ty) in &mut self.narrowed {
             *ty = checker
@@ -158,10 +152,7 @@ impl<'a> ConditionalFacts<'a> {
 
     fn retain_common(&mut self, checker: &Checker<'_>) {
         for (name, assigned) in &mut self.writes {
-            *assigned &= checker
-                .names
-                .get(name)
-                .is_some_and(|slot| checker.assigned.contains(slot));
+            assigned.retain_common(checker.assigned.state(checker.names.get(name)));
         }
         for (name, ty) in &mut self.narrowed {
             if checker
@@ -180,12 +171,8 @@ impl<'a> ConditionalFacts<'a> {
     pub(super) fn switch_arm(&mut self, checker: &mut Checker<'_>) {
         for (name, assigned) in &mut self.writes {
             if let Some(&slot) = checker.names.get(name) {
-                let current = checker.assigned.contains(&slot);
-                if *assigned {
-                    checker.assigned.insert(slot);
-                } else {
-                    checker.assigned.remove(&slot);
-                }
+                let current = checker.assigned.state(Some(&slot));
+                checker.assigned.restore(slot, *assigned);
                 *assigned = current;
             }
         }
@@ -204,9 +191,10 @@ impl<'a> ConditionalFacts<'a> {
     }
 
     pub(super) fn join(self, checker: &mut Checker<'_>) {
-        for (name, assigned) in self.writes {
-            if !assigned && let Some(slot) = checker.names.get(&name) {
-                checker.assigned.remove(slot);
+        for (name, mut incoming) in self.writes {
+            if let Some(&slot) = checker.names.get(&name) {
+                incoming.retain_common(checker.assigned.state(Some(&slot)));
+                checker.assigned.restore(slot, incoming);
             }
         }
         for (name, ty) in self.narrowed {
@@ -266,26 +254,74 @@ impl<'a> BooleanExits<'a> {
 // Snapshots share unchanged trie nodes with the current flow. Entering a
 // nested suite only copies the paths for slots whose facts actually change.
 #[derive(Clone, Default)]
-pub(super) struct Assigned(rpds::HashTrieMap<usize, u64>);
+pub(super) struct Assigned {
+    words: rpds::HashTrieMap<usize, u64>,
+    /// A value keeps its container annotation only when every incoming write agrees.
+    type_sources: rpds::HashTrieMap<usize, TypeDeclaration>,
+}
+
+#[derive(Default, Clone, Copy)]
+struct LocalAssignment {
+    initialized: bool,
+    source: Option<TypeDeclaration>,
+}
+
+impl LocalAssignment {
+    fn retain_common(&mut self, other: Self) {
+        self.initialized &= other.initialized;
+        if self.source != other.source {
+            self.source = None;
+        }
+    }
+}
 
 impl Assigned {
+    pub(super) fn type_source(&self, slot: usize) -> Option<TypeDeclaration> {
+        self.type_sources.get(&slot).copied()
+    }
+
+    pub(super) fn set_type_source(&mut self, slot: usize, source: Option<TypeDeclaration>) {
+        if let Some(source) = source {
+            self.type_sources.insert_mut(slot, source);
+        } else {
+            self.type_sources.remove_mut(&slot);
+        }
+    }
+
+    fn state(&self, slot: Option<&usize>) -> LocalAssignment {
+        LocalAssignment {
+            initialized: slot.is_some_and(|slot| self.contains(slot)),
+            source: slot.and_then(|&slot| self.type_source(slot)),
+        }
+    }
+
+    fn restore(&mut self, slot: usize, state: LocalAssignment) {
+        if state.initialized {
+            self.insert(slot);
+            self.set_type_source(slot, state.source);
+        } else {
+            self.remove(&slot);
+        }
+    }
+
     pub(super) fn contains(&self, slot: &usize) -> bool {
-        let bits = self.0.get(&(slot / 64)).copied().unwrap_or(0);
+        let bits = self.words.get(&(slot / 64)).copied().unwrap_or(0);
         bits & (1 << (slot % 64)) != 0
     }
 
     pub(super) fn insert(&mut self, slot: usize) {
         let index = slot / 64;
         let mask = 1 << (slot % 64);
-        let bits = self.0.get(&index).copied().unwrap_or(0);
+        let bits = self.words.get(&index).copied().unwrap_or(0);
         if bits & mask == 0 {
-            self.0.insert_mut(index, bits | mask);
+            self.words.insert_mut(index, bits | mask);
         }
     }
 
     pub(super) fn remove(&mut self, slot: &usize) {
+        self.type_sources.remove_mut(slot);
         let index = slot / 64;
-        if let Some(&bits) = self.0.get(&index) {
+        if let Some(&bits) = self.words.get(&index) {
             let remaining = bits & !(1 << (slot % 64));
             if remaining != bits {
                 self.set_word(index, remaining);
@@ -295,16 +331,33 @@ impl Assigned {
 
     fn set_word(&mut self, index: usize, bits: u64) {
         if bits == 0 {
-            self.0.remove_mut(&index);
+            self.words.remove_mut(&index);
         } else {
-            self.0.insert_mut(index, bits);
+            self.words.insert_mut(index, bits);
         }
     }
 
+    fn intersect_type_sources(&mut self, other: &Self) {
+        if !self.type_sources.ptr_eq(&other.type_sources) {
+            for (&slot, &source) in &self.type_sources.clone() {
+                if other.type_source(slot) != Some(source) {
+                    self.type_sources.remove_mut(&slot);
+                }
+            }
+        }
+    }
+
+    pub(super) fn after_iteration(&mut self, mut before: Self) {
+        // A loop can perform zero assignments, or finish after a different value was stored.
+        before.intersect_type_sources(self);
+        *self = before;
+    }
+
     fn intersect(&mut self, other: &Self) {
-        if !self.0.ptr_eq(&other.0) {
-            for (&index, &bits) in &self.0.clone() {
-                let common = bits & other.0.get(&index).copied().unwrap_or(0);
+        self.intersect_type_sources(other);
+        if !self.words.ptr_eq(&other.words) {
+            for (&index, &bits) in &self.words.clone() {
+                let common = bits & other.words.get(&index).copied().unwrap_or(0);
                 if common != bits {
                     self.set_word(index, common);
                 }
@@ -313,10 +366,22 @@ impl Assigned {
     }
 
     pub(super) fn extend(&mut self, other: &Self) {
-        for (&index, &bits) in &other.0 {
-            let old = self.0.get(&index).copied().unwrap_or(0);
+        if !self.type_sources.ptr_eq(&other.type_sources) {
+            for (&slot, &source) in &self.type_sources.clone() {
+                if other.contains(&slot) && other.type_source(slot) != Some(source) {
+                    self.type_sources.remove_mut(&slot);
+                }
+            }
+            for (&slot, &source) in &other.type_sources {
+                if !self.contains(&slot) {
+                    self.type_sources.insert_mut(slot, source);
+                }
+            }
+        }
+        for (&index, &bits) in &other.words {
+            let old = self.words.get(&index).copied().unwrap_or(0);
             if old | bits != old {
-                self.0.insert_mut(index, old | bits);
+                self.words.insert_mut(index, old | bits);
             }
         }
     }
@@ -794,7 +859,7 @@ impl Checker<'_> {
         &self,
         target: &ast::Expr,
         rhs: Option<&ast::Expr>,
-    ) -> Option<Type> {
+    ) -> Option<(Type, Option<TypeDeclaration>)> {
         let helpers = Helpers::new(0);
         let omitted_locals = self.omitted_assert_locals.clone();
         let omitted_free = self.omitted_assert_free.clone();
@@ -823,30 +888,32 @@ impl Checker<'_> {
                 if let Some(class) = probe.class_reference(&attribute.value)
                     && let Some(ty) = probe.class_data_type(class, attribute.attr.as_str())
                 {
-                    return Some(ty);
+                    return Some((ty, None));
                 }
                 let receiver = Self::weak_target(probe.expr(&attribute.value).ok()?);
                 // A mock accepts arbitrary effects and return values, including empty containers.
                 if self.native_mock_instance(receiver.ty)
                     && matches!(attribute.attr.as_str(), "side_effect" | "return_value")
                 {
-                    return rhs.and_then(|value| self.empty_argument_type(value));
+                    return rhs
+                        .and_then(|value| self.empty_argument_type(value))
+                        .map(|ty| (ty, None));
                 }
                 if let Type::Class(class) = receiver.ty
                     && let Some(ty) = probe.class_data_type(class, attribute.attr.as_str())
                 {
-                    return Some(ty);
+                    return Some((ty, None));
                 }
                 if let Type::ChainMap(id) = receiver.ty
                     && attribute.attr.as_str() == "maps"
                 {
-                    return Some(self.types.list(Type::Dict(id)));
+                    return Some((self.types.list(Type::Dict(id)), None));
                 }
                 if let Some(class) = self.writable_property(receiver.ty, attribute) {
                     let setter = &self.classes.setters[class][attribute.attr.as_str()];
                     return match self.inference {
-                        Some(inference) => inference.parameter(setter.id, 1),
-                        None => Some(setter.params[1].ty),
+                        Some(inference) => inference.parameter(setter.id, 1).map(|ty| (ty, None)),
+                        None => Some((setter.params[1].ty, None)),
                     };
                 }
                 if matches!(receiver.ty, Type::ModuleSpec(_))
@@ -857,24 +924,29 @@ impl Checker<'_> {
                 probe
                     .writable_field_value(attribute, receiver)
                     .ok()
-                    .map(|(_, _, ty)| ty)
+                    .map(|(_, _, ty)| (ty, None))
             }
             ast::Expr::Subscript(subscript) => {
                 let receiver = probe.expr(&subscript.value).ok()?;
+                let declaration = probe.value_declaration(&receiver);
                 if matches!(receiver.ty, Type::Document(_)) {
-                    return Some(if matches!(&*subscript.slice, ast::Expr::Slice(_)) {
-                        self.types.list(documents::ANY)
-                    } else {
-                        documents::ANY
-                    });
+                    return Some((
+                        if matches!(&*subscript.slice, ast::Expr::Slice(_)) {
+                            self.types.list(documents::ANY)
+                        } else {
+                            documents::ANY
+                        },
+                        declaration,
+                    ));
                 }
                 if receiver.ty == Type::JsonRoot {
-                    return Some(Type::JsonValue);
+                    return Some((Type::JsonValue, declaration));
                 }
                 self.types
                     .mapping(receiver.ty)
                     .map(|(_, value)| value)
                     .or_else(|| self.types.indexed_element(receiver.ty))
+                    .map(|ty| (ty, declaration))
             }
             _ => None,
         }
@@ -943,7 +1015,7 @@ mod tests {
             original.insert(slot);
         }
         let mut branch = original.clone();
-        assert!(branch.0.ptr_eq(&original.0));
+        assert!(branch.words.ptr_eq(&original.words));
         branch.remove(&0);
         branch.remove(&128);
         branch.insert(65);
