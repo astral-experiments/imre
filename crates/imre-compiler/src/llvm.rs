@@ -311,7 +311,6 @@ struct LoopTarget {
 /// an error; finally bodies may replace the completion currently being routed.
 #[derive(Clone)]
 enum Cleanup {
-    Handler(String),
     Finally(usize),
     PendingException {
         error: Value,
@@ -581,6 +580,7 @@ fn emit_program(
         temporaries: Vec::new(),
         cleanups: Vec::new(),
         finalbodies: Vec::new(),
+        handler_depth: 0,
         try_nesting: 0,
         cleanup_bytes: 0,
         cleanup_limit_hit: false,
@@ -878,6 +878,8 @@ struct Emitter<'a, 'module> {
     temporaries: Vec<Value>,
     cleanups: Vec<Cleanup>,
     finalbodies: Vec<finally::Finalbody>,
+    /// Owners below the active exception target survive a caught failure.
+    handler_depth: usize,
     try_nesting: usize,
     cleanup_bytes: usize,
     cleanup_limit_hit: bool,
@@ -2113,16 +2115,11 @@ impl Emitter<'_, '_> {
     fn unwind(&mut self, completion: Completion) {
         let stop = match &completion {
             Completion::Jump { depth, .. } => *depth,
-            Completion::Return(_) | Completion::Error => 0,
+            Completion::Error => self.handler_depth,
+            Completion::Return(_) => 0,
         };
         while self.cleanups.len() > stop {
             match self.cleanups.pop().unwrap() {
-                Cleanup::Handler(label) => {
-                    if matches!(completion, Completion::Error) {
-                        self.jump(&label);
-                        return;
-                    }
-                }
                 Cleanup::Slots(slots) => self.clear_slots(&slots),
                 Cleanup::Active { previous, name } => self.restore_active(&previous, name),
                 Cleanup::Owner(value) => self.release(&value),
@@ -2207,73 +2204,50 @@ impl Emitter<'_, '_> {
         }
         let dispatch = self.label();
         let catches_error = !handlers.is_empty() || !finalbody.is_empty();
-        if catches_error {
-            self.cleanups.push(Cleanup::Handler(dispatch.clone()));
-        }
-        self.block(body);
-        if catches_error {
-            self.cleanups.pop();
-        }
+        operations::CheckedBody::native(self).protected_suites(
+            body,
+            orelse,
+            catches_error.then_some(dispatch.as_str()),
+        );
         if !self.body.terminated {
-            self.block(orelse);
-            if !self.body.terminated {
-                self.route(Completion::Jump {
-                    label: end.clone(),
-                    depth,
-                });
-            }
+            self.route(Completion::Jump {
+                label: end.clone(),
+                depth,
+            });
         }
         if !handlers.is_empty() {
             self.start(&dispatch);
             let exception = self.call("imre_error_take", Type::Exception, &[]);
-            let pending_temporary = self.temporaries.clone();
-            for handler in handlers {
-                let crate::ir::ExceptionMatcher::Categories(kinds) = &handler.matcher else {
-                    unreachable!("a live Python matcher requires the registered frame")
-                };
-                let matched = if kinds.is_empty() {
-                    "true".to_owned()
-                } else {
-                    let mut matched = "false".to_owned();
-                    for kind in kinds {
-                        let byte = self.instruction(format!(
-                            "call i32 @imre_exception_matches(ptr {}, i32 {kind})",
-                            exception.operand
-                        ));
-                        let test = self.instruction(format!("icmp ne i32 {byte}, 0"));
-                        matched = self.instruction(format!("or i1 {matched}, {test}"));
+            let unmatched = operations::CheckedBody::native(self).ordinary_handlers(
+                handlers,
+                &exception.operand,
+                |code, handler| {
+                    let code = code.fixed();
+                    let name = handler.name;
+                    let previous =
+                        code.call("imre_exception_swap_active", Type::Exception, &[&exception]);
+                    code.forget(&previous);
+                    if let Some(name) = name {
+                        code.store(name, &exception);
+                    } else {
+                        code.release(&exception);
                     }
-                    matched
-                };
-                let (caught, next) = (self.label(), self.label());
-                self.branch(&matched, &caught, &next);
-                self.start(&caught);
-                let previous =
-                    self.call("imre_exception_swap_active", Type::Exception, &[&exception]);
-                self.forget(&previous);
-                if let Some(name) = handler.name {
-                    self.store(name, &exception);
-                } else {
-                    self.release(&exception);
-                }
-                self.cleanups.push(Cleanup::Active {
-                    previous,
-                    name: handler.name,
-                });
-                self.block(&handler.body);
-                if !self.body.terminated {
-                    self.route(Completion::Jump {
-                        label: end.clone(),
-                        depth,
-                    });
-                }
-                self.cleanups.pop();
-                self.start(&next);
-                self.temporaries = pending_temporary.clone();
+                    code.cleanups.push(Cleanup::Active { previous, name });
+                    code.block(&handler.body);
+                    if !code.body.terminated {
+                        code.route(Completion::Jump {
+                            label: end.clone(),
+                            depth,
+                        });
+                    }
+                    code.cleanups.pop();
+                },
+            );
+            if unmatched {
+                self.void_call("imre_error_set", &[&exception]);
+                self.release(&exception);
+                self.route(Completion::Error);
             }
-            self.void_call("imre_error_set", &[&exception]);
-            self.release(&exception);
-            self.route(Completion::Error);
         } else if catches_error {
             // Every failure in this protected body shares its pending-error
             // cleanup. Outer protected bodies provide their own landing pads.
@@ -2353,6 +2327,7 @@ impl Emitter<'_, '_> {
         self.loops.clear();
         self.temporaries.clear();
         self.cleanups.clear();
+        self.handler_depth = 0;
         if let Some(attrs) = main_attrs {
             self.body.start_main(self.uses_sys_argv, attrs);
         } else {

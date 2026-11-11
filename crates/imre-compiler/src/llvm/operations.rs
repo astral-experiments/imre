@@ -1,6 +1,7 @@
 //! Emit checked operations using the storage and ownership of each operand.
 
 mod comparisons;
+mod handlers;
 mod iteration;
 pub(crate) use iteration::LoopEdges;
 pub(crate) mod branches;
@@ -184,7 +185,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         frame
     }
 
-    fn fixed(&mut self) -> &mut Emitter<'a, 'module> {
+    pub(super) fn fixed(&mut self) -> &mut Emitter<'a, 'module> {
         let Entry::Native(emitter) = &mut self.0 else {
             unreachable!("checked fixed-layout operation requires a native frame")
         };
@@ -196,6 +197,34 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             Entry::Native(emitter) => &mut emitter.body,
             Entry::Registered(frame) => frame.body(),
         }
+    }
+
+    fn block_name(&mut self) -> String {
+        match &mut self.0 {
+            Entry::Native(e) => e.label(),
+            Entry::Registered(f) => f.block_name(),
+        }
+    }
+    fn jump_open(&mut self, dest: &str) {
+        let body = self.body();
+        if !body.terminated {
+            body.jump(dest);
+        }
+    }
+
+    /// Emit a conditional suite and continue on the false edge when the true
+    /// suite transfers control elsewhere.
+    fn when(&mut self, test: &str, otherwise: Option<String>, yes: impl FnOnce(&mut Self)) {
+        let take = self.block_name();
+        let end = otherwise.unwrap_or_else(|| self.block_name());
+        let body = self.body();
+        if !body.terminated {
+            body.branch(test, &take, &end);
+        }
+        self.body().start(&take);
+        yes(self);
+        self.jump_open(&end);
+        self.body().start(&end);
     }
 
     fn operand(&mut self, expr: &Expr) -> CheckedValue {

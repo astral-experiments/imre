@@ -2415,6 +2415,37 @@ mod tests {
     }
 
     #[test]
+    fn registered_handlers_have_distinct_blocks_after_a_callback_raises() {
+        let source = concat!(
+            "def decode(value, callback):\n",
+            "    try:\n",
+            "        return callback(value)\n",
+            "    except (TypeError, ValueError) as error:\n",
+            "        return error\n",
+            "    except:\n",
+            "        return value\n",
+        );
+        let module = PreparedBody::module(
+            "app",
+            Path::new("app.py"),
+            source,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let (_, llvm) = module.standalone().unwrap();
+        assert!(llvm.contains("call i64 @imre_dyn_positional_call_at("));
+        let mut blocks = HashSet::new();
+        for line in llvm.lines() {
+            if line.starts_with("define ") {
+                blocks.clear();
+            } else if let Some(block) = line.strip_suffix(':') {
+                assert!(blocks.insert(block), "duplicate basic block {block}");
+            }
+        }
+    }
+
+    #[test]
     fn mixed_module_entry_uses_its_stored_inputs_after_source_erasure() {
         let mut module = PreparedBody::module(
             "entry",
