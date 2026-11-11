@@ -4,6 +4,14 @@ use super::*;
 
 pub(super) type Block = (Vec<Statement>, bool);
 
+pub(super) fn loop_transfer(stmt: &ast::Stmt) -> Option<Statement> {
+    match stmt {
+        ast::Stmt::Break(_) => Some(Statement::Break),
+        ast::Stmt::Continue(_) => Some(Statement::Continue),
+        _ => None,
+    }
+}
+
 pub(super) fn if_arms(
     arms: Vec<(Expr, Vec<Statement>)>,
     mut otherwise: Vec<Statement>,
@@ -29,6 +37,8 @@ pub(super) trait StatementLowering {
     fn async_iteration(&self) -> bool {
         false
     }
+    /// Record a reachable exit when this scope has an enclosing loop.
+    fn record_loop_transfer(&mut self, transfer: &Statement) -> bool;
     fn other_statement(&mut self, stmt: &ast::Stmt) -> StdResult<Block, Self::Error>;
 
     fn attribute_statements(
@@ -57,7 +67,10 @@ pub(super) trait StatementLowering {
                 return self.for_loop(loop_);
             }
             ast::Stmt::Pass(_) => (None, true),
-            _ => return self.other_statement(stmt),
+            _ => match loop_transfer(stmt) {
+                Some(transfer) if self.record_loop_transfer(&transfer) => (Some(transfer), false),
+                _ => return self.other_statement(stmt),
+            },
         };
         Ok((statement.into_iter().collect(), continues))
     }
@@ -223,6 +236,18 @@ impl StatementLowering for Checker<'_> {
 
     fn for_loop(&mut self, loop_: &ast::StmtFor) -> Result<Block, String> {
         self.iteration(loop_)
+    }
+
+    fn record_loop_transfer(&mut self, transfer: &Statement) -> bool {
+        if self.loop_breaks.is_empty() {
+            return false;
+        }
+        if self.reachable && matches!(transfer, Statement::Break) {
+            let mut exits = self.take_breaks();
+            self.merge_exit(&mut exits);
+            *self.loop_breaks.last_mut().unwrap() = exits;
+        }
+        true
     }
 
     fn other_statement(&mut self, stmt: &ast::Stmt) -> Result<Block, String> {

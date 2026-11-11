@@ -1133,14 +1133,6 @@ struct LoweredSuite<'s> {
     checked_exit: Option<usize>,
 }
 
-fn loop_transfer(stmt: &ast::Stmt) -> Option<Statement> {
-    match stmt {
-        ast::Stmt::Break(_) => Some(Statement::Break),
-        ast::Stmt::Continue(_) => Some(Statement::Continue),
-        _ => None,
-    }
-}
-
 fn bind_operand(operands: &mut Vec<PhysicalOperand>, value: PhysicalOperand, ty: Type) -> Expr {
     let index = operands.len();
     operands.push(value);
@@ -1985,7 +1977,7 @@ impl<'a> SuitePreparation<'a> {
             self.retain_operand(expr, kind, suspended, checked)
         };
         for stmt in stmts {
-            if let Some(transfer) = loop_transfer(stmt) {
+            if let Some(transfer) = statements::loop_transfer(stmt) {
                 body.extend([checkpoint(stmt), transfer]);
                 checked_exit.get_or_insert(body.len());
                 continue;
@@ -2566,12 +2558,11 @@ impl statements::StatementLowering for SourceScope<'_> {
         Ok((input.for_suite(binding, body, otherwise, Vec::new()), true))
     }
 
+    fn record_loop_transfer(&mut self, _: &Statement) -> bool {
+        self.loop_scope != LoopScope::Outside
+    }
+
     fn other_statement(&mut self, stmt: &ast::Stmt) -> StdResult<statements::Block, ()> {
-        if let Some(transfer) = loop_transfer(stmt) {
-            return (self.loop_scope != LoopScope::Outside)
-                .then(|| (vec![transfer], false))
-                .ok_or(());
-        }
         match stmt {
             ast::Stmt::AugAssign(assign) => {
                 if let Some(name) = assign.target.as_name_expr() {
