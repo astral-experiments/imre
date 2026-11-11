@@ -396,6 +396,8 @@ impl Checker<'_> {
                     .then_some((name.id.as_str(), slot))
             });
             let context = self.target_expectation(target, Some(&assignment.value));
+            let scalar_item = context
+                .filter(|(ty, _)| target.is_subscript_expr() && ty.builtin_scalar_name().is_some());
             let value = if let Some((_, old)) = previous {
                 // An empty literal still needs the old context. Other container
                 // expressions can determine their own concrete result type.
@@ -404,6 +406,9 @@ impl Checker<'_> {
                     self.locals[old],
                     Self::rebindable_container,
                 )?
+            } else if let Some((expected, _)) = scalar_item {
+                // Keep the scalar operand. Its RHS can change which container receives the store.
+                self.expr_expected_if(&assignment.value, expected, |_, _| true)?
             } else if let Some(expected) = context {
                 self.assignment_rhs(target, &assignment.value, expected)?
             } else {
@@ -422,7 +427,8 @@ impl Checker<'_> {
             } else {
                 value
             };
-            let statement = self.assign_value(target, value)?;
+            let value_site = scalar_item.map(|_| assignment.value.as_ref());
+            let statement = self.assign_value_at(target, value, value_site)?;
             if let Some(sites) = &mut self.fixed_sites
                 && local.is_some()
                 && let Statement::Assign(slot, _) = &statement
@@ -454,6 +460,15 @@ impl Checker<'_> {
         &mut self,
         target: &ast::Expr,
         value: Expr,
+    ) -> Result<Statement, String> {
+        self.assign_value_at(target, value, None)
+    }
+
+    fn assign_value_at(
+        &mut self,
+        target: &ast::Expr,
+        value: Expr,
+        value_site: Option<&ast::Expr>,
     ) -> Result<Statement, String> {
         match target {
             ast::Expr::Name(_) => self.assign(target, value),
@@ -553,15 +568,22 @@ impl Checker<'_> {
                             "indexed assignment requires a mutable typed list or dictionary",
                         )
                     })?;
+                let site = value_site.unwrap_or(target);
+                let value = self
+                    .coerce(value, element, site)
+                    .map_err(|error| error.expected_from(declaration, site.range()));
+                // A direct RHS owns its error before the key. An unpacked value is placed after its key.
+                if value_site.is_some()
+                    && let Err(error) = value
+                {
+                    return Err(error);
+                }
                 let index = if matches!(receiver.ty, Type::Deque(_)) {
                     self.integer_index(&subscript.slice)?
                 } else {
                     self.expr_expected_from(&subscript.slice, key, declaration)?
                 };
-                let value = self
-                    .coerce(value, element, target)
-                    .map_err(|error| error.expected_from(declaration, target.range()))?;
-                Ok(Statement::SetItem(receiver, index, value))
+                Ok(Statement::SetItem(receiver, index, value?))
             }
             ast::Expr::Attribute(attribute) => {
                 if self.registered.is_some() {

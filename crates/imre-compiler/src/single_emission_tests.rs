@@ -625,6 +625,22 @@ fn dormant_thread_keeps_an_imported_modules_exact_types() {
             "5:5",
         ),
         (
+            concat!(
+                "def value(seq: list[int]) -> bool:\n    return True\n",
+                "def measure():\n    fresh = [1]\n    declared: list[int] = [2]\n",
+                "    alias = fresh\n    alias[0] = value(alias := declared)\n",
+            ),
+            "7:16",
+        ),
+        (
+            "def measure():\n    values: list[int] = [1]\n    values['a'] = True\n",
+            "3:19",
+        ),
+        (
+            "def measure():\n    values: list[int] = [1]\n    pair = ('a', 2)\n    values[True], n = pair\n",
+            "4:12",
+        ),
+        (
             "def measure():\n    values: list[int] = [True]\n    print(values)\n",
             "2:26",
         ),
@@ -658,6 +674,11 @@ fn dormant_thread_keeps_an_imported_modules_exact_types() {
         concat!(
             "def measure():\n    values: list[int] = [1]\n    alias = values\n    alias = [2]\n",
             "    pair = (True, 2)\n    alias[0], n = pair\n",
+        ),
+        concat!(
+            "def value(seq: list[int]) -> bool:\n    return True\n",
+            "def measure():\n    declared: list[int] = [1]\n    fresh = [2]\n",
+            "    alias = declared\n    alias[0] = value(alias := fresh)\n",
         ),
         concat!(
             "def measure():\n    typed: list[int] = [1]\n    other = [2]\n    alias = typed\n",
