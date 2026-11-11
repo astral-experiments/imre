@@ -42,7 +42,10 @@ pub(super) fn adapters(emitter: &mut Emitter<'_, '_>) {
     if uses.targets.is_empty() && uses.layouts.is_empty() && !uses.context {
         return;
     }
-    output.common().push_str("%callable = type { ptr, ptr }\n");
+    // A plain Python function owns its wrapper link immediately after the shared prefix.
+    output
+        .common()
+        .push_str("%callable = type { ptr, ptr, [0 x ptr] }\n");
     if uses.layouts.contains("python_function") {
         // Keep the ordinary adapter/context ABI. The optional third field owns
         // __wrapped__; kind 3 identifies this link when reclaiming a cycle.
@@ -448,7 +451,7 @@ print(apply(increment, 4))
             "from typing import Callable\ndef apply(callback: Callable[[int], int], value: int) -> int:\n    return callback(value)\n",
             &CompileOptions::default(),
         ).unwrap();
-        assert!(output.contains("%callable = type { ptr, ptr }"));
+        assert!(output.contains("%callable = type { ptr, ptr, [0 x ptr] }"));
         assert!(!output.contains("@layout_callable ="));
     }
 }
