@@ -492,12 +492,15 @@ impl Checker<'_> {
             let slot = helper.declare_binding(&name, value.ty, lambda, true)?;
             helper.assigned.insert(slot);
             // An escaping lambda reads the later cell value. Only its lexical annotation survives.
-            let declaration = if pull {
-                self.assigned.type_source(source)
+            let origin = if pull {
+                self.assigned.value_source(source)
             } else {
-                self.declared_slots.get(&source).copied()
+                self.declared_slots
+                    .get(&source)
+                    .copied()
+                    .map(ValueSource::Declaration)
             };
-            helper.assigned.set_type_source(slot, declaration);
+            helper.assigned.set_value_source(slot, origin);
             params.push(slot);
             args.push(value);
         }

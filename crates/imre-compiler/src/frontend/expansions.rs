@@ -605,6 +605,7 @@ impl Checker<'_> {
         node: &impl Ranged,
         append: Builtin,
     ) -> Result<Expr, String> {
+        self.keep_module_list_layout(&receiver);
         let element = self.types.element(receiver.ty).unwrap();
         let mut input = self.expansion_input(source, Some(element))?;
         if let Iteration::Container {

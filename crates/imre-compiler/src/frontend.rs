@@ -184,7 +184,7 @@ mod warnings;
 mod weakref;
 mod zip_sums;
 mod zipfile;
-use assignments::LocalState;
+use assignments::{LocalState, ValueSource};
 pub(crate) use caller_cache::CallerCache;
 use calls::{Parameter, ParameterKind, parameter};
 pub(crate) use calls::{fixed_call_arguments, known_declared_argument, scalar_literal};
@@ -753,12 +753,27 @@ fn lower_graph(
             }
         }
         for (statement_id, statement) in module.parsed.syntax().body.iter().enumerate() {
+            let owner = DefinitionId {
+                module: module_id,
+                statement: statement_id,
+            };
             match statement {
+                ast::Stmt::Assign(assign)
+                    if assign
+                        .value
+                        .as_list_expr()
+                        .is_some_and(|list| list.elts.is_empty())
+                        && let [target] = assign.targets.as_slice()
+                        && target.as_name_expr().is_some_and(|name| {
+                            module.bindings.get(name.id.as_str()) == Some(&Binding::Value(owner))
+                        })
+                        && !module.rebound_values.contains(&statement_id)
+                        && graph.session.unannotated_module_store(module_id, target) =>
+                {
+                    inference.discover_module_list(&types, owner);
+                }
                 ast::Stmt::FunctionDef(function) => {
-                    if !graph.includes(DefinitionId {
-                        module: module_id,
-                        statement: statement_id,
-                    }) {
+                    if !graph.includes(owner) {
                         continue;
                     }
                     let cached = function_caches::policy(graph, module_id, function)?;
@@ -3624,6 +3639,7 @@ impl<'a> Checker<'a> {
 
     /// Optional and finite-union promotions are explicit; containers stay invariant.
     fn coerce(&self, value: Expr, expected: Type, node: &impl Ranged) -> Result<Expr, String> {
+        self.keep_module_list_layout(&value);
         if matches!(&value.kind, ExprKind::Builtin(Builtin::Unrepresented, _)) {
             return Ok(Expr {
                 ty: expected,
@@ -4617,25 +4633,48 @@ impl<'a> Checker<'a> {
         self.assigned.set_type_source(slot, Some(declaration));
     }
 
-    fn value_declaration(&self, value: &Expr) -> Option<TypeDeclaration> {
+    fn value_source(&self, value: &Expr) -> Option<ValueSource> {
         match &value.kind {
-            ExprKind::Local(slot) => self.assigned.type_source(*slot),
-            ExprKind::Present(inner) | ExprKind::Unwrap(inner) => self.value_declaration(inner),
+            ExprKind::Local(slot) => self.assigned.value_source(*slot),
+            ExprKind::Present(inner) | ExprKind::Unwrap(inner) => self.value_source(inner),
             ExprKind::Conditional(_, yes, no) => {
-                let source = self.value_declaration(yes)?;
-                (self.value_declaration(no) == Some(source)).then_some(source)
+                let source = self.value_source(yes)?;
+                (self.value_source(no) == Some(source)).then_some(source)
             }
-            _ => None,
+            _ => self
+                .globals
+                .list_origin(value)
+                .map(ValueSource::InferredList),
+        }
+    }
+
+    /// A checked mutator or an escaping alias can write elements outside
+    /// the observed appends. Keep the original layout for that allocation.
+    fn keep_module_list_layout(&self, value: &Expr) {
+        if let Some(inference) = self.inference
+            && matches!(value.ty, Type::List(_))
+            && let Some(ValueSource::InferredList(owner)) = self.value_source(value)
+            && self.types.observe_module_list_use(owner, false)
+        {
+            inference.layout_changed();
+        }
+    }
+
+    fn value_declaration(&self, value: &Expr) -> Option<TypeDeclaration> {
+        match self.value_source(value)? {
+            ValueSource::Declaration(declaration) => Some(declaration),
+            ValueSource::InferredList(_) => None,
         }
     }
 
     fn assigned_value(&mut self, slot: usize, value: &Expr) {
-        let declaration = self
+        let source = self
             .declared_slots
             .get(&slot)
             .copied()
-            .or_else(|| self.value_declaration(value));
-        self.assigned.set_type_source(slot, declaration);
+            .map(ValueSource::Declaration)
+            .or_else(|| self.value_source(value));
+        self.assigned.set_value_source(slot, source);
         if self.module_scope {
             self.namespace_assignment(slot, value);
         }
@@ -13124,7 +13163,25 @@ impl<'a> Checker<'a> {
             let (builtin, ty) = match attribute.attr.as_str() {
                 "append" if call.arguments.args.len() == 1 => {
                     let arg = &call.arguments.args[0];
-                    let value = if let ExprKind::Local(slot) = args[0].kind
+                    let value = if let Some(inference) = self.inference
+                        && let Some(ValueSource::InferredList(owner)) = self.value_source(&args[0])
+                    {
+                        self.expr_in_context(
+                            arg,
+                            element,
+                            |_, _| false,
+                            |checker, value, expected, site| {
+                                if checker
+                                    .types
+                                    .observe_module_list_use(owner, value.ty == Type::Str)
+                                {
+                                    inference.layout_changed();
+                                }
+                                checker.coerce(value, expected, site)
+                            },
+                            declaration,
+                        )?
+                    } else if let ExprKind::Local(slot) = args[0].kind
                         && let Some(&site) = self.document_list_sites.get(&slot)
                         && let Some(inference) = self.inference
                         && element != documents::LIST

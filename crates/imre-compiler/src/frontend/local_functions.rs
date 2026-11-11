@@ -743,11 +743,14 @@ impl Checker<'_> {
                 helper.assigned.insert(inner);
                 // A direct call loads the current cell. A later assignment can replace an aliased value.
                 let source = if rebound.contains(&outer) {
-                    self.declared_slots.get(&outer).copied()
+                    self.declared_slots
+                        .get(&outer)
+                        .copied()
+                        .map(ValueSource::Declaration)
                 } else {
-                    self.assigned.type_source(outer)
+                    self.assigned.value_source(outer)
                 };
-                helper.assigned.set_type_source(inner, source);
+                helper.assigned.set_value_source(inner, source);
                 params.push(inner);
                 captures.push(outer);
                 inner

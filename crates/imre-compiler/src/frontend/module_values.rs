@@ -19,6 +19,7 @@ pub(super) struct ModuleValues {
     pub(super) missing_bindings: RefCell<std::collections::BTreeMap<usize, Diagnostic>>,
     pub(super) class_data: RefCell<class_data::Storage>,
     definitions: RefCell<HashMap<(DefinitionId, usize), (usize, Type)>>,
+    list_origins: RefCell<HashMap<usize, DefinitionId>>,
     class_slots: RefCell<HashMap<(DefinitionId, usize), usize>>,
     pub(super) unittest_skips: RefCell<HashMap<(DefinitionId, usize), (usize, usize)>>,
     literal_tuples: RefCell<HashMap<ClassLiteral, usize>>,
@@ -116,6 +117,15 @@ impl ModuleValues {
         Expr {
             ty: self.types.borrow()[slot],
             kind: ExprKind::Builtin(Builtin::GlobalGet(slot), vec![]),
+        }
+    }
+
+    pub(super) fn list_origin(&self, value: &Expr) -> Option<DefinitionId> {
+        match &value.kind {
+            ExprKind::Builtin(Builtin::GlobalGet(slot), _) => {
+                self.list_origins.borrow().get(slot).copied()
+            }
+            _ => None,
         }
     }
 
@@ -495,6 +505,9 @@ impl Checker<'_> {
                 .collect::<Result<Vec<_>, _>>()?;
             for (member, value) in values.into_iter().enumerate() {
                 let slot = self.globals.insert_member(definition, member, value.ty);
+                if let Some(origin) = self.globals.list_origin(&value) {
+                    self.globals.list_origins.borrow_mut().insert(slot, origin);
+                }
                 if let Some(target) = self.globals.saved_function(&value) {
                     self.globals.publish_function(slot, target);
                 }
@@ -522,6 +535,10 @@ impl Checker<'_> {
             value
         } else if let Some(ImportSnapshot::Intrinsic(symbol)) = snapshot {
             self.import_sys_value(*symbol)
+        } else if self.types.module_list_uses_strings(definition) == Some(true)
+            && let ast::Stmt::Assign(assign) = statement
+        {
+            self.expr_expected(&assign.value, self.types.list(Type::Str))?
         } else {
             self.module_assignment(statement)?
         };
@@ -566,6 +583,17 @@ impl Checker<'_> {
             value
         };
         let slot = self.globals.insert(definition, value.ty);
+        if let Some(origin) = self
+            .types
+            .module_list_uses_strings(definition)
+            .map(|_| definition)
+            .or_else(|| match statement {
+                ast::Stmt::Assign(_) => self.globals.list_origin(&value),
+                _ => None,
+            })
+        {
+            self.globals.list_origins.borrow_mut().insert(slot, origin);
+        }
         if let Some(target) = saved {
             self.globals.publish_function(slot, target);
         }

@@ -439,6 +439,11 @@ impl Inference {
         }
     }
 
+    pub(super) fn discover_module_list(&self, types: &Types, owner: DefinitionId) {
+        types.infer_module_list(owner);
+        self.widened.set(true);
+    }
+
     /// A fresh annotated list has no initializer element to settle its storage.
     pub(super) fn discover_list_elements(
         &self,
@@ -1522,7 +1527,9 @@ impl Checker<'_> {
                         )?
                     }
                 } else {
-                    argument.value(checker)?
+                    let value = argument.value(checker)?;
+                    checker.keep_module_list_layout(&value);
+                    value
                 };
                 inference.learn_parameter(signature.id, index, value.ty);
                 Ok(value)

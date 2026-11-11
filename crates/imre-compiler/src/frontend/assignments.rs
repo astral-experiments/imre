@@ -256,14 +256,20 @@ impl<'a> BooleanExits<'a> {
 #[derive(Clone, Default)]
 pub(super) struct Assigned {
     words: rpds::HashTrieMap<usize, u64>,
-    /// A value keeps its container annotation only when every incoming write agrees.
-    type_sources: rpds::HashTrieMap<usize, TypeDeclaration>,
+    /// A value keeps its storage origin only when every incoming write agrees.
+    type_sources: rpds::HashTrieMap<usize, ValueSource>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum ValueSource {
+    Declaration(TypeDeclaration),
+    InferredList(DefinitionId),
 }
 
 #[derive(Default, Clone, Copy)]
 struct LocalAssignment {
     initialized: bool,
-    source: Option<TypeDeclaration>,
+    source: Option<ValueSource>,
 }
 
 impl LocalAssignment {
@@ -276,11 +282,15 @@ impl LocalAssignment {
 }
 
 impl Assigned {
-    pub(super) fn type_source(&self, slot: usize) -> Option<TypeDeclaration> {
+    pub(super) fn value_source(&self, slot: usize) -> Option<ValueSource> {
         self.type_sources.get(&slot).copied()
     }
 
     pub(super) fn set_type_source(&mut self, slot: usize, source: Option<TypeDeclaration>) {
+        self.set_value_source(slot, source.map(ValueSource::Declaration));
+    }
+
+    pub(super) fn set_value_source(&mut self, slot: usize, source: Option<ValueSource>) {
         if let Some(source) = source {
             self.type_sources.insert_mut(slot, source);
         } else {
@@ -291,14 +301,14 @@ impl Assigned {
     fn state(&self, slot: Option<&usize>) -> LocalAssignment {
         LocalAssignment {
             initialized: slot.is_some_and(|slot| self.contains(slot)),
-            source: slot.and_then(|&slot| self.type_source(slot)),
+            source: slot.and_then(|&slot| self.value_source(slot)),
         }
     }
 
     fn restore(&mut self, slot: usize, state: LocalAssignment) {
         if state.initialized {
             self.insert(slot);
-            self.set_type_source(slot, state.source);
+            self.set_value_source(slot, state.source);
         } else {
             self.remove(&slot);
         }
@@ -340,7 +350,7 @@ impl Assigned {
     fn intersect_type_sources(&mut self, other: &Self) {
         if !self.type_sources.ptr_eq(&other.type_sources) {
             for (&slot, &source) in &self.type_sources.clone() {
-                if other.type_source(slot) != Some(source) {
+                if other.value_source(slot) != Some(source) {
                     self.type_sources.remove_mut(&slot);
                 }
             }
@@ -368,7 +378,7 @@ impl Assigned {
     pub(super) fn extend(&mut self, other: &Self) {
         if !self.type_sources.ptr_eq(&other.type_sources) {
             for (&slot, &source) in &self.type_sources.clone() {
-                if other.contains(&slot) && other.type_source(slot) != Some(source) {
+                if other.contains(&slot) && other.value_source(slot) != Some(source) {
                     self.type_sources.remove_mut(&slot);
                 }
             }
@@ -937,6 +947,7 @@ impl Checker<'_> {
             }
             ast::Expr::Subscript(subscript) => {
                 let receiver = probe.expr(&subscript.value).ok()?;
+                self.keep_module_list_layout(&receiver);
                 let declaration = probe.value_declaration(&receiver);
                 if matches!(receiver.ty, Type::Document(_)) {
                     return Some((
