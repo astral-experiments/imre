@@ -82,12 +82,9 @@ pub(super) fn emit(
     config: &str,
     python_optimization: i32,
     providers: &HashSet<String>,
-    layout: crate::BoxedLayout<'_>,
-) -> Result<(Vec<CodegenUnit>, bool), String> {
-    let split = matches!(
-        layout,
-        crate::BoxedLayout::Split | crate::BoxedLayout::WholeWithUnits(_)
-    );
+    layout: crate::CodegenLayout,
+) -> Result<(Vec<CodegenUnit>, bool, Option<String>), String> {
+    let split = !matches!(layout, crate::CodegenLayout::Whole);
     let mut units = Vec::new();
     let mut used_archive = false;
     let mut root = ModuleLauncher::new(
@@ -133,7 +130,7 @@ pub(super) fn emit(
             let (symbol, body) = initializer.provider_body()?;
             archived = check_archive && providers.contains(&symbol);
             if !archived && separate && !root.declares(&symbol) {
-                if whole.is_none() && matches!(layout, crate::BoxedLayout::WholeWithUnits(_)) {
+                if whole.is_none() && matches!(layout, crate::CodegenLayout::SplitWithWhole) {
                     whole = Some(root.clone());
                 }
                 units.push(CodegenUnit {
@@ -179,10 +176,7 @@ pub(super) fn emit(
         }
     }
     units.insert(0, root.finish());
-    if let (crate::BoxedLayout::WholeWithUnits(native), Some(whole)) = (layout, whole) {
-        *native = std::mem::replace(&mut units, vec![whole.finish()]);
-    }
-    Ok((units, used_archive))
+    Ok((units, used_archive, whole.map(|root| root.finish().llvm_ir)))
 }
 
 /// A selected single input owns its exact checked body. An unsupported prompt
@@ -1853,12 +1847,12 @@ mod tests {
         python_optimization: i32,
         bundled_root: &Path,
         providers: &HashSet<String>,
-        layout: crate::BoxedLayout<'_>,
+        layout: crate::CodegenLayout,
         (module_errors, registrations): (
             &HashMap<PathBuf, Box<super::super::ModuleSyntaxError>>,
             &RegisteredBodies<'_>,
         ),
-    ) -> Result<(Vec<CodegenUnit>, bool), String> {
+    ) -> Result<(Vec<CodegenUnit>, bool, Option<String>), String> {
         let units = super::super::prepare::units(
             (files, builtins),
             entry_source,
@@ -6413,7 +6407,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
 
     #[test]
     fn whole_ir_and_split_link_share_the_same_module_selection() {
-        use crate::BoxedLayout;
+        use crate::CodegenLayout;
         let root = Path::new("<imre stdlib>");
         let modules: Vec<ModuleSource> = vec![
             (
@@ -6481,10 +6475,9 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             )
             .unwrap()
         };
-        let (whole, whole_packed) = build(BoxedLayout::Whole);
-        let (split, split_packed) = build(BoxedLayout::Split);
-        let mut native = Vec::new();
-        let (combined, packed) = build(BoxedLayout::WholeWithUnits(&mut native));
+        let (whole, whole_packed, _) = build(CodegenLayout::Whole);
+        let (split, split_packed, _) = build(CodegenLayout::Split);
+        let (native, packed, dump) = build(CodegenLayout::SplitWithWhole);
         assert!(packed && whole_packed && split_packed);
         for ir in [&whole[0].llvm_ir, &split[0].llvm_ir] {
             let main = ir.split_once("define i32 @main(").unwrap().1;
@@ -6536,8 +6529,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
                     .contains(&format!("ptr {builtin}, i64 11, ptr @"))
             );
         }
-        assert_eq!(combined.len(), 1);
-        assert_eq!(whole[0].llvm_ir, combined[0].llvm_ir);
+        assert_eq!(dump.as_deref(), Some(whole[0].llvm_ir.as_str()));
         assert_eq!(native.len(), split.len());
         assert!(native.len() > 1);
         for (actual, expected) in native.iter().zip(&split) {
@@ -6604,13 +6596,13 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         };
         let initializers = (&HashMap::new(), &registrations);
         let refs = |modules: &[_]| {
-            let (units, used) = emit_modules(
+            let (units, used, _) = emit_modules(
                 (modules, &[], None),
                 "{}",
                 0,
                 root,
                 &symbols,
-                crate::BoxedLayout::Whole,
+                crate::CodegenLayout::Whole,
                 initializers,
             )
             .unwrap();
@@ -6643,7 +6635,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
                     0,
                     root,
                     &symbols,
-                    crate::BoxedLayout::Whole,
+                    crate::CodegenLayout::Whole,
                     initializers
                 )
                 .unwrap()
@@ -6652,13 +6644,13 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         }
         assert_eq!(refs(&[project.clone(), bundled.clone()]), [false, true]);
 
-        let (units, used) = emit_modules(
+        let (units, used, _) = emit_modules(
             (&[bundled.clone(), project.clone()], &[], None),
             "{}",
             0,
             root,
             &symbols,
-            crate::BoxedLayout::Whole,
+            crate::CodegenLayout::Whole,
             (
                 &HashMap::from([(
                     bundled.1.clone(),
@@ -6699,13 +6691,13 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             ]),
             ..Default::default()
         };
-        let (units, used) = emit_modules(
+        let (units, used, _) = emit_modules(
             (&[bundled, project.clone(), shadow, project], &[], None),
             "{}",
             0,
             root,
             &symbols,
-            crate::BoxedLayout::Split,
+            crate::CodegenLayout::Split,
             (&HashMap::new(), &registrations),
         )
         .unwrap();

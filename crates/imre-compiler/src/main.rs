@@ -18,7 +18,7 @@ mod wheel;
 
 use build_output::BuildOutput;
 use cli::{BuildOptions, Relro};
-use imre_compiler::{CodegenUnit, packaged_stdlib_zip};
+use imre_compiler::packaged_stdlib_zip;
 
 #[derive(Clone, Copy, Default)]
 enum Allocator {
@@ -393,47 +393,31 @@ fn run() -> Result<ExitCode, String> {
         build_cache::trace("bypass");
     }
     progress.compiling(&source_path, &optimization);
-    enum Code {
-        Whole(String),
-        Units(Vec<CodegenUnit>),
-    }
-    let mut boxed_ir_dump = None;
     let thin_units =
         lto_linker.is_some() && !whole_program && llvm_path.is_none() && !options.address_sanitizer;
-    let (code, input_paths, mut sources, extension_archives) = if split || thin_units {
-        let mut c = if thin_units {
-            imre_compiler::compile_file_for_thin_lto(&source_path, module_root.as_deref(), &options)
-        } else {
-            imre_compiler::compile_file_units(&source_path, module_root.as_deref(), &options)
-        }?;
-        let code = if thin_units && c.units.len() == 1 {
-            Code::Whole(c.units.pop().unwrap().llvm_ir)
-        } else {
-            Code::Units(c.units)
-        };
-        (code, c.input_paths, c.source_inputs, c.extension_archives)
+    let layout = if thin_units {
+        imre_compiler::CodegenLayout::ThinLto
+    } else if split {
+        imre_compiler::CodegenLayout::Split
+    } else if native_link && !whole_program && options.address_sanitizer && llvm_path.is_some() {
+        imre_compiler::CodegenLayout::SplitWithWhole
     } else {
-        let (c, units) =
-            if native_link && !whole_program && options.address_sanitizer && llvm_path.is_some() {
-                imre_compiler::compile_file_with_boxed_units(
-                    &source_path,
-                    module_root.as_deref(),
-                    &options,
-                )?
-            } else {
-                (
-                    imre_compiler::compile_file(&source_path, module_root.as_deref(), &options)?,
-                    Vec::new(),
-                )
-            };
-        let code = if units.is_empty() {
-            Code::Whole(c.llvm_ir)
-        } else {
-            boxed_ir_dump = Some(c.llvm_ir);
-            Code::Units(units)
-        };
-        (code, c.input_paths, c.source_inputs, c.extension_archives)
+        imre_compiler::CodegenLayout::Whole
     };
+    let (
+        imre_compiler::UnitCompilation {
+            units,
+            input_paths,
+            source_inputs: mut sources,
+            extension_archives,
+        },
+        whole_ir_dump,
+    ) = imre_compiler::compile_file_with_layout(
+        &source_path,
+        module_root.as_deref(),
+        &options,
+        layout,
+    )?;
     if !runtime_is_file {
         return Err(format!(
             "Runtime not found: {}. Build the workspace or pass --runtime.",
@@ -464,7 +448,7 @@ fn run() -> Result<ExitCode, String> {
         lto_linker.as_deref().or(native_lld),
         bundled.as_ref().map(|tools| tools.clang.as_path()),
     )?;
-    if let (Some(path), Some(ir)) = (&llvm_path, boxed_ir_dump) {
+    if let (Some(path), Some(ir)) = (&llvm_path, whole_ir_dump) {
         std::fs::write(path, ir).map_err(|e| e.to_string())?;
     }
     let stage = executable_cache
@@ -477,8 +461,9 @@ fn run() -> Result<ExitCode, String> {
         Some(tools) => tools.driver(),
         None => Command::new(clang.as_deref().unwrap_or(OsStr::new("clang-18"))),
     };
-    let native_inputs = match code {
-        Code::Whole(ir) => {
+    let native_inputs = match units {
+        units if !split && units.len() == 1 => {
+            let ir = &units[0].llvm_ir;
             let mut file = tempfile::Builder::new()
                 .prefix("imre-")
                 .suffix(".ll")
@@ -486,13 +471,13 @@ fn run() -> Result<ExitCode, String> {
                 .map_err(|e| e.to_string())?;
             file.write_all(ir.as_bytes()).map_err(|e| e.to_string())?;
             if let Some(path) = llvm_path {
-                std::fs::write(path, &ir).map_err(|e| e.to_string())?;
+                std::fs::write(path, ir).map_err(|e| e.to_string())?;
             }
             let input = file.path().to_owned();
             temporary = Some(file);
             vec![input]
         }
-        Code::Units(units) if thin_units => {
+        units if thin_units => {
             let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
             let mut inputs = Vec::with_capacity(units.len());
             for (i, unit) in units.into_iter().enumerate() {
@@ -508,7 +493,7 @@ fn run() -> Result<ExitCode, String> {
             scratch = Some(dir);
             inputs
         }
-        Code::Units(units) => {
+        units => {
             if stage.is_none() {
                 scratch = Some(tempfile::tempdir().map_err(|e| e.to_string())?);
             }

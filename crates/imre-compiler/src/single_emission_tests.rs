@@ -331,33 +331,26 @@ fn bound_wrapper_emits_once_with_its_fixed_callable_layout() {
         format!("import sys\n{wrapper}\nprint(sys.version_info.major)\n"),
     ] {
         std::fs::write(&path, source).unwrap();
-        let native_calls = Cell::new(0);
-        let compilation = object_fallback(
-            CompilationMode::Build(BoxedLayout::Whole),
-            ProgramEntry::File(&path, None),
-            &CompileOptions::default(),
-            Default::default(),
-            false,
-            |graph, call_error| {
-                let checked = checked_lower_with(graph, None, call_error)?;
-                assert!(matches!(checked, CheckedProgram::Native(_)));
-                Ok(checked)
-            },
-            |_, (module, _), program| {
-                native_calls.set(native_calls.get() + 1);
-                let ranges = ranges::analyze(&module);
-                let llvm_ir = llvm::emit_file(&module, &ranges, false, program)?;
-                assert!(llvm_ir.contains("call void @imre_function_set_wrapped("));
-                assert!(llvm_ir.contains("call ptr @imre_function_get_wrapped("));
-                Ok(vec![CodegenUnit {
-                    name: "__main__".into(),
-                    llvm_ir,
-                }])
-            },
-        )
-        .unwrap();
-        assert_eq!(native_calls.get(), 1);
-        assert!(!compilation.into_built().source_inputs.boxed_imports);
+        let (compilation, phases) =
+            observe_preparation(|| compile_file(&path, None, &CompileOptions::default()).unwrap());
+        assert_eq!(
+            phases
+                .iter()
+                .filter(|phase| matches!(phase, Phase::Llvm))
+                .count(),
+            1
+        );
+        assert!(!compilation.source_inputs.boxed_imports);
+        assert!(
+            compilation
+                .llvm_ir
+                .contains("call void @imre_function_set_wrapped(")
+        );
+        assert!(
+            compilation
+                .llvm_ir
+                .contains("call ptr @imre_function_get_wrapped(")
+        );
     }
 }
 
@@ -417,7 +410,6 @@ fn fixed_file_selects_its_product_for_the_requested_startup() {
                 observed.set(true);
                 Ok(product)
             },
-            |_, _, _| unreachable!("checking does not emit LLVM"),
         )
         .unwrap();
         assert!(observed.get());

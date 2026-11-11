@@ -240,8 +240,13 @@ pub fn compile(source: &str, options: &CompileOptions) -> Result<String, String>
         address_sanitizer: options.address_sanitizer,
         ..Default::default()
     };
-    compile_with_layout(ProgramEntry::Source(source), &options, BoxedLayout::Whole)
-        .map(|product| product.into_whole().llvm_ir)
+    compile_with_layout(
+        ProgramEntry::Source(source),
+        &options,
+        CodegenLayout::Whole,
+        None,
+    )
+    .map(|(product, _)| product.into_whole().llvm_ir)
 }
 
 /// The generated IR and every source file that must be protected from output writes.
@@ -376,7 +381,6 @@ fn check_with(
             graph.session.explicit_check = true;
             checked_lower_with(graph, cache.as_deref_mut(), call_error)
         },
-        |_, _, _| unreachable!("check does not emit LLVM"),
     )
     .map(drop)
 }
@@ -422,27 +426,32 @@ fn bytecode_script_error(path: &Path, bytes: &[u8]) -> Option<&'static str> {
     Some("NotImplementedError: native marshal cannot load CPython code objects")
 }
 
-/// Selects the LLVM outputs for a resolved boxed program.
-enum BoxedLayout<'a> {
+/// Selects the LLVM outputs after the program has been checked.
+pub enum CodegenLayout {
+    /// Emit a single LLVM module.
     Whole,
+    /// Partition functions and initializers by their source module.
     Split,
-    WholeWithUnits(&'a mut Vec<CodegenUnit>),
+    /// Keep fixed functions together and split registered module initializers for ThinLTO.
+    ThinLto,
+    /// Return the native units and save a whole-program dump when their LLVM differs.
+    SplitWithWhole,
 }
 
-enum CompilationMode<'a> {
+enum CompilationMode {
     Check,
-    Build(BoxedLayout<'a>),
+    Build(CodegenLayout),
 }
 
 enum CompilationResult {
     Checked(SourceInputs),
-    Built(UnitCompilation),
+    Built(UnitCompilation, Option<String>),
 }
 
 impl CompilationResult {
-    fn into_built(self) -> UnitCompilation {
+    fn into_built(self) -> (UnitCompilation, Option<String>) {
         match self {
-            Self::Built(compilation) => compilation,
+            Self::Built(compilation, whole) => (compilation, whole),
             Self::Checked(_) => unreachable!("build requested a code generation layout"),
         }
     }
@@ -450,7 +459,7 @@ impl CompilationResult {
 
 /// Uses the boxed backend when the checked graph requires Python object operations.
 fn object_fallback(
-    mode: CompilationMode<'_>,
+    mode: CompilationMode,
     entry: ProgramEntry<'_>,
     options: &CompileOptions,
     mut filesystem: watch::FileSystem<'_>,
@@ -459,11 +468,6 @@ fn object_fallback(
         &mut modules::SourceGraph,
         Option<&LoweringDiagnostic>,
     ) -> Result<CheckedProgram, String>,
-    native: impl Fn(
-        &modules::SourceGraph,
-        CheckedIr,
-        llvm::NativeProgram,
-    ) -> Result<Vec<CodegenUnit>, llvm::Unsupported>,
 ) -> Result<CompilationResult, String> {
     for name in &options.include_modules {
         if !modules::valid_module_operand(name) {
@@ -492,7 +496,7 @@ fn object_fallback(
         } else {
             UnitCompilation::native(graph, units, options.entry_profile.as_deref())
         };
-        Ok(CompilationResult::Built(compilation))
+        Ok(CompilationResult::Built(compilation, None))
     };
     let checked_file = options.python_startup().is_none();
     // A Python module launch enters through the runtime registration. Other callers
@@ -535,16 +539,22 @@ fn object_fallback(
                     CheckedProgram::Registered(reason) => break reason,
                     CheckedProgram::Native(mut fixed) => {
                         let (module, owners) = &mut fixed.ir;
-                        if matches!(mode, CompilationMode::Check) {
+                        let CompilationMode::Build(layout) = &mode else {
                             verify_after(module, "lowering")?;
                             native_includes()?;
                             return Ok(CompilationResult::Checked(graph.inputs));
-                        }
+                        };
                         for original in specialize(module)? {
                             owners.push(owners[original]);
                         }
                         let reason = match llvm::analyze_program(module, &mut fixed.frame_sources) {
-                            Ok(program) => match native(&graph, fixed.into_ir(&graph), program) {
+                            Ok(program) => match llvm::emit_units(
+                                &graph,
+                                fixed.into_ir(&graph),
+                                program,
+                                layout,
+                                options.address_sanitizer,
+                            ) {
                                 Ok(units) => return native_result(graph, units),
                                 Err(refusal) => refusal.0,
                             },
@@ -800,12 +810,22 @@ fn object_fallback(
         Some(mut result) => {
             site_probes.record(match &mut result {
                 CompilationResult::Checked(inputs) => inputs,
-                CompilationResult::Built(compilation) => &mut compilation.source_inputs,
+                CompilationResult::Built(compilation, _) => &mut compilation.source_inputs,
             });
             Ok(result)
         }
         None => fallback(checked_graph),
     }
+}
+
+/// Returns the native units and, when requested, a separate whole-program LLVM dump.
+pub fn compile_file_with_layout(
+    path: &Path,
+    module_root: Option<&Path>,
+    options: &CompileOptions,
+    layout: CodegenLayout,
+) -> Result<(UnitCompilation, Option<String>), String> {
+    compile_with_layout(ProgramEntry::File(path, module_root), options, layout, None)
 }
 
 /// Compiles one entry module and its statically resolved first-party dependencies.
@@ -814,12 +834,8 @@ pub fn compile_file(
     module_root: Option<&Path>,
     options: &CompileOptions,
 ) -> Result<Compilation, String> {
-    compile_with_layout(
-        ProgramEntry::File(path, module_root),
-        options,
-        BoxedLayout::Whole,
-    )
-    .map(UnitCompilation::into_whole)
+    compile_file_with_layout(path, module_root, options, CodegenLayout::Whole)
+        .map(|(compilation, _)| compilation.into_whole())
 }
 
 /// Preserves the whole-program IR and returns independent boxed initializers for native codegen.
@@ -828,13 +844,9 @@ pub fn compile_file_with_boxed_units(
     module_root: Option<&Path>,
     options: &CompileOptions,
 ) -> Result<(Compilation, Vec<CodegenUnit>), String> {
-    let mut units = Vec::new();
-    let compilation = compile_with_layout(
-        ProgramEntry::File(path, module_root),
-        options,
-        BoxedLayout::WholeWithUnits(&mut units),
-    )?;
-    Ok((compilation.into_whole(), units))
+    let (compilation, whole) =
+        compile_file_with_layout(path, module_root, options, CodegenLayout::SplitWithWhole)?;
+    Ok(compilation.into_whole_and_units(whole))
 }
 
 /// Keeps typed programs whole and emits independent boxed initializers for ThinLTO.
@@ -843,35 +855,24 @@ pub fn compile_file_for_thin_lto(
     module_root: Option<&Path>,
     options: &CompileOptions,
 ) -> Result<UnitCompilation, String> {
-    compile_with_layout(
-        ProgramEntry::File(path, module_root),
-        options,
-        BoxedLayout::Split,
-    )
+    compile_file_with_layout(path, module_root, options, CodegenLayout::ThinLto)
+        .map(|(compilation, _)| compilation)
 }
 
-/// Resolves and checks the source graph once for the requested boxed outputs.
+/// Resolves and checks the source graph once for the requested outputs.
 fn compile_with_layout(
     entry: ProgramEntry<'_>,
     options: &CompileOptions,
-    layout: BoxedLayout<'_>,
-) -> Result<UnitCompilation, String> {
-    let typed = |_: &modules::SourceGraph, (module, _): CheckedIr, program| {
-        let ranges = ranges::analyze(&module);
-        let llvm_ir = llvm::emit_file(&module, &ranges, options.address_sanitizer, program)?;
-        Ok(vec![CodegenUnit {
-            name: "__main__".into(),
-            llvm_ir,
-        }])
-    };
+    layout: CodegenLayout,
+    mut cache: Option<&mut IncrementalCompiler>,
+) -> Result<(UnitCompilation, Option<String>), String> {
     object_fallback(
         CompilationMode::Build(layout),
         entry,
         options,
         Default::default(),
-        false,
-        |graph, call_error| checked_lower_with(graph, None, call_error),
-        typed,
+        cache.is_some(),
+        |graph, call_error| checked_lower_with(graph, cache.as_deref_mut(), call_error),
     )
     .map(CompilationResult::into_built)
 }
@@ -909,17 +910,24 @@ impl UnitCompilation {
         }
     }
 
-    fn into_whole(mut self) -> Compilation {
-        Compilation {
-            llvm_ir: self
-                .units
+    fn into_whole(self) -> Compilation {
+        self.into_whole_and_units(None).0
+    }
+
+    fn into_whole_and_units(mut self, whole: Option<String>) -> (Compilation, Vec<CodegenUnit>) {
+        let llvm_ir = whole.unwrap_or_else(|| {
+            self.units
                 .pop()
                 .expect("whole program has one unit")
-                .llvm_ir,
+                .llvm_ir
+        });
+        let compilation = Compilation {
+            llvm_ir,
             input_paths: self.input_paths,
             source_inputs: self.source_inputs,
             extension_archives: self.extension_archives,
-        }
+        };
+        (compilation, self.units)
     }
 }
 
@@ -993,7 +1001,13 @@ impl IncrementalCompiler {
         module_root: Option<&Path>,
         options: &CompileOptions,
     ) -> Result<UnitCompilation, String> {
-        compile_file_units_with(path, module_root, options, Some(self))
+        compile_with_layout(
+            ProgramEntry::File(path, module_root),
+            options,
+            CodegenLayout::Split,
+            Some(self),
+        )
+        .map(|(compilation, _)| compilation)
     }
 }
 
@@ -1003,42 +1017,8 @@ pub fn compile_file_units(
     module_root: Option<&Path>,
     options: &CompileOptions,
 ) -> Result<UnitCompilation, String> {
-    compile_file_units_with(path, module_root, options, None)
-}
-
-fn compile_file_units_with(
-    path: &Path,
-    module_root: Option<&Path>,
-    options: &CompileOptions,
-    mut cache: Option<&mut IncrementalCompiler>,
-) -> Result<UnitCompilation, String> {
-    let typed = |graph: &modules::SourceGraph, (module, owners): CheckedIr, program| {
-        let ranges = ranges::analyze(&module);
-        let names = graph
-            .modules
-            .iter()
-            .map(|m| m.name.clone())
-            .collect::<Vec<_>>();
-        llvm::emit_units(
-            &module,
-            &ranges,
-            options.address_sanitizer,
-            &owners,
-            &names,
-            graph.entry,
-            program,
-        )
-    };
-    object_fallback(
-        CompilationMode::Build(BoxedLayout::Split),
-        ProgramEntry::File(path, module_root),
-        options,
-        Default::default(),
-        cache.is_some(),
-        |graph, call_error| checked_lower_with(graph, cache.as_deref_mut(), call_error),
-        typed,
-    )
-    .map(CompilationResult::into_built)
+    compile_file_with_layout(path, module_root, options, CodegenLayout::Split)
+        .map(|(compilation, _)| compilation)
 }
 
 type CheckedIr = (ir::Module, Vec<modules::ModuleId>);
@@ -1828,7 +1808,6 @@ print("result", call(b=2, a=1))
                         .set(super::modules::SetLayoutHint::Disabled);
                     super::checked_lower_with(graph, None, call_error)
                 },
-                |_, _, _| unreachable!("check does not emit LLVM"),
             )
             .map(drop);
             assert_eq!(
@@ -1864,7 +1843,6 @@ print("result", call(b=2, a=1))
                 assert!(graph.set_layout_hint.get() == super::modules::SetLayoutHint::Disabled);
                 super::checked_lower_with(graph, None, call_error)
             },
-            |_, _, _| unreachable!("check does not emit LLVM"),
         )
         .map(drop);
         assert_eq!(passes, 1);
@@ -1907,7 +1885,6 @@ print("result", call(b=2, a=1))
                 }
                 Ok(result)
             },
-            |_, _, _| unreachable!("check does not emit LLVM"),
         )
         .map(drop);
         assert_eq!(passes, [true, false]);
