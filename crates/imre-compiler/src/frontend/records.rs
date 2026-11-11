@@ -507,6 +507,40 @@ pub(super) fn record_factories(
     Ok(())
 }
 
+/// A successful None check can establish the current value of a stored field.
+/// A property or other callable access has no such fact.
+pub(super) fn present_field(test: &Expr, truth: bool) -> Option<(usize, usize)> {
+    if let ExprKind::Not(inner) = &test.kind {
+        return present_field(inner, !truth);
+    }
+    if !truth
+        && let ExprKind::Builtin(Builtin::IsNone, args) = &test.kind
+        && let [value] = args.as_slice()
+        && let ExprKind::Field(receiver, field) = &value.kind
+        && let ExprKind::Local(slot) = receiver.kind
+    {
+        Some((slot, *field))
+    } else {
+        None
+    }
+}
+
+/// Only the empty arm can carry an unchanged field to the following statement.
+pub(super) fn fallthrough_field(body: &[Statement]) -> Option<(usize, usize)> {
+    let [.., Statement::If(test, yes, no)] = body else {
+        return None;
+    };
+    let exits =
+        |arm: &[Statement]| matches!(arm.last(), Some(Statement::Raise(_) | Statement::Return(_)));
+    if no.is_empty() && exits(yes) {
+        present_field(test, false)
+    } else if yes.is_empty() && exits(no) {
+        present_field(test, true)
+    } else {
+        None
+    }
+}
+
 /// The next initializer in the lexical class lineage, independent of the
 /// concrete receiver used for inherited method specialization.
 #[derive(Clone, Copy)]
@@ -516,6 +550,23 @@ pub(super) enum BaseInitializer {
 }
 
 impl Checker<'_> {
+    /// No user code intervenes between a guard and a direct read of a stored field.
+    pub(super) fn guard_field_read(&mut self, value: &ast::Expr, field: Option<(usize, usize)>) {
+        if let ast::Expr::Attribute(read) = value
+            && read.value.is_name_expr()
+        {
+            self.present_fields.extend(field);
+        }
+    }
+
+    pub(super) fn guard_return_field(&mut self, body: &[ast::Stmt], field: Option<(usize, usize)>) {
+        if let [ast::Stmt::Return(ret)] = body
+            && let Some(value) = &ret.value
+        {
+            self.guard_field_read(value, field);
+        }
+    }
+
     /// A checked type for a mutable field can become stale through an alias.
     /// Load the field once per attribute access and raise Python's AttributeError
     /// if an intervening effect cleared it.
