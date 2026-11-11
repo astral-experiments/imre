@@ -1695,7 +1695,7 @@ pub(super) fn compile(
     {
         return Ok(code);
     }
-    ctx.compile_source_with_flags(args[0], filename, args[2], false, inherited)
+    ctx.compile_source_with_flags(args[0], filename, args[2], inherited)
 }
 
 pub(super) fn call(
