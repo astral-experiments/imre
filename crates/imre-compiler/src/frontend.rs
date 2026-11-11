@@ -125,7 +125,6 @@ mod records;
 mod regex;
 mod registered;
 mod required_sites;
-pub(crate) use registered::PreparedRegion;
 #[cfg(test)]
 pub(crate) use registered::booleans::ExpressionInput;
 pub(crate) use registered::booleans::{
@@ -142,7 +141,7 @@ pub(crate) use registered::{
     AnnotationProvider, CheckedProvider, DeclarationSite, DeferredAnnotation, ModuleAnnotations,
     ParameterAnnotations, ParameterEvaluator, PhysicalOperand, RegisteredBindings,
     RegisteredFunction, RegisteredGenerator, RegisteredLambda, RegisteredScope, RegisteredSuite,
-    SourceEffect, SuiteOperation, SuitePreparation, TypeParameterValues, annotation_expression,
+    SourceEffect, SuitePreparation, TypeParameterValues, annotation_expression,
     place_fixed_function, registered_sites, registered_type_alias,
 };
 pub(crate) use registered::{LocalBinding, RegisteredClass, RegisteredOperand, RegisteredRegion};

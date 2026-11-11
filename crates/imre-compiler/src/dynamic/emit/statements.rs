@@ -29,15 +29,8 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
         &mut self,
         effect: &'p SourceEffect,
     ) -> Option<(&'p crate::ir::Statement, &'p [PhysicalOperand])> {
-        match effect {
-            SourceEffect::Region(region) => {
-                crate::llvm::registered::Frame::emit_region(self, region)
-            }
-            SourceEffect::Value(statement, inputs) => {
-                return Some((statement, inputs));
-            }
-        }
-        None
+        let SourceEffect::Value(statement, inputs) = effect;
+        Some((statement, inputs))
     }
 }
 
