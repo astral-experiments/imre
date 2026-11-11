@@ -13481,6 +13481,15 @@ impl<'a> Checker<'a> {
                 });
             }
             "type"
+                if let [operand] = args.as_slice()
+                    && let Type::Class(class) = operand.ty
+                    && self.unshadowed_builtin(&call.func, "type") =>
+            {
+                return self.dispatch_record(class, operand.clone(), call, |checker, layout, _| {
+                    Ok(checker.record_class_object(layout))
+                });
+            }
+            "type"
                 if args.len() == 1
                     && args[0].ty == Type::Hash
                     && self.unshadowed_builtin(&call.func, "type") =>

@@ -38,6 +38,16 @@ def either(x: Base | Exception) -> None:
     else:
         print("other")
 
+def record_read(value: Base, reads: list[int]) -> Base:
+    reads.append(1)
+    return value
+
+def observe_type() -> None:
+    reads: list[int] = []
+    observed = type(record_read(Grandchild(), reads))
+    print(observed is Grandchild, Child is not observed)
+    print(type(record_read(Base(), reads)) is Base, len(reads))
+
 direct(view(Base()))
 direct(view(Child()))
 direct(view(Grandchild()))
@@ -48,3 +58,4 @@ optional(view(Sibling()))
 either(view(Grandchild()))
 either(view(Sibling()))
 either(ValueError("other"))
+observe_type()
