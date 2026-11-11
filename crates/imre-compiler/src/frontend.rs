@@ -4671,7 +4671,9 @@ impl<'a> Checker<'a> {
     fn value_source(&self, value: &Expr) -> Option<ValueSource> {
         match &value.kind {
             ExprKind::Local(slot) => self.assigned.value_source(*slot),
-            ExprKind::Present(inner) | ExprKind::Unwrap(inner) => self.value_source(inner),
+            ExprKind::Bind(_, inner) | ExprKind::Present(inner) | ExprKind::Unwrap(inner) => {
+                self.value_source(inner)
+            }
             ExprKind::Conditional(_, yes, no) => {
                 let source = self.value_source(yes)?;
                 (self.value_source(no) == Some(source)).then_some(source)
