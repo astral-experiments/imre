@@ -486,6 +486,28 @@ impl Checker<'_> {
         }
         Ok(value)
     }
+
+    /// Bind the Python method and check its operands in source order. A fixed
+    /// caller can check the result contract before selecting its registered frame.
+    pub(in crate::frontend) fn registered_method_call(
+        &mut self,
+        call: &ast::ExprCall,
+        method: &ast::ExprAttribute,
+        receiver: Expr,
+        fixed_result: Type,
+    ) -> Result<Expr, String> {
+        let ty = receiver.ty;
+        let target = loaded_attribute(method, receiver);
+        let mut value = self.call_with_target(call, target)?;
+        if self.registered.is_none() {
+            let failure = self.scoped_builtin_error(&format!("{ty}.{}", method.attr), call);
+            if !self.missing_operation(&failure) {
+                return Err(failure);
+            }
+            value.ty = fixed_result;
+        }
+        Ok(value)
+    }
 }
 
 /// The fixed checker selected this builtin and recorded its registered frame requirement.

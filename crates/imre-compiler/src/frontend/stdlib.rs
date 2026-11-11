@@ -800,18 +800,7 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         if let Some(method) = runtime_format_method(call) {
             // A runtime template determines which positional and keyword values it uses.
-            // Bind the original method and operands with the ordinary Python call operation.
-            let target = registered::values::loaded_attribute(method, receiver);
-            let mut value = self.call_with_target(call, target)?;
-            if self.registered.is_none() {
-                // Check the result against the fixed caller's contract before selecting its frame.
-                let failure = self.scoped_builtin_error("str.format", call);
-                if !self.missing_operation(&failure) {
-                    return Err(failure);
-                }
-                value.ty = Type::Str;
-            }
-            return Ok(value);
+            return self.registered_method_call(call, method, receiver, Type::Str);
         }
         let mut args = vec![receiver];
         if !call.arguments.args.is_empty() {
