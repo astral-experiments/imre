@@ -1773,11 +1773,11 @@ impl Session {
         ty != KnownClass::NoneType.to_instance(&self.db, &ProgramEnvironment::from_file(program))
     }
 
-    /// Get a scalar layout hint for an operand in its own lexical scope.
-    pub(crate) fn scalar_type(&self, module: usize, value: &Expr) -> Option<crate::ir::Type> {
-        use crate::ir::Type;
-        use ty_python_semantic::types::{KnownClass, ProgramEnvironment, Type as Ty};
-
+    fn inferred_layout_type(
+        &self,
+        module: usize,
+        value: &Expr,
+    ) -> Option<ty_python_semantic::types::Type<'_>> {
         if matches!(
             value,
             Expr::Tuple(_) | Expr::List(_) | Expr::Set(_) | Expr::Dict(_)
@@ -1793,18 +1793,26 @@ impl Session {
             value.inferred_type(&SemanticModel::new(&self.db, file))
         }));
         READING_LAYOUT_HINT.set(previous);
-        let ty = match inferred {
-            Ok(ty) => ty?,
-            Err(payload) if payload.is::<LayoutHintLimit>() => return None,
+        match inferred {
+            Ok(ty) => ty,
+            Err(payload) if payload.is::<LayoutHintLimit>() => None,
             Err(payload) => std::panic::resume_unwind(payload),
-        };
+        }
+    }
+
+    /// Get a scalar layout hint for an operand in its own lexical scope.
+    pub(crate) fn scalar_type(&self, module: usize, value: &Expr) -> Option<crate::ir::Type> {
+        use crate::ir::Type;
+        use ty_python_semantic::types::{KnownClass, ProgramEnvironment, Type as Ty};
+
+        let ty = self.inferred_layout_type(module, value)?;
         if !matches!(
             ty,
             Ty::LiteralValue(_) | Ty::NominalInstance(_) | Ty::Union(_)
         ) {
             return None;
         }
-        let env = ProgramEnvironment::from_file(file);
+        let env = ProgramEnvironment::from_file(self.db.program_file(self.files[module]));
         // ty expands a float annotation to float | int. Match that annotation
         // after the narrower bool and int cases; Imre checks the exact operand.
         [
@@ -1828,6 +1836,21 @@ impl Session {
             ty.is_assignable_to(&self.db, &env, instance)
         })
         .map(|(_, ty)| ty)
+    }
+
+    /// A fixed field needs every possible result to fit its storage. Adding a proven
+    /// string subtype to `str` leaves `str`, including a truth-narrowed intersection.
+    pub(crate) fn has_string_layout(&self, module: usize, value: &Expr) -> bool {
+        use ty_python_semantic::types::{KnownClass, ProgramEnvironment, Type as Ty, UnionType};
+        let Some(ty) = self.inferred_layout_type(module, value) else {
+            return false;
+        };
+        if matches!(ty, Ty::Never | Ty::Divergent(_)) {
+            return false;
+        }
+        let env = ProgramEnvironment::from_file(self.db.program_file(self.files[module]));
+        let text = KnownClass::Str.to_instance(&self.db, &env);
+        ty == text || UnionType::from_two_elements(&self.db, &env, ty, text) == text
     }
 
     /// Recognize the canonical tuple[str, ...] type across calls, attributes and names.
