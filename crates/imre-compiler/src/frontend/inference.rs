@@ -1274,13 +1274,22 @@ impl Checker<'_> {
     }
 
     fn call_operand_returns(&self, value: &Expr) -> bool {
-        let ExprKind::Call(callee, _) = &value.kind else {
-            return true;
-        };
+        if let ExprKind::Call(callee, _) = &value.kind {
+            return self.source_function_may_return(*callee);
+        }
+        self.globals.invoked_functions(value).is_none_or(|targets| {
+            targets.is_empty()
+                || targets
+                    .iter()
+                    .any(|&id| self.source_function_may_return(id))
+        })
+    }
+
+    fn source_function_may_return(&self, callee: usize) -> bool {
         let Some((definition, _)) = self
             .functions
             .iter()
-            .find(|(_, signature)| signature.id == *callee)
+            .find(|(_, signature)| signature.id == callee)
         else {
             return true;
         };
