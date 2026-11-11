@@ -1,9 +1,35 @@
-//! Select the first matching ordinary exception handler in source order.
+//! Checked exception dispatch and protected control transfers.
 
 use super::{CheckedBody, Entry};
 use crate::ir::{ExceptHandler, ExceptionMatcher, Statement};
+use crate::llvm::Completion;
 
 impl CheckedBody<'_, '_, '_, '_> {
+    /// Resume the saved action when cleanup falls through. The final destination
+    /// is unconditional, including when all predecessors recorded the same action.
+    pub(in crate::llvm) fn resume_completions<T>(
+        &mut self,
+        targets: &[Completion<T>],
+        tag: &str,
+        mut resume: impl FnMut(&mut Self, &Completion<T>),
+    ) {
+        let (last, tested) = targets.split_last().expect("reachable finalbody");
+        for (index, target) in tested.iter().enumerate() {
+            let test = format!("icmp eq i32 {tag}, {index}");
+            let selected = match &mut self.0 {
+                Entry::Native(code) => code.instruction(test),
+                Entry::Registered(frame) => frame.value(&test),
+            };
+            let arm = self.block_name();
+            let next = self.block_name();
+            self.body().branch(&selected, &arm, &next);
+            self.body().start(&arm);
+            resume(self, target);
+            self.body().start(&next);
+        }
+        resume(self, last);
+    }
+
     fn handler_target(&mut self) -> &mut String {
         match &mut self.0 {
             Entry::Native(code) => &mut code.body.error_target,

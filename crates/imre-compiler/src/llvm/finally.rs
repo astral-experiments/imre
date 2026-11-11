@@ -1,3 +1,4 @@
+use super::operations::CheckedBody;
 use super::{Cleanup, Completion, Emitter, Statement, Type, Value, body::FunctionBody};
 
 /// The LLVM predecessors of one lexical finalbody. The pending action and its
@@ -192,26 +193,16 @@ impl Emitter<'_, '_> {
         self.block(statements);
         self.cleanups.truncate(depth);
         if !self.body.terminated {
-            let last = targets.len() - 1;
-            for (index, target) in targets.into_iter().enumerate() {
-                let next = (index != last).then(|| {
-                    let selected = self.instruction(format!("icmp eq i32 {tag}, {index}"));
-                    let (resume, next) = (self.label(), self.label());
-                    self.branch(&selected, &resume, &next);
-                    self.start(&resume);
-                    next
-                });
+            CheckedBody::native(self).resume_completions(&targets, &tag, |body, target| {
+                let code = body.fixed();
                 if matches!(target, Completion::Error) {
                     let (error, previous) = exception.as_ref().unwrap();
-                    self.restore_active(previous, None);
-                    self.void_call("imre_error_set", &[error]);
-                    self.release(error);
+                    code.restore_active(previous, None);
+                    code.void_call("imre_error_set", &[error]);
+                    code.release(error);
                 }
-                self.route(target.map_return(|_| returned.as_ref().unwrap().clone()));
-                if let Some(next) = next {
-                    self.start(&next);
-                }
-            }
+                code.route(target.map_return(|_| returned.as_ref().unwrap().clone()));
+            });
         }
         // A nested finalbody is included once in its enclosing byte range.
         self.cleanup_bytes = previous_bytes + (self.body.code.len() - before);

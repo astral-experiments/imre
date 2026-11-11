@@ -86,28 +86,24 @@ impl<'f, 'p> Frame<'f, '_, 'p> {
         if self.body.terminated {
             return false;
         }
-        for (index, target) in targets.iter().enumerate() {
-            let next = (index + 1 < targets.len()).then(|| {
-                let selected = self.value(&format!("icmp eq i32 {tag}, {index}"));
-                let resume = self.name("b");
-                let next = self.name("b");
-                self.branch(&selected, &resume, &next);
-                self.label(&resume);
-                next
-            });
-            match target {
-                Completion::Return(()) => {
-                    self.return_from_regions(returned.as_ref().unwrap().clone())
+        CheckedBody::registered(self.reborrow()).resume_completions(
+            &targets,
+            &tag,
+            |body, target| {
+                let frame = body.python();
+                match target {
+                    Completion::Return(()) => {
+                        frame.return_from_regions(returned.as_ref().unwrap().clone())
+                    }
+                    Completion::Jump { label, depth } => {
+                        frame.jump_from_regions(label.clone(), *depth)
+                    }
+                    Completion::Error => {
+                        frame.raise(error.as_deref().expect("pending exception"), None, true)
+                    }
                 }
-                Completion::Jump { label, depth } => self.jump_from_regions(label.clone(), *depth),
-                Completion::Error => {
-                    self.raise(error.as_deref().expect("pending exception"), None, true)
-                }
-            }
-            if let Some(next) = next {
-                self.label(&next);
-            }
-        }
+            },
+        );
         true
     }
 
