@@ -7158,7 +7158,10 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::FunctionWrappedSet => {
-                self.set_field(&args[0].value, 2, &args[1].value);
+                self.line(format!(
+                    "call void @imre_function_set_wrapped(ptr {}, ptr {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
                 self.release_operand(&args[1]);
                 return self.own_operand(args.into_iter().next().unwrap());
             }
@@ -11156,6 +11159,7 @@ declare i32 @imre_json_dump(i64, ptr, i64, i32, i32, i32, i32, i64, ptr, ptr)
 declare ptr @imre_record_try_cached_result(ptr)
 declare void @imre_record_retain(ptr)
 declare zeroext i1 @imre_inspect_coroutine_fn(ptr, ptr) nounwind
+declare void @imre_function_set_wrapped(ptr, ptr) nounwind
 declare ptr @imre_function_get_wrapped(ptr)
 declare void @imre_record_release(ptr)
 declare i32 @imre_record_equal(ptr, ptr) nounwind

@@ -17,6 +17,29 @@ unsafe fn link(function: *const usize) -> *mut *const usize {
 }
 
 /// # Safety
+/// Both operands are rooted. The receiver has storage for an owned public link.
+pub(super) unsafe fn write_wrapped(wrapper: *const usize, value: *const usize) {
+    // SAFETY: initialization only writes the reserved field.
+    unsafe {
+        debug_assert!(is_function(descriptor(wrapper)));
+        imre_record_retain(value);
+        link(wrapper).write(value);
+    }
+}
+
+/// # Safety
+/// Both operands are rooted. The receiver has an initialized, possibly null link.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_function_set_wrapped(wrapper: *const usize, value: *const usize) {
+    // SAFETY: publish the new owner before releasing the old one, including on self-assignment.
+    unsafe {
+        let old = link(wrapper).read();
+        write_wrapped(wrapper, value);
+        imre_record_release(old);
+    }
+}
+
+/// # Safety
 /// The caller roots the function and takes one reference to a successful result.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_function_get_wrapped(wrapper: *const usize) -> *const usize {
@@ -167,8 +190,10 @@ mod tests {
             let held = imre_function_get_wrapped(cache);
             assert_eq!(held, original.cast_const());
 
-            // Transfer the replacement's reference into the public field.
-            imre_record_release(link(cache).replace(replacement));
+            imre_function_set_wrapped(cache, replacement);
+            imre_record_release(replacement);
+            // The link is now the replacement's only owner.
+            imre_function_set_wrapped(cache, replacement);
             imre_record_release(held);
             assert!(old.is_live());
             let held = imre_function_get_wrapped(cache);
