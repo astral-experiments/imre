@@ -1520,16 +1520,16 @@ impl RegisteredFrame<'_, '_> {
         let iteration = std::mem::take(&mut self.iteration);
         let live_roots = self.live_slots.len();
         let first = self.private_slot_count;
-        self.iteration.private_slots = checked.private_slots().into_iter().collect();
+        self.iteration.private_slots = checked
+            .frame_slots(|iterator, kind| {
+                self.iteration.cursors.insert(iterator, kind);
+            })
+            .into_iter()
+            .collect();
         self.iteration.first_slot = first;
         let end = first + self.iteration.private_slots.len();
         self.private_slot_count = end;
         self.live_slots.extend(first..end);
-        checked.walk(&mut |node, _| {
-            if let ir::Node::Statement(Statement::IterNext { iterator, kind, .. }) = node {
-                self.iteration.cursors.insert(*iterator, *kind);
-            }
-        });
         Some(EnclosingSlots {
             iteration,
             live_roots,
