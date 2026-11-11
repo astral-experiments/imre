@@ -640,7 +640,7 @@ fn collect_class(
     }
     let mut methods: Vec<ast::StmtFunctionDef> = Vec::new();
     let mut method_kinds = Vec::new();
-    let mut has_custom_dir = false;
+    let mut needs_object_layout = false;
     let mut initializer = None;
     for (ordinal, statement) in node.body.iter().enumerate() {
         // A type-only method declaration may have a separate runtime signature.
@@ -879,14 +879,21 @@ fn collect_class(
                         "StrEnum methods cannot override member metadata or special behavior",
                     ));
                 }
-                if name == "__dir__" {
-                    // The object runtime binds the class's directory hook. Continue validating
-                    // the other class members before switching to that provider.
-                    let error = module
-                        .diagnostic(method, "custom __dir__ requires native class construction")
-                        .classified(Kind::ScopedClassLayout);
-                    graph.class_layout_error.borrow_mut().get_or_insert(error);
-                    has_custom_dir = true;
+                if matches!(name, "__dir__" | "__next__") {
+                    // These hooks use the Python class namespace. Continue checking the
+                    // other declarations before selecting its object representation.
+                    graph
+                        .class_layout_error
+                        .borrow_mut()
+                        .get_or_insert_with(|| {
+                            module
+                                .diagnostic(
+                                    method,
+                                    &format!("custom {name} requires native class construction"),
+                                )
+                                .classified(Kind::ScopedClassLayout)
+                        });
+                    needs_object_layout = true;
                     class_bindings.insert(name.to_owned());
                     continue;
                 }
@@ -1429,7 +1436,7 @@ fn collect_class(
     if let Some(initializer) = initializer
         && method_origins[initializer] == definition
         // An object-backed class can create new instance fields in its initializer.
-        && !has_custom_dir
+        && !needs_object_layout
         // A proven forwarding exception constructor writes each field through its plan.
         && forwarder.is_none()
     {
