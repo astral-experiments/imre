@@ -99,7 +99,7 @@ fn placed_field_uses_the_ordinary_descriptor_and_attribute_line() {
     };
     let operations = Default::default();
     let scope = RegisteredScope::Function { is_async: false };
-    let ordinary = SuitePreparation::new(&operations, values, &definition.body, true)
+    let ordinary = SuitePreparation::new(&operations, values, true)
         .complete(&definition.body, scope)
         .unwrap();
     let expected = emit_registered_body(source, &ordinary.checked);

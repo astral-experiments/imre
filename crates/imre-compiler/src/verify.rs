@@ -867,7 +867,7 @@ mod tests {
         };
         let operations = Default::default();
         let body = &graph.modules[graph.entry].parsed.syntax().body;
-        let prepare = frontend::SuitePreparation::new(&operations, source, body, true);
+        let prepare = frontend::SuitePreparation::new(&operations, source, true);
         for scope in [
             frontend::RegisteredScope::Module,
             frontend::RegisteredScope::Function { is_async: false },
