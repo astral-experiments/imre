@@ -3804,6 +3804,10 @@ impl WorkerStack {
 }
 
 impl Frame {
+    pub(super) fn operand(&self, index: usize) -> Option<Id> {
+        self.live.get(index).copied()
+    }
+
     /// The strong handles owned by this activation, in marking order.
     pub(super) fn roots(&self) -> impl Iterator<Item = Id> + '_ {
         [self.scope, self.code, self.active, self.inherited]
@@ -5813,7 +5817,12 @@ impl Heap {
                         if (locals.names.values().take(*budget).any(|&id| id == owner)
                             || locals.names.get(".0").is_some_and(|&iter| keeps(heap, iter, owner, budget))))
                         || native.as_ref().is_some_and(|saved| {
-                            saved.any_root(*budget, |value| keeps(heap, value, owner, budget))
+                            // The delegate can lie beyond the bounded prefix of frame roots.
+                            saved
+                                .parked_delegate()
+                                .is_some_and(|id| keeps(heap, id, owner, budget))
+                                || saved
+                                    .any_root(*budget, |value| keeps(heap, value, owner, budget))
                         })
                 }
                 _ => false,
@@ -5840,7 +5849,7 @@ impl Heap {
     }
 
     /// Look for a short strong path from a current frame to an owner.
-    fn frame_keeps_instance_owner(&self, owner: Id) -> bool {
+    fn frame_keeps_owner(&self, owner: Id) -> bool {
         self.frames.iter().rev().take(8).any(|frame| {
             let locals = match self.get(frame.scope) {
                 Value::Scope(scope) => Some(&scope.names),
@@ -6046,7 +6055,7 @@ impl Heap {
                 && owners
                     .clone()
                     .all(|id| matches!(self.get(id), Value::Generator { .. })))
-            && owners.all(|id| self.frame_keeps_instance_owner(id))
+            && owners.all(|id| self.frame_keeps_owner(id))
         {
             return Ok(None);
         }

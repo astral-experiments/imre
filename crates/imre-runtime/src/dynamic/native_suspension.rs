@@ -107,6 +107,13 @@ impl Drop for Continuation {
 pub(super) struct Saved(Rc<RefCell<Option<(Continuation, Frame)>>>);
 
 impl Saved {
+    /// The current delegated iterator is a strong operand only while its frame is parked.
+    pub(super) fn parked_delegate(&self) -> Option<Id> {
+        let parked = self.0.borrow();
+        let (continuation, frame) = parked.as_ref()?;
+        frame.operand(continuation.delegate_root?)
+    }
+
     /// Recheck at most the caller's remaining budget of strong roots while parked.
     pub(super) fn any_root(&self, limit: usize, predicate: impl FnMut(Id) -> bool) -> bool {
         self.0
