@@ -798,9 +798,18 @@ impl Checker<'_> {
         } else {
             self.expr(message)?
         };
-        let mut values = vec![logger, level, original];
+        // Capture caller expressions before configuring the root or testing its level.
+        let mut scope = calls::ArgumentScope::default();
+        let logger = scope.hold(self, logger);
+        let level = match level.tagged_integer_literal() {
+            Some(value) => Expr::integer(value),
+            None => scope.hold(self, level),
+        };
+        let original = scope.hold(self, original);
+        let mut values = Vec::with_capacity(operands.len());
         for operand in operands {
-            values.push(self.expr(operand)?);
+            let value = self.expr(operand)?;
+            values.push(scope.hold(self, value));
         }
         let extra = match call.arguments.keywords.as_ref() {
             [] => None,
@@ -825,35 +834,21 @@ impl Checker<'_> {
                 ));
             }
         };
-        let extra_index = extra.map(|field| {
-            let i = values.len();
-            values.push(field);
-            i
-        });
-        // Python evaluates all arguments, even when a logger discards an event.
-        let mut body = Vec::new();
-        let mut clear = Vec::new();
-        for value in values {
-            let slot = self.hidden(value.ty);
-            body.push(Statement::Assign(slot, value));
-            clear.push(slot);
-        }
+        let extra = extra.map(|value| scope.hold(self, value));
         // Module-level convenience functions install the default handler after
         // evaluating the message arguments, even when the root filters the event.
         if root {
-            body.push(Statement::Expr(self.logging_source_call(
+            scope.body.push(Statement::Expr(self.logging_source_call(
                 "_auto_config",
                 ir::CallArgs::positional(Vec::new()),
                 call,
             )?));
         }
-        let logger = self.local(clear[0]);
-        let level = self.local(clear[1]);
-        let original = self.check_record_value(self.local(clear[2]), message)?;
-        let arguments = clear[3..3 + operands.len()]
-            .iter()
+        let original = self.check_record_value(original, message)?;
+        let arguments = values
+            .into_iter()
             .zip(operands)
-            .map(|(&slot, node)| self.check_record_value(self.local(slot), node))
+            .map(|(value, node)| self.check_record_value(value, node))
             .collect::<std::result::Result<Vec<_>, _>>()?;
         let arguments = Expr {
             ty: self
@@ -861,7 +856,6 @@ impl Checker<'_> {
                 .tuple(arguments.iter().map(|arg| arg.ty).collect()),
             kind: ExprKind::Tuple(arguments),
         };
-        let extra = extra_index.map(|i| self.local(clear[i]));
         let event = if adapter {
             let enabled = self.logging_source_call(
                 "_adapter_enabled",
@@ -898,14 +892,7 @@ impl Checker<'_> {
         } else {
             self.log_event(logger, level, original, arguments, extra, call)?
         };
-        Ok(Expr {
-            ty: Type::None,
-            kind: ExprKind::Scope {
-                body,
-                clear,
-                value: Box::new(event),
-            },
-        })
+        Ok(scope.finish(event))
     }
 
     fn log_event(
