@@ -1,4 +1,4 @@
-use super::{Heap, Id, Root, RootPaths, Search, has_strong_edge};
+use super::{Heap, Id, Root, RootPaths, Search, Value, has_strong_edge};
 use std::collections::HashSet;
 
 /// Strong paths validated against the roots that survive the last release.
@@ -32,12 +32,24 @@ impl RetainedPaths {
             paths.nodes.binary_search(&id).is_ok_and(|i| self.live[i])
                 || heap.bound_in_active_frame(id)
                 || heap.operand_keeps_finalizer(id, usize::MAX)
+                || self.generator_kept_by_anchors(heap, id)
         };
         if operand_release {
             heap.registered_endpoints().all(held)
         } else {
             heap.ordinary_finalizers.iter().copied().all(held)
         }
+    }
+
+    /// A resumed generator can move between surviving operands and local bindings.
+    fn generator_kept_by_anchors(&self, heap: &Heap, owner: Id) -> bool {
+        matches!(heap.get(owner), Value::Generator { .. })
+            && (self
+                .anchors
+                .iter()
+                .rev()
+                .any(|&root| heap.short_path_keeps_owner(root, owner))
+                || heap.frame_keeps_owner(owner))
     }
 
     fn learn(&mut self, heap: &Heap) -> Option<()> {

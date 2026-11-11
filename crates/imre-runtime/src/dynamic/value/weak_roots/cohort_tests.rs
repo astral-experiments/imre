@@ -1,4 +1,4 @@
-use super::super::{FrameOwner, NONE, Value};
+use super::super::{FrameOwner, Id, NONE, Value};
 use crate::dynamic::{ffi, stdlib, weakref};
 
 #[test]
@@ -484,14 +484,8 @@ fn a_slotted_owner_is_kept_only_while_the_member_holds_it() {
     assert!(!paths.valid(&ctx.heap, roots));
 }
 
-#[test]
-fn iterator_paths_recheck_the_suspended_operands() {
-    use super::RootPaths;
-
-    let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
-    let scope = ctx.scope("suspended", None);
-    let heap = &mut ctx.heap;
-    let generator_value = |scope| Value::Generator {
+fn generator_value(scope: Id) -> Value {
+    Value::Generator {
         owner: FrameOwner::Module(NONE),
         frame: None,
         name: NONE,
@@ -502,7 +496,44 @@ fn iterator_paths_recheck_the_suspended_operands() {
         native: None,
         offset: Some(0),
         running: false,
+    }
+}
+
+#[test]
+fn generator_ownership_tracks_live_iterator_inputs_and_scope_bindings() {
+    let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+    let scope = ctx.scope("local", None);
+    let owner = ctx.alloc(generator_value(NONE));
+    let parent = ctx.alloc(generator_value(scope));
+    let root = ctx.alloc(Value::Map {
+        function: crate::dynamic::zip::MapFunction::Python(NONE),
+        inputs: [parent].into(),
+        strict: false,
+    });
+    ctx.bind(scope, "item", owner);
+    let heap = &mut ctx.heap;
+    heap.register_finalizer(owner);
+    heap.release_temporaries_since(0);
+    assert!(heap.short_path_keeps_owner(root, owner));
+    assert!(heap.retained_paths_keep_owners([root].into_iter(), true));
+    assert!(!heap.retained_paths_keep_owners([].into_iter(), true));
+
+    // Replacing the binding closes a cycle and removes its only path to owner.
+    let Value::Scope(locals) = heap.get_mut(scope) else {
+        unreachable!()
     };
+    locals.names.insert("item".into(), root);
+    assert!(!heap.short_path_keeps_owner(root, owner));
+    assert!(!heap.retained_paths_keep_owners([root].into_iter(), true));
+}
+
+#[test]
+fn iterator_paths_recheck_the_suspended_operands() {
+    use super::RootPaths;
+
+    let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+    let scope = ctx.scope("suspended", None);
+    let heap = &mut ctx.heap;
     let target = heap.alloc(generator_value(NONE));
     let generator = heap.alloc(generator_value(scope));
     let cursor = heap.alloc(Value::LoopIterator {
