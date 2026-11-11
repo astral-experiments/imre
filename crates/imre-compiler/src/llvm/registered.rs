@@ -53,6 +53,14 @@ pub(crate) fn frame_inputs(
             && matches!(value.kind, ExprKind::Local(slot)
                 if checked.function.params.contains(&slot) && checked.function.locals[slot].builtin_scalar_name().is_some())
     };
+    let protocol_parameter = |mut value: &Expr| {
+        while let ExprKind::Builtin(Builtin::RegisteredLocation(..), children) = &value.kind
+            && let [child] = children.as_slice()
+        {
+            value = child;
+        }
+        usize::from(scalar_parameter(value))
+    };
     let mut scalar_reads = 0usize;
     let mut protocol_reads = 0usize;
     let mut generators = Vec::new();
@@ -155,8 +163,12 @@ pub(crate) fn frame_inputs(
                 uses_python_protocol |= matches!(iteration, Ok(ir::IterationOperands::Iter(..)));
                 iteration.is_ok()
             }
-            ExprKind::Builtin(Builtin::FormatConversion(_), args) => args.len() == 1,
+            ExprKind::Builtin(Builtin::FormatConversion(_), args) => {
+                protocol_reads += args.first().map_or(0, &protocol_parameter);
+                args.len() == 1
+            }
             ExprKind::Builtin(Builtin::FormatField(_), args) => {
+                protocol_reads += args.first().map_or(0, &protocol_parameter);
                 uses_python_protocol |= args
                     .first()
                     .is_some_and(|value| value.ty == Type::PythonObject);
@@ -197,15 +209,11 @@ pub(crate) fn frame_inputs(
                 let scope = usize::from(call.explicit_scope);
                 if live_parameters {
                     // The method receiver and arguments are passed as their original handles.
-                    for mut operand in operands.iter().skip(scope) {
-                        while let ExprKind::Builtin(Builtin::RegisteredLocation(..), children) =
-                            &operand.kind
-                        {
-                            let [child] = children.as_slice() else { break };
-                            operand = child;
-                        }
-                        protocol_reads += usize::from(scalar_parameter(operand));
-                    }
+                    protocol_reads += operands
+                        .iter()
+                        .skip(scope)
+                        .map(&protocol_parameter)
+                        .sum::<usize>();
                 }
                 operands.len() > scope
             }
