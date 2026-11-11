@@ -5157,7 +5157,7 @@ impl<'a> Loader<'a> {
                             .map(|&at| &parsed.syntax().body[at]);
                         let simple = prefix.clone().all(|stmt| {
                             module_name_guard(stmt)
-                                || conditional_import(&self.modules, id, stmt).is_some()
+                                || conditional_imports(&self.modules, id, stmt).is_some()
                                 || (module.is_package
                                     && value_name(stmt).is_some()
                                     && module_value(stmt).is_some_and(literal_export))
@@ -5243,8 +5243,14 @@ impl<'a> Loader<'a> {
                     )?;
                 }
                 _ => {
-                    if let Some(name) = conditional_import(&self.modules, id, statement) {
-                        self.bind(id, name, Binding::ConditionalValue, statement)?;
+                    if let Some(names) = conditional_imports(&self.modules, id, statement) {
+                        for (name, binding) in names {
+                            // An assignment to an established module value keeps its slot.
+                            // scan_value_writes records its rebinding and checks cyclic reads.
+                            if self.modules[id].local_value(id, binding).is_none() {
+                                self.bind(id, name, Binding::ConditionalValue, statement)?;
+                            }
+                        }
                         self.needs_object_imports = true;
                     }
                     if let ast::Stmt::If(guard) = statement
@@ -6853,7 +6859,7 @@ fn optional_stdlib_import<'a>(
         }
         _ => return None,
     };
-    let primary = single_import_binding(std::slice::from_ref(first))?;
+    let primary = single_import_binding(first)?;
     let fallback = import_error_fallback(modules, module, guard, !rest.is_empty())?;
     let top = module_name.split('.').next()?;
     if rest.is_empty() {
@@ -6950,17 +6956,31 @@ fn import_error_fallback<'a>(
         .then_some(&handler.body)
 }
 
-/// Both arms bind one name. The source importer runs the selected imports and
-/// their module initializers before continuing to the next statement.
-fn conditional_import<'a>(
+/// Names supplied on both normal exits. The initializer executes the imports
+/// and the handler in source order, including after a partially successful import.
+fn conditional_imports<'a>(
     modules: &[SourceModule],
     module: ModuleId,
     statement: &'a ast::Stmt,
-) -> Option<&'a str> {
+) -> Option<Vec<(&'a str, &'a ast::Stmt)>> {
     if let ast::Stmt::Try(guard) = statement {
         let fallback = import_error_fallback(modules, module, guard, false)?;
-        let name = single_import_binding(&guard.body)?;
-        return (single_import_binding(fallback)? == name).then_some(name);
+        let imports = guard
+            .body
+            .iter()
+            .map(single_import_binding)
+            .collect::<Option<Vec<_>>>()?;
+        let mut names = Vec::new();
+        for stmt in fallback {
+            let name = single_import_binding(stmt).or_else(|| {
+                module_value(stmt).filter(|value| literal_export(value))?;
+                value_name(stmt)
+            })?;
+            if imports.contains(&name) {
+                names.push((name, stmt));
+            }
+        }
+        return (!names.is_empty()).then_some(names);
     }
     let guard = statement.as_if_stmt()?;
     let test = guard.test.as_compare_expr()?;
@@ -6998,13 +7018,13 @@ fn conditional_import<'a>(
     (otherwise.test.is_none()
         && value_name(fallback) == Some(name)
         && module_value(fallback).is_some_and(literal_export))
-    .then_some(name)
+    .then(|| vec![(name, &guard.body[0])])
 }
 
-fn single_import_binding(body: &[ast::Stmt]) -> Option<&str> {
-    let aliases = match body {
-        [ast::Stmt::Import(import)] => &import.names,
-        [ast::Stmt::ImportFrom(import)] => &import.names,
+fn single_import_binding(stmt: &ast::Stmt) -> Option<&str> {
+    let aliases = match stmt {
+        ast::Stmt::Import(import) => &import.names,
+        ast::Stmt::ImportFrom(import) => &import.names,
         _ => return None,
     };
     let [alias] = aliases.as_slice() else {
@@ -7161,6 +7181,57 @@ mod native_tests {
         .unwrap();
         let child = loader.load_module("email.encoders").unwrap();
         assert!(!loader.modules[child].registered_namespace);
+    }
+
+    #[test]
+    fn guarded_from_imports_bind_the_names_available_on_both_exits() {
+        let directory = tempfile::tempdir().unwrap();
+        let package = directory.path().join("settings");
+        fs::create_dir(&package).unwrap();
+        fs::write(
+            package.join("values.py"),
+            "label = 'ready'\nparts = (1,)\nextra = 2\n",
+        )
+        .unwrap();
+        fs::write(
+            package.join("__init__.py"),
+            r#"__all__ = ["missing"]
+previous = 0
+try:
+    from .values import label as _label
+    from .values import parts
+    from .values import extra
+    from .values import extra as previous
+except ImportError:
+    _label = "fallback"
+    parts = ()
+    previous = 1
+"#,
+        )
+        .unwrap();
+
+        let entry = directory.path().join("main.py");
+        fs::write(&entry, "from settings import _label, parts, previous\n").unwrap();
+        let graph = SourceGraph::load(&entry, Some(directory.path()), &[]).unwrap();
+        let module = graph
+            .modules
+            .iter()
+            .find(|module| module.name == "settings")
+            .unwrap();
+        assert!(
+            matches!(module.export("previous"), Some(super::Binding::Value(def))
+            if module.rebound_values.contains(&def.statement))
+        );
+        assert_eq!(
+            module.export("_label"),
+            Some(super::Binding::ConditionalValue)
+        );
+        assert_eq!(
+            module.export("parts"),
+            Some(super::Binding::ConditionalValue)
+        );
+        assert_eq!(module.export("extra"), None);
+        assert_eq!(module.export("missing"), None);
     }
 
     #[test]
