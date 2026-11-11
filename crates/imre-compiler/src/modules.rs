@@ -3229,6 +3229,8 @@ pub(crate) struct SourceGraph {
     registered_functions: std::cell::RefCell<HashMap<ModuleId, crate::dynamic::CheckedFunctions>>,
     /// Contract of the original graph, valid only while its declarations still win.
     pub(crate) source_contract: Option<crate::analysis::SourceContract>,
+    /// The original entry's reached call check when it consulted no import bindings.
+    pub(crate) closed_initializer: Option<crate::analysis::InitializerCheck>,
     pub(crate) set_layout_hint: std::cell::Cell<SetLayoutHint>,
     pub(crate) float_components: std::cell::Cell<FloatComponents>,
     pub(crate) missing_repr: std::cell::Cell<Option<DefinitionId>>,
@@ -5027,6 +5029,7 @@ impl<'a> Loader<'a> {
             registered_functions: Default::default(),
             registered_startup: false,
             source_contract: None,
+            closed_initializer: None,
             set_layout_hint: std::cell::Cell::new(SetLayoutHint::Available),
             check_fallback_calls: Default::default(),
             imports_runtime_class: self.imports_runtime_class,

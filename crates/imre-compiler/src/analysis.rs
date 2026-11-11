@@ -8,7 +8,9 @@ mod execution;
 mod incremental_tests;
 mod inferred_shapes;
 mod initializer_calls;
-pub(crate) use initializer_calls::{inert_declaration, passive_function, unambiguous_file_module};
+pub(crate) use initializer_calls::{
+    InitializerCheck, inert_declaration, passive_function, unambiguous_file_module,
+};
 mod run_path;
 mod shipped_exports;
 mod tuple_displays;
@@ -317,6 +319,7 @@ pub(crate) fn check_registered_project<'a>(
                 winners.clone(),
                 has_file_body,
                 entry_operand,
+                Some(graph),
             )?;
             return Ok(RegisteredLayouts::from_winners(
                 || graph.session.clone(),
@@ -371,7 +374,13 @@ pub(crate) fn check_registered_project<'a>(
     }
     let contracts = session.check_closed_program(&paths, None, &[], None);
     let winners = (first_winner..).zip(sources);
-    session.check_registered_execution(contracts, winners.clone(), has_file_body, entry_operand)?;
+    session.check_registered_execution(
+        contracts,
+        winners.clone(),
+        has_file_body,
+        entry_operand,
+        None,
+    )?;
     Ok(RegisteredLayouts::from_winners(|| session, winners))
 }
 
@@ -577,6 +586,7 @@ impl Session {
         sources: impl Iterator<Item = (usize, crate::dynamic::RegisteredSource<'a>)> + Clone,
         has_file_body: Option<&dyn Fn(&str) -> bool>,
         entry_operand: Option<(usize, &str, &crate::frontend::phase::Diagnostic)>,
+        original: Option<&crate::modules::SourceGraph>,
     ) -> Result<(), String> {
         let mut captures = execution::CapturedImports::default();
         if let Some((entry, start)) = sources
@@ -593,17 +603,34 @@ impl Session {
             } else {
                 (entry, start)
             };
-            let declarations: HashMap<_, _> = sources
-                .clone()
-                .filter(|(_, source)| source.declares_signatures)
-                .map(|(id, source)| (source.name, (id, source.path)))
-                .collect();
-            if let Some(error) = self.checked_initializer_calls(
-                (entry, start.path),
-                start.main_body,
-                |name| declarations.get(name).copied(),
-                Some(&mut captures),
-            ) {
+            let closed = original.and_then(|graph| {
+                let closed = graph.closed_initializer.as_ref()?;
+                let module = &graph.modules[graph.entry];
+                (entry == graph.entry
+                    && start.checked_module == Some(entry)
+                    && start.path == module.path
+                    && start.source == module.source
+                    && start.source == module.original_source())
+                .then_some(closed)
+            });
+            let error = if let Some(closed) = closed {
+                // No import was queried on this prefix, so no imported function was captured.
+                closed.error.clone()
+            } else {
+                let declarations: HashMap<_, _> = sources
+                    .clone()
+                    .filter(|(_, source)| source.declares_signatures)
+                    .map(|(id, source)| (source.name, (id, source.path)))
+                    .collect();
+                self.checked_initializer_calls(
+                    (entry, start.path),
+                    start.main_body,
+                    |name| declarations.get(name).copied(),
+                    Some(&mut captures),
+                )
+                .error
+            };
+            if let Some(error) = error {
                 if !matches!(
                     error.kind,
                     crate::frontend::phase::Kind::ExecutionOperand(_)

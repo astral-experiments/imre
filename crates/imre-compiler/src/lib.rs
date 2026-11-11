@@ -527,7 +527,10 @@ fn object_fallback(
         Ok(Some(mut graph)) => {
             graph.registered_startup = boxed_startup;
             site_probes.record(&mut graph.inputs);
-            let call_error = initializer_call_error(&graph, registered_initializer);
+            let initializer = check_initializer(&graph, registered_initializer);
+            let call_error = initializer
+                .as_ref()
+                .and_then(analysis::InitializerCheck::fixed_error);
             if call_error.is_some() {
                 // Both representations reject this initializer. Check it in the ordinary
                 // layout once so an earlier annotated failure keeps its original priority.
@@ -535,7 +538,7 @@ fn object_fallback(
             }
             let baseline = graph.lowering_baseline();
             let refusal = loop {
-                let error = match lower(&mut graph, call_error.as_ref())? {
+                let error = match lower(&mut graph, call_error)? {
                     CheckedProgram::Registered(reason) => break reason,
                     CheckedProgram::Native(mut fixed) => {
                         let (module, owners) = &mut fixed.ir;
@@ -577,6 +580,9 @@ fn object_fallback(
                 }
                 graph.retry_without_set_layout(&baseline);
             };
+            // Incremental lowering can replace the entry's type database with a cached session.
+            graph.closed_initializer =
+                initializer.filter(|check| !incremental && !check.read_import_binding);
             (refusal, Some(graph))
         }
         Ok(None) => (
@@ -1091,17 +1097,20 @@ impl CheckedProgram {
 
 #[cfg(test)]
 fn checked_lower(graph: &mut modules::SourceGraph) -> Result<CheckedProgram, String> {
-    let call_error = initializer_call_error(graph, false);
-    checked_lower_with(graph, None, call_error.as_ref())
+    let initializer = check_initializer(graph, false);
+    let error = initializer
+        .as_ref()
+        .and_then(analysis::InitializerCheck::fixed_error);
+    checked_lower_with(graph, None, error)
 }
 
-fn initializer_call_error(
+fn check_initializer(
     graph: &modules::SourceGraph,
     registered_entry: bool,
-) -> Option<LoweringDiagnostic> {
+) -> Option<analysis::InitializerCheck> {
     analysis::ClosedSource::project_path(&graph.modules[graph.entry])
         .filter(|_| !registered_entry)
-        .and_then(|entry| {
+        .map(|entry| {
             // Python startup and -m have a separately selected registration.
             let runs_as_main = graph.command_startup.is_none()
                 && graph.python_file("__main__") == Some(graph.entry);
@@ -1115,7 +1124,6 @@ fn initializer_call_error(
                     ))
                 })
         })
-        .filter(|error| error.kind != LoweringKind::RegisteredExecution)
 }
 
 fn checked_lower_with(

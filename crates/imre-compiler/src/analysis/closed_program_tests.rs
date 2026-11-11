@@ -683,6 +683,26 @@ fn dormant_lexical_checks_keep_known_parameters_of_partial_calls() {
 }
 
 #[test]
+fn initializer_checks_record_the_startup_namespace_lookup() {
+    let root = tempdir().unwrap();
+    let path = root.path().join("app.py");
+    let mut session = super::Session::new(root.path(), &[]).unwrap();
+    session
+        .add(
+            &path,
+            "from __main__ import receive\n",
+            crate::SourceKind::File,
+        )
+        .unwrap();
+    for runs_as_main in [false, true] {
+        let check = session.initializer_call_error((0, &path), runs_as_main, |_| {
+            panic!("the startup namespace uses its own resolver")
+        });
+        assert!(check.read_import_binding);
+    }
+}
+
+#[test]
 fn initializer_calls_use_original_bindings_and_all_arguments() {
     let root = tempdir().unwrap();
     let paths = [
@@ -699,6 +719,7 @@ fn initializer_calls_use_original_bindings_and_all_arguments() {
             .initializer_call_error((0, &paths[0].0), true, |name| {
                 (name == "scores").then_some((1, &paths[1].0))
             })
+            .error
             .map(|e| e.to_string())
     };
     let read = "def consume():\n    exec(input('source: '))\n";

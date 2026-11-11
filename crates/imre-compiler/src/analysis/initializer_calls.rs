@@ -10,6 +10,20 @@ use ty_python_core::FileScopeId;
 use ty_python_core::definition::{Definition, DefinitionKind};
 use ty_python_semantic::{Db, HasType, SemanticModel, types::Type};
 
+/// Result of following the reached module prefix with one set of import bindings.
+pub(crate) struct InitializerCheck {
+    pub(crate) error: Option<Diagnostic>,
+    pub(crate) read_import_binding: bool,
+}
+
+impl InitializerCheck {
+    pub(crate) fn fixed_error(&self) -> Option<&Diagnostic> {
+        self.error
+            .as_ref()
+            .filter(|error| error.kind != Kind::RegisteredExecution)
+    }
+}
+
 /// Search-path discovery alone cannot prove a call reaches a bootstrap, frozen
 /// or native provider's Python shadow. It can already be present in sys.modules.
 pub(crate) fn unambiguous_file_module(name: &str) -> bool {
@@ -139,7 +153,7 @@ impl Session {
         entry: (usize, &'a Path),
         runs_as_main: bool,
         application_module: impl Fn(&str) -> Option<(usize, &'a Path)>,
-    ) -> Option<Diagnostic> {
+    ) -> InitializerCheck {
         self.checked_initializer_calls(entry, runs_as_main, application_module, None)
     }
 
@@ -149,11 +163,13 @@ impl Session {
         runs_as_main: bool,
         application_module: impl Fn(&str) -> Option<(usize, &'a Path)>,
         captures: Option<&mut super::execution::CapturedImports>,
-    ) -> Option<Diagnostic> {
+    ) -> InitializerCheck {
         // These semantic queries establish a diagnostic. Only native lowering's
         // layout queries should retain a hint session for subsequent compilations.
         let hints = self.hint_reads.get();
+        let read_import_binding = std::cell::Cell::new(false);
         let error = self.reached_initializer_error(entry, captures, |name| {
+            read_import_binding.set(true);
             if name == "__main__" {
                 runs_as_main.then_some(entry)
             } else {
@@ -161,7 +177,10 @@ impl Session {
             }
         });
         self.hint_reads.set(hints);
-        error
+        InitializerCheck {
+            error,
+            read_import_binding: read_import_binding.get(),
+        }
     }
 
     fn reached_initializer_error<'a>(
