@@ -61,15 +61,6 @@ impl Context {
     pub(super) fn registered_path_spec(&mut self, name: Id, path: Id) -> Result<Id> {
         let path = self.import_path(path)?;
         let fullname = self.str_value(name)?;
-        // A native extension uses its place in the virtual stdlib even without a Python file.
-        if imre_ast::providers::is_native_fallback(fullname)
-            && self.config["bundled_root"].as_str().map(OsStr::new) == Some(path.as_os_str())
-        {
-            let loader = self.lookup_attr(self.bootstrap_module, "_BundledImporter")?;
-            let find = self.lookup_attr(loader, "find_spec")?;
-            return self.call(find, vec![name], Vec::new());
-        }
-
         let leaf = fullname.rsplit('.').next().unwrap();
         if Path::new(leaf).file_name() != Some(OsStr::new(leaf)) {
             return Ok(NONE);
@@ -78,7 +69,19 @@ impl Context {
         let init = stem.join("__init__.py");
         let file = stem.with_extension("py");
         let contains = |path: &Path| self.file_sources(fullname).any(|entry| entry.path == path);
-        let (origin, package) = if contains(&init) {
+        let has_init = contains(&init);
+        // The bundled loader installs a native package's exports before executing its
+        // registered __init__.py. Native extensions can also exist without a Python file.
+        if self.config["bundled_root"].as_str().map(OsStr::new) == Some(path.as_os_str())
+            && (imre_ast::providers::is_native_fallback(fullname)
+                || (has_init && imre_ast::providers::is_native_package(fullname)))
+        {
+            let loader = self.lookup_attr(self.bootstrap_module, "_BundledImporter")?;
+            let find = self.lookup_attr(loader, "find_spec")?;
+            return self.call(find, vec![name], Vec::new());
+        }
+
+        let (origin, package) = if has_init {
             (Some(init), true)
         } else if contains(&file) {
             (Some(file), false)
