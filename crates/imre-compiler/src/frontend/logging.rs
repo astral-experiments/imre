@@ -360,7 +360,7 @@ impl Checker<'_> {
             None,
             &mut |checker, index, arg| {
                 if index == 0 {
-                    arg.checked(checker, Type::Str, false)
+                    arg.checked(checker, Type::Str, false, None)
                 } else {
                     Ok(Self::string_value(arg.value(checker)?))
                 }

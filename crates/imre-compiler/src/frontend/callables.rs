@@ -471,11 +471,11 @@ impl Checker<'_> {
             .filter(|name| !bound.contains(name));
         let mut params = Vec::new();
         for (parameter, &ty) in names.iter().zip(&parameters) {
-            let slot = helper.bind_parameter(&parameter.parameter, ty)?;
+            let slot = helper.bind_parameter(&parameter.parameter, ty, None)?;
             params.push(slot);
         }
         for (parameter, ty) in variadics {
-            params.push(helper.bind_parameter(parameter, ty)?);
+            params.push(helper.bind_parameter(parameter, ty, None)?);
         }
         let mut args = Vec::with_capacity(captures.len());
         captures.sort_unstable_by_key(|(slot, _)| *slot);
@@ -491,6 +491,13 @@ impl Checker<'_> {
             let value = self.local(source);
             let slot = helper.declare_binding(&name, value.ty, lambda, true)?;
             helper.assigned.insert(slot);
+            // An escaping lambda reads the later cell value. Only its lexical annotation survives.
+            let declaration = if pull {
+                self.assigned.type_source(source)
+            } else {
+                self.declared_slots.get(&source).copied()
+            };
+            helper.assigned.set_type_source(slot, declaration);
             params.push(slot);
             args.push(value);
         }
@@ -726,6 +733,7 @@ impl Checker<'_> {
                             self,
                             ty,
                             false,
+                            None,
                             |checker, value, expected, site| {
                                 checker.coerce(value, expected, site).map_err(|error| {
                                     error.at_callable_argument(site.range(), || {

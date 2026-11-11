@@ -23,7 +23,12 @@ struct Site {
 }
 
 impl Site {
-    fn new(function: &ast::StmtFunctionDef, following: &[ast::Stmt], cmp_input: bool) -> Self {
+    fn new(
+        function: &ast::StmtFunctionDef,
+        following: &[ast::Stmt],
+        cmp_input: bool,
+        source_contracts: bool,
+    ) -> Self {
         Self {
             range: function.range,
             cmp_input: cmp_input && cmp_keys::can_specialize(function),
@@ -33,7 +38,7 @@ impl Site {
                 None,
                 |_| true,
             ),
-            later_writes: if function.is_async {
+            later_writes: if function.is_async || source_contracts {
                 narrowing::assigned_names(following)
             } else {
                 HashSet::new()
@@ -284,6 +289,7 @@ impl Checker<'_> {
                     function,
                     &stmts[index + 1..],
                     cmp_inputs.contains(name),
+                    self.graph.modules[self.module].checks_source_contracts(),
                 ));
                 continue;
             }
@@ -321,6 +327,7 @@ impl Checker<'_> {
                         function,
                         &stmts[index + 1..],
                         cmp_inputs.contains(name),
+                        self.graph.modules[self.module].checks_source_contracts(),
                     )]),
                     active_comparator: None,
                     comparators: HashMap::new(),
@@ -577,6 +584,7 @@ impl Checker<'_> {
             })
             .collect();
         let signature = Signature {
+            parameter_declarations: Arc::default(),
             id: 0,
             physical_frame: false,
             asynchronous: false,
@@ -651,6 +659,7 @@ impl Checker<'_> {
             existing.clone()
         } else {
             let signature = Signature {
+                parameter_declarations: Arc::default(),
                 id: 0,
                 physical_frame: false,
                 asynchronous: true,
@@ -704,10 +713,15 @@ impl Checker<'_> {
             (definition.returns.is_none() && !annotations::inert_body(definition)).then(Vec::new);
         helper.asynchronous = signature.asynchronous;
         let mut params = Vec::new();
-        for (parameter, ty) in closed_calls::parameters(&definition.parameters)
-            .zip(signature.params.iter().map(|p| p.ty))
+        for (index, (parameter, layout)) in closed_calls::parameters(&definition.parameters)
+            .zip(&signature.params)
+            .enumerate()
         {
-            let slot = helper.bind_parameter(parameter, ty)?;
+            let slot = helper.bind_parameter(
+                parameter,
+                layout.ty,
+                signature.parameter_declaration(index),
+            )?;
             params.push(slot);
         }
 
@@ -717,10 +731,23 @@ impl Checker<'_> {
         reads.sort();
         let mut captures = Vec::new();
         let mut slots = HashMap::new();
+        let later_writes = self.local_functions.get(definition.name.as_str());
+        let rebound: HashSet<_> = later_writes
+            .into_iter()
+            .flat_map(|binding| &binding.later_writes)
+            .filter_map(|name| self.names.get(name).copied())
+            .collect();
         let mut capture = |outer: usize, helper: &mut Checker<'_>| -> usize {
             *slots.entry(outer).or_insert_with(|| {
                 let inner = helper.hidden(self.locals[outer]);
                 helper.assigned.insert(inner);
+                // A direct call loads the current cell. A later assignment can replace an aliased value.
+                let source = if rebound.contains(&outer) {
+                    self.declared_slots.get(&outer).copied()
+                } else {
+                    self.assigned.type_source(outer)
+                };
+                helper.assigned.set_type_source(inner, source);
                 params.push(inner);
                 captures.push(outer);
                 inner

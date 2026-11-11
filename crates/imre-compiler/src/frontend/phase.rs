@@ -36,10 +36,18 @@ pub(crate) struct EntryOperand {
     pub(crate) operand: TextRange,
 }
 
+/// The source annotation that supplied an operand's expected type.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct TypeDeclaration {
+    pub(super) module: ModuleId,
+    pub(super) annotation: TextRange,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Position {
     range: TextRange,
     entry_statement: Option<Box<EntryOperand>>,
+    expected_from: Option<TypeDeclaration>,
     line: usize,
     column: usize,
 }
@@ -83,6 +91,7 @@ impl<M> Diagnostic<M> {
             position: Some(Position {
                 range,
                 entry_statement: None,
+                expected_from: None,
                 line,
                 column,
             }),
@@ -131,9 +140,16 @@ impl<M> Diagnostic<M> {
         self
     }
 
-    pub(crate) fn exact_operand_in(&self, path: &std::path::Path) -> Option<TextRange> {
-        self.exact_operand()
-            .filter(|_| self.path.as_deref() == Some(path))
+    pub(crate) fn has_declared_operand(&self, graph: &SourceGraph) -> bool {
+        self.kind == Kind::ExactType
+            && self
+                .position
+                .as_ref()
+                .and_then(|p| p.expected_from)
+                .is_some_and(|owner| graph.modules[owner.module].checks_source_contracts())
+            && graph.modules.iter().any(|m| {
+                m.checks_source_contracts() && self.path.as_deref() == Some(m.path.as_path())
+            })
     }
 
     pub(crate) fn earlier_contract(&self, other: &Self) -> bool {
@@ -274,6 +290,22 @@ impl Failure {
                     operand: position.range,
                 })
             });
+        }
+        self
+    }
+
+    pub(super) fn expected_from(
+        mut self,
+        declaration: Option<TypeDeclaration>,
+        operand: TextRange,
+    ) -> Self {
+        if let Some(declaration) = declaration
+            && let Self::Diagnostic(error) = &mut self
+            && error.kind == Kind::ExactType
+            && let Some(position) = &mut error.position
+            && position.range == operand
+        {
+            position.expected_from.get_or_insert(declaration);
         }
         self
     }

@@ -2933,6 +2933,8 @@ impl Checker<'_> {
         // established new facts since this lazy body was checked.
         for slot in &input.writes {
             self.narrowed.remove_mut(slot);
+            self.assigned
+                .set_type_source(*slot, self.declared_slots.get(slot).copied());
         }
         let before = self.assigned.clone();
         let mut facts = self.narrowed.clone();
@@ -2947,7 +2949,7 @@ impl Checker<'_> {
         self.loop_breaks.push(None);
         let body = lower_body(self)?;
         let breaks = self.loop_breaks.pop().unwrap();
-        self.assigned = before;
+        self.assigned.after_iteration(before);
         self.narrowed = facts;
         let (orelse, falls) = self.loop_else(orelse, breaks, true)?;
         Ok((

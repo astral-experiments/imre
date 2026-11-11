@@ -1207,7 +1207,7 @@ fn checked_lower_with(
         // diagnostic. A real registration checks this result before emitting its body.
         graph.source_contract = Some(checked.and_then(|()| {
             if let Err(error) = &lowered
-                && graph.session.declared_exact_operand(graph, error)
+                && error.has_declared_operand(graph)
             {
                 return Err(error.to_string());
             }

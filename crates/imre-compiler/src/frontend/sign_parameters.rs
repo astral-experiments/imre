@@ -74,7 +74,7 @@ impl Checker<'_> {
         ty: Type,
         sign_only: bool,
     ) -> Result<Expr, String> {
-        calls::Supplied::Source(argument).checked(self, ty, sign_only)
+        calls::Supplied::Source(argument).checked(self, ty, sign_only, None)
     }
 
     pub(super) fn direct_value(

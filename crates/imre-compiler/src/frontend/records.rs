@@ -470,6 +470,7 @@ pub(super) fn record_factories(
                 };
                 let function = inference.register(Vec::new(), Some(concrete), Vec::new());
                 let signature = Signature {
+                    parameter_declarations: Arc::default(),
                     id: function,
                     physical_frame: false,
                     asynchronous: false,

@@ -249,11 +249,23 @@ pub(super) fn bind_input<B: PatternBinder>(
 
 impl Checker<'_> {
     /// Finds a target's storage without executing its receiver or index.
-    fn target_context(&self, target: &ast::Expr, rhs: Option<&ast::Expr>) -> Option<Type> {
+    pub(super) fn target_context(
+        &self,
+        target: &ast::Expr,
+        rhs: Option<&ast::Expr>,
+    ) -> Option<Type> {
+        self.target_expectation(target, rhs).map(|(ty, _)| ty)
+    }
+
+    fn target_expectation(
+        &self,
+        target: &ast::Expr,
+        rhs: Option<&ast::Expr>,
+    ) -> Option<(Type, Option<TypeDeclaration>)> {
         if let ast::Expr::Name(name) = target {
             self.names
                 .get(name.id.as_str())
-                .map(|&slot| self.locals[slot])
+                .map(|&slot| (self.locals[slot], self.declared_slots.get(&slot).copied()))
         } else {
             self.assignment_context(target, rhs)
         }
@@ -263,13 +275,13 @@ impl Checker<'_> {
         &mut self,
         target: &ast::Expr,
         value: &ast::Expr,
-        expected: Type,
+        (expected, declaration): (Type, Option<TypeDeclaration>),
     ) -> Result<Expr, String> {
         if self.inference.is_some() && expected == Type::JsonObject && target.is_attribute_expr() {
             // Keep a mutable owner until the resolved target decides its storage.
             self.document_annotation_value(value, expected, documents::MAP)
         } else {
-            self.expr_expected(value, expected)
+            self.expr_expected_from(value, expected, declaration)
         }
     }
 
@@ -362,7 +374,7 @@ impl Checker<'_> {
                     .contains(&slot)
                     .then_some((name.id.as_str(), slot))
             });
-            let context = self.target_context(target, Some(&assignment.value));
+            let context = self.target_expectation(target, Some(&assignment.value));
             let value = if let Some((_, old)) = previous {
                 // An empty literal still needs the old context. Other container
                 // expressions can determine their own concrete result type.
@@ -399,7 +411,7 @@ impl Checker<'_> {
             return Ok(vec![statement]);
         }
         let context = assignment.targets.iter().find_map(|target| {
-            self.target_context(target, Some(&assignment.value))
+            self.target_expectation(target, Some(&assignment.value))
                 .map(|ty| (target, ty))
         });
         let value = if let Some((target, expected)) = context {
@@ -503,6 +515,7 @@ impl Checker<'_> {
                     )));
                 }
                 let receiver = self.json_mutation_receiver(receiver, subscript)?;
+                let declaration = self.value_declaration(&receiver);
                 let (key, element) = self
                     .types
                     .mapping(receiver.ty)
@@ -521,7 +534,7 @@ impl Checker<'_> {
                 let index = if matches!(receiver.ty, Type::Deque(_)) {
                     self.integer_index(&subscript.slice)?
                 } else {
-                    self.expr_expected(&subscript.slice, key)?
+                    self.expr_expected_from(&subscript.slice, key, declaration)?
                 };
                 let value = self.coerce(value, element, target)?;
                 Ok(Statement::SetItem(receiver, index, value))
@@ -964,7 +977,7 @@ impl Checker<'_> {
                 }
             }
         }
-        if let Some(expected) = self.target_context(target, Some(value)) {
+        if let Some(expected) = self.target_expectation(target, Some(value)) {
             return self
                 .assignment_rhs(target, value, expected)
                 .map(assignments::unpromoted);
