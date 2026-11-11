@@ -714,13 +714,6 @@ impl Analyzer {
                 }
                 return Flow::default();
             }
-            Statement::Assert(test) => {
-                self.expression(test, &mut state, record);
-                return Flow {
-                    next: self.assume(test, true, state),
-                    ..Flow::default()
-                };
-            }
             Statement::If(test, yes, no) => {
                 self.expression(test, &mut state, record);
                 let yes = self

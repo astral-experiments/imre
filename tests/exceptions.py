@@ -95,6 +95,20 @@ except KeyError as error:
         for name in ("generic_args", "generic_args_processes", "generic_args_groups", "generic_args_records")
     },
     "explicit_base": (Path(__file__).parent / "fixtures/exceptions/explicit_base.py").read_text(),
+    "assertion_arguments": """
+def require(value: bool, with_message: bool) -> None:
+    if with_message:
+        assert value, ""
+    else:
+        assert value
+
+
+for with_message in (False, True):
+    try:
+        require(False, with_message)
+    except AssertionError as error:
+        print(error.args)
+""",
     "constructor_arguments": (Path(__file__).parent / "fixtures/exceptions/constructor_arguments.py").read_text(),
     "import_error": (Path(__file__).parent / "fixtures/exceptions/import_error.py").read_text(),
     "private_forwarding_parameter_names": """

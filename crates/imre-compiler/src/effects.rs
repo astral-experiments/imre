@@ -103,7 +103,7 @@ fn block(body: &[Statement], functions: &[bool], targets: Context<'_>) -> bool {
         // Every native loop can propagate KeyboardInterrupt at its signal checkpoint.
         Statement::While(..) | Statement::For { .. } => true,
         Statement::With { .. } => true,
-        Statement::IterNext { .. } | Statement::Assert(_) | Statement::Raise(_) => true,
+        Statement::IterNext { .. } | Statement::Raise(_) => true,
         Statement::Try {
             body,
             handlers,

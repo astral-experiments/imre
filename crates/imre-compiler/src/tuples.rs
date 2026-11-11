@@ -228,7 +228,7 @@ fn inspect(
                 inspect_expression(a, candidates, producers);
                 inspect_expression(b, candidates, producers);
             }
-            Statement::Expr(value) | Statement::Return(value) | Statement::Assert(value) => {
+            Statement::Expr(value) | Statement::Return(value) => {
                 inspect_expression(value, candidates, producers);
             }
             Statement::Match(_, cases) => {

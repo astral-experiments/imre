@@ -345,7 +345,6 @@ impl Copies<'_> {
             Statement::Assign(_, value)
             | Statement::Return(value)
             | Statement::Expr(value)
-            | Statement::Assert(value)
             | Statement::If(value, _, _) => value,
             _ => return,
         };

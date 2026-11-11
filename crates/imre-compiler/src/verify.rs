@@ -450,7 +450,6 @@ impl Verifier<'_> {
                 self.distinct_slots(&slots)
             }
             Statement::Return(value) => same(value.ty, self.function.returns),
-            Statement::Assert(test) => same(test.ty, Type::Bool),
             Statement::Try {
                 body,
                 handlers,
