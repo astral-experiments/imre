@@ -8,13 +8,8 @@ use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::path::Path;
 
-const SOURCE: &str = "imre_dyn_register_source";
-const BUILTIN: &str = "imre_dyn_register_builtin_source";
-const FILE: &str = "imre_dyn_register_file_code";
-const DECLARED_FILE: &str = "imre_dyn_register_declared_file_code_at";
-const ZIP: &str = "imre_dyn_register_zip_source";
-const ERROR: &str = "imre_dyn_register_module_error";
-const SINGLE: &str = "imre_dyn_register_module_single";
+const SOURCE_ARGS: &str = "ptr, ptr, ptr, ptr, i64, ptr";
+const PHYSICAL_ARGS: &str = "ptr, ptr, ptr, ptr, i32, ptr";
 
 /// Root constants, registration calls and declarations for one output layout.
 #[derive(Clone)]
@@ -25,45 +20,17 @@ pub(crate) struct ModuleLauncher {
 }
 
 impl ModuleLauncher {
-    pub(crate) fn new(
-        config: &str,
-        keep_docstrings: bool,
-        has_zip: bool,
-        has_builtins: bool,
-        has_errors: bool,
-    ) -> Self {
+    pub(crate) fn new(config: &str, keep_docstrings: bool) -> Self {
         let mut output = Output {
             keep_docstrings,
             ..Output::default()
         };
         let config = output.data(config.as_bytes());
-        // Keep entry-only declarations out of standalone provider fingerprints.
-        let source_args = "ptr, ptr, ptr, ptr, i64, ptr";
-        let physical_args = "ptr, ptr, ptr, ptr, i32, ptr";
         let mut main = FunctionBody::new("entry", "");
-        writeln!(main.code, "declare void @{SOURCE}({source_args})\n").unwrap();
         main.start_main(true, "");
         main.line(format!(
             "%ctx = call ptr @imre_dyn_new(i32 %argc, ptr %argv, ptr {config})"
         ));
-        writeln!(
-            output.functions,
-            "declare void @{FILE}({physical_args})\ndeclare void @{DECLARED_FILE}({physical_args}, ptr)"
-        )
-        .unwrap();
-        if has_zip {
-            writeln!(output.functions, "declare void @{ZIP}({physical_args})").unwrap();
-        }
-        if has_builtins {
-            writeln!(output.functions, "declare void @{BUILTIN}({source_args})").unwrap();
-        }
-        if has_errors {
-            writeln!(
-                output.functions,
-                "declare void @{ERROR}(ptr, ptr, ptr, ptr, i64, ptr, ptr, i8, ptr)"
-            )
-            .unwrap();
-        }
         Self {
             output,
             main,
@@ -102,6 +69,18 @@ impl ModuleLauncher {
         format!("@{symbol}")
     }
 
+    fn register(&mut self, function: &str, parameters: &str, arguments: std::fmt::Arguments<'_>) {
+        if !self.declares(function) {
+            self.declarations.insert(function.to_owned());
+            writeln!(
+                self.output.functions,
+                "declare void @{function}({parameters})"
+            )
+            .unwrap();
+        }
+        writeln!(self.main.code, "  call void @{function}({arguments})").unwrap();
+    }
+
     /// Attach one checked input to the module registered immediately before its inputs.
     pub(crate) fn register_single(
         &mut self,
@@ -111,20 +90,15 @@ impl ModuleLauncher {
         flags: u32,
         code: &str,
     ) {
-        if self.declarations.insert(SINGLE.to_owned()) {
-            writeln!(
-                self.output.functions,
-                "declare void @{SINGLE}(ptr, ptr, ptr, ptr, i64, i32, ptr)"
-            )
-            .unwrap();
-        }
         let text = self.output.data(source.as_bytes());
-        writeln!(
-            self.main.code,
-            "  call void @{SINGLE}(ptr %ctx, ptr {owner}, ptr {filename}, ptr {text}, i64 {}, i32 {flags}, ptr {code})",
-            source.len(),
-        )
-        .unwrap();
+        self.register(
+            "imre_dyn_register_module_single",
+            "ptr, ptr, ptr, ptr, i64, i32, ptr",
+            format_args!(
+                "ptr %ctx, ptr {owner}, ptr {filename}, ptr {text}, i64 {}, i32 {flags}, ptr {code}",
+                source.len(),
+            ),
+        );
     }
 
     pub(crate) fn register_error(
@@ -142,12 +116,14 @@ impl ModuleLauncher {
         let text = self.output.data(source.as_bytes());
         let hash = digest.map_or_else(|| "null".into(), |digest| self.output.data(digest));
         let error_kind = if parse_error { 2 } else { u8::from(in_args) };
-        writeln!(
-            self.main.code,
-            "  call void @{ERROR}(ptr %ctx, ptr {name}, ptr {file}, ptr {text}, i64 {}, ptr {message}, ptr {position}, i8 {error_kind}, ptr {hash})",
-            source.len(),
-        )
-        .unwrap();
+        self.register(
+            "imre_dyn_register_module_error",
+            "ptr, ptr, ptr, ptr, i64, ptr, ptr, i8, ptr",
+            format_args!(
+                "ptr %ctx, ptr {name}, ptr {file}, ptr {text}, i64 {}, ptr {message}, ptr {position}, i8 {error_kind}, ptr {hash}",
+                source.len(),
+            ),
+        );
     }
 
     pub(crate) fn finish(mut self) -> CodegenUnit {
@@ -175,12 +151,16 @@ impl ModuleOperands<'_> {
         let name = &self.name;
         let file = &self.file;
         let mut declared_path = String::new();
-        let (function, data, argument) = match self.loader {
+        let ((function, parameters), data, argument) = match self.loader {
             ModuleLoader::Source { builtin, text } => {
-                let function = if *builtin { BUILTIN } else { SOURCE };
+                let function = if *builtin {
+                    "imre_dyn_register_builtin_source"
+                } else {
+                    "imre_dyn_register_source"
+                };
                 let data = text.map_or_else(|| "null".into(), |text| launcher.output.data(text));
                 (
-                    function,
+                    (function, SOURCE_ARGS),
                     data,
                     format!("i64 {}", text.map_or(0, <[u8]>::len)),
                 )
@@ -191,13 +171,16 @@ impl ModuleOperands<'_> {
                 future_flags,
             } => {
                 let function = match kind {
-                    PhysicalModuleKind::File => FILE,
+                    PhysicalModuleKind::File => ("imre_dyn_register_file_code", PHYSICAL_ARGS),
                     PhysicalModuleKind::DeclaredFile(path) => {
                         let origin = launcher.output.data(path.as_os_str().as_encoded_bytes());
                         write!(declared_path, ", ptr {origin}").unwrap();
-                        DECLARED_FILE
+                        (
+                            "imre_dyn_register_declared_file_code_at",
+                            "ptr, ptr, ptr, ptr, i32, ptr, ptr",
+                        )
                     }
-                    PhysicalModuleKind::Zip => ZIP,
+                    PhysicalModuleKind::Zip => ("imre_dyn_register_zip_source", PHYSICAL_ARGS),
                 };
                 (
                     function,
@@ -206,10 +189,12 @@ impl ModuleOperands<'_> {
                 )
             }
         };
-        writeln!(
-            launcher.main.code,
-            "  call void @{function}(ptr %ctx, ptr {name}, ptr {file}, ptr {data}, {argument}, ptr {code}{declared_path})"
-        )
-        .unwrap();
+        launcher.register(
+            function,
+            parameters,
+            format_args!(
+                "ptr %ctx, ptr {name}, ptr {file}, ptr {data}, {argument}, ptr {code}{declared_path}"
+            ),
+        );
     }
 }
