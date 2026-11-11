@@ -1267,7 +1267,7 @@ impl Checker<'_> {
             return Ok(Some(source.located(node, value)));
         }
         if let ast::Expr::Call(call) = node
-            && let Some(method) = stdlib::runtime_format_method(call)
+            && let Some(method) = stdlib::registered_string_method(call)
             && self.graph.session.scalar_type(self.module, &method.value) == Some(Type::Str)
         {
             // The receiver has a scalar layout. Place this method call in the same
