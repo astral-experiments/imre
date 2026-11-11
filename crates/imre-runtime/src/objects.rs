@@ -325,6 +325,11 @@ pub extern "C" fn imre_pointer_identity(value: *const std::ffi::c_void) -> usize
     Int::from_usize(value.addr()).into_raw()
 }
 
+/// The base object descriptor displays the concrete class and the receiver's Python identity.
+pub(crate) fn base_object_repr(class_name: &str, identity: u64) -> impl std::fmt::Display {
+    std::fmt::from_fn(move |out| write!(out, "<{class_name} object at {identity:#x}>"))
+}
+
 /// Borrows a rooted object for one nonreentrant operation.
 unsafe fn object<'a>(pointer: *const Object) -> &'a Object {
     if pointer.is_null() {

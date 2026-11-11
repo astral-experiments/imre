@@ -1,12 +1,5 @@
 # Fixed-layout programs specialize assertEqual in the frontend. Runtime-loaded
 # test classes compare the actual objects, including reflected __eq__.
-def _safe_repr(value):
-    try:
-        return repr(value)
-    except Exception:
-        return object.__repr__(value)
-
-
 def _baseAssertEqual(self, first, second, msg=None):
     if not first == second:
         difference = _inequality_message(_safe_repr(first), _safe_repr(second))

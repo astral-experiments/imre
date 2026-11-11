@@ -1161,21 +1161,35 @@ pub unsafe extern "C" fn imre_record_default_repr(payload: *const usize) -> *con
     // SAFETY: source instances have an immutable concrete layout and qualified name.
     let semantics = unsafe { descriptor(payload).semantics.as_ref() }
         .unwrap_or_else(|| fail("SystemError", "internal records have no representation"));
+    // SAFETY: the receiver is rooted and its descriptor supplies the concrete class name.
+    unsafe {
+        imre_object_base_repr(
+            payload.cast(),
+            semantics.qualified_name,
+            semantics.qualified_name_len,
+        )
+    }
+}
+
+/// Display a fixed Python object with its concrete class, bypassing its display overrides.
+///
+/// # Safety
+/// The receiver is a rooted Python allocation. The name is its concrete class's valid
+/// qualified UTF-8 name and is readable for `length` bytes throughout the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_object_base_repr(
+    receiver: *const std::ffi::c_void,
+    name: *const u8,
+    length: usize,
+) -> *const Str {
+    // SAFETY: the compiler or record descriptor supplies this immutable class name.
+    let name = unsafe { text(name, length) };
+    let repr = super::base_object_repr(name, receiver.addr() as u64);
     let mut output = String::new();
-    let result = write_default_record_repr(&mut ReprWriter(&mut output), payload, semantics);
+    let result = write!(ReprWriter(&mut output), "{repr}");
     super::exceptions::finish_display(
         result.and_then(|()| super::exceptions::rendered(output.into())),
     )
-}
-
-fn write_default_record_repr(
-    output: &mut ReprWriter<'_>,
-    payload: *const usize,
-    semantics: &super::records::RecordSemantics,
-) -> std::fmt::Result {
-    // SAFETY: the compiler emits immutable UTF-8 identifiers for public record layouts.
-    let name = unsafe { text(semantics.qualified_name, semantics.qualified_name_len) };
-    write!(output, "<{name} object at {payload:p}>")
 }
 
 unsafe fn fields_repr(
@@ -1197,7 +1211,12 @@ unsafe fn fields_repr(
             return Ok(None);
         }
         if semantics.kind != TUPLE && semantics.flags & GENERATED_REPR == 0 {
-            write_default_record_repr(output, payload, semantics)?;
+            let name = text(semantics.qualified_name, semantics.qualified_name_len);
+            write!(
+                output,
+                "{}",
+                super::base_object_repr(name, payload.addr() as u64)
+            )?;
             return Ok(None);
         }
         let plain_tuple = semantics.kind == TUPLE && semantics.name.is_null();
