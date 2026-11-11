@@ -2889,12 +2889,19 @@ impl Context {
         error
     }
 
-    /// A class body can insert arbitrary keys into its live namespace through locals().
+    /// Read a live namespace key, including equality with keys installed by Python.
+    fn lookup_dict_name(&mut self, dict: Id, name: &str) -> Result<Option<Id>> {
+        if let Some(value) = self.scalar_dict_name(dict, name) {
+            return Ok(value);
+        }
+        let key = self.heap.code_name(name);
+        let (_, index) = self.find_dictionary_key(dict, key, None)?;
+        Ok(index.map(|index| self.stored_entries(dict)[index].1))
+    }
+
     fn lookup_scope_name(&mut self, scope: Id, name: &str) -> Result<Option<Id>> {
-        if let Some(dict) = self.scope_data(scope).class_body_mapping() {
-            let key = self.heap.code_name(name);
-            let (_, index) = self.find_dictionary_key(dict, key, None)?;
-            return Ok(index.map(|i| self.stored_entries(dict)[i].1));
+        if let Some(dict) = self.scope_data(scope).binding_namespace(name) {
+            return self.lookup_dict_name(dict, name);
         }
         Ok(self.scope_name(scope, name))
     }
@@ -2961,10 +2968,7 @@ impl Context {
             }
         }
         let builtins = self.default_source_builtins()?;
-        let key = self.heap.code_name(name);
-        let (_, index) = self.find_dictionary_key(builtins, key, None)?;
-        index
-            .map(|index| self.stored_entries(builtins)[index].1)
+        self.lookup_dict_name(builtins, name)?
             .ok_or_else(|| self.missing_binding(origin, scope, name))
     }
     /// Resolve the factory in the mapping payload of an exact or derived defaultdict.

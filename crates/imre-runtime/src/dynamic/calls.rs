@@ -9313,7 +9313,7 @@ impl Context {
     }
 
     /// The outer None means that Python could intercept this dictionary lookup.
-    fn scalar_dict_name(&self, dict: Id, name: &str) -> Option<Option<Id>> {
+    pub(super) fn scalar_dict_name(&self, dict: Id, name: &str) -> Option<Option<Id>> {
         let Value::Dict(entries) = self.heap.get(dict) else {
             return None;
         };

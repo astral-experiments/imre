@@ -2759,7 +2759,7 @@ impl Context {
     pub(super) fn source_global(&mut self, globals: ExecGlobals, name: &str) -> Result<Id> {
         for mapping in [globals.dict, globals.builtins] {
             if matches!(self.heap.get(mapping), Value::Dict(_)) {
-                if let Some(value) = self.dict_named_item(mapping, name) {
+                if let Some(value) = self.lookup_dict_name(mapping, name)? {
                     return Ok(value);
                 }
             } else {
