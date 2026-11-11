@@ -1163,9 +1163,15 @@ fn lower_graph(
     if let Some(cache) = cache.as_deref_mut() {
         cache.validate_abi(&definitions, &globals);
     }
-    let mut functions = Vec::new();
+    let named = graph.registered_startup && !needs_registered_entry;
+    let mut completed = registered::FixedFunctions::default();
+    let finish_named = |completed: &mut registered::FixedFunctions| {
+        if named {
+            completed.place(graph, &inference.source_checks);
+            capture();
+        }
+    };
     let mut frame_sources = HashMap::new();
-    let mut entry_frames = HashMap::new();
     let mut has_wrapper_link = false;
     let mut refused_body = None;
     let mut zip_sums = Vec::new();
@@ -1237,9 +1243,7 @@ fn lower_graph(
                 }
                 Err(error) if error.is_object() => {}
                 Err(error) => {
-                    if graph.registered_startup {
-                        capture();
-                    }
+                    finish_named(&mut completed);
                     let report = error.terminal_in(graph, *module_id);
                     refused_body = Some(called_body(report)?);
                     break;
@@ -1268,23 +1272,20 @@ fn lower_graph(
             Some(cache) if signature.method.is_none() => cache.body(checker, definition, signature),
             _ => lower_body(checker, definition, signature),
         };
-        let (body, sums) = match checked_region(
-            result,
-            graph,
-            *module_id,
-            &mut unavailable,
-            capture_on_object,
-        ) {
-            Ok(Some(body)) => body,
-            Ok(None) => continue,
-            Err(report) => {
-                if graph.registered_startup {
-                    capture();
+        let (body, sums) =
+            match checked_region(result, graph, *module_id, &mut unavailable, |failure| {
+                if !named {
+                    capture_on_object(failure);
                 }
-                refused_body = Some(called_body(report)?);
-                break;
-            }
-        };
+            }) {
+                Ok(Some(body)) => body,
+                Ok(None) => continue,
+                Err(report) => {
+                    finish_named(&mut completed);
+                    refused_body = Some(called_body(report)?);
+                    break;
+                }
+            };
         if needs_registered_entry {
             // The fixed-layout checks have supplied their diagnostics. Registered
             // definitions and the registered initializer already own this program.
@@ -1304,28 +1305,13 @@ fn lower_graph(
                 && module.parsed.syntax().body[callable_definitions[signature.id].statement]
                     .as_function_def_stmt()
                     == Some(definition);
-            if !graph.registered_startup && *module_id == graph.entry && original {
-                entry_frames.insert(functions.len(), (definition, source));
-            } else if graph.registered_startup
-                && original
-                && !graph
-                    .registered_functions()
-                    .get(module_id)
-                    .is_some_and(|bodies| bodies.contains_key(&definition.start()))
-                && source.matches(&function)
-                && inference
-                    .source_checks
-                    .accepts(graph, *module_id, definition)
-            {
-                // The fixed graph still uses the checked instructions for call and initializer
-                // validation. Its named entry executes those operations with the Python binder.
-                graph.register_function(
-                    *module_id,
-                    definition.start(),
-                    place_fixed_function(function.clone(), source),
-                );
+            let slot = completed.functions.len();
+            if original && (named || *module_id == graph.entry) {
+                completed
+                    .frames
+                    .push((slot, callable_definitions[signature.id], source));
             } else if can_transfer_frames || graph.registered_startup {
-                frame_sources.insert(functions.len(), (definition.start(), source));
+                frame_sources.insert(slot, (definition.start(), source));
             }
         }
         graph.ordered_reads(*module_id, &definition.body, true, &mut reads);
@@ -1352,19 +1338,16 @@ fn lower_graph(
             (function, calls, reads)
         };
         if sums.len() >= 2 && !classes.cached.contains_key(&signature.id) {
-            zip_sums.push((functions.len(), sums));
+            zip_sums.push((completed.functions.len(), sums));
         }
         owners.push(*module_id);
-        functions.push(function);
+        completed.functions.push(function);
         call_graph.push(calls);
         class_reads.push(reads);
         recursion_errors.push(module.error(
             definition,
             "recursive calls are unsupported in this prototype",
         ));
-    }
-    if graph.registered_startup {
-        capture();
     }
     let mut entry = None;
     let mut startup = Vec::new();
@@ -1410,28 +1393,14 @@ fn lower_graph(
         if checked_region(result, graph, module_id, &mut unavailable, |failure| {
             // Entry checking has finished. An object refusal discards the fixed graph, so
             // its completed functions can move to the Python binder before ordinary recovery.
-            if failure.is_object() && !captured.get() && !entry_frames.is_empty() {
-                for (id, function) in functions.drain(..).enumerate() {
-                    if let Some((definition, source)) = entry_frames.remove(&id)
-                        && !graph
-                            .registered_functions()
-                            .get(&module_id)
-                            .is_some_and(|entries| entries.contains_key(&definition.start()))
-                        && source.matches(&function)
-                        && inference
-                            .source_checks
-                            .accepts(graph, module_id, definition)
-                    {
-                        graph.register_function(
-                            module_id,
-                            definition.start(),
-                            place_fixed_function(function, source),
-                        );
-                    }
+            if !named {
+                if failure.is_object() && !captured.get() {
+                    completed.place(graph, &inference.source_checks);
                 }
+                capture_on_object(failure);
             }
-            capture_on_object(failure);
-        })?
+        })
+        .inspect_err(|_| finish_named(&mut completed))?
         .is_some()
             && let Some(body) = fixed_entry
         {
@@ -1444,28 +1413,34 @@ fn lower_graph(
             });
         }
     }
-    if let Some(reason) = unavailable {
-        return Err(reason);
-    }
-    if let Some((_, reason)) = globals.missing_bindings.borrow_mut().pop_first() {
+    if let Some(reason) = unavailable.or_else(|| {
+        globals
+            .missing_bindings
+            .borrow_mut()
+            .pop_first()
+            .map(|(_, reason)| reason)
+    }) {
+        finish_named(&mut completed);
         return Err(reason);
     }
     if needs_registered_entry {
         return Ok(crate::CheckedProgram::Registered(None));
     }
     if let Some(error) = graph.deferred_object_error.take() {
-        if error.kind.is_object() {
+        if named {
+            finish_named(&mut completed);
+        } else if error.kind.is_object() {
             capture();
         }
         return Err(error);
     }
-    if can_transfer_frames {
-        frame_sources.extend(
-            entry_frames
-                .into_iter()
-                .map(|(id, (definition, source))| (id, (definition.start(), source))),
-        );
+    if !named && can_transfer_frames {
+        for (slot, owner, source) in completed.frames.drain(..) {
+            let definition = &graph.modules[owner.module].parsed.syntax().body[owner.statement];
+            frame_sources.insert(slot, (definition.start(), source));
+        }
     }
+    let functions = &mut completed.functions;
     let fault_enabled = graph
         .command_startup
         .as_ref()
@@ -1499,33 +1474,38 @@ fn lower_graph(
         recursion_errors.push(helper.recursion_error);
     }
     let mut entry = entry.expect("source graph has an entry module");
-    typing::validate_functions(&functions, &entry, &types)?;
-    let callable_targets = callables::targets(&functions, &entry, &types)?;
-    for (function, calls) in functions.iter().zip(&mut call_graph) {
-        ir::walk_expressions(&function.body, &mut |value| {
-            if let Some(targets) = globals.invoked_functions(value) {
-                calls.extend(targets.iter().copied());
-            } else if let Some(signature) = callables::invoked_signature(value)
-                && let Some(targets) = callable_targets.get(&signature)
-            {
-                calls.extend(targets);
-            }
-        });
-    }
-    for function in functions.iter().chain([&entry]) {
-        callables::validate_storage(function, &types)?;
-    }
-    if let Some(id) = recursive_call_root(&call_graph) {
-        return Err(recursion_errors.swap_remove(id).into());
-    }
-    globals.validate_initializers(
-        initializer_ids.clone().zip(initialization_order),
-        graph,
-        &functions,
-        &class_reads,
-        &callable_definitions,
-        &callable_targets,
-    )?;
+    let validate_calls = |functions: &[ir::Function]| -> StdResult<(), Diagnostic> {
+        typing::validate_functions(functions, &entry, &types)?;
+        let callable_targets = callables::targets(functions, &entry, &types)?;
+        for (function, calls) in functions.iter().zip(&mut call_graph) {
+            ir::walk_expressions(&function.body, &mut |value| {
+                if let Some(targets) = globals.invoked_functions(value) {
+                    calls.extend(targets.iter().copied());
+                } else if let Some(signature) = callables::invoked_signature(value)
+                    && let Some(targets) = callable_targets.get(&signature)
+                {
+                    calls.extend(targets);
+                }
+            });
+        }
+        for function in functions.iter().chain([&entry]) {
+            callables::validate_storage(function, &types)?;
+        }
+        if let Some(id) = recursive_call_root(&call_graph) {
+            return Err(recursion_errors.swap_remove(id).into());
+        }
+        globals.validate_initializers(
+            initializer_ids.clone().zip(initialization_order),
+            graph,
+            functions,
+            &class_reads,
+            &callable_definitions,
+            &callable_targets,
+        )?;
+        Ok(())
+    };
+    validate_calls(functions).inspect_err(|_| finish_named(&mut completed))?;
+    let functions = &mut completed.functions;
     python_frames.push(true); // The program entry runs a Python module body.
     let mut names = false;
     let mut uses_builtin_module_names = false;
@@ -1562,21 +1542,26 @@ fn lower_graph(
         }
     }
     if graph.reachable_only() {
-        classes.missing_key_reprs(&functions, &entry, graph, &types, key_reprs);
+        classes.missing_key_reprs(functions, &entry, graph, &types, key_reprs);
     }
-    let json_records = json::schemas(graph, &classes, &types, &functions, &entry)?;
+    let json_records = json::schemas(graph, &classes, &types, functions, &entry)
+        .inspect_err(|_| finish_named(&mut completed))?;
+    let functions = &mut completed.functions;
     // Fusing adjacent sums also inlines their generator bodies and scalar calls.
     if !track_frames {
         for (id, sums) in zip_sums {
-            zip_sums::fuse(&mut functions, id, &sums);
+            zip_sums::fuse(functions, id, &sums);
         }
     }
     if let Some(cache) = cache {
         cache.finish(&types);
     }
-    if let Some(registered) = registered_entry(graph, &functions, &entry)? {
+    let selected = registered_entry(graph, functions, &entry);
+    finish_named(&mut completed);
+    if let Some(registered) = selected? {
         return Ok(registered);
     }
+    let mut functions = completed.functions;
     // Checkpoints above refer to the source operations. Insert native startup
     // bookkeeping into these same bodies only after their source order is checked.
     for id in initializer_ids {

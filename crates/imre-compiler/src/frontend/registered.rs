@@ -337,6 +337,40 @@ pub(super) fn selected_operands(and: bool, mut operands: Vec<Expr>) -> Expr {
     result
 }
 
+/// Fixed validation borrows these functions. A Python entry that survives the
+/// checks takes the original operations, including checked siblings on an error exit.
+#[derive(Default)]
+pub(super) struct FixedFunctions {
+    pub(super) functions: Vec<ir::Function>,
+    pub(super) frames: Vec<(usize, DefinitionId, FixedBodySource)>,
+}
+
+impl FixedFunctions {
+    pub(super) fn place(&mut self, graph: &SourceGraph, checks: &SourceChecks) {
+        // Functions were appended in slot order. Removing in reverse leaves every
+        // earlier slot intact, including when helper functions have since been added.
+        for (slot, owner, source) in self.frames.drain(..).rev() {
+            let definition = graph.modules[owner.module].parsed.syntax().body[owner.statement]
+                .as_function_def_stmt()
+                .expect("a physical function definition");
+            if !graph
+                .registered_functions()
+                .get(&owner.module)
+                .is_some_and(|entries| entries.contains_key(&definition.start()))
+                && source.matches(&self.functions[slot])
+                && checks.accepts(graph, owner.module, definition)
+            {
+                let function = self.functions.swap_remove(slot);
+                graph.register_function(
+                    owner.module,
+                    definition.start(),
+                    place_fixed_function(function, source),
+                );
+            }
+        }
+    }
+}
+
 pub(super) enum Capture<'a> {
     Solved,
     IncludeLive,
