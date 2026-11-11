@@ -12,28 +12,6 @@ use super::*;
 
 mod slices;
 
-/// Only a stored field of the same local can be read again under its guard.
-fn local_field(value: &Expr) -> Option<(usize, usize)> {
-    if let ExprKind::Field(receiver, field) = &value.kind
-        && let ExprKind::Local(local) = receiver.kind
-    {
-        Some((local, *field))
-    } else {
-        None
-    }
-}
-
-fn present_field(condition: &Expr) -> Option<(usize, usize)> {
-    if let ExprKind::Not(inner) = &condition.kind
-        && let ExprKind::Builtin(Builtin::IsNone, args) = &inner.kind
-        && let [value] = args.as_slice()
-    {
-        local_field(value)
-    } else {
-        None
-    }
-}
-
 /// Evaluating the dict key precedes the value. A call, property or assignment
 /// could change the guarded field through an alias during that interval.
 fn preserves_field(value: &Expr) -> bool {
@@ -248,7 +226,9 @@ impl EagerDisplay for Checker<'_> {
             output,
             destination,
             result,
-            conditions.last().and_then(present_field),
+            conditions
+                .last()
+                .and_then(|test| records::present_field(test, true)),
         )
     }
 }
@@ -1116,29 +1096,14 @@ impl Checker<'_> {
         expected: Option<Type>,
         guarded: Option<(usize, usize)>,
     ) -> Result<Expr, String> {
-        if let Some((slot, field)) = guarded
-            && let ast::Expr::Attribute(attribute) = expression
-            && let ast::Expr::Name(receiver) = &*attribute.value
-            && self.names.get(receiver.id.as_str()) == Some(&slot)
-            && let Type::Class(class) = self.locals[slot]
-            && self.classes.declarations.definitions[class].fields[field].name
-                == attribute.attr.as_str()
-            && let Some(payload) = self.types.payload(self.classes.fields[class][field])
-        {
-            let value = self.expr(expression)?;
-            let unwrapped = Expr {
-                ty: payload,
-                kind: ExprKind::Unwrap(Box::new(value)),
-            };
-            return match expected {
-                Some(ty) => self.coerce(unwrapped, ty, expression),
-                None => Ok(unwrapped),
-            };
-        }
-        match expected {
+        let depth = self.present_fields.len();
+        self.guard_field_read(expression, guarded);
+        let value = match expected {
             Some(ty) => self.expr_expected(expression, ty),
             None => self.expr(expression),
-        }
+        };
+        self.present_fields.truncate(depth);
+        value
     }
 }
 

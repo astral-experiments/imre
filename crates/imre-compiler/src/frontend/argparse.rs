@@ -1750,14 +1750,14 @@ impl Checker<'_> {
             let mut reassigned = false;
             for operand in value.values.iter().rev() {
                 if !reassigned && let Some(guard) = self.namespace_guard(operand, truth, body) {
-                    self.namespace_guards.push(guard);
+                    self.present_fields.push(guard);
                 }
                 if !matches!(operand, ast::Expr::Attribute(attr) if attr.value.is_name_expr()) {
                     reassigned = true
                 }
             }
         } else if let Some(guard) = self.namespace_guard(test, truth, body) {
-            self.namespace_guards.push(guard);
+            self.present_fields.push(guard);
         }
     }
 

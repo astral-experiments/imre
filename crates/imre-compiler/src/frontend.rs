@@ -3017,7 +3017,8 @@ struct Checker<'a> {
     regex_fields: HashMap<usize, HashMap<String, usize>>,
     joined_lines: joined_lines::Plan,
     consuming_lists: consuming_lists::Plan,
-    namespace_guards: Vec<(usize, usize)>,
+    /// Stored fields known to be present at the current read, by receiver slot and field index.
+    present_fields: Vec<(usize, usize)>,
     caught_exceptions: Vec<CaughtException>,
     returns: Type,
     /// Inferred containers can acquire a new storage layout at an outermost plain assignment.
@@ -3108,7 +3109,7 @@ impl<'a> Checker<'a> {
             regex_fields: HashMap::new(),
             joined_lines: joined_lines::Plan::default(),
             consuming_lists: consuming_lists::Plan::default(),
-            namespace_guards: Vec::new(),
+            present_fields: Vec::new(),
             caught_exceptions: Vec::new(),
             returns: Type::None,
             inferred_containers: HashSet::new(),
@@ -4374,12 +4375,13 @@ impl<'a> Checker<'a> {
         let mut arm = |checker: &mut Self, truth: bool| {
             checker.apply_facts(&value.test, truth);
             let expression = if truth { &*value.body } else { &*value.orelse };
-            let guards = checker.namespace_guards.len();
+            let guards = checker.present_fields.len();
             if narrowing::expression_assignments(expression).is_empty() {
                 checker.enter_namespace_guards(&value.test, truth, &[]);
             }
+            checker.guard_field_read(expression, records::present_field(&test, truth));
             let result = check(checker, expression);
-            checker.namespace_guards.truncate(guards);
+            checker.present_fields.truncate(guards);
             result
         };
         let first = arm(self, !reversed)?;
@@ -5460,6 +5462,7 @@ impl<'a> Checker<'a> {
         let enclosing_sum = self.zip_sum_rhs;
         let mut previous_sum = false;
         let mut length_guard = None;
+        let mut fallthrough_field = None;
         for (index, statement) in statements.iter().enumerate() {
             let mut fresh = None;
             if let ast::Stmt::Assign(assignment) = statement
@@ -5522,8 +5525,13 @@ impl<'a> Checker<'a> {
             {
                 (vec![self.assign(target, parser)?], true)
             } else {
-                self.statement(statement)?
+                let depth = self.present_fields.len();
+                self.guard_return_field(std::slice::from_ref(statement), fallthrough_field);
+                let result = self.statement(statement);
+                self.present_fields.truncate(depth);
+                result?
             };
+            fallthrough_field = records::fallthrough_field(&lowered);
             self.fixed_tuple = enclosing_tuple;
             if !self.module_scope
                 && let Some((name, rhs)) = fresh
@@ -7113,21 +7121,23 @@ impl<'a> Checker<'a> {
             if let Some(read) = self.immediate_present_subscript(test, body) {
                 self.present_subscripts.push(read);
             }
-            let namespace_depth = self.namespace_guards.len();
+            let field_depth = self.present_fields.len();
             self.enter_namespace_guards(test, true, body);
+            self.guard_return_field(body, records::present_field(&condition, true));
             // In a reachable-only profile, an impossible compatibility guard's
             // expression-only body contains no local declarations to preserve.
-            let (yes, yes_falls) = if self.graph.reachable_only()
+            let yes = if self.graph.reachable_only()
                 && known == Some(false)
                 && body.iter().all(|stmt| matches!(stmt, ast::Stmt::Expr(s) if narrowing::expression_assignments(&s.value).is_empty()))
             {
-                (Vec::new(), false)
+                Ok((Vec::new(), false))
             } else {
-                self.block(body)?
+                self.block(body)
             };
-            self.namespace_guards.truncate(namespace_depth);
+            self.present_fields.truncate(field_depth);
             self.regex_guards.truncate(guard_depth);
             self.present_subscripts.truncate(subscript_depth);
+            let (yes, yes_falls) = yes?;
             if yes_falls && known != Some(false) && !exit_fixed {
                 self.merge_exit(&mut joined);
             }
@@ -7142,15 +7152,19 @@ impl<'a> Checker<'a> {
             arms.push((condition, yes));
         }
         let (no, no_falls) = if let Some(tail) = clauses.last().filter(|c| c.test.is_none()) {
-            let guards = self.namespace_guards.len();
+            let guards = self.present_fields.len();
             let last_test = clauses
                 .iter()
                 .rev()
                 .find_map(|clause| clause.test.as_ref())
                 .unwrap_or(&branch.test);
             self.enter_namespace_guards(last_test, false, &tail.body);
+            let field = arms
+                .last()
+                .and_then(|(test, _)| records::present_field(test, false));
+            self.guard_return_field(&tail.body, field);
             let result = self.block(&tail.body);
-            self.namespace_guards.truncate(guards);
+            self.present_fields.truncate(guards);
             result?
         } else {
             (Vec::new(), true)
@@ -10192,7 +10206,7 @@ impl<'a> Checker<'a> {
                 let (receiver, field, ty) = self.field_value(attribute, receiver)?;
                 if let Some(name) = attribute.value.as_name_expr()
                     && let Some(&slot) = self.names.get(name.id.as_str())
-                    && self.namespace_guards.contains(&(slot, field))
+                    && self.present_fields.contains(&(slot, field))
                     && let Some(payload) = self.types.payload(ty)
                 {
                     return Ok(Expr {
