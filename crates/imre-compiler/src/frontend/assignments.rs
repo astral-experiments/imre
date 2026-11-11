@@ -585,9 +585,10 @@ impl Checker<'_> {
 
     pub(super) fn is_module_namespace(&self, value: &Expr) -> bool {
         match &value.kind {
-            ExprKind::Builtin(Builtin::RegisteredCall(site), _) => {
-                self.namespace_calls.contains(&site.range)
-            }
+            ExprKind::Invoke { args, .. } => args
+                .site
+                .python()
+                .is_some_and(|site| self.namespace_calls.contains(&site.range)),
             ExprKind::Local(slot) => self.module_namespace.aliases.contains(slot),
             _ => false,
         }
@@ -628,7 +629,10 @@ impl Checker<'_> {
         call: &ast::Expr,
         checked: &Result<Expr, String>,
     ) {
-        if self.namespace_calls.contains(&call.range()) {
+        if checked
+            .as_ref()
+            .is_ok_and(|value| self.is_module_namespace(value))
+        {
             return;
         }
         let can_call_python = match checked {
