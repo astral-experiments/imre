@@ -735,7 +735,6 @@ impl Builtin {
             | Self::RegisteredInPlace(_)
             | Self::RegisteredAttribute { .. }
             | Self::RegisteredSpread
-            | Self::RegisteredDict(_)
             | Self::Unrepresented
             | Self::RegisteredSubscript(..)
             | Self::RegisteredIndexConstant(_)

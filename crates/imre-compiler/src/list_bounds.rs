@@ -377,10 +377,15 @@ impl Analysis<'_> {
                 }
                 None
             }
-            ExprKind::Dict { entries, .. } => {
-                for (key, value) in entries {
-                    self.expression(key, state);
+            ExprKind::Dict(entries) => {
+                for crate::ir::DictEntry { key, value } in entries {
+                    if let Some(key) = key {
+                        self.expression(key, state);
+                    }
                     self.expression(value, state);
+                }
+                if expression.ty == Type::PythonObject {
+                    state.fill(None);
                 }
                 None
             }
@@ -475,9 +480,12 @@ fn readonly(expression: &Expr) -> bool {
         | ExprKind::Set { values, .. }
         | ExprKind::Compare(values, _)
         | ExprKind::Boolean(_, values) => values.iter().all(readonly),
-        ExprKind::Dict { entries, .. } => entries
-            .iter()
-            .all(|(key, value)| readonly(key) && readonly(value)),
+        ExprKind::Dict(entries) => {
+            expression.ty != Type::PythonObject
+                && entries
+                    .iter()
+                    .all(|entry| entry.key.as_ref().is_some_and(readonly) && readonly(&entry.value))
+        }
         ExprKind::Bind(_, value)
         | ExprKind::Present(value)
         | ExprKind::Absent(value)

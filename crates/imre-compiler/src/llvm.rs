@@ -3211,32 +3211,8 @@ impl Emitter<'_, '_> {
             | ExprKind::BooleanValue(..)
             | ExprKind::Conditional(..)
             | ExprKind::Builtin(..) => unreachable!("shared IR expression"),
-            ExprKind::List(_) | ExprKind::Tuple(_) | ExprKind::Set { .. } => {
+            ExprKind::List(_) | ExprKind::Tuple(_) | ExprKind::Set { .. } | ExprKind::Dict(_) => {
                 unreachable!("shared checked display")
-            }
-            ExprKind::Dict {
-                key,
-                value,
-                entries,
-            } => {
-                let dict = Value {
-                    ty: expression.ty,
-                    operand: self.instruction(format!(
-                        "call ptr @imre_dict_new(i32 {}, i32 {})",
-                        representation_kind(*key, &self.module.types),
-                        representation_kind(*value, &self.module.types)
-                    )),
-                    small_integer: false,
-                };
-                let dict = self.owned(dict);
-                for (key, value) in entries {
-                    let key = self.operand(key);
-                    let value = self.operand(value);
-                    self.set_item(&dict, &key.value, &value.value, false);
-                    self.release_operand(&value);
-                    self.release_operand(&key);
-                }
-                dict
             }
             ExprKind::Present(expression_value) => {
                 let value = self.operand(expression_value);
@@ -4870,7 +4846,6 @@ impl Emitter<'_, '_> {
             | Builtin::RegisteredIndexConstant(_)
             | Builtin::RegisteredSlice
             | Builtin::RegisteredDeleteItem
-            | Builtin::RegisteredDict(_)
             | Builtin::RegisteredEllipsis
             | Builtin::RegisteredComplex(..)
             | Builtin::FormatConversion(_)

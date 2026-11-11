@@ -118,7 +118,7 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
             | ExprKind::Not(_)
             | ExprKind::Scope { .. } => true,
             ExprKind::Conditional(..) | ExprKind::BooleanValue(..) | ExprKind::Boolean(..) => true,
-            ExprKind::Dict { entries, .. } => entries.is_empty(),
+            ExprKind::Dict(entries) => expr.ty == Type::PythonObject || entries.is_empty(),
             ExprKind::Builtin(op, args) if let Some(iteration) = op.iteration_operands(args) => {
                 uses_python_protocol |= matches!(iteration, Ok(ir::IterationOperands::Iter(..)));
                 iteration.is_ok()
@@ -199,16 +199,6 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
                 segments.len() == fields.len() + 1
             }
             ExprKind::Builtin(Builtin::RegisteredInterpolation { .. }, args) => args.len() == 2,
-            ExprKind::Builtin(Builtin::RegisteredDict(entries), operands) => {
-                operands.len()
-                    == entries
-                        .iter()
-                        .map(|entry| match entry {
-                            ir::DictEntryKind::Pair => 2,
-                            ir::DictEntryKind::Unpack => 1,
-                        })
-                        .sum::<usize>()
-            }
             _ => false,
         };
     });
@@ -1323,15 +1313,6 @@ impl Frame<'_, '_, '_> {
                 } else {
                     read(self)
                 }
-            }
-            (Builtin::RegisteredDict(entries), values) => {
-                let mut values = values.iter();
-                let items = entries.iter().map(|entry| {
-                    let key = (*entry == ir::DictEntryKind::Pair)
-                        .then(|| values.next().expect("checked dictionary key"));
-                    (key, values.next().expect("checked dictionary value"))
-                });
-                self.dict_display(items, |code, expr| code.evaluate_handle(expr))
             }
             _ => unreachable!("unsupported registered operation"),
         };

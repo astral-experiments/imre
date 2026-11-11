@@ -1693,69 +1693,6 @@ pub(crate) trait FrameEmitter<'a, 'p>:
         self.op("put", &[receiver, index, value])
     }
 
-    /// Construct a Python dictionary with CPython's BUILD_MAP, MAP_ADD and DICT_UPDATE order.
-    fn dict_display<'e, T: 'e>(
-        &mut self,
-        items: impl Iterator<Item = (Option<&'e T>, &'e T)>,
-        mut evaluate: impl FnMut(&mut Self, &T) -> String,
-    ) -> String {
-        // CPython's codegen_dict flushes on the pair *after* the buffered operands exceed
-        // its stack-use guideline. codegen_subdict streams any chunk over that guideline.
-        const STACK_USE_GUIDELINE: usize = 30;
-        let mut items = items.peekable();
-        if items.peek().is_none() {
-            return self.op("dict", &[]);
-        }
-
-        let mark = self.temporary_mark();
-        self.unwind_operands(&mark, |f| {
-            let mut result = None;
-            while let Some((key, value)) = items.next() {
-                let Some(key) = key else {
-                    let dict = result.get_or_insert_with(|| f.op("dict", &[]));
-                    let mapping = evaluate(f, value);
-                    f.op("update", &[dict, &mapping]);
-                    f.keep_operands(&mark, dict, "0");
-                    continue;
-                };
-
-                let mut chunk = vec![(key, value)];
-                while chunk.len() < STACK_USE_GUIDELINE / 2 + 2
-                    && let Some((Some(key), value)) = items.next_if(|(key, _)| key.is_some())
-                {
-                    chunk.push((key, value));
-                }
-                let streamed = (2 * chunk.len() > STACK_USE_GUIDELINE).then(|| f.op("dict", &[]));
-                let mut pending = Vec::new();
-                for (key, value) in chunk {
-                    let key = evaluate(f, key);
-                    let value = evaluate(f, value);
-                    if let Some(part) = &streamed {
-                        f.op("put", &[part, &key, &value]);
-                        f.keep_operands(&mark, part, result.as_deref().unwrap_or("0"));
-                    } else {
-                        pending.push((key, value));
-                    }
-                }
-                let part = streamed.unwrap_or_else(|| {
-                    let part = f.op("dict", &[]);
-                    for (key, value) in pending {
-                        f.op("put", &[&part, &key, &value]);
-                    }
-                    f.keep_operands(&mark, &part, result.as_deref().unwrap_or("0"));
-                    part
-                });
-                if let Some(dict) = &result {
-                    f.op("update", &[dict, &part]);
-                    f.keep_operands(&mark, dict, "0");
-                } else {
-                    result = Some(part);
-                }
-            }
-            result.expect("nonempty dictionary display")
-        })
-    }
-
     fn object_operation<'e, T: 'e>(
         &mut self,
         op: &Builtin,
@@ -2108,7 +2045,7 @@ pub(crate) trait FrameEmitter<'a, 'p>:
                 code.checked(&format!("call i64 @imre_dyn_display_item(ptr %ctx, i64 {list}, i64 {value}, i64 {mark}, i1 {extend})"));
             };
             let (mut result, complete) = crate::llvm::operations::sequences::build(
-                code, items, spread, &mut evaluate, initial, append,
+                code, items, crate::llvm::operations::sequences::STACK_USE_GUIDELINE, spread, &mut evaluate, initial, append,
             );
             if !complete && tuple {
                 let operation = if slot.is_some() { "constant_tuple" } else { "tuple" };

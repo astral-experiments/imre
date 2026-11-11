@@ -69,7 +69,7 @@ impl SourceScope<'_> {
                 element: Type::PythonObject,
                 values: Vec::new(),
             },
-            Output::Dict(..) => ExprKind::Builtin(Builtin::RegisteredDict(Vec::new()), Vec::new()),
+            Output::Dict(..) => ExprKind::Dict(Vec::new()),
             Output::Generator(_) => return None,
         };
         let result = self.hidden(Type::PythonObject);

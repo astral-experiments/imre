@@ -68,11 +68,7 @@ impl Checker<'_> {
             .collect::<Result<Vec<_>, String>>()?;
         Ok(scope.finish(Expr {
             ty: self.types.dict(Type::Str, value),
-            kind: ExprKind::Dict {
-                key: Type::Str,
-                value,
-                entries,
-            },
+            kind: ExprKind::dict_pairs(entries),
         }))
     }
 
@@ -202,11 +198,7 @@ impl Checker<'_> {
     ) -> Expr {
         let empty = Expr {
             ty: self.types.dict(key, value),
-            kind: ExprKind::Dict {
-                key,
-                value,
-                entries: Vec::new(),
-            },
+            kind: ExprKind::Dict(Vec::new()),
         };
         if sources.is_empty() {
             return empty;
@@ -266,11 +258,7 @@ impl Checker<'_> {
             target,
             Expr {
                 ty,
-                kind: ExprKind::Dict {
-                    key: key_type,
-                    value: value_type,
-                    entries: Vec::new(),
-                },
+                kind: ExprKind::Dict(Vec::new()),
             },
         ));
         let mut body = self.expand_items(Iteration::Prepared(input), source, |c, item| {
@@ -1104,11 +1092,7 @@ impl Checker<'_> {
         let result = self.hidden(ty);
         let init = Expr {
             ty,
-            kind: ExprKind::Dict {
-                key,
-                value,
-                entries: Vec::new(),
-            },
+            kind: ExprKind::Dict(Vec::new()),
         };
         Ok(Expr {
             ty,
@@ -1179,11 +1163,7 @@ impl Checker<'_> {
                 result,
                 Expr {
                     ty,
-                    kind: ExprKind::Dict {
-                        key,
-                        value,
-                        entries: Vec::new(),
-                    },
+                    kind: ExprKind::Dict(Vec::new()),
                 },
             ),
         );

@@ -371,11 +371,7 @@ impl Checker<'_> {
         );
         let table = Expr {
             ty: layout.registry,
-            kind: ExprKind::Dict {
-                key: Type::Str,
-                value: target.ty,
-                entries: vec![(unpacking::string("object"), target.clone())],
-            },
+            kind: ExprKind::dict_pairs(vec![(unpacking::string("object"), target.clone())]),
         };
         let metadata = if let Some(text) = text {
             let doc = text

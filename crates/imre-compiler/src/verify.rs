@@ -503,10 +503,6 @@ impl Verifier<'_> {
             ExprKind::Builtin(Builtin::Unrepresented, _) => {
                 Err("unrepresented source operand in executable IR".into())
             }
-            ExprKind::Dict { key, value, .. } => {
-                self.ty(*key)?;
-                self.ty(*value)
-            }
             ExprKind::Set { element, .. } => self.ty(*element),
             ExprKind::Builtin(
                 Builtin::JsonDecode(ty)
@@ -588,18 +584,20 @@ impl Verifier<'_> {
                 }
                 Ok(())
             }
-            ExprKind::Dict {
-                key,
-                value: item,
-                entries,
-            } => {
-                require(
-                    types.mapping(value.ty) == Some((*key, *item)),
-                    "dictionary expression has inconsistent storage types",
-                )?;
-                for (k, v) in entries {
-                    same(k.ty, *key)?;
-                    same(v.ty, *item)?;
+            ExprKind::Dict(_) if value.ty == Type::PythonObject => Ok(()),
+            ExprKind::Dict(entries) => {
+                let (key, item) = types
+                    .mapping(value.ty)
+                    .ok_or("dictionary expression needs mapping storage")?;
+                self.ty(key)?;
+                self.ty(item)?;
+                for entry in entries {
+                    let k = entry
+                        .key
+                        .as_ref()
+                        .ok_or("fixed dictionary display cannot expand a mapping")?;
+                    same(k.ty, key)?;
+                    same(entry.value.ty, item)?;
                 }
                 Ok(())
             }

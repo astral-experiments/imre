@@ -246,7 +246,7 @@ impl CheckedBody<'_, '_, '_, '_> {
     }
 
     /// A Python setter needs each real object before the next target callback can run.
-    fn store_operand(&mut self, expr: &Expr) -> CheckedValue {
+    pub(super) fn store_operand(&mut self, expr: &Expr) -> CheckedValue {
         let value = self.operand(expr);
         match &mut self.0 {
             Entry::Native(_) => value,
@@ -361,7 +361,7 @@ impl CheckedBody<'_, '_, '_, '_> {
     }
 
     /// Write already evaluated operands while their statement still holds its owners.
-    fn write_item(
+    pub(super) fn write_item(
         &mut self,
         table: &CheckedValue,
         key: &CheckedValue,

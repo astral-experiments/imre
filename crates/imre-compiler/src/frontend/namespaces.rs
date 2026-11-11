@@ -174,11 +174,7 @@ impl Checker<'_> {
         } else {
             Expr {
                 ty,
-                kind: ExprKind::Dict {
-                    key: Type::Str,
-                    value: item,
-                    entries,
-                },
+                kind: ExprKind::dict_pairs(entries),
             }
         };
         Ok(scope.finish(Expr {
