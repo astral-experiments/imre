@@ -436,13 +436,29 @@ impl Checker<'_> {
         })
     }
 
-    pub(super) fn wrapped_function(
+    pub(super) fn callable_attribute(
         &mut self,
         receiver: &Expr,
         attribute: &ast::ExprAttribute,
-    ) -> Option<Expr> {
-        if attribute.attr.as_str() != "__wrapped__" || !matches!(receiver.ty, Type::Callable(_)) {
-            return None;
+    ) -> phase::Result<Option<Expr>, String> {
+        let name = attribute.attr.as_str();
+        if !matches!(name, "__func__" | "__wrapped__") || !matches!(receiver.ty, Type::Callable(_))
+        {
+            return Ok(None);
+        }
+        let mut scope = calls::ArgumentScope::default();
+        let owner = if let Some((class, index)) = self.types.bound_method_site(receiver.ty) {
+            let method = &self.classes.declarations.definitions[class].methods[index];
+            let signature = self.classes.methods[class][method.name.as_str()].clone();
+            scope.hold(self, receiver.clone());
+            self.callable_value(&signature, None, None, attribute)?
+        } else if name == "__func__" {
+            return Ok(None);
+        } else {
+            receiver.clone()
+        };
+        if name == "__func__" {
+            return Ok(Some(scope.finish(owner)));
         }
         self.wrapper_link.set(true);
         // A load spanning lines is positioned at the attribute name.
@@ -452,12 +468,12 @@ impl Checker<'_> {
             } else {
                 attribute.attr.range()
             };
-        let target = self.types.wrapped_link_type(receiver.ty);
-        Some(builtin(
+        let target = self.types.wrapped_link_type(owner.ty);
+        Ok(Some(scope.finish(builtin(
             Builtin::FunctionWrappedGet(self.fixed_origin(range, None)),
             target,
-            vec![receiver.clone()],
-        ))
+            vec![owner],
+        ))))
     }
 
     pub(super) fn cache_control(
@@ -470,7 +486,7 @@ impl Checker<'_> {
         };
         if !matches!(
             attr.attr.as_str(),
-            "cache_info" | "cache_clear" | "cache_parameters" | "__wrapped__"
+            "cache_info" | "cache_clear" | "cache_parameters"
         ) {
             return Ok(None);
         }
@@ -501,9 +517,6 @@ impl Checker<'_> {
         };
         let (state, capacity) = if let Some((id, params, result)) = declaration {
             let policy = self.classes.cached[&id];
-            if name == "__wrapped__" {
-                return Ok(None);
-            }
             if name == "cache_parameters" {
                 return self.cache_parameters(Some(policy), wrapper, call).map(Some);
             }
@@ -517,12 +530,6 @@ impl Checker<'_> {
             };
             if name == "cache_parameters" {
                 return self.cache_parameters(None, Some(wrapper), call).map(Some);
-            }
-            if name == "__wrapped__" {
-                let target = self
-                    .wrapped_function(&wrapper, attr)
-                    .expect("cache wrapper attribute");
-                return self.invoke(call, target).map(Some);
             }
             (
                 context_field(wrapper, layout, 1, layout.table.cache_state()),
