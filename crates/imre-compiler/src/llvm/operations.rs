@@ -505,6 +505,43 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         .expect("guarded integer arithmetic has a normal result")
     }
 
+    fn subscript(&mut self, op: &Builtin, operands: &[Expr], returns: Type) -> CheckedValue {
+        let [base, key] = operands else {
+            unreachable!("checked subscript operands")
+        };
+        if let Entry::Native(emitter) = &mut self.0
+            && let Some(value) = emitter.selected_split(op, operands)
+        {
+            return CheckedValue::owned(value);
+        }
+        // A receiver that came from Python must already be rooted before the key can call back.
+        let operand = |code: &mut Self, expr: &Expr| match &mut code.0 {
+            Entry::Native(emitter) => CheckedValue::native(emitter.operand(expr)),
+            Entry::Registered(frame) => CheckedValue::handle(frame.evaluate_handle(expr)),
+        };
+        let base = operand(self, base);
+        if let (Entry::Registered(frame), Builtin::RegisteredSubscript(..)) = (&mut self.0, op)
+            && let Some(value) = frame.slice_subscript(op, base.rooted_handle(), key)
+        {
+            return value;
+        }
+        let key = operand(self, key);
+        match &mut self.0 {
+            Entry::Native(emitter) => CheckedValue::owned(emitter.at_builtin_origin(op, |e| {
+                e.prepared_builtin(
+                    op,
+                    operands,
+                    returns,
+                    vec![base.into_native(), key.into_native()],
+                    Vec::new(),
+                )
+            })),
+            Entry::Registered(frame) => frame.subscript_at(op, |frame, span| {
+                frame.op_at("get", &[base.rooted_handle(), key.rooted_handle()], span)
+            }),
+        }
+    }
+
     fn unary_expression(&mut self, op: UnaryOp, operand: &Expr, expr: &Expr) -> CheckedValue {
         let (scope, direct) = match &mut self.0 {
             Entry::Native(emitter) => (
@@ -778,6 +815,16 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             }
             ExprKind::Conditional(test, yes, no) => self.conditional_value(test, yes, no),
             ExprKind::Boolean(..) | ExprKind::BooleanValue(..) => self.boolean_expression(expr),
+            ExprKind::Builtin(
+                op @ (Builtin::ListGet(_)
+                | Builtin::TupleGet
+                | Builtin::TupleIndex
+                | Builtin::StringGet
+                | Builtin::BytesGet
+                | Builtin::DictGet
+                | Builtin::RegisteredSubscript(..)),
+                args,
+            ) => self.subscript(op, args, expr.ty),
             ExprKind::Builtin(op @ Builtin::Bool, args) => match &mut self.0 {
                 Entry::Native(emitter) => CheckedValue::owned(emitter.builtin(op, args, expr.ty)),
                 Entry::Registered(_) => {
