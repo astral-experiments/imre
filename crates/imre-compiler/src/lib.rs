@@ -606,7 +606,7 @@ fn object_fallback(
             // Native lowering can fail before the file has a runtime registration.
             // Check its existing contracts before diagnosing the failed call's source.
             if let Some(contract) = &graph.source_contract {
-                contract.clone()?;
+                contract.original(&graph).clone()?;
             }
             graph
                 .session
@@ -721,13 +721,15 @@ fn object_fallback(
             entry_requests_objects,
             registered.as_ref(),
         )?;
-        if let Some(registered) = registered {
+        if let Some(mut registered) = registered {
             let layouts = analysis::check_registered_project(
                 registered.root,
                 registered.roots,
                 registered.winners.iter().copied(),
                 registered.has_file_body,
-                checked_graph.as_deref(),
+                checked_graph
+                    .as_deref()
+                    .map(|g| (g, &registered.provider_sources)),
                 refusal.as_ref(),
             )?;
             registered.layouts.extend(layouts);
@@ -750,12 +752,22 @@ fn object_fallback(
                     })
                     .collect();
                 files.extend_from_slice(registered.file_alternatives);
+                if let Some(graph) = checked_graph.as_deref() {
+                    registered.provider_sources.retain(|&id, _| {
+                        !registered
+                            .file_alternatives
+                            .iter()
+                            .any(|file| file.name == graph.modules[id].name)
+                    });
+                }
                 let layouts = analysis::check_registered_project(
                     registered.root,
                     registered.roots,
                     files,
                     registered.has_file_body,
-                    checked_graph.as_deref(),
+                    checked_graph
+                        .as_deref()
+                        .map(|g| (g, &registered.provider_sources)),
                     None,
                 )?;
                 registered.layouts.extend(layouts);
@@ -1166,6 +1178,17 @@ fn checked_lower_with(
         }
         return Ok(CheckedProgram::Runtime(reason));
     }
+    if cache.is_none()
+        && !retry_with_cached_hints
+        && let Err(reason) = lowered
+    {
+        graph.session.set_closed_program_rules();
+        graph.source_contract = Some(analysis::SourceContract::Pending {
+            native: Box::new(reason.clone()),
+            result: Default::default(),
+        });
+        return Ok(CheckedProgram::Runtime(reason));
+    }
     let (skipped, overloads) = graph.diagnostic_scopes();
     let skipped = skipped.as_deref();
     // A fully lowered graph has already checked the actual first-party definitions.
@@ -1189,7 +1212,7 @@ fn checked_lower_with(
             } else {
                 session.check_scopes(skipped, &overloads)?;
             }
-            graph.source_contract = Some(Ok(()));
+            graph.source_contract = Some(analysis::SourceContract::Checked(Ok(())));
             Ok(ir)
         })
     } else {
@@ -1208,14 +1231,10 @@ fn checked_lower_with(
         };
         // An inapplicable object representation cannot replace a native source or ABI
         // diagnostic. A real registration checks this result before emitting its body.
-        graph.source_contract = Some(checked.and_then(|()| {
-            if let Err(error) = &lowered
-                && error.has_declared_operand(graph)
-            {
-                return Err(error.to_string());
-            }
-            Ok(())
-        }));
+        graph.source_contract =
+            Some(analysis::SourceContract::Checked(checked.and_then(|()| {
+                native.map_or(Ok(()), |reason| reason.check_declared_operand(graph))
+            })));
         lowered
     };
     match result {

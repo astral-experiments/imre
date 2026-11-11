@@ -196,6 +196,18 @@ impl Int {
         }
     }
 
+    /// Every C int fits in the immediate representation of a canonical integer.
+    fn to_c_int(&self) -> Result<libc::c_int> {
+        self.as_small()
+            .and_then(|n| libc::c_int::try_from(n).ok())
+            .ok_or_else(|| {
+                Error::new(
+                    Kind::OverflowError,
+                    "Python int too large to convert to C int",
+                )
+            })
+    }
+
     fn to_i64(&self) -> Option<i64> {
         self.as_small().or_else(|| self.big().to_i64())
     }

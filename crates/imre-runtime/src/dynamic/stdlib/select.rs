@@ -9,7 +9,7 @@ use std::{io, time::Duration};
 
 /// Convert an integer or the integer returned by a file object's fileno method.
 pub(super) fn fd(ctx: &mut Context, object: Id) -> Result<i32> {
-    let number = if let Ok(n) = ctx.as_int(object) {
+    let number = if let Ok(n) = ctx.borrow_int(object) {
         n
     } else {
         let method = ctx.lookup_attr(object, "fileno").map_err(|e| {
@@ -23,14 +23,10 @@ pub(super) fn fd(ctx: &mut Context, object: Id) -> Result<i32> {
             }
         })?;
         let number = ctx.call(method, Vec::new(), Vec::new())?;
-        ctx.as_int(number)
+        ctx.borrow_int(number)
             .map_err(|_| Error::new("TypeError", "fileno() returned a non-integer"))?
     };
-    let n = number
-        .to_i64()
-        .and_then(|n| i32::try_from(n).ok())
-        .ok_or_else(|| Error::new("OverflowError", "Python int too large to convert to C int"))?;
-    Ok(readiness::checked_fd(n)?)
+    Ok(readiness::checked_fd(number.to_c_int()?)?)
 }
 
 /// Convert the optional timeout before a syscall or any descriptor lookups.

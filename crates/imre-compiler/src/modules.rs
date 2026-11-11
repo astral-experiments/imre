@@ -3204,8 +3204,8 @@ pub(crate) struct SourceGraph {
     /// The launcher has already selected a registered module initializer.
     pub(crate) registered_startup: bool,
     registered_functions: std::cell::RefCell<HashMap<ModuleId, crate::dynamic::CheckedFunctions>>,
-    /// Declaration result for these exact selected files, prior to any object-path re-selection.
-    pub(crate) source_contract: Option<Result<(), String>>,
+    /// Contract of the original graph, valid only while its declarations still win.
+    pub(crate) source_contract: Option<crate::analysis::SourceContract>,
     pub(crate) set_layout_hint: std::cell::Cell<SetLayoutHint>,
     pub(crate) float_components: std::cell::Cell<FloatComponents>,
     pub(crate) missing_repr: std::cell::Cell<Option<DefinitionId>>,

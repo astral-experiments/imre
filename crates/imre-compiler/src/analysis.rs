@@ -86,6 +86,37 @@ pub(crate) struct Session {
     pub(crate) explicit_check: bool,
 }
 
+/// The fixed checker's declaration proof can be consumed by more than one
+/// registration. A failed cold lowering does not need that proof until its
+/// original bindings are selected.
+pub(crate) enum SourceContract {
+    Checked(Result<(), String>),
+    Pending {
+        native: Box<crate::frontend::phase::Diagnostic>,
+        result: std::cell::OnceCell<Result<(), String>>,
+    },
+}
+
+impl SourceContract {
+    pub(crate) fn original(&self, graph: &crate::modules::SourceGraph) -> &Result<(), String> {
+        match self {
+            Self::Checked(result) => result,
+            Self::Pending { native, result } => result.get_or_init(|| {
+                let (skipped, overloads) = graph.diagnostic_scopes();
+                graph
+                    .session
+                    .closed_program_errors(
+                        &graph.modules,
+                        skipped.as_deref(),
+                        &overloads,
+                        Some(native),
+                    )
+                    .and_then(|()| native.check_declared_operand(graph))
+            }),
+        }
+    }
+}
+
 /// Source ownership used by the same diagnostics for checked graphs and object registrations.
 pub(crate) trait ClosedSource {
     fn project_path(&self) -> Option<&Path>;
@@ -200,13 +231,21 @@ pub(crate) fn check_registered_project<'a>(
         IntoIter: ExactSizeIterator + Clone,
     >,
     has_file_body: Option<&dyn Fn(&str) -> bool>,
-    checked: Option<&crate::modules::SourceGraph>,
+    checked: Option<(
+        &crate::modules::SourceGraph,
+        &crate::dynamic::ProviderSources<'_>,
+    )>,
     refusal: Option<&crate::frontend::phase::Diagnostic>,
 ) -> Result<Option<RegisteredLayouts>, String> {
     let sources = sources.into_iter();
     if sources.len() == 0 {
         return Ok(None);
     }
+    let (checked, providers) = checked.unzip();
+    let declarations = providers
+        .into_iter()
+        .flat_map(|p| p.values().copied())
+        .filter(|(path, _)| path.extension().is_some_and(|ext| ext == "pyi"));
     let entry_operand = checked.zip(refusal).and_then(|(graph, report)| {
         let site = report.entry_operand()?;
         if site.body != site.module {
@@ -238,7 +277,9 @@ pub(crate) fn check_registered_project<'a>(
     });
     if let Some(graph) = checked
         && !graph.has_checked_only_import
-        && let Some(result) = &graph.source_contract
+        // This result belongs to the checked adapter, before a native declaration won.
+        && declarations.clone().next().is_none()
+        && let Some(contract) = &graph.source_contract
     {
         let mut matched = std::collections::HashSet::new();
         let admitted = sources.clone().all(|winner| {
@@ -272,7 +313,7 @@ pub(crate) fn check_registered_project<'a>(
         {
             let winners = sources.map(|winner| (winner.checked_module.unwrap(), winner));
             graph.session.check_registered_execution(
-                result.clone(),
+                contract.original(graph).clone(),
                 winners.clone(),
                 has_file_body,
                 entry_operand,
@@ -290,6 +331,10 @@ pub(crate) fn check_registered_project<'a>(
     let mut session =
         Session::with_storage(root, extension_roots, salsa::Storage::default(), true)?;
     let mut paths = Vec::with_capacity(sources.len());
+    for (path, source) in declarations {
+        session.add(path, source, crate::SourceKind::File)?;
+        paths.push((path.to_owned(), false));
+    }
     // Static SDK declarations can type an import even though there is no Python
     // body to register. An actual same-name registration supplies its own types.
     if let Some(graph) = checked {
@@ -2108,6 +2153,11 @@ impl Session {
         overloads: &[Vec<CheckedDiagnostic>],
         native: Option<&crate::frontend::phase::Diagnostic>,
     ) -> Result<(), String> {
+        self.set_closed_program_rules();
+        self.closed_program_errors(modules, skipped, overloads, native)
+    }
+
+    pub(crate) fn set_closed_program_rules(&mut self) {
         // Native lowering and the ordinary fallback checker own the rest of the type
         // contract. Check the same declared signatures when lowering stops at a
         // representation choice, or registration selects a different source graph.
@@ -2128,7 +2178,6 @@ impl Session {
         DiagnosticRules::get(&self.db)
             .set_rules(&mut self.db)
             .to(Arc::new(rules));
-        self.closed_program_errors(modules, skipped, overloads, native)
     }
 
     /// ty omits diagnostics in unreachable statements. A direct call can still
