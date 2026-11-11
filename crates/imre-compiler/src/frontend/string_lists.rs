@@ -50,20 +50,19 @@ fn prefix_argument<'a>(expr: &'a ast::Expr, name: &str) -> Option<&'a ast::Expr>
 /// Both bulk filters implement exactly one synchronous pull guarded by one
 /// predicate. Inspect the executable plan before replacing that loop.
 fn filtered_item<'a>(plan: &Plan<'a>) -> Option<(&'a str, &'a ast::Expr)> {
-    let filters = plan.loop_filters(0, None)?;
     let Step::Next {
         target: ast::Expr::Name(target),
-        is_async: false,
+        accepted,
         ..
-    } = plan.steps[0]
+    } = plan.steps()[0]
     else {
         return None;
     };
-    let accepted = filters.end;
-    let [Step::Filter { test, .. }] = &plan.steps[filters] else {
+    let [Step::Filter { test, .. }] = &plan.steps()[1..accepted] else {
         return None;
     };
-    matches!(plan.steps[accepted], Step::Emit { .. }).then_some((target.id.as_str(), *test))
+    (!plan.outer_async && matches!(plan.steps()[accepted], Step::Emit { .. }))
+        .then_some((target.id.as_str(), *test))
 }
 
 impl Checker<'_> {

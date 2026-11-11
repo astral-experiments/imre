@@ -91,7 +91,7 @@ impl RegisteredGenerator {
             scope.hidden(ty)
         });
         let mut body = scope
-            .comprehension_loop(&plan, 0, None, input, &mut |scope, output, _| {
+            .comprehension_loop(&plan, 0, input, &mut |scope, output, _| {
                 let item = output.value();
                 let yield_item = |value| {
                     Statement::Expr(operation(

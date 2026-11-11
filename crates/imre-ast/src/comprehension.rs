@@ -97,8 +97,10 @@ pub enum Step<'a> {
     Next {
         depth: usize,
         target: &'a ast::Expr,
-        is_async: bool,
-        exhausted: usize,
+        /// First operation after the filters for this pull.
+        accepted: usize,
+        /// On exhaustion resume the enclosing pull, or finish the outer iterator.
+        parent: Option<usize>,
     },
     Filter {
         test: &'a ast::Expr,
@@ -109,11 +111,6 @@ pub enum Step<'a> {
         output: Output<'a>,
         resume: usize,
     },
-    Close {
-        depth: usize,
-        next: usize,
-    },
-    End,
 }
 
 pub struct Plan<'a> {
@@ -121,7 +118,7 @@ pub struct Plan<'a> {
     pub outer_async: bool,
     pub output: Output<'a>,
     pub depths: usize,
-    pub steps: Vec<Step<'a>>,
+    steps: Vec<Step<'a>>,
     /// Original clause nodes for syntax diagnostics and typed specialization.
     pub clauses: &'a [ast::Comprehension],
 }
@@ -145,7 +142,7 @@ impl<'a> Plan<'a> {
 
     pub fn new(clauses: &'a [ast::Comprehension], output: Output<'a>) -> Self {
         let outer = outer_clause(clauses);
-        let mut heads = Vec::with_capacity(clauses.len());
+        let mut parent = None;
         let mut steps = Vec::new();
         for (depth, clause) in clauses.iter().enumerate() {
             if depth > 0 {
@@ -156,13 +153,13 @@ impl<'a> Plan<'a> {
                 });
             }
             let head = steps.len();
-            heads.push(head);
             steps.push(Step::Next {
                 depth,
                 target: &clause.target,
-                is_async: clause.is_async,
-                exhausted: 0,
+                accepted: head + 1 + clause.ifs.len(),
+                parent,
             });
+            parent = Some(head);
             steps.extend(
                 clause
                     .ifs
@@ -172,20 +169,8 @@ impl<'a> Plan<'a> {
         }
         steps.push(Step::Emit {
             output,
-            resume: *heads.last().unwrap(),
+            resume: parent.expect("a comprehension has an outer pull"),
         });
-        while let Some(head) = heads.pop() {
-            let close = steps.len();
-            let Step::Next { exhausted, .. } = &mut steps[head] else {
-                unreachable!()
-            };
-            *exhausted = close;
-            steps.push(Step::Close {
-                depth: heads.len(),
-                next: heads.last().copied().unwrap_or(close + 1),
-            });
-        }
-        steps.push(Step::End);
         Self {
             outer: &outer.iter,
             outer_async: outer.is_async,
@@ -196,52 +181,9 @@ impl<'a> Plan<'a> {
         }
     }
 
-    /// The filters accepted by one structured loop. Rejection and emission must
-    /// return to this pull, and exhaustion must close it and rejoin its caller.
-    /// The step at the end of the range opens the next loop or emits its item.
-    pub fn loop_filters(
-        &self,
-        head: usize,
-        parent: Option<usize>,
-    ) -> Option<std::ops::Range<usize>> {
-        let Step::Next {
-            depth, exhausted, ..
-        } = self.steps.get(head)?
-        else {
-            return None;
-        };
-        let Step::Close {
-            depth: closing,
-            next,
-        } = self.steps.get(*exhausted)?
-        else {
-            return None;
-        };
-        let rejoin = match self.steps.get(*next)? {
-            Step::Next { .. } => Some(*next),
-            Step::End => None,
-            _ => return None,
-        };
-        if depth != closing || rejoin != parent {
-            return None;
-        }
-        for (pc, step) in self.steps.iter().enumerate().skip(head + 1) {
-            match step {
-                Step::Filter { reject, .. } if *reject == head => continue,
-                Step::Emit { resume, .. } if *resume == head => {}
-                Step::Open {
-                    depth: inner,
-                    is_async,
-                    ..
-                } if *inner == depth + 1
-                    && matches!(self.steps.get(pc + 1),
-                        Some(Step::Next { depth, is_async: pull_async, .. }) if depth == inner && pull_async == is_async) =>
-                    {}
-                _ => return None,
-            }
-            return Some(head + 1..pc);
-        }
-        None
+    /// The immutable instruction sequence with its prepared branch destinations.
+    pub fn steps(&self) -> &[Step<'a>] {
+        &self.steps
     }
 
     pub fn target_names(&self) -> HashSet<String> {
@@ -284,7 +226,6 @@ impl<'a> Plan<'a> {
                 Step::Open { iterable, .. } => visit(iterable),
                 Step::Filter { test, .. } => visit(test),
                 Step::Emit { output, .. } => output.elements().for_each(&mut visit),
-                Step::Close { .. } | Step::End => {}
             }
         }
     }
@@ -292,11 +233,7 @@ impl<'a> Plan<'a> {
     /// Includes implicit awaits in async iteration, and excludes the acquisition
     /// expression which runs in the caller when constructing a generator.
     pub fn body_suspends(&self) -> bool {
-        if self
-            .steps
-            .iter()
-            .any(|s| matches!(s, Step::Next { is_async: true, .. }))
-        {
+        if self.clauses.iter().any(|clause| clause.is_async) {
             return true;
         }
         let mut scan = Suspension::default();
@@ -432,15 +369,27 @@ mod tests {
         let expression =
             ruff_python_parser::parse_expression("(y for x in xs if x if f(x) for y in x if y)")
                 .unwrap();
-        let mut plan = Plan::from_expr(expression.expr()).unwrap();
-        assert_eq!(plan.loop_filters(0, None), Some(1..3));
-        assert_eq!(plan.loop_filters(4, Some(0)), Some(5..6));
-        assert_eq!(plan.loop_filters(4, None), None);
-        let Step::Filter { reject, .. } = &mut plan.steps[5] else {
-            unreachable!()
-        };
-        *reject = 0;
-        assert_eq!(plan.loop_filters(4, Some(0)), None);
+        let plan = Plan::from_expr(expression.expr()).unwrap();
+        assert!(matches!(
+            plan.steps(),
+            [
+                Step::Next {
+                    accepted: 3,
+                    parent: None,
+                    ..
+                },
+                Step::Filter { reject: 0, .. },
+                Step::Filter { reject: 0, .. },
+                Step::Open { depth: 1, .. },
+                Step::Next {
+                    accepted: 6,
+                    parent: Some(0),
+                    ..
+                },
+                Step::Filter { reject: 4, .. },
+                Step::Emit { resume: 4, .. },
+            ]
+        ));
     }
 
     #[test]

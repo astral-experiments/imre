@@ -55,7 +55,7 @@ impl Program {
         comp: &Plan<'_>,
         line_at: &impl Fn(usize) -> u32,
     ) -> Result<()> {
-        for &step in &comp.steps {
+        for &step in comp.steps() {
             match step {
                 CompStep::Open { iterable, .. } => self.record_expression(
                     iterable.clone(),
@@ -90,7 +90,6 @@ impl Program {
                         )?;
                     }
                 }
-                CompStep::Close { .. } | CompStep::End => {}
             }
         }
         Ok(())
