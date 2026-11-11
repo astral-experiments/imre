@@ -437,6 +437,52 @@ fn interleaved_import_preserves_another_modules_list_contract() {
 }
 
 #[test]
+fn dormant_thread_keeps_an_imported_modules_exact_types() {
+    let project = tempfile::tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    let scores = project.path().join("scores.py");
+    std::fs::write(
+        &entry,
+        concat!(
+            "import socket\nimport threading\nimport scores\n",
+            "def receive(stream):\n    with stream as source:\n        print(source.recv(2))\n",
+            "if False:\n    reader, writer = socket.socketpair()\n",
+            "    threading.Thread(target=receive, args=(reader,)).start()\n",
+            "scores.measure()\n",
+        ),
+    )
+    .unwrap();
+    for (source, position) in [
+        (
+            "def take(value: int) -> int:\n    return value\n\ndef measure() -> int:\n    return take(True)\n",
+            "5:17",
+        ),
+        (
+            "def measure() -> int:\n    values: list[int] = [1]\n    values.append(True)\n    return values[0]\n",
+            "3:19",
+        ),
+        (
+            "def measure():\n    values: list[int] = [1]\n    values[0] = True\n    print(values)\n",
+            "3:17",
+        ),
+    ] {
+        std::fs::write(&scores, source).unwrap();
+        let error = format!(
+            "{}:{position}: Imre: expected int, got bool; annotations are enforced contracts",
+            scores.display()
+        );
+        assert_refusal_before_llvm(&entry, &error, &[CompileOptions::default()]);
+    }
+    for source in [
+        "def measure():\n    value = 1\n    value = 'ready'\n    print(value)\n",
+        "def measure():\n    values = [1]\n    values.append(True)\n    print(values)\n",
+    ] {
+        std::fs::write(&scores, source).unwrap();
+        check_file(&entry, None).unwrap();
+    }
+}
+
+#[test]
 fn retained_generator_propagates_its_nested_definition_refusal() {
     let project = tempfile::tempdir().unwrap();
     let entry = project.path().join("main.py");
