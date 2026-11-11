@@ -3401,8 +3401,7 @@ impl Emitter<'_, '_> {
     /// still run at their source position, using stack bytes or an owned BigInt
     /// string. The completed result is published only after allocation succeeds.
     /// Unique entry-block scratch avoids loop stack growth and nested overwrite.
-    fn concat(&mut self, expression: &Expr) -> Value {
-        let expressions = concat_leaves(self, expression);
+    fn concat(&mut self, expressions: Vec<&Expr>) -> Value {
         if let [left, right] = expressions.as_slice()
             && !matches!(left.kind, ExprKind::Str(_))
             && !matches!(right.kind, ExprKind::Str(_))

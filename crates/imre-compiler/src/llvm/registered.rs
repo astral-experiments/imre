@@ -1075,7 +1075,7 @@ impl Frame<'_, '_, '_> {
                     }
                 }
             }
-            (Builtin::FormatConversion(_) | Builtin::FormatField(_) | Builtin::FormatJoin, _) => {
+            (Builtin::FormatConversion(_) | Builtin::FormatField(_), _) => {
                 let mark = self.temporary_mark();
                 self.unwind_stack_operands(&mark, |frame| {
                     let result = match (op, operands) {
@@ -1089,13 +1089,6 @@ impl Frame<'_, '_, '_> {
                             frame.keep_operands(&mark, &value, "0");
                             let spec = frame.evaluate_handle(spec);
                             frame.format_field(&value, &spec)
-                        }
-                        (Builtin::FormatJoin, parts) => {
-                            let parts = parts
-                                .iter()
-                                .map(|part| frame.evaluate_handle(part))
-                                .collect();
-                            return frame.format_join(&mark, parts);
                         }
                         _ => unreachable!("checked format operands"),
                     };
