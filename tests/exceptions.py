@@ -95,6 +95,7 @@ except KeyError as error:
         for name in ("generic_args", "generic_args_processes", "generic_args_groups", "generic_args_records")
     },
     "explicit_base": (Path(__file__).parent / "fixtures/exceptions/explicit_base.py").read_text(),
+    "constructor_arguments": (Path(__file__).parent / "fixtures/exceptions/constructor_arguments.py").read_text(),
     "import_error": (Path(__file__).parent / "fixtures/exceptions/import_error.py").read_text(),
     "private_forwarding_parameter_names": """
 class Problem(Exception):
@@ -1332,13 +1333,6 @@ finally:
     "writable_exception_suppression": 'error = ValueError("error")\nerror.__suppress_context__ = True',
     "exception_group": "try:\n    raise ValueError()\nexcept* ValueError:\n    pass\n",
     "dynamic_handler": "kind = ValueError\ntry:\n    pass\nexcept kind:\n    pass\n",
-    "implicit_exception_constructor_args": """
-from dataclasses import dataclass
-@dataclass
-class Payload(Exception):
-    field: str
-raise Payload("x")
-""",
     "inconsistent_exception_mro": """
 class First(Exception):
     pass
@@ -1348,14 +1342,16 @@ class Reversed(First, Second):
     pass
 raise Reversed()
 """,
-    "exception_subclass_method": """
-class WithMethod(Exception):
-    def describe(self) -> str:
-        return "extra behavior"
-""",
 }
 
 ERRORS = {
+    "implicit_exception_constructor_args": ("""
+from dataclasses import dataclass
+@dataclass
+class Payload(Exception):
+    field: str
+raise Payload("x")
+""", "Payload"),
     "fixed_mapped_digit_traceback": (
         """\
 def successor_sum(text: str) -> int:
@@ -1607,8 +1603,6 @@ def main() -> None:
             path.write_text(dedent(source), encoding="utf-8")
             result = run([compiler, "check", str(path)])
             assert result.returncode > 0 and result.stderr, (name, result)
-            if name == "exception_subclass_method":
-                assert "exception payload needs an explicit initializer" in result.stderr, result
             if name == "separate_payload_layouts":
                 assert "multiple independent exception payload layouts" in result.stderr, result
             if name == "exception_binder_adjacent_error":
