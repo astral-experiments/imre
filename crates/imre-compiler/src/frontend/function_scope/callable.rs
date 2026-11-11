@@ -230,6 +230,9 @@ impl CallableMetadata {
         let mut signature = self.layout.clone();
         for parameter in &self.parameter_types {
             let builtin = checked.and_then(|body| {
+                if matches!(body.inputs, crate::frontend::FrameInputs::Protocol { .. }) {
+                    return None;
+                }
                 let &slot = body.function.params.get(parameter.position)?;
                 let binding = body.local_names.get(&slot)?;
                 if binding.namespace.is_some() || binding.name != parameter.name {

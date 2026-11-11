@@ -140,11 +140,11 @@ pub(crate) use registered::values::{
     module_literal_replacements, packed_arguments, push_codepoints,
 };
 pub(crate) use registered::{
-    AnnotationProvider, CheckedProvider, DeclarationSite, DeferredAnnotation, ModuleAnnotations,
-    ParameterAnnotations, ParameterEvaluator, PhysicalOperand, PreparedRefusal, RegisteredBindings,
-    RegisteredFunction, RegisteredGenerator, RegisteredLambda, RegisteredScope, RegisteredSuite,
-    SuitePreparation, TypeParameterValues, annotation_expression, place_fixed_function,
-    registered_sites, registered_type_alias,
+    AnnotationProvider, CheckedProvider, DeclarationSite, DeferredAnnotation, FrameInputs,
+    ModuleAnnotations, ParameterAnnotations, ParameterEvaluator, PhysicalOperand, PreparedRefusal,
+    RegisteredBindings, RegisteredFunction, RegisteredGenerator, RegisteredLambda, RegisteredScope,
+    RegisteredSuite, SuitePreparation, TypeParameterValues, annotation_expression,
+    place_fixed_function, registered_sites, registered_type_alias,
 };
 pub(crate) use registered::{LocalBinding, RegisteredClass, RegisteredOperand, RegisteredRegion};
 #[cfg(test)]
@@ -1727,6 +1727,7 @@ fn registered_entry(
 
 #[derive(Clone)]
 struct LoweredBody {
+    live_protocol_parameters: bool,
     wrapper_link: bool,
     function: ir::Function,
     source: Option<FixedBodySource>,
@@ -1885,6 +1886,7 @@ fn lower_function(
     }
     Ok((
         LoweredBody {
+            live_protocol_parameters: checker.live_protocol_parameters,
             wrapper_link: checker.wrapper_link.get(),
             source,
             function: ir::Function {
@@ -3062,6 +3064,8 @@ struct Checker<'a> {
     checked_callback_effects: bool,
     /// Only a complete body can be retained by a solved-signature registration trial.
     optional_registered_body: bool,
+    /// This body takes a lexical callable binding with live parameter annotations.
+    live_protocol_parameters: bool,
     /// The first operation whose execution requires a different representation. All
     /// later source operations still see the facts from the ordinary checker.
     unrepresented: std::cell::RefCell<Option<Failure>>,
@@ -3162,6 +3166,7 @@ impl<'a> Checker<'a> {
             bound_function_imports: false,
             checked_callback_effects: false,
             optional_registered_body: false,
+            live_protocol_parameters: false,
             unrepresented: Default::default(),
             namespace_calls: HashSet::new(),
             module_namespace: Default::default(),
