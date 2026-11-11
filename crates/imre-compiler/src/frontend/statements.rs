@@ -12,6 +12,17 @@ pub(super) fn loop_transfer(stmt: &ast::Stmt) -> Option<Statement> {
     }
 }
 
+/// A bare raise reuses the active exception without evaluating an operand.
+pub(super) fn raised<E>(
+    raise: &ast::StmtRaise,
+    prepare: impl FnOnce(&ast::Expr) -> StdResult<Statement, E>,
+) -> StdResult<Statement, E> {
+    match &raise.exc {
+        Some(value) => prepare(value),
+        None => Ok(Statement::Raise(None)),
+    }
+}
+
 pub(super) fn if_arms(
     arms: Vec<(Expr, Vec<Statement>)>,
     mut otherwise: Vec<Statement>,
@@ -33,6 +44,11 @@ pub(super) trait StatementLowering {
     ) -> StdResult<Option<Statement>, Self::Error>;
     fn effect(&mut self, value: &ast::Expr) -> StdResult<(Option<Statement>, bool), Self::Error>;
     fn returned(&mut self, ret: &ast::StmtReturn) -> StdResult<Expr, Self::Error>;
+    fn raised_value(
+        &mut self,
+        raise: &ast::StmtRaise,
+        value: &ast::Expr,
+    ) -> StdResult<Statement, Self::Error>;
     fn for_loop(&mut self, loop_: &ast::StmtFor) -> StdResult<Block, Self::Error>;
     fn async_iteration(&self) -> bool {
         false
@@ -66,6 +82,10 @@ pub(super) trait StatementLowering {
             ast::Stmt::For(loop_) if !loop_.is_async || self.async_iteration() => {
                 return self.for_loop(loop_);
             }
+            ast::Stmt::Raise(raise) => (
+                Some(raised(raise, |value| self.raised_value(raise, value))?),
+                false,
+            ),
             ast::Stmt::Pass(_) => (None, true),
             _ => match loop_transfer(stmt) {
                 Some(transfer) if self.record_loop_transfer(&transfer) => (Some(transfer), false),
@@ -236,6 +256,26 @@ impl StatementLowering for Checker<'_> {
 
     fn for_loop(&mut self, loop_: &ast::StmtFor) -> Result<Block, String> {
         self.iteration(loop_)
+    }
+
+    fn raised_value(
+        &mut self,
+        raise: &ast::StmtRaise,
+        value: &ast::Expr,
+    ) -> Result<Statement, String> {
+        if self.registered.is_some() {
+            return registered::raised_value(raise, value, |value| self.expr(value));
+        }
+        let raised = match self.raised_class(value)? {
+            Some(exception) => exception,
+            None => self.expr_expected(value, Type::Exception)?,
+        };
+        let (raised, cause) = match &raise.cause {
+            Some(cause) => self.exception_with_cause(raise, raised, cause)?,
+            None => (raised, None),
+        };
+        let origin = self.fixed_origin(raise.range(), None);
+        Ok(Statement::raise_at(raised, cause, Some(origin)))
     }
 
     fn record_loop_transfer(&mut self, transfer: &Statement) -> bool {
