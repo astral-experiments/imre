@@ -346,10 +346,7 @@ pub(super) fn supported(handlers: &[ExceptHandler], finalbody: &[Statement]) -> 
 
 impl<'p> Frame<'_, '_, 'p> {
     fn prepared_child(&self, body: &[Statement]) -> Option<&'p crate::frontend::RegisteredSuite> {
-        let super::FrameInputs::Region(region) = self.inputs else {
-            return None;
-        };
-        region.child_suite(body)
+        self.suite?.child_suite(body)
     }
 
     pub(in crate::llvm) fn try_region(

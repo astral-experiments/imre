@@ -1,9 +1,9 @@
 //! Prepare expression inputs owned by residual source suites.
 use super::values::{self, RegisteredSource};
-use super::{PreparedRefusal, RegionRoot, SuitePreparation};
+use super::{PhysicalOperand, PreparedRefusal, RegionRoot, RegisteredOperand, SuitePreparation};
 use crate::ir;
 use ruff_python_ast as ast;
-use ruff_text_size::{Ranged, TextRange, TextSize};
+use ruff_text_size::{Ranged, TextRange};
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -18,77 +18,51 @@ pub(crate) enum Selection {
     Checked(ir::Expr),
     Operand(Box<super::RegisteredOperand>),
     Refused(TextRange, &'static str),
-    Inputs(Box<PhysicalInputs>),
 }
 
 impl Selection {
-    #[cfg(test)]
-    pub(crate) fn physical(&self) -> Option<&PhysicalInputs> {
-        match self {
-            Self::Inputs(inputs) => Some(inputs),
-            _ => None,
-        }
-    }
-
     /// Value and branch emission bind the same physical inputs in operation order.
     fn refusal(&self, prepare: &SuitePreparation<'_>) -> Option<PreparedRefusal> {
         match self {
             Self::Refused(range, reason) => Some(PreparedRefusal::Operand((*range, reason))),
             Self::Checked(value) => prepare.literal_refusal(RegionRoot::Operand(value)),
-            Self::Operand(operand) => prepare.literal_refusal(RegionRoot::Operand(&operand.value)),
-            Self::Inputs(inputs) => inputs
-                .children
-                .iter()
-                .find_map(|input| input.refusal(prepare, |value| value))
-                .or_else(|| prepare.literal_refusal(RegionRoot::Operand(&inputs.operation))),
+            Self::Operand(operand) => prepare
+                .operand_refusals(&operand.inputs)
+                .or_else(|| prepare.literal_refusal(RegionRoot::Operand(&operand.value))),
         }
     }
-
-    #[cfg(test)]
-    pub(crate) fn replace_residual_input(&mut self, at: usize, value: ir::Expr) {
-        let Self::Inputs(inputs) = self else {
-            panic!("expected prepared mixed operands");
-        };
-        assert!(matches!(inputs.children[at], SourceOperand::Residual(_)));
-        inputs.children[at] = SourceOperand::Checked(value);
-    }
 }
 
-enum InputEvaluation {
-    BeforeOperation,
-    AtUse,
-}
-
-/// The physical owner supplies the operands of a checked operation.
-pub(crate) struct PhysicalInputs {
-    pub(crate) operation: ir::Expr,
-    pub(crate) position: TextSize,
-    children: Box<[PreparedInput]>,
-    evaluation: InputEvaluation,
-}
-
-pub(crate) type PreparedInput = SourceOperand<ir::Expr, OwnedExpression>;
-
-impl PhysicalInputs {
-    pub(crate) fn operand(&self, slot: usize) -> BorrowedOperand<'_> {
-        self.children[slot].operand()
-    }
-
-    pub(crate) fn eager_operands(&self) -> Option<impl Iterator<Item = BorrowedOperand<'_>>> {
-        matches!(self.evaluation, InputEvaluation::BeforeOperation).then(|| self.operands())
-    }
-
-    pub(crate) fn operands(&self) -> impl Iterator<Item = BorrowedOperand<'_>> {
-        self.children.iter().map(|child| child.operand())
-    }
-}
-
-impl PreparedInput {
-    pub(crate) fn operand(&self) -> BorrowedOperand<'_> {
+#[cfg(test)]
+impl Selection {
+    pub(crate) fn physical(&self) -> Option<&RegisteredOperand> {
         match self {
-            Self::Checked(value) => SourceOperand::Checked(value),
-            Self::Residual(input) => SourceOperand::Residual(input.as_input()),
+            Self::Operand(operand) => Some(operand),
+            _ => None,
         }
+    }
+
+    pub(crate) fn replace_residual_input(&mut self, at: usize, value: ir::Expr) {
+        let Self::Operand(operand) = self else {
+            panic!("expected a checked operation with bound inputs");
+        };
+        assert!(matches!(operand.inputs[at], PhysicalOperand::Residual(_)));
+        operand.inputs[at] = PhysicalOperand::Checked(Box::new(RegisteredOperand::with_inputs(
+            value,
+            Box::default(),
+        )));
+    }
+}
+
+#[cfg(test)]
+impl RegisteredOperand {
+    pub(crate) fn operands(
+        &self,
+    ) -> impl Iterator<Item = SourceOperand<&ir::Expr, ExpressionInput<'_>>> {
+        self.inputs.iter().map(|child| match child {
+            PhysicalOperand::Checked(value) => SourceOperand::Checked(&value.value),
+            PhysicalOperand::Residual(input) => SourceOperand::Residual(input.as_input()),
+        })
     }
 }
 
@@ -230,7 +204,7 @@ impl PhysicalPreparation<'_, '_> {
                     scope.with_suspending_operands(|scope| scope.operand(node))
                 }) {
                     Some(operand) => Selection::Operand(Box::new(operand)),
-                    None => Selection::Inputs(self.slotted_operation(
+                    None => Selection::Operand(self.slotted_operation(
                         node,
                         |slots| {
                             ir::ExprKind::Builtin(
@@ -250,12 +224,16 @@ impl PhysicalPreparation<'_, '_> {
         self.residual(node)
     }
 
-    fn ordinary_input(&mut self, node: &ast::Expr) -> PreparedInput {
+    fn ordinary_input(&mut self, node: &ast::Expr) -> PhysicalOperand {
         self.input(node, values::registered_value(node, self.source))
     }
 
     /// Keep control flow in the checked operation and bind each leaf at its own use.
-    fn logical_operation(&mut self, node: &ast::Expr, inputs: &mut Vec<PreparedInput>) -> ir::Expr {
+    fn logical_operation(
+        &mut self,
+        node: &ast::Expr,
+        inputs: &mut Vec<PhysicalOperand>,
+    ) -> ir::Expr {
         if ExpressionSites::governs(node) || node.is_compare_expr() {
             let value = values::operation(
                 node,
@@ -270,16 +248,15 @@ impl PhysicalPreparation<'_, '_> {
             .expect("a logical or comparison expression has a checked operation");
             return self.source.located(node, value);
         }
-        let input = match self.ordinary_input(node) {
-            PreparedInput::Checked(value) if ir::control::boolean_literal(&value).is_some() => {
-                return value;
-            }
-            input => input,
+        let checked = match values::registered_value(node, self.source) {
+            Some(value) if ir::control::boolean_literal(&value).is_some() => return value,
+            checked => checked,
         };
-        let slot = inputs.len();
-        inputs.push(input);
-        self.source
-            .located(node, ir::Expr::local(slot, ir::Type::PythonObject))
+        let input = self.input(node, checked);
+        self.source.located(
+            node,
+            super::bind_operand(inputs, input, ir::Type::PythonObject),
+        )
     }
 
     fn residual(&mut self, node: &ast::Expr) -> Option<Selection> {
@@ -287,56 +264,53 @@ impl PhysicalPreparation<'_, '_> {
         if ExpressionSites::governs(node) {
             let mut inputs = Vec::new();
             let operation = self.logical_operation(node, &mut inputs);
-            return Some(Selection::Inputs(self.inputs(
+            return Some(Selection::Operand(self.inputs(
                 node,
                 operation,
                 inputs.into_boxed_slice(),
-                InputEvaluation::AtUse,
             )));
         }
         if let ast::Expr::Compare(cmp) = node {
-            return Some(Selection::Inputs(self.slotted_operation(
+            return Some(Selection::Operand(self.slotted_operation(
                 node,
                 |slots| ir::ExprKind::Compare(slots, cmp.ops.to_vec()),
                 cmp.operands.iter(),
             )));
         }
-        let (op, children) = if let Some((op, operands)) = values::binary_operands(node) {
-            let operation = values::binary(
-                op,
-                ir::Expr::local(0, ir::Type::PythonObject),
-                ir::Expr::local(1, ir::Type::PythonObject),
+        let mut children = Vec::new();
+        let op = if let Some((op, [left, right])) = values::binary_operands(node) {
+            let left = super::bind_operand(
+                &mut children,
+                self.ordinary_input(left),
+                ir::Type::PythonObject,
             );
-            (
-                operation,
-                operands
-                    .into_iter()
-                    .map(|child| self.ordinary_input(child))
-                    .collect(),
+            let right = super::bind_operand(
+                &mut children,
+                self.ordinary_input(right),
+                ir::Type::PythonObject,
+            );
+            values::binary(op, left, right)
+        } else if let Some(value) = values::index_operation(node, source, |child, value| {
+            super::bind_operand(
+                &mut children,
+                self.input(child, value),
+                ir::Type::PythonObject,
             )
-        } else if let Some(index) = values::index_operands(node, source) {
-            (
-                index.value,
-                index
-                    .inputs
-                    .into_iter()
-                    .map(|(child, ordinary)| self.input(child, ordinary))
-                    .collect(),
-            )
+        }) {
+            value
         } else {
             let object = source.object_operation(node)?;
             let operands = std::iter::once(object.target).chain(object.arguments());
-            return Some(Selection::Inputs(self.slotted_operation(
+            return Some(Selection::Operand(self.slotted_operation(
                 node,
                 |slots| ir::ExprKind::Builtin(object.opcode, slots),
                 operands,
             )));
         };
-        Some(Selection::Inputs(self.inputs(
+        Some(Selection::Operand(self.inputs(
             node,
             op,
-            children,
-            InputEvaluation::BeforeOperation,
+            children.into_boxed_slice(),
         )))
     }
 
@@ -345,46 +319,48 @@ impl PhysicalPreparation<'_, '_> {
         node: &ast::Expr,
         operation: impl FnOnce(Vec<ir::Expr>) -> ir::ExprKind,
         operands: impl Iterator<Item = &'n ast::Expr>,
-    ) -> Box<PhysicalInputs> {
-        let children: Box<[_]> = operands.map(|child| self.ordinary_input(child)).collect();
-        let slots = (0..children.len())
-            .map(|slot| ir::Expr::local(slot, ir::Type::PythonObject))
+    ) -> Box<RegisteredOperand> {
+        let mut children = Vec::new();
+        let slots = operands
+            .map(|child| {
+                super::bind_operand(
+                    &mut children,
+                    self.ordinary_input(child),
+                    ir::Type::PythonObject,
+                )
+            })
             .collect();
         let operation = ir::Expr {
             ty: ir::Type::PythonObject,
             kind: operation(slots),
         };
-        self.inputs(node, operation, children, InputEvaluation::AtUse)
+        self.inputs(node, operation, children.into_boxed_slice())
     }
 
     fn inputs(
         &self,
         node: &ast::Expr,
         operation: ir::Expr,
-        children: Box<[PreparedInput]>,
-        evaluation: InputEvaluation,
-    ) -> Box<PhysicalInputs> {
-        Box::new(PhysicalInputs {
-            operation,
-            position: imre_ast::expression_position(
-                node,
-                self.source.method_imports,
-                self.source.private_names,
-            ),
+        children: Box<[PhysicalOperand]>,
+    ) -> Box<RegisteredOperand> {
+        Box::new(RegisteredOperand::with_inputs(
+            self.source.located(node, operation),
             children,
-            evaluation,
-        })
+        ))
     }
 
-    fn input(&mut self, child: &ast::Expr, ordinary: Option<ir::Expr>) -> PreparedInput {
+    fn input(&mut self, child: &ast::Expr, ordinary: Option<ir::Expr>) -> PhysicalOperand {
         let checked = ordinary.or_else(|| {
             self.suspended
                 .then(|| values::suspended_operand(child, self.source))
                 .flatten()
         });
         match checked {
-            Some(value) => SourceOperand::Checked(value),
-            None => SourceOperand::Residual(self.occurrence(child, Self::select_remaining)),
+            Some(value) => PhysicalOperand::Checked(Box::new(RegisteredOperand::with_inputs(
+                value,
+                Box::default(),
+            ))),
+            None => PhysicalOperand::Residual(self.occurrence(child, Self::select_remaining)),
         }
     }
 }
@@ -418,8 +394,10 @@ pub(crate) struct Occurrence<V> {
 }
 
 pub(crate) type OwnedExpression = Occurrence<Rc<Selection>>;
+#[cfg(test)]
 pub(crate) type ExpressionInput<'a> = Occurrence<&'a Selection>;
 
+#[cfg(test)]
 impl OwnedExpression {
     pub(crate) fn as_input(&self) -> ExpressionInput<'_> {
         Occurrence {
@@ -434,8 +412,6 @@ impl<V> Ranged for Occurrence<V> {
         self.range
     }
 }
-
-pub(crate) type BorrowedOperand<'a> = SourceOperand<&'a ir::Expr, ExpressionInput<'a>>;
 
 #[cfg(test)]
 mod tests {
@@ -576,19 +552,19 @@ mod tests {
             super::super::RegisteredScope::Module,
             false,
         );
-        let Selection::Inputs(inputs) = prepare.select_value(&root).unwrap() else {
+        let Selection::Operand(inputs) = prepare.select_value(&root).unwrap() else {
             panic!("expected a checked logical operation with prepared inputs");
         };
         let mut ops = Vec::new();
-        ir::walk_operand_expressions(&inputs.operation, &mut |expr| {
+        ir::walk_operand_expressions(&inputs.value, &mut |expr| {
             if let ir::ExprKind::Compare(_, comparison) = &expr.kind {
                 ops.extend_from_slice(comparison);
             }
         });
         assert_eq!(ops, [ast::CmpOp::Lt, ast::CmpOp::Gt]);
-        assert_eq!(inputs.children.len(), 4);
+        assert_eq!(inputs.inputs.len(), 4);
         for (slot, expected_name) in [(1, "before"), (3, "after")] {
-            let SourceOperand::Checked(name) = inputs.operand(slot) else {
+            let SourceOperand::Checked(name) = inputs.operands().nth(slot).unwrap() else {
                 panic!("expected the checked name operand");
             };
             let mut names = Vec::new();

@@ -3977,7 +3977,7 @@ mod tests {
     #[test]
     fn a_mixed_comparison_keeps_its_operators_and_only_the_residual_child() {
         use crate::frontend::ExpressionInput;
-        use crate::frontend::ExpressionSelection::Inputs;
+        use crate::frontend::ExpressionSelection::Operand;
         use crate::frontend::SourceOperand::{Checked, Residual};
 
         let text = concat!(
@@ -4001,23 +4001,31 @@ mod tests {
             "first() < (lambda v: v)(middle()) <= last()"
         );
         let inputs = root.selected.physical().unwrap();
-        let crate::ir::ExprKind::Compare(slots, ops) = &inputs.operation.kind else {
+        let crate::ir::ExprKind::Builtin(
+            crate::ir::Builtin::RegisteredLocation(range, ..),
+            located,
+        ) = &inputs.value.kind
+        else {
+            panic!("expected the physical comparison location");
+        };
+        assert_eq!(*range, root.range);
+        let crate::ir::ExprKind::Compare(slots, ops) = &located[0].kind else {
             panic!("expected a registered comparison");
         };
         assert_eq!(ops.as_slice(), [ast::CmpOp::Lt, ast::CmpOp::LtE]);
         assert_eq!(slots.len(), 3);
         assert!(
             slots.iter().enumerate().all(
-                |(i, value)| matches!(value.kind, crate::ir::ExprKind::Local(slot) if slot == i)
+                |(i, value)| matches!(value.kind, crate::ir::ExprKind::Builtin(crate::ir::Builtin::RegisteredInput(slot), _) if slot == i)
             )
         );
-        assert!(matches!(inputs.operand(0), Checked(_)));
-        assert!(matches!(inputs.operand(2), Checked(_)));
+        assert!(matches!(inputs.operands().next().unwrap(), Checked(_)));
+        assert!(matches!(inputs.operands().nth(2).unwrap(), Checked(_)));
         let Residual(ExpressionInput {
             range,
-            selected: Inputs(_),
+            selected: Operand(_),
             ..
-        }) = inputs.operand(1)
+        }) = inputs.operands().nth(1).unwrap()
         else {
             panic!("expected the comparison to own its middle call");
         };
@@ -4252,7 +4260,7 @@ mod tests {
         inject_residual_child_module(&mut prepared);
 
         let original = prepared.standalone().unwrap();
-        let ExpressionSelection::Inputs(inputs) =
+        let ExpressionSelection::Operand(inputs) =
             residual_selection(prepared.source.initializer.as_mut().unwrap())
         else {
             panic!("expected a mixed conditional");
@@ -4262,7 +4270,7 @@ mod tests {
             Checked(_),
             Residual(ExpressionInput {
                 range,
-                selected: ExpressionSelection::Inputs(_),
+                selected: ExpressionSelection::Operand(_),
                 ..
             }),
         ] = inputs.operands().collect::<Vec<_>>()[..]
@@ -4289,15 +4297,15 @@ mod tests {
         inject_residual_child_module(&mut prepared);
         let original = prepared.standalone().unwrap();
         use crate::frontend::{ExpressionInput, ExpressionSelection, SourceOperand};
-        let ExpressionSelection::Inputs(inputs) =
+        let ExpressionSelection::Operand(inputs) =
             residual_selection(prepared.source.initializer.as_mut().unwrap())
         else {
             panic!("expected a mixed choice");
         };
         assert!(matches!(
-            inputs.operand(1),
+            inputs.operands().nth(1).unwrap(),
             SourceOperand::Residual(ExpressionInput {
-                selected: ExpressionSelection::Inputs(_),
+                selected: ExpressionSelection::Operand(_),
                 ..
             })
         ));
@@ -5909,8 +5917,14 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             let input = held_input(suite, external_test);
             assert_eq!(input.range, replacement.range());
             let inputs = input.selected.physical().unwrap();
+            let ExprKind::Builtin(Builtin::RegisteredLocation(range, ..), located) =
+                &inputs.value.kind
+            else {
+                panic!("expected the physical yield location");
+            };
+            assert_eq!(*range, input.range);
             assert!(matches!(
-                &inputs.operation.kind,
+                &located[0].kind,
                 ExprKind::Builtin(Builtin::RegisteredSuspend(SuspendValue::Yield, range), _)
                     if *range == input.range
             ));
@@ -6549,7 +6563,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             Checked(_),
             Residual(ExpressionInput {
                 range: first,
-                selected: ExpressionSelection::Inputs(_),
+                selected: ExpressionSelection::Operand(_),
                 ..
             }),
             Checked(_),

@@ -44,6 +44,7 @@ pub(crate) fn registered_type_parameters<F>(
 /// An expression can own private slots without introducing another Python function.
 pub(crate) struct RegisteredOperand {
     pub(crate) value: Expr,
+    pub(crate) inputs: Box<[PhysicalOperand]>,
     #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
     locals: Vec<Type>,
     pub(crate) local_names: HashMap<usize, LocalBinding>,
@@ -91,6 +92,17 @@ impl<'a> RegisteredRegion<'a> {
 }
 
 impl RegisteredOperand {
+    /// Bind an operation whose scoped children already own their private locals.
+    fn with_inputs(value: Expr, inputs: Box<[PhysicalOperand]>) -> Self {
+        Self {
+            value,
+            inputs,
+            #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
+            locals: Vec::new(),
+            local_names: HashMap::new(),
+        }
+    }
+
     /// Lower an inline value with its lexical bindings and compiler-owned slots.
     pub(crate) fn prepare(
         expr: &ast::Expr,
@@ -136,6 +148,7 @@ impl RegisteredOperand {
             value,
             #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
             locals: _locals,
+            inputs: Box::default(),
             local_names,
         }
     }
