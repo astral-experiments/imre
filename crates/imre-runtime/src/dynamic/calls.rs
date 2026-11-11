@@ -7773,6 +7773,7 @@ impl Context {
                             | "BufferedReader"
                             | "BufferedWriter"
                             | "BufferedRandom"
+                            | "TextIOWrapper"
                             | "IOBase"
                             | "BufferedIOBase"
                     )
