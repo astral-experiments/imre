@@ -247,6 +247,13 @@ impl CheckedBody<'_, '_, '_, '_> {
         body: &[Statement],
         otherwise: &[Statement],
     ) {
+        // A module assembling its annotation provider reserves indices even in dead code.
+        if crate::ir::control::boolean_literal(test) == Some(false)
+            && !matches!(&self.0, Entry::Registered(frame) if frame.module_annotation_sites.is_some())
+        {
+            self.emit_block(otherwise);
+            return;
+        }
         let optimized = match &mut self.0 {
             Entry::Native(e) => Some((
                 e.snapshot_loop_lengths(stmt),
