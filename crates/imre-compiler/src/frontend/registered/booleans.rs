@@ -241,7 +241,6 @@ impl PhysicalPreparation<'_, '_> {
             let value = values::operation(
                 node,
                 self.source,
-                None,
                 false,
                 ir::control::boolean_literal,
                 |_| true,
