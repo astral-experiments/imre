@@ -558,7 +558,9 @@ impl Checker<'_> {
                 } else {
                     self.expr_expected_from(&subscript.slice, key, declaration)?
                 };
-                let value = self.coerce(value, element, target)?;
+                let value = self
+                    .coerce(value, element, target)
+                    .map_err(|error| error.expected_from(declaration, target.range()))?;
                 Ok(Statement::SetItem(receiver, index, value))
             }
             ast::Expr::Attribute(attribute) => {
