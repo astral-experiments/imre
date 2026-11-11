@@ -1,5 +1,6 @@
 //! Ownership lowering and textual LLVM emission, with no C or interpreter layer.
 
+use ruff_python_ast::CmpOp;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt::Write;
 
@@ -1868,7 +1869,7 @@ impl Emitter<'_, '_> {
     fn while_condition(&mut self, test: &Expr, contiguous_sum: bool) -> String {
         if contiguous_sum
             && let ExprKind::Compare(values, ops) = &test.kind
-            && let ([cursor, length], [Compare::Less]) = (values.as_slice(), ops.as_slice())
+            && let ([cursor, length], [CmpOp::Lt]) = (values.as_slice(), ops.as_slice())
             && self.nonnegative_index(cursor)
             && self.nonnegative_index(length)
         {
@@ -4496,10 +4497,7 @@ impl Emitter<'_, '_> {
             let ([left, right], [op]) = (operands.as_slice(), ops.as_slice()) else {
                 return None;
             };
-            if !matches!(
-                (and, *op),
-                (true, Compare::NotEqual) | (false, Compare::Equal)
-            ) {
+            if !matches!((and, *op), (true, CmpOp::NotEq) | (false, CmpOp::Eq)) {
                 return None;
             }
             Self::indexed_ascii_literal(left, right)
@@ -4540,45 +4538,32 @@ impl Emitter<'_, '_> {
     }
 
     /// Keeps a chain's middle operand rooted until its final comparison completes.
-    fn comparisons(&mut self, values: &[Expr], ops: &[Compare]) -> Value {
+    fn specialized_comparison(&mut self, values: &[Expr], ops: &[CmpOp]) -> Option<Value> {
         if let ([left, right], [op]) = (values, ops)
-            && let Some(result) = self.indexed_ascii_comparison(left, right, *op)
+            && let Some(op) = Compare::from_operator(*op)
+            && let Some(result) = self.indexed_ascii_comparison(left, right, op)
         {
-            return result;
+            return Some(result);
         }
         if let ([left, right], [op]) = (values, ops)
-            && let Some(result) = self.integer_region_comparison(left, right, *op)
+            && let Some(op) = Compare::from_operator(*op)
+            && let Some(result) = self.integer_region_comparison(left, right, op)
         {
-            return result;
+            return Some(result);
         }
         if let ([left, right], [op]) = (values, ops)
+            && let Some(op) = Compare::from_operator(*op)
             && read_only_integer(left)
             && read_only_integer(right)
         {
             let left = self.read_only_integer_operand(left);
             let right = self.read_only_integer_operand(right);
-            let result = self.compare(*op, &left.value, &right.value);
+            let result = self.compare(op, &left.value, &right.value);
             self.release_operand(&left);
             self.release_operand(&right);
-            return result;
+            return Some(result);
         }
-        // A chain keeps its middle operand across the next expression. Limit
-        // short field borrows to one native comparison with passive operands.
-        let operand = if ops.len() == 1
-            && matches!(
-                values[0].ty,
-                Type::Str | Type::StrLiteral(_) | Type::Tuple(_)
-            )
-            && values.iter().all(read_only_field_operand)
-        {
-            Self::immediate_receiver
-        } else {
-            Self::operand
-        };
-        operations::CheckedBody::native(self)
-            .native_comparisons(values, ops, operand)
-            .into_native()
-            .value
+        None
     }
 
     /// Borrows a direct integer-list read under its local root. Callers prove the
@@ -4838,7 +4823,6 @@ impl Emitter<'_, '_> {
             | Builtin::RegisteredName(_)
             | Builtin::RegisteredUnary(_)
             | Builtin::Unrepresented
-            | Builtin::RegisteredCompare(_)
             | Builtin::RegisteredContainsLiteral(_)
             | Builtin::RegisteredInPlace(_)
             | Builtin::RegisteredSubscript(..)

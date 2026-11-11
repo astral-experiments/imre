@@ -1,6 +1,7 @@
 //! Summarize integer additions over successive ordinals in a counted loop.
 use super::{Emitter, Value};
-use crate::ir::{Binary, Builtin, Compare, Expr, ExprKind, Function, Statement, Type};
+use crate::ir::{Binary, Builtin, Expr, ExprKind, Function, Statement, Type};
+use ruff_python_ast::CmpOp;
 
 const MAX_SMALL: i64 = (1_i64 << 62) - 1;
 
@@ -213,8 +214,8 @@ impl<'a> Reduction<'a> {
         let residue = r.parse::<i64>().ok()?;
         let hits = i64::from((0..period).contains(&residue));
         let count = match op {
-            Compare::Equal => hits,
-            Compare::NotEqual => period - hits,
+            CmpOp::Eq => hits,
+            CmpOp::NotEq => period - hits,
             _ => return None,
         };
         Some(Cycle { period, count })

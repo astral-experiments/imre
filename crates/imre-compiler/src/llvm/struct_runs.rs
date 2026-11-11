@@ -1,5 +1,6 @@
 //! Fold uniform runs and repeated cycles of pure scalar-row projections when binary64 addition is exact.
 use super::*;
+use ruff_python_ast::CmpOp;
 
 struct RunSum<'a> {
     list: usize,
@@ -63,7 +64,7 @@ fn run_sum<'a>(module: &Module, test: &Expr, body: &'a [Statement]) -> Option<Ru
     let ExprKind::Compare(parts, ops) = &test.kind else {
         return None;
     };
-    let ([start, bound], [Compare::Less]) = (parts.as_slice(), ops.as_slice()) else {
+    let ([start, bound], [CmpOp::Lt]) = (parts.as_slice(), ops.as_slice()) else {
         return None;
     };
     let ExprKind::Binary(Binary::Add, old_index, one) = &advance.kind else {

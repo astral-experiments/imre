@@ -1,5 +1,6 @@
 //! Enforces the closed typed subset independently of gradual Python typing.
 
+use ruff_python_ast::CmpOp;
 use std::collections::{HashMap, HashSet};
 use std::result::Result as StdResult;
 use std::sync::Arc;
@@ -1674,7 +1675,7 @@ fn registered_entry(
             ExprKind::Compare(values, operators) => {
                 orders_strings |= values.iter().zip(operators).any(|(value, op)| {
                     matches!(value.ty, Type::Str | Type::StrLiteral(_))
-                        && !matches!(op, Compare::Equal | Compare::NotEqual)
+                        && !matches!(op, CmpOp::Eq | CmpOp::NotEq)
                 });
             }
             _ => {}
@@ -5295,7 +5296,7 @@ impl<'a> Checker<'a> {
                                 kind: ExprKind::Builtin(Builtin::Len, vec![self.local(captured)]),
                             },
                         ],
-                        vec![Compare::Less],
+                        vec![CmpOp::Lt],
                     ),
                 },
                 None,
@@ -9016,14 +9017,9 @@ impl<'a> Checker<'a> {
                             }
                         })
                         .collect();
-                    let op = if *op == ast::CmpOp::Eq {
-                        Compare::Equal
-                    } else {
-                        Compare::NotEqual
-                    };
                     return Ok(Expr {
                         ty: Type::Bool,
-                        kind: ExprKind::Compare(values, vec![op]),
+                        kind: ExprKind::Compare(values, vec![*op]),
                     });
                 }
                 if let [op @ (ast::CmpOp::Eq | ast::CmpOp::NotEq)] = compare.ops.as_ref()
@@ -9032,15 +9028,14 @@ impl<'a> Checker<'a> {
                     return Ok(Self::identity_result(values, *op == ast::CmpOp::NotEq));
                 }
                 if values.iter().all(|v| matches!(v.ty, Type::ForwardRef(_))) {
-                    let ops = compare
+                    if !compare
                         .ops
                         .iter()
-                        .map(|op| match op {
-                            ast::CmpOp::Eq => Ok(Compare::Equal),
-                            ast::CmpOp::NotEq => Ok(Compare::NotEqual),
-                            _ => Err(error(self.source, expression, "ForwardRef has no ordering")),
-                        })
-                        .collect::<StdResult<Vec<_>, _>>()?;
+                        .all(|op| matches!(op, ast::CmpOp::Eq | ast::CmpOp::NotEq))
+                    {
+                        return Err(error(self.source, expression, "ForwardRef has no ordering"));
+                    }
+                    let ops = compare.ops.to_vec();
                     return Ok(Expr {
                         ty: Type::Bool,
                         kind: ExprKind::Compare(values, ops),
@@ -9137,14 +9132,9 @@ impl<'a> Checker<'a> {
                     && matches!(scalar(left.ty), Type::Str | Type::Int)
                     && scalar(left.ty) == scalar(right.ty)
                 {
-                    let operation = if *op == ast::CmpOp::Eq {
-                        Compare::Equal
-                    } else {
-                        Compare::NotEqual
-                    };
                     return Ok(Expr {
                         ty: Type::Bool,
-                        kind: ExprKind::Compare(values, vec![operation]),
+                        kind: ExprKind::Compare(values, vec![*op]),
                     });
                 }
                 if let [left, right] = values.as_slice()
@@ -9235,19 +9225,19 @@ impl<'a> Checker<'a> {
                             "ModuleSpec rich comparison requires dynamic attribute protocol support",
                         ));
                     }
-                    if let Some(order) = counter::comparison(self.types, ty, right, op) {
-                        ops.push(order);
+                    // Counters compare counts even when their key representations differ.
+                    if self.types.is_counter(ty)
+                        && self.types.is_counter(right)
+                        && Compare::from_operator(op).is_some()
+                    {
+                        ops.push(op);
                         continue;
                     }
                     if (self.types.is_ordered_dict(ty) || self.types.is_ordered_dict(right))
                         && self.types.mapping(ty) == self.types.mapping(right)
                         && matches!(op, ast::CmpOp::Eq | ast::CmpOp::NotEq)
                     {
-                        ops.push(if op == ast::CmpOp::Eq {
-                            Compare::Equal
-                        } else {
-                            Compare::NotEqual
-                        });
+                        ops.push(op);
                         continue;
                     }
                     let numeric = matches!(ty, Type::Int | Type::Float)
@@ -9302,17 +9292,11 @@ impl<'a> Checker<'a> {
                                 )
                         )
                         || matches!(ty, Type::Tuple(_)) && self.types.ordered_key(ty);
-                    let op = match op {
-                        ast::CmpOp::Eq => Compare::Equal,
-                        ast::CmpOp::NotEq => Compare::NotEqual,
-                        ast::CmpOp::Lt if ordered => Compare::Less,
-                        ast::CmpOp::LtE if ordered => Compare::LessEqual,
-                        ast::CmpOp::Gt if ordered => Compare::Greater,
-                        ast::CmpOp::GtE if ordered => Compare::GreaterEqual,
-                        _ => {
-                            return Err(self.unsupported_comparison(expression, ty, right));
-                        }
-                    };
+                    if Compare::from_operator(op).is_none()
+                        || !ordered && !matches!(op, ast::CmpOp::Eq | ast::CmpOp::NotEq)
+                    {
+                        return Err(self.unsupported_comparison(expression, ty, right));
+                    }
                     if matches!(ty, Type::Patch(_)) {
                         return Err(error(
                             self.source,

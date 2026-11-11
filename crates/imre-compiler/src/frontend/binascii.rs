@@ -1,6 +1,7 @@
 //! Bind binascii and the standard library's base64 wrappers in Python call order.
 
 use super::*;
+use ruff_python_ast::CmpOp;
 
 fn bytes_op(op: Builtin, args: Vec<Expr>) -> Expr {
     Expr {
@@ -335,7 +336,7 @@ impl Checker<'_> {
         let two = Expr::integer(2);
         let correct_length = Expr {
             ty: Type::Bool,
-            kind: ExprKind::Compare(vec![length, two], vec![Compare::Equal]),
+            kind: ExprKind::Compare(vec![length, two], vec![CmpOp::Eq]),
         };
         let buffer_error = calls::type_error(
             Type::Bytes,

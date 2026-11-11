@@ -15,6 +15,7 @@ use crate::llvm::body::FunctionBody;
 pub(crate) use abi::{ABI, CallArguments, Output, permanent};
 use abi::{GUARDED_LIT, GUARDED_NAMED_OP, NAMED_OP};
 pub(crate) use frame::{AnnotationScope, FrameEmitter, RegisteredFrame, SourcePositions};
+use ruff_python_ast::CmpOp;
 use sites::CheckedSites;
 
 use crate::llvm::operations::{CheckedBody, CheckedValue, LoopEdges};
@@ -176,7 +177,7 @@ pub(crate) fn frame_inputs(
                 uses_python_protocol = true;
                 ir::generator_operands(*scoped, operands).is_ok()
             }
-            ExprKind::Builtin(Builtin::RegisteredCompare(ops), values) => {
+            ExprKind::Compare(values, ops) if ir::Compare::uses_python_protocol(expr.ty, ops) => {
                 !ops.is_empty() && values.len() == ops.len() + 1
             }
             ExprKind::Builtin(Builtin::RegisteredContainsLiteral(_), values) => !values.is_empty(),
@@ -789,19 +790,12 @@ impl Frame<'_, '_, '_> {
 
     pub(crate) fn rich_comparison(
         &mut self,
-        op: ruff_python_ast::CmpOp,
+        op: CmpOp,
         left: &str,
         right: &str,
     ) -> (String, Option<String>) {
-        if matches!(
-            op,
-            ruff_python_ast::CmpOp::Is | ruff_python_ast::CmpOp::IsNot
-        ) {
-            let relation = if op == ruff_python_ast::CmpOp::Is {
-                "eq"
-            } else {
-                "ne"
-            };
+        if matches!(op, CmpOp::Is | CmpOp::IsNot) {
+            let relation = if op == CmpOp::Is { "eq" } else { "ne" };
             let bit = self
                 .code
                 .value(&format!("icmp {relation} i64 {left}, {right}"));

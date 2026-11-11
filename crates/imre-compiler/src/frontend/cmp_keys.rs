@@ -341,21 +341,8 @@ impl Checker<'_> {
         op: ast::CmpOp,
         site: &impl Ranged,
     ) -> Result<Expr, String> {
-        let operation = match op {
-            ast::CmpOp::Lt => Compare::Less,
-            ast::CmpOp::LtE => Compare::LessEqual,
-            ast::CmpOp::Eq => Compare::Equal,
-            ast::CmpOp::NotEq => Compare::NotEqual,
-            ast::CmpOp::Gt => Compare::Greater,
-            ast::CmpOp::GtE => Compare::GreaterEqual,
-            _ => {
-                return Err(error(
-                    self.source,
-                    site,
-                    "unsupported comparator-key comparison",
-                ));
-            }
-        };
+        let operation = Compare::from_operator(op)
+            .ok_or_else(|| error(self.source, site, "unsupported comparator-key comparison"))?;
         let (Type::CmpKey(l, lb), Type::CmpKey(r, rb)) = (left.ty, right.ty) else {
             return Ok(raised(
                 Type::Bool,

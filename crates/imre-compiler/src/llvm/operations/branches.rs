@@ -191,19 +191,17 @@ impl CheckedBody<'_, '_, '_, '_> {
         }
         if let ExprKind::Builtin(Builtin::RegisteredLocation(range, position, ..), operands) =
             &expr.kind
-            && let ExprKind::Builtin(Builtin::RegisteredCompare(ops), values) = &operands[0].kind
+            && let ExprKind::Compare(values, ops) = &operands[0].kind
         {
             let previous = self.python().enter_test(*range, *position);
-            let bit = self
-                .registered_comparisons(values, ops, true)
-                .into_condition();
+            let bit = self.comparisons(values, ops, true).into_condition();
             self.python().leave_test(previous);
             return bit;
         }
-        if let ExprKind::Builtin(Builtin::RegisteredCompare(ops), values) = &expr.kind {
-            return self
-                .registered_comparisons(values, ops, true)
-                .into_condition();
+        if matches!(self.0, Entry::Registered(_))
+            && let ExprKind::Compare(values, ops) = &expr.kind
+        {
+            return self.comparisons(values, ops, true).into_condition();
         }
         let mark = if already_rooted {
             None

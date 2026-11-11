@@ -1,5 +1,6 @@
 //! Build the native default unittest suite from resolved TestCase class identities.
 use super::*;
+use ruff_python_ast::CmpOp;
 
 impl Checker<'_> {
     pub(super) fn unittest_main(
@@ -558,14 +559,14 @@ impl Checker<'_> {
                         ty: Type::Bool,
                         kind: ExprKind::Compare(
                             vec![method_name.clone(), unpacking::string(&method)],
-                            vec![Compare::Equal],
+                            vec![CmpOp::Eq],
                         ),
                     };
                     let explicit = Expr {
                         ty: Type::Bool,
                         kind: ExprKind::Compare(
                             vec![checker.local(description_slot), unpacking::string("")],
-                            vec![Compare::Equal],
+                            vec![CmpOp::Eq],
                         ),
                     };
                     let display = Expr {

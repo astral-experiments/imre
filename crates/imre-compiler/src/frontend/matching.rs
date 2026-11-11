@@ -85,7 +85,7 @@ fn builtin(ty: Type, operation: Builtin, args: Vec<Expr>) -> Expr {
 fn compare(left: Expr, operation: Compare, right: Expr) -> Expr {
     Expr {
         ty: Type::Bool,
-        kind: ExprKind::Compare(vec![left, right], vec![operation]),
+        kind: ExprKind::Compare(vec![left, right], vec![operation.operator()]),
     }
 }
 

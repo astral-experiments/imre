@@ -4,9 +4,10 @@
 //! slots keep the fast loop's ownership proof independent of the fallback, while
 //! both versions preserve the original visible target and Python control flow.
 
+use ruff_python_ast::CmpOp;
 use std::collections::HashSet;
 
-use crate::ir::{self, Compare, Expr, ExprKind, Module, Statement, Type};
+use crate::ir::{self, Expr, ExprKind, Module, Statement, Type};
 use crate::ranges;
 
 const MAX_SMALL: i64 = (1_i64 << 62) - 1;
@@ -111,7 +112,7 @@ fn rewrite_loop(
                 local(captured),
                 Expr::integer(MAX_SMALL - stride),
             ],
-            vec![Compare::LessEqual, Compare::LessEqual],
+            vec![CmpOp::LtE, CmpOp::LtE],
         ),
     };
     *statement = Statement::Scope {

@@ -66,7 +66,10 @@ fn scalar(e: &Expr) -> bool {
             a.ty == Type::Int && b.ty == Type::Int && scalar(a) && scalar(b)
         }
         ExprKind::Negate(v) | ExprKind::Not(v) => scalar(v),
-        ExprKind::Boolean(_, args) | ExprKind::Compare(args, _) => args.iter().all(scalar),
+        ExprKind::Boolean(_, args) => args.iter().all(scalar),
+        ExprKind::Compare(args, ops) => {
+            !Compare::uses_python_protocol(e.ty, ops) && args.iter().all(scalar)
+        }
         ExprKind::Builtin(Builtin::ListGet(_) | Builtin::Len | Builtin::Bool, args) => {
             args.iter().all(scalar)
         }

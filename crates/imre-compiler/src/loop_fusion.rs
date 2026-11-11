@@ -4,11 +4,10 @@ mod nullable;
 mod periodic;
 mod records;
 
+use ruff_python_ast::CmpOp;
 use std::collections::{HashMap, HashSet};
 
-use crate::ir::{
-    self, Binary, Builtin, Compare, Expr, ExprKind, Function, Module, Statement, Type,
-};
+use crate::ir::{self, Binary, Builtin, Expr, ExprKind, Function, Module, Statement, Type};
 
 pub(crate) fn specialize(module: &mut Module) {
     let constructors = records::constructors(module);
@@ -162,10 +161,7 @@ fn remap_index(expr: &mut Expr, from: usize, to: usize) {
 fn greater(left: &Expr, right: i128) -> Expr {
     Expr {
         ty: Type::Bool,
-        kind: ExprKind::Compare(
-            vec![left.clone(), Expr::integer(right)],
-            vec![Compare::Greater],
-        ),
+        kind: ExprKind::Compare(vec![left.clone(), Expr::integer(right)], vec![CmpOp::Gt]),
     }
 }
 

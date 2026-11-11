@@ -2,6 +2,7 @@
 //! expressions instead join only concrete types and their nullable forms.
 
 use super::*;
+use ruff_python_ast::CmpOp;
 
 impl Checker<'_> {
     /// Consumes truth directly so mixed operands such as `items and len(items)`
@@ -338,7 +339,7 @@ fn guarded_string_boundary(values: &[Expr]) -> Option<Expr> {
         let ExprKind::Compare(operands, ops) = &expr.kind else {
             return None;
         };
-        let ([left, right], [Compare::Equal]) = (operands.as_slice(), ops.as_slice()) else {
+        let ([left, right], [CmpOp::Eq]) = (operands.as_slice(), ops.as_slice()) else {
             return None;
         };
         let (args, literal, text) = match (&left.kind, &right.kind) {

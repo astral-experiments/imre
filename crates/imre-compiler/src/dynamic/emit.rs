@@ -4001,9 +4001,7 @@ mod tests {
             "first() < (lambda v: v)(middle()) <= last()"
         );
         let inputs = root.selected.physical().unwrap();
-        let crate::ir::ExprKind::Builtin(crate::ir::Builtin::RegisteredCompare(ops), slots) =
-            &inputs.operation.kind
-        else {
+        let crate::ir::ExprKind::Compare(slots, ops) = &inputs.operation.kind else {
             panic!("expected a registered comparison");
         };
         assert_eq!(ops.as_slice(), [ast::CmpOp::Lt, ast::CmpOp::LtE]);

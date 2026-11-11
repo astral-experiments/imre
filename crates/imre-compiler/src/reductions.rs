@@ -5,11 +5,10 @@
 //! addition per iteration. Its accumulator identity carries the resulting
 //! induction proof; ordinary interval widening is never treated as that proof.
 
-use crate::ir::{
-    Binary, Builtin, Compare, Expr, ExprKind, Module, Statement, Type, walk_expressions,
-};
+use crate::ir::{Binary, Builtin, Expr, ExprKind, Module, Statement, Type, walk_expressions};
 use crate::list_bounds::block_readonly;
 use crate::ranges::{IntRange, IntegerFacts};
+use ruff_python_ast::CmpOp;
 
 const MIN_SMALL: i128 = -(1_i128 << 62);
 const MAX_SMALL: i128 = (1_i128 << 62) - 1;
@@ -196,7 +195,7 @@ fn version(
             ty: Type::Bool,
             kind: ExprKind::Compare(
                 vec![length(source), Expr::integer(budget)],
-                vec![Compare::LessEqual],
+                vec![CmpOp::LtE],
             ),
         },
         fast,
@@ -249,10 +248,10 @@ fn loop_source(test: &Expr, initial: &[Initial]) -> Option<(usize, usize, bool)>
         return None;
     };
     match operations.as_slice() {
-        [Compare::Less] if initial[cursor] == Initial::Zero => {
+        [CmpOp::Lt] if initial[cursor] == Initial::Zero => {
             Some((cursor, list_length(right)?, false))
         }
-        [Compare::GreaterEqual] if literal(right) == Some(0) => {
+        [CmpOp::GtE] if literal(right) == Some(0) => {
             let Initial::Reverse { source, .. } = initial[cursor] else {
                 return None;
             };

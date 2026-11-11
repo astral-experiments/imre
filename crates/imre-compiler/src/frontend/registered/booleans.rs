@@ -232,7 +232,12 @@ impl PhysicalPreparation<'_, '_> {
                     Some(operand) => Selection::Operand(Box::new(operand)),
                     None => Selection::Inputs(self.slotted_operation(
                         node,
-                        ir::Builtin::RegisteredSuspend(kind, node.range()),
+                        |slots| {
+                            ir::ExprKind::Builtin(
+                                ir::Builtin::RegisteredSuspend(kind, node.range()),
+                                slots,
+                            )
+                        },
                         std::iter::once(child),
                     )),
                 };
@@ -292,7 +297,7 @@ impl PhysicalPreparation<'_, '_> {
         if let ast::Expr::Compare(cmp) = node {
             return Some(Selection::Inputs(self.slotted_operation(
                 node,
-                ir::Builtin::RegisteredCompare(cmp.ops.to_vec()),
+                |slots| ir::ExprKind::Compare(slots, cmp.ops.to_vec()),
                 cmp.operands.iter(),
             )));
         }
@@ -323,7 +328,7 @@ impl PhysicalPreparation<'_, '_> {
             let operands = std::iter::once(object.target).chain(object.arguments());
             return Some(Selection::Inputs(self.slotted_operation(
                 node,
-                object.opcode,
+                |slots| ir::ExprKind::Builtin(object.opcode, slots),
                 operands,
             )));
         };
@@ -338,14 +343,17 @@ impl PhysicalPreparation<'_, '_> {
     fn slotted_operation<'n>(
         &mut self,
         node: &ast::Expr,
-        opcode: ir::Builtin,
+        operation: impl FnOnce(Vec<ir::Expr>) -> ir::ExprKind,
         operands: impl Iterator<Item = &'n ast::Expr>,
     ) -> Box<PhysicalInputs> {
         let children: Box<[_]> = operands.map(|child| self.ordinary_input(child)).collect();
         let slots = (0..children.len())
             .map(|slot| ir::Expr::local(slot, ir::Type::PythonObject))
             .collect();
-        let operation = super::operation(opcode, ir::Type::PythonObject, slots);
+        let operation = ir::Expr {
+            ty: ir::Type::PythonObject,
+            kind: operation(slots),
+        };
         self.inputs(node, operation, children, InputEvaluation::AtUse)
     }
 
@@ -573,8 +581,7 @@ mod tests {
         };
         let mut ops = Vec::new();
         ir::walk_operand_expressions(&inputs.operation, &mut |expr| {
-            if let ir::ExprKind::Builtin(ir::Builtin::RegisteredCompare(comparison), _) = &expr.kind
-            {
+            if let ir::ExprKind::Compare(_, comparison) = &expr.kind {
                 ops.extend_from_slice(comparison);
             }
         });

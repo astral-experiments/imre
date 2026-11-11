@@ -1,6 +1,7 @@
 //! Nominal member identity and the finite set of values accepted by a match.
 
 use super::*;
+use ruff_python_ast::CmpOp;
 
 impl Checker<'_> {
     pub(super) fn assert_never(
@@ -744,9 +745,9 @@ impl Checker<'_> {
                 kind: ExprKind::Compare(
                     vec![left, right],
                     vec![if op == ast::CmpOp::Is {
-                        Compare::Equal
+                        CmpOp::Eq
                     } else {
-                        Compare::NotEqual
+                        CmpOp::NotEq
                     }],
                 ),
             });

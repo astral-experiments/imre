@@ -5,9 +5,10 @@
 mod window_ranges;
 pub(crate) use window_ranges::{is_window_range_guard, reserved_append_window};
 
+use ruff_python_ast::CmpOp;
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::ir::{Binary, Builtin, Compare, Expr, ExprKind, Module, Statement, Type, contains_loop};
+use crate::ir::{Binary, Builtin, Expr, ExprKind, Module, Statement, Type, contains_loop};
 
 /// Versions leaf loops after tuple scalarization.
 /// Unknown calls and mutations retain the original arbitrary-precision path.
@@ -415,6 +416,11 @@ impl Plan<'_> {
                     return false;
                 }
             }
+            ExprKind::Compare(_, ops)
+                if crate::ir::Compare::uses_python_protocol(expression.ty, ops) =>
+            {
+                return false;
+            }
             ExprKind::Compare(values, _) | ExprKind::Boolean(_, values) => {
                 for (index, value) in values.iter_mut().enumerate() {
                     if index == 0 {
@@ -543,7 +549,7 @@ fn while_arguments(test: &Expr) -> Option<([Expr; 3], usize)> {
     let ExprKind::Compare(values, operations) = &test.kind else {
         return None;
     };
-    if !matches!(operations.as_slice(), [Compare::Less]) {
+    if !matches!(operations.as_slice(), [CmpOp::Lt]) {
         return None;
     }
     let [cursor, length] = values.as_slice() else {
@@ -621,8 +627,8 @@ fn prove_range_windows(
             return;
         };
         let width = match comparisons.as_slice() {
-            [Compare::GreaterEqual] => width,
-            [Compare::Greater] => width + 1,
+            [CmpOp::GtE] => width,
+            [CmpOp::Gt] => width + 1,
             _ => return,
         };
         if width <= 0 || !matches!(counter.kind, ExprKind::Local(slot) if slot == cursor) {
@@ -670,7 +676,7 @@ fn prove_range_windows(
         };
         guards.push(Expr {
             ty: Type::Bool,
-            kind: ExprKind::Compare(vec![stop.clone(), length], vec![Compare::LessEqual]),
+            kind: ExprKind::Compare(vec![stop.clone(), length], vec![CmpOp::LtE]),
         });
     }
 }

@@ -1,6 +1,7 @@
 //! Sealed POSIX readiness operations for integer file descriptors.
 use super::*;
 use crate::ir::{ProcessOperation, Readiness};
+use ruff_python_ast::CmpOp;
 
 fn op(operation: Readiness, ty: Type, args: Vec<Expr>) -> Expr {
     Expr {
@@ -31,10 +32,7 @@ impl Checker<'_> {
         let value = scope.hold(self, value);
         let positive = Expr {
             ty: Type::Bool,
-            kind: ExprKind::Compare(
-                vec![value.clone(), Expr::integer(0)],
-                vec![ir::Compare::Greater],
-            ),
+            kind: ExprKind::Compare(vec![value.clone(), Expr::integer(0)], vec![CmpOp::Gt]),
         };
         let seconds = Expr {
             ty: Type::Float,

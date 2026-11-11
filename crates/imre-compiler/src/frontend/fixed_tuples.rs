@@ -3,6 +3,7 @@
 //! admitted; a resize, aliasing call or rebinding loses the proof.
 
 use super::*;
+use ruff_python_ast::CmpOp;
 
 #[derive(Clone, Copy)]
 pub(super) struct Guard {
@@ -56,7 +57,7 @@ impl Checker<'_> {
                         },
                         self.local(key_slot),
                     ],
-                    vec![Compare::Equal],
+                    vec![CmpOp::Eq],
                 ),
             })
             .collect::<Vec<_>>();

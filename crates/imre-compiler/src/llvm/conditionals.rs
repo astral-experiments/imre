@@ -1,6 +1,7 @@
 //! Branchless absolute values for pure integer conditional-negation idioms.
 
-use crate::ir::{Compare, Expr, ExprKind, Type};
+use crate::ir::{Expr, ExprKind, Type};
+use ruff_python_ast::CmpOp;
 
 /// Recognizes `-x if x < 0 else x` and equivalent zero comparisons. All reads
 /// must name the same exact integer local, so evaluation cannot call user code,
@@ -17,8 +18,8 @@ pub(super) fn absolute_operand<'a>(test: &'a Expr, yes: &Expr, no: &Expr) -> Opt
         (ExprKind::Local(slot), _) if left.ty == Type::Int && zero(right) => (
             *slot,
             match operation {
-                Compare::Less | Compare::LessEqual => true,
-                Compare::Greater | Compare::GreaterEqual => false,
+                CmpOp::Lt | CmpOp::LtE => true,
+                CmpOp::Gt | CmpOp::GtE => false,
                 _ => return None,
             },
             left,
@@ -26,8 +27,8 @@ pub(super) fn absolute_operand<'a>(test: &'a Expr, yes: &Expr, no: &Expr) -> Opt
         (_, ExprKind::Local(slot)) if right.ty == Type::Int && zero(left) => (
             *slot,
             match operation {
-                Compare::Greater | Compare::GreaterEqual => true,
-                Compare::Less | Compare::LessEqual => false,
+                CmpOp::Gt | CmpOp::GtE => true,
+                CmpOp::Lt | CmpOp::LtE => false,
                 _ => return None,
             },
             right,

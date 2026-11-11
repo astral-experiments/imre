@@ -3,6 +3,7 @@
 
 pub(crate) mod control;
 
+use ruff_python_ast::CmpOp;
 use std::collections::BTreeSet;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1022,7 +1023,7 @@ pub(crate) enum ExprKind {
     Absent(Box<Expr>),
     Unwrap(Box<Expr>),
     Binary(Binary, Box<Expr>, Box<Expr>),
-    Compare(Vec<Expr>, Vec<Compare>),
+    Compare(Vec<Expr>, Vec<CmpOp>),
     Boolean(bool, Vec<Expr>),
     /// Returns the short-circuit operand, narrowed by its selected truth value,
     /// or the RHS. The operands are evaluated once and retain their identities.
@@ -1121,6 +1122,39 @@ pub(crate) enum Compare {
     LessEqual,
     Greater,
     GreaterEqual,
+}
+
+impl Compare {
+    /// Object results, identity, and membership preserve Python operand semantics.
+    pub(crate) fn uses_python_protocol(ty: Type, ops: &[CmpOp]) -> bool {
+        ty == Type::PythonObject
+            || ops
+                .iter()
+                .any(|op| matches!(op, CmpOp::Is | CmpOp::IsNot | CmpOp::In | CmpOp::NotIn))
+    }
+
+    pub(crate) fn operator(self) -> CmpOp {
+        match self {
+            Self::Equal => CmpOp::Eq,
+            Self::NotEqual => CmpOp::NotEq,
+            Self::Less => CmpOp::Lt,
+            Self::LessEqual => CmpOp::LtE,
+            Self::Greater => CmpOp::Gt,
+            Self::GreaterEqual => CmpOp::GtE,
+        }
+    }
+
+    pub(crate) fn from_operator(op: CmpOp) -> Option<Self> {
+        match op {
+            CmpOp::Eq => Some(Self::Equal),
+            CmpOp::NotEq => Some(Self::NotEqual),
+            CmpOp::Lt => Some(Self::Less),
+            CmpOp::LtE => Some(Self::LessEqual),
+            CmpOp::Gt => Some(Self::Greater),
+            CmpOp::GtE => Some(Self::GreaterEqual),
+            CmpOp::Is | CmpOp::IsNot | CmpOp::In | CmpOp::NotIn => None,
+        }
+    }
 }
 
 /// Native multiset arithmetic over integer counts. Values match the runtime ABI.
@@ -2192,8 +2226,6 @@ pub(crate) enum Builtin {
     /// Resolve the code name in the live registered Python scope.
     RegisteredName(String),
     RegisteredUnary(ObjectUnary),
-    /// One fewer operator than operands. The middle operands of a chain are evaluated once.
-    RegisteredCompare(Vec<ruff_python_ast::CmpOp>),
     /// The needle and a short constant tuple's elements, with optional negation.
     RegisteredContainsLiteral(bool),
     /// Apply Python's in-place protocol to the previously loaded target and the RHS.

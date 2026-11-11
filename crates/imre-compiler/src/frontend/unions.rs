@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::ir::{CalendarType, InstanceType};
+use ruff_python_ast::CmpOp;
 use ty_python_semantic::types::KnownClass;
 
 impl Checker<'_> {
@@ -814,8 +815,8 @@ impl Checker<'_> {
                     return None;
                 };
                 match ops.as_slice() {
-                    [Compare::Equal] => Some(left == right),
-                    [Compare::NotEqual] => Some(left != right),
+                    [CmpOp::Eq] => Some(left == right),
+                    [CmpOp::NotEq] => Some(left != right),
                     _ => None,
                 }
             }
