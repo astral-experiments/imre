@@ -34,8 +34,6 @@ struct Program {
         Option<Rc<std::cell::RefCell<(TextRange, imre_ast::executable::PatternMessage)>>>,
     pub name: String,
     class_scope: bool,
-    class_cell: bool,
-    class_nonlocal: bool,
     has_named_bindings: bool,
     strip_docstrings: bool,
     is_async: bool,
@@ -67,7 +65,6 @@ impl ScopeDirective {
 enum EnclosingBinding {
     TypeParameter,
     Local,
-    ClassCell,
 }
 
 /// Suspension sites among the supported operands of one expression. The plan is discarded
@@ -1286,10 +1283,6 @@ impl Program {
                         format!("nonlocal binding not allowed for type parameter '{name}'"),
                     ));
                 }
-                if matches!(binding, EnclosingBinding::ClassCell) {
-                    self.class_nonlocal = true;
-                    self.class_cell = true;
-                }
             } else {
                 let message = if self.name == "<module>" {
                     "nonlocal declaration not allowed at module level".to_owned()
@@ -1310,7 +1303,7 @@ impl Program {
                 {
                     return Some(EnclosingBinding::TypeParameter);
                 }
-                Some(EnclosingBinding::ClassCell)
+                Some(EnclosingBinding::Local)
             } else if self.locals.contains(name)
                 && (function || matches!(enclosing(name), Some(EnclosingBinding::TypeParameter)))
             {
@@ -1343,12 +1336,6 @@ impl Program {
                 } else {
                     child.resolve_directives(&bound, module_globals)?;
                 }
-                if child.class_cell
-                    && function
-                    && matches!(enclosing("__class__"), Some(EnclosingBinding::ClassCell))
-                {
-                    self.class_cell = true;
-                }
             }
         }
         Ok(())
@@ -1369,8 +1356,6 @@ impl Program {
             deferred_pattern: None,
             name: name.to_owned(),
             class_scope: false,
-            class_cell: false,
-            class_nonlocal: false,
             has_named_bindings,
             strip_docstrings: false,
             is_async: false,
