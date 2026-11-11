@@ -295,6 +295,32 @@ fn suspended_assignment_refusal_precedes_llvm_emission() {
 }
 
 #[test]
+fn writing_function_defaults_preserves_later_checked_errors() {
+    let project = tempfile::tempdir().unwrap();
+    let path = project.path().join("defaults.py");
+    let source = r#"def answer(value: int = 9) -> int:
+    return value
+
+def run() -> None:
+    alias = answer
+    alias.__defaults__ = (17,)
+    wrong: int = "late"
+    print(answer())
+
+run()
+"#;
+    std::fs::write(&path, source).unwrap();
+    assert_refusal_before_llvm(
+        &path,
+        &path,
+        ":7:18: Imre: expected int, got str; annotations are enforced contracts",
+        &[CompileOptions::default()],
+    );
+    std::fs::write(&path, source.replace(r#""late""#, "17")).unwrap();
+    compile_file(&path, None, &CompileOptions::default()).unwrap();
+}
+
+#[test]
 fn bound_wrapper_emits_once_with_its_fixed_callable_layout() {
     let project = tempfile::tempdir().unwrap();
     let path = project.path().join("wrapper.py");

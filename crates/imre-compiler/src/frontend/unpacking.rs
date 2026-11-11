@@ -630,6 +630,16 @@ impl Checker<'_> {
                     return self.store_class_data(class, attribute, value);
                 }
                 let receiver = Self::weak_target(self.expr(&attribute.value)?);
+                if matches!(receiver.ty, Type::Callable(_))
+                    && attribute.attr.as_str() == "__defaults__"
+                {
+                    self.require_registered_operation(attribute);
+                    return Ok(registered::attribute_statement(
+                        ir::AttributeAction::Store,
+                        attribute,
+                        vec![value, receiver],
+                    ));
+                }
                 if receiver.ty == Type::SysImplementation && attribute.attr.as_str() == "cache_tag"
                 {
                     let value = self.coerce(value, self.types.optional(Type::Str), target)?;
