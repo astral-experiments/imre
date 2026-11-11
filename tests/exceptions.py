@@ -1355,6 +1355,17 @@ class WithMethod(Exception):
 }
 
 ERRORS = {
+    "fixed_mapped_digit_traceback": (
+        """\
+def successor_sum(text: str) -> int:
+    digits = list(map(int, text))
+    return sum([digit * (digit + 1) for digit in digits])
+
+
+print(successor_sum("1x"))
+""",
+        "ValueError",
+    ),
     "mapped_digit_traceback": (
         (Path(__file__).parent / "fixtures/exceptions/mapped_digit_traceback.py").read_text(),
         "ValueError",
@@ -1660,10 +1671,13 @@ def main() -> None:
                         assert actual.stdout == (
                             "callback before\ncallback caught\nidentity True True\n"
                         )
+                    if name in {"mapped_digit_traceback", "fixed_mapped_digit_traceback"}:
                         # Both executions use the same filename. Compare every frame in order.
                         frames = [line for line in reference.stderr.splitlines() if line.startswith('  File "')]
                         actual_frames = [line for line in actual.stderr.splitlines() if line.startswith('  File "')]
-                        assert len(frames) == 4 and actual_frames == frames, (actual.stderr, reference.stderr)
+                        assert len(frames) == (4 if name == "mapped_digit_traceback" else 2)
+                        assert actual_frames == frames, (actual.stderr, reference.stderr)
+                        assert actual.stderr.splitlines()[-1] == reference.stderr.splitlines()[-1]
                     if name in CHAIN_REPORTS:
                         assert actual.returncode == 1 and exception_report(
                             actual.stderr

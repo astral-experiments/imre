@@ -32,7 +32,7 @@ pub(crate) fn specialize(module: &mut Module) {
         let mut producer = false;
         ir::walk_expressions(&function.body, &mut |e| match e.kind {
             ExprKind::Local(id) => reads[id] += 1,
-            ExprKind::Builtin(Builtin::StringIntList, _) => producer = true,
+            ExprKind::Builtin(Builtin::StringIntList(_), _) => producer = true,
             _ => {}
         });
         if !producer {
@@ -73,7 +73,7 @@ fn fuse(
         else {
             continue;
         };
-        let ExprKind::Builtin(Builtin::StringIntList, args) = &producer.kind else {
+        let ExprKind::Builtin(Builtin::StringIntList(_), args) = &producer.kind else {
             continue;
         };
         let [text] = args.as_slice() else { continue };

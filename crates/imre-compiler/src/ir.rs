@@ -1950,7 +1950,7 @@ pub(crate) enum Builtin {
     TupleCacheResult,
     /// Eagerly converts immutable string code points into an integer list,
     /// preserving `list(map(int, text))` errors without character objects.
-    StringIntList,
+    StringIntList(FixedOrigin),
     /// Materialize exact integer prefixes, optionally starting with an initial value.
     ListAccumulate,
     /// Consume the remaining owned values of an integer cursor into a fresh list.

@@ -545,7 +545,7 @@ impl Builtin {
             | Self::JoinBufferNew
             | Self::StringReplace
             | Self::StringGet
-            | Self::StringIntList
+            | Self::StringIntList(_)
             | Self::ListAccumulate
             | Self::Sumprod
             | Self::MathComb

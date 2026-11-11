@@ -279,7 +279,7 @@ impl Analysis<'_> {
                     return None;
                 }
                 match operation {
-                    Builtin::StringIntList => Some(Bounds { min: 0, max: 9 }),
+                    Builtin::StringIntList(_) => Some(Bounds { min: 0, max: 9 }),
                     Builtin::Slice if expression.ty == Type::ListInt && arguments_readonly => {
                         facts.first().copied().flatten()
                     }
