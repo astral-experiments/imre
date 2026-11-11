@@ -1516,10 +1516,10 @@ print(Token().clean())
     }
 
     #[test]
-    fn sealed_imports_without_lowering_stay_confined_to_cold_bodies() {
+    fn reachable_only_defers_sealed_imports_until_their_use() {
         let source = "from configparser import ConfigParser as parser\ndef cold():\n    return parser()\nprint(42)\n";
         reachable(source).unwrap();
-        assert!(compile(source, &CompileOptions::default()).is_err());
+        crate::check(source).unwrap();
         assert!(
             reachable(&source.replace("print(42)", "print(cold())"))
                 .unwrap_err()

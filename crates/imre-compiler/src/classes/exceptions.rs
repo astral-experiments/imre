@@ -123,36 +123,23 @@ pub(crate) fn explicit_message_initializer<'a>(
     .then_some((base, values))
 }
 
-/// A fixed record stores the base arguments during straight-line initialization.
-/// Conditional initialization uses the ordinary Python exception instance.
-fn fixed_layout(module: &SourceModule, node: &ast::StmtClassDef) -> Result<bool, String> {
-    let methods = node
-        .body
-        .iter()
-        .filter_map(ast::Stmt::as_function_def_stmt)
-        .collect::<Vec<_>>();
-    let initialization = methods
-        .iter()
-        .find(|m| m.name.as_str() == "__init__")
-        .or_else(|| methods.iter().find(|m| m.name.as_str() == "__post_init__"));
-    let Some(init) = initialization else {
-        return Err(module.error(node,"an exception payload needs an explicit initializer or dataclass post-init which calls super().__init__(message)"));
-    };
-    let calls = init.body.iter().filter(|stmt| {
-        matches!(stmt, ast::Stmt::Expr(e) if matches!(&*e.value, ast::Expr::Call(c)
-            if super_init(c) || init.name.as_str() == "__init__" && explicit_message_initializer(module, c).is_some()))
-    }).count();
+/// A fixed exception record stores the arguments supplied by one unconditional base initializer.
+fn fixed_layout(module: &SourceModule, init: &ast::StmtFunctionDef) -> bool {
     if !init.body.iter().all(|stmt| match stmt {
         ast::Stmt::Expr(_) | ast::Stmt::Assign(_) | ast::Stmt::Pass(_) => true,
         ast::Stmt::AnnAssign(field) => field.value.is_some(),
         _ => false,
     }) {
-        return Ok(false);
+        return false;
     }
-    if calls != 1 {
-        return Err(module.error(init,"an exception payload must initialize its message exactly once in a straight-line constructor"));
-    }
-    Ok(true)
+    init.body
+        .iter()
+        .filter(|stmt| {
+            matches!(stmt, ast::Stmt::Expr(expr) if matches!(&*expr.value, ast::Expr::Call(call)
+                if super_init(call) || init.name.as_str() == "__init__" && explicit_message_initializer(module, call).is_some()))
+        })
+        .count()
+        == 1
 }
 
 /// C3 merge rejects inconsistent or repeated bases before any descriptor is emitted.
@@ -287,14 +274,16 @@ pub(super) fn collect(graph: &SourceGraph) -> Result<Declarations, String> {
                             "custom import exception payload layouts are unsupported",
                         ));
                     }
-                    let own_initializer = storage.is_none()
-                        || node
-                            .body
+                    let method = |name: &str| {
+                        node.body
                             .iter()
                             .filter_map(ast::Stmt::as_function_def_stmt)
-                            .any(|f| matches!(f.name.as_str(), "__init__" | "__post_init__"));
-                    if !registered_base && own_initializer {
-                        registered_base = !fixed_layout(module, node)?;
+                            .find(|f| f.name.as_str() == name)
+                    };
+                    let initializer = method("__init__").or_else(|| method("__post_init__"));
+                    if !registered_base && (storage.is_none() || initializer.is_some()) {
+                        registered_base =
+                            !initializer.is_some_and(|init| fixed_layout(module, init));
                     }
                     if !registered_base {
                         layouts.insert(def);
