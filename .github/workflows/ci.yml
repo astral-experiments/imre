@@ -212,7 +212,16 @@ jobs:
       - name: Install the pinned Rust toolchain
         run: rustup show
       - name: Install LLVM 18 and the CRC32C build tools
-        run: sudo apt-get update && sudo apt-get install -y clang-18 lld-18 libclang-rt-18-dev patchelf cmake valgrind
+        run: |
+          if ! sudo apt-get update -o APT::Update::Error-Mode=any; then
+            for mirrors in /etc/apt/apt-mirrors.txt /etc/apt/apt-security-mirrors.txt; do
+              if [[ -f "$mirrors" ]]; then
+                sudo sed -i 's|//azure\.archive\.ubuntu\.com/|//archive.ubuntu.com/|g' "$mirrors"
+              fi
+            done
+            sudo apt-get update
+          fi
+          sudo apt-get install -y clang-18 lld-18 libclang-rt-18-dev patchelf cmake valgrind
       - name: Verify and assemble the vendored CPython suite fixtures
         run: |
           python3 benchmarks/cpython_stdlib/full/test_stage_tests.py
