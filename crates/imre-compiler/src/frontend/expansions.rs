@@ -375,7 +375,10 @@ impl Checker<'_> {
                     "a tuple display with runtime width cannot guarantee a fixed layout",
                 ));
             }
-            return self.runtime_tuple_display(tuple);
+            return self.collect_tuple(tuple.elts.iter().map(|entry| {
+                let spread = entry.as_starred_expr().map(|star| star.value.as_ref());
+                (entry, spread)
+            }));
         }
         let mut scope = calls::ArgumentScope::default();
         let mut values = Vec::new();
@@ -457,8 +460,12 @@ impl Checker<'_> {
         }))
     }
 
-    /// Capture each spread completely before evaluating the next expression.
-    fn runtime_tuple_display(&mut self, tuple: &ast::ExprTuple) -> Result<Expr, String> {
+    /// Capture each spread completely before evaluating the next entry. The entry
+    /// retains its own diagnostic span when the iterable is inside a starred display.
+    pub(super) fn collect_tuple<'a>(
+        &mut self,
+        entries: impl IntoIterator<Item = (&'a ast::Expr, Option<&'a ast::Expr>)>,
+    ) -> Result<Expr, String> {
         let buffer = self.hidden(Type::TupleBuffer);
         let mut body = vec![Statement::Assign(
             buffer,
@@ -477,9 +484,9 @@ impl Checker<'_> {
                 ),
             })
         };
-        for entry in &tuple.elts {
-            if let ast::Expr::Starred(star) = entry {
-                let input = self.expansion_input(&star.value, None)?;
+        for (entry, spread) in entries {
+            if let Some(source) = spread {
+                let input = self.expansion_input(source, None)?;
                 if let Iteration::Container { iterable, .. } = &input {
                     let scalar = match iterable.ty {
                         Type::Int => Some("int"),
@@ -490,7 +497,7 @@ impl Checker<'_> {
                     };
                     if let Some(name) = scalar {
                         self.graph
-                            .checked_non_iterable_spread(self.module, star.value.range());
+                            .checked_non_iterable_spread(self.module, source.range());
                         let exception = Expr {
                             ty: Type::Exception,
                             kind: ExprKind::Exception {

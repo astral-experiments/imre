@@ -13036,6 +13036,12 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(Builtin::StderrLine, vec![text]),
             });
         }
+        if self.unshadowed_builtin(&call.func, "tuple")
+            && call.arguments.keywords.is_empty()
+            && let [source @ ast::Expr::Generator(_)] = call.arguments.args.as_ref()
+        {
+            return self.collect_tuple([(source, Some(source))]);
+        }
         match name {
             "list" => return self.list_call(call, None),
             "sorted" => return self.sorted_call(call, None),
