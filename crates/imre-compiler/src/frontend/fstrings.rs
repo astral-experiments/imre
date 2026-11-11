@@ -88,7 +88,7 @@ impl<C, E> Fields<C, E> {
         };
         if self.result == Type::PythonObject {
             value = self.operation(
-                Builtin::RegisteredLocation(field.range(), field.start()),
+                Builtin::RegisteredLocation(field.range(), field.start(), None),
                 vec![value],
             );
         }

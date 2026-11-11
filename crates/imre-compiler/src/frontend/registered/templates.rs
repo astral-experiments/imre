@@ -145,7 +145,7 @@ impl RegisteredSource<'_> {
                         vec![value, self.template_spec(nested, operand)?],
                     );
                     object(
-                        Builtin::RegisteredLocation(nested.range(), nested.start()),
+                        Builtin::RegisteredLocation(nested.range(), nested.start(), None),
                         vec![value],
                     )
                 }

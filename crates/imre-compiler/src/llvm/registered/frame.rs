@@ -1539,7 +1539,7 @@ pub(crate) trait FrameEmitter<'a, 'p>:
     }
 
     fn with_operand_source<T>(&mut self, expr: &ir::Expr, emit: impl FnOnce(&mut Self) -> T) -> T {
-        if let ir::ExprKind::Builtin(ir::Builtin::RegisteredLocation(range, _), _) = &expr.kind {
+        if let ir::ExprKind::Builtin(ir::Builtin::RegisteredLocation(range, ..), _) = &expr.kind {
             self.with_source_range(*range, emit)
         } else {
             emit(self)

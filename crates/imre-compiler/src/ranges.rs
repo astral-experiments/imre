@@ -403,7 +403,6 @@ impl Interval {
                 }
             }
             Binary::Power
-            | Binary::GuardedIntAdd
             | Binary::MatrixMultiply
             | Binary::Divide
             | Binary::Repeat

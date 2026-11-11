@@ -189,7 +189,7 @@ impl CheckedBody<'_, '_, '_, '_> {
         if let ExprKind::Bool(value) = expr.kind {
             return value.to_string();
         }
-        if let ExprKind::Builtin(Builtin::RegisteredLocation(range, position), operands) =
+        if let ExprKind::Builtin(Builtin::RegisteredLocation(range, position, ..), operands) =
             &expr.kind
             && let ExprKind::Builtin(Builtin::RegisteredCompare(ops), values) = &operands[0].kind
         {
@@ -224,7 +224,8 @@ impl CheckedBody<'_, '_, '_, '_> {
         at: Option<ruff_text_size::TextRange>,
     ) -> String {
         if let Entry::Registered(frame) = &mut self.0
-            && let ExprKind::Builtin(Builtin::RegisteredLocation(range, anchor), args) = &expr.kind
+            && let ExprKind::Builtin(Builtin::RegisteredLocation(range, anchor, ..), args) =
+                &expr.kind
         {
             let previous = frame.enter_test(*range, *anchor);
             let bit = self.operand_truth(&args[0], value, Some(*range));

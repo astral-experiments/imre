@@ -635,6 +635,14 @@ pub(crate) struct Expr {
 }
 
 impl Expr {
+    /// The checker's type at this use can refine a live Python handle.
+    pub(crate) fn checked_operand_type(&self) -> Type {
+        match self.kind {
+            ExprKind::Builtin(Builtin::RegisteredLocation(_, _, Some(ty)), _) => ty,
+            _ => self.ty,
+        }
+    }
+
     /// A registered invocation carries the Python binder's position and source-ordered values.
     pub(crate) fn is_registered_invoke(&self) -> bool {
         let ExprKind::Invoke { callable, args } = &self.kind else {
@@ -660,7 +668,7 @@ impl Expr {
         if self.ty == Type::PythonObject {
             return true;
         }
-        let ExprKind::Builtin(Builtin::RegisteredLocation(range, _), parts) = &self.kind else {
+        let ExprKind::Builtin(Builtin::RegisteredLocation(range, ..), parts) = &self.kind else {
             return false;
         };
         let [local] = parts.as_slice() else {
@@ -1023,8 +1031,6 @@ pub(crate) enum ExprKind {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Binary {
     Add,
-    /// Checked integer operands carried as Python objects; guard their actual representations.
-    GuardedIntAdd,
     Subtract,
     Multiply,
     Divide,
@@ -1065,7 +1071,7 @@ impl From<ruff_python_ast::Operator> for Binary {
 impl Binary {
     pub(crate) fn protocol(self) -> &'static str {
         match self {
-            Self::Add | Self::GuardedIntAdd | Self::Concat => "+",
+            Self::Add | Self::Concat => "+",
             Self::Subtract => "-",
             Self::Multiply | Self::Repeat => "*",
             Self::Divide => "/",
@@ -2104,8 +2110,12 @@ pub(crate) enum Builtin {
     RegisteredInput(usize),
     /// Evaluate each operand for its effects and release it before evaluating the next.
     RegisteredDiscard,
-    /// The source position in effect while this registered operand is evaluated.
-    RegisteredLocation(ruff_text_size::TextRange, ruff_text_size::TextSize),
+    /// The source position of this operand and its optional checked scalar type.
+    RegisteredLocation(
+        ruff_text_size::TextRange,
+        ruff_text_size::TextSize,
+        Option<Type>,
+    ),
     /// Construct the native function at this physical definition site from its evaluated header.
     RegisteredDefinition(DefinitionSite),
     /// Evaluate packed bases in this generic header, then construct its prepared class namespace.

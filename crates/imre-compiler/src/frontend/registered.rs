@@ -4526,7 +4526,7 @@ mod tests {
                 ) => &operands[0],
                 _ => panic!("expected the destination's namespace store"),
             };
-            let ExprKind::Builtin(Builtin::RegisteredLocation(site, _), operands) = &operand.kind
+            let ExprKind::Builtin(Builtin::RegisteredLocation(site, ..), operands) = &operand.kind
             else {
                 panic!("expected the subscript's original range")
             };
@@ -4831,18 +4831,23 @@ mod tests {
     fn a_late_import_keeps_the_selected_sources_operand_types() {
         let dir = tempfile::tempdir().unwrap();
         let entry = dir.path().join("app.py");
-        std::fs::write(&entry, "import sys\nsys.path = list(sys.path)\nimport prices\nprint(prices.add(13, 27), prices.join('a', 'b'))\n").unwrap();
+        std::fs::write(&entry, "import sys\nsys.path = list(sys.path)\nimport prices\nprint(prices.add(13, 27), prices.join('a', 'b'), prices.sub(27, 13))\n").unwrap();
         std::fs::write(
             dir.path().join("prices.py"),
-            "def add(n: int, other: int):\n    return n + other\ndef join(n: str, other: str):\n    return n + other\n",
+            "def add(n: int, other: int):\n    return n + other\ndef join(n: str, other: str):\n    return n + other\ndef sub(n: int, other: int):\n    return n - other\n",
         )
         .unwrap();
         let ir = crate::compile_file(&entry, None, &Default::default())
             .unwrap()
             .llvm_ir;
-        let add = registered_body_at(&ir, "prices.py", 2);
-        assert_eq!(add.matches("call i64 @imre_dyn_exact_int_word(").count(), 2);
-        assert!(add.contains("call i64 @int_add(") && add.contains("call i64 @imre_dyn_op_at("));
+        for (line, native) in [(2, "@int_add("), (6, "@int_sub(")] {
+            let body = registered_body_at(&ir, "prices.py", line);
+            assert_eq!(
+                body.matches("call i64 @imre_dyn_exact_int_word(").count(),
+                2
+            );
+            assert!(body.contains(native) && body.contains("call i64 @imre_dyn_op_at("));
+        }
         assert!(!registered_body_at(&ir, "prices.py", 4).contains("@int_add("));
     }
 
@@ -4903,7 +4908,7 @@ mod tests {
         ir::walk_expressions(&checked.function.body, &mut |expr| match &expr.kind {
             ExprKind::Invoke { callable, args } => {
                 let site = args.site.python().unwrap();
-                let ExprKind::Builtin(Builtin::RegisteredLocation(range, _), callee) =
+                let ExprKind::Builtin(Builtin::RegisteredLocation(range, ..), callee) =
                     &callable.kind
                 else {
                     panic!("expected the checked callable operand");
@@ -5022,7 +5027,7 @@ mod tests {
             }
             ExprKind::Builtin(Builtin::RegisteredSubscript(..), _) => operations.push("get"),
             ExprKind::Invoke { callable, args } => {
-                let ExprKind::Builtin(Builtin::RegisteredLocation(_, _), operands) = &callable.kind
+                let ExprKind::Builtin(Builtin::RegisteredLocation(..), operands) = &callable.kind
                 else {
                     panic!("expected the located callback");
                 };
