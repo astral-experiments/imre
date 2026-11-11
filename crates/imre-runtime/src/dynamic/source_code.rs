@@ -330,7 +330,8 @@ impl<'a> ast::visitor::Visitor<'a> for NamedBindings {
 }
 
 impl NamedBindings {
-    fn declare(self, program: &mut Program) -> Result<()> {
+    // Anonymous expression scopes validate their bindings after lexical resolution.
+    fn declare(self, mut program: Option<&mut Program>) -> Result<()> {
         if self.invalid_iterable {
             return Err(Error::new(
                 "SyntaxError",
@@ -341,13 +342,13 @@ impl NamedBindings {
             return Err(error);
         }
         for (name, offset, comprehension) in self.targets {
-            if comprehension && program.class_scope {
+            if comprehension && program.as_ref().is_some_and(|p| p.class_scope) {
                 return Err(Error::new(
                     "SyntaxError",
                     "assignment expression within a comprehension cannot be used in a class body",
                 ));
             }
-            if let Some((kind, directive)) = program.directives.get(&name)
+            if let Some((kind, directive)) = program.as_ref().and_then(|p| p.directives.get(&name))
                 && offset < directive.start()
             {
                 return Err(Error::new(
@@ -361,6 +362,9 @@ impl NamedBindings {
             if name == "__debug__" {
                 return Err(Error::new("SyntaxError", "cannot assign to __debug__"));
             }
+            let Some(program) = program.as_deref_mut() else {
+                continue;
+            };
             if comprehension && program.name == "<module>" {
                 program
                     .directives
@@ -788,15 +792,13 @@ impl<'a, 'ctx> CompiledStrings<'a, 'ctx> {
         for expr in functions {
             let child = match expr {
                 ast::Expr::Lambda(lambda) => {
-                    let new_program = || Program::new("<lambda>", has_named_bindings);
-                    let mut declared = has_named_bindings.then(new_program);
-                    if let Some(child) = &mut declared {
+                    if has_named_bindings {
                         let mut named = NamedBindings::default();
                         named.visit_expr(&lambda.body);
-                        named.declare(child)?;
+                        named.declare(None)?;
                     }
                     if let Some(plan) = OperandPlan::for_function(&lambda.body, false) {
-                        let mut child = declared.unwrap_or_else(new_program);
+                        let mut child = Program::new("<lambda>", has_named_bindings);
                         child.record_operand(*lambda.body.clone(), &plan)?;
                         Child::Lowered(Box::new(child))
                     } else {
@@ -1600,7 +1602,7 @@ impl Program {
                 }
             }
             self.lower_suite(body, function, active)?;
-            named.declare(self)
+            named.declare(Some(self))
         })
     }
 
@@ -2612,7 +2614,7 @@ impl Context {
                     use ast::visitor::Visitor;
                     let mut named = NamedBindings::default();
                     named.visit_expr(&expression.body);
-                    named.declare(&mut code)?;
+                    named.declare(Some(&mut code))?;
                 }
                 Some(expression.body)
             }
