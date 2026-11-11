@@ -669,7 +669,7 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         match (first.ty, second.ty) {
             (Type::PythonObject, _) | (_, Type::PythonObject) => {
-                self.require_registered_operation(at);
+                self.require_registered_operation(at)?;
                 Ok(Expr {
                     ty: Type::Bool,
                     ..Expr::unrepresented()
