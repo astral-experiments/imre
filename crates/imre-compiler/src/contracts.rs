@@ -55,7 +55,15 @@ impl Builtin {
         use HeapEffect::{PreservesLists, PreservesOwners, Unknown};
 
         match self {
-            Self::Bool => Contract::new(args.first().is_some_and(|e| matches!(e.ty, Type::ObjectValue | Type::List(_) | Type::Union(_) | Type::Optional(_))), PreservesLists),
+            Self::Bool => Contract::new(
+                args.first().is_some_and(|e| {
+                    matches!(
+                        e.ty,
+                        Type::ObjectValue | Type::List(_) | Type::Union(_) | Type::Optional(_)
+                    )
+                }),
+                PreservesLists,
+            ),
             Self::Len => Contract::new(
                 args.first().is_some_and(|e| matches!(e.ty, Type::List(_))),
                 PreservesLists,
@@ -65,19 +73,33 @@ impl Builtin {
                 match op {
                     New | Index | Snapshot(_) | Field(_) => Contract::new(true, PreservesLists),
                     AddRow | Push => Contract::new(true, Unknown),
-                    Len | RowLen | ViewLen(_) | ViewField(..) => Contract::new(false, PreservesLists),
+                    Len | RowLen | ViewLen(_) | ViewField(..) => {
+                        Contract::new(false, PreservesLists)
+                    }
                 }
             }
-            Self::SplitIntSource(_) | Self::SplitTextSource(_) | Self::SplitTextLen | Self::StringSliceEqual => Contract::new(false, PreservesLists),
+            Self::SplitIntSource(_)
+            | Self::SplitTextSource(_)
+            | Self::SplitTextLen
+            | Self::StringSliceEqual => Contract::new(false, PreservesLists),
             Self::SplitTextField(..) => Contract::new(true, PreservesLists),
             Self::StringTupleContains => Contract::new(false, PreservesLists),
-            Self::SplitIntField(..) | Self::SplitIntCached(..) | Self::StringListNonempty | Self::StringListContains | Self::StringListFilter(_) | Self::FilterCharacterSet(_) => {
-                Contract::new(true, PreservesLists)
-            }
+            Self::SplitIntField(..)
+            | Self::SplitIntCached(..)
+            | Self::StringListNonempty
+            | Self::StringListContains
+            | Self::StringListFilter(_)
+            | Self::FilterCharacterSet(_) => Contract::new(true, PreservesLists),
             Self::Random(crate::ir::RandomOperation::Shuffle) => Contract::new(true, Unknown),
-            Self::ListReverse => Contract::new(args.first().is_some_and(|e| matches!(e.ty, Type::List(_))), Unknown),
+            Self::ListReverse => Contract::new(
+                args.first().is_some_and(|e| matches!(e.ty, Type::List(_))),
+                Unknown,
+            ),
             Self::CollectIntCursor => Contract::new(true, Unknown),
-            Self::ListExtendBuffer | Self::ListExtendSnapshot | Self::ListExtendUnhinted | Self::SortDetach => Contract::new(true, Unknown),
+            Self::ListExtendBuffer
+            | Self::ListExtendSnapshot
+            | Self::ListExtendUnhinted
+            | Self::SortDetach => Contract::new(true, Unknown),
             Self::FunctionWrappedSet => Contract::new(false, Unknown),
             Self::MarkCoroutine(_) => Contract::new(false, Unknown),
             Self::IsCoroutineFunction => Contract::new(false, PreservesOwners),
@@ -92,9 +114,12 @@ impl Builtin {
                 Contract::new(true, PreservesLists)
             }
             Self::Str
-                if args
-                    .first()
-                    .is_some_and(|e| matches!(e.ty, Type::Exception | Type::NamedException(_) | Type::ObjectValue)) =>
+                if args.first().is_some_and(|e| {
+                    matches!(
+                        e.ty,
+                        Type::Exception | Type::NamedException(_) | Type::ObjectValue
+                    )
+                }) =>
             {
                 Contract::new(true, Unknown)
             }
@@ -137,7 +162,9 @@ impl Builtin {
             | Self::ExceptionFieldLen
             | Self::ExceptionFieldIndex
             | Self::ExceptionFormatterResult(_) => Contract::new(true, PreservesLists),
-            Self::MappingObjectGet | Self::ObjectTextProject | Self::RecordFromFields => Contract::new(true, PreservesOwners),
+            Self::MappingObjectGet | Self::ObjectTextProject | Self::RecordFromFields => {
+                Contract::new(true, PreservesOwners)
+            }
             Self::BoxValue
             | Self::ExceptionTupleView
             | Self::ObjectRecordProject(_)
@@ -155,9 +182,7 @@ impl Builtin {
                 | crate::ir::LogOperation::DictConfig
                 | crate::ir::LogOperation::DictConfigTyped
                 | crate::ir::LogOperation::FileConfig,
-            ) => {
-                Contract::new(true, Unknown)
-            }
+            ) => Contract::new(true, Unknown),
             Self::SystemExitFromTuple
             | Self::ExceptionArgument(_)
             | Self::NamedException { .. } => Contract::new(false, PreservesLists),
@@ -294,9 +319,17 @@ impl Builtin {
                 ),
                 PreservesLists,
             ),
-            Self::WarningScopeEnter | Self::WarningScopeExit => Contract::new(false, PreservesLists),
+            Self::WarningScopeEnter | Self::WarningScopeExit => {
+                Contract::new(false, PreservesLists)
+            }
             Self::TimeExtras | Self::TimeExtra(_) => Contract::new(false, PreservesLists),
-            Self::Mktime | Self::MktimeOffset | Self::TimeComponent | Self::TimeSequenceLength | Self::ClockParts(_) | Self::TimeSleep | Self::SignalPause
+            Self::Mktime
+            | Self::MktimeOffset
+            | Self::TimeComponent
+            | Self::TimeSequenceLength
+            | Self::ClockParts(_)
+            | Self::TimeSleep
+            | Self::SignalPause
             | Self::PercentFormat
             | Self::WarningFilter { .. }
             | Self::WarningFormat { .. }
@@ -447,7 +480,8 @@ impl Builtin {
             | Self::Decode
             | Self::DecodeAscii
             | Self::DecodeLatin1
-            | Self::FloatDivmod | Self::BytesHex
+            | Self::FloatDivmod
+            | Self::BytesHex
             | Self::UrlsafeB64encode
             | Self::Base64Translate
             | Self::BinasciiAsciiInput
@@ -673,9 +707,7 @@ impl Builtin {
             | Self::GetInAppendWindow(..)
             | Self::GetBoundedInAppendWindow { .. }
             | Self::JoinBufferAppend
-            | Self::SortByKeys => {
-                Contract::new(true, PreservesOwners)
-            }
+            | Self::SortByKeys => Contract::new(true, PreservesOwners),
             Self::ObjectCall(..)
             | Self::RegisteredImport(_)
             | Self::RegisteredSuspend(..)
@@ -722,7 +754,9 @@ impl Builtin {
             | Self::RegisteredPairNeedsRow
             | Self::RegisteredCall(..)
             | Self::SortByComparator => Contract::new(true, Unknown),
-            Self::ListReserveRange | Self::StructCyclePrefix => Contract::new(false, PreservesOwners),
+            Self::ListReserveRange | Self::StructCyclePrefix => {
+                Contract::new(false, PreservesOwners)
+            }
             Self::AnnotationRef
             | Self::BinaryOpen(_)
             | Self::BinaryRead
