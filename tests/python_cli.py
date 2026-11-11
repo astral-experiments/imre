@@ -3808,6 +3808,27 @@ def report(text):
         result = run(imre, "-B", "-m", "scalar_returns")
         assert result.returncode == 0 and not result.stderr, result
 
+        scalar_parameters = root / "scalar_parameters.py"
+        scalar_parameters.write_text(
+            (fixtures / "registered_reduction_callback.py").read_text()
+            + """
+def invoke(function, value):
+    try:
+        function(value, value, send)
+    except TypeError as error:
+        print(error)
+
+publish.__annotations__["a"] = str
+print(publish.__annotations__["a"] is str)
+invoke(publish, 3)
+invoke(publish, "bad")
+"""
+        )
+        for args in [(scalar_parameters,), ("-m", "scalar_parameters")]:
+            result = run(imre, "-B", *args, stdin=b"first\n3\n4\n12\n")
+            assert result.returncode == 0 and not result.stderr, result
+            assert result.stdout == b'first 7\n8\nTrue\nfirst 6\npublish argument "a" requires int\n'
+
         served = root / "served"
         served.mkdir()
         (served / "a&b").touch()
