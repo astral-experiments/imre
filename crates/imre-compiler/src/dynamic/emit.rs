@@ -20,7 +20,7 @@ use crate::llvm::registered::sites::{
     Declaration,
 };
 use crate::llvm::registered::{
-    ABI, AnnotationScope, FrameEmitter, Output, RegisteredFrame, SourcePositions, sites,
+    ABI, AnnotationScope, Output, RegisteredFrame, SourcePositions, sites,
 };
 use serde_json::json;
 
@@ -1568,13 +1568,6 @@ impl<'a, 'p> std::ops::Deref for Function<'a, 'p> {
 impl std::ops::DerefMut for Function<'_, '_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.frame
-    }
-}
-
-impl Function<'_, '_> {
-    fn checkpoint(&mut self, node: &impl Ranged) {
-        self.current_range = node.range();
-        self.frame.checkpoint(node.range());
     }
 }
 
