@@ -8380,10 +8380,12 @@ impl<'a> Checker<'a> {
                 }
                 let Some(&slot) = self.names.get(name.id.as_str()) else {
                     let name = name.id.as_str();
-                    if imre_ast::providers::BUILTIN_FUNCTIONS.contains(&name)
+                    if (imre_ast::providers::BUILTIN_FUNCTIONS.contains(&name)
+                        || imre_ast::exceptions::boxed_builtin_kind(name).is_some())
                         && self.unshadowed_builtin(expression, name)
                     {
-                        return Err(self.scoped_builtin_error(name, expression));
+                        self.require_builtin_scope(name, expression);
+                        return Ok(registered::values::name_binding(name));
                     }
                     if matches!(
                         self.resolve(expression),
@@ -13823,12 +13825,15 @@ impl<'a> Checker<'a> {
         Ok(self.registered_builtin_call(call, name, args))
     }
 
-    fn registered_builtin_call(&self, call: &ast::ExprCall, name: &str, args: Vec<Expr>) -> Expr {
-        // A fixed-only caller can check the remaining operands and source
-        // operations. The actual call requires its registered Python frame.
+    /// A fixed caller still checks the following operations before choosing its frame.
+    fn require_builtin_scope(&self, name: &str, site: &impl Ranged) {
         if self.registered.is_none() && !self.globals.registered_initializers {
-            self.missing_operation(&self.scoped_builtin_error(name, call));
+            self.missing_operation(&self.scoped_builtin_error(name, site));
         }
+    }
+
+    fn registered_builtin_call(&self, call: &ast::ExprCall, name: &str, args: Vec<Expr>) -> Expr {
+        self.require_builtin_scope(name, call);
         registered::values::name_call(call, name, args)
     }
 
