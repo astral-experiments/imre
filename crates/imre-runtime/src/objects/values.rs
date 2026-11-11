@@ -466,19 +466,14 @@ impl ReprTarget for ReprWriter<'_> {
     }
 }
 
-/// Returns one owned Python representation, borrowing every input until the
-/// string is complete. Compiler validation excludes resource representations.
+/// Return one owned representation, dispatching Python repr on concrete members.
 ///
 /// # Safety
-/// `word` uses `kind` and roots an initialized acyclic value throughout the call.
+/// The caller roots the initialized value with its exact storage kind throughout the call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_value_repr(word: usize, kind: u32) -> *const Str {
-    let mut output = String::new();
-    // SAFETY: the caller supplies the exact checked representation and root.
-    let result = unsafe { try_write_repr(&mut ReprWriter(&mut output), word, WordKind::new(kind)) };
-    super::exceptions::finish_display(
-        result.and_then(|()| super::exceptions::rendered(output.into())),
-    )
+    // SAFETY: the checked caller supplies the rooted value and its representation.
+    unsafe { super::boxed_values::checked_text(WordKind::new(kind), word, true) }
 }
 
 /// # Safety

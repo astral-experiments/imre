@@ -1024,6 +1024,12 @@ impl Checker<'_> {
         at: &impl Ranged,
     ) -> Result<Option<Expr>, String> {
         let ty = value.ty;
+        if self.types.element(ty) == Some(Type::ObjectValue) {
+            return Ok(Some(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(Builtin::Repr, vec![value.clone()]),
+            }));
+        }
         if !dataclass_values::repr_supported(ty, self.types) {
             return Ok(None);
         }
