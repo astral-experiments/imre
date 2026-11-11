@@ -262,14 +262,16 @@ Both native levels skipped the upstream CPython-specific lazy-import test. It st
 
 ## Design
 
-Types are part of Imre's compilation contract: variables, containers, and class
-fields have known types, and each function has one declared or inferred
-signature. This lets Imre choose concrete representations. It aims to preserve
-Python's behavior for supported operations, including arbitrary-precision integers.
+Imre uses declared and inferred types to choose how to represent values and
+which operations to specialize. Compiled functions can also hold Python objects
+and call the runtime for operations such as attribute lookup. Supported integer
+operations preserve Python's arbitrary precision.
 
-Imre's runtime uses reference counting and restricts object graphs to avoid
-cycles. Compiled programs run without a Python installation. Their imports must
-use supported Python or native extensions rebuilt against Imre’s `Python.h`.
+Imre manages fixed-layout class instances by reference count. It checks their
+field types for ownership cycles. The Python object heap traces roots and can
+reclaim unreachable cycles. Compiled programs run without a Python installation.
+Their imports must use supported Python or native extensions rebuilt against
+Imre’s `Python.h`.
 
 Other projects make different trade-offs:
 
