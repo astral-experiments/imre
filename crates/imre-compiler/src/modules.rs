@@ -4172,16 +4172,22 @@ impl SourceGraph {
         let relative = entry
             .strip_prefix(&root)
             .map_err(|_| "entry source must be inside the module root")?;
-        let name = relative
-            .with_extension("")
+        let stem = relative.with_extension("");
+        let parts = stem
             .components()
             .map(|part| {
                 part.as_os_str()
                     .to_str()
                     .ok_or("module paths must be valid UTF-8")
             })
-            .collect::<Result<Vec<_>, _>>()?
-            .join(".");
+            .collect::<Result<Vec<_>, _>>()?;
+        let name = parts.join(".");
+        // Keep the physical FILE's import identity even if scanning its imports
+        // selects the registered runtime. A literal dot in a filename is not a
+        // package separator.
+        if parts.len() > 1 && parts.iter().all(|part| !part.contains('.')) {
+            site_probes.packaged_file_module = Some(name.clone());
+        }
         let source = fs
             .read_source_string(&entry)
             .map_err(|error| format!("{}: {error}", entry.display()))?;
@@ -4589,6 +4595,7 @@ pub(crate) struct SiteProbes {
     pub(crate) wheel_records: crate::installed_wheels::WheelRecords,
     /// Canonical import root inferred for a file build, including when its checked scan fails.
     pub(super) package_root: Option<PathBuf>,
+    pub(super) packaged_file_module: Option<String>,
     missing: Vec<PathBuf>,
     selected: bool,
     file_checks: BTreeMap<PathBuf, bool>,

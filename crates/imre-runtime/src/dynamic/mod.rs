@@ -3870,13 +3870,7 @@ impl Context {
         if self.config["sitecustomize"] != true {
             return self.module("site").map(drop);
         }
-        let (main, scope, _, _) = self.allocate_import_module("__main__", &[], None)?;
-        self.bind(scope, "__doc__", NONE);
-        self.bind(scope, "__spec__", NONE);
-        let builtins = self.module("builtins")?;
-        self.bind(scope, "__builtins__", builtins);
-        let loader = self.lookup_attr(self.bootstrap_module, "_NativeImporter")?;
-        self.bind(scope, "__loader__", loader);
+        let (main, _, _, _) = self.allocate_import_module("__main__", &[], None)?;
         self.publish_module("__main__", main)?;
         let site = self.module("site")?;
         if let Some(path) = self.config["user_site_pth"].as_str().map(str::to_owned) {
@@ -3981,9 +3975,12 @@ impl Context {
     }
 
     fn prepare_main_module(&mut self) -> Result<Option<MainModuleFrame>> {
+        let packaged = self.config["packaged_file_module"].as_str();
+        // The compiler registers the selected FILE first, even when another search root
+        // supplies a package or module with the same qualified name.
         let Some(source) = self
             .sources
-            .get("__main__")
+            .get(packaged.unwrap_or("__main__"))
             .and_then(|sources| sources.first())
         else {
             return Ok(None);
@@ -3993,9 +3990,15 @@ impl Context {
             source.path.clone(),
             importlib::SourceBody::Registered(initializer),
         );
+        let packaged = packaged.map(str::to_owned);
         let (module, scope, name, _) =
             self.allocate_import_module("__main__", &[], Some(&source))?;
         self.publish_module("__main__", module)?;
+        let (module, scope) = if let Some(qualified) = packaged {
+            self.prepare_packaged_file(name, &qualified, &source.0)?
+        } else {
+            (module, scope)
+        };
         let code = self.module_code(initializer, &source.0).inspect_err(|_| {
             self.finish_initialization(module);
         })?;
@@ -4113,9 +4116,12 @@ impl Context {
         locations: &[PathBuf],
         source: Option<&(PathBuf, importlib::SourceBody)>,
     ) -> Result<(Id, Id, Id, Option<Id>)> {
+        let main = name == "__main__";
+        // A package parent runs before the entry acquires its file and qualified spec.
+        let packaged_main = main && self.config["packaged_file_module"].is_string();
         // A startup hook can populate or replace __main__. Execute the application
         // in its current namespace, leaving any bindings the hook installed intact.
-        if name == "__main__"
+        if main
             && self.config["sitecustomize"] == true
             && let Some((path, _)) = source
         {
@@ -4125,7 +4131,7 @@ impl Context {
             {
                 // The script can delete the registry binding while its initializer is running.
                 self.heap.keep(module);
-                let origin = if self.config["command"] != true {
+                let origin = if self.config["command"] != true && !packaged_main {
                     let file = self.import_path_text(path)?;
                     if self.scope_name(scope, "__file__").is_none() {
                         self.bind(scope, "__file__", file);
@@ -4137,6 +4143,7 @@ impl Context {
                 return Ok((module, scope, key, origin));
             }
         }
+        let source = source.filter(|_| !packaged_main);
         let scope = self.scope(name, None);
         // CPython's private module publishes its ABCs under the public name.
         let name_id = self.text(if name == "_collections_abc" {
@@ -4145,7 +4152,7 @@ impl Context {
             name
         });
         self.bind(scope, "__name__", name_id);
-        if source.is_some() {
+        if source.is_some() || main {
             self.bind(scope, "__doc__", NONE);
         } else if let Some(doc) = self.config["module_docs"].get(name) {
             let doc = doc
@@ -4158,7 +4165,7 @@ impl Context {
             let dirs = self.location_list(locations)?;
             self.bind(scope, "__path__", dirs);
         }
-        let package = if name == "__main__" {
+        let package = if main {
             NONE
         } else if !locations.is_empty() {
             name_id
@@ -4168,8 +4175,8 @@ impl Context {
         self.bind(scope, "__package__", package);
         if name == "builtins" {
             self.install_builtins(scope)?;
-        } else if source.is_some() {
-            let builtins = if name == "__main__" {
+        } else if source.is_some() || main {
+            let builtins = if main {
                 self.module("builtins")?
             } else {
                 self.default_source_builtins()?
@@ -4202,12 +4209,17 @@ impl Context {
                 self.bind(scope, name, function);
             }
         }
+        if main && source.is_none() {
+            self.bind(scope, "__spec__", NONE);
+            let loader = self.lookup_attr(self.bootstrap_module, "_NativeImporter")?;
+            self.bind(scope, "__loader__", loader);
+        }
         let origin = match source {
             Some((path, _)) if locations.contains(path) => {
                 self.bind(scope, "__file__", NONE);
                 None
             }
-            Some((path, _)) if name != "__main__" || self.config["command"] != true => {
+            Some((path, _)) if !main || self.config["command"] != true => {
                 let file = self.import_path_text(path)?;
                 self.bind(scope, "__file__", file);
                 Some(file)
@@ -4251,10 +4263,9 @@ impl Context {
     }
 
     fn finish_initialization(&mut self, module: Id) {
-        let Value::Module { initializing, .. } = self.heap.get_mut(module) else {
-            unreachable!()
-        };
-        *initializing = false;
+        if let Value::Module { initializing, .. } = self.heap.get_mut(module) {
+            *initializing = false;
+        }
     }
 
     fn run_initializer(

@@ -98,13 +98,22 @@ impl Context {
             return Ok(NONE);
         };
 
+        self.registered_source_spec(name, origin.as_deref(), package.then_some(stem.as_path()))
+    }
+
+    pub(super) fn registered_source_spec(
+        &mut self,
+        name: Id,
+        origin: Option<&Path>,
+        package: Option<&Path>,
+    ) -> Result<Id> {
         // Use the installing core, including during a fresh import of the public importlib package.
         // spec_from_file_location would make the virtual bundled filename absolute.
         let external = self.finder_external;
         let bootstrap = self.lookup_attr(external, "_bootstrap")?;
         let spec_type = self.lookup_attr(bootstrap, "ModuleSpec")?;
         let (origin, loader) = if let Some(file) = origin {
-            let file = self.import_path_text(&file)?;
+            let file = self.import_path_text(file)?;
             let factory = self.lookup_attr(external, "SourceFileLoader")?;
             let loader = self.call(factory, vec![name, file], vec![])?;
             self.bind_loader_source(loader, name, file)?;
@@ -120,8 +129,8 @@ impl Context {
         if origin != NONE {
             self.set_attr(spec, "has_location", TRUE)?;
         }
-        if package {
-            let portion = self.import_path_text(&stem)?;
+        if let Some(portion) = package {
+            let portion = self.import_path_text(portion)?;
             let locations = self.alloc(Value::List(vec![portion]));
             self.set_attr(spec, "submodule_search_locations", locations)?;
         }

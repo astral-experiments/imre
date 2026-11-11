@@ -840,8 +840,9 @@ pub(crate) struct RegisteredSources<'a> {
 }
 
 pub(crate) fn compile(
-    (operand, mut filesystem, wheel_records): (
+    (operand, packaged_file_module, mut filesystem, wheel_records): (
         crate::ProgramEntry<'_>,
+        Option<&str>,
         crate::watch::FileSystem<'_>,
         &mut crate::installed_wheels::WheelRecords,
     ),
@@ -1007,6 +1008,9 @@ pub(crate) fn compile(
         return Ok(None);
     }
     let provider_script = provider_script || fallback_script;
+    if let Some((parent, _)) = packaged_file_module.and_then(|name| name.rsplit_once('.')) {
+        first.add(0, parent);
+    }
     if let Some(name) = module_entry {
         first.add(0, "runpy");
         // Register source candidates without interpreting a module operand as a filesystem path.
@@ -1154,8 +1158,11 @@ pub(crate) fn compile(
                     || explicit_roots.contains(root))
         })
         .collect();
+    // The runtime executes the first FILE body in __main__. Its finder and
+    // relative imports use the qualified name belonging to that same file.
+    let entry_name = packaged_file_module.unwrap_or("__main__");
     let mut sources = vec![(
-        "__main__".to_owned(),
+        entry_name.to_owned(),
         if in_memory {
             PathBuf::from("<string>")
         } else {
@@ -1207,7 +1214,7 @@ pub(crate) fn compile(
     let mut frozen_files: Vec<String> = Vec::new();
     let mut searched_frozen_files = HashSet::new();
     let mut selected_work =
-        VecDeque::from([(("__main__".to_owned(), false, first), ImportOrigin::File)]);
+        VecDeque::from([((entry_name.to_owned(), false, first), ImportOrigin::File)]);
     let mut sdk_work = VecDeque::new();
     let mut following_sdk = false;
     let mut work = VecDeque::new();
@@ -1736,6 +1743,14 @@ pub(crate) fn compile(
                         }
                         continue;
                     };
+                    // A parent can import the entry by its qualified name.
+                    // This physical body is already registered as unit zero.
+                    if packaged_file_module == Some(&prefix) && path == sources[0].1 {
+                        if winner {
+                            entry_sources.insert(prefix.clone(), (root.clone(), package));
+                        }
+                        continue;
+                    }
                     if !implicit_dirs.is_empty() && !implicit_dirs.contains(root) {
                         before_site.insert(prefix.clone());
                     }
@@ -2366,7 +2381,7 @@ pub(crate) fn compile(
         "optimize":python_optimization,
         "dont_write_bytecode":startup.is_some_and(|(flags, _)| flags.dont_write_bytecode),
         "executable":startup.map(|(_, executable)| executable),
-        "command_source":command,"path0_bytes":path0_bytes,
+        "command_source":command,"path0_bytes":path0_bytes,"packaged_file_module":packaged_file_module,
         "command":in_memory,"module_entry":module_entry,"path_entry":options.path_entry,"paths":paths,
     });
     let providers = options

@@ -771,7 +771,12 @@ fn object_fallback(
         entry => entry,
     };
     match dynamic::compile(
-        (entry, filesystem, &mut site_probes.wheel_records),
+        (
+            entry,
+            site_probes.packaged_file_module.as_deref(),
+            filesystem,
+            &mut site_probes.wheel_records,
+        ),
         options,
         object_imports,
         operation
