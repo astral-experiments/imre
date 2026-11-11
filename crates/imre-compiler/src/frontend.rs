@@ -1691,30 +1691,9 @@ fn lower_function(
         .filter(|p| p.annotation().is_some())
         .map(|p| p.name.to_string());
     checker.joined_lines = joined_lines::find(&definition.body);
-    checker.returns = signature.returns;
     checker.interactive_names = module.is_doctest_case() && definition.name.as_str() == "_run_case";
-    checker.asynchronous = signature.asynchronous;
-    checker.method_context(signature.method);
-    checker.generator_item = classes.producer_items.get(&signature.id).copied();
     let mut params = Vec::new();
-    for (index, (parameter, layout)) in closed_calls::parameters(&definition.parameters)
-        .zip(&signature.params)
-        .enumerate()
-    {
-        params.push(checker.bind_parameter(
-            parameter,
-            layout.ty,
-            signature.parameter_declaration(index),
-        )?);
-    }
-    if let Some(keyword) = &definition.parameters.kwarg {
-        let parameter = signature.params.last().expect("keyword-rest signature");
-        params.push(checker.bind_parameter(
-            keyword,
-            parameter.ty,
-            signature.parameter_declaration(params.len()),
-        )?);
-    }
+    checker.bind_function_signature(definition, signature, |slot| params.push(slot))?;
     checker.consuming_lists = consuming_lists::find(&definition.body, |func| {
         checker.unshadowed_builtin(func, "sorted")
     });
@@ -3173,6 +3152,28 @@ impl<'a> Checker<'a> {
                 }
                 _ => false,
             }
+    }
+
+    /// Bind the declared parameter slots in native ABI order for inference and final lowering.
+    fn bind_function_signature(
+        &mut self,
+        definition: &ast::StmtFunctionDef,
+        signature: &Signature,
+        mut bound: impl FnMut(usize),
+    ) -> Result<(), String> {
+        self.returns = signature.returns;
+        self.asynchronous = signature.asynchronous;
+        self.method_context(signature.method);
+        self.generator_item = self.classes.producer_items.get(&signature.id).copied();
+        // The signature builder appends **kwargs after the ordinary parameters and *args.
+        let parameters = closed_calls::parameters(&definition.parameters)
+            .chain(definition.parameters.kwarg.as_deref());
+        for (index, (parameter, layout)) in parameters.zip(&signature.params).enumerate() {
+            let slot =
+                self.bind_parameter(parameter, layout.ty, signature.parameter_declaration(index))?;
+            bound(slot);
+        }
+        Ok(())
     }
 
     fn bind_parameter(
