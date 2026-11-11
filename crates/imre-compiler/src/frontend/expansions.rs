@@ -144,7 +144,7 @@ impl Checker<'_> {
                         }) if value.ty == Type::PythonObject
                             && self.unshadowed_builtin(&call.func, "dict") =>
                         {
-                            return self.registered_iterable_call(call, "dict", value);
+                            return self.bind_registered_builtin_call(call, "dict", vec![value]);
                         }
                         input => input.into_iteration(self, source)?,
                     }

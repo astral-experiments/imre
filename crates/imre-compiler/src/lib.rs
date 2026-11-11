@@ -2268,6 +2268,29 @@ def first(stream: Stream) -> str:
     }
 
     #[test]
+    fn stored_map_arguments_use_the_registered_call_binding() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("main.py");
+        let source = r#"
+def twice(value: int) -> int:
+    return 2 * value
+
+cursor = map(twice, [1, 2], strict=True)
+print(next(cursor))
+"#;
+        let mut compiler = super::IncrementalCompiler::default();
+        std::fs::write(&path, source).unwrap();
+        compiler.check_file(&path, None).unwrap();
+
+        std::fs::write(&path, format!("{source}twice('bad')\n")).unwrap();
+        let error = compiler.check_file(&path, None).unwrap_err();
+        assert!(
+            error.contains("main.py:7:7: Imre: expected int, got str"),
+            "{error}"
+        );
+    }
+
+    #[test]
     fn module_functions_take_precedence_over_builtin_calls() {
         let source = r#"
 import builtins
