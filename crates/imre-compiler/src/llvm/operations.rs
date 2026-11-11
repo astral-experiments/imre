@@ -663,10 +663,11 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
     }
 
     pub(crate) fn emit_statement(&mut self, stmt: &Statement) {
-        if let Entry::Registered(frame) = &mut self.0
-            && let Some(range) = frame.next_fixed_site()
-        {
-            frame.statement_site(range, None);
+        if let Entry::Registered(frame) = &mut self.0 {
+            frame.place_statement(stmt);
+            if let Some(range) = frame.next_fixed_site() {
+                frame.statement_site(range, None);
+            }
         }
         match stmt {
             Statement::Assign(slot, expr) => {
@@ -750,14 +751,15 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         }
     }
 
-    /// Place lexical children before use and install fixed list views only after
-    /// the last operation that could invalidate their backing storage.
+    /// Install fixed list views after the last operation that can invalidate their backing storage.
     pub(crate) fn emit_function(&mut self, function: &crate::ir::Function) {
         let mut statements = function.body.as_slice();
         let list_views = match &mut self.0 {
             Entry::Native(code) => code.int_buffer_region(function),
             Entry::Registered(frame) => {
-                frame.place_function_sites(statements);
+                if !statements.is_empty() && !frame.next_statement() {
+                    return;
+                }
                 None
             }
         };
