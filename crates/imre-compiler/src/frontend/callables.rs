@@ -770,6 +770,38 @@ impl Checker<'_> {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn stored_provider_callable_selects_its_own_unsolved_signature() {
+        use crate::frontend::{lower_with_caller_cache, phase::Kind};
+        use crate::modules::SourceGraph;
+        use std::fs;
+
+        let project = tempfile::tempdir().unwrap();
+        let installed = tempfile::tempdir().unwrap();
+        let provider = installed.path().join("support.py");
+        fs::write(
+            &provider,
+            "def earlier(text): return text\ndef selected(exc): return exc\n",
+        )
+        .unwrap();
+        let entry = project.path().join("app.py");
+        fs::write(
+            &entry,
+            "import support\ntry:\n    raise KeyError('marker')\nexcept KeyError as error:\n    helper = support.selected\n    print(helper(error))\n",
+        )
+        .unwrap();
+        let mut graph = SourceGraph::load(&entry, None, &[installed.path().to_path_buf()]).unwrap();
+        let diagnostic = lower_with_caller_cache(&mut graph, None).err().unwrap();
+        assert_eq!(diagnostic.kind, Kind::ScopedObject);
+        assert_eq!(
+            diagnostic.to_string(),
+            format!(
+                "{}:2:1: Imre: using this function as a value requires Python argument binding",
+                provider.display()
+            ),
+        );
+    }
+
+    #[test]
     fn registered_entry_reuses_the_typed_callback_body() {
         use crate::frontend::caller_cache::observe_lowerings;
         use crate::ir::{self, ExprKind, Type};
