@@ -744,13 +744,18 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         }
     }
 
-    /// Emit the function through one traversal, installing fixed list views only
-    /// after the last operation that could invalidate their backing storage.
+    /// Place lexical children before use and install fixed list views only after
+    /// the last operation that could invalidate their backing storage.
     pub(crate) fn emit_function(&mut self, function: &crate::ir::Function) {
         let mut statements = function.body.as_slice();
-        if let Entry::Native(code) = &self.0
-            && let Some((start, slots)) = code.int_buffer_region(function)
-        {
+        let list_views = match &mut self.0 {
+            Entry::Native(code) => code.int_buffer_region(function),
+            Entry::Registered(frame) => {
+                frame.place_function_sites(statements);
+                None
+            }
+        };
+        if let Some((start, slots)) = list_views {
             self.emit_block(&statements[..start]);
             let code = self.fixed();
             if code.body.terminated {
