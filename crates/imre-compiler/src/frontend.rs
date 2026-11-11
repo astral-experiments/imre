@@ -5955,7 +5955,7 @@ impl<'a> Checker<'a> {
                         value
                     };
                     Some(Statement::AugmentField(receiver, field, op, value))
-                } else if let ast::Expr::Name(_) = &*assign.target {
+                } else if let ast::Expr::Name(name) = &*assign.target {
                     let left = self.expr(&assign.target)?;
                     if assign.op == ast::Operator::Add
                         && let Some(element) = self.types.deque_element(left.ty)
@@ -5964,6 +5964,22 @@ impl<'a> Checker<'a> {
                         return Ok((vec![self.assign(&assign.target, value)?], true));
                     }
                     let right = self.expr(&assign.value)?;
+                    if assign.op == ast::Operator::Add
+                        && (left.ty == Type::PythonObject
+                            || right.ty == Type::PythonObject
+                            || (left.ty == right.ty && self.types.element(left.ty).is_some()))
+                    {
+                        // The registered name store owns __iadd__ and its result. Even
+                        // two lists with the same layout must preserve the original alias.
+                        let failure = self.scoped_builtin_error("in-place addition", statement);
+                        if !self.missing_operation(&failure) {
+                            return Err(failure);
+                        }
+                        if let Some(&slot) = self.names.get(name.id.as_str()) {
+                            self.assigned_value(slot, &Expr::unrepresented());
+                        }
+                        return Ok((Vec::new(), true));
+                    }
                     let value = if self.types.is_counter(left.ty) {
                         self.counter_math(assign.op, left, right, true, statement)?
                     } else if assign.op == ast::Operator::Div
