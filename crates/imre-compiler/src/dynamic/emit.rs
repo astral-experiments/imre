@@ -17,7 +17,8 @@ use crate::frontend::{ParameterEvaluator, RegisteredGenerator, RegisteredLambda,
 use crate::ir::RegisteredTypeParameter;
 use crate::llvm::ModuleLauncher;
 use crate::llvm::registered::sites::{
-    CheckedSites, CompiledAlias, CompiledDefinition, CompiledTypeParameters, Declaration,
+    CheckedSites, CompiledAlias, CompiledDefinition, CompiledGenerator, CompiledTypeParameters,
+    Declaration,
 };
 use crate::llvm::registered::{
     ABI, AnnotationScope, Output, RegisteredBody, RegisteredFrame, SourcePositions, sites,
@@ -1264,13 +1265,16 @@ impl<'p> sites::SiteDefinitions<'p> for LexicalDefinitions<'_, 'p> {
         (namespace, parameters, class.range)
     }
 
-    fn generator(&mut self, site: TextRange) -> CompiledDefinition {
+    fn generator(&mut self, site: TextRange) -> CompiledGenerator {
         let body = &self.source.generators[&site];
-        self.compile_callable(
-            site.start(),
-            Callable::Generator(body),
-            Body::Registered(RegisteredBody::Function(&body.body), None),
-        )
+        CompiledGenerator {
+            function: self.compile_callable(
+                site.start(),
+                Callable::Generator(body),
+                Body::Registered(RegisteredBody::Function(&body.body), None),
+            ),
+            acquire: body.acquire,
+        }
     }
 
     fn type_alias(&mut self, site: TextSize) -> Result<CompiledAlias, String> {

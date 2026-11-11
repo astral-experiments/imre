@@ -1508,15 +1508,15 @@ impl Builtin {
     }
 }
 
-/// A generator binding consumes its acquired cursor in the defining scope.
+/// The generator site acquires its outer iterator in the defining scope.
 pub(crate) fn generator_operands(
     scoped: bool,
     args: &[Expr],
 ) -> Result<(Option<&Expr>, &Expr), &'static str> {
     match (scoped, args) {
-        (true, [scope, cursor]) => Ok((Some(scope), cursor)),
-        (false, [cursor]) => Ok((None, cursor)),
-        _ => Err("registered generator needs its outer cursor and any explicit scope"),
+        (true, [scope, iterable]) => Ok((Some(scope), iterable)),
+        (false, [iterable]) => Ok((None, iterable)),
+        _ => Err("registered generator needs its outer iterable and any explicit scope"),
     }
 }
 

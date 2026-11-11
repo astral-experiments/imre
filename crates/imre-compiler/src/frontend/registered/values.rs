@@ -949,26 +949,16 @@ pub(super) fn operation<'a, E>(
     }))
 }
 
-/// Acquire only the outer cursor here. The lexical generator owns iteration and its body.
+/// The defining frame supplies the iterable. Its checked generator site owns acquisition.
 fn generator_binding<E>(
     generator: &ast::ExprGenerator,
     mut operand: impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
 ) -> StdResult<Expr, E> {
     let outer = imre_ast::comprehension::outer_clause(&generator.generators);
-    let acquire = if outer.is_async {
-        ir::IteratorOp::Async(outer.iter.range())
-    } else {
-        ir::IteratorOp::Get(outer.iter.range())
-    };
-    let iterator = super::operation(
-        Builtin::RegisteredIter(acquire),
-        Type::PythonObject,
-        vec![operand(&outer.iter)?],
-    );
     Ok(super::operation(
         Builtin::RegisteredGenerator(generator.range(), false),
         Type::PythonObject,
-        vec![iterator],
+        vec![operand(&outer.iter)?],
     ))
 }
 

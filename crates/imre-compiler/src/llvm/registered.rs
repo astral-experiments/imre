@@ -1128,14 +1128,16 @@ impl<'f> Frame<'f, '_, '_> {
                 sites.bind_lambda(code, *site, &scope, &defaults)
             }
             (Builtin::RegisteredGenerator(site, scoped), operands) => {
-                let (scope, cursor) =
+                let (scope, iterable) =
                     ir::generator_operands(*scoped, operands).expect("checked generator operands");
                 let scope = scope
                     .map(|scope| self.evaluate_handle(scope))
                     .unwrap_or_else(|| self.code.scope.clone());
                 let mark = self.temporary_mark();
                 self.unwind_operands(&mark, |frame| {
-                    let cursor = frame.evaluate_handle(cursor);
+                    let acquire = frame.code.parts().1.generators[site].acquire;
+                    let cursor =
+                        frame.acquire_iterator(acquire, |frame| frame.evaluate_handle(iterable));
                     frame.keep_operands(&mark, &cursor, "0");
                     let (code, sites) = frame.code.parts();
                     let result = sites.bind_generator(code, *site, &scope, &cursor);
