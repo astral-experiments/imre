@@ -808,30 +808,26 @@ impl DeferredAnnotation {
 
     /// Build one provider in the order its checked fields become visible.
     pub(crate) fn prepare_body(
-        fields: impl IntoIterator<Item = (Self, Option<usize>)>,
+        declarations: impl IntoIterator<Item = (Self, Option<usize>)>,
         (locals, local_names): RegisteredBindings,
     ) -> AnnotationProvider {
-        let mut body = vec![Statement::Expr(operation(
-            Builtin::RegisteredAnnotationStart,
-            Type::None,
-            vec![],
-        ))];
-        for (field, index) in fields {
-            body.push(Statement::Expr(operation(
-                Builtin::RegisteredAnnotationInsert(ir::AnnotationField {
-                    name: field.name,
-                    range: field.range,
-                    index,
-                }),
-                Type::None,
-                vec![field.value?],
-            )));
+        let mut fields = Vec::new();
+        let mut values = Vec::new();
+        for (field, index) in declarations {
+            fields.push(ir::AnnotationField {
+                name: field.name,
+                range: field.range,
+                index,
+            });
+            values.push(field.value?);
         }
-        body.push(Statement::Return(operation(
-            Builtin::RegisteredAnnotationResult,
+        let body = vec![Statement::Return(operation(
+            Builtin::RegisteredAnnotations {
+                fields: fields.into(),
+            },
             Type::PythonObject,
-            vec![],
-        )));
+            values,
+        ))];
         Ok(RegisteredFunction {
             inputs: FrameInputs::Checked,
             fixed_sites: Vec::new(),
@@ -3978,30 +3974,19 @@ mod tests {
         assert!(!provider.reads(Some(&class)).contains("mod"));
         assert!(provider.reads(None).contains("mod"));
         let body = &provider.body.as_ref().unwrap().function.body;
-        let fields: Vec<_> = body
-            .iter()
-            .filter_map(|statement| {
-                let Statement::Expr(Expr {
-                    kind: ExprKind::Builtin(Builtin::RegisteredAnnotationInsert(field), inputs),
-                    ..
-                }) = statement
-                else {
-                    return None;
-                };
-                Some((field, inputs.as_slice()))
-            })
-            .collect();
-        let names: Vec<_> = fields
-            .iter()
-            .map(|(field, _)| field.name.as_str())
-            .collect();
+        let [
+            Statement::Return(Expr {
+                kind: ExprKind::Builtin(Builtin::RegisteredAnnotations { fields, .. }, values),
+                ..
+            }),
+        ] = body.as_slice()
+        else {
+            panic!("expected checked function annotations")
+        };
+        let names: Vec<_> = fields.iter().map(|field| field.name.as_str()).collect();
         assert_eq!(names, ["b", "a", "args", "c", "kw", "return"]);
-        assert!(matches!(
-            fields[0].1,
-            [Expr {
-                kind: ExprKind::Builtin(Builtin::BindAnnotationExpression { site, .. }, _), ..
-            }] if *site == fields[0].0.range.start()
-        ));
+        assert!(matches!(&values[0].kind, ExprKind::Builtin(
+            Builtin::BindAnnotationExpression { site, .. }, _) if *site == fields[0].range.start()));
         assert_eq!(provider.references["a"], "mod.T");
         assert_eq!(provider.references["return"], "None");
         assert!(!provider.references.contains_key("b"));
@@ -4056,42 +4041,20 @@ mod tests {
         crate::verify::registered(scoped.region()).unwrap();
         let checked = callback(&[0, 1, 0]).unwrap();
         let [
-            Statement::Expr(start),
-            members @ ..,
-            Statement::Return(result),
+            Statement::Return(Expr {
+                kind: ExprKind::Builtin(Builtin::RegisteredAnnotations { fields }, values),
+                ..
+            }),
         ] = checked.function.body.as_slice()
         else {
-            panic!("expected a single callback body")
+            panic!("expected checked annotations")
         };
-        assert!(matches!(
-            start.kind,
-            ExprKind::Builtin(Builtin::RegisteredAnnotationStart, _)
-        ));
-        assert!(matches!(
-            result.kind,
-            ExprKind::Builtin(Builtin::RegisteredAnnotationResult, _)
-        ));
-        let numbered: Vec<_> =
-            members
-                .iter()
-                .map(|stmt| {
-                    let Statement::Expr(Expr {
-                        kind:
-                            ExprKind::Builtin(
-                                Builtin::RegisteredAnnotationInsert(occurrence),
-                                operands,
-                            ),
-                        ..
-                    }) = stmt
-                    else {
-                        panic!("expected a guarded annotation insertion")
-                    };
-                    assert_eq!(operands.len(), 1);
-                    (occurrence.index, occurrence.name.as_str())
-                })
-                .collect();
+        assert_eq!(values.len(), fields.len());
         assert_eq!(
-            numbered,
+            fields
+                .iter()
+                .map(|field| (field.index, field.name.as_str()))
+                .collect::<Vec<_>>(),
             [(Some(0), "first"), (Some(1), "second"), (Some(2), "first")]
         );
         let bundled_sites = prepared(true).module_annotations.fields;
@@ -4102,9 +4065,9 @@ mod tests {
             matches!(&bundled_sites[3].value, Ok(Expr {kind: ExprKind::Str(text), ..}) if text == "list[int]")
         );
         let forward = callback(&[3]).unwrap();
-        assert!(matches!(&forward.function.body[1],
-            Statement::Expr(Expr { kind: ExprKind::Builtin(
-                Builtin::RegisteredAnnotationInsert(ir::AnnotationField { index: Some(0), .. }), values), .. })
+        assert!(matches!(&forward.function.body[0],
+            Statement::Return(Expr { kind: ExprKind::Builtin(
+                Builtin::RegisteredAnnotations { .. }, values), .. })
                 if matches!(values.as_slice(), [Expr { kind: ExprKind::Builtin(
                     Builtin::BindAnnotationExpression { site, .. }, _), .. }] if *site == stmts[3].as_ann_assign_stmt().unwrap().annotation.start())));
         for slot in [2, 4, 6] {

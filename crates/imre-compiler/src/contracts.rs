@@ -713,11 +713,9 @@ impl Builtin {
             | Self::RegisteredSuspend(..)
             | Self::RegisteredAssertionFailure { .. }
             | Self::RegisteredNamespaceAnnotation(_)
-            | Self::RegisteredAnnotationStart
             | Self::RegisteredAnnotationFormat
-            | Self::RegisteredAnnotationInsert(_)
+            | Self::RegisteredAnnotations { .. }
             | Self::BindAnnotationExpression { .. }
-            | Self::RegisteredAnnotationResult
             | Self::RegisteredDeleteName(..)
             | Self::RegisteredDefinition(_)
             | Self::RegisteredClassNamespace(..)

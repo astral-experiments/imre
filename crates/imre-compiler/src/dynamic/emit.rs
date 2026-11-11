@@ -2079,15 +2079,13 @@ mod tests {
         assert!(!checked.region().private_slots().is_empty());
         crate::verify::registered(checked.region()).unwrap();
         let [
-            _,
-            Statement::Expr(Expr {
-                kind: ExprKind::Builtin(Builtin::RegisteredAnnotationInsert(_), fields),
+            Statement::Return(Expr {
+                kind: ExprKind::Builtin(Builtin::RegisteredAnnotations { .. }, fields),
                 ..
             }),
-            _,
         ] = checked.function.body.as_mut_slice()
         else {
-            panic!("expected one annotation insertion");
+            panic!("expected one annotation provider")
         };
         let [value] = fields.as_mut_slice() else {
             panic!("expected one annotation value");
@@ -2133,22 +2131,21 @@ mod tests {
         let provider = provider.as_mut().as_mut().unwrap();
         assert!(!provider.region().private_slots().is_empty());
         crate::verify::registered(provider.region()).unwrap();
-        let mut fields = provider.function.body.iter_mut().filter_map(|stmt| {
-            if let Statement::Expr(crate::ir::Expr {
-                kind: ExprKind::Builtin(Builtin::RegisteredAnnotationInsert(field), inputs),
+        let [
+            Statement::Return(crate::ir::Expr {
+                kind: ExprKind::Builtin(Builtin::RegisteredAnnotations { fields, .. }, values),
                 ..
-            }) = stmt
-            {
-                Some((field.name.as_str(), inputs))
-            } else {
-                None
-            }
-        });
-        let (first, values) = fields.next().unwrap();
-        let (second, replacements) = fields.next().unwrap();
-        assert_eq!((first, second), ("first", "second"));
-        let ([value], [replacement]) = (values.as_mut_slice(), replacements.as_slice()) else {
-            panic!("each annotation has one checked value");
+            }),
+        ] = provider.function.body.as_mut_slice()
+        else {
+            panic!("expected checked class annotations")
+        };
+        assert_eq!(
+            fields.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(),
+            ["first", "second"]
+        );
+        let [value, replacement] = values.as_mut_slice() else {
+            panic!("expected two annotation operands")
         };
         *value = replacement.clone();
         assert_ne!(prepared.standalone().unwrap(), original);
@@ -4928,7 +4925,12 @@ mod tests {
         let provider = header.annotations.as_ref().unwrap();
         assert_eq!(provider.start, method.parameters.start());
         let body = provider.body.as_ref().unwrap();
-        assert_eq!(body.function.body.len(), 4); // start, two fields, return
+        use crate::ir::{Builtin, Expr, ExprKind, Statement};
+        assert!(matches!(
+            body.function.body.as_slice(),
+            [Statement::Return(Expr { kind: ExprKind::Builtin(Builtin::RegisteredAnnotations { .. }, values), .. })]
+                if values.len() == 2
+        ));
         assert!(!body.local_names.is_empty());
         let original = prepared.standalone().unwrap();
         let class = prepared.syntax.as_mut().unwrap().to_mut()[0]

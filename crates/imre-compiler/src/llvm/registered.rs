@@ -970,9 +970,7 @@ impl<'f> Frame<'f, '_, '_> {
                     | Builtin::RegisteredNamespaceAnnotation(_)
                     | Builtin::RegisteredDiscard
                     | Builtin::RegisteredDisplayHook
-                    | Builtin::RegisteredAnnotationStart
                     | Builtin::RegisteredAnnotationFormat
-                    | Builtin::RegisteredAnnotationInsert(_)
                     | Builtin::RegisteredAttribute {
                         action: ir::AttributeAction::Delete | ir::AttributeAction::InPlace(_),
                         ..
@@ -1230,23 +1228,21 @@ impl<'f> Frame<'f, '_, '_> {
                 });
                 "0".to_owned()
             }
-            (Builtin::RegisteredAnnotationStart, []) => {
+            (Builtin::RegisteredAnnotations { fields }, values) => {
                 self.code.begin_annotations();
-                "0".to_owned()
-            }
-            (Builtin::RegisteredAnnotationInsert(field), [value]) => {
-                let target = self
-                    .code
-                    .annotation_target(field.index, &field.name, field.range);
-                let value = self.evaluate_handle(value);
-                self.code.store_annotation(target, &value);
-                "0".to_owned()
+                for (field, value) in fields.iter().zip(values) {
+                    let target = self
+                        .code
+                        .annotation_target(field.index, &field.name, field.range);
+                    let value = self.evaluate_handle(value);
+                    self.code.store_annotation(target, &value);
+                }
+                self.code.take_annotation_result()
             }
             (Builtin::BindAnnotationExpression { site, spelling }, []) => {
                 let (code, sites) = self.code.parts();
                 sites.annotation_string(code, *site, spelling)
             }
-            (Builtin::RegisteredAnnotationResult, []) => self.code.take_annotation_result(),
             (
                 Builtin::RegisteredNamespaceAnnotation(ir::NamespaceAnnotation::Module { index }),
                 [],
