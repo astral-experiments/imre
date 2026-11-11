@@ -95,13 +95,12 @@ impl Checker<'_> {
 
     /// Capture the optional receiver once. Entering None fails before the try;
     /// every exit from the protected body releases exactly the captured lock.
-    pub(super) fn handler_lock_scope(
+    pub(super) fn handler_lock_context<'s>(
         &mut self,
+        out: &'s mut Vec<Statement>,
         item: &ast::WithItem,
-        remaining: &[ast::WithItem],
-        body: &[ast::Stmt],
         manager: Expr,
-    ) -> Result<(Vec<Statement>, bool), String> {
+    ) -> Result<&'s mut Vec<Statement>, String> {
         let ty = self.types.optional(Type::HandlerLock);
         if manager.ty == ty {
             self.graph
@@ -131,23 +130,16 @@ impl Checker<'_> {
         } else {
             statements.push(Statement::Expr(enter));
         }
-        let (nested, falls) = self.with_items(remaining, body)?;
-        protected.extend(nested);
-        statements.push(Statement::Try {
-            body: protected,
-            handlers: Vec::new(),
-            orelse: Vec::new(),
-            finalbody: vec![Statement::Expr(Expr {
+        Ok(contexts::enter_native(
+            out,
+            statements,
+            protected,
+            Vec::new(),
+            Statement::Expr(Expr {
                 ty: Type::None,
                 kind: ExprKind::Builtin(Builtin::Logging(Op::LockExit), vec![self.local(captured)]),
-            })],
-        });
-        Ok((
-            vec![Statement::Scope {
-                body: statements,
-                clear,
-            }],
-            falls,
+            }),
+            clear,
         ))
     }
 }

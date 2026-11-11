@@ -82,51 +82,129 @@ pub(super) fn op(op: Op, ty: Type, args: Vec<Expr>) -> Expr {
     }
 }
 
+pub(super) type Protected<'a> = std::ops::ControlFlow<bool, &'a mut Vec<Statement>>;
+
+/// Each acquisition opens its checked protected suite after a successful enter.
+/// The next acquisition (or the user suite) goes after its target binding.
+pub(super) fn with_items<C, I: IntoIterator, E>(
+    scope: &mut C,
+    items: I,
+    mut enter: impl for<'s> FnMut(
+        &mut C,
+        I::Item,
+        &'s mut Vec<Statement>,
+    ) -> StdResult<Protected<'s>, E>,
+    body: impl FnOnce(&mut C) -> StdResult<statements::Block, E>,
+) -> StdResult<statements::Block, E> {
+    let mut statements = Vec::new();
+    let mut protected = &mut statements;
+    for item in items {
+        protected = match enter(scope, item, protected)? {
+            Protected::Continue(suite) => suite,
+            Protected::Break(falls) => return Ok((statements, falls)),
+        };
+    }
+    let falls = finish(protected, body(scope)?);
+    Ok((statements, falls))
+}
+
+pub(super) fn finish(protected: &mut Vec<Statement>, (body, falls): statements::Block) -> bool {
+    if protected.is_empty() {
+        *protected = body;
+    } else {
+        protected.extend(body);
+    }
+    falls
+}
+
+/// Return the protected checked suite in the operation just appended.
+fn open(enclosing: &mut Vec<Statement>, region: Statement) -> &mut Vec<Statement> {
+    match enclosing.push_mut(region) {
+        Statement::Scope { body, .. }
+        | Statement::Try { body, .. }
+        | Statement::With { body, .. } => body,
+        _ => unreachable!("a checked manager opens a scope, try, or Python protocol region"),
+    }
+}
+
+pub(super) fn enter_native(
+    enclosing: &mut Vec<Statement>,
+    enter: Vec<Statement>,
+    binding: Vec<Statement>,
+    handlers: Vec<ir::ExceptHandler>,
+    exit: Statement,
+    clear: Vec<usize>,
+) -> &mut Vec<Statement> {
+    let acquired = if clear.is_empty() {
+        enclosing.extend(enter);
+        enclosing
+    } else {
+        open(enclosing, Statement::Scope { body: enter, clear })
+    };
+    open(
+        acquired,
+        Statement::Try {
+            body: binding,
+            handlers,
+            orelse: Vec::new(),
+            finalbody: vec![exit],
+        },
+    )
+}
+
+pub(super) fn enter_python(
+    enclosing: &mut Vec<Statement>,
+    site: ir::ContextSite,
+    manager: Expr,
+    binding: Option<ir::ContextBinding>,
+) -> &mut Vec<Statement> {
+    open(
+        enclosing,
+        Statement::With {
+            manager,
+            site,
+            binding,
+            body: Vec::new(),
+        },
+    )
+}
+
 impl Checker<'_> {
     pub(super) fn generator_scope(
         &mut self,
+        out: &mut Vec<Statement>,
         item: &ast::WithItem,
         rest: &[ast::WithItem],
         suite: &[ast::Stmt],
         manager: Expr,
-    ) -> Result<(Vec<Statement>, bool), String> {
+    ) -> Result<bool, String> {
         let slot = self.hidden(manager.ty);
         let mut protected = Vec::new();
         if let Some(target) = &item.optional_vars {
             protected.push(self.assign(target, Expr::none())?);
         }
         let (body, falls) = self.with_items(rest, suite)?;
-        protected.extend(body);
         let exception = self.hidden(Type::Exception);
         let handled = op(
             Op::ContextThrow,
             Type::Bool,
             vec![self.local(slot), self.local(exception)],
         );
-        let body = vec![
-            Statement::Assign(slot, manager),
-            Statement::Expr(op(Op::ContextEnter, Type::None, vec![self.local(slot)])),
-            Statement::Try {
-                body: protected,
-                handlers: vec![ir::ExceptHandler {
-                    matcher: crate::ir::ExceptionMatcher::Categories(vec![0]),
-                    name: Some(exception),
-                    body: vec![Statement::If(handled, vec![], vec![Statement::Raise(None)])],
-                }],
-                orelse: vec![],
-                finalbody: vec![Statement::Expr(op(
-                    Op::ContextExit,
-                    Type::None,
-                    vec![self.local(slot)],
-                ))],
-            },
-        ];
-        Ok((
-            vec![Statement::Scope {
-                body,
-                clear: vec![slot],
+        let suite = enter_native(
+            out,
+            vec![
+                Statement::Assign(slot, manager),
+                Statement::Expr(op(Op::ContextEnter, Type::None, vec![self.local(slot)])),
+            ],
+            protected,
+            vec![ir::ExceptHandler {
+                matcher: ir::ExceptionMatcher::Categories(vec![0]),
+                name: Some(exception),
+                body: vec![Statement::If(handled, vec![], vec![Statement::Raise(None)])],
             }],
-            falls,
-        ))
+            Statement::Expr(op(Op::ContextExit, Type::None, vec![self.local(slot)])),
+            vec![slot],
+        );
+        Ok(finish(suite, (body, falls)))
     }
 }

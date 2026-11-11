@@ -6423,9 +6423,22 @@ impl<'a> Checker<'a> {
         items: &[ast::WithItem],
         body: &[ast::Stmt],
     ) -> Result<(Vec<Statement>, bool), String> {
-        let Some((item, remaining)) = items.split_first() else {
-            return self.block(body);
-        };
+        contexts::with_items(
+            self,
+            items.iter().enumerate(),
+            |scope, (index, item), out| scope.acquire_with(out, item, &items[index + 1..], body),
+            |scope| scope.block(body),
+        )
+    }
+
+    fn acquire_with<'s>(
+        &mut self,
+        out: &'s mut Vec<Statement>,
+        item: &ast::WithItem,
+        remaining: &[ast::WithItem],
+        body: &[ast::Stmt],
+    ) -> Result<contexts::Protected<'s>, String> {
+        use std::ops::ControlFlow::{Break, Continue};
         if let ast::Expr::Call(call) = &item.context_expr
             && self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::CatchWarnings))
         {
@@ -6437,26 +6450,20 @@ impl<'a> Checker<'a> {
             if let Some(target) = &item.optional_vars {
                 protected.push(self.assign_value(target, Expr::none())?);
             }
-            let (nested, falls) = self.with_items(remaining, body)?;
-            protected.extend(nested);
             let action = |op| {
                 Statement::Expr(Expr {
                     ty: Type::None,
                     kind: ExprKind::Builtin(op, vec![]),
                 })
             };
-            return Ok((
-                vec![
-                    action(Builtin::WarningScopeEnter),
-                    Statement::Try {
-                        body: protected,
-                        handlers: vec![],
-                        orelse: vec![],
-                        finalbody: vec![action(Builtin::WarningScopeExit)],
-                    },
-                ],
-                falls,
-            ));
+            return Ok(Continue(contexts::enter_native(
+                out,
+                vec![action(Builtin::WarningScopeEnter)],
+                protected,
+                Vec::new(),
+                action(Builtin::WarningScopeExit),
+                Vec::new(),
+            )));
         }
         let temporary = if let ast::Expr::Call(call) = &item.context_expr
             && matches!(
@@ -6475,26 +6482,36 @@ impl<'a> Checker<'a> {
         if let Type::Class(class) = manager.ty
             && self.unittest_context(class)
         {
-            return self.assert_raises_scope(item, remaining, body, class, manager);
+            return Ok(Break(contexts::finish(
+                out,
+                self.assert_raises_scope(item, remaining, body, class, manager)?,
+            )));
         }
         if let Type::Class(class) = manager.ty {
             let record = &self.classes.declarations.definitions[class];
             if record.name == "_SubTestContext"
                 && self.graph.modules[record.definition.module].is_bundled("unittest")
             {
-                return self.subtest_scope(item, remaining, body, class, manager);
+                return Ok(Break(contexts::finish(
+                    out,
+                    self.subtest_scope(item, remaining, body, class, manager)?,
+                )));
             }
         }
         if self.types.payload(manager.ty).unwrap_or(manager.ty) == Type::HandlerLock {
-            return self.handler_lock_scope(item, remaining, body, manager);
+            return Ok(Continue(self.handler_lock_context(out, item, manager)?));
         }
         if let Type::Class(class) = manager.ty
             && self.bundled_mock_class(class, "_DictionaryPatch")
         {
-            return self.mock_dictionary_scope(item, remaining, body, class, manager);
+            return Ok(Continue(
+                self.mock_dictionary_context(out, item, class, manager)?,
+            ));
         }
         if manager.ty == Type::GeneratorContext {
-            return self.generator_scope(item, remaining, body, manager);
+            return self
+                .generator_scope(out, item, remaining, body, manager)
+                .map(Break);
         }
         let stored = self.types.directory_value(manager.ty);
         let archive = manager.ty == Type::ZipFile;
@@ -6542,7 +6559,7 @@ impl<'a> Checker<'a> {
                     if let Some(target) = &item.optional_vars {
                         self.assign_value(target, Expr::unrepresented())?;
                     }
-                    return self.with_items(remaining, body);
+                    return Ok(Continue(out));
                 }
                 return Err(failure);
             }
@@ -6569,8 +6586,13 @@ impl<'a> Checker<'a> {
             };
             protected.push(self.assign(target, value)?);
         }
-        let (nested, falls) = self.with_items(remaining, body)?;
-        protected.extend(nested);
+        // The server cleanup is a checked virtual call. Preserve the protected
+        // suite's first failure before checking its possible close methods.
+        let server_body = if server.is_some() {
+            Some(self.with_items(remaining, body)?)
+        } else {
+            None
+        };
         let mut statements = vec![Statement::Assign(captured, manager)];
         if let Some((enter, _)) = context_methods {
             self.calls.insert(enter);
@@ -6621,19 +6643,18 @@ impl<'a> Checker<'a> {
                 kind,
             }
         };
-        statements.push(Statement::Try {
-            body: protected,
-            handlers: Vec::new(),
-            orelse: Vec::new(),
-            finalbody: vec![Statement::Expr(cleanup)],
-        });
-        Ok((
-            vec![Statement::Scope {
-                body: statements,
-                clear: vec![captured],
-            }],
-            falls,
-        ))
+        let protected = contexts::enter_native(
+            out,
+            statements,
+            protected,
+            Vec::new(),
+            Statement::Expr(cleanup),
+            vec![captured],
+        );
+        Ok(match server_body {
+            Some(tail) => Break(contexts::finish(protected, tail)),
+            None => Continue(protected),
+        })
     }
 
     /// Imported exception aliases resolve by identity; a spelling alone cannot
