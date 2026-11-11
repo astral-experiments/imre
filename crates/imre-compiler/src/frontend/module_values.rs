@@ -959,8 +959,7 @@ impl ModuleValues {
                 // A deferred reader sees the most recently executed declaration. An immutable
                 // snapshot has just the one physical target it copied at its own store.
                 let current = |value: &Expr| {
-                    self
-                        .invoked_functions(value)?
+                    self.invoked_functions(value)?
                         .iter()
                         .rev()
                         .copied()
