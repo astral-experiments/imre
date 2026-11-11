@@ -2654,7 +2654,7 @@ const RUNTIME_PROVIDERS: &[&str] = &[
 ];
 
 /// Return the effective source used for a discovered bundled module on this target.
-fn bundled_module_source(
+pub(crate) fn bundled_module_source(
     name: &str,
     standalone: bool,
 ) -> Option<(&'static str, std::borrow::Cow<'static, str>)> {

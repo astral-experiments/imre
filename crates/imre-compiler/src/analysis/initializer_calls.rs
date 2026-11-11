@@ -504,16 +504,7 @@ impl Session {
             return None;
         }
         let owner = self.files[module];
-        let global = FileScopeId::global();
-        let index = ty_python_core::semantic_index(&self.db, self.db.program_file(owner));
-        let symbol = index.place_table(global).symbol_id(name)?;
-        let mut bindings = index
-            .use_def_map(global)
-            .end_of_scope_symbol_bindings(symbol);
-        let def = bindings.next()?.binding.definition()?;
-        if bindings.next().is_some() || def.file(&self.db) != owner {
-            return None;
-        }
+        let def = self.final_module_binding(owner, name)?;
         let DefinitionKind::Function(function) = def.kind(&self.db) else {
             return None;
         };

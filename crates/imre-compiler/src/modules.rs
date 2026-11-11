@@ -572,7 +572,7 @@ pub(crate) enum Binding {
     Module(ModuleId),
     Definition(DefinitionId),
     /// The owning Python module initializes the checked class object.
-    RegisteredClass(DefinitionId),
+    RegisteredClass(ruff_db::files::FileRange),
     /// The module initializer establishes this binding when its guard executes.
     ConditionalValue,
     /// A class defined by the runtime arm of a TYPE_CHECKING guard.
@@ -4233,7 +4233,23 @@ impl SourceGraph {
         if let Some(import) = self.local_static_binding(module, expression) {
             return self.local_import_value(module, expression, import);
         }
-        let binding = resolve_binding(&self.modules, module, expression)?;
+        let binding = resolve_binding(&self.modules, module, expression).or_else(|| {
+            let attr = expression.as_attribute_expr()?;
+            let Binding::IntrinsicModule(namespace) =
+                resolve_binding(&self.modules, module, &attr.value)?
+            else {
+                return None;
+            };
+            let owner = self.session.module_name_at(module, &attr.value)?;
+            if IntrinsicModule::named(owner) != Some(namespace) {
+                return None;
+            }
+            stdlib_symbol_or_else(&self.modules, namespace, attr.attr.as_str(), || {
+                self.session
+                    .shipped_class(owner, attr.attr.as_str())
+                    .map(Binding::RegisteredClass)
+            })
+        })?;
         if let Binding::Definition(id) = binding
             && self.builtin_before_function(module, expression, id)
         {
@@ -4540,6 +4556,16 @@ fn textwrap_implementation(name: &str) -> Option<&'static str> {
 
 /// Resolve the public definitions compiled from Python alongside sealed native operations.
 fn stdlib_symbol(modules: &[SourceModule], module: IntrinsicModule, name: &str) -> Option<Binding> {
+    stdlib_symbol_or_else(modules, module, name, || None)
+}
+
+/// A selected checked interface owns its misses as well as its public definitions.
+fn stdlib_symbol_or_else(
+    modules: &[SourceModule],
+    module: IntrinsicModule,
+    name: &str,
+    unclaimed: impl FnOnce() -> Option<Binding>,
+) -> Option<Binding> {
     if module == IntrinsicModule::Dataclasses
         && matches!(name, "MISSING" | "_MISSING_TYPE")
         && let Some(source) = modules
@@ -4564,12 +4590,12 @@ fn stdlib_symbol(modules: &[SourceModule], module: IntrinsicModule, name: &str) 
             IntrinsicModule::ImportlibMetadata if name == "version" => METADATA_VERSION,
             IntrinsicModule::Inspect if name == "cleandoc" => INSPECT_FUNCTIONS,
             IntrinsicModule::Tempfile if name == "SpooledTemporaryFile" => TEMPFILE_SPOOL,
-            IntrinsicModule::Logging if !name.starts_with('_') => LOGGING_CLASSES,
-            IntrinsicModule::LoggingHandlers if !name.starts_with('_') => LOGGING_HANDLER_CLASSES,
+            IntrinsicModule::Logging => (!name.starts_with('_')).then_some(LOGGING_CLASSES)?,
+            IntrinsicModule::LoggingHandlers => (!name.starts_with('_')).then_some(LOGGING_HANDLER_CLASSES)?,
             IntrinsicModule::Fractions if name == "Fraction" => FRACTION_CLASS,
             IntrinsicModule::Calendar if matches!(name, "Calendar" | "TextCalendar") => CALENDAR_CLASSES,
             IntrinsicModule::Textwrap => textwrap_implementation(name)?,
-            _ => return None,
+            _ => return unclaimed(),
         };
         let (id, source) = modules
             .iter()
@@ -5723,7 +5749,10 @@ impl<'a> Loader<'a> {
                                 self.import_namespace(id, statement.range(), provider);
                                 self.modules[provider].export(member)
                             } else {
-                                None
+                                self.session.prepare_shipped_source(&name)?;
+                                stdlib_symbol_or_else(&self.modules, module, member, || {
+                                    self.session.shipped_class(&name, member).map(Binding::RegisteredClass)
+                                })
                             }
                         }
                         .filter(|binding| {
@@ -5740,8 +5769,15 @@ impl<'a> Loader<'a> {
                                 alias.name
                             )
                         })?;
+                        if let Binding::IntrinsicModule(child) = binding {
+                            let child_name = format!("{name}.{}", alias.name);
+                            if IntrinsicModule::named(&child_name) == Some(child) {
+                                self.session.prepare_shipped_source(&child_name)?;
+                            }
+                        }
                         if binding
                             == Binding::Intrinsic(Intrinsic::Fnmatch(FnmatchOperation::Parts))
+                            || matches!(binding, Binding::RegisteredClass(_))
                             || binding == Binding::IntrinsicModule(IntrinsicModule::ReConstants)
                             || module == IntrinsicModule::EmailHeaderValueParser
                             || matches!(
@@ -5965,6 +6001,9 @@ impl<'a> Loader<'a> {
         });
         if let Some(module) = module {
             self.reject_stdlib_shadow(name)?;
+            if imports.is_none() {
+                self.session.prepare_shipped_source(name)?;
+            }
             if module == IntrinsicModule::Fractions {
                 // The checked representation has the same import shadowing rules as fractions.py.
                 for dependency in ["functools", "math", "numbers", "operator", "re", "sys"] {

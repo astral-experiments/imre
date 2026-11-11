@@ -168,3 +168,75 @@ fn a_program_root_package_keeps_the_initializer_diagnostic_on_its_own_source() {
         "{error}"
     );
 }
+
+#[test]
+fn demanded_shipped_classes_use_the_defining_source() {
+    use super::Binding;
+    use ruff_text_size::Ranged;
+
+    let root = tempfile::tempdir().unwrap();
+    let entry = root.path().join("main.py");
+    fs::write(
+        root.path().join("helper.py"),
+        "from asyncio import Future as F\nfrom traceback import FrameSummary as S\n",
+    )
+    .unwrap();
+    fs::write(&entry,"import asyncio as tasks\nimport traceback as tb\nfrom helper import F, S\ntasks.Future\ntb.FrameSummary\n").unwrap();
+    let graph = SourceGraph::load(&entry, Some(root.path()), &[]).unwrap();
+    let module = &graph.modules[graph.entry];
+    assert!(
+        graph
+            .session
+            .shipped_class("traceback", "format_exc")
+            .is_none()
+    );
+    // asyncio imports tasks with a wildcard. Its explicit __all__ omits this class.
+    assert!(
+        graph
+            .session
+            .shipped_class("asyncio.tasks", "_GatheringFuture")
+            .is_some()
+    );
+    assert!(
+        graph
+            .session
+            .shipped_class("asyncio", "_GatheringFuture")
+            .is_none()
+    );
+    for (pos, alias, class, filename) in [
+        (3, "F", "Future", "asyncio/futures.py"),
+        (4, "S", "FrameSummary", "traceback.py"),
+    ] {
+        let (file, parsed, _) = graph
+            .session
+            .selected_file(&Path::new(crate::dynamic::BUNDLED_SOURCE_ROOT).join(filename))
+            .unwrap();
+        let definition = parsed
+            .suite()
+            .iter()
+            .filter_map(ruff_python_ast::Stmt::as_class_def_stmt)
+            .find(|c| c.name.as_str() == class)
+            .unwrap();
+        let expected = Some(Binding::RegisteredClass(ruff_db::files::FileRange::new(
+            file,
+            definition.name.range(),
+        )));
+        assert_eq!(module.export(alias), expected);
+        let qualified = &module.parsed.suite()[pos].as_expr_stmt().unwrap().value;
+        assert_eq!(graph.resolve(graph.entry, qualified), expected);
+    }
+}
+
+#[test]
+fn explicit_shipped_class_import_uses_its_verified_alias() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("main.py");
+    fs::write(&entry, "from glob import _PathGlobber as Globber\n").unwrap();
+    crate::check_with(
+        crate::ProgramEntry::File(&entry, None),
+        &CompileOptions::default(),
+        None,
+        Default::default(),
+    )
+    .unwrap();
+}
