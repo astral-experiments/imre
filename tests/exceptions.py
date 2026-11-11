@@ -88,6 +88,7 @@ except KeyError as error:
     "retained_field_str": (Path(__file__).parent / "fixtures/exceptions/retained_field_str.py").read_text(),
     "inherited_payload": (Path(__file__).parent / "fixtures/exceptions/inherited_payload.py").read_text(),
     "http_exception": (Path(__file__).parent / "fixtures/exceptions/http_exception.py").read_text(),
+    "property_setter": (Path(__file__).parent / "fixtures/exceptions/property_setter.py").read_text(),
     "warning_hierarchy": (Path(__file__).parent / "fixtures/exceptions/warning_hierarchy.py").read_text(),
     **{
         name: (Path(__file__).parent / f"fixtures/exceptions/{name}.py").read_text()
