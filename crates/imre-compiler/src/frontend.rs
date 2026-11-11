@@ -4185,7 +4185,7 @@ impl<'a> Checker<'a> {
                     return coerce(self, value, expected, expression);
                 }
                 let receiver = Self::weak_target(self.expr(&attribute.value)?);
-                if let Some(wrapped) = self.wrapped_function(&receiver, attribute) {
+                if let Some(wrapped) = self.callable_attribute(&receiver, attribute)? {
                     return self.coerce(wrapped, expected, expression);
                 }
                 if receiver.ty == Type::JsonDecoder && attribute.attr.as_str() == "decode" {
@@ -9839,7 +9839,7 @@ impl<'a> Checker<'a> {
                 if let Type::ForwardRef(layout) = receiver.ty {
                     return self.forward_ref_attribute(layout, receiver, attribute);
                 }
-                if let Some(wrapped) = self.wrapped_function(&receiver, attribute) {
+                if let Some(wrapped) = self.callable_attribute(&receiver, attribute)? {
                     return Ok(wrapped);
                 }
                 if let Some(field) = self.partial_attribute(&receiver, attribute.attr.as_str()) {
@@ -12371,7 +12371,7 @@ impl<'a> Checker<'a> {
             if let Some(layout) = self.types.dispatcher(receiver.ty) {
                 return self.single_dispatch_method(call, attribute, receiver, layout);
             }
-            if let Some(wrapped) = self.wrapped_function(&receiver, attribute) {
+            if let Some(wrapped) = self.callable_attribute(&receiver, attribute)? {
                 return self.invoke(call, wrapped);
             }
             if attribute.attr.as_str() == "func"
