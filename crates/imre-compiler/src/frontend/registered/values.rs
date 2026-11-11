@@ -3,14 +3,14 @@ use super::*;
 use crate::ir::DisplayKind;
 use std::collections::BTreeSet;
 
-pub(in crate::frontend) struct ModuleSource {
+pub(crate) struct ModuleSource {
     method_imports: BTreeSet<String>,
     replacements: HashMap<TextRange, Vec<u32>>,
     has_templates: bool,
 }
 
 impl ModuleSource {
-    pub(in crate::frontend) fn new(module: &crate::modules::SourceModule) -> Self {
+    pub(crate) fn new(module: &crate::modules::SourceModule) -> Self {
         let tokens = module.parsed.tokens();
         Self {
             method_imports: imre_ast::module_imports(&module.parsed.syntax().body),

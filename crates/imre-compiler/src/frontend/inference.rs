@@ -892,7 +892,6 @@ impl Inference {
                     errors.push((module, diagnostic));
                 }
             }
-            let mut literals = HashMap::new();
             for (module, function, signature) in definitions.iter() {
                 if graph.modules[*module].archive.is_some() {
                     continue; // Native declarations must be fully annotated.
@@ -953,10 +952,7 @@ impl Inference {
                     graph, *module, signatures, classes, types, &helpers, &globals,
                 );
                 if signature.registered_frame() {
-                    let module_literals = literals.entry(*module).or_insert_with(|| {
-                        registered::values::ModuleSource::new(&graph.modules[*module])
-                    });
-                    checker.registered = Some(module_literals);
+                    checker.registered = Some(graph.modules[*module].registered_values());
                 }
                 checker.inference = Some(self);
                 checker.discover_document_return = document_return;
@@ -1040,9 +1036,6 @@ impl Inference {
                             &graph.modules[*module],
                             function,
                             graph.python_optimization(),
-                            literals.entry(*module).or_insert_with(|| {
-                                registered::values::ModuleSource::new(&graph.modules[*module])
-                            }),
                         )
                     {
                         graph.register_function(*module, function.start(), body);
