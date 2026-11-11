@@ -15,6 +15,17 @@ class RecordingChecker(doctest.OutputChecker):
 
 
 def current():
+    class RejectEncoding(str):
+        def encode(self, encoding="utf-8", errors="strict"):
+            raise ValueError(str(self))
+
+    try:
+        doctest.OutputChecker().check_output(RejectEncoding("want"), RejectEncoding("got"), 0)
+    except ValueError as error:
+        assert str(error) == "got"
+    else:
+        raise AssertionError("the output should have failed to encode")
+
     file_suite = doctest.DocFileSuite
     with tempfile.TemporaryDirectory() as root:
         good = os.path.join(root, "numbers.good.txt")

@@ -196,8 +196,8 @@ def _ellipsis(want: str, got: str) -> bool:
 
 class OutputChecker:
     def check_output(self, want: str, got: str, optionflags: int) -> bool:
-        want = ascii_output(want)
         got = ascii_output(got)
+        want = ascii_output(want)
         if want == got:
             return True
         if not optionflags & 1 and ((want == "1\n" and got == "True\n") or
