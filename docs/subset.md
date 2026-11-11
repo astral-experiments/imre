@@ -861,6 +861,27 @@ Invalid UTF-8 raises `UnicodeDecodeError`, matching `UnicodeError` and `ValueErr
 
 In command mode, each `-O` raises `sys.flags.optimize` by one. `PYTHONOPTIMIZE` can raise that level unless `-I` ignores it. At level one or higher, `__debug__` is false and assertions do not evaluate their conditions or messages. At level two or higher, the module docstring is `None`. File builds use level zero, including when LLVM code generation uses `--opt-level 3`.
 
+## Logging configuration
+
+A legacy `logging.config.fileConfig` INI can supply Python expressions for
+formatter defaults and handler classes and arguments. For a handler known
+when building the application, use `dictConfig` to name the class and pass
+its settings as data. This example writes `ready` to standard output.
+
+```python
+import logging.config
+
+logging.config.dictConfig({
+    "version": 1,
+    "handlers": {"console": {
+        "class": "logging.StreamHandler",
+        "stream": "ext://sys.stdout",
+    }},
+    "root": {"level": "INFO", "handlers": ["console"]},
+})
+logging.info("ready")
+```
+
 ## Command-line options
 
 A function can declare an `argparse.ArgumentParser`, add required positional arguments and named options, and return the result of `parse_args()`. An explicit `list[str]` supplies the arguments to parse; omitting it or passing `None` reads `sys.argv[1:]`. Imre derives a read-only namespace with a concrete field for each option. Hyphens become underscores in field names. A choice of strings gives the field a string `Literal` type. A value option without a default or `required=True` produces an optional field.
