@@ -17,6 +17,13 @@ assert spread(3, 1, 2) == 2
 assert spread(-large, 1, large) == 2 * large
 assert spread(large, large, large) == 0
 
+
+def bounds(values: dict[str, int]) -> int:
+    return max(values.values()) - min(values.values())
+
+
+assert bounds({"first": 2, "second": 39, "third": 4}) == 37
+
 visits: list[int] = []
 print(min(observe(n, visits) for n in [large, -large, -large]))
 print(len(visits))

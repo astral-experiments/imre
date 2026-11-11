@@ -2955,14 +2955,20 @@ impl Checker<'_> {
                 kind: ExprKind::Builtin(Builtin::IntExtremum { minimum }, args),
             });
         }
-        let [source @ ast::Expr::Generator(_)] = call.arguments.args.as_ref() else {
+        let input = match call.arguments.args.as_ref() {
+            [source @ ast::Expr::Generator(_)] => Some(self.expansion_input(source, Some(Type::Int))?),
+            [source] => self.pipeline_input(source, None, None)?.filter(|input| {
+                matches!(input, Iteration::Prepared(cursor) if self.locals[cursor.value] == Type::Int)
+            }),
+            _ => None,
+        };
+        let Some(input) = input else {
             return Err(error(
                 self.source,
                 call,
                 &format!("{name} requires at least two integers or one integer generator"),
             ));
         };
-        let input = self.expansion_input(source, Some(Type::Int))?;
         let best = self.hidden(Type::Int);
         let empty = self.hidden(Type::Bool);
         let mut body = vec![Statement::Assign(empty, Expr::boolean(true))];
