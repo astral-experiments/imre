@@ -817,8 +817,8 @@ impl Checker<'_> {
         let stored = self.coerce(value.clone(), storage, expression)?;
         let slot = self.declare(name.id.as_str(), storage, expression)?;
         self.assigned_value(slot, &stored);
-        if self.comprehension_depth != 0 {
-            self.comprehension_exports.insert(name.id.to_string(), slot);
+        if let Some(exports) = &mut self.comprehension_exports {
+            exports.insert(name.id.to_string(), slot);
         }
         Ok(Expr {
             ty: value.ty,

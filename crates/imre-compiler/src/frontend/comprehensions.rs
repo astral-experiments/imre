@@ -490,6 +490,7 @@ pub(super) struct ComprehensionScope {
     names: HashMap<String, usize>,
     class_receiver: Option<String>,
     targets: HashSet<String>,
+    outer_exports: Option<HashMap<String, usize>>,
 }
 
 impl Checker<'_> {
@@ -968,6 +969,7 @@ impl Checker<'_> {
             names: self.names.clone(),
             class_receiver: self.class_receiver.clone(),
             targets: self.comprehension_targets.clone(),
+            outer_exports: self.comprehension_exports.replace(HashMap::new()),
         };
         for name in &targets {
             self.names.remove(name);
@@ -980,21 +982,28 @@ impl Checker<'_> {
             self.class_receiver = None;
         }
         self.comprehension_targets.extend(targets);
-        self.comprehension_depth += 1;
         scope
     }
 
-    pub(super) fn leave_comprehension(&mut self, scope: ComprehensionScope) {
-        self.comprehension_depth -= 1;
+    pub(super) fn leave_comprehension(
+        &mut self,
+        scope: ComprehensionScope,
+    ) -> HashMap<String, usize> {
+        let exports = std::mem::replace(&mut self.comprehension_exports, scope.outer_exports)
+            .expect("entered comprehension");
         self.comprehension_targets = scope.targets;
         self.names = scope.names;
         self.class_receiver = scope.class_receiver;
-        for (name, &slot) in &self.comprehension_exports {
+        for (name, &slot) in &exports {
             if !self.comprehension_targets.contains(name) {
                 self.names.insert(name.clone(), slot);
             }
+            if let Some(outer) = &mut self.comprehension_exports {
+                outer.insert(name.clone(), slot);
+            }
         }
         self.restore_state(scope.state);
+        exports
     }
 
     /// Shares enclosing bindings while reserving private targets and owners.
@@ -1055,7 +1064,7 @@ impl Checker<'_> {
             }
         }
         self.namespace = enclosing;
-        self.leave_comprehension(scope);
+        let exports = self.leave_comprehension(scope);
         let (ty, mut body) = body?;
         if !prefix.is_empty() {
             prefix.append(&mut body);
@@ -1065,7 +1074,7 @@ impl Checker<'_> {
             // A filter runs before it can suppress the output or the next clause.
             let mut bind = |expression| {
                 for name in narrowing::guaranteed_assignments(expression, None) {
-                    if let Some(&slot) = self.comprehension_exports.get(&name) {
+                    if let Some(&slot) = exports.get(&name) {
                         self.assigned.insert(slot);
                     }
                 }
@@ -1083,11 +1092,7 @@ impl Checker<'_> {
                 self.narrowed.remove_mut(slot);
             }
         }
-        let exported = self
-            .comprehension_exports
-            .values()
-            .copied()
-            .collect::<HashSet<_>>();
+        let exported = exports.into_values().collect::<HashSet<_>>();
         let clear = (first_private..self.locals.len())
             .filter(|slot| !exported.contains(slot))
             .collect();
