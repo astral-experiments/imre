@@ -20,13 +20,18 @@ pub(super) struct Output {
 }
 
 impl Output {
-    pub fn new(functions: &[usize], count: usize, entry: usize, split: bool) -> Self {
+    fn new(
+        functions: impl IntoIterator<Item = usize>,
+        count: usize,
+        entry: usize,
+        split: bool,
+    ) -> Self {
         #[cfg(test)]
         crate::single_emission_tests::record_llvm_start();
         let mut next = vec![0; count];
         let functions = functions
-            .iter()
-            .map(|&owner| {
+            .into_iter()
+            .map(|owner| {
                 let local = next[owner];
                 next[owner] += 1;
                 (owner, local)
@@ -44,6 +49,10 @@ impl Output {
             users: HashMap::new(),
             local_helpers: HashSet::new(),
         }
+    }
+
+    pub(super) fn whole(functions: usize) -> Self {
+        Self::new(std::iter::repeat_n(0, functions), 1, 0, false)
     }
 
     pub fn split(&self) -> bool {
@@ -229,11 +238,19 @@ impl Output {
         &mut self.units[owner]
     }
 
-    fn finish(self) -> Vec<String> {
+    pub(super) fn emit(
+        mut self,
+        module: &Module,
+        ranges: &RangeFacts<'_>,
+        sanitize: bool,
+        program: NativeProgram,
+    ) -> Result<Vec<String>, Unsupported> {
+        emit_program(module, ranges, sanitize, &mut self, program)?;
         let Some(common) = self.common else {
-            return self.units;
+            return Ok(self.units);
         };
-        self.units
+        Ok(self
+            .units
             .into_iter()
             .map(|body| {
                 let mut unit = String::with_capacity(common.len() + body.len());
@@ -241,30 +258,37 @@ impl Output {
                 unit.push_str(&body);
                 unit
             })
-            .collect()
+            .collect())
     }
 }
 
 pub(crate) fn emit_units(
-    module: &Module,
-    ranges: &RangeFacts<'_>,
-    sanitize: bool,
-    functions: &[usize],
-    names: &[String],
-    entry: usize,
+    graph: &crate::modules::SourceGraph,
+    (module, owners): crate::CheckedIr,
     program: NativeProgram,
-) -> Result<Vec<CodegenUnit>, super::Unsupported> {
-    let mut output = Output::new(functions, names.len(), entry, true);
-    emit_program(module, ranges, sanitize, &mut output, program)?;
-    let units = names
-        .iter()
-        .zip(output.finish())
-        .map(|(name, llvm_ir)| CodegenUnit {
-            name: name.clone(),
+    layout: &crate::CodegenLayout,
+    sanitize: bool,
+) -> Result<Vec<CodegenUnit>, Unsupported> {
+    let split = matches!(layout, crate::CodegenLayout::Split);
+    let output = if split {
+        Output::new(owners, graph.modules.len(), graph.entry, true)
+    } else {
+        Output::whole(module.functions.len())
+    };
+    let ranges = crate::ranges::analyze(&module);
+    Ok(output
+        .emit(&module, &ranges, sanitize, program)?
+        .into_iter()
+        .enumerate()
+        .map(|(id, llvm_ir)| CodegenUnit {
+            name: if split {
+                graph.modules[id].name.clone()
+            } else {
+                "__main__".to_owned()
+            },
             llvm_ir,
         })
-        .collect();
-    Ok(units)
+        .collect())
 }
 
 #[cfg(test)]

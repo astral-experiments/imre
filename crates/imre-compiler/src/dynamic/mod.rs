@@ -850,7 +850,7 @@ pub(crate) fn compile(
     object_imports: bool,
     operation: Option<ObjectOperation>,
     project: &mut Option<crate::modules::SourceGraph>,
-    mode: crate::CompilationMode<'_>,
+    mode: crate::CompilationMode,
     check: impl FnOnce(
         Option<&mut crate::modules::SourceGraph>,
         bool,
@@ -2443,27 +2443,30 @@ pub(crate) fn compile(
         "command_source":command,"path0_bytes":path0_bytes,"packaged_file_module":packaged_file_module,
         "command":in_memory,"module_entry":module_entry,"path_entry":options.path_entry,"paths":paths,
     });
-    let (units, used_archive) = emit::emit(
+    let (units, used_archive, whole) = emit::emit(
         units,
         &config.to_string(),
         python_optimization,
         &providers.symbols,
         layout,
     )?;
-    Ok(Some(crate::CompilationResult::Built(UnitCompilation {
-        units,
-        input_paths: inputs
-            .source_files()
-            .map(|(path, _, _)| path.clone())
-            .collect(),
-        source_inputs: inputs,
-        extension_archives: options
-            .bundled_provider_archive
-            .iter()
-            .filter(|_| used_archive)
-            .cloned()
-            .collect(),
-    })))
+    Ok(Some(crate::CompilationResult::Built(
+        UnitCompilation {
+            units,
+            input_paths: inputs
+                .source_files()
+                .map(|(path, _, _)| path.clone())
+                .collect(),
+            source_inputs: inputs,
+            extension_archives: options
+                .bundled_provider_archive
+                .iter()
+                .filter(|_| used_archive)
+                .cloned()
+                .collect(),
+        },
+        whole,
+    )))
 }
 
 /// The full threading factory needs these Python dependencies before the startup fallbacks.

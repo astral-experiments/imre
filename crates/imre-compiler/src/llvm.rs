@@ -347,18 +347,10 @@ pub(crate) fn emit(
     sanitize: bool,
 ) -> Result<String, Unsupported> {
     let program = analyze_program(module, &mut Default::default())?;
-    emit_file(module, ranges, sanitize, program)
-}
-
-pub(crate) fn emit_file(
-    module: &Module,
-    ranges: &RangeFacts<'_>,
-    sanitize: bool,
-    program: NativeProgram,
-) -> Result<String, Unsupported> {
-    let mut output = Output::new(&vec![0; module.functions.len()], 1, 0, false);
-    emit_program(module, ranges, sanitize, &mut output, program)?;
-    Ok(std::mem::take(output.entry_buffer()))
+    Ok(Output::whole(module.functions.len())
+        .emit(module, ranges, sanitize, program)?
+        .pop()
+        .expect("whole module"))
 }
 
 const BRANCH_WEIGHTS: &str = "\n!0 = !{!\"branch_weights\", i32 1, i32 2000}\n!1 = !{!\"branch_weights\", i32 2000, i32 1}\n";
