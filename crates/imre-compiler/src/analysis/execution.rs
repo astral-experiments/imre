@@ -118,6 +118,12 @@ enum ArgumentFact {
 pub(super) type FunctionImports = HashMap<TextRange, (usize, Option<ExecutionRequirement>)>;
 pub(super) type CapturedImports = HashMap<usize, FunctionImports>;
 
+struct CapturedImport<'a> {
+    owner: File,
+    name: &'a str,
+    requirement: Option<ExecutionRequirement>,
+}
+
 struct Escape<'a, 'db> {
     model: &'a SemanticModel<'db>,
     parsed: &'a ruff_db::parsed::ParsedModuleRef,
@@ -220,7 +226,7 @@ impl<'ast> Escape<'ast, '_> {
                 .any(|range| range.contains_range(expression.range()))
     }
 
-    fn captured_target(&self, call: &ExprCall) -> Option<(usize, Option<ExecutionRequirement>)> {
+    fn captured_target(&self, call: &ExprCall) -> Option<CapturedImport<'ast>> {
         let name = call.func.as_name_expr()?;
         let db = self.model.db();
         let binding = self
@@ -245,17 +251,14 @@ impl<'ast> Escape<'ast, '_> {
         };
         let alias = import.alias(self.parsed);
         let (owner, requirement) = self.captured.get(&alias.range())?;
-        let (file, declaration) = self.declared_function(&call.func)?;
-        let syntax = self.session.parsed(file);
-        let function = declaration.node(&syntax);
-        if self.session.files[*owner] != file || function.name.as_str() != alias.name.as_str() {
-            return None;
-        }
-        crate::frontend::fixed_call_arguments(call, &function.parameters)?;
         call.arguments
             .iter_source_order()
             .all(|arg| self.argument_can_return(arg.value()))
-            .then(|| (*owner, requirement.clone()))
+            .then(|| CapturedImport {
+                owner: self.session.files[*owner],
+                name: alias.name.as_str(),
+                requirement: requirement.clone(),
+            })
     }
 
     fn argument_can_return(&self, expression: &Expr) -> bool {
@@ -455,19 +458,24 @@ impl<'ast> Escape<'ast, '_> {
 
     fn imported_execution(
         &self,
-        captured_owner: Option<usize>,
+        capture: Option<CapturedImport<'_>>,
         call: &'ast ExprCall,
     ) -> Option<ExecutionRequirement> {
         let (owner, declaration) = self.declared_function(&call.func)?;
         let follows_open_source =
             owner != self.model.file() && self.open_providers.contains(&owner);
-        let captured = captured_owner.is_some_and(|id| self.session.files[id] == owner);
-        if !follows_open_source && !captured {
+        let capture = capture.filter(|capture| capture.owner == owner);
+        if !follows_open_source && capture.is_none() {
             return None;
         }
         let parsed = self.session.parsed(owner);
         let function = declaration.node(&parsed);
+        let capture = capture.filter(|capture| capture.name == function.name.as_str());
+        let captured = capture.is_some();
         let bound = crate::frontend::fixed_call_arguments(call, &function.parameters)?;
+        if let Some(requirement) = capture.and_then(|capture| capture.requirement) {
+            return Some(requirement);
+        }
         let callbacks: Vec<_> = bound
             .into_iter()
             .filter_map(|(parameter, argument)| {
@@ -829,10 +837,7 @@ impl<'a> Visitor<'a> for Escape<'a, '_> {
             return;
         }
         if self.first.is_none() && (capture.is_some() || !self.open_providers.is_empty()) {
-            let (owner, requirement) = capture.unzip();
-            self.first = requirement
-                .flatten()
-                .or_else(|| self.imported_execution(owner, call));
+            self.first = self.imported_execution(capture, call);
             if self.first.is_some() {
                 return;
             }
