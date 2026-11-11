@@ -2435,6 +2435,20 @@ def present_after_exhaustion(value: int | None) -> int:
     }
 
     #[test]
+    fn a_caught_exception_keeps_its_runtime_class_in_a_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("main.py");
+        std::fs::write(
+            &path,
+            "try:\n    int('bad')\nexcept ValueError as error:\n    cls = type(error)\n    print(cls.__name__)\n",
+        )
+        .unwrap();
+        super::IncrementalCompiler::default()
+            .check_file(&path, None)
+            .unwrap();
+    }
+
+    #[test]
     fn handler_flow_requires_a_direct_unconditional_raise() {
         let source = r#"
 class Policy:

@@ -13518,6 +13518,15 @@ impl<'a> Checker<'a> {
                 });
             }
             "type"
+                if let [exception] = args.as_slice()
+                    && matches!(exception.ty, Type::Exception | Type::NamedException(_))
+                    && self.unshadowed_builtin(&call.func, name)
+                    && registered::values::fixed_positional_arguments(call) =>
+            {
+                // A handler can catch a subclass of its declared exception.
+                return Ok(self.registered_builtin_call(call, name, args));
+            }
+            "type"
                 if args.len() == 1
                     && args[0].ty == Type::Hash
                     && self.unshadowed_builtin(&call.func, "type") =>
