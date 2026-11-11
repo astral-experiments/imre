@@ -725,7 +725,7 @@ fn object_fallback(
                  registered: Option<dynamic::RegisteredSources<'_>>| {
         check_returns(checked_graph.as_deref_mut(), entry_requests_objects)?;
         if let Some(registered) = registered {
-            analysis::check_registered_project(
+            let layouts = analysis::check_registered_project(
                 registered.root,
                 registered.roots,
                 registered.winners.iter().copied(),
@@ -733,6 +733,7 @@ fn object_fallback(
                 checked_graph.as_deref(),
                 refusal.as_ref(),
             )?;
+            registered.layouts.extend(layouts);
             if registered
                 .file_alternatives
                 .iter()
@@ -752,7 +753,7 @@ fn object_fallback(
                     })
                     .collect();
                 files.extend_from_slice(registered.file_alternatives);
-                analysis::check_registered_project(
+                let layouts = analysis::check_registered_project(
                     registered.root,
                     registered.roots,
                     files,
@@ -760,6 +761,7 @@ fn object_fallback(
                     checked_graph.as_deref(),
                     None,
                 )?;
+                registered.layouts.extend(layouts);
             }
         }
         Ok(())

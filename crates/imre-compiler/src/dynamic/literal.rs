@@ -116,6 +116,7 @@ impl ParsedLiteral {
             python_optimization,
             ModuleOrigin::ExecLiteral(self.inherited_flags),
             children,
+            None,
         )
     }
 }

@@ -785,6 +785,7 @@ pub(crate) enum ObjectOperation {
 #[derive(Clone, Copy)]
 pub(crate) struct RegisteredSource<'a> {
     pub(crate) has_open_exec: bool,
+    pub(crate) unit: Option<usize>,
     /// This registration can start the application before any custom startup module runs.
     pub(crate) initial: bool,
     /// The ordinary launcher selected this source to execute in the startup namespace.
@@ -808,6 +809,7 @@ impl<'a> RegisteredSource<'a> {
     ) -> Self {
         Self {
             has_open_exec: false,
+            unit: None,
             name,
             path,
             source,
@@ -827,6 +829,7 @@ impl<'a> RegisteredSource<'a> {
 }
 
 pub(crate) struct RegisteredSources<'a> {
+    pub(crate) layouts: &'a mut Vec<crate::analysis::RegisteredLayouts>,
     pub(crate) root: &'a Path,
     pub(crate) roots: &'a [PathBuf],
     pub(crate) winners: &'a [RegisteredSource<'a>],
@@ -2071,6 +2074,7 @@ pub(crate) fn compile(
             let mut registration =
                 RegisteredSource::new(&sources[id], program && application, module);
             registration.has_open_exec = literals.open_exec.contains(&id);
+            registration.unit = matches!(mode, crate::CompilationMode::Build(_)).then_some(id);
             registration.declares_signatures = application;
             registration.check_execution |= application;
             registration.main_body = match module_entry {
@@ -2126,10 +2130,12 @@ pub(crate) fn compile(
                 && !module_errors.contains_key(s.path)
         })
     };
+    let mut layouts = Vec::new();
     check(
         project.as_mut(),
         entry_requests_objects || startup_provider,
         Some(RegisteredSources {
+            layouts: &mut layouts,
             root: &root,
             roots: &roots,
             winners,
@@ -2206,13 +2212,13 @@ pub(crate) fn compile(
         }
     }
     let mut prepared = prepare::units(
-        &sources,
-        &builtins,
+        (&sources, &builtins),
         entry_source,
         python_optimization,
         Path::new(bundled_root),
         &module_errors,
         &registrations,
+        layouts,
     );
     let crate::CompilationMode::Build(layout) = mode else {
         prepared.try_for_each(|unit| unit.map(drop))?;

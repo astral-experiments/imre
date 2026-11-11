@@ -267,6 +267,7 @@ impl<'a> PreparedBody<'a> {
             Input::Module(
                 ParsedModule::parse(path, source.into())?.parsed,
                 LiteralSites::default(),
+                None,
             ),
         )?;
         use_module(module)
@@ -279,6 +280,7 @@ impl<'a> PreparedBody<'a> {
         python_optimization: i32,
         origin: ModuleOrigin<'a>,
         literal_sites: LiteralSites,
+        operand_types: Option<crate::analysis::OperandTypes<'_>>,
     ) -> Result<Self, String> {
         let (body, _) = Self::prepare(
             name,
@@ -286,7 +288,7 @@ impl<'a> PreparedBody<'a> {
             module.text,
             python_optimization,
             origin,
-            Input::Module(module.parsed, literal_sites),
+            Input::Module(module.parsed, literal_sites, operand_types),
         )?;
         if let Some(refusal) = body.initializer().refusal {
             use crate::frontend::PreparedRefusal;
@@ -319,7 +321,7 @@ impl<'a> PreparedBody<'a> {
         #[cfg(test)]
         crate::single_emission_tests::record_preparation(
             path,
-            matches!(&input, Input::Module(Cow::Borrowed(_), _)),
+            matches!(&input, Input::Module(Cow::Borrowed(_), ..)),
         );
         let keep_docstrings = python_optimization < 2;
         let source = text.as_ref();
@@ -335,7 +337,7 @@ impl<'a> PreparedBody<'a> {
             _ => None,
         };
         let (syntax, tokens, replacements) = match &input {
-            Input::Module(parsed, _) => (
+            Input::Module(parsed, ..) => (
                 parsed.syntax(),
                 parsed.tokens(),
                 module_source::validate(path, source, parsed, keep_docstrings)?,
@@ -382,9 +384,9 @@ impl<'a> PreparedBody<'a> {
             .filter(|token| token.kind() == ast::token::TokenKind::Class)
             .map(Ranged::start)
             .collect::<Vec<_>>();
-        let (mut body, exec_literals) = match input {
-            Input::Module(parsed, sites) => (module_source::into_body(parsed), sites),
-            Input::Expression(syntax, ..) => (syntax.body, LiteralSites::default()),
+        let (mut body, exec_literals, operand_types) = match input {
+            Input::Module(parsed, sites, types) => (module_source::into_body(parsed), sites, types),
+            Input::Expression(syntax, ..) => (syntax.body, LiteralSites::default(), None),
         };
         let method_imports = imre_ast::module_imports(&body);
         let future_flags = super::literal::future_flags(&body, inherited_flags);
@@ -395,6 +397,7 @@ impl<'a> PreparedBody<'a> {
             inherited_flags & imre_ast::code_flags::FUTURE_ANNOTATIONS != 0,
         )?;
         let values = crate::frontend::RegisteredSource {
+            operand_types,
             text: source,
             private_names: Some(&private_names),
             replacements: &replacements,
@@ -708,6 +711,7 @@ enum Input<'a> {
     Module(
         Cow<'a, ruff_python_parser::Parsed<ast::ModModule>>,
         LiteralSites,
+        Option<crate::analysis::OperandTypes<'a>>,
     ),
     Expression(ast::ModModule, &'a ast::token::Tokens),
 }
@@ -843,6 +847,7 @@ impl SourceInfo<'_> {
 
     fn registered_source(&self) -> crate::frontend::RegisteredSource<'_> {
         crate::frontend::RegisteredSource {
+            operand_types: None,
             text: &self.text,
             replacements: &self.replacements,
             has_templates: self.has_templates,
@@ -1646,13 +1651,13 @@ mod tests {
         ),
     ) -> Result<(Vec<CodegenUnit>, bool), String> {
         let units = super::super::prepare::units(
-            files,
-            builtins,
+            (files, builtins),
             entry_source,
             python_optimization,
             bundled_root,
             module_errors,
             registrations,
+            Vec::new(),
         )
         .collect::<Result<Vec<_>, _>>()?;
         super::emit(units, config, python_optimization, providers, layout)

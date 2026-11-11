@@ -22,6 +22,7 @@ impl ModuleSource {
     }
     pub(super) fn context<'a>(&'a self, text: &'a str) -> RegisteredSource<'a> {
         RegisteredSource {
+            operand_types: None,
             template_fields: None,
             generators: None,
             lambdas: None,
@@ -36,6 +37,7 @@ impl ModuleSource {
 
 #[derive(Clone, Copy)]
 pub(crate) struct RegisteredSource<'a> {
+    pub(crate) operand_types: Option<crate::analysis::OperandTypes<'a>>,
     pub(crate) text: &'a str,
     pub(crate) replacements: &'a HashMap<TextRange, Vec<u32>>,
     pub(crate) has_templates: bool,
@@ -810,6 +812,15 @@ pub(super) fn operation<E>(
     mut child: impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
 ) -> StdResult<Option<Expr>, E> {
     if let Some((op, [left, right])) = binary_operands(node) {
+        let op = if op == Binary::Add
+            && source
+                .operand_types
+                .is_some_and(|types| types.integer_add(left, right))
+        {
+            Binary::GuardedIntAdd
+        } else {
+            op
+        };
         return Ok(Some(binary(op, child(left)?, child(right)?)));
     }
     if let Some((items, display)) = display_elements(node) {
@@ -1291,6 +1302,7 @@ mod tests {
         let parsed = imre_ast::indentation::prepare(text).parse_module().unwrap();
         let imports = imre_ast::module_imports(&parsed.syntax().body);
         let source = RegisteredSource {
+            operand_types: None,
             template_fields: None,
             generators: None,
             lambdas: None,
@@ -1354,6 +1366,7 @@ mod tests {
         let text = "obj.emit(value, named=arg)\nf(first=a, *items, **mapping, last=b)\n";
         let parsed = imre_ast::indentation::prepare(text).parse_module().unwrap();
         let source = RegisteredSource {
+            operand_types: None,
             template_fields: None,
             generators: None,
             lambdas: None,
@@ -1444,6 +1457,7 @@ mod tests {
         };
         let call = assign.value.as_call_expr().unwrap();
         let source = RegisteredSource {
+            operand_types: None,
             template_fields: None,
             generators: None,
             lambdas: None,
@@ -1481,6 +1495,7 @@ mod tests {
                 panic!("expected expression")
             };
             let source = RegisteredSource {
+                operand_types: None,
                 template_fields: None,
                 generators: None,
                 lambdas: None,
@@ -1522,6 +1537,7 @@ mod tests {
                 panic!("expected expression")
             };
             let source = RegisteredSource {
+                operand_types: None,
                 template_fields: None,
                 generators: None,
                 lambdas: None,

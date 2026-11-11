@@ -3588,6 +3588,7 @@ mod tests {
             Some(ast::Expr::FString(_))
         ));
         let source = RegisteredSource {
+            operand_types: None,
             template_fields: None,
             generators: None,
             lambdas: None,
@@ -3992,6 +3993,7 @@ mod tests {
         let replacements = HashMap::new();
         let imports = imre_ast::module_imports(&stmts);
         let source = RegisteredSource {
+            operand_types: None,
             template_fields: None,
             generators: None,
             lambdas: None,
@@ -4803,22 +4805,45 @@ mod tests {
         let ir = crate::compile_file(dir.path(), None, &options)
             .unwrap()
             .llvm_ir;
+        let bump = registered_body_at(&ir, "__main__.py", 2);
+        assert!(bump.contains("call i64 @int_add("));
+        assert!(bump.contains("call i64 @imre_dyn_exact_int_word("));
+    }
+
+    fn registered_body_at<'a>(ir: &'a str, filename: &str, line: u32) -> &'a str {
+        let suffix = format!(r#"{filename}\00""#);
         let file = ir
             .lines()
             .find_map(|line| {
                 let (name, value) = line.split_once(" = private unnamed_addr constant ")?;
-                value.ends_with(r#"__main__.py\00""#).then_some(name)
+                value.ends_with(&suffix).then_some(name)
             })
             .unwrap();
-        let statement = format!("ptr {file}, i32 2, i64 0)");
-        let bump = ir
-            .split("\ndefine internal i64 @code")
+        let statement = format!("ptr {file}, i32 {line}, i64 0)");
+        ir.split("\ndefine internal i64 @code")
             .skip(1)
             .filter_map(|code| code.split_once("\n}").map(|(body, _)| body))
             .find(|body| body.contains(&statement))
-            .unwrap();
-        assert!(bump.contains("call i64 @int_add("));
-        assert!(bump.contains("call i64 @imre_dyn_exact_int_word("));
+            .unwrap()
+    }
+
+    #[test]
+    fn a_late_import_keeps_the_selected_sources_operand_types() {
+        let dir = tempfile::tempdir().unwrap();
+        let entry = dir.path().join("app.py");
+        std::fs::write(&entry, "import sys\nsys.path = list(sys.path)\nimport prices\nprint(prices.add(13, 27), prices.join('a', 'b'))\n").unwrap();
+        std::fs::write(
+            dir.path().join("prices.py"),
+            "def add(n: int, other: int):\n    return n + other\ndef join(n: str, other: str):\n    return n + other\n",
+        )
+        .unwrap();
+        let ir = crate::compile_file(&entry, None, &Default::default())
+            .unwrap()
+            .llvm_ir;
+        let add = registered_body_at(&ir, "prices.py", 2);
+        assert_eq!(add.matches("call i64 @imre_dyn_exact_int_word(").count(), 2);
+        assert!(add.contains("call i64 @int_add(") && add.contains("call i64 @imre_dyn_op_at("));
+        assert!(!registered_body_at(&ir, "prices.py", 4).contains("@int_add("));
     }
 
     #[test]
@@ -5544,6 +5569,7 @@ mod tests {
                 .find(|def| def.name.as_str() == name)
                 .unwrap();
             let source = RegisteredSource {
+                operand_types: None,
                 template_fields: None,
                 generators: None,
                 lambdas: None,

@@ -304,6 +304,7 @@ mod tests {
             panic!("expected an f-string");
         };
         let source = RegisteredSource {
+            operand_types: None,
             template_fields: None,
             generators: None,
             lambdas: None,

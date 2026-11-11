@@ -456,13 +456,14 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         {
             return value;
         }
+        let guarded_ints = op == Binary::GuardedIntAdd;
         // A body placed from a native definition now receives Python handles.
         let op = match (fixed_site, op) {
-            (true, Binary::Concat) => Binary::Add,
+            (_, Binary::GuardedIntAdd) | (true, Binary::Concat) => Binary::Add,
             (true, Binary::Repeat) => Binary::Multiply,
             _ => op,
         };
-        let checked_ints = left.ty == Type::Int && right.ty == Type::Int;
+        let checked_ints = guarded_ints || (left.ty == Type::Int && right.ty == Type::Int);
         let arithmetic = matches!(op, Binary::Add | Binary::Subtract | Binary::Multiply)
             && (fixed_site || expr.ty == Type::PythonObject || checked_ints)
             || op == Binary::Modulo && checked_ints;
@@ -482,7 +483,9 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         {
             value
         } else if arithmetic {
-            if op == Binary::Multiply || a.can_use_integer_arithmetic(left.ty, &b, right.ty, usage)
+            if op == Binary::Multiply
+                || checked_ints
+                || a.can_use_integer_arithmetic(left.ty, &b, right.ty, usage)
             {
                 self.integer_arithmetic(op, &a, &b)
             } else {

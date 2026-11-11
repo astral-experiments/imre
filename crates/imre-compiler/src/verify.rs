@@ -847,6 +847,7 @@ mod tests {
         let text = "out = [1, ('s', callback(arg)), *rest]\n";
         let graph = SourceGraph::single(text).unwrap();
         let source = frontend::RegisteredSource {
+            operand_types: None,
             template_fields: None,
             generators: None,
             lambdas: None,
