@@ -315,6 +315,67 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         }
     }
 
+    /// Evaluate the raised object before its optional cause. A suspended Python cause
+    /// saves the first handle in the frame. Fixed owned operands already unwind with
+    /// the emitter's other temporaries.
+    fn raise_statement(&mut self, raised: Option<&crate::ir::RaisedException>) {
+        let Some(raised) = raised else {
+            match &mut self.0 {
+                Entry::Native(emitter) => {
+                    emitter.void_call("imre_exception_reraise", &[]);
+                    emitter.body.end("unreachable");
+                }
+                Entry::Registered(frame) => {
+                    let active = frame.caught.last().cloned().unwrap_or_else(|| "0".into());
+                    frame.raise(&active, None, true);
+                }
+            }
+            return;
+        };
+        let statement = match &self.0 {
+            Entry::Registered(frame) => Some(frame.current_range),
+            Entry::Native(_) => None,
+        };
+        let exception = self.operand(&raised.exception);
+        if let Entry::Registered(frame) = &mut self.0 {
+            let handle = frame.materialize(&exception);
+            frame.live.push(handle);
+        }
+        let cause = raised.cause.as_deref().map(|cause| self.operand(cause));
+        match &mut self.0 {
+            Entry::Native(emitter) => {
+                let mut exception = exception.into_native();
+                if let Some(cause) = cause {
+                    let cause = cause.into_native();
+                    let ptr =
+                        emitter.instruction(format!("inttoptr i64 {} to ptr", cause.value.operand));
+                    let call = format!(
+                        "call ptr @imre_exception_with_cause(ptr {}, ptr {ptr})",
+                        exception.value.operand
+                    );
+                    exception = emitter.attach_exception(exception, call);
+                    emitter.release_operand(&cause);
+                }
+                if let Some(origin) = &raised.origin {
+                    let call = emitter.exception_frame(&exception.value.operand, origin);
+                    exception = emitter.attach_exception(exception, call);
+                }
+                emitter.void_call("imre_exception_raise", &[&exception.value]);
+                emitter.release_operand(&exception);
+                emitter.body.end("unreachable");
+            }
+            Entry::Registered(frame) => {
+                let cause = cause.map(|value| frame.materialize(&value));
+                let exception = frame.live.pop().expect("pending raised exception");
+                frame.raise_operand_at(
+                    &exception,
+                    cause.as_deref(),
+                    statement.expect("registered raise site"),
+                );
+            }
+        }
+    }
+
     fn release_input(&mut self, value: CheckedValue) {
         match value {
             CheckedValue::Handle { .. } | CheckedValue::IntegerLiteral(_) => {}
@@ -807,10 +868,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                     Entry::Registered(frame) => frame.return_result(value),
                 }
             }
-            Statement::Raise(exception) => match &mut self.0 {
-                Entry::Native(emitter) => emitter.other_statement(stmt),
-                Entry::Registered(frame) => frame.raise_exception(exception.as_ref()),
-            },
+            Statement::Raise(raised) => self.raise_statement(raised.as_ref()),
             Statement::Try {
                 body,
                 handlers,
@@ -905,6 +963,20 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
 }
 
 impl Emitter<'_, '_> {
+    /// Both fixed exception annotations return a retained alias of the original.
+    fn attach_exception(&mut self, previous: Operand, call: String) -> Operand {
+        let operand = self.instruction(call);
+        self.release_operand(&previous);
+        Operand {
+            value: self.owned(Value {
+                ty: Type::Exception,
+                operand,
+                small_integer: false,
+            }),
+            ownership: Ownership::Owned,
+        }
+    }
+
     /// An immediate consumer may borrow the new binding. Other consumers own the RHS
     /// independently of any conversion or subsequent replacement of the stored value.
     pub(super) fn bind_value(&mut self, slot: usize, rhs: &Expr, ownership: Ownership) -> Value {

@@ -31,7 +31,6 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
     let private = checked.region().private_slots();
     let has_slot = |slot: &usize| private.contains(slot) || checked.local_names.contains_key(slot);
     let mut supported = true;
-    let mut cause_wrapper = None;
     // This visit reaches suspensions inside eager scopes and protected binding suites.
     ir::walk_nodes(body, &mut |node, _| {
         let expr = match node {
@@ -40,10 +39,7 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
                     Statement::Assign(slot, _) => has_slot(slot),
                     Statement::Raise(value) => {
                         uses_python_protocol = true;
-                        cause_wrapper = value
-                            .as_ref()
-                            .filter(|value| value.explicit_cause().is_some());
-                        true
+                        value.as_ref().is_none_or(|raised| raised.origin.is_none())
                     }
                     Statement::Return(_)
                     | Statement::Expr(_)
@@ -107,13 +103,6 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
             }
             ir::Node::Expression(expr) => expr,
         };
-        // Only a raise consumes the cause wrapper directly. Its children still need normal lowering.
-        if cause_wrapper
-            .take()
-            .is_some_and(|value| std::ptr::eq(value, expr))
-        {
-            return;
-        }
         supported &= match &expr.kind {
             ExprKind::Local(slot) => has_slot(slot),
             ExprKind::Bind(slot, _) => {
@@ -454,14 +443,6 @@ impl std::ops::DerefMut for Frame<'_, '_, '_> {
 }
 
 impl<'f, 'a, 'p> Frame<'f, 'a, 'p> {
-    pub(crate) fn raise_exception(&mut self, value: Option<&Expr>) {
-        let (exception, cause) = match value.and_then(Expr::explicit_cause) {
-            Some((exception, cause)) => (Some(exception), Some(cause)),
-            None => (value, None),
-        };
-        self.raise_operands(exception, cause, Self::evaluate_handle);
-    }
-
     pub(super) fn next_statement(&mut self) -> bool {
         if self.body.terminated {
             if self.module_annotation_sites.is_none() {

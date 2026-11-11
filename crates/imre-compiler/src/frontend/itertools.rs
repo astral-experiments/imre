@@ -583,13 +583,13 @@ impl Checker<'_> {
             body.push(Statement::If(
                 self.local(ready),
                 Vec::new(),
-                vec![Statement::Raise(Some(Expr {
+                vec![Statement::raise(Expr {
                     ty: Type::Exception,
                     kind: ExprKind::Exception {
                         kind: exception_kind("StopIteration").unwrap(),
                         message: None,
                     },
-                }))],
+                })],
             ));
             self.local(item)
         };

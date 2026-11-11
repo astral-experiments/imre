@@ -2941,6 +2941,7 @@ impl Emitter<'_, '_> {
             Statement::Assign(..)
             | Statement::Expr(_)
             | Statement::Return(_)
+            | Statement::Raise(_)
             | Statement::Scope { .. }
             | Statement::With { .. }
             | Statement::Clear(_)
@@ -2982,18 +2983,6 @@ impl Emitter<'_, '_> {
                 orelse,
                 finalbody,
             } => self.try_statement(body, handlers, orelse, finalbody),
-            Statement::Raise(exception) => {
-                if let Some(exception) = exception {
-                    let exception = self.operand(exception);
-                    self.void_call("imre_exception_raise", &[&exception.value]);
-                    self.release_operand(&exception);
-                } else {
-                    self.void_call("imre_exception_reraise", &[]);
-                }
-                // Both runtime helpers always set an error; their success edge
-                // is unreachable, but uses the same immediate-check protocol.
-                self.body.end("unreachable");
-            }
             Statement::SetField(receiver, field, expression) => {
                 let value = self.operand(expression);
                 let receiver = self.operand(receiver);
@@ -7641,18 +7630,6 @@ impl Emitter<'_, '_> {
                 Value {
                     ty: Type::Exception,
                     operand: self.instruction(attach),
-                    small_integer: false,
-                }
-            }
-            Builtin::ExceptionWithCause => {
-                let cause =
-                    self.instruction(format!("inttoptr i64 {} to ptr", args[1].value.operand));
-                Value {
-                    ty: Type::Exception,
-                    operand: self.instruction(format!(
-                        "call ptr @imre_exception_with_cause(ptr {}, ptr {cause})",
-                        args[0].value.operand
-                    )),
                     small_integer: false,
                 }
             }

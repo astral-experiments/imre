@@ -246,7 +246,7 @@ fn unbound_failure(name: &str, missing: Missing) -> Statement {
             ),
         ),
     };
-    Statement::Raise(Some(Expr {
+    Statement::raise(Expr {
         ty: Type::Exception,
         kind: ExprKind::Exception {
             kind: exception_kind(kind).unwrap(),
@@ -255,7 +255,7 @@ fn unbound_failure(name: &str, missing: Missing) -> Statement {
                 kind: ExprKind::Str(message),
             })),
         },
-    }))
+    })
 }
 
 impl Checker<'_> {

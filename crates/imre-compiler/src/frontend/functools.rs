@@ -27,13 +27,13 @@ pub(super) fn wrapper_attributes(fields: ir::WrapperAttributes, types: &Types) -
 }
 
 fn type_error(message: &str) -> Statement {
-    Statement::Raise(Some(Expr {
+    Statement::raise(Expr {
         ty: Type::Exception,
         kind: ExprKind::Exception {
             kind: exception_kind("TypeError").unwrap(),
             message: Some(Box::new(unpacking::string(message))),
         },
-    }))
+    })
 }
 
 impl Checker<'_> {

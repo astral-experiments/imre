@@ -68,13 +68,7 @@ impl Checker<'_> {
                 )
             };
             let cause = Expr::absent(self.types.optional(Type::Exception));
-            let error = Expr {
-                ty: Type::Exception,
-                kind: ExprKind::Builtin(
-                    Builtin::ExceptionWithCause,
-                    vec![exception("TypeError", unpacking::string(message)), cause],
-                ),
-            };
+            let error = exception("TypeError", unpacking::string(message));
             let slot = self.hidden(Type::Str);
             let converted = Expr {
                 ty: Type::Str,
@@ -88,7 +82,7 @@ impl Checker<'_> {
                                     .to_vec(),
                             ),
                             name: None,
-                            body: vec![Statement::Raise(Some(error))],
+                            body: vec![Statement::raise_at(error, Some(cause), None)],
                         }],
                         orelse: vec![],
                         finalbody: vec![],
@@ -134,7 +128,7 @@ impl Checker<'_> {
                     },
                     Statement::If(
                         self.local(invalid),
-                        vec![Statement::Raise(Some(exception("ValueError", message)))],
+                        vec![Statement::raise(exception("ValueError", message))],
                         vec![],
                     ),
                 ],

@@ -582,8 +582,6 @@ impl Builtin {
             | Self::SysIsInterned
             | Self::ExceptionRecord
             | Self::ExceptionCause
-            // A fresh exception retains its cause without replacing any existing owner.
-            | Self::ExceptionWithCause
             | Self::ExceptionOrigin(_)
             | Self::ExceptionSuppressContext
             | Self::HexFormat { .. }

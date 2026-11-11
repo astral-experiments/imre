@@ -176,13 +176,13 @@ fn build_wrapper(
                 let message = field(arg.clone(), 1, Type::Str);
                 body.push(Statement::If(
                     builtin(Builtin::Bool, Type::Bool, vec![message.clone()]),
-                    vec![Statement::Raise(Some(Expr {
+                    vec![Statement::raise(Expr {
                         ty: Type::Exception,
                         kind: ExprKind::Exception {
                             kind: exception_kind("TypeError").unwrap(),
                             message: Some(Box::new(message)),
                         },
-                    }))],
+                    })],
                     vec![],
                 ));
             }

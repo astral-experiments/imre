@@ -74,7 +74,7 @@ impl Checker<'_> {
                     == crate::classes::MethodKind::Property
             }) {
                 let owner = &self.classes.declarations.definitions[class].name;
-                return Ok(Statement::Raise(Some(Expr {
+                return Ok(Statement::raise(Expr {
                     ty: Type::Exception,
                     kind: ExprKind::Exception {
                         kind: exception_kind("AttributeError").unwrap(),
@@ -82,7 +82,7 @@ impl Checker<'_> {
                             "property '{name}' of '{owner}' object has no setter"
                         )))),
                     },
-                })));
+                }));
             }
             let (receiver, index, ty) = self.writable_field_value(attr, receiver)?;
             return Ok(Statement::SetField(

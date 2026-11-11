@@ -176,7 +176,7 @@ pub(super) fn format_argument(types: &Types, fmt: &Expr, rhs: &Expr) -> Option<E
         return None;
     }
     let positional = field(arg.clone(), 1, types.callback_positional());
-    let unsupported = Statement::Raise(Some(Expr {
+    let unsupported = Statement::raise(Expr {
         ty: Type::Exception,
         kind: ExprKind::Exception {
             kind: exception_kind("NotImplementedError").unwrap(),
@@ -184,7 +184,7 @@ pub(super) fn format_argument(types: &Types, fmt: &Expr, rhs: &Expr) -> Option<E
                 "formatting a callback argument with opaque fields is unsupported",
             ))),
         },
-    }));
+    });
     Some(Expr {
         ty: Type::Str,
         kind: ExprKind::Scope {

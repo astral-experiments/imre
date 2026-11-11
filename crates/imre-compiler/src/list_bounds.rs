@@ -221,7 +221,10 @@ impl Analysis<'_> {
                 }
                 Statement::Raise(value) => {
                     if let Some(value) = value {
-                        self.expression(value, state);
+                        self.expression(&mut value.exception, state);
+                        if let Some(cause) = &mut value.cause {
+                            self.expression(cause, state);
+                        }
                     }
                 }
                 Statement::IterNext {
@@ -510,7 +513,9 @@ pub(crate) fn block_readonly(body: &[Statement]) -> bool {
         Statement::For {
             args, body, orelse, ..
         } => args.iter().all(readonly) && block_readonly(body) && block_readonly(orelse),
-        Statement::Raise(value) => value.as_ref().is_none_or(readonly),
+        Statement::Raise(value) => value.as_ref().is_none_or(|value| {
+            readonly(&value.exception) && value.cause.as_deref().is_none_or(readonly)
+        }),
         Statement::Move(..)
         | Statement::Clear(_)
         | Statement::Break

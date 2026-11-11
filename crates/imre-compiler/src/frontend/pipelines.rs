@@ -425,7 +425,7 @@ fn catch_stop_iteration(
 }
 
 fn raise_value_error(message: String) -> Statement {
-    Statement::Raise(Some(Expr {
+    Statement::raise(Expr {
         ty: Type::Exception,
         kind: ExprKind::Exception {
             kind: exception_kind("ValueError").unwrap(),
@@ -434,7 +434,7 @@ fn raise_value_error(message: String) -> Statement {
                 kind: ExprKind::Str(message),
             })),
         },
-    }))
+    })
 }
 
 pub(super) fn check_range_step(step: Expr) -> Statement {
@@ -2632,10 +2632,7 @@ impl Checker<'_> {
             ty: self.types.optional(Type::Exception),
             kind: ExprKind::Builtin(Builtin::ActiveException, Vec::new()),
         };
-        let converted = Statement::Raise(Some(Expr {
-            ty: Type::Exception,
-            kind: ExprKind::Builtin(Builtin::ExceptionWithCause, vec![error, cause]),
-        }));
+        let converted = Statement::raise_at(error, Some(cause), None);
         catch_stop_iteration(self.types, body, vec![converted])
     }
 

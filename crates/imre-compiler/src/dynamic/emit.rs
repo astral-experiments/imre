@@ -3864,8 +3864,7 @@ mod tests {
         let Some(Statement::Raise(Some(value))) = plan.checked.function.body.last() else {
             panic!("expected a terminal raise");
         };
-        let (exception, cause) = value.explicit_cause().unwrap();
-        for operand in [exception, cause] {
+        for operand in [&value.exception, value.cause.as_deref().unwrap()] {
             let mut awaits = 0;
             ir::walk_operand_expressions(operand, &mut |expr| {
                 if matches!(

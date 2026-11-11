@@ -705,7 +705,10 @@ impl Analyzer {
             }
             Statement::Raise(value) => {
                 if let Some(value) = value {
-                    self.expression(value, &mut state, record);
+                    self.expression(&value.exception, &mut state, record);
+                    if let Some(cause) = &value.cause {
+                        self.expression(cause, &mut state, record);
+                    }
                 }
                 return Flow::default();
             }

@@ -610,7 +610,7 @@ impl Checker<'_> {
             ty: Type::Bool,
             kind: ExprKind::Builtin(Builtin::IsNone, vec![local.clone()]),
         };
-        let error = Statement::Raise(Some(Expr {
+        let error = Statement::raise(Expr {
             ty: Type::Exception,
             kind: ExprKind::Exception {
                 kind: exception_kind("AttributeError").unwrap(),
@@ -622,7 +622,7 @@ impl Checker<'_> {
                     )),
                 })),
             },
-        }));
+        });
         Expr {
             ty: payload,
             kind: ExprKind::Scope {
