@@ -2241,15 +2241,16 @@ pub(crate) enum Builtin {
         test: ruff_text_size::TextRange,
     },
     RegisteredNamespaceAnnotation(NamespaceAnnotation),
-    RegisteredAnnotationStart,
     RegisteredAnnotationFormat,
-    RegisteredAnnotationInsert(AnnotationField),
+    /// The lazy provider's field metadata and its checked value operands share one order.
+    RegisteredAnnotations {
+        fields: Box<[AnnotationField]>,
+    },
     /// Bind the string operand to a checked child function in this provider.
     BindAnnotationExpression {
         site: ruff_text_size::TextSize,
         spelling: String,
     },
-    RegisteredAnnotationResult,
     /// Delete one current-scope binding, reporting a missing name at its source target.
     RegisteredDeleteName(String, ruff_text_size::TextRange),
     RegisteredCall(RegisteredCall),

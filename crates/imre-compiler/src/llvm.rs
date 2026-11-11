@@ -4474,11 +4474,9 @@ impl Emitter<'_, '_> {
             | Builtin::RegisteredSuspend(..)
             | Builtin::RegisteredAssertionFailure { .. }
             | Builtin::RegisteredNamespaceAnnotation(_)
-            | Builtin::RegisteredAnnotationStart
             | Builtin::RegisteredAnnotationFormat
-            | Builtin::RegisteredAnnotationInsert(_)
+            | Builtin::RegisteredAnnotations { .. }
             | Builtin::BindAnnotationExpression { .. }
-            | Builtin::RegisteredAnnotationResult
             | Builtin::RegisteredDeleteName(..)
             | Builtin::RegisteredDefinition(_)
             | Builtin::RegisteredClassNamespace(..)
