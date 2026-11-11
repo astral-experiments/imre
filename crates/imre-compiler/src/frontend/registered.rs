@@ -877,22 +877,24 @@ impl TypeParameterValues {
     }
 }
 
-/// The module retains its checked fields until its physical marker order is known.
+/// Module declarations and their runtime marks use the same conditional indices.
 #[derive(Default)]
 pub(crate) struct ModuleAnnotations {
-    fields: HashMap<TextSize, DeferredAnnotation>,
+    fields: Vec<DeferredAnnotation>,
     bindings: RegisteredBindings,
 }
 
 impl ModuleAnnotations {
-    /// A finally suite can emit the same marker on several edges. Each occurrence
-    /// has its own visible conditional index in the module's annotation function.
-    pub(crate) fn module_body(&self, sites: &[TextSize]) -> AnnotationProvider {
-        let fields = sites
-            .iter()
+    pub(crate) fn into_body(self) -> Option<AnnotationProvider> {
+        if self.fields.is_empty() {
+            return None;
+        }
+        let fields = self
+            .fields
+            .into_iter()
             .enumerate()
-            .map(|(index, site)| (self.fields[site].clone(), Some(index)));
-        DeferredAnnotation::prepare_body(fields, self.bindings.clone())
+            .map(|(index, field)| (field, Some(index)));
+        Some(DeferredAnnotation::prepare_body(fields, self.bindings))
     }
 }
 
@@ -1044,27 +1046,25 @@ pub(super) fn collect_sites<'a>(
                             vec![operand.expect("prepared postponed annotation")],
                         )
                     } else {
-                        let fields = if module {
-                            &mut self.output.module_annotations.fields
-                        } else {
-                            &mut self.output.class_annotations
-                        };
-                        fields.insert(
-                            ann.start(),
-                            DeferredAnnotation::new(
-                                name.clone(),
-                                &ann.annotation,
-                                operand,
-                                &mut self.annotations,
-                            ),
+                        let field = DeferredAnnotation::new(
+                            name.clone(),
+                            &ann.annotation,
+                            operand,
+                            &mut self.annotations,
                         );
-                        (
-                            ir::NamespaceAnnotation::Deferred {
+                        let mark = if module {
+                            let fields = &mut self.output.module_annotations.fields;
+                            let index = fields.len();
+                            fields.push(field);
+                            ir::NamespaceAnnotation::Module { index }
+                        } else {
+                            self.output.class_annotations.insert(ann.start(), field);
+                            ir::NamespaceAnnotation::Class {
                                 site: ann.start(),
                                 name,
-                            },
-                            Vec::new(),
-                        )
+                            }
+                        };
+                        (mark, Vec::new())
                     };
                     self.output.operations.insert(
                         ann.target.range(),
@@ -1074,6 +1074,19 @@ pub(super) fn collect_sites<'a>(
                             values,
                         ),
                     );
+                }
+                // Ordinary try numbers its else before the handlers. Except-star uses source order.
+                ast::Stmt::Try(region)
+                    if matches!(self.scope, RegisteredScope::Module)
+                        && !region.is_star
+                        && !region.orelse.is_empty() =>
+                {
+                    self.visit_body(&region.body);
+                    self.visit_body(&region.orelse);
+                    for handler in &region.handlers {
+                        self.visit_except_handler(handler);
+                    }
+                    self.visit_body(&region.finalbody);
                 }
                 _ => walk_stmt(self, stmt),
             }
@@ -3981,6 +3994,32 @@ mod tests {
     }
 
     #[test]
+    fn module_annotation_order_distinguishes_exception_groups() {
+        for (handler, expected) in [
+            ("except", ["body", "otherwise", "caught"]),
+            ("except*", ["body", "caught", "otherwise"]),
+        ] {
+            let text = format!(
+                "try:\n    body: int\n{handler} ValueError:\n    caught: str\nelse:\n    otherwise: bool\n"
+            );
+            let graph = SourceGraph::single(&text).unwrap();
+            let module = &graph.modules[graph.entry];
+            let sites = prepared_sites(
+                &module.parsed.syntax().body,
+                values::ModuleSource::new(module).context(&text),
+                false,
+            );
+            let names: Vec<_> = sites
+                .module_annotations
+                .fields
+                .iter()
+                .map(|field| field.name.as_str())
+                .collect();
+            assert_eq!(names, expected);
+        }
+    }
+
+    #[test]
     fn annotation_callback_numbers_physical_occurrences_and_preserves_a_lowering_error() {
         let text = "first: int\nsecond: list[int]\ncomplex: dict[str, int]\nforward: 'list[int]'\nprepared: (lambda: int)()\ndeferred: next(t for t in (int,))\nquoted: '(lambda: Child)()'\nscoped: [item for item in items]\n";
         let graph = SourceGraph::single(text).unwrap();
@@ -3992,11 +4031,11 @@ mod tests {
         let module = prepared(false).module_annotations;
         let sites = &module.fields;
         let callback = |occurrences: &[usize]| {
-            let sites: Vec<_> = occurrences
+            let fields = occurrences
                 .iter()
-                .map(|slot| stmts[*slot].start())
-                .collect();
-            module.module_body(&sites)
+                .enumerate()
+                .map(|(index, &slot)| (sites[slot].clone(), Some(index)));
+            DeferredAnnotation::prepare_body(fields, module.bindings.clone())
         };
         let scoped = callback(&[7, 0, 7]).unwrap();
         assert!(!scoped.region().private_slots().is_empty());
@@ -4042,12 +4081,11 @@ mod tests {
             [(Some(0), "first"), (Some(1), "second"), (Some(2), "first")]
         );
         let bundled_sites = prepared(true).module_annotations.fields;
-        let quoted_site = stmts[3].start();
         assert!(
-            matches!(&sites[&quoted_site].value, Ok(Expr { kind: ExprKind::Builtin(Builtin::BindAnnotationExpression { site, .. }, _), .. }) if *site == stmts[3].as_ann_assign_stmt().unwrap().annotation.start())
+            matches!(&sites[3].value, Ok(Expr { kind: ExprKind::Builtin(Builtin::BindAnnotationExpression { site, .. }, _), .. }) if *site == stmts[3].as_ann_assign_stmt().unwrap().annotation.start())
         );
         assert!(
-            matches!(&bundled_sites[&quoted_site].value, Ok(Expr {kind: ExprKind::Str(text), ..}) if text == "list[int]")
+            matches!(&bundled_sites[3].value, Ok(Expr {kind: ExprKind::Str(text), ..}) if text == "list[int]")
         );
         let forward = callback(&[3]).unwrap();
         assert!(matches!(&forward.function.body[1],
@@ -4056,10 +4094,10 @@ mod tests {
                 if matches!(values.as_slice(), [Expr { kind: ExprKind::Builtin(
                     Builtin::BindAnnotationExpression { site, .. }, _), .. }] if *site == stmts[3].as_ann_assign_stmt().unwrap().annotation.start())));
         for slot in [2, 4, 6] {
-            assert!(sites[&stmts[slot].start()].value.is_ok());
+            assert!(sites[slot].value.is_ok());
         }
         // This fixture omits the generator registry. Keep that exact operand error.
-        let field = &sites[&stmts[5].start()];
+        let field = &sites[5];
         let error = field.value.as_ref().err().unwrap();
         assert!(field.range.contains_range(error.0));
         assert!(!error.1.is_empty());

@@ -472,18 +472,6 @@ impl std::ops::DerefMut for Frame<'_, '_, '_> {
 }
 
 impl<'f, 'a, 'p> Frame<'f, 'a, 'p> {
-    pub(super) fn next_statement(&mut self) -> bool {
-        if self.body.terminated {
-            if self.module_annotation_sites.is_none() {
-                return false;
-            }
-            // A module provider still reserves the sites in unreachable statements.
-            let dead = self.name("b");
-            self.label(&dead);
-        }
-        true
-    }
-
     /// Nested suites place their own operands when the checked emitter enters them.
     pub(super) fn place_statement(&mut self, statement: &Statement) {
         if let FrameOwner::Prepared(owner) = &mut self.code {
@@ -1258,13 +1246,22 @@ impl<'f> Frame<'f, '_, '_> {
             }
             (Builtin::RegisteredAnnotationResult, []) => self.code.take_annotation_result(),
             (
-                Builtin::RegisteredNamespaceAnnotation(ir::NamespaceAnnotation::Deferred {
+                Builtin::RegisteredNamespaceAnnotation(ir::NamespaceAnnotation::Module { index }),
+                [],
+            ) => {
+                let index = self.code.integer(*index);
+                let scope = self.code.scope.clone();
+                self.code.op("mark_module_annotation", &[&scope, &index]);
+                "0".to_owned()
+            }
+            (
+                Builtin::RegisteredNamespaceAnnotation(ir::NamespaceAnnotation::Class {
                     site,
                     name,
                 }),
                 [],
             ) => {
-                self.code.mark_annotation(*site, name);
+                self.code.mark_class_annotation(*site, name);
                 "0".to_owned()
             }
             (

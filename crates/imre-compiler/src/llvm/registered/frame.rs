@@ -86,7 +86,6 @@ pub(crate) struct RegisteredFrame<'a, 'p> {
     /// Class-scoped evaluators read the live class dictionary before lexical names.
     annotation_names: Option<(ClassBindings, String)>,
     annotation_active: Option<String>,
-    pub(crate) module_annotation_sites: Option<Vec<TextSize>>,
     pub(crate) body: FunctionBody,
     id: u32,
     pending_check: Option<ErrorCheck>,
@@ -143,7 +142,6 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
             annotation_scope: AnnotationScope::Plain,
             annotation_names: None,
             annotation_active: None,
-            module_annotation_sites: None,
             id,
             body: FunctionBody::new(if native_suspension { "start" } else { "entry" }, "failed"),
             pending_check: None,
@@ -176,14 +174,12 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         docstring: Option<&str>,
     ) {
         if has_annotations {
-            if string_annotations {
-                self.op("setup_module_string_annotations", &[&self.scope.clone()]);
+            let setup = if string_annotations {
+                "setup_module_string_annotations"
             } else {
-                // Lower the provider after collecting the body, but run its setup first.
-                self.module_annotation_sites = Some(Vec::new());
-                self.jump("annotations_init");
-                self.label("module_body");
-            }
+                "setup_module_annotations"
+            };
+            self.op(setup, &[&self.scope.clone()]);
         }
         if self.output.keep_docstrings
             && let Some(doc) = docstring
@@ -193,19 +189,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         }
     }
 
-    pub(crate) fn finish_module(
-        mut self,
-        define_annotations: impl FnOnce(&mut Self, &[TextSize]),
-    ) -> String {
-        if let Some(sites) = self.module_annotation_sites.take() {
-            self.end("ret i64 0");
-            self.label("annotations_init");
-            if !sites.is_empty() {
-                define_annotations(&mut self, &sites);
-            }
-            self.op("setup_module_annotations", &[&self.scope.clone()]);
-            self.jump("module_body");
-        }
+    pub(crate) fn finish_module(mut self) -> String {
         self.finish(true)
     }
 

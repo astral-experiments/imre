@@ -1428,7 +1428,10 @@ pub(crate) struct AnnotationField {
 
 #[derive(Clone)]
 pub(crate) enum NamespaceAnnotation {
-    Deferred {
+    Module {
+        index: usize,
+    },
+    Class {
         site: ruff_text_size::TextSize,
         name: String,
     },

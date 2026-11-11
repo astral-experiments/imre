@@ -145,7 +145,7 @@ impl<'f, 'p> Frame<'f, '_, 'p> {
             frame.caught.pop();
             Some(error)
         });
-        if self.module_annotation_sites.is_some() || normal && resumes {
+        if normal && resumes {
             self.label(&done);
         }
     }
