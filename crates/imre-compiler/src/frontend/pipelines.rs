@@ -2464,29 +2464,15 @@ impl Checker<'_> {
         let ready = self.hidden(Type::Bool);
         let done = self.hidden(Type::Bool);
         let resume_pc = self.hidden(Type::Int);
-        self.leave_comprehension(scope);
+        let exported: HashSet<_> = self.leave_comprehension(scope).into_values().collect();
         let mut writes = pulls
             .iter()
             .flat_map(|pull| pull.input.writes.iter().copied())
             .collect::<HashSet<_>>();
-        for expression in plan
-            .clauses
-            .iter()
-            .flat_map(|clause| &clause.ifs)
-            .chain(std::iter::once(plan.output.value()))
-        {
-            for name in narrowing::expression_assignments(expression) {
-                if let Some(slot) = self.names.get(&name) {
-                    self.narrowed.remove_mut(slot);
-                    writes.insert(*slot);
-                }
-            }
+        for slot in &exported {
+            self.narrowed.remove_mut(slot);
+            writes.insert(*slot);
         }
-        let exported = self
-            .comprehension_exports
-            .values()
-            .copied()
-            .collect::<HashSet<_>>();
         let mut clear = pulls[0].input.clear.clone();
         clear.extend((first_private..self.locals.len()).filter(|slot| !exported.contains(slot)));
         let mut evaluate = std::mem::take(&mut pulls[0].input.evaluate);
