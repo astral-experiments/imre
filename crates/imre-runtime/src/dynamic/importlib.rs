@@ -26,6 +26,10 @@ impl SourceBody {
     }
 }
 
+extern "C" fn empty_module(_: *mut Context, _: Id) -> Id {
+    NONE
+}
+
 impl Context {
     /// Call the caller's import hook for side effects, then read the interpreter's module registry.
     pub(super) fn import_with_builtins(&mut self, module_name: &str) -> Result<Id> {
@@ -597,6 +601,14 @@ impl Context {
             Err(error) if !loader && error.kind == "UnicodeEncodeError" => return Ok(None),
             Err(error) => return Err(error),
         };
+        // An empty source read by the loader has no operations tied to a build-time origin.
+        if loader && self.bytes_like(data)?.is_empty() {
+            return Ok(Some(self.native_module_code(
+                empty_module,
+                filename,
+                Some(inherited),
+            )));
+        }
         let mut entries = self.sources.values().flatten().filter_map(|source| {
             if source.path.as_os_str() != path.as_os_str()
                 && !matches!(source.code, ModuleInitializer::File { declared_open_path: Some(alias), .. } if alias.as_os_str() == path.as_os_str())
