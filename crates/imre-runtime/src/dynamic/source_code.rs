@@ -117,7 +117,7 @@ struct OperandPlan {
 impl OperandPlan {
     fn new(root: &ast::Expr, kind: FunctionKind, line: u32, function: bool) -> Self {
         let mut sites = smallvec::SmallVec::new();
-        if kind.is_async() || (function && imre_ast::code_flags::yields_in_expression(root)) {
+        if kind.is_async() || function {
             let mut work = smallvec::SmallVec::<[&ast::Expr; 8]>::new();
             work.push(root);
             while let Some(expr) = work.pop() {
@@ -1638,6 +1638,9 @@ impl Program {
         line: u32,
         function: bool,
     ) -> Result<Option<ast::Expr>> {
+        if function && !self.kind.is_async() && !code_flags::yields_in_expression(&expr) {
+            return Ok(Some(expr));
+        }
         let plan = OperandPlan::new(&expr, self.kind, line, function);
         self.lower_operand(expr, &plan)
     }
@@ -1770,8 +1773,10 @@ impl Program {
     }
 
     fn record_expression(&mut self, expr: ast::Expr, line: u32, function: bool) -> Result<()> {
-        let plan = OperandPlan::new(&expr, self.kind, line, function);
-        self.record_operand(expr, &plan)
+        if let Some(expr) = self.lower_suspension(expr, line, function)? {
+            self.items.push((line, SourceItem::Discard(expr)));
+        }
+        Ok(())
     }
 
     fn qualified_name(parent: &str, class: bool, name: &str) -> String {
