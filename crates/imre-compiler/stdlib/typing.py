@@ -16,8 +16,6 @@ from collections import ChainMap as _ChainMap, OrderedDict as _OrderedDict, dequ
 from collections.abc import Callable as _ABCCallable
 from _collections_abc import AsyncIterator as _AsyncIterator, Awaitable as _Awaitable
 from abc import abstractmethod
-from annotationlib import ForwardRef, _make_forward_ref
-from annotationlib import annotations_to_string as _annotation_strings, type_repr as _annotation_type_repr
 from functools import lru_cache
 from _typing import _idfunc
 from types import GenericAlias
@@ -630,7 +628,7 @@ def _typeddict_field(value, module, owner=None):
     if value is None:
         return type(None)
     if isinstance(value, str):
-        return _make_forward_ref(value, module, owner)
+        return _typing._make_forward_ref(value, module, owner)
     message = "TypedDict('Name', {f0: t0, f1: t1, ...}); each t must be a type"
     return _type_check(value, message)
 
@@ -671,7 +669,7 @@ def _make_eager_annotate(types=_sentinel):
         if format in (1, 3):
             return checked
         if format == 4:
-            return _annotation_strings(types)
+            return _typing._annotation_strings(types)
         raise NotImplementedError(format)
 
     return annotate
@@ -825,7 +823,7 @@ def _configure_typeddict(cls, fields, total, own_annotate=None, bases=(), *, nam
             if format != 4:
                 own = {key: _typeddict_field(tp, cls.__module__) for key, tp in own.items()}
         elif format == 4:
-            own = _annotation_strings(fields)
+            own = _typing._annotation_strings(fields)
         elif format in (1, 3):
             own = annotations
         else:
@@ -1476,14 +1474,14 @@ def TypeAlias(self, parameters):
 def _type_repr(arg):
     if isinstance(arg, tuple):
         return '[' + ', '.join(_type_repr(item) for item in arg) + ']'
-    return _annotation_type_repr(arg)
+    return _typing._annotation_type_repr(arg)
 
 
 def _type_convert(arg, module=None, *, allow_special_forms=False, owner=None):
     if arg is None:
         return type(None)
     if isinstance(arg, str):
-        return _make_forward_ref(arg, module, owner, is_class=allow_special_forms)
+        return _typing._make_forward_ref(arg, module, owner, is_class=allow_special_forms)
     return arg
 
 
@@ -1520,7 +1518,7 @@ def _make_callable_alias(constructor, origin, params):
 def _typeddict_qualifier_alias(form, parameters):
     item = _type_check(parameters, f"{form._name} accepts only a single type.")
     if isinstance(item, str):
-        item = _make_forward_ref(item)
+        item = _typing._make_forward_ref(item)
     return _typing._GenericAlias(form, (type(None) if item is None else item,))
 
 
@@ -2412,7 +2410,7 @@ class _AnnotatedAlias(_NotIterable):
             self.__parameters__ = () if isinstance(origin, type) else getattr(origin, "__parameters__", ())
 
     def __repr__(self):
-        origin = _annotation_type_repr(self.__origin__)
+        origin = _typing._annotation_type_repr(self.__origin__)
         return f"typing.Annotated[{origin}, {', '.join(repr(item) for item in self.__metadata__)}]"
 
     def __eq__(self, other):
@@ -2455,7 +2453,7 @@ def Annotated(self, *parameters):
         raise TypeError("Annotated[...] should not be used with an unpacked TypeVarTuple")
     origin = _type_check(origin, "Annotated[t, ...]: t must be a type.", allow_special_forms=True)
     if isinstance(origin, str):
-        origin = _make_forward_ref(origin, is_class=True)
+        origin = _typing._make_forward_ref(origin, is_class=True)
     return _AnnotatedAlias(type(None) if origin is None else origin, parameters[1:])
 
 
@@ -2506,15 +2504,15 @@ def evaluate_forward_ref(
     value = forward_ref.evaluate(globals=globals, locals=locals,
                                  type_params=type_params, owner=owner, format=format)
 
-    if (isinstance(value, ForwardRef)
+    if (isinstance(value, _typing.ForwardRef)
             and format == Format.FORWARDREF):
         return value
 
     if isinstance(value, str):
-        value = _make_forward_ref(value, module=forward_ref.__forward_module__,
-                                  owner=owner or forward_ref.__owner__,
-                                  is_argument=forward_ref.__forward_is_argument__,
-                                  is_class=forward_ref.__forward_is_class__)
+        value = _typing._make_forward_ref(value, module=forward_ref.__forward_module__,
+                                          owner=owner or forward_ref.__owner__,
+                                          is_argument=forward_ref.__forward_is_argument__,
+                                          is_class=forward_ref.__forward_is_class__)
     if owner is None:
         owner = forward_ref.__owner__
     return _eval_type(
@@ -2564,7 +2562,7 @@ def _eval_type(t, globalns, localns, type_params=_sentinel, *, recursive_guard=f
     if type_params is _sentinel:
         _deprecation_warning_for_no_type_params_passed("typing._eval_type")
         type_params = ()
-    if isinstance(t, ForwardRef):
+    if isinstance(t, _typing.ForwardRef):
         if prefer_fwd_module and t.__forward_module__ is not None:
             globalns = _forward_ref_module_globals(t, owner)
         return evaluate_forward_ref(t, globals=globalns, locals=localns,
@@ -2576,8 +2574,8 @@ def _eval_type(t, globalns, localns, type_params=_sentinel, *, recursive_guard=f
         return t
     if kind == "builtin":
         args = tuple(
-            _make_forward_ref(arg, module=getattr(parent_fwdref, "__forward_module__", None),
-                              owner=getattr(parent_fwdref, "__owner__", None))
+            _typing._make_forward_ref(arg, module=getattr(parent_fwdref, "__forward_module__", None),
+                                      owner=getattr(parent_fwdref, "__owner__", None))
             if isinstance(arg, str) else arg for arg in t.__args__
         )
         unpacked = t.__unpacked__
@@ -2825,7 +2823,14 @@ def dataclass_transform(
 
 
 def __getattr__(attr):
-    if attr in {"Pattern", "Match"}:
+    if attr in {"ForwardRef", "_make_forward_ref"}:
+        import annotationlib
+        alias = getattr(annotationlib, attr)
+    elif attr == "_annotation_strings":
+        from annotationlib import annotations_to_string as alias
+    elif attr == "_annotation_type_repr":
+        from annotationlib import type_repr as alias
+    elif attr in {"Pattern", "Match"}:
         import re
         alias = _SpecialGenericAlias(getattr(re, attr), 1)
     elif attr in {"ContextManager", "AsyncContextManager"}:
