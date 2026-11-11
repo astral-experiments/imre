@@ -5,7 +5,7 @@
 use std::cell::RefCell;
 
 pub(crate) use imre_ast::comprehension::collect_target_names as target_names;
-use imre_ast::comprehension::{Output, Plan, Step};
+use imre_ast::comprehension::{Output, Plan};
 use ruff_python_ast::visitor::{Visitor, walk_expr, walk_stmt};
 
 use super::*;
@@ -131,16 +131,8 @@ pub(super) trait EagerDisplay: Sized {
         conditions: &[Expr],
     ) -> StdResult<Vec<Statement>, Self::Error>;
 
-    fn eager_filters(&mut self, steps: &[Step<'_>]) -> StdResult<Vec<Expr>, Self::Error> {
-        steps
-            .iter()
-            .map(|step| {
-                let Step::Filter { test, .. } = step else {
-                    unreachable!("a pull owns a contiguous range of filters")
-                };
-                self.filter(test)
-            })
-            .collect()
+    fn eager_filters(&mut self, clause: &ast::Comprehension) -> StdResult<Vec<Expr>, Self::Error> {
+        clause.ifs.iter().map(|test| self.filter(test)).collect()
     }
 
     fn eager_loop(
@@ -158,29 +150,19 @@ pub(super) trait EagerDisplay: Sized {
     fn comprehension_loop<'p>(
         &mut self,
         plan: &Plan<'p>,
-        pc: usize,
+        depth: usize,
         input: Self::Input,
         emit: &mut impl FnMut(&mut Self, Output<'p>, &[Expr]) -> StdResult<Vec<Statement>, Self::Error>,
     ) -> StdResult<Vec<Statement>, Self::Error> {
-        let Step::Next {
-            depth,
-            target,
-            accepted,
-            ..
-        } = plan.steps()[pc]
-        else {
-            unreachable!("an iterator is followed by its pull")
-        };
+        let clause = &plan.clauses[depth];
         self.before_pull(plan, depth);
-        self.with_target(target, input, plan.output, |lower| {
-            let conditions = lower.eager_filters(&plan.steps()[pc + 1..accepted])?;
-            let mut body = match plan.steps()[accepted] {
-                Step::Emit { output, .. } => emit(lower, output, &conditions)?,
-                Step::Open { depth, .. } => {
-                    let input = lower.input(&plan.clauses[depth])?;
-                    lower.comprehension_loop(plan, accepted + 1, input, emit)?
-                }
-                _ => unreachable!("an accepted input opens an iterator or emits"),
+        self.with_target(&clause.target, input, plan.output, |lower| {
+            let conditions = lower.eager_filters(clause)?;
+            let mut body = if let Some(inner) = plan.clauses.get(depth + 1) {
+                let input = lower.input(inner)?;
+                lower.comprehension_loop(plan, depth + 1, input, emit)?
+            } else {
+                emit(lower, plan.output, &conditions)?
             };
             for condition in conditions.into_iter().rev() {
                 body = vec![Statement::If(condition, body, Vec::new())];

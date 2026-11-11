@@ -1,6 +1,6 @@
 //! Collect code-object metadata for implicit comprehension scopes.
 
-use imre_ast::comprehension::Step as CompStep;
+use imre_ast::comprehension::BodyOperand;
 
 use super::*;
 
@@ -55,14 +55,12 @@ impl Program {
         comp: &Plan<'_>,
         line_at: &impl Fn(usize) -> u32,
     ) -> Result<()> {
-        for &step in comp.steps() {
-            match step {
-                CompStep::Open { iterable, .. } => self.record_expression(
-                    iterable.clone(),
-                    line_at(iterable.start().to_usize()),
-                    true,
-                )?,
-                CompStep::Next { target, .. } => {
+        for operand in comp.body_operands() {
+            match operand {
+                BodyOperand::Value(expr) => {
+                    self.record_expression(expr.clone(), line_at(expr.start().to_usize()), true)?;
+                }
+                BodyOperand::Target(target) => {
                     if matches!(comp.output, Output::Generator(_)) {
                         self.declare_target(target)?;
                     }
@@ -72,22 +70,6 @@ impl Program {
                         self.lower_suspended_target(target, line)?;
                     } else {
                         self.items.push((line, SourceItem::Discard(target.clone())));
-                    }
-                }
-                CompStep::Filter { test, .. } => {
-                    self.record_expression(test.clone(), line_at(test.start().to_usize()), true)?
-                }
-                CompStep::Emit { output, .. } => {
-                    for expr in output
-                        .key()
-                        .into_iter()
-                        .chain(std::iter::once(output.value()))
-                    {
-                        self.record_expression(
-                            expr.clone(),
-                            line_at(expr.start().to_usize()),
-                            true,
-                        )?;
                     }
                 }
             }

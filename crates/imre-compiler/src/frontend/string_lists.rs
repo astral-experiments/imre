@@ -1,6 +1,6 @@
 //! Bulk operations whose exact string elements cannot invoke user callbacks.
 
-use imre_ast::comprehension::{Output, Plan, Step};
+use imre_ast::comprehension::{Output, Plan};
 
 use super::*;
 
@@ -50,19 +50,11 @@ fn prefix_argument<'a>(expr: &'a ast::Expr, name: &str) -> Option<&'a ast::Expr>
 /// Both bulk filters implement exactly one synchronous pull guarded by one
 /// predicate. Inspect the executable plan before replacing that loop.
 fn filtered_item<'a>(plan: &Plan<'a>) -> Option<(&'a str, &'a ast::Expr)> {
-    let Step::Next {
-        target: ast::Expr::Name(target),
-        accepted,
-        ..
-    } = plan.steps()[0]
-    else {
-        return None;
-    };
-    let [Step::Filter { test, .. }] = &plan.steps()[1..accepted] else {
-        return None;
-    };
-    (!plan.outer_async && matches!(plan.steps()[accepted], Step::Emit { .. }))
-        .then_some((target.id.as_str(), *test))
+    let [clause] = plan.clauses else { return None };
+    match (&clause.target, clause.ifs.as_slice(), clause.is_async) {
+        (ast::Expr::Name(target), [test], false) => Some((target.id.as_str(), test)),
+        _ => None,
+    }
 }
 
 impl Checker<'_> {
