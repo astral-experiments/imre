@@ -911,7 +911,7 @@ fn lower_graph(
                 table.insert(method.name.to_string(), alias);
                 continue;
             }
-            let mut method =
+            let (mut method, returns_iterator) =
                 records::executable_method(method, context, &classes.declarations, graph, &types)?;
             let keyword_copy =
                 record_inputs::copies_keywords(&class.methods[index], graph, module_id);
@@ -1008,7 +1008,7 @@ fn lower_graph(
                 }
                 classes.contexts.insert(signature.id);
             }
-            if records::iterator_result(&method, graph, module_id) {
+            if returns_iterator {
                 classes.generators.insert(signature.id);
             } else {
                 signature.physical_frame = physical_entry;
@@ -3275,6 +3275,7 @@ impl<'a> Checker<'a> {
         self.returns = signature.returns;
         self.asynchronous = signature.asynchronous;
         self.method_context(signature.method);
+        self.context_method = self.classes.contexts.contains(&signature.id);
         self.generator_item = self.classes.producer_items.get(&signature.id).copied();
         // The signature builder appends **kwargs after the ordinary parameters and *args.
         let parameters = closed_calls::parameters(&definition.parameters)

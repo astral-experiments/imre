@@ -24,7 +24,7 @@ pub(super) fn executable_method(
     classes: &Classes,
     graph: &SourceGraph,
     types: &Types,
-) -> std::result::Result<ast::StmtFunctionDef, String> {
+) -> std::result::Result<(ast::StmtFunctionDef, bool), String> {
     let mut method = (*binding.function).clone();
     method.name.clone_from(&binding.name);
     method.decorator_list.clear();
@@ -40,7 +40,9 @@ pub(super) fn executable_method(
         ));
     }
     let origin = classes.definitions[context.class].method_origins[context.index].module;
-    if iterator_result(&method, graph, origin) {
+    let returns_iterator = matches!(method.returns.as_deref(), Some(ast::Expr::Subscript(annotation))
+        if graph.resolve(origin, &annotation.value) == Some(Binding::Intrinsic(Intrinsic::Iterator)));
+    if returns_iterator {
         let Some(ast::Stmt::Expr(stmt)) = method.body.last() else {
             return Err(graph.modules[origin]
                 .error(&method, "a record iterator requires a final yield from"));
@@ -125,7 +127,7 @@ pub(super) fn executable_method(
             )?;
         }
     }
-    Ok(method)
+    Ok((method, returns_iterator))
 }
 
 /// A generator's early return ends iteration and discards its value. Only a
@@ -199,15 +201,6 @@ fn private_items(
     };
     uses.visit_body(&body[created + 1..]);
     !uses.escapes
-}
-
-pub(super) fn iterator_result(
-    method: &ast::StmtFunctionDef,
-    graph: &SourceGraph,
-    module: usize,
-) -> bool {
-    matches!(method.returns.as_deref(), Some(ast::Expr::Subscript(annotation))
-        if graph.resolve(module, &annotation.value) == Some(Binding::Intrinsic(Intrinsic::Iterator)))
 }
 
 /// Generated initializer locals must not shadow module imports or builtin
@@ -670,25 +663,9 @@ impl Checker<'_> {
         result
     }
 
-    pub(super) fn record_generator(&self, context: MethodContext) -> bool {
-        let record = &self.classes.declarations.definitions[context.class];
-        iterator_result(
-            &record.methods[context.index],
-            self.graph,
-            record.method_origins[context.index].module,
-        )
-    }
     /// Body checking and type discovery must see the same statically bound class
     /// and the same narrow permission to initialize a generated frozen record.
     pub(super) fn method_context(&mut self, context: Option<MethodContext>) {
-        self.context_method = context.is_some_and(|context| {
-            let record = &self.classes.declarations.definitions[context.class];
-            super::contexts::decorated(
-                &record.methods[context.index],
-                self.graph,
-                record.method_origins[context.index].module,
-            )
-        });
         self.class = context.map(|context| context.class);
         let lexical_owner = context.map(|context| {
             let classes = &self.classes.declarations;
@@ -1499,7 +1476,7 @@ impl Checker<'_> {
             }
             return self.copy_with_keywords(class, receiver, &call.arguments.keywords, call);
         }
-        if self.record_generator(signature.method.unwrap())
+        if self.classes.generators.contains(&signature.id)
             && self.iterator_source != Some(call.range())
         {
             return Err(error(
