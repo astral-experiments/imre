@@ -787,7 +787,9 @@ impl Checker<'_> {
                     .registered_classes
                     .contains(&definition)
                 {
-                    return Some(Binding::RegisteredClass(definition));
+                    return Some(Binding::RegisteredClass(
+                        self.graph.session.class_declaration(definition),
+                    ));
                 }
                 let namedtuple = self.types.namedtuple(definition).is_some();
                 if namedtuple

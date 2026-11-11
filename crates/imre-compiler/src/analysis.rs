@@ -10,6 +10,7 @@ mod inferred_shapes;
 mod initializer_calls;
 pub(crate) use initializer_calls::{inert_declaration, passive_function, unambiguous_file_module};
 mod run_path;
+mod shipped_exports;
 mod tuple_displays;
 
 use std::cell::Cell;
@@ -576,6 +577,7 @@ impl Session {
         File::sync_path(&mut self.db, origin);
         Ok(())
     }
+
     pub(crate) fn selected_file(
         &self,
         path: &Path,
@@ -1411,12 +1413,7 @@ impl Session {
         file: File,
         expression: &Expr,
     ) -> Option<ty_python_core::definition::Definition<'_>> {
-        let index = ty_python_core::semantic_index(&self.db, self.db.program_file(file));
-        let scope = index.try_expression_scope_id(expression)?;
-        let use_id = index.try_expression_use_id(expression.into())?;
-        let mut bindings = index.use_def_map(scope).bindings_at_use(use_id);
-        let first = bindings.next()?.binding.definition()?;
-        bindings.next().is_none().then_some(first)
+        shipped_exports::binding_at_use(&self.db, file, expression)
     }
 
     /// Fold a local import only while that statement is the sole binding reaching this read.
@@ -1509,13 +1506,20 @@ impl Session {
         })
     }
 
-    /// A function-local module alias can be shadowed independently of the package binding.
-    pub(crate) fn is_stdlib_module(&self, module: usize, expression: &Expr, name: &str) -> bool {
-        use ty_python_semantic::types::Type as Ty;
-        self.hint_reads.set(self.hint_reads.get() + 1);
+    /// Resolve a module alias at the expression that reads it.
+    pub(crate) fn module_name_at(&self, module: usize, expression: &Expr) -> Option<&str> {
         let model = SemanticModel::new(&self.db, self.db.program_file(self.files[module]));
-        matches!(expression.inferred_type(&model), Some(Ty::ModuleLiteral(m))
-            if m.module(&self.db).name(&self.db).as_str() == name)
+        let ty_python_semantic::types::Type::ModuleLiteral(owner) =
+            expression.inferred_type(&model)?
+        else {
+            return None;
+        };
+        Some(owner.module(&self.db).name(&self.db).as_str())
+    }
+
+    pub(crate) fn is_stdlib_module(&self, module: usize, expression: &Expr, name: &str) -> bool {
+        self.hint_reads.set(self.hint_reads.get() + 1);
+        self.module_name_at(module, expression) == Some(name)
     }
 
     /// Only the stdlib function can add a literal dependency, even if a local shares its spelling.
