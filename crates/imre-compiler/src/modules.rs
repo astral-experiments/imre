@@ -368,7 +368,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             concat!(
                 include_str!("../stdlib/collections/__init__.py"),
                 "\n",
-                include_str!("../stdlib/collections/namedtuple_repr.py"),
+                include_str!("../stdlib/collections/bootstrap.py"),
                 "\n",
                 include_str!("../stdlib/collections/recursive_repr.py"),
                 "\n",

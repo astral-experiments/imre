@@ -2,7 +2,7 @@
 
 import _collections_abc
 import operator as _operator
-from _collections_abc import MutableMapping as _MutableMapping, MutableSequence as _MutableSequence
+from _collections_abc import MutableMapping as _MutableMapping
 from itertools import repeat as _repeat
 
 try:
@@ -18,10 +18,6 @@ try:
     from _collections import _deque_iterator
 except ImportError:
     pass
-
-from _collections import deque
-_MutableSequence.register(deque)
-
 
 def _elements(items):
     for key, count in items:
