@@ -104,7 +104,10 @@ impl Checker<'_> {
             // identity. Keep conversion eager and preserve its first error.
             return Ok(Expr {
                 ty: Type::ListInt,
-                kind: ExprKind::Builtin(Builtin::StringIntList, vec![iterable.clone()]),
+                kind: ExprKind::Builtin(
+                    Builtin::StringIntList(self.fixed_origin(call.range(), Some(call.func.end()))),
+                    vec![iterable.clone()],
+                ),
             });
         }
         self.collect_list(input, convert, element, call)

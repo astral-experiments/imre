@@ -989,13 +989,26 @@ impl Emitter<'_, '_> {
     }
 
     fn call(&mut self, name: &str, returns: Type, args: &[&Value]) -> Value {
+        self.call_at(name, returns, args, None)
+    }
+
+    fn call_at(
+        &mut self,
+        name: &str,
+        returns: Type,
+        args: &[&Value],
+        origin: Option<&ir::FixedOrigin>,
+    ) -> Value {
         self.call_with_effect(
             &format!("@{name}"),
             None,
             returns,
             args,
             runtime_call_may_raise(name),
-            CallSite::default(),
+            CallSite {
+                origin,
+                ..CallSite::default()
+            },
         )
     }
 
@@ -7171,16 +7184,11 @@ impl Emitter<'_, '_> {
                 returns,
                 &[&args[0].value, &args[1].value],
             ),
-            Builtin::FunctionWrappedGet(origin) => self.call_with_effect(
-                "@imre_function_get_wrapped",
-                None,
+            Builtin::FunctionWrappedGet(origin) => self.call_at(
+                "imre_function_get_wrapped",
                 returns,
                 &[&args[0].value],
-                true,
-                CallSite {
-                    origin: Some(origin),
-                    ..CallSite::default()
-                },
+                Some(origin),
             ),
             Builtin::WrapperAttributes(fields) => {
                 let names = fields
@@ -8493,9 +8501,12 @@ impl Emitter<'_, '_> {
                     small_integer: true,
                 }
             }
-            Builtin::StringIntList => {
-                self.call("imre_str_int_list", Type::ListInt, &[&args[0].value])
-            }
+            Builtin::StringIntList(origin) => self.call_at(
+                "imre_str_int_list",
+                returns,
+                &[&args[0].value],
+                Some(origin),
+            ),
             Builtin::StringSliceEqual => {
                 let equal = self.instruction(format!(
                     "call i32 @imre_str_slice_equal(ptr {}, i64 {}, i64 {}, ptr {}, i64 {}, i64 {})",
