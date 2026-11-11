@@ -649,6 +649,13 @@ impl Checker<'_> {
                     return self.store_class_data(class, attribute, value);
                 }
                 let receiver = Self::weak_target(self.expr(&attribute.value)?);
+                if self.types.payload(receiver.ty).unwrap_or(receiver.ty) == Type::PythonObject {
+                    return Ok(registered::attribute_statement(
+                        ir::AttributeAction::Store,
+                        attribute,
+                        vec![value, receiver],
+                    ));
+                }
                 if attribute.attr.as_str() == "__wrapped__"
                     && (self.types.cache_declaration(receiver.ty).is_some()
                         || self.types.cached_function(receiver.ty).is_some())

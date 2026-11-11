@@ -1184,16 +1184,45 @@ fn python_instances_keep_their_declared_class_in_fields_and_containers() {
     let main = project.path().join("main.py");
     fs::write(
         project.path().join("model.py"),
-        "class Item:\n    def __init__(self, value): self.value = value\n\
-         class Child(Item): pass\n\
-         class Other:\n    def __init__(self, value): self.value = value\n\
-         class Box:\n    def __init__(self): self.item: Item = Item(0)\n\
-         type Items = list[Item]\n",
+        "class Item:
+    def __init__(self, value): self.value = value
+class Child(Item): pass
+class Other:
+    def __init__(self, value): self.value = value
+class Box:
+    def __init__(self):
+        self.item: Item = Item(0)
+        self.maybe: Item | None = None
+    @property
+    def current(self) -> list[Item]:
+        return [self.item]
+    @current.setter
+    def current(self, replacement: Item):
+        self.item = replacement
+    def read(self):
+        return self.item
+    def write(self, replacement: Item):
+        self.item = replacement
+    from_functions = property(read, write)
+type Items = list[Item]
+",
     )
     .unwrap();
     let imports = "from model import Box, Child, Item, Items, Other\n";
     for (body, rule) in [
         ("box = Box()\nbox.item = Other(1)\n", "invalid-assignment"),
+        (
+            "box = Box()\nbox.from_functions = Other(1)\n",
+            "invalid-assignment",
+        ),
+        (
+            "box = Box()\nbox.current = Other(1)\n",
+            "invalid-assignment",
+        ),
+        (
+            "box = Box()\nbox.current.append(Other(1))\n",
+            "invalid-argument-type",
+        ),
         (
             "values: Items = [Item(0)]\nvalues.append(Other(1))\n",
             "invalid-argument-type",
@@ -1209,7 +1238,7 @@ fn python_instances_keep_their_declared_class_in_fields_and_containers() {
     }
     fs::write(
         &main,
-        format!("{imports}box = Box()\nbox.item = Child(1)\nvalues: Items = [Item(0)]\nvalues.append(Child(2))\n"),
+        format!("{imports}box = Box()\nbox.item = Child(1)\nbox.current = Child(1)\nbox.from_functions = Child(2)\nbox.current.append(Child(2))\nbox.maybe = Child(1)\nif box.maybe is not None: box.maybe.value = 2\nvalues: Items = [Item(0)]\nvalues.append(Child(2))\n"),
     )
     .unwrap();
     crate::check_file(&main, None).unwrap();

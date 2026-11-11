@@ -9816,7 +9816,7 @@ impl<'a> Checker<'a> {
                         });
                     }
                 }
-                if receiver.ty == Type::PythonObject {
+                if self.types.payload(receiver.ty).unwrap_or(receiver.ty) == Type::PythonObject {
                     return Ok(registered::values::loaded_attribute(attribute, receiver));
                 }
                 if receiver.ty == Type::Float

@@ -2858,7 +2858,10 @@ fn has_declared_nominal_target(
         .find_map(|node| match node {
             AnyNodeRef::StmtAssign(statement) if assignment => {
                 Some(statement.targets.iter().any(|target| {
-                    if range != target.range() && range != statement.range() {
+                    if range != target.range()
+                        && range != statement.range()
+                        && range != statement.value.range()
+                    {
                         return false;
                     }
                     let place = match target {
@@ -2881,6 +2884,40 @@ fn has_declared_nominal_target(
         .unwrap_or(false)
 }
 
+fn property_accessor<'db>(
+    db: &'db dyn Db,
+    definition: ty_python_core::definition::Definition<'db>,
+    context: ruff_python_ast::ExprContext,
+) -> Option<ty_python_core::definition::Definition<'db>> {
+    use ruff_python_ast::ExprContext;
+    use ty_python_core::definition::DefinitionKind;
+    use ty_python_semantic::types::{Type, TypeDefinition};
+
+    let source = db.program_file(definition.file(db));
+    let parsed = ruff_db::parsed::parsed_module(db, source.python_file(db)).load(db);
+    let model = SemanticModel::new(db, source);
+    let ty = match definition.kind(db) {
+        DefinitionKind::Function(function) => function.node(&parsed).inferred_type(&model),
+        DefinitionKind::Assignment(assignment) => assignment.value(&parsed).inferred_type(&model),
+        DefinitionKind::AnnotatedAssignment(assignment) => {
+            assignment.value(&parsed)?.inferred_type(&model)
+        }
+        _ => None,
+    };
+    let Type::PropertyInstance(property) = ty? else {
+        return None;
+    };
+    let accessor = match context {
+        ExprContext::Load => property.getter(db),
+        ExprContext::Store => property.setter(db),
+        _ => None,
+    }?;
+    match accessor.definition(db, &model.program_environment()) {
+        Some(TypeDefinition::Function(function)) => Some(function),
+        _ => None,
+    }
+}
+
 fn declared_nominal_place(
     db: &dyn Db,
     model: &SemanticModel<'_>,
@@ -2891,6 +2928,38 @@ fn declared_nominal_place(
         return ty_python_semantic::definitions_for_attribute(model, attribute)
             .iter()
             .any(|declaration| {
+                if let ty_python_semantic::ResolvedDefinition::Definition(definition) = declaration
+                    && let Some(accessor) = property_accessor(db, *definition, attribute.ctx)
+                    && let ty_python_core::definition::DefinitionKind::Function(function) =
+                        accessor.kind(db)
+                {
+                    let source = db.program_file(accessor.file(db));
+                    let parsed =
+                        ruff_db::parsed::parsed_module(db, source.python_file(db)).load(db);
+                    let function = function.node(&parsed);
+                    let annotation = match attribute.ctx {
+                        ruff_python_ast::ExprContext::Load => function.returns.as_deref(),
+                        ruff_python_ast::ExprContext::Store => function
+                            .parameters
+                            .posonlyargs
+                            .iter()
+                            .chain(&function.parameters.args)
+                            .nth(1)
+                            .map(|parameter| &parameter.parameter)
+                            .or(function.parameters.vararg.as_deref())
+                            .and_then(|parameter| parameter.annotation.as_deref()),
+                        _ => None,
+                    };
+                    return annotation.is_some_and(|annotation| {
+                        contains_source_class(
+                            db,
+                            &SemanticModel::new(db, source),
+                            annotation,
+                            class_files,
+                            &mut std::collections::HashSet::new(),
+                        )
+                    });
+                }
                 let site = declaration.focus_range(db);
                 source_class_annotation(db, site.file(), site.range(), false, class_files)
             });
