@@ -119,7 +119,7 @@ pub(super) fn launch(
         if archive.is_file() {
             std::os::unix::fs::symlink(archive, target)?;
         } else {
-            std::fs::write(target, super::STDLIB_ARCHIVE)?;
+            std::fs::write(target, super::packaged_stdlib_zip())?;
         }
     }
 
