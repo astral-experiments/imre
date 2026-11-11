@@ -195,6 +195,9 @@ fn native_operand(value: &CheckedValue) -> &str {
         CheckedValue::Native(v, _) => &v.value.operand,
         CheckedValue::IntOrHandle { word, .. } => word,
         CheckedValue::Handle { .. } => "0",
+        CheckedValue::IntegerLiteral(_) => {
+            unreachable!("a literal operand belongs to its operation")
+        }
     }
 }
 
@@ -202,7 +205,7 @@ fn python_handle(value: &CheckedValue) -> &str {
     match value {
         CheckedValue::Handle { id, .. } => id,
         CheckedValue::IntOrHandle { fallback, .. } => fallback,
-        CheckedValue::Native(..) => "0",
+        CheckedValue::Native(..) | CheckedValue::IntegerLiteral(_) => "0",
     }
 }
 
