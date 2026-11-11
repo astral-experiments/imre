@@ -445,6 +445,13 @@ impl Checker<'_> {
             return self.path_io(receiver, name, call);
         }
         if name == "open" {
+            if let Some(ast::Expr::StringLiteral(mode)) =
+                call.arguments.find_argument_value("mode", 0)
+                && is_update_mode(mode.value.to_str())
+            {
+                // The Python stream owns the shared read/write cursor and its context manager.
+                return self.registered_method_call(call, attribute, receiver, Type::PythonObject);
+            }
             return self.path_open(receiver, call);
         }
         if matches!(
@@ -737,9 +744,6 @@ impl Checker<'_> {
             }
         };
         // A read/write stream needs the buffered update implementation used by io.open.
-        if call.arguments.len() == 1 && is_update_mode(mode) {
-            return Err(self.scoped_builtin_error("buffered update open", call));
-        }
         let (ty, mut builtin) = match mode {
             "rt" | "tr" => file_open_mode("r"),
             "wt" | "tw" => file_open_mode("w"),
