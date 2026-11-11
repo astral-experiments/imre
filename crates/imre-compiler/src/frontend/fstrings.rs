@@ -24,13 +24,16 @@ struct Parts<'a> {
     values: Vec<Expr>,
 }
 
+pub(super) enum FieldValue {
+    Formatted(Expr),
+    Operand(Expr),
+}
+
 struct Fields<C, E> {
     context: C,
     result: Type,
     literal: fn(&mut C, &[FStringLiteral<'_>]) -> StdResult<Expr, E>,
-    operand: fn(&mut C, &ast::Expr) -> StdResult<Expr, E>,
-    scalar:
-        fn(&mut C, &ast::InterpolatedElement, ast::ConversionFlag) -> StdResult<Option<Expr>, E>,
+    prepare: fn(&mut C, &ast::InterpolatedElement, ast::ConversionFlag) -> StdResult<FieldValue, E>,
     conversion: fn(&C, Expr, char) -> Expr,
     format: fn(&mut C, &ast::InterpolatedElement, Type, Type) -> Builtin,
 }
@@ -71,20 +74,20 @@ impl<C, E> Fields<C, E> {
         } else {
             field.conversion
         };
-        let mut value = if let Some(scalar) = (self.scalar)(&mut self.context, field, conversion)? {
-            scalar
-        } else {
-            let mut value = (self.operand)(&mut self.context, &field.expression)?;
-            if let Some(flag) = conversion.to_char() {
-                value = (self.conversion)(&self.context, value, flag);
+        let mut value = match (self.prepare)(&mut self.context, field, conversion)? {
+            FieldValue::Formatted(text) => text,
+            FieldValue::Operand(mut value) => {
+                if let Some(flag) = conversion.to_char() {
+                    value = (self.conversion)(&self.context, value, flag);
+                }
+                let mut spec = Parts::default();
+                if let Some(elements) = &field.format_spec {
+                    self.elements(&mut spec, &elements.elements, raw)?;
+                }
+                let spec = self.finish(spec)?;
+                let op = (self.format)(&mut self.context, field, value.ty, spec.ty);
+                self.operation(op, vec![value, spec])
             }
-            let mut spec = Parts::default();
-            if let Some(elements) = &field.format_spec {
-                self.elements(&mut spec, &elements.elements, raw)?;
-            }
-            let spec = self.finish(spec)?;
-            let op = (self.format)(&mut self.context, field, value.ty, spec.ty);
-            self.operation(op, vec![value, spec])
         };
         if self.result == Type::PythonObject {
             value = self.operation(
@@ -146,8 +149,7 @@ pub(super) fn registered_fstring<E>(
         context: (source, operand),
         result: Type::PythonObject,
         literal: |(source, _), pieces| Ok(source.string(pieces.iter().copied())),
-        operand: |(_, child), expr| child(expr),
-        scalar: |_, _, _| Ok(None),
+        prepare: |(_, child), field, _| child(&field.expression).map(FieldValue::Operand),
         conversion: |_, value, flag| object_conversion(value, flag),
         format: |_, _, _, _| Builtin::FormatField(Box::default()),
     }
@@ -279,8 +281,7 @@ impl Checker<'_> {
                     kind: ExprKind::Str(text),
                 })
             },
-            operand: |checker, expression| checker.expr(expression),
-            scalar: |checker, field, conversion| checker.formatted_scalar(field, conversion),
+            prepare: |checker, field, conversion| checker.prepare_field(field, conversion),
             conversion: |checker, value, flag| checker.field_conversion(value, flag),
             format: |checker, field, value, spec| checker.field_format(field, value, spec),
         }
