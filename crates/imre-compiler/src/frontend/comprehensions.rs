@@ -686,21 +686,7 @@ impl Checker<'_> {
         .map(Some)
     }
 
-    /// Reduces an immediately consumed integer comprehension in its original
-    /// eager order. Integer addition has no callbacks or recoverable failures;
-    /// the private list and its element owners cannot otherwise be observed.
-    pub(super) fn sum_comprehension(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
-        let ast::Expr::ListComp(value) = expression else {
-            unreachable!("sum selected a list comprehension");
-        };
-        self.comprehension_display(
-            expression,
-            &Plan::new(&value.generators, Output::List(&value.elt)),
-            Collector::IntegerSum,
-        )
-    }
-
-    fn comprehension_display(
+    pub(super) fn comprehension_display(
         &mut self,
         expression: &ast::Expr,
         display: &Plan<'_>,

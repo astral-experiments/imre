@@ -313,13 +313,19 @@ impl PhysicalPreparation<'_, '_> {
         }) {
             value
         } else {
-            let object = source.object_operation(node)?;
-            let operands = std::iter::once(object.target).chain(object.arguments());
-            return Some(Selection::Operand(self.slotted_operation(
+            let Ok(value) = source.object_operation(
                 node,
-                |slots| ir::ExprKind::Builtin(object.opcode, slots),
-                operands,
-            )));
+                true,
+                |_| true,
+                |child| {
+                    Ok::<_, std::convert::Infallible>(super::bind_operand(
+                        &mut children,
+                        self.ordinary_input(child),
+                        ir::Type::PythonObject,
+                    ))
+                },
+            );
+            value?
         };
         Some(Selection::Operand(self.inputs(
             node,
