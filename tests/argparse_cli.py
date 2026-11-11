@@ -9,6 +9,7 @@ from pathlib import Path
 
 FIXTURES = Path(__file__).parent / "fixtures" / "argparse"
 CASES = {
+    "evaluated_default": [[], ["--repository", "explicit"]],
     "registration_errors": [[], ["const"], ["invalid"], ["both"], ["effects"], ["interrupt"],
                             ["nested-group"], ["nested-child"], ["nested-child-group"],
                             ["mutex-group"], ["mutex-child"], ["mutex-child-name"]],
@@ -185,6 +186,7 @@ REJECTED = {
     "invalid_arity": 'parser.add_argument("input", nargs="bad")',
     "zero_arity": 'parser.add_argument("input", nargs=0)',
     "mixed_positionals": 'parser.add_argument("input", "--other")',
+    "computed_default_bad_converter": 'parser.add_argument("--key", default="name".upper())\n    parser.add_argument("--number", type=complex)',
     "foreign_converter": 'parser.add_argument("--number", type=complex)',
     "choice_expression": 'parser.add_argument("--key", choices=list("ab"))',
     "metavar_arity": 'parser.add_argument("--key", nargs="?", metavar=("A", "B"))',
@@ -304,6 +306,7 @@ def main():
             )
             if (
                 check.returncode == 0
+                or name == "computed_default_bad_converter" and b"argparse type must be" not in check.stderr
                 or b"argparse" not in check.stderr.lower()
                 and b"add_argument" not in check.stderr
             ):
