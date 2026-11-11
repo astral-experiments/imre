@@ -30,9 +30,18 @@ fn template_children_use_their_eager_bindings_after_source_is_dropped() {
     };
 
     let mut scopes = HashMap::new();
+    let mut parents = HashMap::new();
     let mut captures = 0;
-    ir::walk_operand_expressions(&operand.value, &mut |node| match &node.kind {
-        ExprKind::Builtin(Builtin::RegisteredCall(call), args) => {
+    operand.region().walk(&mut |node, _| match node {
+        ir::Node::Statement(Statement::Assign(slot, value)) => {
+            if let ExprKind::Builtin(Builtin::RegisteredNamespace(_), args) = &value.kind {
+                parents.insert(*slot, args.as_slice());
+            }
+        }
+        ir::Node::Expression(Expr {
+            kind: ExprKind::Builtin(Builtin::RegisteredCall(call), args),
+            ..
+        }) => {
             let ir::RegisteredCallTarget::Method { name, .. } = &call.target else {
                 panic!("expected a method call");
             };
@@ -43,26 +52,34 @@ fn template_children_use_their_eager_bindings_after_source_is_dropped() {
             let ExprKind::Local(namespace) = scope.kind else {
                 panic!("expected a comprehension namespace");
             };
-            let mut lookups = 0;
-            ir::walk_operand_expressions(arg, &mut |child| {
-                if let ExprKind::Builtin(Builtin::RegisteredName(id), owner) = &child.kind {
-                    assert_eq!(id, "v");
-                    assert!(
-                        matches!(owner.as_slice(), [Expr {kind: ExprKind::Local(slot), ..}] if *slot == namespace)
-                    );
-                    lookups += 1;
-                }
-            });
-            assert_eq!(lookups, 1);
+            let ExprKind::Builtin(Builtin::RegisteredLocation(..), value) = &arg.kind else {
+                panic!("expected a positioned argument");
+            };
+            let [
+                Expr {
+                    kind: ExprKind::Local(target),
+                    ..
+                },
+            ] = value.as_slice()
+            else {
+                panic!("expected the comprehension target as the argument");
+            };
+            let binding = &operand.local_names[target];
+            assert_eq!(binding.name, "v");
+            assert_eq!(binding.namespace, Some(namespace));
             assert!(scopes.insert(name.as_str(), namespace).is_none());
         }
-        ExprKind::Builtin(
-            Builtin::RegisteredInterpolation {
-                expression,
-                conversion,
-            },
-            _,
-        ) => {
+        ir::Node::Expression(Expr {
+            kind:
+                ExprKind::Builtin(
+                    Builtin::RegisteredInterpolation {
+                        expression,
+                        conversion,
+                    },
+                    _,
+                ),
+            ..
+        }) => {
             assert_eq!(expression, spelling);
             assert_eq!(*conversion, Some('a'));
             captures += 1;
@@ -71,14 +88,10 @@ fn template_children_use_their_eager_bindings_after_source_is_dropped() {
     });
     assert_eq!(captures, 1);
     assert_ne!(scopes["read"], scopes["width"]);
-    for namespace in scopes.values() {
-        assert!(
-            operand
-                .local_names
-                .values()
-                .any(|binding| { binding.name == "v" && binding.namespace == Some(*namespace) })
-        );
-    }
+    assert!(parents[&scopes["width"]].is_empty());
+    assert!(
+        matches!(parents[&scopes["read"]], [Expr { kind: ExprKind::Local(parent), .. }] if *parent == scopes["width"])
+    );
 
     let mut output = Output::default();
     let file = output.data(b"lexical.py");
