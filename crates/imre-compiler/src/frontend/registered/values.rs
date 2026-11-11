@@ -804,7 +804,6 @@ pub(super) fn binary(op: Binary, left: Expr, right: Expr) -> Expr {
 pub(super) fn operation<'a, E>(
     node: &ast::Expr,
     source: RegisteredSource<'a>,
-    local: Option<Expr>,
     allow_typed_receiver: bool,
     literal: impl Fn(&Expr) -> Option<bool>,
     dynamic_receiver: impl FnOnce(&ast::Expr) -> bool,
@@ -908,12 +907,7 @@ pub(super) fn operation<'a, E>(
             }
             return Ok(Some(selected_operands(and, values)));
         }
-        ast::Expr::Name(name) => {
-            if let Some(value) = local {
-                return Ok(Some(value));
-            }
-            return Ok(Some(name_binding(&name.id)));
-        }
+        ast::Expr::Name(name) => return Ok(Some(name_binding(&name.id))),
         ast::Expr::NumberLiteral(lit) => number_literal(&lit.value, false),
         ast::Expr::StringLiteral(lit) => {
             return Ok(Some(
@@ -1074,7 +1068,6 @@ impl Region {
             _ => operation(
                 node,
                 source,
-                None,
                 false,
                 ir::control::boolean_literal,
                 |_| true,
@@ -1244,10 +1237,11 @@ impl Checker<'_> {
             let value = self.call(call)?;
             return Ok(Some(source.located(node, value)));
         }
-        let local = node
-            .as_name_expr()
-            .and_then(|n| self.names.get(n.id.as_str()))
-            .map(|&slot| self.local(slot));
+        if let Some(name) = node.as_name_expr()
+            && let Some(&slot) = self.names.get(name.id.as_str())
+        {
+            return Ok(Some(source.located(node, self.local(slot))));
+        }
         let graph = self.graph;
         let owner = self.module;
         if let ast::Expr::Compare(cmp) = node {
@@ -1294,7 +1288,6 @@ impl Checker<'_> {
         let Some(mut value) = operation(
             node,
             source,
-            local,
             string_method,
             // Even a skipped operand participates in static argument and result checking.
             |_| None,

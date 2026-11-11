@@ -3473,17 +3473,22 @@ impl SourceScope<'_> {
                 kind: ExprKind::Bind(self.slot(&target.id), Box::new(value)),
             }
         } else {
-            let local = expr.as_name_expr().and_then(|name| {
-                let slot = match (&self.comprehension, self.kind) {
-                    (None, RegisteredScope::Module) => self.names.get(name.id.as_str()).copied(),
-                    _ => self.comprehension_target(&name.id),
-                }?;
-                Some(Expr::local(slot, Type::PythonObject))
-            });
+            if let Some(name) = expr.as_name_expr() {
+                let bindings = self
+                    .comprehension
+                    .as_ref()
+                    .map_or(&self.names, |scope| &scope.targets);
+                if let Some(&slot) = bindings.get(name.id.as_str()) {
+                    return Some(self.source.located_operand(
+                        expr,
+                        Expr::local(slot, Type::PythonObject),
+                        types,
+                    ));
+                }
+            }
             values::operation(
                 expr,
                 self.source,
-                local,
                 matches!(self.kind, RegisteredScope::Class),
                 ir::control::boolean_literal,
                 |_| true,
