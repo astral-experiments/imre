@@ -1284,6 +1284,12 @@ impl Checker<'_> {
         if let ast::Expr::Compare(cmp) = node {
             // Preserve the existing checker for every link between concrete operands.
             let opaque = cmp.operands.iter().map(|operand| {
+                if let ast::Expr::Name(name) = operand
+                    && let Some(&slot) = self.names.get(name.id.as_str())
+                    && self.locals[slot] == Type::PythonObject
+                {
+                    return true;
+                }
                 let receiver = match operand {
                     ast::Expr::Call(call) => source.call(call).1,
                     ast::Expr::Attribute(field) => field.value.as_ref(),

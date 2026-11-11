@@ -138,6 +138,19 @@ fn captured_publish_emits_its_registered_callback_and_error_return() {
 }
 
 #[test]
+fn a_checked_local_uses_python_membership_alongside_native_multiplication() {
+    let source = concat!(
+        "def probe(callback, left: int, right: int):\n",
+        "    module = callback.__module__\n",
+        "    if module not in ('__main__', 'builtins'):\n",
+        "        callback(left * right)\n",
+    );
+    let body = emit_captured_body(source).functions;
+    assert!(body.contains("call i64 @imre_dyn_contains_literal_tuple("));
+    assert!(body.contains("call i64 @int_mul("));
+}
+
+#[test]
 fn checked_subtraction_selects_integer_arithmetic_in_both_calling_conventions() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("difference.py");
