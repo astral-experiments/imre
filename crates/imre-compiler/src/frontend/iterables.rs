@@ -77,40 +77,39 @@ impl Checker<'_> {
             return Ok(filtered);
         }
         let (input, convert) = self.consumer_input(source, element)?;
-        if !convert
-            && let Iteration::Container {
+        match input {
+            Iteration::Container {
                 iterable,
                 items: false,
                 start: None,
-            } = &input
-            && self.types.element(iterable.ty) == Some(Type::Str)
-            && element.is_none_or(|expected| expected == Type::Str)
-        {
-            return Ok(Expr {
-                ty: iterable.ty,
-                kind: ExprKind::Builtin(Builtin::StringListCopy, vec![iterable.clone()]),
-            });
-        }
-        if convert
-            && element.is_none_or(|ty| ty == Type::Int)
-            && let Iteration::Container {
+            } if !convert
+                && self.types.element(iterable.ty) == Some(Type::Str)
+                && element.is_none_or(|ty| ty == Type::Str) =>
+            {
+                Ok(Expr {
+                    ty: iterable.ty,
+                    kind: ExprKind::Builtin(Builtin::StringListCopy, vec![iterable]),
+                })
+            }
+            Iteration::Container {
                 iterable,
                 items: false,
                 start: None,
-            } = &input
-            && iterable.ty == Type::Str
-        {
-            // The immutable source has no callback or observable iterator
-            // identity. Keep conversion eager and preserve its first error.
-            return Ok(Expr {
-                ty: Type::ListInt,
-                kind: ExprKind::Builtin(
-                    Builtin::StringIntList(self.call_origin(call)),
-                    vec![iterable.clone()],
-                ),
-            });
+            } if convert
+                && iterable.ty == Type::Str
+                && element.is_none_or(|ty| ty == Type::Int) =>
+            {
+                // Exhaust the checked immutable text in order, including its first conversion error.
+                Ok(Expr {
+                    ty: Type::ListInt,
+                    kind: ExprKind::Builtin(
+                        Builtin::StringIntList(self.call_origin(call)),
+                        vec![iterable],
+                    ),
+                })
+            }
+            input => self.collect_list(input, convert, element, call),
         }
-        self.collect_list(input, convert, element, call)
     }
 
     /// Collect an already-evaluated iterable into a fresh list.
@@ -232,8 +231,14 @@ impl Checker<'_> {
                 self.mapping_values_iteration(view, method, receiver)?
             });
         }
-        if matches!(source, ast::Expr::ListComp(_)) {
-            let subtotal = self.sum_comprehension(source)?;
+        if let ast::Expr::ListComp(display) = source {
+            // The exact integer reduction preserves the order of the eager comprehension.
+            let plan = imre_ast::comprehension::Plan::new(
+                &display.generators,
+                imre_ast::comprehension::Output::List(&display.elt),
+            );
+            let subtotal =
+                self.comprehension_display(source, &plan, comprehensions::Collector::IntegerSum)?;
             let start = self.integer_fold_start(call, "0")?;
             return Ok(add_start(subtotal, start));
         }
@@ -453,22 +458,18 @@ impl Checker<'_> {
         element: Option<Type>,
     ) -> Result<(Iteration, bool), String> {
         if let ast::Expr::Call(call) = expression
-            && matches!(&*call.func, ast::Expr::Name(name) if name.id == "map")
-            && matches!(call.arguments.args.as_ref(), [ast::Expr::Name(name), _] if name.id == "int")
+            && self.unshadowed_builtin(&call.func, "map")
+            && let [converter, source] = call.arguments.args.as_ref()
+            && self.unshadowed_builtin(converter, "int")
         {
-            if !call.arguments.keywords.is_empty()
-                || !matches!(
-                    call.arguments.args.as_ref(),
-                    [ast::Expr::Name(name), _] if name.id == "int"
-                )
-            {
+            if !call.arguments.keywords.is_empty() {
                 return Err(error(
                     self.source,
                     call,
                     "map requires the builtin int converter and one concrete iterable",
                 ));
             }
-            return Ok((self.expansion_input(&call.arguments.args[1], None)?, true));
+            return Ok((self.expansion_input(source, None)?, true));
         }
         Ok((self.expansion_input(expression, element)?, false))
     }

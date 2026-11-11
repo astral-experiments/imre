@@ -66,8 +66,8 @@ impl RegisteredSource<'_> {
         imre_ast::direct_method(call, self.method_imports, self.private_names)
     }
 
-    pub(crate) fn call(self, call: &ast::ExprCall) -> (ir::RegisteredCall, &ast::Expr) {
-        let (target, operand) = if let Some(field) = self.direct_method(call) {
+    fn call_target(self, call: &ast::ExprCall) -> (ir::RegisteredCallTarget, &ast::Expr) {
+        if let Some(field) = self.direct_method(call) {
             (
                 ir::RegisteredCallTarget::Method {
                     name: field.attr.to_string(),
@@ -77,26 +77,41 @@ impl RegisteredSource<'_> {
             )
         } else {
             (callable_target(call), call.func.as_ref())
-        };
-        (call_site(call, target), operand)
+        }
     }
 
-    /// Select the operation and the source operands that feed it. A residual child
-    /// uses its own lowering without sending the enclosing operation to the syntax emitter.
-    pub(crate) fn object_operation(self, node: &ast::Expr) -> Option<ObjectOperation<'_>> {
-        let (opcode, target, arguments) = match node {
-            ast::Expr::Attribute(field) => (attribute_load(field), field.value.as_ref(), None),
-            ast::Expr::Call(call) => {
-                let (site, target) = self.call(call);
-                (Builtin::RegisteredCall(site), target, Some(&call.arguments))
+    /// Bind the receiver before the arguments, including physical inputs in a mixed expression.
+    pub(super) fn object_operation<E>(
+        self,
+        node: &ast::Expr,
+        allow_typed_receiver: bool,
+        dynamic_receiver: impl FnOnce(&ast::Expr) -> bool,
+        mut child: impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
+    ) -> StdResult<Option<Expr>, E> {
+        let receiver = |node: &ast::Expr, needs_protocol: bool| {
+            if needs_protocol && !dynamic_receiver(node) {
+                return Ok(None);
             }
-            _ => return None,
+            let value = child(node)?;
+            Ok((allow_typed_receiver || value.ty == Type::PythonObject).then_some(value))
         };
-        Some(ObjectOperation {
-            opcode,
-            target,
-            arguments,
-        })
+        match node {
+            ast::Expr::Call(call) => {
+                let (selection, target) = self.call_target(call);
+                let method = matches!(selection, ir::RegisteredCallTarget::Method { .. });
+                let Some(target) = receiver(target, method)? else {
+                    return Ok(None);
+                };
+                let args = imre_ast::argument_values(&call.arguments)
+                    .map(child)
+                    .collect::<StdResult<_, _>>()?;
+                Ok(Some(bound_call(call, selection, target, args)))
+            }
+            ast::Expr::Attribute(field) => Ok(receiver(&field.value, true)?.map(|value| {
+                super::operation(attribute_load(field), Type::PythonObject, vec![value])
+            })),
+            _ => Ok(None),
+        }
     }
 
     pub(super) fn located(self, node: &ast::Expr, value: Expr) -> Expr {
@@ -120,20 +135,6 @@ impl RegisteredSource<'_> {
             *hint = types.scalar_type(node);
         }
         value
-    }
-}
-
-pub(crate) struct ObjectOperation<'a> {
-    pub(crate) opcode: Builtin,
-    pub(crate) target: &'a ast::Expr,
-    arguments: Option<&'a ast::Arguments>,
-}
-
-impl<'a> ObjectOperation<'a> {
-    pub(crate) fn arguments(&self) -> impl Iterator<Item = &'a ast::Expr> + use<'a> {
-        self.arguments
-            .into_iter()
-            .flat_map(imre_ast::argument_values)
     }
 }
 
@@ -396,16 +397,6 @@ pub(crate) fn exec_literal_text<'a>(
     Ok(text)
 }
 
-fn call_site(call: &ast::ExprCall, target: ir::RegisteredCallTarget) -> ir::RegisteredCall {
-    ir::RegisteredCall {
-        range: call.range(),
-        target,
-        arguments: registered_argument_layout(&call.arguments),
-        partition_field: None,
-        explicit_scope: false,
-    }
-}
-
 pub(in crate::frontend) fn fixed_positional_arguments(call: &ast::ExprCall) -> bool {
     matches!(
         registered_argument_layout(&call.arguments),
@@ -415,18 +406,31 @@ pub(in crate::frontend) fn fixed_positional_arguments(call: &ast::ExprCall) -> b
 
 /// Invoke a checked callable value with its positional operands. Method resolution
 /// and argument packing carry additional binding data in the registered call.
-fn bound_call(call: ir::RegisteredCall, target: Expr, mut arguments: Vec<Expr>) -> Expr {
+fn bound_call(
+    call: &ast::ExprCall,
+    selection: ir::RegisteredCallTarget,
+    target: Expr,
+    mut arguments: Vec<Expr>,
+) -> Expr {
+    let layout = registered_argument_layout(&call.arguments);
     if target.ty == Type::PythonObject
-        && matches!(call.arguments, ir::RegisteredArguments::Positional)
+        && matches!(layout, ir::RegisteredArguments::Positional)
         && let ir::RegisteredCallTarget::Callable {
             end,
             suspended_name,
-        } = call.target
+        } = selection
     {
-        return positional_invoke(call.range, end, suspended_name, target, arguments);
+        return positional_invoke(call.range(), end, suspended_name, target, arguments);
     }
     arguments.insert(0, target);
-    super::operation(Builtin::RegisteredCall(call), Type::PythonObject, arguments)
+    let site = ir::RegisteredCall {
+        range: call.range(),
+        target: selection,
+        arguments: layout,
+        partition_field: None,
+        explicit_scope: false,
+    };
+    super::operation(Builtin::RegisteredCall(site), Type::PythonObject, arguments)
 }
 
 fn positional_invoke(
@@ -487,7 +491,7 @@ impl Checker<'_> {
         let arguments = imre_ast::argument_values(&call.arguments)
             .map(|arg| self.expr(arg))
             .collect::<Result<_, _>>()?;
-        let mut value = bound_call(call_site(call, callable_target(call)), target, arguments);
+        let mut value = bound_call(call, callable_target(call), target, arguments);
         if let Some(slot) = self.namespace {
             in_namespace(&mut value, self.local(slot));
         }
@@ -523,11 +527,7 @@ pub(in crate::frontend) fn name_call(
     name: &str,
     arguments: Vec<Expr>,
 ) -> Expr {
-    bound_call(
-        call_site(call, callable_target(call)),
-        name_binding(name),
-        arguments,
-    )
+    bound_call(call, callable_target(call), name_binding(name), arguments)
 }
 
 pub(super) fn number_literal(number: &ast::Number, minus: bool) -> ExprKind {
@@ -846,33 +846,10 @@ pub(super) fn operation<'a, E>(
         return Ok((allow_typed_receiver || value.ty == Type::PythonObject)
             .then(|| Expr::unary(unary.op, value, Type::PythonObject)));
     }
-    if let Some(selected) = source.object_operation(node) {
-        if !matches!(
-            selected.opcode,
-            Builtin::RegisteredCall(ir::RegisteredCall {
-                target: ir::RegisteredCallTarget::Callable { .. },
-                ..
-            })
-        ) && !dynamic_receiver(selected.target)
-        {
-            return Ok(None);
-        }
-        let target = child(selected.target)?;
-        if target.ty != Type::PythonObject && !allow_typed_receiver {
-            return Ok(None);
-        }
-        let arguments = selected
-            .arguments()
-            .map(&mut child)
-            .collect::<StdResult<_, _>>()?;
-        if let Builtin::RegisteredCall(call) = selected.opcode {
-            return Ok(Some(bound_call(call, target, arguments)));
-        }
-        return Ok(Some(super::operation(
-            selected.opcode,
-            Type::PythonObject,
-            vec![target],
-        )));
+    if let Some(value) =
+        source.object_operation(node, allow_typed_receiver, dynamic_receiver, &mut child)?
+    {
+        return Ok(Some(value));
     }
     let kind = match node {
         ast::Expr::Generator(generator)
@@ -1257,7 +1234,7 @@ impl Checker<'_> {
                     return true;
                 }
                 let receiver = match operand {
-                    ast::Expr::Call(call) => source.call(call).1,
+                    ast::Expr::Call(call) => source.call_target(call).1,
                     ast::Expr::Attribute(field) => field.value.as_ref(),
                     _ => operand,
                 };

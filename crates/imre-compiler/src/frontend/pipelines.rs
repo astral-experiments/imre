@@ -871,17 +871,15 @@ impl Checker<'_> {
                 input.evaluate.append(&mut input.acquire);
                 input
             }
-            "map" => {
+            "map" if self.unshadowed_builtin(&call.func, "map") => {
                 let [ast::Expr::Name(converter), source] = call.arguments.args.as_ref() else {
                     return Ok(Some(Iteration::Prepared(
                         self.callback_input(call, element, false)?,
                     )));
                 };
-                let to_tuple = self.unshadowed_builtin(&call.arguments.args[0], "tuple");
-                if (!to_tuple && !matches!(converter.id.as_str(), "int" | "str" | "ord"))
-                    || (converter.id == "ord"
-                        && (self.names.contains_key("ord")
-                            || self.resolve(&call.arguments.args[0]).is_some()))
+                let name = converter.id.as_str();
+                if !matches!(name, "tuple" | "int" | "str" | "ord")
+                    || !self.unshadowed_builtin(&call.arguments.args[0], name)
                 {
                     return Ok(Some(Iteration::Prepared(
                         self.callback_input(call, element, false)?,
@@ -891,7 +889,7 @@ impl Checker<'_> {
                 let source = self.expansion_input(source, None)?;
                 let mut input = self.prepare_iteration(source, call, false)?;
                 let item = self.local(input.value);
-                let converted = if to_tuple {
+                let converted = if name == "tuple" {
                     self.iterable_tuple(&item).ok_or_else(|| {
                         error(
                             self.source,
