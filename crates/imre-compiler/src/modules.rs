@@ -3484,16 +3484,17 @@ impl SourceGraph {
             && source.export("AbstractContextManager") == Some(Binding::Definition(definition))
     }
 
-    /// Resolve a bundled logging definition called implicitly by native lowering.
-    pub(crate) fn logging_definition(&self, name: &str) -> Option<DefinitionId> {
-        let module = self
-            .modules
-            .iter()
-            .find(|module| module.is_bundled(LOGGING_CLASSES))?;
+    /// Resolve an implicit call or class reference in its selected bundled module.
+    pub(crate) fn bundled_definition(&self, owner: &str, name: &str) -> Option<DefinitionId> {
+        let module = &self.modules[*self.by_name.get(owner)?];
         match module.bindings.get(name)? {
-            Binding::Definition(def) => Some(*def),
+            Binding::Definition(def) if module.bundled => Some(*def),
             _ => None,
         }
+    }
+
+    pub(crate) fn logging_definition(&self, name: &str) -> Option<DefinitionId> {
+        self.bundled_definition(LOGGING_CLASSES, name)
     }
 
     pub(crate) fn checked_diagnostic_count(&self, module: ModuleId) -> usize {

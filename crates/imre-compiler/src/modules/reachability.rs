@@ -613,11 +613,7 @@ impl Reachable {
                 }
             }
         }
-        let case_base = graph
-            .modules
-            .iter()
-            .find(|m| m.is_bundled("unittest"))
-            .and_then(|m| m.bindings.get("TestCase"));
+        let case_base = graph.bundled_definition("unittest", "TestCase");
         let mut inspected_cases = HashSet::new();
         let mut expanded = HashSet::new();
         loop {
@@ -657,10 +653,10 @@ impl Reachable {
                 // callbacks. A reachable suite run must also retain these methods.
                 if found.attributes.contains("_runRegistered")
                     && node.is_class_def_stmt()
-                    && let Some(Binding::Definition(base)) = case_base
+                    && let Some(base) = case_base
                     && inspected_cases.insert(id)
                 {
-                    found.root_unittest_class(graph, *base, id);
+                    found.root_unittest_class(graph, base, id);
                 }
                 let mut refs = References {
                     graph,
