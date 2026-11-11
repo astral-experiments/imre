@@ -1,0 +1,13 @@
+family	original_test	occurrence	original_qualifying_group	archived_stock	archived_native_O0	archived_native_O3	public_6837_stock	public_6837_O0	public_6837_O3	first_fileConfig_eval	configuration_operand	historical_credit	current_aot_credit	delta
+logging	test.test_logging.ConfigFileTest.test_config0_ok	1	declared-ids-from-065	ok	ok	ok	ok	ERROR	ERROR	logging/config.py:154	StreamHandler	1	0	-1
+logging	test.test_logging.ConfigFileTest.test_config0_using_cp_ok	1	declared-ids-from-065	ok	ok	ok	ok	ERROR	ERROR	logging/config.py:154	StreamHandler	1	0	-1
+logging	test.test_logging.ConfigFileTest.test_config1_ok	1	declared-ids-from-065	ok	ok	ok	ok	ERROR	ERROR	logging/config.py:154	StreamHandler	1	0	-1
+logging	test.test_logging.ConfigFileTest.test_config4_ok	1	declared-ids-from-065	ok	ok	ok	ok	ERROR	ERROR	logging/config.py:154	StreamHandler	1	0	-1
+logging	test.test_logging.ConfigFileTest.test_config5_ok	1	declared-ids-from-065	ok	ok	ok	ok	ERROR	ERROR	logging/config.py:154	logging.StreamHandler	1	0	-1
+logging	test.test_logging.ConfigFileTest.test_config6_ok	1	declared-ids-from-065	ok	ok	ok	ok	ERROR	ERROR	logging/config.py:154	StreamHandler	1	0	-1
+logging	test.test_logging.ConfigFileTest.test_config7_ok	1	declared-ids-from-097	ok	ok	ok	ok	ERROR	ERROR	logging/config.py:154	StreamHandler	1	0	-1
+logging	test.test_logging.ConfigFileTest.test_config8_ok	1	declared-ids-from-097	ok	ok	ok	ok	ERROR	ERROR	logging/config.py:154	FileHandler	1	0	-1
+logging	test.test_logging.ConfigFileTest.test_config9_ok	1	declared-ids-from-097	ok	ok	ok	ok	ERROR	ERROR	logging/config.py:132	"{""customfield"": ""defaultvalue""}"	1	0	-1
+logging	test.test_logging.ConfigFileTest.test_config_set_handler_names	1	declared-ids-from-097	ok	ok	ok	ok	ERROR	ERROR	logging/config.py:154	StreamHandler	1	0	-1
+logging	test.test_logging.ConfigFileTest.test_defaults_do_no_interpolation	1	declared-ids-from-097	ok	ok	ok	ok	ERROR	ERROR	logging/config.py:154	logging.StreamHandler	1	0	-1
+logging	test.test_logging.ConfigFileTest.test_logger_disabling	1	declared-ids-from-097	ok	ok	ok	ok	ERROR	ERROR	logging/config.py:154	StreamHandler	1	0	-1
