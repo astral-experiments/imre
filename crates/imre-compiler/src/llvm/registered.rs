@@ -546,6 +546,16 @@ impl Frame<'_, '_, '_> {
         Some(function.fixed_sites[i])
     }
 
+    pub(super) fn operand_range(&self, expr: &Expr) -> Option<TextRange> {
+        if let Some((function, next)) = self.fixed_sites {
+            return function.fixed_sites.get(next.get()).copied();
+        }
+        match expr.kind {
+            ExprKind::Builtin(Builtin::RegisteredLocation(range, ..), _) => Some(range),
+            _ => None,
+        }
+    }
+
     pub(super) fn load_fixed_field(&mut self, receiver: &Expr, range: TextRange) -> CheckedValue {
         let (function, _) = self
             .fixed_sites

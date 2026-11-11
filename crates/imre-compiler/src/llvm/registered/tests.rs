@@ -193,6 +193,23 @@ fn checked_subtraction_selects_integer_arithmetic_in_both_calling_conventions() 
 }
 
 #[test]
+fn nested_additions_keep_their_own_protocol_positions() {
+    let source = "def publish(n: int, send):\n    send((n + 2) + 3)\n";
+    let mut output = emit_captured_body(source);
+    let plus = output.data(b"+");
+    let fallback = format!("call i64 @imre_dyn_op_at(ptr %ctx, ptr {plus},");
+    for position in [[2, 10, 12, 15], [2, 9, 17, 20]] {
+        let pointer = output.position(position);
+        assert!(
+            output.functions.lines().any(|line| {
+                line.contains(&fallback) && line.ends_with(&format!("ptr {pointer})"))
+            }),
+            "missing arithmetic site {position:?}"
+        );
+    }
+}
+
+#[test]
 fn integer_literal_handle_is_only_loaded_on_the_protocol_edge() {
     let mut output = emit_captured_body("def scale(n: int, send):\n    send(n * 31415927 + 17)\n");
     let literal = output.data(b"31415927");

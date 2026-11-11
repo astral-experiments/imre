@@ -2163,7 +2163,23 @@ pub(super) unsafe extern "C" fn imre_dyn_op_at(
         return NONE;
     }
     // SAFETY: the emitter supplies null or a native [4 x i32] module constant.
-    finish_at(ctx, result, unsafe { span.as_ref() })
+    let span = unsafe { span.as_ref() };
+    if let Err(error) = &mut result
+        && let Some(&[line, start, operator, end]) = span
+        && matches!(op, "+" | "-" | "*" | "%")
+    {
+        error.tracing().source_position = Some((
+            line,
+            value::TracebackSpan {
+                start,
+                end,
+                end_line: line,
+                anchor: value::TracebackAnchor::Operator(operator),
+            },
+        ));
+        return finish(ctx, result);
+    }
+    finish_at(ctx, result, span)
 }
 
 /// Publish a continued expression's source line without changing its statement's GC roots.
