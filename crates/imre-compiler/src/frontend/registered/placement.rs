@@ -48,6 +48,36 @@ mod tests {
     }
 
     #[test]
+    fn file_object_recovery_places_the_checked_arithmetic_body() {
+        let text = concat!(
+            "def scale(n: int) -> int:\n    return n * 31415927 + 17\n\n",
+            "m = map(int, \"12\")\nprint(scale(3), list(m))\n",
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.py");
+        std::fs::write(&path, text).unwrap();
+        let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
+        let (_, lowered) =
+            caller_cache::observe_lowerings(|| crate::checked_lower(&mut graph).unwrap());
+        assert_eq!(lowered.iter().filter(|name| *name == "scale").count(), 1);
+        let functions = graph.registered_functions();
+        let placed = &functions[&graph.entry][&TextSize::default()];
+        let function = &placed.function;
+        assert_eq!(function.returns, Type::PythonObject);
+        assert_eq!(function.locals[function.params[0]], Type::Int);
+        assert_eq!(placed.local_names[&function.params[0]].name, "n");
+        let positions: Vec<_> = placed
+            .fixed_sites
+            .iter()
+            .map(|range| (u32::from(range.start()), u32::from(range.end())))
+            .collect();
+        assert_eq!(
+            positions,
+            [(30, 54), (37, 54), (37, 49), (37, 38), (41, 49), (52, 54)]
+        );
+    }
+
+    #[test]
     fn original_sites_survive_only_unchanged_checked_operations() {
         let text = concat!(
             "class Receiver:\n    def read(self, value: str) -> str:\n        return value\n",
