@@ -167,7 +167,7 @@ fn checked_class_site_uses_registered_metadata_after_module_erasure() {
 fn typing_initializer_binds_the_checked_reveal_type_definition() {
     use crate::ir::{Builtin, DefinitionSite, ExprKind};
 
-    let source = include_str!("../../../../stdlib/typing.py");
+    let source = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/stdlib/typing.py"));
     let start =
         ruff_text_size::TextSize::try_from(source.find("def reveal_type[T]").unwrap()).unwrap();
     PreparedBody::with_module(
