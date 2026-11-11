@@ -617,6 +617,14 @@ fn dormant_thread_keeps_an_imported_modules_exact_types() {
             "3:17",
         ),
         (
+            "def measure():\n    values: list[int] = [1]\n    pair = (True, 2)\n    values[0], n = pair\n",
+            "4:5",
+        ),
+        (
+            "def measure():\n    values: list[int] = [1]\n    alias = values\n    pair = (True, 2)\n    alias[0], n = pair\n",
+            "5:5",
+        ),
+        (
             "def measure():\n    values: list[int] = [True]\n    print(values)\n",
             "2:26",
         ),
@@ -646,6 +654,11 @@ fn dormant_thread_keeps_an_imported_modules_exact_types() {
     for source in [
         "def measure():\n    value = 1\n    value = 'ready'\n    print(value)\n",
         "def measure():\n    values = [1]\n    values.append(True)\n    print(values)\n",
+        "def measure():\n    values = [1]\n    pair = (True, 2)\n    values[0], n = pair\n",
+        concat!(
+            "def measure():\n    values: list[int] = [1]\n    alias = values\n    alias = [2]\n",
+            "    pair = (True, 2)\n    alias[0], n = pair\n",
+        ),
         concat!(
             "def measure():\n    typed: list[int] = [1]\n    other = [2]\n    alias = typed\n",
             "    for alias in [other]:\n        pass\n    alias.append(True)\n",
