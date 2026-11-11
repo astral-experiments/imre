@@ -1,23 +1,16 @@
 //! Prepare the operands evaluated by function, class, and module annotation providers.
 
-use std::collections::HashMap;
-
 use ruff_python_ast as ast;
-use ruff_python_ast::statement_visitor::{StatementVisitor, walk_stmt};
 use ruff_python_parser::Parsed;
 use ruff_text_size::{Ranged, TextRange, TextSize};
+use std::collections::HashMap;
 
 use super::registered::values::Region;
 use super::{
     RegisteredOperand, RegisteredScope, RegisteredSource, annotation_expression,
-    annotation_spelling, parameter_annotations,
+    annotation_spelling,
 };
 use crate::ir::{Builtin, Expr, ExprKind, Type};
-
-pub(crate) struct AnnotationOperands<R> {
-    pub(crate) values: HashMap<TextSize, Expr>,
-    pub(crate) children: HashMap<TextSize, AnnotationBody<R>>,
-}
 
 pub(crate) struct AnnotationBody<R> {
     pub(crate) code: AnnotationCode,
@@ -42,9 +35,6 @@ impl AnnotationCode {
         })
     }
 }
-
-type PrepareChild<'a, R> =
-    dyn Fn(&str, &Parsed<ast::ModExpression>) -> Option<AnnotationBody<R>> + 'a;
 
 pub(super) fn checked_annotation_value(
     expr: &ast::Expr,
@@ -75,137 +65,61 @@ pub(super) fn unpack_annotation(value: Expr) -> Expr {
     }
 }
 
-/// Prepare each operand in its declaring source and key it by its expression’s byte offset.
-pub(crate) fn annotation_operands<R>(
-    stmts: &[ast::Stmt],
-    string_annotations: bool,
+/// Prepare an annotation at its declaration. Only a linked string child needs a site identity.
+pub(super) fn annotation_operand<R>(
+    expr: &ast::Expr,
+    module: bool,
     source: RegisteredSource<'_>,
+    string_annotations: bool,
     bundled: bool,
-    prepare_child: impl Fn(&str, &Parsed<ast::ModExpression>) -> Option<AnnotationBody<R>>,
-) -> AnnotationOperands<R> {
-    #[derive(Clone, Copy)]
-    enum Scope {
-        Module,
-        Class,
-        Function,
-    }
-
-    struct Strings<'a, R> {
-        operands: AnnotationOperands<R>,
-        prepare_child: &'a PrepareChild<'a, R>,
-        source: RegisteredSource<'a>,
-        string_annotations: bool,
-        bundled: bool,
-        scope: Scope,
-    }
-
-    impl<R> Strings<'_, R> {
-        fn record(&mut self, expr: &ast::Expr, module: bool) {
-            let text = if self.string_annotations {
-                annotation_spelling(expr)
-            } else if let ast::Expr::StringLiteral(literal) = expr
-                && !self.source.has_templates
-                && self.source.replacements.is_empty()
-            {
-                literal.value.to_str().to_owned()
-            } else {
-                let value = if module {
-                    Region::Suite.operand(expr, self.source)
-                } else {
-                    checked_annotation_value(expr, |input| {
-                        Region::Suite.operand(input, self.source)
-                    })
-                };
-                if let Some(value) = value {
-                    self.operands.values.insert(expr.start(), value);
-                }
-                return;
-            };
-            let body = if self.bundled {
-                None
-            } else {
-                let expanded;
-                let expression = if text
-                    .trim_start_matches(imre_ast::strings::python_whitespace)
-                    .starts_with('*')
-                {
-                    expanded = imre_ast::forward_refs::starred_expression(&text);
-                    expanded.as_str()
-                } else {
-                    &text
-                };
-                annotation_expression(expression)
-                    .and_then(|parsed| (self.prepare_child)(expression, &parsed))
-            };
-            let site = expr.start();
-            let kind = match body {
-                Some(body) => {
-                    self.operands.children.insert(site, body);
-                    ExprKind::Builtin(
-                        Builtin::BindAnnotationExpression {
-                            site,
-                            spelling: text,
-                        },
-                        Vec::new(),
-                    )
-                }
-                None => ExprKind::Str(text),
-            };
-            self.operands.values.insert(
-                site,
-                Expr {
-                    ty: Type::Str,
-                    kind,
-                },
-            );
-        }
-
-        fn nested(&mut self, stmts: &[ast::Stmt], scope: Scope) {
-            let enclosing = std::mem::replace(&mut self.scope, scope);
-            self.visit_body(stmts);
-            self.scope = enclosing;
-        }
-    }
-
-    impl<'a, R> StatementVisitor<'a> for Strings<'_, R> {
-        fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
-            match stmt {
-                ast::Stmt::FunctionDef(def) => {
-                    for (_, annotation) in
-                        parameter_annotations(&def.parameters, def.returns.as_deref())
-                    {
-                        self.record(annotation, false);
-                    }
-                    self.nested(&def.body, Scope::Function);
-                }
-                ast::Stmt::ClassDef(class) => {
-                    self.nested(&class.body, Scope::Class);
-                }
-                ast::Stmt::AnnAssign(ann) if ann.simple && ann.target.is_name_expr() => {
-                    match self.scope {
-                        Scope::Module => self.record(&ann.annotation, true),
-                        Scope::Class => self.record(&ann.annotation, false),
-                        Scope::Function => {}
-                    }
-                }
-                _ => walk_stmt(self, stmt),
-            }
-        }
-    }
-
-    let mut strings = Strings {
-        operands: AnnotationOperands {
-            values: HashMap::new(),
-            children: HashMap::new(),
-        },
-        prepare_child: &prepare_child,
-        source,
-        string_annotations,
-        bundled,
-        scope: Scope::Module,
+    children: &mut HashMap<TextSize, AnnotationBody<R>>,
+    prepare_child: impl FnOnce(&str, &Parsed<ast::ModExpression>) -> Option<AnnotationBody<R>>,
+) -> Option<Expr> {
+    let text = if string_annotations {
+        annotation_spelling(expr)
+    } else if let ast::Expr::StringLiteral(literal) = expr
+        && !source.has_templates
+        && source.replacements.is_empty()
+    {
+        literal.value.to_str().to_owned()
+    } else {
+        return if module {
+            Region::Suite.operand(expr, source)
+        } else {
+            checked_annotation_value(expr, |input| Region::Suite.operand(input, source))
+        };
     };
-    strings.visit_body(stmts);
-    strings.operands
+    let body = if bundled {
+        None
+    } else {
+        let expanded;
+        let expression = if text
+            .trim_start_matches(imre_ast::strings::python_whitespace)
+            .starts_with('*')
+        {
+            expanded = imre_ast::forward_refs::starred_expression(&text);
+            expanded.as_str()
+        } else {
+            &text
+        };
+        annotation_expression(expression).and_then(|parsed| prepare_child(expression, &parsed))
+    };
+    let kind = if let Some(child) = body {
+        children.insert(expr.start(), child);
+        ExprKind::Builtin(
+            Builtin::BindAnnotationExpression {
+                site: expr.start(),
+                spelling: text,
+            },
+            Vec::new(),
+        )
+    } else {
+        ExprKind::Str(text)
+    };
+    Some(Expr {
+        ty: Type::Str,
+        kind,
+    })
 }
 
 #[cfg(test)]
@@ -234,6 +148,46 @@ pub(super) fn test_annotation_body(
 mod tests {
     use super::*;
 
+    struct ObservedOperands {
+        values: HashMap<TextSize, Expr>,
+        children: HashMap<TextSize, AnnotationBody<()>>,
+    }
+
+    fn observe(
+        stmts: &[ast::Stmt],
+        source: RegisteredSource<'_>,
+        postponed: bool,
+        bundled: bool,
+    ) -> ObservedOperands {
+        let mut names = imre_ast::Names::default();
+        names.string_annotations = postponed;
+        let mut observed = ObservedOperands {
+            values: HashMap::new(),
+            children: HashMap::new(),
+        };
+        super::super::registered::collect_sites(stmts, &names, source, |expr, module| {
+            let value = annotation_operand(
+                expr,
+                module,
+                source,
+                postponed,
+                bundled,
+                &mut observed.children,
+                test_annotation_body,
+            );
+            if let Some(value) = &value {
+                assert!(
+                    observed
+                        .values
+                        .insert(expr.start(), value.clone())
+                        .is_none()
+                );
+            }
+            value
+        });
+        observed
+    }
+
     #[test]
     fn prepare_string_children_in_their_declaring_scope() {
         let text = "class C:\n    field: '(lambda: 1)()'\n    def f(self, arg: 'list[int]') -> 'Name':\n        local: 'skip[T]'\n        async def nested(arg: 'list[int]'): pass\n";
@@ -249,13 +203,7 @@ mod tests {
             generators: None,
             lambdas: None,
         };
-        let sites = annotation_operands(
-            &parsed.syntax().body,
-            false,
-            source,
-            false,
-            test_annotation_body,
-        );
+        let sites = observe(&parsed.syntax().body, source, false, false);
         assert_eq!(sites.values.len(), 4);
         for (start, _) in text.match_indices("'list[int]'") {
             let range = sites.children[&TextSize::try_from(start).unwrap()]
@@ -288,13 +236,7 @@ mod tests {
             generators: None,
             lambdas: None,
         };
-        let sites = annotation_operands(
-            &parsed.syntax().body,
-            false,
-            source,
-            false,
-            test_annotation_body,
-        );
+        let sites = observe(&parsed.syntax().body, source, false, false);
         let offset = |s| TextSize::try_from(text.find(s).unwrap()).unwrap();
         assert!(sites.children.is_empty());
         for spelling in ["mark(1)", "token", "lambda"] {
@@ -343,13 +285,7 @@ after: K[L]
         };
         let site = |spelling| TextSize::try_from(text.find(spelling).unwrap()).unwrap();
         for bundled in [false, true] {
-            let sites = annotation_operands(
-                &parsed.syntax().body,
-                true,
-                source,
-                bundled,
-                test_annotation_body,
-            );
+            let sites = observe(&parsed.syntax().body, source, true, bundled);
             assert_eq!(sites.values.len(), 6);
             assert_eq!(sites.children.len(), if bundled { 0 } else { 6 });
             for spelling in ["A[B]", "C[D]", "E[F]", "*Items", "I[J]", "K[L]"] {

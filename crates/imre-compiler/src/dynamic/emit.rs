@@ -484,18 +484,13 @@ impl<'a> PreparedBody<'a> {
             ..values
         };
         // Annotation providers use the completed lambda sites for this source unit.
-        let crate::frontend::AnnotationOperands {
-            values: annotation_values,
-            children: annotation_children,
-        } = crate::frontend::annotation_operands(
+        let (mut sites, annotation_children) = crate::frontend::registered_sites(
             &body,
-            private_names.string_annotations,
+            &private_names,
             values,
             bundled,
             |text, parsed| Self::prepare_annotation(text, parsed, python_optimization),
         );
-        let mut sites =
-            crate::frontend::registered_sites(&body, &private_names, values, annotation_values);
         let mut operations = sites.operations;
         let mut type_aliases = HashMap::new();
         for (alias, class) in aliases {
@@ -1910,21 +1905,16 @@ mod tests {
             generators: Some(&generators),
             ..source
         };
-        let annotations = crate::frontend::annotation_operands(
+        let classes = crate::frontend::registered_sites(
             body,
-            prepared.source.private_names.string_annotations,
+            &prepared.source.private_names,
             source,
             prepared.source.bundled,
             |text, parsed| {
                 PreparedBody::prepare_annotation(text, parsed, prepared.source.python_optimization)
             },
-        );
-        let classes = crate::frontend::registered_sites(
-            body,
-            &prepared.source.private_names,
-            source,
-            annotations.values,
         )
+        .0
         .declarations
         .into_iter()
         .filter_map(|site| match site {
