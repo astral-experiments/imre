@@ -840,8 +840,19 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 self.binary_expression(*op, left, right, expr, site, usage)
             }
             ExprKind::Builtin(Builtin::FormatJoin, parts) => match &mut self.0 {
-                Entry::Native(emitter) => CheckedValue::owned(emitter.concat(expr)),
-                Entry::Registered(frame) => frame.builtin(&Builtin::FormatJoin, parts),
+                Entry::Native(emitter) => {
+                    CheckedValue::owned(emitter.concat(parts.iter().collect()))
+                }
+                Entry::Registered(frame) => {
+                    let mark = frame.temporary_mark();
+                    CheckedValue::handle(frame.unwind_stack_operands(&mark, |frame| {
+                        let values: Vec<_> = parts.iter().map(|part| frame.evaluate_handle(part)).collect();
+                        let (values, count) = frame.handle_array(&values);
+                        frame.checked(&format!(
+                            "call i64 @imre_dyn_format_parts(ptr %ctx, i64 {mark}, ptr {values}, i64 {count})"
+                        ))
+                    }))
+                }
             },
             ExprKind::Invoke { callable, args } => self.invoke(callable, args, expr.ty),
             ExprKind::Builtin(
@@ -1158,7 +1169,8 @@ impl Emitter<'_, '_> {
         expression: &Expr,
     ) -> Option<CheckedValue> {
         if expression.string_addends().is_some() {
-            return Some(CheckedValue::owned(self.concat(expression)));
+            let parts = super::concat_leaves(self, expression);
+            return Some(CheckedValue::owned(self.concat(parts)));
         }
         if matches!(op, Binary::Add)
             && matches!(&left.kind, ExprKind::Builtin(Builtin::IntBounded { .. }, _))

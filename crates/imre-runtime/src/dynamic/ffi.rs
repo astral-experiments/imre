@@ -725,7 +725,6 @@ impl Context {
                 self.flag_or_integer(class, result)
             }
             "format_conversion" => self.format_conversion(a, b),
-            "format_concat" => self.concat_strings(a, b),
             "format" => {
                 let value = if b == NONE {
                     a
@@ -3104,21 +3103,31 @@ pub(super) unsafe extern "C" fn imre_dyn_unwind_operands(ctx: *mut Context, mark
     }
 }
 
-/// Keep a completed joined string while popping its inputs in Python evaluation-stack order.
+/// Join the checked f-string parts and pop them in Python evaluation-stack order.
+///
+/// # Safety
+/// The generated caller owns the context, retains the readable array of `count`
+/// handles, and took `mark` before evaluating this expression.
 #[unsafe(no_mangle)]
-pub(super) unsafe extern "C" fn imre_dyn_finish_format_join(
+pub(super) unsafe extern "C" fn imre_dyn_format_parts(
     ctx: *mut Context,
     mark: usize,
-    result: Id,
-) {
-    // SAFETY: the result and operand boundary belong to the caller's active frame.
-    let ctx = unsafe { &mut *ctx };
-    if ctx.heap.observes_released_roots() {
-        for slot in (mark + 1..ctx.heap.temporary_mark()).rev() {
-            ctx.discard_temporaries(slot, [result]);
+    values: *const Id,
+    count: usize,
+) -> Id {
+    // SAFETY: the caller owns the context and roots the parts through the join.
+    let (ctx, values) = unsafe { (&mut *ctx, live_handles(values, count)) };
+    let joined = ctx.join_formatted(values);
+    let result = finish(ctx, joined);
+    if ctx.pending.is_none() {
+        if ctx.heap.observes_released_roots() {
+            for slot in (mark + 1..ctx.heap.temporary_mark()).rev() {
+                ctx.discard_temporaries(slot, [result]);
+            }
         }
+        ctx.discard_temporaries(mark, [result]);
     }
-    ctx.discard_temporaries(mark, [result]);
+    result
 }
 
 /// Publish surviving operands before collecting, returning the boundary above the first one.

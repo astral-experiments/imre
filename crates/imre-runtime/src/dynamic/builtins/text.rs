@@ -2390,6 +2390,93 @@ fn translate_str(ctx: &mut Context, receiver: Id, table: Id) -> Result<Id> {
     Ok(ctx.text(text.into_string()))
 }
 
+enum JoinInput<'a> {
+    Iterable(Id),
+    Formatted(&'a [Id]),
+}
+
+impl Context {
+    /// Join the already formatted f-string fields without invoking string subclasses' addition.
+    pub(in super::super) fn join_formatted(&mut self, values: &[Id]) -> Result<Id> {
+        let empty = self.text("");
+        join_strings(self, empty, JoinInput::Formatted(values))
+    }
+}
+
+fn join_strings(ctx: &mut Context, receiver: Id, values: JoinInput<'_>) -> Result<Id> {
+    let collected;
+    let values = match values {
+        JoinInput::Formatted(values) => values,
+        JoinInput::Iterable(id) => match ctx.heap.get(id) {
+            Value::List(items) | Value::Tuple(items) => items.as_slice(),
+            _ => {
+                collected = ctx.items(id)?;
+                &collected
+            }
+        },
+    };
+    let mut surrogate = matches!(
+        ctx.heap.get(ctx.scalar_value(receiver)),
+        Value::SurrogateStr(_)
+    );
+    for (index, &item) in values.iter().enumerate() {
+        let Some(storage) = ctx.string_storage(item) else {
+            let class = ctx.exact_type(item)?;
+            let name = ctx.class_name(class);
+            return Err(type_error(format!(
+                "sequence item {index}: expected str instance, {} found",
+                &name[..name.floor_char_boundary(80)]
+            )));
+        };
+        if values.len() == 1 {
+            return Ok(storage);
+        }
+        surrogate |= matches!(ctx.heap.get(storage), Value::SurrogateStr(_));
+    }
+    if surrogate {
+        let sep = ctx.string_codepoints(receiver)?;
+        let mut output = Vec::new();
+        for (index, &item) in values.iter().enumerate() {
+            let points = ctx.string_codepoints(item)?;
+            if index != 0 {
+                output
+                    .try_reserve(sep.len())
+                    .map_err(|_| crate::Error::memory_error())?;
+                output.extend_from_slice(&sep);
+            }
+            output
+                .try_reserve(points.len())
+                .map_err(|_| crate::Error::memory_error())?;
+            output.extend_from_slice(&points);
+        }
+        return Ok(ctx.text_codepoints(output));
+    }
+    let sep = ctx.str_value(receiver)?;
+    let mut length = sep
+        .len()
+        .checked_mul(values.len().saturating_sub(1))
+        .ok_or_else(crate::Error::memory_error)?;
+    for &item in values {
+        length = length
+            .checked_add(ctx.str_value(item)?.len())
+            .ok_or_else(crate::Error::memory_error)?;
+    }
+    if length == 0 && sep.is_empty() {
+        return Ok(ctx.string_storage(receiver).unwrap());
+    }
+    let mut output = String::new();
+    output
+        .try_reserve_exact(length)
+        .map_err(|_| crate::Error::memory_error())?;
+    for (index, &item) in values.iter().enumerate() {
+        if index != 0 {
+            output.push_str(sep);
+        }
+        output.push_str(ctx.str_value(item)?);
+    }
+    Ok(ctx.text(output))
+}
+
 pub(super) fn method(
     ctx: &mut Context,
     owner: &str,
@@ -2960,74 +3047,7 @@ pub(super) fn method(
         }
         positional(name, kwargs)?;
         arity(name, args, 1, 1)?;
-        let collected;
-        let values = match ctx.heap.get(args[0]) {
-            Value::List(items) | Value::Tuple(items) => items.as_slice(),
-            _ => {
-                collected = ctx.items(args[0])?;
-                &collected
-            }
-        };
-        let mut surrogate = matches!(
-            ctx.heap.get(ctx.scalar_value(receiver)),
-            Value::SurrogateStr(_)
-        );
-        for (index, &item) in values.iter().enumerate() {
-            let Some(storage) = ctx.string_storage(item) else {
-                let class = ctx.exact_type(item)?;
-                let name = ctx.class_name(class);
-                return Err(type_error(format!(
-                    "sequence item {index}: expected str instance, {} found",
-                    &name[..name.floor_char_boundary(80)]
-                )));
-            };
-            if values.len() == 1 {
-                return Ok(storage);
-            }
-            surrogate |= matches!(ctx.heap.get(storage), Value::SurrogateStr(_));
-        }
-        if surrogate {
-            let sep = ctx.string_codepoints(receiver)?;
-            let mut output = Vec::new();
-            for (index, &item) in values.iter().enumerate() {
-                let points = ctx.string_codepoints(item)?;
-                if index != 0 {
-                    output
-                        .try_reserve(sep.len())
-                        .map_err(|_| crate::Error::memory_error())?;
-                    output.extend_from_slice(&sep);
-                }
-                output
-                    .try_reserve(points.len())
-                    .map_err(|_| crate::Error::memory_error())?;
-                output.extend_from_slice(&points);
-            }
-            return Ok(ctx.text_codepoints(output));
-        }
-        let sep = ctx.str_value(receiver)?;
-        let mut length = sep
-            .len()
-            .checked_mul(values.len().saturating_sub(1))
-            .ok_or_else(crate::Error::memory_error)?;
-        for &item in values {
-            length = length
-                .checked_add(ctx.str_value(item)?.len())
-                .ok_or_else(crate::Error::memory_error)?;
-        }
-        if length == 0 && sep.is_empty() {
-            return Ok(ctx.string_storage(receiver).unwrap());
-        }
-        let mut output = String::new();
-        output
-            .try_reserve_exact(length)
-            .map_err(|_| crate::Error::memory_error())?;
-        for (index, &item) in values.iter().enumerate() {
-            if index != 0 {
-                output.push_str(sep);
-            }
-            output.push_str(ctx.str_value(item)?);
-        }
-        return Ok(ctx.text(output));
+        return join_strings(ctx, receiver, JoinInput::Iterable(args[0]));
     }
     if matches!(name, "startswith" | "endswith") {
         positional(name, kwargs)?;
