@@ -14,6 +14,7 @@ use crate::frontend::{
 };
 use crate::ir::DisplayKind;
 use crate::ir::{self, Binary, Builtin, Expr, ExprKind, Statement, Type};
+use crate::llvm::LoopTarget;
 use crate::llvm::body::FunctionBody;
 pub(crate) use abi::{ABI, CallArguments, Output, permanent};
 use abi::{GUARDED_LIT, GUARDED_NAMED_OP, NAMED_OP};
@@ -284,13 +285,6 @@ pub(super) struct IterationState {
     first_slot: usize,
     cursors: HashMap<usize, ir::IterNextKind>,
     in_expression: bool,
-}
-
-/// Branches to the next pull and to exhaustion keep the loop's cursor live.
-pub(crate) struct LoopTarget {
-    edges: LoopEdges,
-    step_depth: usize,
-    exit_depth: usize,
 }
 
 pub(super) struct ExpressionScope {
@@ -859,14 +853,14 @@ impl Frame<'_, '_, '_> {
         self.code.regions.pop();
     }
     pub(crate) fn enter_loop(&mut self, edges: &LoopEdges) {
-        let depth = self.code.regions.len();
-        self.push_loop(edges.clone(), depth, depth);
+        let cleanup_depth = self.code.regions.len();
+        self.code.loops.push(LoopTarget {
+            edges: edges.clone(),
+            cleanup_depth,
+        });
     }
     pub(crate) fn leave_loop(&mut self) {
         self.code.loops.pop();
-    }
-    pub(crate) fn transfer_loop(&mut self, stmt: &Statement) {
-        self.unwind_loop(stmt);
     }
     pub(crate) fn begin_step(&mut self, mark: &str) {
         self.code.line(&format!(

@@ -157,18 +157,7 @@ impl<'p> Frame<'_, '_, 'p> {
         }
     }
 
-    pub(super) fn unwind_loop(&mut self, stmt: &Statement) {
-        let target = self.loops.last().expect("loop transfer");
-        let (label, depth) = match stmt {
-            Statement::Break => (&target.edges.done, target.exit_depth),
-            Statement::Continue => (&target.edges.step, target.step_depth),
-            Statement::Exhaust => (&target.edges.exhausted, target.step_depth),
-            _ => unreachable!("loop transfer"),
-        };
-        self.jump_from_regions(label.clone(), depth);
-    }
-
-    pub(super) fn jump_from_regions(&mut self, label: String, depth: usize) {
+    pub(in crate::llvm) fn jump_from_regions(&mut self, label: String, depth: usize) {
         self.exit_regions(
             depth,
             &Completion::Jump {

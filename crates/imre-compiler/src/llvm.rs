@@ -53,7 +53,7 @@ mod unions;
 mod units;
 
 pub(crate) use module_registration::ModuleLauncher;
-use operations::CheckedBody;
+use operations::{CheckedBody, LoopEdges};
 use units::Output;
 pub(crate) use units::emit_units;
 
@@ -301,12 +301,13 @@ struct LengthSnapshot {
 
 /// Finally routing chooses the eventual transfer before it reaches either
 /// the break exit or the distinct normal-exhaustion/else entry.
-#[derive(Clone)]
 struct LoopTarget {
-    end: String,
-    exhausted: String,
-    next: String,
+    edges: LoopEdges,
     cleanup_depth: usize,
+}
+
+struct NativeLoop {
+    target: LoopTarget,
     raw_subtotal: Option<String>,
 }
 
@@ -861,7 +862,7 @@ struct Emitter<'a, 'module> {
     enum_members: Vec<[usize; 3]>,
     http_members: Vec<Option<(u64, usize, usize)>>,
     literal_globals: Vec<Option<String>>,
-    loops: Vec<LoopTarget>,
+    loops: Vec<NativeLoop>,
     locals: Vec<Type>,
     directory_slot_count: usize,
     borrowed_params: Vec<bool>,
@@ -3093,11 +3094,15 @@ impl Emitter<'_, '_> {
                 }
                 let current = self.load(*cursor, small_cursor);
                 self.store(*target, &current);
-                self.loops.push(LoopTarget {
-                    end: end.clone(),
-                    exhausted: exhausted.clone(),
-                    next: increment.clone(),
-                    cleanup_depth: self.cleanups.len(),
+                self.loops.push(NativeLoop {
+                    target: LoopTarget {
+                        edges: LoopEdges {
+                            step: increment.clone(),
+                            exhausted: exhausted.clone(),
+                            done: end.clone(),
+                        },
+                        cleanup_depth: self.cleanups.len(),
+                    },
                     raw_subtotal: None,
                 });
                 self.block(body);
