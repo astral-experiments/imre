@@ -765,10 +765,8 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 Entry::Registered(frame) => frame.sequence(values, DisplayKind::Set),
             },
             ExprKind::Compare(values, ops) => {
-                CheckedValue::owned(self.fixed().comparisons(values, ops))
-            }
-            ExprKind::Builtin(Builtin::RegisteredCompare(ops), values) => {
-                self.registered_comparisons(values, ops, false)
+                let truth = matches!(self.0, Entry::Native(_));
+                self.comparisons(values, ops, truth)
             }
             ExprKind::Conditional(test, yes, no) => self.conditional_value(test, yes, no),
             ExprKind::Boolean(..) | ExprKind::BooleanValue(..) => self.boolean_expression(expr),

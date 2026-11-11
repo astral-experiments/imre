@@ -9,6 +9,7 @@
 
 use crate::callables::Targets;
 use crate::ir::{Expr, ExprKind, Module, Statement, Type};
+use ruff_python_ast::CmpOp;
 
 pub(crate) struct ExceptionEffects {
     functions: Vec<bool>,
@@ -130,6 +131,9 @@ fn expression(value: &Expr, functions: &[bool], targets: Context<'_>) -> bool {
         | ExprKind::Bytes(_)
         | ExprKind::None
         | ExprKind::Local(_) => false,
+        ExprKind::Compare(_, ops) if crate::ir::Compare::uses_python_protocol(value.ty, ops) => {
+            true
+        }
         // Fixed-offset datetime ordering raises on a mix of naive and aware operands.
         // Preserve this effect across a direct call even when both operands are simple locals.
         ExprKind::Compare(values, ops)
@@ -137,7 +141,7 @@ fn expression(value: &Expr, functions: &[bool], targets: Context<'_>) -> bool {
                 matches!(
                     value.ty,
                     crate::ir::Type::Calendar(crate::ir::CalendarType::DateTime)
-                ) && !matches!(op, crate::ir::Compare::Equal | crate::ir::Compare::NotEqual)
+                ) && !matches!(op, CmpOp::Eq | CmpOp::NotEq)
             }) =>
         {
             true

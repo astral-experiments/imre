@@ -1,6 +1,7 @@
 //! Borrow a selected list field while the caller still owns its record.
 
-use crate::ir::{Builtin, Compare, Expr, ExprKind, Function, Statement, Type};
+use crate::ir::{Builtin, Expr, ExprKind, Function, Statement, Type};
+use ruff_python_ast::CmpOp;
 
 pub(crate) struct Getter {
     pub root: usize,
@@ -52,9 +53,7 @@ pub(crate) fn selected(call: &Expr, functions: &[Function]) -> Option<Getter> {
     let test = match &test.kind {
         ExprKind::Local(_) if test.ty == Type::Bool => apply(test)?,
         ExprKind::Compare(values, ops) => {
-            let ([a, b], [Compare::Equal | Compare::NotEqual]) =
-                (values.as_slice(), ops.as_slice())
-            else {
+            let ([a, b], [CmpOp::Eq | CmpOp::NotEq]) = (values.as_slice(), ops.as_slice()) else {
                 return None;
             };
             if a.ty != b.ty || !matches!(a.ty, Type::Bool | Type::StrEnum(_)) {

@@ -293,7 +293,7 @@ impl Checker<'_> {
         };
         Ok(scope.finish(Expr {
             ty: Type::Bool,
-            kind: ExprKind::Compare(inputs, vec![op]),
+            kind: ExprKind::Compare(inputs, vec![op.operator()]),
         }))
     }
 

@@ -6,6 +6,7 @@
 //! bound, but no relationship to a container's later length is retained. Indexed
 //! accesses must keep checking current bounds, including after alias mutation.
 
+use ruff_python_ast::CmpOp;
 use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
 
@@ -976,6 +977,12 @@ impl Analyzer {
                     .unwrap_or_else(|| State::unknown(state.0.len()));
                 result
             }
+            ExprKind::Compare(values, ops) if Compare::uses_python_protocol(expression.ty, ops) => {
+                for value in values {
+                    self.expression(value, state, record);
+                }
+                Interval::UNKNOWN
+            }
             ExprKind::Compare(values, ops) => {
                 self.expression(&values[0], state, record);
                 let mut current = Some(state.clone());
@@ -1149,7 +1156,7 @@ impl Analyzer {
                     alternatives
                 }
             }
-            ExprKind::Compare(values, ops) => {
+            ExprKind::Compare(values, ops) if !Compare::uses_python_protocol(test.ty, ops) => {
                 let mut alternatives = None;
                 let mut current = Some(state);
                 for (index, &op) in ops.iter().enumerate() {
@@ -1181,7 +1188,7 @@ impl Analyzer {
         &mut self,
         left: &Expr,
         right: &Expr,
-        op: Compare,
+        op: CmpOp,
         truth: bool,
         state: State,
     ) -> Option<State> {
@@ -1192,6 +1199,9 @@ impl Analyzer {
         {
             return Some(state);
         }
+        let Some(op) = Compare::from_operator(op) else {
+            return Some(state);
+        };
         let op = if truth {
             op
         } else {
@@ -1748,7 +1758,7 @@ mod tests {
                         },
                     },
                 ],
-                vec![Compare::Less],
+                vec![CmpOp::Lt],
             ),
         };
         function.body = vec![

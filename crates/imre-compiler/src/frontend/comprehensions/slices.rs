@@ -1,6 +1,7 @@
 //! Removes a private reverse slice when an integer reduction cannot mutate it.
 
-use crate::ir::{Binary, Builtin, Compare, Expr, ExprKind, Statement, Type};
+use crate::ir::{Binary, Builtin, Expr, ExprKind, Statement, Type};
+use ruff_python_ast::CmpOp;
 
 /// A helper's first iterable has no Python-visible identity. For a readonly
 /// integer reduction, reading the original list in the same selected order
@@ -79,10 +80,7 @@ pub(super) fn fuse(body: &mut [Statement], params: &[usize], args: &mut [Expr]) 
     );
     *test = Expr {
         ty: Type::Bool,
-        kind: ExprKind::Compare(
-            vec![local(*cursor), Expr::integer(0)],
-            vec![Compare::GreaterEqual],
-        ),
+        kind: ExprKind::Compare(vec![local(*cursor), Expr::integer(0)], vec![CmpOp::GtE]),
     };
     args[0] = source;
 }
@@ -94,7 +92,7 @@ fn forward_condition(value: &Expr, captured: usize, cursor: usize) -> bool {
     let [left, right] = values.as_slice() else {
         return false;
     };
-    matches!(operations.as_slice(), [Compare::Less])
+    matches!(operations.as_slice(), [CmpOp::Lt])
         && matches!(left.kind, ExprKind::Local(slot) if slot == cursor)
         && matches!(&right.kind, ExprKind::Builtin(Builtin::Len, args)
             if matches!(args.as_slice(), [Expr { kind: ExprKind::Local(slot), .. }] if *slot == captured))

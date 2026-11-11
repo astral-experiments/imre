@@ -3,6 +3,7 @@
 use super::calls::parameter;
 use super::*;
 use crate::ir::TextOperation;
+use ruff_python_ast::CmpOp;
 
 /// A contiguous slice has no fallible stride or user-defined indexing operation.
 fn unit_string_slice(value: &Expr) -> bool {
@@ -182,7 +183,7 @@ impl Checker<'_> {
         Ok(scope.finish(if check {
             Expr {
                 ty: Type::Bool,
-                kind: ExprKind::Compare(vec![normalized, text], vec![Compare::Equal]),
+                kind: ExprKind::Compare(vec![normalized, text], vec![CmpOp::Eq]),
             }
         } else {
             normalized

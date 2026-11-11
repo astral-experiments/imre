@@ -389,6 +389,17 @@ impl Analysis<'_> {
                 }
                 None
             }
+            ExprKind::Compare(values, ops)
+                if crate::ir::Compare::uses_python_protocol(expression.ty, ops) =>
+            {
+                for (index, value) in values.iter_mut().enumerate() {
+                    self.expression(value, state);
+                    if index != 0 {
+                        state.fill(None);
+                    }
+                }
+                None
+            }
             ExprKind::Compare(values, _) | ExprKind::Boolean(_, values) => {
                 for (index, value) in values.iter_mut().enumerate() {
                     let skipped = state.clone();
@@ -478,8 +489,11 @@ fn readonly(expression: &Expr) -> bool {
         ExprKind::List(values)
         | ExprKind::Tuple(values)
         | ExprKind::Set { values, .. }
-        | ExprKind::Compare(values, _)
         | ExprKind::Boolean(_, values) => values.iter().all(readonly),
+        ExprKind::Compare(values, ops) => {
+            !crate::ir::Compare::uses_python_protocol(expression.ty, ops)
+                && values.iter().all(readonly)
+        }
         ExprKind::Dict(entries) => {
             expression.ty != Type::PythonObject
                 && entries

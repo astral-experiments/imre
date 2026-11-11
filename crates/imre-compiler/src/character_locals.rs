@@ -106,10 +106,11 @@ fn specialize_function(function: &mut Function) {
                 uses[slot].handled_reads += 1;
             }
         }
-        ExprKind::Compare(values, _)
-            if values
-                .iter()
-                .all(|v| result_slot(v).is_some() || one_character(v).is_some()) =>
+        ExprKind::Compare(values, ops)
+            if !ir::Compare::uses_python_protocol(expr.ty, ops)
+                && values
+                    .iter()
+                    .all(|v| result_slot(v).is_some() || one_character(v).is_some()) =>
         {
             // Unicode scalar order is also lexicographic order for exact
             // one-character strings. Every local in a chain must qualify.
@@ -170,8 +171,9 @@ fn specialize_function(function: &mut Function) {
                 expr.ty = Type::Int;
             }
         }
-        ExprKind::Compare(values, _)
-            if values.iter().filter_map(result_slot).any(|i| scalars[i]) =>
+        ExprKind::Compare(values, ops)
+            if !ir::Compare::uses_python_protocol(expr.ty, ops)
+                && values.iter().filter_map(result_slot).any(|i| scalars[i]) =>
         {
             for value in values {
                 if let Some(code) = one_character(value) {

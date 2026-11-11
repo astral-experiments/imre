@@ -15,7 +15,7 @@ fn builtin(ty: Type, kind: Builtin, args: Vec<Expr>) -> Expr {
 fn comparison(left: Expr, op: Compare, right: Expr) -> Expr {
     Expr {
         ty: Type::Bool,
-        kind: ExprKind::Compare(vec![left, right], vec![op]),
+        kind: ExprKind::Compare(vec![left, right], vec![op.operator()]),
     }
 }
 
@@ -222,11 +222,13 @@ pub(super) fn bind_input<B: PatternBinder>(
         let ordinary = binder.pattern_hidden(Type::Bool);
         // The loop owns the cursor predicate across iterations.
         // A direct pull initializes both projected items before the common target stores.
-        let from_row = builtin(
-            Type::Bool,
-            Builtin::RegisteredCompare(vec![ast::CmpOp::Is]),
-            vec![binder.pattern_local(ordinary), Expr::boolean(true)],
-        );
+        let from_row = Expr {
+            ty: Type::Bool,
+            kind: ExprKind::Compare(
+                vec![binder.pattern_local(ordinary), Expr::boolean(true)],
+                vec![ast::CmpOp::Is],
+            ),
+        };
         body = vec![Statement::If(from_row, body, Vec::new())];
         Some(PairBinding {
             ordinary,

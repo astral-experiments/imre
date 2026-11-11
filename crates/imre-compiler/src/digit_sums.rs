@@ -6,10 +6,9 @@
 //! weighted = sum([3 * d for d in digits[-2::-2]])
 //! ```
 
-use crate::ir::{
-    self, Binary, Builtin, Compare, Expr, ExprKind, Function, Module, Statement, Type,
-};
+use crate::ir::{self, Binary, Builtin, Expr, ExprKind, Function, Module, Statement, Type};
 use crate::reductions::{count_writes, literal};
+use ruff_python_ast::CmpOp;
 
 mod terms;
 
@@ -97,10 +96,7 @@ fn fuse(
         };
         let success = Expr {
             ty: Type::Bool,
-            kind: ExprKind::Compare(
-                vec![local(pack), Expr::integer(0)],
-                vec![Compare::GreaterEqual],
-            ),
+            kind: ExprKind::Compare(vec![local(pack), Expr::integer(0)], vec![CmpOp::GtE]),
         };
         let unpack = |phase| {
             let (op, bits) = if phase == 0 {
@@ -217,7 +213,7 @@ fn mapped_helper(function: &Function) -> Option<Lane> {
         || clear.contains(sum)
         || !is_local(input, *param)
         || !orelse.is_empty()
-        || !matches!(ops.as_slice(), [Compare::GreaterEqual])
+        || !matches!(ops.as_slice(), [CmpOp::GtE])
         || !matches!(test.as_slice(),[c,z] if is_local(c,*cursor) && literal(z)==Some(0))
         || !matches!(&length.kind, ExprKind::Builtin(Builtin::Len,args) if matches!(args.as_slice(), [s] if is_local(s,*list)))
         || !matches!(args.as_slice(), [s,c] if is_local(s,*list) && is_local(c,*cursor))

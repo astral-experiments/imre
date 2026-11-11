@@ -928,7 +928,7 @@ pub(super) fn operation<'a, E>(
                     .iter()
                     .map(&mut child)
                     .collect::<StdResult<Vec<_>, _>>()?;
-                ExprKind::Builtin(Builtin::RegisteredCompare(cmp.ops.to_vec()), values)
+                ExprKind::Compare(values, cmp.ops.to_vec())
             }
         }
         ast::Expr::If(branch) => {

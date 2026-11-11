@@ -1,12 +1,7 @@
 //! Source-ordered comparison links, with an early exit for each false middle result.
-use super::super::{Compare, Emitter, Expr, Operand, Type, Value};
-use super::{CheckedBody, CheckedValue, ValueJoin};
+use super::super::{Compare, Expr, Type, Value, read_only_field_operand};
+use super::{CheckedBody, CheckedValue, Entry, ValueJoin};
 use ruff_python_ast::CmpOp;
-
-enum Relation {
-    Fixed(Compare),
-    Python(CmpOp),
-}
 
 impl CheckedValue {
     pub(crate) fn into_condition(self) -> String {
@@ -24,55 +19,55 @@ impl CheckedValue {
 }
 
 impl<'f, 'a, 'p, 'm> CheckedBody<'f, 'a, 'p, 'm> {
-    pub(in crate::llvm) fn native_comparisons(
-        &mut self,
-        values: &[Expr],
-        ops: &[Compare],
-        operand: fn(&mut Emitter<'a, 'm>, &Expr) -> Operand,
-    ) -> CheckedValue {
-        let mut chain = ComparisonChain::new(self, Relations::Fixed(ops), true);
-        values
-            .iter()
-            .find_map(|expr| {
-                let value = CheckedValue::native(operand(self.fixed(), expr));
-                chain.push(self, value)
-            })
-            .expect("complete fixed comparison")
-    }
-
-    pub(crate) fn registered_comparisons(
+    pub(crate) fn comparisons(
         &mut self,
         values: &[Expr],
         ops: &[CmpOp],
         truth: bool,
     ) -> CheckedValue {
-        let mut chain = ComparisonChain::new(self, Relations::Python(ops), truth);
-        values
-            .iter()
-            .find_map(|expr| {
-                let value = self.evaluate(expr);
-                let handle = self.python().materialize(&value);
-                chain.push(self, CheckedValue::handle(handle))
-            })
-            .expect("complete registered comparison")
+        let immediate = match &mut self.0 {
+            Entry::Native(code) => {
+                if let Some(result) = code.specialized_comparison(values, ops) {
+                    return CheckedValue::owned(result);
+                }
+                ops.len() == 1
+                    && matches!(
+                        values[0].ty,
+                        Type::Str | Type::StrLiteral(_) | Type::Tuple(_)
+                    )
+                    && values.iter().all(read_only_field_operand)
+            }
+            Entry::Registered(_) => false,
+        };
+        let mut chain = ComparisonChain::new(self, ops, truth);
+        for expr in values {
+            let value = if immediate {
+                CheckedValue::native(self.fixed().immediate_receiver(expr))
+            } else {
+                self.store_operand(expr)
+            };
+            if let Some(result) = chain.push(self, value) {
+                return result;
+            }
+        }
+        unreachable!("checked comparisons end with a result")
     }
 
     fn compare_pair(
         &mut self,
-        relation: Relation,
+        op: CmpOp,
         left: &CheckedValue,
         right: &CheckedValue,
     ) -> (String, Option<String>) {
-        match (relation, left, right) {
-            (Relation::Fixed(op), CheckedValue::Native(a, None), CheckedValue::Native(b, None)) => {
+        match (left, right) {
+            (CheckedValue::Native(a, None), CheckedValue::Native(b, None)) => {
+                let op = Compare::from_operator(op).expect("checked native comparison");
                 let predicate = self.fixed().compare(op, &a.value, &b.value).operand;
                 (predicate.clone(), Some(predicate))
             }
-            (
-                Relation::Python(op),
-                CheckedValue::Handle { id: a, .. },
-                CheckedValue::Handle { id: b, .. },
-            ) => self.python().rich_comparison(op, a, b),
+            (CheckedValue::Handle { id: a, .. }, CheckedValue::Handle { id: b, .. }) => {
+                self.python().rich_comparison(op, a, b)
+            }
             _ => unreachable!("comparison operands follow the selected representation"),
         }
     }
@@ -84,31 +79,9 @@ impl<'f, 'a, 'p, 'm> CheckedBody<'f, 'a, 'p, 'm> {
     }
 }
 
-enum Relations<'a> {
-    Fixed(&'a [Compare]),
-    Python(&'a [CmpOp]),
-}
-
-impl Relations<'_> {
-    fn next(&mut self) -> (Relation, bool) {
-        match self {
-            Self::Fixed(ops) => {
-                let (first, rest) = ops.split_first().expect("missing fixed comparison");
-                *ops = rest;
-                (Relation::Fixed(*first), rest.is_empty())
-            }
-            Self::Python(ops) => {
-                let (first, rest) = ops.split_first().expect("missing Python comparison");
-                *ops = rest;
-                (Relation::Python(*first), rest.is_empty())
-            }
-        }
-    }
-}
-
 /// Owns the CFG and live middle operand between successive, source-ordered values.
 struct ComparisonChain<'a> {
-    ops: Relations<'a>,
+    ops: &'a [CmpOp],
     truth: bool,
     root: Option<(String, (String, String))>,
     right_scope: Option<(String, (String, String))>,
@@ -119,14 +92,13 @@ struct ComparisonChain<'a> {
 }
 
 impl<'a> ComparisonChain<'a> {
-    fn new(code: &mut CheckedBody<'_, '_, '_, '_>, ops: Relations<'a>, truth: bool) -> Self {
-        let root = match ops {
-            Relations::Python(ops)
-                if ops.len() > 1 || matches!(ops, [CmpOp::Is | CmpOp::IsNot]) =>
-            {
-                Some(code.python().compare_scope())
-            }
-            _ => None,
+    fn new(code: &mut CheckedBody<'_, '_, '_, '_>, ops: &'a [CmpOp], truth: bool) -> Self {
+        let root = if matches!(code.0, Entry::Registered(_))
+            && (ops.len() > 1 || matches!(ops, [CmpOp::Is | CmpOp::IsNot]))
+        {
+            Some(code.python().compare_scope())
+        } else {
+            None
         };
         Self {
             ops,
@@ -149,7 +121,9 @@ impl<'a> ComparisonChain<'a> {
             self.prepare_right(code, right);
             return None;
         };
-        let (op, last) = self.ops.next();
+        let (&op, remaining) = self.ops.split_first().expect("checked comparison link");
+        self.ops = remaining;
+        let last = remaining.is_empty();
         let truth = self.truth;
         let root = &self.root;
         let done = &self.done;

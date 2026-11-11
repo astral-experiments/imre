@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::reductions::count_writes;
+use ruff_python_ast::CmpOp;
 
 /// A closed initializer whose only operations store positional parameters into fields.
 pub(super) struct Constructor {
@@ -187,7 +188,7 @@ fn traversal(statement: &Statement, list: usize) -> Option<Traversal<'_>> {
     };
     if !is_local(source, list)
         || !integer(zero, "0")
-        || !matches!(ops.as_slice(), [Compare::Less])
+        || !matches!(ops.as_slice(), [CmpOp::Lt])
         || !is_local(index, *cursor)
         || !is_local(receiver, *alias)
         || !orelse.is_empty()

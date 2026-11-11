@@ -391,7 +391,7 @@ fn binary(operation: Binary, left: Expr, right: Expr) -> Expr {
 pub(super) fn compare(operation: Compare, left: Expr, right: Expr) -> Expr {
     Expr {
         ty: Type::Bool,
-        kind: ExprKind::Compare(vec![left, right], vec![operation]),
+        kind: ExprKind::Compare(vec![left, right], vec![operation.operator()]),
     }
 }
 

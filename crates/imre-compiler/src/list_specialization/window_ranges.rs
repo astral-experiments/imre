@@ -1,6 +1,7 @@
 use super::{builtin, list_local};
 use crate::ir::{self, Builtin, Expr, ExprKind, Function, Statement, Type};
 use crate::ranges::{self, IntegerFacts};
+use ruff_python_ast::CmpOp;
 
 const LOW: i64 = i32::MIN as i64;
 const HIGH: i64 = i32::MAX as i64;
@@ -130,10 +131,7 @@ fn propose(statement: &mut Statement) -> bool {
         .collect::<Vec<_>>();
     let mut guards = vec![Expr {
         ty: Type::Bool,
-        kind: ExprKind::Compare(
-            vec![budget, Expr::integer(8)],
-            vec![ir::Compare::GreaterEqual],
-        ),
+        kind: ExprKind::Compare(vec![budget, Expr::integer(8)], vec![CmpOp::GtE]),
     }];
     guards.extend(counters.into_iter().map(|slot| {
         builtin(

@@ -2,6 +2,7 @@
 use super::*;
 use crate::ir::InstanceType;
 use crate::types::DispatchFunction;
+use ruff_python_ast::CmpOp;
 
 fn builtin(op: Builtin, ty: Type, args: Vec<Expr>) -> Expr {
     Expr {
@@ -51,7 +52,7 @@ fn lookup(table: &Expr, name: Expr, target: Type) -> Expr {
                 ty: Type::Bool,
                 kind: ExprKind::Compare(
                     vec![name.clone(), unpacking::string("bool")],
-                    vec![ir::Compare::Equal],
+                    vec![CmpOp::Eq],
                 ),
             };
             conditional(is_bool, int(), base)

@@ -638,7 +638,9 @@ impl Verifier<'_> {
                 "unwrap result does not match optional payload",
             ),
             ExprKind::Compare(values, ops) => {
-                same(value.ty, Type::Bool)?;
+                if value.ty != Type::PythonObject {
+                    same(value.ty, Type::Bool)?;
+                }
                 require(
                     !ops.is_empty() && values.len() == ops.len() + 1,
                     "comparison operand/operator count mismatch",

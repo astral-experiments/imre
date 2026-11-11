@@ -1,5 +1,6 @@
 //! Resolve the protocol method requested by the bundled HTTP dispatcher.
 use super::*;
+use ruff_python_ast::CmpOp;
 
 impl Checker<'_> {
     /// Look up a bound do_* callable on the actual handler layout. The caller's
@@ -80,7 +81,7 @@ impl Checker<'_> {
                 let test = Expr {
                     ty: Type::Bool,
                     kind: ExprKind::Compare(
-                        vec![key.clone(), unpacking::string(name)], vec![ir::Compare::Equal],
+                        vec![key.clone(), unpacking::string(name)], vec![CmpOp::Eq],
                     ),
                 };
                 fallback = Expr {
