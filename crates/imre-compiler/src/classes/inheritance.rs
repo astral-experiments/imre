@@ -602,4 +602,56 @@ assert not issubclass(Open, OpenChild)
         assert_eq!(child.storage_base, Some(0));
         assert_eq!(child.bases, [0]);
     }
+
+    #[test]
+    fn async_iterator_registers_only_its_class_and_subclasses() {
+        let source = r#"from typing import AsyncIterator
+
+class Stream:
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        raise NotImplementedError
+        yield b""
+    async def aclose(self) -> None:
+        pass
+
+class Scalar:
+    def add(self, value: int) -> int:
+        return value + 1
+
+class Derived(Stream):
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        yield b"child"
+"#;
+        let graph = SourceGraph::single(source).unwrap();
+        let classes = Classes::collect(&graph).unwrap();
+        let id = |statement| DefinitionId {
+            module: graph.entry,
+            statement,
+        };
+        assert_eq!(classes.registered_classes, HashSet::from([id(1), id(3)]));
+        let scalar = &classes.definitions[classes.ids[&id(2)]];
+        assert!(
+            scalar
+                .methods
+                .iter()
+                .any(|method| method.name.as_str() == "add")
+        );
+    }
+
+    #[test]
+    fn async_iterator_keeps_sibling_diagnostics_in_source() {
+        let iterator = "    async def __aiter__(self): yield 1\n";
+        let invalid = "    def __unknown__(self): pass\n";
+        for (methods, position) in [([iterator, invalid], 1), ([invalid, iterator], 0)] {
+            let source = format!("class Stream:\n{}", methods.concat());
+            let graph = SourceGraph::single(&source).unwrap();
+            let module = &graph.modules[graph.entry];
+            let class = module.parsed.suite()[0].as_class_def_stmt().unwrap();
+            let expected = module.diagnostic(
+                &class.body[position],
+                "unsupported special method on a fixed-layout class",
+            );
+            assert_eq!(Classes::collect(&graph).err(), Some(expected));
+        }
+    }
 }
