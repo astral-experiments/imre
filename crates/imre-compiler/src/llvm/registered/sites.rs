@@ -21,6 +21,11 @@ pub(crate) struct CompiledDefinition {
     pub(crate) class_header: Option<TextRange>,
 }
 
+pub(crate) struct CompiledGenerator {
+    pub(crate) function: CompiledDefinition,
+    pub(crate) acquire: ir::IteratorOp,
+}
+
 pub(crate) struct DefinitionOperands {
     doc: String,
     annotate: String,
@@ -214,7 +219,7 @@ pub(crate) trait SiteDefinitions<'p> {
         &mut self,
         site: TextSize,
     ) -> (CompiledDefinition, CompiledTypeParameters, TextRange);
-    fn generator(&mut self, site: TextRange) -> CompiledDefinition;
+    fn generator(&mut self, site: TextRange) -> CompiledGenerator;
     fn type_alias(&mut self, site: TextSize) -> Result<CompiledAlias, String>;
     fn annotation_string(&mut self, site: TextSize) -> String;
 }
@@ -227,7 +232,7 @@ pub(crate) struct CheckedSites {
     pub(crate) class_namespaces:
         HashMap<TextSize, (CompiledDefinition, CompiledTypeParameters, TextRange)>,
     pub(crate) lambdas: HashMap<TextSize, CompiledDefinition>,
-    pub(crate) generators: HashMap<TextRange, CompiledDefinition>,
+    pub(crate) generators: HashMap<TextRange, CompiledGenerator>,
     pub(crate) aliases: HashMap<TextSize, Result<CompiledAlias, String>>,
 }
 
@@ -316,7 +321,9 @@ impl CheckedSites {
         scope: &str,
         cursor: &str,
     ) -> String {
-        let function = self.generators[&site].bind_defaults(frame, scope, &[]);
+        let function = self.generators[&site]
+            .function
+            .bind_defaults(frame, scope, &[]);
         frame.op("generator", &[&function, cursor])
     }
 

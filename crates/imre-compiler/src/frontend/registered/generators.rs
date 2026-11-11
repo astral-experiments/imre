@@ -8,6 +8,7 @@ use imre_ast::comprehension::Plan;
 pub(crate) struct RegisteredGenerator {
     pub(crate) body: RegisteredFunction,
     pub(crate) metadata: CallableMetadata,
+    pub(crate) acquire: ir::IteratorOp,
 }
 
 impl RegisteredGenerator {
@@ -64,9 +65,15 @@ impl RegisteredGenerator {
         );
         scope.generator_expression = true;
         let outer = imre_ast::comprehension::outer_clause(plan.clauses);
-        let (cursor, kind) = match comprehensions::async_pull(outer) {
-            Some(pull) => (values::name_binding(".0"), ir::IterNextKind::Async(pull)),
+        let range = outer.iter.range();
+        let (acquire, cursor, kind) = match comprehensions::async_pull(outer) {
+            Some(pull) => (
+                ir::IteratorOp::Async(range),
+                values::name_binding(".0"),
+                ir::IterNextKind::Async(pull),
+            ),
             None => (
+                ir::IteratorOp::Get(range),
                 operation(
                     Builtin::RegisteredIter(ir::IteratorOp::LoopCursor),
                     Type::PythonObject,
@@ -110,6 +117,7 @@ impl RegisteredGenerator {
         Some(Self {
             body: scope.finish(body),
             metadata: CallableMetadata::generator(scope_facts, is_async),
+            acquire,
         })
     }
 }
@@ -184,6 +192,9 @@ mod tests {
             panic!("expected one prepared generator");
         };
         assert!(child.is_async());
+        assert!(
+            matches!(child.acquire, ir::IteratorOp::Async(range) if &module.source[range] == "rows")
+        );
         assert_eq!(child.metadata.parameter_names().collect::<Vec<_>>(), [".0"]);
         let body = &child.body.function.body;
         let mut pulls = 0;
@@ -226,6 +237,9 @@ mod tests {
             panic!("expected one prepared generator");
         };
         assert!(child.is_async());
+        assert!(
+            matches!(child.acquire, ir::IteratorOp::Get(range) if &module.source[range] == "rows")
+        );
         let mut awaits = 0;
         let mut yields = 0;
         let mut adapted = 0;
