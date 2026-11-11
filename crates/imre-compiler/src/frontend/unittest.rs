@@ -451,15 +451,10 @@ impl Checker<'_> {
             .as_attribute_expr()
             .and_then(|a| a.value.as_name_expr())
             .map(|n| (n.id.as_str(), class));
-        let source = self
+        let def = self
             .graph
-            .modules
-            .iter()
-            .find(|m| m.bundled && m.name == "unittest")
+            .bundled_definition("unittest", "_AssertRaisesContext")
             .unwrap();
-        let Binding::Definition(def) = source.bindings["_AssertRaisesContext"] else {
-            unreachable!()
-        };
         let context = self.classes.declarations.ids[&def];
         let init = &self.classes.methods[context]["__init__"];
         let (initializer, case_type) = (init.id, init.params[1].ty);
@@ -703,15 +698,10 @@ impl Checker<'_> {
     /// Raise at the Python binding or invocation boundary, after its inputs have
     /// run. A regular call also gives expression scopes a normal cleanup edge.
     fn unittest_call_type_error(&mut self, message: String) -> Statement {
-        let module = self
+        let def = self
             .graph
-            .modules
-            .iter()
-            .find(|m| m.bundled && m.name == "unittest")
+            .bundled_definition("unittest", "_raise_call_type_error")
             .unwrap();
-        let Binding::Definition(def) = module.bindings["_raise_call_type_error"] else {
-            unreachable!()
-        };
         let id = self.functions[&def].id;
         self.calls.insert(id);
         Statement::Expr(Expr {
