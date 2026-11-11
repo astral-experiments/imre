@@ -163,18 +163,9 @@ enum SourceItem {
     Docstring(ast::StringLiteralValue),
     StringAnnotation(String, ast::Expr),
     MakeGenerator(ast::Expr),
-    Match {
-        subject: ast::Expr,
-        cases: Vec<SourceCase>,
-    },
+    Pattern(ast::Pattern, Box<[String]>),
     Name(ast::Identifier),
     Names(Vec<ast::name::Name>),
-}
-
-struct SourceCase {
-    pattern: ast::Pattern,
-    captures: Vec<String>,
-    guard: Option<Box<ast::Expr>>,
 }
 
 struct Definition {
@@ -1109,16 +1100,10 @@ impl Program {
                         strings.heap.code_name(name.as_str());
                     }
                 }
-                SourceItem::Match { subject, cases, .. } => {
-                    strings.visit_expr(subject);
-                    for case in cases {
-                        strings.visit_pattern(&case.pattern);
-                        for name in &case.captures {
-                            strings.heap.code_name(name);
-                        }
-                        if let Some(guard) = &case.guard {
-                            strings.visit_expr(guard);
-                        }
+                SourceItem::Pattern(pattern, captures) => {
+                    strings.visit_pattern(pattern);
+                    for name in captures.iter() {
+                        strings.heap.code_name(name);
                     }
                 }
                 SourceItem::MakeGenerator(expr) => {
@@ -1962,25 +1947,23 @@ impl Program {
                     continue;
                 }
                 Stmt::Match(s) => {
-                    let dispatch = self.items.len();
-                    let mut cases = Vec::new();
+                    // Case bodies validate in order while their metadata follows all the headers.
+                    let mut headers = std::mem::take(&mut self.items);
+                    headers.push(SourceItem::Discard(*s.subject));
                     let count = s.cases.len();
                     for (i, case) in s.cases.into_iter().enumerate() {
                         let captures = self.case_captures(&case, i + 1 < count)?;
-                        cases.push(SourceCase {
-                            pattern: case.pattern,
-                            captures,
-                            guard: case.guard,
-                        });
+                        headers.push(SourceItem::Pattern(
+                            case.pattern,
+                            captures.into_boxed_slice(),
+                        ));
+                        if let Some(guard) = case.guard {
+                            headers.push(SourceItem::Discard(*guard));
+                        }
                         self.lower(case.body, function, active.as_deref_mut())?;
                     }
-                    self.items.insert(
-                        dispatch,
-                        SourceItem::Match {
-                            subject: *s.subject,
-                            cases,
-                        },
-                    );
+                    headers.append(&mut self.items);
+                    self.items = headers;
                     continue;
                 }
                 Stmt::If(s) => {
