@@ -633,7 +633,7 @@ impl Checker<'_> {
                 if matches!(receiver.ty, Type::Callable(_))
                     && attribute.attr.as_str() == "__defaults__"
                 {
-                    self.require_registered_operation(attribute);
+                    self.require_registered_operation(attribute)?;
                     return Ok(registered::attribute_statement(
                         ir::AttributeAction::Store,
                         attribute,
@@ -1054,7 +1054,7 @@ impl PatternBinder for Checker<'_> {
             && (self.registered.is_some() || self.graph.modules[self.module].is_program_source())
         {
             if self.registered.is_none() {
-                self.require_registered_operation(target);
+                self.require_registered_operation(target)?;
             }
             let sequence = self.types.list(Type::PythonObject);
             return Ok(protocol_snapshot(
