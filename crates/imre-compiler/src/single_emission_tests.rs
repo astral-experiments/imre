@@ -449,6 +449,33 @@ fn interleaved_import_preserves_another_modules_list_contract() {
 }
 
 #[test]
+fn eager_comprehension_exports_only_guaranteed_assignments() {
+    let project = tempfile::tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    for (display, bound) in [
+        ("[(alias := value) for _ in [1]]", true),
+        ("[False for _ in [1] if (alias := value) is None]", true),
+        ("[(alias := value) for _ in []]", false),
+        ("[(alias := value) for _ in [1] if False]", false),
+    ] {
+        let source = format!(
+            "def measure():\n    value = [2]\n    {display}\n    print(alias is value)\n\nmeasure()\n"
+        );
+        std::fs::write(&entry, source).unwrap();
+        let result = check_file(&entry, None);
+        if bound {
+            result.unwrap();
+        } else {
+            assert_source_diagnostic(
+                &result.unwrap_err(),
+                &entry,
+                ":4:11: Imre: local may be uninitialized on this path",
+            );
+        }
+    }
+}
+
+#[test]
 fn dormant_thread_keeps_an_imported_modules_exact_types() {
     let project = tempfile::tempdir().unwrap();
     let entry = project.path().join("main.py");

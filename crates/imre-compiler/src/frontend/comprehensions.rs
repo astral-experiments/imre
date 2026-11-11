@@ -583,17 +583,18 @@ impl Checker<'_> {
             "asynchronous comprehensions are unsupported",
         )?;
         let input = self.iteration_input(display.outer, None)?;
+        let writes = narrowing::expression_assignments(expression);
         if matches!(input, Iteration::Prepared(_))
             // A typed await uses the enclosing coroutine's task and frame.
             || display.body_suspends()
-            || !narrowing::expression_assignments(expression).is_empty()
+            || !writes.is_empty()
             || pipelines::is_pipeline_expression(self, display.outer)
             || !self.local_functions.is_empty()
                 && free_reads(expression, HashSet::new())
                     .iter()
                     .any(|name| self.local_functions.contains_key(name))
         {
-            return self.inline_comprehension(expression, display, collector, input);
+            return self.inline_comprehension(display, collector, input, writes);
         }
         let targets = display.target_names();
         let mut reads = Reads {
@@ -870,13 +871,13 @@ impl Checker<'_> {
     /// cleared on both normal completion and exceptional loop exits.
     fn inline_comprehension(
         &mut self,
-        expression: &ast::Expr,
         display: &Plan<'_>,
         collector: Collector,
         input: Iteration,
+        writes: HashSet<String>,
     ) -> Result<Expr, String> {
         let first_private = self.locals.len();
-        let writes = narrowing::expression_assignments(expression);
+        let first_pull = matches!(&input, Iteration::Container { iterable, .. } if iterable.is_nonempty_list_literal());
         // Acquire the outer iterator before declaring the comprehension's shadowing names.
         let mut input = input;
         let mut prefix = Vec::new();
@@ -928,6 +929,23 @@ impl Checker<'_> {
         if !prefix.is_empty() {
             prefix.append(&mut body);
             body = prefix;
+        }
+        if first_pull && !writes.is_empty() {
+            // A filter runs before it can suppress the output or the next clause.
+            let mut bind = |expression| {
+                for name in narrowing::guaranteed_assignments(expression, None) {
+                    if let Some(&slot) = self.comprehension_exports.get(&name) {
+                        self.assigned.insert(slot);
+                    }
+                }
+            };
+            let passes = display.clauses[0].ifs.iter().all(|test| {
+                bind(test);
+                ast::helpers::Truthiness::from_expr(test, |_| false).into_bool() == Some(true)
+            });
+            if passes && display.clauses.len() == 1 {
+                display.output.elements().for_each(bind);
+            }
         }
         for name in writes {
             if let Some(slot) = self.names.get(&name) {
