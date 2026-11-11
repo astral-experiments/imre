@@ -2097,8 +2097,10 @@ impl<'a> SuitePreparation<'a> {
                     Some(Statement::Expr(operand(&value.value)))
                 }
                 ast::Stmt::Raise(raise) => {
-                    let Ok(statement) = raised(raise, |expr| {
-                        Ok::<_, std::convert::Infallible>(operand(expr))
+                    let Ok(statement) = statements::raised(raise, |value| {
+                        raised_value(raise, value, |expr| {
+                            Ok::<_, std::convert::Infallible>(operand(expr))
+                        })
                     });
                     Some(statement)
                 }
@@ -2472,14 +2474,12 @@ pub(crate) fn delete_item(receiver: Expr, key: Expr) -> Expr {
     )
 }
 
-pub(super) fn raised<E>(
+pub(super) fn raised_value<E>(
     raise: &ast::StmtRaise,
+    value: &ast::Expr,
     mut operand: impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
 ) -> StdResult<Statement, E> {
-    let Some(exception) = &raise.exc else {
-        return Ok(Statement::Raise(None));
-    };
-    let exception = operand(exception)?;
+    let exception = operand(value)?;
     let cause = raise.cause.as_deref().map(operand).transpose()?;
     Ok(Statement::raise_at(exception, cause, None))
 }
@@ -2572,6 +2572,14 @@ impl statements::StatementLowering for SourceScope<'_> {
         Ok((input.for_suite(binding, body, otherwise, Vec::new()), true))
     }
 
+    fn raised_value(
+        &mut self,
+        raise: &ast::StmtRaise,
+        value: &ast::Expr,
+    ) -> StdResult<Statement, ()> {
+        raised_value(raise, value, |expr| self.frame_value(expr).ok_or(()))
+    }
+
     fn record_loop_transfer(&mut self, _: &Statement) -> bool {
         self.loop_scope != LoopScope::Outside
     }
@@ -2608,10 +2616,6 @@ impl statements::StatementLowering for SourceScope<'_> {
                 let name = alias.name.as_name_expr().ok_or(())?;
                 Ok((vec![self.store(name.id.as_str(), value)], true))
             }
-            ast::Stmt::Raise(raise) => Ok((
-                vec![raised(raise, |value| self.frame_value(value).ok_or(()))?],
-                false,
-            )),
             ast::Stmt::Match(branch) => self.match_statement(branch),
             ast::Stmt::ClassDef(class) => {
                 let operands = self

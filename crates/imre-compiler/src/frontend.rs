@@ -6388,79 +6388,6 @@ impl<'a> Checker<'a> {
             ast::Stmt::With(with_) if self.asynchronous => {
                 return self.async_with(&with_.items, &with_.body);
             }
-            ast::Stmt::Raise(raise) if self.registered.is_some() => {
-                let raised = registered::raised(raise, |value| self.expr(value))?;
-                return Ok((vec![raised], false));
-            }
-            ast::Stmt::Raise(raise) => {
-                let value = raise
-                    .exc
-                    .as_deref()
-                    .map(|value| self.raised_exception(value))
-                    .transpose()?;
-                let Some(raised) = value else {
-                    return Ok((vec![Statement::Raise(None)], false));
-                };
-                let cause = if let Some(cause) = &raise.cause {
-                    if let ExprKind::Builtin(
-                        Builtin::Process(ir::ProcessOperation::ExceptionAt),
-                        args,
-                    ) = &raised.kind
-                        && matches!(
-                            &args[1].kind,
-                            ExprKind::Int(_) | ExprKind::Unary(UnaryOp::USub, _)
-                        )
-                        && let ExprKind::Local(slot) = args[0].kind
-                        && let Some(name) = cause.as_name_expr()
-                        && self.names.get(name.id.as_str()) == Some(&slot)
-                    {
-                        let group = self.expr_expected(cause, Type::Exception)?;
-                        let member = Expr {
-                            ty: Type::Exception,
-                            kind: ExprKind::Builtin(
-                                Builtin::Process(ir::ProcessOperation::MemberCause),
-                                vec![raised, group],
-                            ),
-                        };
-                        let origin = self.fixed_origin(raise.range(), None);
-                        return Ok((vec![Statement::raise_at(member, None, Some(origin))], false));
-                    }
-                    if !matches!(
-                        raised.kind,
-                        ExprKind::Exception { .. }
-                            | ExprKind::Builtin(
-                                Builtin::NamedException { .. }
-                                    | Builtin::ImportErrorNew { .. }
-                                    | Builtin::ExceptionArgument(_),
-                                _
-                            )
-                    ) && !matches!(&raised.kind,
-                        ExprKind::Builtin(Builtin::Process(ir::ProcessOperation::ExceptionView),args)
-                            if matches!(args[0].kind, ExprKind::Builtin(Builtin::NamedException { .. } | Builtin::ImportErrorNew { .. }, _)))
-                    {
-                        return Err(error(
-                            self.source,
-                            raise,
-                            "explicit causes require a freshly constructed builtin exception",
-                        ));
-                    }
-                    let expected = self.types.optional(Type::Exception);
-                    let cause = if self.exception_category(cause).is_some() {
-                        let cause = self.raised_exception(cause)?;
-                        self.coerce(cause, expected, raise)?
-                    } else {
-                        self.expr_expected(cause, expected)?
-                    };
-                    Some(cause)
-                } else {
-                    None
-                };
-                let origin = self.fixed_origin(raise.range(), None);
-                return Ok((
-                    vec![Statement::raise_at(raised, cause, Some(origin))],
-                    false,
-                ));
-            }
             ast::Stmt::Import(_) | ast::Stmt::ImportFrom(_)
                 if self.graph.command_startup.is_some() =>
             {
@@ -6913,44 +6840,95 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn raised_exception(&mut self, value: &ast::Expr) -> Result<Expr, String> {
-        if let Some(kind) = self.exception_category(value) {
-            if self.class_reference(value).is_some() {
-                return Err(error(
-                    self.source,
-                    value,
-                    "raise a constructed exception payload with its required arguments",
-                ));
+    /// Binds an explicit native cause, including a member raised from its exception group.
+    fn exception_with_cause(
+        &mut self,
+        raise: &ast::StmtRaise,
+        raised: Expr,
+        cause: &ast::Expr,
+    ) -> Result<(Expr, Option<Expr>), String> {
+        if let ExprKind::Builtin(Builtin::Process(ir::ProcessOperation::ExceptionAt), args) =
+            &raised.kind
+            && matches!(
+                &args[1].kind,
+                ExprKind::Int(_) | ExprKind::Unary(UnaryOp::USub, _)
+            )
+            && let ExprKind::Local(slot) = args[0].kind
+            && let Some(name) = cause.as_name_expr()
+            && self.names.get(name.id.as_str()) == Some(&slot)
+        {
+            let group = self.expr_expected(cause, Type::Exception)?;
+            let member = Expr {
+                ty: Type::Exception,
+                kind: ExprKind::Builtin(
+                    Builtin::Process(ir::ProcessOperation::MemberCause),
+                    vec![raised, group],
+                ),
+            };
+            return Ok((member, None));
+        }
+        if !matches!(
+            raised.kind,
+            ExprKind::Exception { .. }
+                | ExprKind::Builtin(
+                    Builtin::NamedException { .. }
+                        | Builtin::ImportErrorNew { .. }
+                        | Builtin::ExceptionArgument(_),
+                    _
+                )
+        ) && !matches!(&raised.kind,
+            ExprKind::Builtin(Builtin::Process(ir::ProcessOperation::ExceptionView),args)
+                if matches!(args[0].kind, ExprKind::Builtin(Builtin::NamedException { .. } | Builtin::ImportErrorNew { .. }, _)))
+        {
+            return Err(error(
+                self.source,
+                raise,
+                "explicit causes require a freshly constructed builtin exception",
+            ));
+        }
+        let expected = self.types.optional(Type::Exception);
+        let cause = if let Some(cause) = self.raised_class(cause)? {
+            self.coerce(cause, expected, raise)?
+        } else {
+            self.expr_expected(cause, expected)?
+        };
+        Ok((raised, Some(cause)))
+    }
+
+    fn raised_class(&mut self, value: &ast::Expr) -> Result<Option<Expr>, String> {
+        let Some(kind) = self.exception_category(value) else {
+            return Ok(None);
+        };
+        if self.class_reference(value).is_some() {
+            return Err(error(
+                self.source,
+                value,
+                "raise a constructed exception payload with its required arguments",
+            ));
+        }
+        let exception = if self.is_import_error(kind) {
+            self.import_error_value(kind, Vec::new(), vec![], [None; 3])
+        } else if kind == 32 {
+            Expr {
+                ty: Type::Exception,
+                kind: ExprKind::Builtin(Builtin::SystemExitNew { omit_none: false }, Vec::new()),
             }
-            if self.is_import_error(kind) {
-                return Ok(self.import_error_value(kind, Vec::new(), vec![], [None; 3]));
-            }
-            if kind == 32 {
-                return Ok(Expr {
-                    ty: Type::Exception,
-                    kind: ExprKind::Builtin(
-                        Builtin::SystemExitNew { omit_none: false },
-                        Vec::new(),
-                    ),
-                });
-            }
-            if matches!(kind, 0 | 18 | 25..=31 | 34) {
-                return Err(error(
-                    self.source,
-                    value,
-                    "this exception category is catch-only",
-                ));
-            }
-            Ok(Expr {
+        } else if matches!(kind, 0 | 18 | 25..=31 | 34) {
+            return Err(error(
+                self.source,
+                value,
+                "this exception category is catch-only",
+            ));
+        } else {
+            Expr {
                 ty: Type::Exception,
                 kind: ExprKind::Exception {
                     kind,
                     message: None,
                 },
-            })
-        } else {
-            self.expr_expected(value, Type::Exception)
-        }
+            }
+        };
+        Ok(Some(exception))
     }
 
     fn exception_category(&self, expression: &ast::Expr) -> Option<u32> {
