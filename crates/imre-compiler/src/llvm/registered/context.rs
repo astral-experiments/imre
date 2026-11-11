@@ -274,12 +274,22 @@ impl<'p> Frame<'_, '_, 'p> {
                     outer,
                 } => {
                     self.body.error_target.clone_from(outer);
-                    if let Some(caught) = enclosing {
+                    let done = enclosing.as_ref().map(|caught| {
+                        let pending = self.value(&format!("icmp ne i64 {value}, 0"));
+                        let restore = self.name("b");
+                        let done = self.name("b");
+                        self.branch(&pending, &restore, &done);
+                        self.label(&restore);
                         self.op("restore_caught", &[caught]);
-                    }
+                        done
+                    });
                     let index = self.live.iter().rposition(|v| v == value).unwrap();
                     discarded.push((index, self.live.remove(index)));
                     self.release_target(None);
+                    if let Some(done) = done {
+                        self.jump(&done);
+                        self.label(&done);
+                    }
                 }
             }
             left.push(region);

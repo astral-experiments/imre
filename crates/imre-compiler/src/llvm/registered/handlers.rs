@@ -44,32 +44,56 @@ impl<'f, 'p> Frame<'f, '_, 'p> {
         let Some(Region::Finally { body, .. }) = self.regions.pop() else {
             unreachable!("active finally region")
         };
-        self.body.error_target = enclosing;
-        // Module providers also visit unreachable annotation sites in source order.
-        let mut needs_join = self.module_annotation_sites.is_some();
-        if !self.body.terminated || needs_join {
-            self.emit_finally(&body);
-            needs_join |= !self.body.terminated;
-            self.jump(&done);
-        }
-
+        self.body.error_target.clone_from(&enclosing);
+        let normal = (!self.body.terminated).then(|| {
+            let cleanup = self.name("b");
+            self.jump(&cleanup);
+            (cleanup, self.body.current.clone())
+        });
         self.label(&failed);
-        let exception = self.op("take_error", &[]);
+        let raised = self.op("take_error", &[]);
         let outer = self.caught.last().cloned().unwrap_or_else(|| "0".into());
-        self.live.push(exception.clone());
-        self.caught.push(exception.clone());
-        let pending = Region::Pending {
-            value: exception.clone(),
-            enclosing: Some(outer),
-            outer: self.body.error_target.clone(),
+        // Both paths enter the same suite. A normal exit inherits the surrounding
+        // handler. An exceptional exit carries the exception raised by the body.
+        let (pending, active) = if let Some((cleanup, from)) = &normal {
+            self.jump(cleanup);
+            let error_from = self.body.current.clone();
+            self.label(cleanup);
+            let pending = self.value(&format!("phi i64 [0, %{from}], [{raised}, %{error_from}]"));
+            let active = if outer == "0" {
+                pending.clone()
+            } else {
+                self.value(&format!(
+                    "phi i64 [{outer}, %{from}], [{raised}, %{error_from}]"
+                ))
+            };
+            (pending, active)
+        } else {
+            (raised.clone(), raised)
         };
-        self.regions.push(pending);
+
+        self.live.push(pending.clone());
+        self.caught.push(active);
+        self.regions.push(Region::Pending {
+            value: pending.clone(),
+            enclosing: Some(outer),
+            outer: enclosing,
+        });
         self.emit_finally(&body);
         self.regions.pop();
         self.caught.pop();
         self.live.pop();
+        // Module providers also visit unreachable annotation sites in source order.
+        let mut needs_join = self.module_annotation_sites.is_some();
         if !self.body.terminated {
-            self.raise(&exception, None, true);
+            if normal.is_some() {
+                let failed = self.value(&format!("icmp ne i64 {pending}, 0"));
+                let reraise = self.name("b");
+                self.branch(&failed, &reraise, &done);
+                self.label(&reraise);
+                needs_join = true;
+            }
+            self.raise(&pending, None, true);
         }
         if needs_join {
             self.label(&done);
