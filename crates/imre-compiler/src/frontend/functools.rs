@@ -135,7 +135,9 @@ impl Checker<'_> {
         wrapped: Expr,
         node: &impl Ranged,
     ) -> Result<Expr, String> {
-        if !matches!(wrapper.ty, Type::Callable(_)) || wrapper.ty != wrapped.ty {
+        if !matches!(wrapper.ty, Type::Callable(_))
+            || self.types.wrapped_link_type(wrapper.ty) != self.types.wrapped_link_type(wrapped.ty)
+        {
             return Err(error(
                 self.source,
                 node,

@@ -46,26 +46,18 @@ pub(super) fn adapters(emitter: &mut Emitter<'_, '_>) {
     output
         .common()
         .push_str("%callable = type { ptr, ptr, [0 x ptr] }\n");
-    if uses.layouts.contains("python_function") {
-        // Keep the ordinary adapter/context ABI. The optional third field owns
-        // __wrapped__; kind 3 identifies this link when reclaiming a cycle.
-        output.entry_buffer().push_str("@semantics_python_function = private constant { i32, i32, ptr, i64, ptr, i64, ptr } { i32 3, i32 0, ptr null, i64 0, ptr null, i64 0, ptr null }\n@kinds_python_function = private constant [3 x i32] [i32 0, i32 6, i32 6]\n");
-        output
-            .global(
-                output.entry,
-                "layout_python_function",
-                "constant",
-                "{ i64, ptr, ptr }",
-            )
-            .push_str("{ i64 3, ptr @kinds_python_function, ptr @semantics_python_function }\n");
+    if uses.layouts.contains("python_function") || uses.layouts.contains("cache_callable") {
+        // The optional link at word two owns its referent and can participate in a cycle.
+        output.entry_buffer().push_str("@semantics_python_function = private constant { i32, i32, ptr, i64, ptr, i64, ptr } { i32 3, i32 0, ptr null, i64 0, ptr null, i64 0, ptr null }\n");
     }
     for (name, kinds, length) in [
+        ("python_function", "i32 0, i32 6, i32 6", 3),
         ("callable", "i32 0, i32 6", 2),
         ("callable_enum", "i32 0, i32 10", 2),
         ("callable_object", "i32 0, i32 5", 2),
         ("callable_list", "i32 0, i32 4", 2),
         ("empty_partial", "i32 0, i32 0, i32 6", 3),
-        ("cache_callable", "i32 0, i32 6, i32 0, i32 0", 4),
+        ("cache_callable", "i32 0, i32 6, i32 6, i32 0, i32 0", 5),
     ] {
         if !uses.layouts.contains(name) {
             continue;
@@ -75,6 +67,11 @@ pub(super) fn adapters(emitter: &mut Emitter<'_, '_>) {
             "@kinds_{name} = private unnamed_addr constant [{length} x i32] [{kinds}]"
         )
         .unwrap();
+        let semantics = if matches!(name, "python_function" | "cache_callable") {
+            "@semantics_python_function"
+        } else {
+            "null"
+        };
         writeln!(
             output.global(
                 output.entry,
@@ -82,7 +79,7 @@ pub(super) fn adapters(emitter: &mut Emitter<'_, '_>) {
                 "constant",
                 "{ i64, ptr, ptr }"
             ),
-            "{{ i64 {length}, ptr @kinds_{name}, ptr null }}"
+            "{{ i64 {length}, ptr @kinds_{name}, ptr {semantics} }}"
         )
         .unwrap();
     }
@@ -261,7 +258,7 @@ impl Emitter<'_, '_> {
             });
         }
         let bound = receiver.is_some();
-        let receiver = receiver.map(|receiver| self.expr(receiver));
+        let mut receiver = receiver.map(|receiver| self.expr(receiver));
         // The hidden context is one pointer-sized ABI word. A StrEnum stores its
         // nonowning tag in that word; only its adapter converts the bits back.
         let scalar = receiver
@@ -290,14 +287,24 @@ impl Emitter<'_, '_> {
         self.line(format!("store ptr @{target}, ptr {}", result.operand));
         let context = self.callable_context_slot(&result);
         if let Some(policy) = policy {
-            // Applied caches capture the actual wrappee in the first field of
-            // their frame. A statically decorated declaration has no frame.
-            let source = receiver.as_ref().map_or_else(
-                || "null".to_owned(),
-                |frame| self.instruction(format!("load ptr, ptr {}", frame.operand)),
-            );
+            let source = if let Some(frame) = &receiver {
+                self.instruction(format!("load ptr, ptr {}", frame.operand))
+            } else {
+                // The adapter invokes the declared body directly. Its context still owns
+                // the original Python callable if the public link is later replaced.
+                let raw = self
+                    .module
+                    .types
+                    .original_cache_body(function)
+                    .expect("declared cache body");
+                let signature = self.module.types.wrapped_link_type(ty);
+                let original = self.callable_value(signature, raw, None);
+                let operand = original.operand.clone();
+                receiver = Some(original);
+                operand
+            };
             self.line(format!(
-                "call void @imre_callable_copy_cache_policy(ptr {}, ptr {source}, i64 {}, i32 {})",
+                "call void @imre_callable_init_cache(ptr {}, ptr {source}, i64 {}, i32 {})",
                 result.operand,
                 policy.capacity,
                 u32::from(policy.typed)

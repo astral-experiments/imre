@@ -1337,6 +1337,7 @@ fn lower_graph(
                     ),
                 },
             );
+            types.register_cache_body(signature.id, raw, policy);
             let wrapper = function_caches::wrapper(signature, raw, &types, policy);
             (wrapper, HashSet::from([raw]), HashSet::new())
         } else {
