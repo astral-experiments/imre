@@ -372,9 +372,8 @@ impl Pending {
     }
 }
 
-/// Each missing slot is filled once from a checked call or a fully checked body.
-/// Discovery uses the ordinary checker, then discards all of its IR and owners.
-/// The final pass checks every body again with complete, immutable signatures.
+/// Checked calls and function bodies supply missing parameter and return types.
+/// Once signatures settle, the final body check produces the operations for local callbacks.
 #[derive(Default)]
 pub(super) struct Inference {
     pending: RefCell<Vec<Pending>>,
@@ -855,7 +854,8 @@ impl Inference {
         let mut registered_generators = HashSet::new();
         loop {
             let widened = self.widened.replace(false);
-            if !widened && !self.unresolved() {
+            let signatures_settled = !self.unresolved();
+            if !widened && signatures_settled {
                 break;
             }
             checked_bodies.clear();
@@ -905,7 +905,7 @@ impl Inference {
                 {
                     continue;
                 }
-                let (ready, infer_return, retrying) = {
+                let (ready, infer_return, retrying, document_return) = {
                     let signatures = self.pending.borrow();
                     let pending = &signatures[signature.id];
                     let skip = match pending.discovery {
@@ -923,6 +923,7 @@ impl Inference {
                         pending.params.iter().all(Option::is_some),
                         pending.returns.is_none(),
                         matches!(pending.discovery, ReturnDiscovery::Waiting(_)),
+                        pending.document_return,
                     )
                 };
                 if !ready {
@@ -935,6 +936,19 @@ impl Inference {
                 // Calls earlier in this round can have supplied new parameters.
                 let mut signature = signature.clone();
                 self.update(&mut signature);
+                let discover_returns = infer_return || document_return.is_some();
+                // Local scalar and Python values cannot refine another declaration.
+                // Let the ordinary body checker retain their operations and positions.
+                if signatures_settled
+                    && !discover_returns
+                    && registered.contains_key(&signature.id)
+                    && signature.params.iter().all(|param| {
+                        param.ty == Type::PythonObject || param.ty.builtin_scalar_name().is_some()
+                    })
+                    && graph.session.function_uses_only_locals(*module, function)
+                {
+                    continue;
+                }
                 let mut checker = Checker::new(
                     graph, *module, signatures, classes, types, &helpers, &globals,
                 );
@@ -945,10 +959,8 @@ impl Inference {
                     checker.registered = Some(module_literals);
                 }
                 checker.inference = Some(self);
-                checker.discover_document_return =
-                    self.pending.borrow()[signature.id].document_return;
-                checker.inferred_returns =
-                    (infer_return || checker.discover_document_return.is_some()).then(Vec::new);
+                checker.discover_document_return = document_return;
+                checker.inferred_returns = discover_returns.then(Vec::new);
                 let mut checked_return = false;
                 let result = (|| {
                     checker.bind_function_signature(function, &signature, |_| {})?;
