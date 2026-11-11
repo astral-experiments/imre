@@ -1,7 +1,7 @@
 //! Eager displays in prepared Python suites use the checked frontend's loop traversal.
 
 use super::*;
-use crate::frontend::comprehensions::{EagerDisplay, dict_entry};
+use crate::frontend::comprehensions::{EagerDisplay, async_pull, dict_entry};
 use imre_ast::comprehension::{Output, Plan};
 
 pub(super) struct Namespace {
@@ -101,13 +101,6 @@ impl SourceScope<'_> {
             },
         })
     }
-}
-
-pub(super) fn async_pull(clause: &ast::Comprehension) -> Option<ir::AsyncPull> {
-    clause.is_async.then(|| ir::AsyncPull {
-        range: clause.target.range(),
-        header: None,
-    })
 }
 
 impl EagerDisplay for SourceScope<'_> {

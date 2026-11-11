@@ -76,7 +76,7 @@ impl RegisteredGenerator {
         );
         scope.generator_expression = true;
         let outer = imre_ast::comprehension::outer_clause(&generator.generators);
-        let (cursor, kind) = match eager::async_pull(outer) {
+        let (cursor, kind) = match comprehensions::async_pull(outer) {
             Some(pull) => (values::name_binding(".0"), ir::IterNextKind::Async(pull)),
             None => (
                 operation(

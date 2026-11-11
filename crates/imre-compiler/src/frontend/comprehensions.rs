@@ -196,6 +196,13 @@ pub(super) trait EagerDisplay: Sized {
     }
 }
 
+pub(super) fn async_pull(clause: &ast::Comprehension) -> Option<ir::AsyncPull> {
+    clause.is_async.then(|| ir::AsyncPull {
+        range: clause.target.range(),
+        header: None,
+    })
+}
+
 impl EagerDisplay for Checker<'_> {
     type Input = Iteration;
     type Destination = Collector;
@@ -206,7 +213,24 @@ impl EagerDisplay for Checker<'_> {
     }
 
     fn input(&mut self, clause: &ast::Comprehension) -> Result<Iteration, String> {
-        self.iteration_input(&clause.iter, None)
+        let Some(pull) = async_pull(clause) else {
+            return self.iteration_input(&clause.iter, None);
+        };
+        if !self.asynchronous {
+            return Err(error(
+                self.source,
+                clause,
+                "asynchronous comprehension outside an async function",
+            ));
+        }
+        let value = self.expr(&clause.iter)?;
+        Ok(Iteration::Prepared(registered::cursor_input(
+            value,
+            Type::PythonObject,
+            clause.iter.range(),
+            Some(pull),
+            |ty| self.hidden(ty),
+        )))
     }
 
     fn with_target(
@@ -562,20 +586,7 @@ impl Checker<'_> {
         &self,
         plan: &Plan<'_>,
         node: &impl Ranged,
-        async_error: &str,
     ) -> Result<(), String> {
-        let requires_async_iterator = match plan.output {
-            // A single await in a deferred expression gives it the async
-            // generator protocol even if every source is synchronous.
-            Output::Generator(_) => plan.body_suspends(),
-            _ => plan
-                .steps
-                .iter()
-                .any(|step| matches!(step, Step::Next { is_async: true, .. })),
-        };
-        if requires_async_iterator {
-            return Err(error(self.source, node, async_error));
-        }
         if plan
             .clauses
             .iter()
@@ -596,12 +607,17 @@ impl Checker<'_> {
         display: &Plan<'_>,
         collector: Collector,
     ) -> Result<Expr, String> {
-        self.check_comprehension_inputs(
-            display,
-            expression,
-            "asynchronous comprehensions are unsupported",
-        )?;
-        let input = self.iteration_input(display.outer, None)?;
+        // Native tasks cannot suspend a Python iterator. Only the registered
+        // function frame owns the resume point for an asynchronous pull.
+        if self.registered.is_none() && display.clauses.iter().any(|clause| clause.is_async) {
+            return Err(error(
+                self.source,
+                expression,
+                "asynchronous comprehensions are unsupported",
+            ));
+        }
+        self.check_comprehension_inputs(display, expression)?;
+        let input = self.input(&display.clauses[0])?;
         let writes = narrowing::expression_assignments(expression);
         if matches!(input, Iteration::Prepared(_))
             // A typed await uses the enclosing coroutine's task and frame.
