@@ -648,69 +648,64 @@ impl Checker<'_> {
         attribute: &ast::ExprAttribute,
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
-        if attribute.attr.as_str() == "makeRecord" {
+        let name = attribute.attr.as_str();
+        if name == "makeRecord" {
             return self.logger_make_record(logger, call);
         }
-        if matches!(attribute.attr.as_str(), "addHandler" | "removeHandler") {
+        if matches!(name, "addHandler" | "removeHandler") {
             let handler = self.handler_type().ok_or_else(|| {
                 error(self.source, attribute, "missing logging.Handler definition")
             })?;
             let args = self.arguments(call, &[parameter("hdlr", handler, None)], Some(logger))?;
-            let op = if attribute.attr.as_str() == "addHandler" {
+            let op = if name == "addHandler" {
                 Log::AddHandler
             } else {
                 Log::RemoveHandler
             };
             return Ok(self.ordered_builtin(Builtin::Logging(op), Type::None, args));
         }
-        if attribute.attr.as_str() == "hasHandlers" {
-            let args = self.arguments(call, &[], Some(logger))?;
-            return Ok(self.ordered_builtin(Builtin::Logging(Log::HasHandlers), Type::Bool, args));
+        if matches!(name, "setLevel" | "isEnabledFor") {
+            let params = [parameter("level", Type::Int, None)];
+            let (op, ty, args) = if name == "setLevel" {
+                let args =
+                    self.arguments_with(call, &params, Some(logger), |checker, _, arg| {
+                        checker.checked_logging_level(arg)
+                    })?;
+                (Log::SetLevel, Type::None, args)
+            } else {
+                (
+                    Log::Enabled,
+                    Type::Bool,
+                    self.arguments(call, &params, Some(logger))?,
+                )
+            };
+            return Ok(self.ordered_builtin(Builtin::Logging(op), ty, args));
         }
-        if attribute.attr.as_str() == "getChildren" {
-            let args = self.arguments(call, &[], Some(logger))?;
-            return Ok(self.ordered_builtin(
-                Builtin::Logging(Log::Children),
-                self.types.set(Type::Logger),
-                args,
-            ));
-        }
-        if attribute.attr.as_str() == "setLevel" {
-            let args = self.arguments_with(
-                call,
-                &[parameter("level", Type::Int, None)],
-                Some(logger),
-                |checker, _, arg| checker.checked_logging_level(arg),
-            )?;
-            return Ok(self.ordered_builtin(Builtin::Logging(Log::SetLevel), Type::None, args));
-        }
-        let args = call.arguments.args.as_ref();
-        let name = attribute.attr.as_str();
-        let level = match (name, args) {
-            ("getEffectiveLevel", []) => {
-                self.reject_builtin_keywords(call)?;
-                return Ok(operation(Log::EffectiveLevel, Type::Int, vec![logger]));
-            }
-            ("isEnabledFor", [level]) => {
-                self.reject_builtin_keywords(call)?;
-                let level = self.expr_expected(level, Type::Int)?;
-                return Ok(operation(Log::Enabled, Type::Bool, vec![logger, level]));
-            }
-            ("log", _) => None,
-            ("debug", _) => Some(10),
-            ("info", _) => Some(20),
-            ("warning", _) => Some(30),
-            ("error", _) => Some(40),
-            ("critical" | "fatal", _) => Some(50),
+        let (op, ty) = match name {
+            "hasHandlers" => (Log::HasHandlers, Type::Bool),
+            "getChildren" => (Log::Children, self.types.set(Type::Logger)),
+            "getEffectiveLevel" => (Log::EffectiveLevel, Type::Int),
             _ => {
-                return Err(error(
-                    self.source,
-                    call,
-                    "unsupported logger method or argument count",
-                ));
+                let level = match name {
+                    "log" => None,
+                    "debug" => Some(10),
+                    "info" => Some(20),
+                    "warning" => Some(30),
+                    "error" => Some(40),
+                    "critical" | "fatal" => Some(50),
+                    _ => {
+                        return Err(error(
+                            self.source,
+                            call,
+                            "unsupported logger method or argument count",
+                        ));
+                    }
+                };
+                return self.log_message(logger, level, false, call);
             }
         };
-        self.log_message(logger, level, false, call)
+        let args = self.arguments(call, &[], Some(logger))?;
+        Ok(self.ordered_builtin(Builtin::Logging(op), ty, args))
     }
 
     pub(super) fn root_log(
