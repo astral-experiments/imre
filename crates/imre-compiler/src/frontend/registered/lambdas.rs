@@ -1,7 +1,7 @@
 //! Prepare the binding expression in the enclosing scope and the return in its own frame.
 
 use super::*;
-use crate::frontend::function_scope::{CallableMetadata, FunctionScope, ScopeFacts};
+use crate::frontend::function_scope::{CallableMetadata, FunctionScope, LexicalSites};
 use imre_ast::code_flags;
 
 pub(crate) struct RegisteredLambda {
@@ -11,110 +11,31 @@ pub(crate) struct RegisteredLambda {
 }
 
 impl RegisteredLambda {
-    /// Bind lambdas and templates in the activation that evaluates their operands.
-    pub(crate) fn collect(
-        body: &[ast::Stmt],
+    /// Prepare the collected children after their generator dependencies are available.
+    pub(crate) fn prepare_sites(
+        sites: LexicalSites<'_>,
         source: values::RegisteredSource<'_>,
-        scopes: &mut ScopeFacts,
+        string_annotations: bool,
         expressions: &mut ExpressionSites,
     ) -> HashMap<TextSize, Self> {
-        if scopes.lambdas.is_empty() && !source.has_templates {
-            return HashMap::new();
-        }
-        use ast::visitor::{Visitor, walk_body, walk_expr, walk_stmt};
-        struct Collector<'a, 't> {
-            source: values::RegisteredSource<'a>,
-            expressions: &'t mut ExpressionSites,
-            scopes: HashMap<TextSize, FunctionScope>,
-            sites: HashMap<TextSize, RegisteredLambda>,
-            owner: RegisteredScope,
-            suite_owner: Option<RegisteredScope>,
-        }
-        impl<'a> Visitor<'a> for Collector<'_, '_> {
-            fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
-                // Ruff visits the entire header before calling visit_body for the suite.
-                self.suite_owner = match stmt {
-                    ast::Stmt::FunctionDef(def) => Some(RegisteredScope::Function {
-                        is_async: def.is_async,
-                    }),
-                    ast::Stmt::ClassDef(_) => Some(RegisteredScope::Class),
-                    _ => None,
-                };
-                walk_stmt(self, stmt);
-            }
-
-            fn visit_body(&mut self, stmts: &'a [ast::Stmt]) {
-                let parent = self.owner;
-                if let Some(owner) = self.suite_owner.take() {
-                    self.owner = owner;
+        let mut lambdas = HashMap::new();
+        for (expr, owner) in sites {
+            let source = values::RegisteredSource {
+                lambdas: Some(&lambdas),
+                ..source
+            };
+            match expr {
+                ast::Expr::Lambda(lambda) => {
+                    let scope = FunctionScope::lambda(lambda, string_annotations);
+                    let plan = Self::prepare(lambda, source, &scope, owner);
+                    expressions.register_lexical(expr, std::rc::Rc::clone(&plan.binding));
+                    lambdas.insert(lambda.start(), plan);
                 }
-                walk_body(self, stmts);
-                self.owner = parent;
-            }
-
-            fn visit_expr(&mut self, expr: &'a ast::Expr) {
-                stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || match expr {
-                    ast::Expr::Lambda(lambda) => {
-                        if let Some(parameters) = &lambda.parameters {
-                            self.visit_parameters(parameters);
-                        }
-                        let parent = std::mem::replace(&mut self.owner, RegisteredScope::Lambda);
-                        self.visit_expr(&lambda.body);
-                        self.owner = parent;
-                    }
-                    ast::Expr::Generator(generator) => {
-                        let plan = imre_ast::comprehension::Plan::generator(generator);
-                        self.visit_expr(plan.outer);
-                        let owner = RegisteredScope::Function {
-                            is_async: self
-                                .source
-                                .generators
-                                .and_then(|sites| sites.get(&generator.range()))
-                                .map_or_else(
-                                    || plan.body_suspends(),
-                                    RegisteredGenerator::is_async,
-                                ),
-                        };
-                        let parent = std::mem::replace(&mut self.owner, owner);
-                        plan.visit_body(|child| self.visit_expr(child));
-                        self.owner = parent;
-                    }
-                    _ => walk_expr(self, expr),
-                });
-
-                let source = values::RegisteredSource {
-                    lambdas: Some(&self.sites),
-                    ..self.source
-                };
-                match expr {
-                    ast::Expr::Lambda(lambda) => {
-                        let plan = RegisteredLambda::prepare(
-                            lambda,
-                            source,
-                            &self.scopes[&lambda.start()],
-                            self.owner,
-                        );
-                        self.expressions
-                            .register_lexical(expr, std::rc::Rc::clone(&plan.binding));
-                        self.sites.insert(lambda.start(), plan);
-                    }
-                    ast::Expr::TString(_) => {
-                        self.expressions.prepare_template(expr, source, self.owner)
-                    }
-                    _ => {}
-                }
+                ast::Expr::TString(_) => expressions.prepare_template(expr, source, owner),
+                _ => unreachable!("only lambdas and templates have lexical operand sites"),
             }
         }
-        let mut collector = Collector {
-            source,
-            expressions,
-            scopes: std::mem::take(&mut scopes.lambdas),
-            sites: HashMap::new(),
-            owner: RegisteredScope::Module,
-            suite_owner: None,
-        };
-        collector.visit_body(body);
-        collector.sites
+        lambdas
     }
 
     pub(super) fn body(
@@ -196,14 +117,19 @@ async def factory(seed, rows, mark):
             lambdas: None,
             private_names: Some(&names),
         };
-        let (mut scopes, generators) =
-            RegisteredGenerator::collect_scopes(&body, &names, source, |_, _| {});
+        let mut lexical = Vec::new();
+        let (_, generators) =
+            RegisteredGenerator::collect_scopes(&body, &names, source, |_, _| {}, &mut lexical);
         let source = values::RegisteredSource {
             generators: Some(&generators),
             ..source
         };
-        let mut sites =
-            RegisteredLambda::collect(&body, source, &mut scopes, &mut ExpressionSites::default());
+        let mut sites = RegisteredLambda::prepare_sites(
+            lexical,
+            source,
+            names.string_annotations,
+            &mut ExpressionSites::default(),
+        );
         let factory = body[0].as_function_def_stmt().unwrap();
         let lambda = |index: usize| {
             factory.body[index]

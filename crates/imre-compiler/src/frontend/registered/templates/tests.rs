@@ -185,13 +185,15 @@ fn template_default_and_body_suspend_in_their_defining_frames() {
         let mut templates = ExpressionSites::default();
         let mut body = parsed.into_syntax().body;
         let names = imre_ast::lower(&mut body);
-        let mut scopes = crate::frontend::function_scope::ScopeFacts::prepare(
+        let mut lexical = Vec::new();
+        crate::frontend::function_scope::ScopeFacts::prepare(
             &body,
             &names,
             |_, _| {},
-            |_, _, _| {},
+            |_, _, _, _| {},
+            &mut lexical,
         );
-        RegisteredLambda::collect(&body, source, &mut scopes, &mut templates);
+        RegisteredLambda::prepare_sites(lexical, source, names.string_annotations, &mut templates);
         templates
     };
     let mut sites: Vec<_> = templates.templates().collect();
@@ -274,23 +276,25 @@ fn unavailable_template_child_is_reported_at_its_own_range() {
         .as_tuple_expr()
         .unwrap();
     for complete in [false, true] {
-        let (mut scopes, mut generators) = RegisteredGenerator::collect_scopes(
+        let mut lexical = Vec::new();
+        let (_, mut generators) = RegisteredGenerator::collect_scopes(
             &module.body,
             &Default::default(),
             source,
             |_, _| {},
+            &mut lexical,
         );
         if !complete {
             generators.clear();
         }
         let mut sites = ExpressionSites::default();
-        RegisteredLambda::collect(
-            &module.body,
+        RegisteredLambda::prepare_sites(
+            lexical,
             RegisteredSource {
                 generators: Some(&generators),
                 ..source
             },
-            &mut scopes,
+            false,
             &mut sites,
         );
         for template in &templates.elts {

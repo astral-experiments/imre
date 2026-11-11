@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::frontend::comprehensions::EagerDisplay;
-use crate::frontend::function_scope::{CallableMetadata, FunctionScope, ScopeFacts};
+use crate::frontend::function_scope::{CallableMetadata, FunctionScope, LexicalSites, ScopeFacts};
 use imre_ast::comprehension::Plan;
 
 pub(crate) struct RegisteredGenerator {
@@ -11,6 +11,7 @@ pub(crate) struct RegisteredGenerator {
 }
 
 impl RegisteredGenerator {
+    #[cfg(test)]
     pub(super) fn is_async(&self) -> bool {
         self.metadata.suspension_flags() == imre_ast::code_flags::ASYNC_GENERATOR
     }
@@ -21,30 +22,36 @@ impl RegisteredGenerator {
         names: &imre_ast::Names,
         source: values::RegisteredSource<'_>,
         alias_site: impl FnMut(&'a ast::StmtTypeAlias, Option<TextSize>),
+        expressions: &mut LexicalSites<'a>,
     ) -> (ScopeFacts, HashMap<TextRange, Self>) {
         let mut sites = HashMap::new();
-        let scopes = ScopeFacts::prepare(body, names, alias_site, |range, plan, scope| {
-            let source = values::RegisteredSource {
-                generators: Some(&sites),
-                ..source
-            };
-            let child = stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
-                Self::prepare(plan, source, &scope)
-            });
-            if let Some(child) = child {
-                sites.insert(range, child);
-            }
-        });
+        let scopes = ScopeFacts::prepare(
+            body,
+            names,
+            alias_site,
+            |range, plan, is_async, scope| {
+                let source = values::RegisteredSource {
+                    generators: Some(&sites),
+                    ..source
+                };
+                let child = stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
+                    Self::prepare(plan, is_async, source, &scope)
+                });
+                if let Some(child) = child {
+                    sites.insert(range, child);
+                }
+            },
+            expressions,
+        );
         (scopes, sites)
     }
 
     fn prepare(
         plan: &Plan<'_>,
+        is_async: bool,
         source: values::RegisteredSource<'_>,
         scope_facts: &FunctionScope,
     ) -> Option<Self> {
-        let is_async = plan.body_suspends();
-
         // The constructor installs the target declarations and the acquired cursor in
         // a fresh comprehension frame. Reads and writes now use that frame directly.
         let operations = HashMap::new();
@@ -162,6 +169,7 @@ mod tests {
             &Default::default(),
             literals.context(&module.source),
             |_, _| {},
+            &mut Vec::new(),
         );
         generators
     }
