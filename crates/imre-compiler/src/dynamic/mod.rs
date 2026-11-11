@@ -1,6 +1,7 @@
 //! Collects Python source modules from explicit startup search paths for native lowering.
 
 mod emit;
+pub(crate) use emit::Prompt;
 mod import_module;
 pub(crate) mod literal;
 mod prepare;
@@ -2303,6 +2304,10 @@ pub(crate) fn compile(
                 .entry(unit)
                 .or_default()
                 .functions = Some(bodies);
+        }
+        if keep_docstrings && !modules[module].doctest_prompts.is_empty() {
+            registrations.checked_units.entry(unit).or_default().prompts =
+                &modules[module].doctest_prompts;
         }
     }
     let providers = options

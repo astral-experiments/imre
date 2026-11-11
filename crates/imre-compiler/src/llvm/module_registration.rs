@@ -14,6 +14,7 @@ const FILE: &str = "imre_dyn_register_file_code";
 const DECLARED_FILE: &str = "imre_dyn_register_declared_file_code_at";
 const ZIP: &str = "imre_dyn_register_zip_source";
 const ERROR: &str = "imre_dyn_register_module_error";
+const SINGLE: &str = "imre_dyn_register_module_single";
 
 /// Root constants, registration calls and declarations for one output layout.
 #[derive(Clone)]
@@ -101,6 +102,31 @@ impl ModuleLauncher {
         format!("@{symbol}")
     }
 
+    /// Attach one checked input to the module registered immediately before its inputs.
+    pub(crate) fn register_single(
+        &mut self,
+        owner: &str,
+        filename: &str,
+        source: &str,
+        flags: u32,
+        code: &str,
+    ) {
+        if self.declarations.insert(SINGLE.to_owned()) {
+            writeln!(
+                self.output.functions,
+                "declare void @{SINGLE}(ptr, ptr, ptr, ptr, i64, i32, ptr)"
+            )
+            .unwrap();
+        }
+        let text = self.output.data(source.as_bytes());
+        writeln!(
+            self.main.code,
+            "  call void @{SINGLE}(ptr %ctx, ptr {owner}, ptr {filename}, ptr {text}, i64 {}, i32 {flags}, ptr {code})",
+            source.len(),
+        )
+        .unwrap();
+    }
+
     pub(crate) fn register_error(
         &mut self,
         (name, file, source): (&str, &Path, &str),
@@ -139,15 +165,15 @@ impl ModuleLauncher {
 
 /// The loader payload follows the initializer's constants in each output.
 pub(crate) struct ModuleOperands<'a> {
-    name: String,
+    pub(crate) name: String,
     pub(crate) file: String,
     loader: &'a ModuleLoader<'a>,
 }
 
 impl ModuleOperands<'_> {
-    pub(crate) fn write_call(self, launcher: &mut ModuleLauncher, code: &str) {
-        let name = self.name;
-        let file = self.file;
+    pub(crate) fn write_call(&self, launcher: &mut ModuleLauncher, code: &str) {
+        let name = &self.name;
+        let file = &self.file;
         let mut declared_path = String::new();
         let (function, data, argument) = match self.loader {
             ModuleLoader::Source { builtin, text } => {

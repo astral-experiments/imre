@@ -297,6 +297,16 @@ impl Context {
 
     pub(super) fn op(&mut self, op: &str, a: Id, b: Id, c: Id) -> Result<Id> {
         match op {
+            "bind_doctest_module" => self.bind_doctest_module(a, b),
+            "displayhook" => {
+                self.heap.keep(a);
+                let hook = self
+                    .sys_binding("displayhook")?
+                    .ok_or_else(|| Error::new("RuntimeError", "lost sys.displayhook"))?;
+                self.heap.keep(hook);
+                self.call(hook, vec![a], Vec::new())?;
+                Ok(NONE)
+            }
             "annotation_format" => {
                 let limit = self.int(2);
                 let unsupported = self.binary(">", a, limit)?;
@@ -1037,6 +1047,39 @@ pub(super) unsafe extern "C" fn imre_dyn_register_source(
     unsafe { register_compiled(ctx, name, file, text, len, ModuleInitializer::Native(code)) }
 }
 
+/// Attach a checked interactive input immediately after registering its owning module.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_register_module_single(
+    ctx: *mut Context,
+    owner: *const c_char,
+    filename: *const c_char,
+    source: *const u8,
+    len: u64,
+    flags: u32,
+    code: Code,
+) {
+    // SAFETY: the linked entry supplies static filenames, native code and exactly len source bytes.
+    let (ctx, owner, filename, source) = unsafe {
+        (
+            &mut *ctx,
+            cstr(owner),
+            cstr(filename),
+            std::slice::from_raw_parts(source, len as usize),
+        )
+    };
+    let module = ctx
+        .sources
+        .get_mut(owner)
+        .and_then(|sources| sources.last_mut())
+        .expect("registered prompt owner");
+    Rc::make_mut(module.single_inputs.get_or_insert_with(Default::default)).push(SingleInput {
+        filename,
+        source,
+        flags,
+        code,
+    });
+}
+
 /// Accept older physical file registrations that do not carry compiler flags.
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_register_file_source(
@@ -1278,6 +1321,7 @@ fn register_source(
             path: file.into(),
             code,
             bundled_text,
+            single_inputs: None,
         });
 }
 

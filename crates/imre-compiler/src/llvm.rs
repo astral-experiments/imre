@@ -4815,6 +4815,7 @@ impl Emitter<'_, '_> {
             | Builtin::RegisteredInput(_)
             | Builtin::RegisteredStatement(..)
             | Builtin::RegisteredDiscard
+            | Builtin::RegisteredDisplayHook
             | Builtin::RegisteredNamespace(_)
             | Builtin::RegisteredUnpack { .. }
             | Builtin::RegisteredIter(_)

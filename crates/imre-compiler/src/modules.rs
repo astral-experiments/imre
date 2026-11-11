@@ -2847,6 +2847,8 @@ pub(crate) struct SourceModule {
     pub(crate) source: String,
     /// Physical text when newline normalization changed the source for analysis.
     original_source: Option<Box<str>>,
+    doctest_documents: std::sync::OnceLock<Vec<doctest::Docstring>>,
+    pub(crate) doctest_prompts: Vec<doctest::Prompt>,
     pub(crate) bundled: bool,
     /// The registered source initializer publishes this module's live attributes.
     pub(crate) registered_namespace: bool,
@@ -4664,6 +4666,7 @@ impl SiteProbes {
 type ModuleFile = (PathBuf, PathBuf, bool, usize, Option<NativeArchive>);
 
 struct Loader<'a> {
+    python_optimization: i32,
     module_operand: Option<String>,
     fs: FileSystem<'a>,
     /// ty only searches typeshed for builtins; record sealed imports missing from its inventory.
@@ -4739,6 +4742,10 @@ impl<'a> Loader<'a> {
         let archive_roots = search_roots.len();
         let mut site_roots = HashSet::new();
         let mut site_probes = None;
+        let python_optimization = python
+            .as_ref()
+            .and_then(|(options, _)| options.python_startup())
+            .map_or(0, |(flags, _)| flags.optimize);
         if let Some((options, probes)) = python {
             for dir in options.installed_dirs() {
                 let canonical = fs.canonicalize(dir).map_err(|e| e.to_string())?;
@@ -4753,6 +4760,7 @@ impl<'a> Loader<'a> {
             site_probes = Some((site_roots, probes));
         }
         Ok(Self {
+            python_optimization,
             module_operand: None,
             fs,
             archive_roots,
@@ -4833,6 +4841,8 @@ impl<'a> Loader<'a> {
             name,
             source,
             original_source,
+            doctest_documents: Default::default(),
+            doctest_prompts: Vec::new(),
             bundled: false,
             registered_namespace: false,
             parsed,

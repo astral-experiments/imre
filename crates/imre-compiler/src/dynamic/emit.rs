@@ -34,6 +34,7 @@ pub(super) struct PhysicalFile {
 /// admission does not attach any checked function bodies.
 #[derive(Default)]
 pub(super) struct CheckedUnit<'a> {
+    pub(super) prompts: &'a [Prompt],
     pub(super) literal_sites: LiteralSites,
     pub(super) source: Option<module_source::CheckedFile>,
     pub(super) functions: Option<&'a super::CheckedFunctions>,
@@ -69,6 +70,7 @@ impl RegisteredBodies<'_> {
 pub(super) enum ModuleOrigin<'a> {
     Program(Option<&'a super::CheckedFunctions>),
     ExecLiteral(u32),
+    Interactive(u32),
     Provider,
     Bundled,
 }
@@ -115,9 +117,9 @@ pub(super) fn emit(
                 continue;
             }
         };
-        let bundled = match initializer {
-            Initializer::Checked(body) => body.source.bundled,
-            Initializer::Archived(_) => true,
+        let (bundled, prompts) = match initializer {
+            Initializer::Checked(body) => (body.source.bundled, body.prompts),
+            Initializer::Archived(_) => (true, &[][..]),
         };
         let registration = prepared.registration(bundled);
         let check_archive = bundled && !providers.is_empty();
@@ -155,6 +157,19 @@ pub(super) fn emit(
                     }
                 };
                 module.write_call(launcher, &code);
+                for Prompt(prompt) in prompts {
+                    let file = launcher
+                        .output
+                        .data(prompt.source.path.as_os_str().as_encoded_bytes());
+                    let code = prompt.emit(&mut launcher.output, unit, &file)?;
+                    launcher.register_single(
+                        &module.name,
+                        &file,
+                        &prompt.source.text,
+                        prompt.source.future_flags,
+                        &code,
+                    );
+                }
                 Ok(())
             };
         register(&mut root, external.as_deref())?;
@@ -169,8 +184,23 @@ pub(super) fn emit(
     Ok((units, used_archive))
 }
 
+/// A selected single input owns its exact checked body. An unsupported prompt
+/// leaves its fixed suite eligible for the existing native runner.
+pub(crate) struct Prompt(PreparedBody<'static>);
+
+impl Prompt {
+    pub(crate) fn new(filename: PathBuf, source: String, python_optimization: i32) -> Option<Self> {
+        // compile_single consumes this code only at Python optimization level zero.
+        if python_optimization != 0 {
+            return None;
+        }
+        PreparedBody::interactive(filename, source, python_optimization, 0).map(Self)
+    }
+}
+
 /// Normalized source and lowered names shared by archive, split, and inline placement.
 pub(super) struct PreparedBody<'a> {
+    pub(super) prompts: &'a [Prompt],
     name: &'a str,
     #[cfg(test)]
     syntax: Option<Cow<'static, ast::Suite>>,
@@ -241,7 +271,7 @@ impl<'a> PreparedBody<'a> {
 
     #[cfg(test)]
     fn original_fixture_suite(&self) -> Result<ast::Suite, String> {
-        let path = self.source.path;
+        let path = self.source.path.as_ref();
         let text = self.source.text.as_ref();
         let mut body = module_source::into_body(ParsedModule::parse(path, text.into())?.parsed);
         module_source::lower(path, text, &mut body)?;
@@ -259,7 +289,7 @@ impl<'a> PreparedBody<'a> {
     ) -> Result<R, String> {
         let (module, _) = Self::prepare(
             name,
-            path,
+            Cow::Borrowed(path),
             Cow::Borrowed(source),
             python_optimization,
             origin,
@@ -272,9 +302,30 @@ impl<'a> PreparedBody<'a> {
         use_module(module)
     }
 
+    /// Prepare a finite `single` input in the same lexical scope as module code.
+    fn interactive(
+        path: impl Into<Cow<'a, Path>>,
+        text: impl Into<Cow<'a, str>>,
+        python_optimization: i32,
+        inherited_flags: u32,
+    ) -> Option<Self> {
+        let path = path.into();
+        let module = ParsedModule::parse(&path, text.into()).ok()?;
+        Self::from_parsed(
+            "<module>",
+            path,
+            module,
+            python_optimization,
+            ModuleOrigin::Interactive(inherited_flags),
+            LiteralSites::default(),
+            None,
+        )
+        .ok()
+    }
+
     pub(super) fn from_parsed(
         name: &'a str,
-        path: &'a Path,
+        path: impl Into<Cow<'a, Path>>,
         module: ParsedModule<'a, '_>,
         python_optimization: i32,
         origin: ModuleOrigin<'a>,
@@ -283,7 +334,7 @@ impl<'a> PreparedBody<'a> {
     ) -> Result<Self, String> {
         let (body, _) = Self::prepare(
             name,
-            path,
+            path.into(),
             module.text,
             python_optimization,
             origin,
@@ -292,9 +343,12 @@ impl<'a> PreparedBody<'a> {
         if let Some(refusal) = body.initializer().refusal {
             use crate::frontend::PreparedRefusal;
             return Err(match refusal {
-                PreparedRefusal::Operand((range, reason)) => {
-                    module_source::operand_diagnostic(path, &body.source.text, range, reason)
-                }
+                PreparedRefusal::Operand((range, reason)) => module_source::operand_diagnostic(
+                    &body.source.path,
+                    &body.source.text,
+                    range,
+                    reason,
+                ),
                 PreparedRefusal::ExecLiteral(site) => {
                     let (operand, reason) = body
                         .source
@@ -311,7 +365,7 @@ impl<'a> PreparedBody<'a> {
 
     fn prepare(
         name: &'a str,
-        path: &'a Path,
+        path: Cow<'a, Path>,
         text: Cow<'a, str>,
         python_optimization: i32,
         origin: ModuleOrigin<'a>,
@@ -319,15 +373,16 @@ impl<'a> PreparedBody<'a> {
     ) -> Result<(Self, Option<crate::frontend::AnnotationCode>), String> {
         #[cfg(test)]
         crate::single_emission_tests::record_preparation(
-            path,
+            &path,
             matches!(&input, Input::Module(Cow::Borrowed(_), ..)),
         );
+        let interactive = matches!(origin, ModuleOrigin::Interactive(_));
         let keep_docstrings = python_optimization < 2;
         let source = text.as_ref();
         let bundled = matches!(origin, ModuleOrigin::Bundled);
         let provider = matches!(origin, ModuleOrigin::Provider);
         let inherited_flags = match origin {
-            ModuleOrigin::ExecLiteral(flags) => flags,
+            ModuleOrigin::ExecLiteral(flags) | ModuleOrigin::Interactive(flags) => flags,
             _ => 0,
         };
         let expression = matches!(&input, Input::Expression(..));
@@ -339,7 +394,14 @@ impl<'a> PreparedBody<'a> {
             Input::Module(parsed, ..) => (
                 parsed.syntax(),
                 parsed.tokens(),
-                module_source::validate(path, source, parsed, keep_docstrings)?,
+                module_source::validate(
+                    &path,
+                    source,
+                    parsed,
+                    keep_docstrings
+                        && !(interactive
+                            && matches!(parsed.syntax().body.as_slice(), [ast::Stmt::Expr(_)])),
+                )?,
             ),
             Input::Expression(syntax, tokens) => (
                 syntax,
@@ -390,7 +452,7 @@ impl<'a> PreparedBody<'a> {
         let method_imports = imre_ast::module_imports(&body);
         let future_flags = super::literal::future_flags(&body, inherited_flags);
         let private_names = module_source::lower_with_future(
-            path,
+            &path,
             source,
             &mut body,
             inherited_flags & imre_ast::code_flags::FUTURE_ANNOTATIONS != 0,
@@ -539,8 +601,15 @@ impl<'a> PreparedBody<'a> {
                         .unwrap_or_default(),
                 );
         }
-        let initializer =
-            (!expression).then(|| prepare.suite(&body, crate::frontend::RegisteredScope::Module));
+        let initializer = if interactive {
+            Some(
+                prepare
+                    .interactive(&body)
+                    .ok_or("unsupported interactive statement")?,
+            )
+        } else {
+            (!expression).then(|| prepare.suite(&body, crate::frontend::RegisteredScope::Module))
+        };
         #[cfg(test)]
         let statement_sites = prepare.sites;
         let source = SourceInfo {
@@ -574,7 +643,7 @@ impl<'a> PreparedBody<'a> {
             private_names,
             text,
         };
-        let docstring = (!expression && keep_docstrings)
+        let docstring = (!expression && !interactive && keep_docstrings)
             .then(|| crate::frontend::docstring(&body).or_else(|| source.bundled_docstring("")))
             .flatten();
         let annotation = if expression {
@@ -588,6 +657,7 @@ impl<'a> PreparedBody<'a> {
         drop(body);
         Ok((
             PreparedBody {
+                prompts: &[],
                 name,
                 #[cfg(test)]
                 syntax: None,
@@ -617,7 +687,7 @@ impl<'a> PreparedBody<'a> {
         };
         let (prepared, code) = PreparedBody::prepare(
             "",
-            Path::new("<string>"),
+            Cow::Borrowed(Path::new("<string>")),
             Cow::Owned(text.to_owned()),
             python_optimization,
             ModuleOrigin::Program(None),
@@ -646,7 +716,7 @@ impl<'a> PreparedBody<'a> {
             }
             _ => file.to_owned(),
         };
-        let positions = SourcePositions::new(self.source.path, &self.source.text, &code_file);
+        let positions = SourcePositions::new(&self.source.path, &self.source.text, &code_file);
         let mut frame =
             RegisteredFrame::new(output, &positions, false, unit, self.source.module_start);
         let initializer = self.initializer();
@@ -663,6 +733,10 @@ impl<'a> PreparedBody<'a> {
             self.source.private_names.string_annotations,
             self.docstring.as_deref(),
         );
+        if !self.prompts.is_empty() {
+            let name = frame.code_name(self.name);
+            frame.op("bind_doctest_module", &[&frame.scope.clone(), &name]);
+        }
         let globals = &self.source.scopes.module_globals;
         let frame = location.emit_body(
             frame,
@@ -841,7 +915,7 @@ struct SourceInfo<'a> {
     class_bodies: HashMap<ruff_text_size::TextSize, crate::frontend::RegisteredClass>,
     initializer: Option<crate::frontend::RegisteredSuite>,
     bundled: bool,
-    path: &'a Path,
+    path: Cow<'a, Path>,
     python_annotations: bool,
     module_start: ruff_text_size::TextSize,
     #[cfg(test)]
@@ -867,7 +941,7 @@ impl SourceInfo<'_> {
 
     fn literal_diagnostic(&self, site: TextSize, reason: &str) -> String {
         crate::frontend::phase::Diagnostic::at(&self.text, &TextRange::empty(site), reason)
-            .with_path(self.path)
+            .with_path(&self.path)
             .to_string()
     }
 
@@ -1236,7 +1310,7 @@ impl<'p> sites::SiteDefinitions<'p> for LexicalDefinitions<'_, 'p> {
             callable_code: Default::default(),
             exec_code: Default::default(),
             unit: self.source.unit,
-            positions: &SourcePositions::new(body.scope.path, text, &file),
+            positions: &SourcePositions::new(&body.scope.path, text, &file),
         };
         location.code(
             self.output,
@@ -1670,6 +1744,91 @@ mod tests {
     use super::super::prepare::ModuleSource;
     use super::*;
     use crate::llvm::registered::permanent;
+
+    #[test]
+    fn ordinary_doctest_suites_place_owned_inputs_and_keep_the_fixed_runner() {
+        let directory = tempfile::tempdir().unwrap();
+        let entry = directory.path().join("app.py");
+        let run = "doctest.DocTestSuite(subject).debug()";
+        for (caller, second, compound) in [
+            (run.to_owned(), "record()", false),
+            (run.to_owned(), "if True:\n...     3", true),
+            (format!("def later():\n    {run}"), "record()", false),
+            (format!("if False:\n    {run}"), "record()", false),
+        ] {
+            std::fs::write(
+                &entry,
+                format!("import doctest\nimport subject\n{caller}\n"),
+            )
+            .unwrap();
+            std::fs::write(
+                directory.path().join("subject.py"),
+                format!("\"\"\"\n>>> 3\n3\n>>> {second}\n\"\"\"\n"),
+            )
+            .unwrap();
+            let graph =
+                crate::modules::SourceGraph::load(&entry, Some(directory.path()), &[]).unwrap();
+            let subject = graph.modules.iter().find(|m| m.name == "subject").unwrap();
+            let inputs: Vec<_> = subject
+                .doctest_prompts
+                .iter()
+                .map(|Prompt(body)| (body.source.path.as_ref(), body.source.text.as_ref()))
+                .collect();
+            let mut expected = vec![(Path::new("<doctest subject[0]>"), "3\n")];
+            if !compound {
+                expected.push((Path::new("<doctest subject[1]>"), "record()\n"));
+            }
+            assert_eq!(inputs, expected);
+            assert!(graph.doctest_runner().is_some());
+            assert!(graph.modules.iter().any(|m| m.is_doctest_case()));
+        }
+    }
+
+    #[test]
+    fn interactive_prompts_use_checked_operands_and_display_only_expressions() {
+        use crate::ir::{Builtin, ExprKind, Statement};
+        let path = Path::new("<doctest example[0]>");
+        for (text, display) in [
+            ("3\n", true),
+            ("record()\n", true),
+            ("None\n", true),
+            ("'prompt string'\n", true),
+            ("saved = record()\n", false),
+            ("raise problem\n", false),
+            ("def f():\n    return 3\n", false),
+            ("class C:\n    x = 3\n", false),
+            ("type T = int\n", false),
+        ] {
+            let prepared = PreparedBody::interactive(path, text, 0, 0).unwrap();
+            assert!(prepared.syntax.is_none());
+            assert!(prepared.docstring.is_none());
+            let suite = prepared.initializer();
+            assert!(suite.fully_checked());
+            crate::verify::registered(suite.checked.region()).unwrap();
+            let displays = suite.checked.function.body.iter().any(|stmt| {
+                let Statement::Expr(value) = stmt else {
+                    return false;
+                };
+                let ExprKind::Builtin(Builtin::RegisteredDisplayHook, args) = &value.kind else {
+                    return false;
+                };
+                let [operand] = &args[..] else {
+                    panic!("displayhook needs its expression")
+                };
+                let ExprKind::Builtin(Builtin::RegisteredLocation(range, ..), _) = &operand.kind
+                else {
+                    panic!("displayed operand lost its source position")
+                };
+                assert_eq!(&text[*range], text.trim_end());
+                true
+            });
+            assert_eq!(displays, display);
+            prepared.standalone().unwrap();
+        }
+        assert!(PreparedBody::interactive(path, "1\n2\n", 0, 0).is_none());
+        assert!(PreparedBody::interactive(path, "if True:\n    3\n", 0, 0).is_none());
+        assert!(PreparedBody::interactive(path, "def f():\n    '\\ud800'\n", 0, 0).is_none());
+    }
 
     fn emit_modules(
         (files, builtins, entry_source): (

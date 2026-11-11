@@ -2,10 +2,39 @@
 
 use super::*;
 use ruff_python_ast::visitor::{Visitor, walk_expr, walk_stmt};
+use std::borrow::Cow;
 use std::fmt::Write;
 
 const CASE_PREFIX: &str = "_imre_compiled_doctest_";
 const RUNNER_MODULE: &str = "_imre_compiled_doctests";
+
+pub(crate) use crate::dynamic::Prompt;
+pub(super) type Docstring = (String, String, Option<TextSize>);
+
+/// The runner and the DocTest metadata use the same physical declarations in source order.
+pub(crate) fn documents(
+    modules: &[SourceModule],
+    target: Binding,
+) -> Option<(&str, Cow<'_, [Docstring]>)> {
+    match target {
+        Binding::Module(id) => {
+            let source = &modules[id];
+            let docs = source.doctest_documents.get_or_init(|| {
+                let mut docs = Vec::new();
+                source_docstrings(&source.name, &source.parsed.syntax().body, true, &mut docs);
+                docs
+            });
+            Some((&source.name, Cow::Borrowed(docs)))
+        }
+        Binding::IntrinsicModule(module) => {
+            let sealed = sealed(module)?;
+            let mut docs = Vec::new();
+            sealed.append_to(&mut docs);
+            Some((sealed.module, Cow::Owned(docs)))
+        }
+        _ => None,
+    }
+}
 
 impl SourceModule {
     /// Only loader-created example modules may use interactive variable binding.
@@ -586,28 +615,38 @@ impl Loader<'_> {
         }
         let mut cases = std::collections::BTreeMap::new();
         if uses.executes {
+            let mut recorded = HashSet::new();
             for variable in uses.variables {
                 if let Some(bindings) = uses.assignments.get(&variable) {
                     uses.targets.extend(bindings);
                 }
             }
             for target in uses.targets {
-                let mut docs = Vec::new();
-                match target {
-                    Binding::Module(id) => {
-                        let m = &self.modules[id];
-                        source_docstrings(&m.name, &m.parsed.syntax().body, true, &mut docs);
-                    }
-                    Binding::IntrinsicModule(module) if let Some(catalog) = sealed(module) => {
-                        catalog.append_to(&mut docs);
-                    }
-                    _ => continue,
-                }
-                for (name, doc, _) in docs {
-                    let sources = prompts(&doc);
+                let Some((_, docs)) = documents(&self.modules, target) else {
+                    continue;
+                };
+                let mut prepared = Vec::new();
+                for (name, doc, _) in docs.iter() {
+                    let sources = prompts(doc);
                     if !sources.is_empty() {
-                        cases.insert(name, (sources, target));
+                        if let Binding::Module(id) = target
+                            && recorded.insert((id, name.clone()))
+                        {
+                            prepared.extend(sources.iter().enumerate().filter_map(
+                                |(index, source)| {
+                                    Prompt::new(
+                                        format!("<doctest {name}[{index}]>").into(),
+                                        source.clone(),
+                                        self.python_optimization,
+                                    )
+                                },
+                            ));
+                        }
+                        cases.insert(name.clone(), (sources, target));
                     }
+                }
+                if let Binding::Module(id) = target {
+                    self.modules[id].doctest_prompts.extend(prepared);
                 }
             }
         }
@@ -654,5 +693,46 @@ impl Loader<'_> {
         source.push_str(&body);
         self.add_doctest_module(RUNNER_MODULE.into(), &source)?;
         Ok(Vec::new())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn physical_doctest_declarations_survive_syntax_withdrawal() {
+        let source = "'module doc'\nclass C:\n    'class doc'\n    def method(self):\n        'method doc'\n";
+        let mut graph = SourceGraph::single(source).unwrap();
+        let entry = graph.entry;
+        let target = Binding::Module(entry);
+        assert!(graph.modules[entry].doctest_documents.get().is_none());
+        let storage = documents(&graph.modules, target).unwrap().1.as_ptr();
+
+        let erased = SourceGraph::single("pass\n").unwrap();
+        graph.modules[entry].parsed = erased.modules[erased.entry].parsed.clone();
+        let (owner, docs) = documents(&graph.modules, target).unwrap();
+        assert_eq!(owner, "__main__");
+        assert_eq!(docs.as_ptr(), storage);
+        let actual: Vec<_> = docs
+            .iter()
+            .map(|(name, doc, offset)| (name.as_str(), doc.as_str(), usize::from(offset.unwrap())))
+            .collect();
+        assert_eq!(
+            actual,
+            [
+                ("__main__", "module doc", 0),
+                (
+                    "__main__.C",
+                    "class doc",
+                    source.find("'class doc'").unwrap()
+                ),
+                (
+                    "__main__.C.method",
+                    "method doc",
+                    source.find("'method doc'").unwrap()
+                ),
+            ]
+        );
     }
 }
