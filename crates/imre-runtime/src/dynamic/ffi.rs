@@ -2620,7 +2620,8 @@ union PrelinkedEntry {
 #[repr(C)]
 pub(super) struct PrelinkedSite {
     entry: PrelinkedEntry,
-    filename: *const c_char,
+    // Kept in the linked site ABI. The active parent Code owns the filename.
+    _filename: *const c_char,
     first_line: u32,
     tag: u32,
 }
@@ -2663,21 +2664,7 @@ pub(super) unsafe extern "C" fn imre_dyn_define(
     {
         code
     } else {
-        let filename = if let Some(filename) = ctx
-            .code_object(owner)
-            .compilation_constants
-            .as_ref()
-            .and_then(|constants| constants.filename)
-        {
-            filename
-        } else {
-            // SAFETY: the filename is a nul-terminated constant in the native executable.
-            let file = unsafe { native_path(definition.filename) };
-            match ctx.import_path_text(file) {
-                Ok(filename) => filename,
-                Err(error) => return finish(ctx, Err(error)),
-            }
-        };
+        let filename = ctx.code_object(owner).filename;
         // SAFETY: the emitter initializes the union with the function ABI selected by the tag.
         let body = unsafe {
             match definition.tag {

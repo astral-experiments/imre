@@ -1194,12 +1194,7 @@ fn registered_single_code(ctx: &mut Context, source: Id, filename: Id, test: Id)
     let input = owner.single_inputs.as_ref()?.iter().find(|input| {
         input.filename == name && input.source == text.as_bytes() && inherited & !input.flags == 0
     })?;
-    let code = ctx.native_module_code(input.code, filename, Some(input.flags));
-    let Value::Code(object) = ctx.heap.get_mut(code) else {
-        unreachable!()
-    };
-    object.bind_file_constants(filename);
-    Some(code)
+    Some(ctx.native_module_code(input.code, filename, Some(input.flags)))
 }
 
 /// Convert the real builtin's path and options in argument order. A Python compiler owns its operands.

@@ -490,7 +490,7 @@ impl Context {
         self.module_code_at(entry, path, filename)
     }
 
-    fn module_code_at(
+    pub(super) fn module_code_at(
         &mut self,
         entry: ModuleInitializer,
         path: &Path,
@@ -536,20 +536,6 @@ impl Context {
             }
         };
         Ok(self.native_module_code(entry, filename, flags))
-    }
-
-    fn compiled_file_code(
-        &mut self,
-        entry: ModuleInitializer,
-        path: &Path,
-        filename: Id,
-    ) -> Result<Id> {
-        let code = self.module_code_at(entry, path, filename)?;
-        let Value::Code(object) = self.heap.get_mut(code) else {
-            unreachable!()
-        };
-        object.bind_file_constants(filename);
-        Ok(code)
     }
 
     /// Each execution of compiled source gets its own module code and nested definition cache.
@@ -657,7 +643,7 @@ impl Context {
         if Sha256::digest(self.bytes_like(data)?).as_slice() != digest {
             return Ok(None);
         }
-        self.compiled_file_code(code, &path, filename).map(Some)
+        self.module_code_at(code, &path, filename).map(Some)
     }
 
     /// Resolve the file that runpy tried to open to the declaring loader’s native code.
@@ -690,7 +676,7 @@ impl Context {
             }
         }
         selected
-            .map(|(code, ..)| self.compiled_file_code(code, &path, filename))
+            .map(|(code, ..)| self.module_code_at(code, &path, filename))
             .transpose()
     }
 
