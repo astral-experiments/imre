@@ -365,14 +365,14 @@ impl<'p> RegisteredBody<'p> {
             return;
         };
         let next = Cell::new(0);
-        let mut frame = Frame {
+        let frame = Frame {
             code: code.reborrow(),
             names: Some(&checked.local_names),
             inputs,
             fixed_sites: (!checked.fixed_sites.is_empty()).then_some((checked, &next)),
         };
-        frame.checked_statements(&checked.function.body);
-        frame.restore_checked_slots(enclosing);
+        CheckedBody::registered(frame).emit_function(&checked.function);
+        code.restore_checked_slots(enclosing);
     }
 }
 
@@ -493,12 +493,13 @@ impl<'f, 'a, 'p> Frame<'f, 'a, 'p> {
         true
     }
 
-    fn checked_statements(&mut self, body: &[Statement]) {
-        if !body.is_empty() && self.next_statement() {
-            if let FrameOwner::Prepared(owner) = &mut self.code {
-                owner.place_statements(body);
-            }
-            self.emit_suite(body);
+    /// Reserve the lexical children of the next executable body before their first use.
+    pub(super) fn place_function_sites(&mut self, body: &[Statement]) {
+        if !body.is_empty()
+            && self.next_statement()
+            && let FrameOwner::Prepared(owner) = &mut self.code
+        {
+            owner.place_statements(body);
         }
     }
 
