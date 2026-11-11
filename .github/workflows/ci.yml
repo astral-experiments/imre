@@ -253,7 +253,7 @@ jobs:
           persist-credentials: false
       - name: Compare POSIX fd readiness with CPython
         env:
-          PYTHONPATH: .cpython-stdlib-reference/Lib
+          PYTHONPATH: ${{ runner.temp }}/imre-cpython-fixtures/Lib
         run: python3 tests/posix_readiness.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --host-original
       - name: Run original CPython TCP methods and socket option controls
         env:
