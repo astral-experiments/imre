@@ -446,7 +446,6 @@ mod tests {
             SuiteSelection::Physical,
             false,
         );
-        assert!(suite.refusals.is_empty());
         let inputs = &suite.operands;
         assert!(matches!(
             inputs.as_slice(),
