@@ -1048,7 +1048,7 @@ fn lower_graph(
             callable_definitions.push(class.definition);
         }
     }
-    records::record_factories(
+    let record_factories = records::record_factories(
         &mut classes,
         &mut definitions,
         &mut callable_definitions,
@@ -1130,7 +1130,7 @@ fn lower_graph(
         || graph.modules[graph.entry].parsed.syntax().body.iter().any(|stmt| {
             matches!(stmt, ast::Stmt::FunctionDef(def) if inspect::marks_function(graph, graph.entry, def))
         });
-    let helpers = Helpers::new(definitions.len() + graph.initializers(entry_declarations).count());
+    let helpers = Helpers::new(inference.len() + graph.initializers(entry_declarations).count());
     let needs_registered_entry =
         !registered_generators.is_empty() || signatures.values().any(Signature::registered_frame);
     if needs_registered_entry {
@@ -1218,6 +1218,22 @@ fn lower_graph(
             capture();
         }
     };
+    let checker_for = |module| {
+        Checker::new(
+            graph,
+            module,
+            &signatures,
+            &classes,
+            &types,
+            &helpers,
+            &globals,
+        )
+    };
+    let capture_fixed_refusal = |failure: &Failure| {
+        if !named {
+            capture_on_object(failure);
+        }
+    };
     let mut frame_sources = HashMap::new();
     let mut has_wrapper_link = false;
     let mut refused_body = None;
@@ -1228,15 +1244,7 @@ fn lower_graph(
     let mut recursion_errors = Vec::new();
     for (module_id, definition, signature) in &definitions {
         let module = &graph.modules[*module_id];
-        let mut checker = Checker::new(
-            graph,
-            *module_id,
-            &signatures,
-            &classes,
-            &types,
-            &helpers,
-            &globals,
-        );
+        let mut checker = checker_for(*module_id);
         // Both calling conventions can diagnose the same body. Named startup uses the
         // ordinary binder to check which physical function the entry actually calls.
         let called_body = |report: Diagnostic| {
@@ -1319,20 +1327,21 @@ fn lower_graph(
             Some(cache) if signature.method.is_none() => cache.body(checker, definition, signature),
             _ => lower_body(checker, definition, signature),
         };
-        let (body, sums) =
-            match checked_region(result, graph, *module_id, &mut unavailable, |failure| {
-                if !named {
-                    capture_on_object(failure);
-                }
-            }) {
-                Ok(Some(body)) => body,
-                Ok(None) => continue,
-                Err(report) => {
-                    finish_named(&mut completed);
-                    refused_body = Some(called_body(report)?);
-                    break;
-                }
-            };
+        let (body, sums) = match checked_region(
+            result,
+            graph,
+            *module_id,
+            &mut unavailable,
+            capture_fixed_refusal,
+        ) {
+            Ok(Some(body)) => body,
+            Ok(None) => continue,
+            Err(report) => {
+                finish_named(&mut completed);
+                refused_body = Some(called_body(report)?);
+                break;
+            }
+        };
         if needs_registered_entry {
             // The fixed-layout checks have supplied their diagnostics. Registered
             // definitions and the registered initializer already own this program.
@@ -1396,21 +1405,31 @@ fn lower_graph(
             "recursive calls are unsupported in this prototype",
         ));
     }
+    let mut factories = Vec::with_capacity(record_factories.len());
+    if refused_body.is_none() {
+        for class in record_factories {
+            let module = classes.declarations.definitions[class].definition.module;
+            let checker = checker_for(module);
+            let body = checked_region(
+                checker.record_factory_body(class),
+                graph,
+                module,
+                &mut unavailable,
+                capture_fixed_refusal,
+            )
+            .inspect_err(|_| finish_named(&mut completed))?;
+            if let Some(helper) = body {
+                factories.push(helper);
+            }
+        }
+    }
     let mut entry = None;
     let mut startup = Vec::new();
     for (module_id, module) in graph.modules.iter().enumerate() {
         if module_id != graph.entry {
             continue;
         }
-        let mut checker = Checker::new(
-            graph,
-            module_id,
-            &signatures,
-            &classes,
-            &types,
-            &helpers,
-            &globals,
-        );
+        let mut checker = checker_for(module_id);
         checker.module_scope = true;
         let statements = module
             .executable
@@ -1491,19 +1510,23 @@ fn lower_graph(
         .command_startup
         .as_ref()
         .is_some_and(|(flags, _)| flags.faulthandler);
-    let initializer_ids = functions.len()..functions.len() + initializations.len();
+    let first_initializer = functions.len() + factories.len();
+    let initializer_ids = first_initializer..first_initializer + initializations.len();
     let mut initialization_order = Vec::with_capacity(initializations.len());
-    for initialization in initializations {
+    let module_bodies = initializations.into_iter().map(|initialization| {
         let module_id = initialization.order.module;
-        functions.push(initialization.function);
-        call_graph.push(initialization.calls);
-        initialization_order.push(initialization.order);
-        owners.push(module_id);
-        class_reads.push(HashSet::new());
         let module = &graph.modules[module_id];
-        recursion_errors
-            .push(module.error(module.parsed.syntax(), "recursive module initialization"));
-    }
+        initialization_order.push(initialization.order);
+        comprehensions::Helper {
+            module: module_id,
+            function: initialization.function,
+            calls: initialization.calls,
+            class_reads: HashSet::new(),
+            recursion_error: module
+                .error(module.parsed.syntax(), "recursive module initialization"),
+            source_frame: module.archive.is_none(),
+        }
+    });
     // Entry code and inactive module guards can create helpers too. Validate the
     // complete graph only after every source expression has been lowered.
     let list_builds = helpers.list_builds.take();
@@ -1511,7 +1534,11 @@ fn lower_graph(
         .iter()
         .map(|&module| graph.modules[module].archive.is_none())
         .collect();
-    for helper in helpers.take_functions() {
+    for helper in factories
+        .into_iter()
+        .chain(module_bodies)
+        .chain(helpers.take_functions())
+    {
         python_frames.push(helper.source_frame);
         owners.push(helper.module);
         functions.push(helper.function);

@@ -368,12 +368,13 @@ pub(super) fn field_default(
 /// fresh container defaults without expanding a tree of constructors in the IR.
 pub(super) fn record_factories(
     classes: &mut ClassInfo,
-    definitions: &mut Vec<(ModuleId, ast::StmtFunctionDef, Signature)>,
+    definitions: &mut [(ModuleId, ast::StmtFunctionDef, Signature)],
     owners: &mut Vec<DefinitionId>,
     inference: &inference::Inference,
     graph: &SourceGraph,
     types: &Types,
-) -> std::result::Result<(), String> {
+) -> std::result::Result<Vec<usize>, String> {
+    let mut factories = Vec::new();
     let mut thunks = HashMap::new();
     for (class, record) in classes.declarations.definitions.iter().enumerate() {
         for (index, field) in record.fields.iter().enumerate() {
@@ -396,55 +397,8 @@ pub(super) fn record_factories(
                 continue;
             }
             let function = *thunks.entry(id).or_insert_with(|| {
-                let node = &declared.node;
-                let range = node.name.range();
-                let callee = ast::Expr::Name(ast::ExprName {
-                    range,
-                    node_index: ast::AtomicNodeIndex::NONE,
-                    id: node.name.id.clone(),
-                    ctx: ast::ExprContext::Load,
-                });
-                let helper = ast::StmtFunctionDef {
-                    range,
-                    node_index: ast::AtomicNodeIndex::NONE,
-                    is_async: false,
-                    decorator_list: Default::default(),
-                    name: ast::Identifier::new("__imre_record_factory", range),
-                    type_params: None,
-                    parameters: Box::new(ast::Parameters {
-                        range,
-                        ..Default::default()
-                    }),
-                    returns: Some(Box::new(callee.clone())),
-                    body: [ast::Stmt::Return(ast::StmtReturn {
-                        range,
-                        node_index: ast::AtomicNodeIndex::NONE,
-                        value: Some(Box::new(ast::Expr::Call(ast::ExprCall {
-                            range_start: range.start(),
-                            node_index: ast::AtomicNodeIndex::NONE,
-                            func: Box::new(callee),
-                            arguments: ast::Arguments {
-                                range,
-                                node_index: ast::AtomicNodeIndex::NONE,
-                                args: Default::default(),
-                                keywords: Default::default(),
-                            },
-                        }))),
-                    })]
-                    .into_iter()
-                    .collect(),
-                };
                 let function = inference.register(Vec::new(), Some(concrete), Vec::new());
-                let signature = Signature {
-                    parameter_declarations: Arc::default(),
-                    id: function,
-                    physical_frame: false,
-                    asynchronous: false,
-                    params: Vec::new(),
-                    returns: concrete,
-                    method: None,
-                };
-                definitions.push((target.module, helper, signature));
+                factories.push(id);
                 owners.push(target);
                 function
             });
@@ -470,7 +424,62 @@ pub(super) fn record_factories(
             definitions[signature.id].2.params[index].default = Some(value);
         }
     }
-    Ok(())
+    Ok(factories)
+}
+
+impl Checker<'_> {
+    /// Lower the zero-argument call shared by fields that construct this dataclass.
+    pub(super) fn record_factory_body(
+        mut self,
+        class: usize,
+    ) -> Result<comprehensions::Helper, String> {
+        let name = &self.classes.declarations.definitions[class].node.name;
+        let range = name.range();
+        let returns = Type::Class(class);
+        let callee = ast::Expr::Name(ast::ExprName {
+            range,
+            node_index: ast::AtomicNodeIndex::NONE,
+            id: name.id.clone(),
+            ctx: ast::ExprContext::Load,
+        });
+        let source = [ast::Stmt::Return(ast::StmtReturn {
+            range,
+            node_index: ast::AtomicNodeIndex::NONE,
+            value: Some(Box::new(ast::Expr::Call(ast::ExprCall {
+                range_start: range.start(),
+                node_index: ast::AtomicNodeIndex::NONE,
+                func: Box::new(callee),
+                arguments: ast::Arguments {
+                    range,
+                    node_index: ast::AtomicNodeIndex::NONE,
+                    args: Default::default(),
+                    keywords: Default::default(),
+                },
+            }))),
+        })];
+        self.returns = returns;
+        self.frame = LexicalFrame::Named("__imre_record_factory".into());
+        let result = self.block(&source);
+        let (mut body, _) = self.finish_region(result)?;
+        self.fault_frame(&mut body, "__imre_record_factory", range.start());
+        let mut class_reads = self.class_reads.into_inner();
+        self.graph
+            .ordered_reads(self.module, &source, true, &mut class_reads);
+        Ok(comprehensions::Helper {
+            module: self.module,
+            function: ir::Function {
+                params: Vec::new(),
+                returns,
+                locals: self.locals,
+                body,
+            },
+            calls: self.calls,
+            class_reads,
+            recursion_error: self.graph.modules[self.module]
+                .error(name, "recursive calls are unsupported in this prototype"),
+            source_frame: true,
+        })
+    }
 }
 
 /// A successful None check can establish the current value of a stored field.
