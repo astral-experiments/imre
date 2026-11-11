@@ -88,10 +88,10 @@ pub(super) fn generator_scope(
         implicit_class: true,
         ..Uses::new(string_annotations)
     };
-    plan.visit_body(|expr| uses.visit_expr(expr));
+    let locals = plan.scope_bindings(|expr| uses.visit_expr(expr));
     uses.direct.append(&mut uses.nested);
     let mut scope = ClosureNames {
-        locals: plan.collect_target_names(),
+        locals,
         reads: uses.direct,
         nonlocals: uses.walrus,
         ..ClosureNames::default()
@@ -163,10 +163,9 @@ impl Uses {
         self.visit_expr(plan.outer);
         let mut child = self.child_scope();
         let bounds = ClosureNames {
-            locals: plan.collect_target_names(),
+            locals: plan.scope_bindings(|expr| child.visit_expr(expr)),
             ..ClosureNames::default()
         };
-        plan.visit_body(|expr| child.visit_expr(expr));
         // Assignment expressions escape comprehension scopes, but stop at a lambda or function.
         if self.inline_comprehensions {
             if !matches!(plan.output, imre_ast::comprehension::Output::Generator(_)) {

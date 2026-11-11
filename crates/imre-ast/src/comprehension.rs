@@ -146,7 +146,7 @@ impl<'a> Plan<'a> {
     ) -> Result<T, InvalidTarget> {
         let mut names = T::default();
         for clause in self.clauses {
-            visit_target_names(&clause.target, &mut names, &invalid)?;
+            visit_target(&clause.target, &mut names, &invalid, |_| {})?;
         }
         Ok(names)
     }
@@ -173,6 +173,25 @@ impl<'a> Plan<'a> {
                 BodyOperand::Value(expr) | BodyOperand::Target(expr) => visit(expr),
             }
         }
+    }
+
+    /// Collect the body's local bindings while visiting the expressions it evaluates.
+    /// A name target binds directly, while an attribute or subscript still reads its operands.
+    pub fn scope_bindings<T: Default + Extend<String>>(
+        &self,
+        mut visit: impl FnMut(&'a ast::Expr),
+    ) -> T {
+        let mut names = T::default();
+        for operand in self.body_operands() {
+            match operand {
+                BodyOperand::Value(expr) => visit(expr),
+                BodyOperand::Target(target) => {
+                    visit_target(target, &mut names, |_| Ok(()), &mut visit)
+                        .expect("collecting names without validation");
+                }
+            }
+        }
+        names
     }
 
     /// Includes implicit awaits in async iteration, and excludes the acquisition
@@ -214,7 +233,7 @@ pub enum InvalidTarget {
 /// Only names in a binding pattern become local. Analysis can collect names
 /// before its owning compiler reports a malformed assignment pattern.
 pub fn collect_target_names(target: &ast::Expr, names: &mut HashSet<String>) {
-    let _ = visit_target_names(target, names, |_| Ok(()));
+    let _ = visit_target(target, names, |_| Ok(()), |_| {});
 }
 
 /// Declare bindings left to right. Attribute and subscript receivers are
@@ -223,19 +242,20 @@ pub fn try_collect_target_names(
     target: &ast::Expr,
     names: &mut impl Extend<String>,
 ) -> Result<(), InvalidTarget> {
-    visit_target_names(target, names, Err)
+    visit_target(target, names, Err, |_| {})
 }
 
-fn visit_target_names(
-    mut target: &ast::Expr,
+fn visit_target<'a>(
+    mut target: &'a ast::Expr,
     names: &mut impl Extend<String>,
     invalid: impl Fn(InvalidTarget) -> Result<(), InvalidTarget>,
+    mut visit: impl FnMut(&'a ast::Expr),
 ) -> Result<(), InvalidTarget> {
     let mut pending = Vec::new();
     loop {
         match target {
             ast::Expr::Name(name) => names.extend([name.id.to_string()]),
-            ast::Expr::Attribute(_) | ast::Expr::Subscript(_) => {}
+            ast::Expr::Attribute(_) | ast::Expr::Subscript(_) => visit(target),
             ast::Expr::Starred(star) => {
                 invalid(InvalidTarget::BareStar)?;
                 target = &star.value;
@@ -256,7 +276,10 @@ fn visit_target_names(
                     item => item,
                 }));
             }
-            _ => invalid(InvalidTarget::Unsupported)?,
+            _ => {
+                invalid(InvalidTarget::Unsupported)?;
+                visit(target);
+            }
         }
         let Some(next) = pending.pop() else {
             return Ok(());
@@ -378,10 +401,10 @@ mod tests {
 
     #[test]
     fn target_scopes_declare_unpack_names_in_clause_order() {
-        let parsed = ruff_python_parser::parse_expression(
-            "[item async for (first, *rest), [items[index], box.value] in rows for item, first in rest]",
-        )
-        .unwrap();
+        use ruff_text_size::Ranged;
+
+        let text = "[item async for (first, *rest), [items[index], box.value] in rows if first for item, first in rest]";
+        let parsed = ruff_python_parser::parse_expression(text).unwrap();
         let plan = Plan::from_expr(parsed.expr()).unwrap();
         let expected = HashSet::from(["first".to_owned(), "rest".to_owned(), "item".to_owned()]);
         assert_eq!(plan.target_names(), expected);
@@ -389,6 +412,13 @@ mod tests {
         assert_eq!(
             plan.collect_target_names::<Vec<_>>(),
             ["first", "rest", "item", "first"]
+        );
+        let mut reads = Vec::new();
+        let names: Vec<_> = plan.scope_bindings(|expr| reads.push(&text[expr.range()]));
+        assert_eq!(names, ["first", "rest", "item", "first"]);
+        assert_eq!(
+            reads,
+            ["items[index]", "box.value", "first", "rest", "item"]
         );
 
         let pattern = ruff_python_parser::parse_expression("(a, [b, *c], d)").unwrap();
