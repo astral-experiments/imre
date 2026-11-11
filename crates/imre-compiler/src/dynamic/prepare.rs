@@ -5,17 +5,23 @@ use std::path::{Path, PathBuf};
 
 use super::ModuleSyntaxError;
 use super::emit::{ModuleOrigin, PhysicalFile, PreparedBody, RegisteredBodies};
+use super::provider_archive::Providers;
 use crate::frontend::module_source::ParsedModule;
 use crate::ir::PhysicalModuleKind;
 
 pub(super) type ModuleSource = (String, PathBuf, String);
+
+pub(super) enum Initializer<'a> {
+    Checked(Box<PreparedBody<'a>>),
+    Archived(&'a str),
+}
 
 pub(super) struct PreparedUnit<'a> {
     pub(super) module: &'a ModuleSource,
     pub(super) builtin: bool,
     pub(super) physical: Option<(&'a PhysicalFile, PhysicalModuleKind<'a>)>,
     pub(super) zip: Option<&'a ([u8; 32], u32)>,
-    pub(super) initializer: Result<PreparedBody<'a>, &'a ModuleSyntaxError>,
+    pub(super) initializer: Result<Initializer<'a>, &'a ModuleSyntaxError>,
 }
 
 /// Check consumes this iterator one unit at a time. A build retains the same
@@ -24,7 +30,7 @@ pub(super) fn units<'a>(
     (files, builtins): (&'a [ModuleSource], &'a [ModuleSource]),
     mut entry_source: Option<ParsedModule<'a, 'a>>,
     python_optimization: i32,
-    bundled_root: &'a Path,
+    (bundled_root, providers): (&'a Path, Option<&'a Providers>),
     module_errors: &'a HashMap<PathBuf, Box<ModuleSyntaxError>>,
     registrations: &'a RegisteredBodies<'a>,
     mut layouts: Vec<crate::analysis::RegisteredLayouts>,
@@ -47,17 +53,29 @@ pub(super) fn units<'a>(
         let zip = archive_members.get(path);
         let physical = physical_files.get(path).filter(|_| !builtin);
         let types = layouts.iter_mut().find_map(|facts| facts.take(unit));
+        let bundled = path.starts_with(bundled_root);
+        let origin = if bundled {
+            ModuleOrigin::Bundled
+        } else if python_providers.contains(&unit) {
+            ModuleOrigin::Provider
+        } else {
+            ModuleOrigin::Program(checked.and_then(|unit| unit.functions))
+        };
         let initializer = if !builtin && let Some(error) = module_errors.get(path) {
             Err(error.as_ref())
+        } else if unit != 0
+            && python_optimization == 0
+            && matches!(origin, ModuleOrigin::Bundled)
+            && physical.is_none()
+            && zip.is_none()
+            && discovered.is_none()
+            && checked.is_none()
+            && types.is_none()
+            && let Some(symbol) = providers.and_then(|archive| archive.sealed(name, path, source))
+        {
+            // The standalone producer checked these exact bytes without application facts.
+            Ok(Initializer::Archived(symbol))
         } else {
-            let bundled = path.starts_with(bundled_root);
-            let origin = if bundled {
-                ModuleOrigin::Bundled
-            } else if python_providers.contains(&unit) {
-                ModuleOrigin::Provider
-            } else {
-                ModuleOrigin::Program(checked.and_then(|unit| unit.functions))
-            };
             // Preserve the loader's digest while compiling its normalized source.
             let file_digest = physical_files.get(path).and_then(|file| file.digest);
             let (text, syntax) = if let Some(entry) = discovered {
@@ -78,7 +96,7 @@ pub(super) fn units<'a>(
                 Some(parsed) => ParsedModule { text, parsed },
                 None => ParsedModule::parse(path, text)?,
             };
-            Ok(PreparedBody::from_parsed(
+            Ok(Initializer::Checked(Box::new(PreparedBody::from_parsed(
                 name,
                 path,
                 module,
@@ -88,7 +106,7 @@ pub(super) fn units<'a>(
                     .map(|unit| unit.literal_sites.clone())
                     .unwrap_or_default(),
                 types,
-            )?)
+            )?)))
         };
         // Release each checker database after its last selected first-party file.
         layouts.retain(|facts| !facts.is_empty());
