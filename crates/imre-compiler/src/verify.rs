@@ -474,13 +474,21 @@ impl Verifier<'_> {
                 self.block(orelse)?;
                 self.block(finalbody)
             }
-            Statement::Raise(Some(value)) => require(
-                matches!(
-                    value.ty,
-                    Type::Exception | Type::ImportException | Type::TimeoutExpired
-                ),
-                "raise needs an exception",
-            ),
+            Statement::Raise(Some(value)) => {
+                require(
+                    matches!(
+                        value.exception.ty,
+                        Type::Exception | Type::ImportException | Type::TimeoutExpired
+                    ),
+                    "raise needs an exception",
+                )?;
+                require(
+                    value.cause.as_ref().is_none_or(|cause| {
+                        self.module.types.payload(cause.ty) == Some(Type::Exception)
+                    }),
+                    "raise cause needs an optional exception",
+                )
+            }
             Statement::Raise(None)
             | Statement::Expr(_)
             | Statement::Break

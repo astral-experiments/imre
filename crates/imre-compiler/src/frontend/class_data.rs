@@ -409,7 +409,7 @@ impl Checker<'_> {
                         Statement::SetField(view.clone(), s.value, release),
                         Statement::SetField(view, s.ready, Expr::boolean(false)),
                     ],
-                    vec![Statement::Raise(Some(exc))],
+                    vec![Statement::raise(exc)],
                 )],
                 Expr::none(),
                 Vec::new(),

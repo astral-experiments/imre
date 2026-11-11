@@ -280,7 +280,10 @@ fn inspect(
             }
             Statement::Raise(value) => {
                 if let Some(value) = value {
-                    inspect_expression(value, candidates, producers);
+                    inspect_expression(&value.exception, candidates, producers);
+                    if let Some(cause) = &value.cause {
+                        inspect_expression(cause, candidates, producers);
+                    }
                 }
             }
             Statement::For {

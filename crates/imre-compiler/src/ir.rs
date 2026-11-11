@@ -708,17 +708,6 @@ impl Expr {
         }
     }
 
-    /// Exception and cause are evaluated in source order before the registered raise ABI normalizes them.
-    pub(crate) fn explicit_cause(&self) -> Option<(&Self, &Self)> {
-        if let ExprKind::Builtin(Builtin::ExceptionWithCause, args) = &self.kind
-            && let [exception, cause] = args.as_slice()
-        {
-            Some((exception, cause))
-        } else {
-            None
-        }
-    }
-
     /// Read a local slot with its type at the use site.
     pub(crate) fn local(slot: usize, ty: Type) -> Self {
         Self {
@@ -2484,8 +2473,6 @@ pub(crate) enum Builtin {
     ExceptionMessage,
     ExceptionName,
     JsonErrorField(u32),
-    /// Attaches an explicit cause to a fresh, unescaped builtin exception.
-    ExceptionWithCause,
     /// Record the source location of a raised Python exception.
     ExceptionOrigin(FixedOrigin),
     ExceptionCause,
@@ -3444,6 +3431,13 @@ pub(crate) struct MatchCase {
 }
 
 #[derive(Clone)]
+pub(crate) struct RaisedException {
+    pub(crate) exception: Expr,
+    pub(crate) cause: Option<Box<Expr>>,
+    pub(crate) origin: Option<Box<FixedOrigin>>,
+}
+
+#[derive(Clone)]
 pub(crate) enum Statement {
     Assign(usize, Expr),
     /// Transfers an owned local to another local, resetting its source.
@@ -3504,7 +3498,7 @@ pub(crate) enum Statement {
         finalbody: Vec<Statement>,
     },
     /// None re-raises the dynamically active exception, including across calls.
-    Raise(Option<Expr>),
+    Raise(Option<RaisedException>),
 }
 
 // Visit value patterns in source order with either a shared or a mutable borrow.
@@ -3621,7 +3615,14 @@ macro_rules! statement_children {
                 ($suite)(orelse);
                 ($suite)(finalbody);
             }
-            Statement::Raise(Some(value)) => ($expression)(value),
+            Statement::Raise(Some(RaisedException {
+                exception, cause, ..
+            })) => {
+                ($expression)(exception);
+                if let Some(cause) = cause {
+                    ($expression)(cause);
+                }
+            }
             Statement::Move(..)
             | Statement::Clear(_)
             | Statement::Raise(None)
@@ -3634,6 +3635,22 @@ macro_rules! statement_children {
 }
 
 impl Statement {
+    pub(crate) fn raise(exception: Expr) -> Self {
+        Self::raise_at(exception, None, None)
+    }
+
+    pub(crate) fn raise_at(
+        exception: Expr,
+        cause: Option<Expr>,
+        origin: Option<FixedOrigin>,
+    ) -> Self {
+        Self::Raise(Some(RaisedException {
+            exception,
+            cause: cause.map(Box::new),
+            origin: origin.map(Box::new),
+        }))
+    }
+
     /// Visit immediate operands, including the subject, value patterns and guards of a match.
     pub(crate) fn operands<'a>(&'a self, visit: impl FnMut(&'a Expr)) {
         let mut visit = visit;

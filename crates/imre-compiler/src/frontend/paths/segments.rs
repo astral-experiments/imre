@@ -228,7 +228,7 @@ impl Checker<'_> {
                     },
                     Statement::If(
                         self.local(failed),
-                        vec![Statement::Raise(Some(segment_exception(&name)))],
+                        vec![Statement::raise(segment_exception(&name))],
                         vec![],
                     ),
                 ],

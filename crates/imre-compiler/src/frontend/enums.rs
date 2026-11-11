@@ -85,13 +85,13 @@ impl Checker<'_> {
                 clear: vec![slot],
             },
         };
-        Ok(Statement::Raise(Some(Expr {
+        Ok(Statement::raise(Expr {
             ty: Type::Exception,
             kind: ExprKind::Exception {
                 kind: exception_kind("AssertionError").unwrap(),
                 message: Some(Box::new(message)),
             },
-        })))
+        }))
     }
 
     pub(super) fn enum_member(&self, class: usize, name: &str) -> Option<Expr> {

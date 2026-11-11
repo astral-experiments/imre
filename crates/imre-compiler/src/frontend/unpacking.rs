@@ -37,13 +37,13 @@ pub(super) fn concat(left: Expr, right: Expr) -> Expr {
 
 /// Uses the sealed ValueError category so ordinary handlers catch arity errors.
 fn unpack_error(message: Expr) -> Statement {
-    Statement::Raise(Some(Expr {
+    Statement::raise(Expr {
         ty: Type::Exception,
         kind: ExprKind::Exception {
             kind: exception_kind("ValueError").unwrap(),
             message: Some(Box::new(message)),
         },
-    }))
+    })
 }
 
 /// Target traversal and operand lifetimes are shared by checked and namespace suites.
@@ -828,13 +828,13 @@ impl Checker<'_> {
                         body: vec![
                             Statement::Expr(value),
                             Statement::Expr(receiver),
-                            Statement::Raise(Some(Expr {
+                            Statement::raise(Expr {
                                 ty: Type::Exception,
                                 kind: ExprKind::Exception {
                                     kind: exception_kind("AttributeError").unwrap(),
                                     message: Some(Box::new(string(message))),
                                 },
-                            })),
+                            }),
                         ],
                         clear: vec![],
                     });

@@ -40,7 +40,7 @@ impl Checker<'_> {
             vec![unpacking::string("errno"), unpacking::string(name)],
             [Some(1), None, Some(2)],
         );
-        Statement::If(condition, Vec::new(), vec![Statement::Raise(Some(err))])
+        Statement::If(condition, Vec::new(), vec![Statement::raise(err)])
     }
 
     pub(super) fn errno_attribute(&self, owner: Expr, name: &str) -> Expr {

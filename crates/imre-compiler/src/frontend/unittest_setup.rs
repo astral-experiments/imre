@@ -331,7 +331,7 @@ impl Checker<'_> {
                     checker.coerce(default, field.ty, attribute)?,
                 ));
             }
-            Ok(Statement::Raise(Some(Expr {
+            Ok(Statement::raise(Expr {
                 ty: Type::Exception,
                 kind: ExprKind::Exception {
                     kind: exception_kind("AttributeError").unwrap(),
@@ -340,7 +340,7 @@ impl Checker<'_> {
                         definition.name
                     )))),
                 },
-            })))
+            }))
         };
         let mut missing = absent(self, class)?;
         for child in self.classes.concrete_layouts(class) {

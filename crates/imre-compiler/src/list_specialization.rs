@@ -334,7 +334,11 @@ impl Plan<'_> {
                 }
                 Statement::Raise(value) => {
                     if let Some(value) = value
-                        && !self.expression(value, aliases)
+                        && (!self.expression(&mut value.exception, aliases)
+                            || value
+                                .cause
+                                .as_mut()
+                                .is_some_and(|cause| !self.expression(cause, aliases)))
                     {
                         return false;
                     }

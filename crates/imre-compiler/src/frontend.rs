@@ -5534,7 +5534,7 @@ impl<'a> Checker<'a> {
                         message: Some(Box::new(message)),
                     },
                 };
-                body.push(Statement::Raise(Some(exception)));
+                body.push(Statement::raise(exception));
             }
             return Ok(false);
         }
@@ -6341,13 +6341,13 @@ impl<'a> Checker<'a> {
                     Statement::If(
                         test,
                         Vec::new(),
-                        vec![Statement::Raise(Some(Expr {
+                        vec![Statement::raise(Expr {
                             ty: Type::Exception,
                             kind: ExprKind::Exception {
                                 kind: 9,
                                 message: Some(Box::new(message)),
                             },
-                        }))],
+                        })],
                     )
                 } else {
                     Statement::Assert(test)
@@ -6374,13 +6374,15 @@ impl<'a> Checker<'a> {
                 return Ok((vec![raised], false));
             }
             ast::Stmt::Raise(raise) => {
-                let mut value = raise
+                let value = raise
                     .exc
                     .as_deref()
                     .map(|value| self.raised_exception(value))
                     .transpose()?;
-                if let Some(cause) = &raise.cause {
-                    let raised = value.take().expect("raise from has an exception");
+                let Some(raised) = value else {
+                    return Ok((vec![Statement::Raise(None)], false));
+                };
+                let cause = if let Some(cause) = &raise.cause {
                     if let ExprKind::Builtin(
                         Builtin::Process(ir::ProcessOperation::ExceptionAt),
                         args,
@@ -6398,8 +6400,8 @@ impl<'a> Checker<'a> {
                                 vec![raised, group],
                             ),
                         };
-                        let member = self.exception_origin(member, raise);
-                        return Ok((vec![Statement::Raise(Some(member))], false));
+                        let origin = self.fixed_origin(raise.range(), None);
+                        return Ok((vec![Statement::raise_at(member, None, Some(origin))], false));
                     }
                     if !matches!(
                         raised.kind,
@@ -6427,13 +6429,15 @@ impl<'a> Checker<'a> {
                     } else {
                         self.expr_expected(cause, expected)?
                     };
-                    value = Some(Expr {
-                        ty: Type::Exception,
-                        kind: ExprKind::Builtin(Builtin::ExceptionWithCause, vec![raised, cause]),
-                    });
-                }
-                let value = value.map(|exception| self.exception_origin(exception, raise));
-                return Ok((vec![Statement::Raise(value)], false));
+                    Some(cause)
+                } else {
+                    None
+                };
+                let origin = self.fixed_origin(raise.range(), None);
+                return Ok((
+                    vec![Statement::raise_at(raised, cause, Some(origin))],
+                    false,
+                ));
             }
             ast::Stmt::Import(_) | ast::Stmt::ImportFrom(_)
                 if self.graph.command_startup.is_some() =>
@@ -6959,13 +6963,10 @@ impl<'a> Checker<'a> {
         let [Statement::Raise(Some(raised))] = body else {
             return None;
         };
-        let ExprKind::Builtin(Builtin::ExceptionOrigin(_), operands) = &raised.kind else {
+        if raised.origin.is_none() || raised.cause.is_some() {
             return None;
-        };
-        let [value] = operands.as_slice() else {
-            return None;
-        };
-        let ExprKind::Exception { kind, message } = &value.kind else {
+        }
+        let ExprKind::Exception { kind, message } = &raised.exception.kind else {
             return None;
         };
         if handlers != [*kind]
@@ -7788,7 +7789,7 @@ impl<'a> Checker<'a> {
             kind: ExprKind::Scope {
                 body: vec![
                     Statement::Assign(slot, value),
-                    Statement::If(invalid, vec![Statement::Raise(Some(error))], vec![]),
+                    Statement::If(invalid, vec![Statement::raise(error)], vec![]),
                 ],
                 value: Box::new(Expr {
                     ty: Type::Float,

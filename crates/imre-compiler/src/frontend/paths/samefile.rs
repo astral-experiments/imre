@@ -142,10 +142,10 @@ impl Checker<'_> {
             }
         } else {
             (
-                vec![Statement::Raise(Some(missing_attribute(
+                vec![Statement::raise(missing_attribute(
                     &self.path_argument_type_name(other.ty),
                     "stat",
-                )))],
+                ))],
                 self.samefile_stats(left, self.local(fs_result), at)?,
             )
         };

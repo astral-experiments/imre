@@ -2394,16 +2394,12 @@ pub(super) fn raised<E>(
     raise: &ast::StmtRaise,
     mut operand: impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
 ) -> StdResult<Statement, E> {
-    let exception = raise.exc.as_deref().map(&mut operand).transpose()?;
-    let value = match (exception, raise.cause.as_deref()) {
-        (Some(value), Some(cause)) => Some(operation(
-            Builtin::ExceptionWithCause,
-            Type::Exception,
-            vec![value, operand(cause)?],
-        )),
-        (value, _) => value,
+    let Some(exception) = &raise.exc else {
+        return Ok(Statement::Raise(None));
     };
-    Ok(Statement::Raise(value))
+    let exception = operand(exception)?;
+    let cause = raise.cause.as_deref().map(operand).transpose()?;
+    Ok(Statement::raise_at(exception, cause, None))
 }
 
 impl statements::StatementLowering for SourceScope<'_> {
@@ -3806,8 +3802,7 @@ mod tests {
         let Some(Statement::Raise(Some(value))) = checked.function.body.last() else {
             panic!("expected a terminal raise");
         };
-        let (exception, cause) = value.explicit_cause().unwrap();
-        for operand in [exception, cause] {
+        for operand in [&value.exception, value.cause.as_deref().unwrap()] {
             let mut calls = 0;
             ir::walk_operand_expressions(operand, &mut |value| {
                 calls += usize::from(value.is_registered_invoke());

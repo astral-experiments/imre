@@ -1539,26 +1539,9 @@ pub(crate) trait FrameEmitter<'a, 'p>:
         });
     }
 
-    /// A bare raise transfers the active exception immediately. An explicit raise
-    /// roots its evaluated exception until the caller has evaluated the cause.
-    fn raise_operands<T>(
-        &mut self,
-        exception: Option<T>,
-        cause: Option<T>,
-        operand: impl Fn(&mut Self, T) -> String,
-    ) {
-        let Some(exception) = exception else {
-            let active = self.caught.last().cloned().unwrap_or_else(|| "0".into());
-            self.raise(&active, None, true);
-            return;
-        };
-        let statement = self.current_range;
-        let exception = operand(self, exception);
-        self.live.push(exception);
-        let cause = cause.map(|value| operand(self, value));
-        let exception = self.live.pop().expect("pending explicit raise");
+    fn raise_operand_at(&mut self, exception: &str, cause: Option<&str>, statement: TextRange) {
         self.replace_position(SourcePosition::Expression(statement));
-        self.raise(&exception, cause.as_deref(), false);
+        self.raise(exception, cause, false);
     }
 
     fn with_operand_source<T>(&mut self, expr: &ir::Expr, emit: impl FnOnce(&mut Self) -> T) -> T {
