@@ -376,6 +376,21 @@ pub(crate) fn check_registered_project<'a>(
 }
 
 impl Session {
+    /// The class namespace supplies a name before Python falls back to its module.
+    pub(crate) fn reads_outer_name(&self, module: usize, expression: &Expr) -> bool {
+        let file = self.db.program_file(self.files[module]);
+        let index = ty_python_core::semantic_index(&self.db, file);
+        index
+            .try_expression_scope_id(expression)
+            .zip(index.try_expression_use_id(expression.into()))
+            .is_some_and(|(scope, use_id)| {
+                !index
+                    .use_def_map(scope)
+                    .bindings_at_use(use_id)
+                    .any(|binding| binding.binding.definition().is_some())
+            })
+    }
+
     /// A plain store can still initialize a name declared by an earlier annotation.
     pub(crate) fn unannotated_module_store(&self, module: usize, target: &Expr) -> bool {
         let file = self.db.program_file(self.files[module]);

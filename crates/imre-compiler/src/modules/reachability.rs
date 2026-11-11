@@ -455,6 +455,29 @@ impl<'a> Visitor<'a> for References<'_> {
     }
 }
 
+impl SourceGraph {
+    /// A type-only method declaration can have a different runtime signature.
+    pub(crate) fn runtime_class_item<'a>(
+        &self,
+        module: ModuleId,
+        item: &'a ast::Stmt,
+    ) -> &'a ast::Stmt {
+        if let ast::Stmt::If(guard) = item
+            && guard.test.is_name_expr()
+            && self.resolve(module, &guard.test)
+                == Some(Binding::Intrinsic(Intrinsic::TypeChecking))
+            && self.session.reads_outer_name(module, &guard.test)
+            && let [otherwise] = guard.elif_else_clauses.as_slice()
+            && otherwise.test.is_none()
+            && let [method @ ast::Stmt::FunctionDef(_)] = otherwise.body.as_slice()
+        {
+            method
+        } else {
+            item
+        }
+    }
+}
+
 impl Reachable {
     /// Default unittest discovery observes all TestCase class bindings in the entry module,
     /// including imported aliases; their test methods have no source call sites.
@@ -645,6 +668,12 @@ impl Reachable {
                     found: &mut found,
                 };
                 if let ast::Stmt::ClassDef(class) = node {
+                    let items = || {
+                        class
+                            .body
+                            .iter()
+                            .map(|item| graph.runtime_class_item(id.module, item))
+                    };
                     if expanded.insert(id) {
                         if source.is_bundled(super::LOGGING_CLASSES)
                             && class.name.as_str() == "Handler"
@@ -659,7 +688,7 @@ impl Reachable {
                         for decorator in &class.decorator_list {
                             refs.visit_decorator(decorator);
                         }
-                        for field in &class.body {
+                        for field in items() {
                             if !matches!(field, ast::Stmt::FunctionDef(_)) {
                                 refs.visit_stmt(field);
                             }
@@ -668,7 +697,7 @@ impl Reachable {
                     // A property(get, set) declaration reads its local methods while
                     // constructing the descriptor, even when no method is explicitly called.
                     let mut accessors = HashSet::new();
-                    for item in &class.body {
+                    for item in items() {
                         // Binding a setter reads the preceding property, even when
                         // no later code reads the descriptor through an instance.
                         if let ast::Stmt::FunctionDef(method) = item
@@ -689,7 +718,7 @@ impl Reachable {
                             }));
                         }
                     }
-                    for item in &class.body {
+                    for item in items() {
                         if let ast::Stmt::FunctionDef(method) = item {
                             let name = method.name.as_str();
                             // These protocols have implicit call sites in the supported language.
@@ -833,7 +862,8 @@ impl Reachable {
                         skipped.push(node.range())
                     }
                     ast::Stmt::ClassDef(class) => {
-                        for item in &class.body {
+                        for node in &class.body {
+                            let item = graph.runtime_class_item(module, node);
                             if let ast::Stmt::FunctionDef(method) = item
                                 && !found.methods.contains(&(module, method.start()))
                             {
@@ -1077,7 +1107,7 @@ fn class_effect(graph: &SourceGraph, module: ModuleId, class: &ast::StmtClassDef
                             ast::Stmt::ClassDef(parent) if id.module != module || parent.start() < class.start()))
                 })
         })
-        || class.body.iter().any(|s| match s {
+        || class.body.iter().any(|s| match graph.runtime_class_item(module, s) {
             ast::Stmt::Pass(_) => false,
             ast::Stmt::Expr(s) => !matches!(&*s.value, ast::Expr::StringLiteral(_)),
             ast::Stmt::Assign(s) => !literal(&s.value),
@@ -1543,6 +1573,40 @@ print(Token().clean())
                 .is_err()
         );
         assert!(reachable(&cold.replace("repr=False", "repr=globals()")).is_err());
+    }
+
+    #[test]
+    fn conditional_class_method_roots_its_runtime_callee_when_used() {
+        let source = r#"from typing import TYPE_CHECKING
+def helper(value: int) -> int:
+    return value
+class Owner:
+    if TYPE_CHECKING:
+        def read(self) -> int: ...
+    else:
+        def read(self):
+            return helper(7)
+owner = Owner()
+"#;
+        for (call, reached) in [("", false), ("read = owner.read\nprint(read())", true)] {
+            let graph =
+                super::SourceGraph::single_with_mode(&format!("{source}{call}\n"), true).unwrap();
+            let module = graph.entry;
+            let body = &graph.modules[module].parsed.syntax().body;
+            let class = body[2].as_class_def_stmt().unwrap();
+            let method = graph
+                .runtime_class_item(module, &class.body[0])
+                .as_function_def_stmt()
+                .unwrap();
+            assert_eq!(
+                graph.includes(super::DefinitionId {
+                    module,
+                    statement: 1
+                }),
+                reached
+            );
+            assert_eq!(graph.includes_method(module, method), reached);
+        }
     }
 
     #[test]
