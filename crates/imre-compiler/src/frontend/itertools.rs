@@ -530,7 +530,10 @@ impl Checker<'_> {
                 });
             }
             self.prepare_csv_reader(source)
-        } else if source.ty == Type::StringIO {
+        } else if matches!(
+            source.ty,
+            Type::TextIO | Type::StringIO | Type::BinaryIO | Type::BytesIO
+        ) {
             let mut lines = self.prepare_file_lines(source);
             // next(stream) pulls directly. It does not invoke iter(stream)'s
             // separate closed-file check before readline.
