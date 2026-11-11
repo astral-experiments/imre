@@ -133,6 +133,43 @@ impl Context {
         Ok(self.with_subclass_storage(class, base, storage))
     }
 
+    /// Materialize digits only after map has captured the original int and an exact string.
+    /// On failure, leave its iterator untouched so normal pulls raise at the offending character.
+    pub(super) fn list_from_int_character_map(&mut self, map: Id) -> Option<Id> {
+        let Value::Map {
+            function: MapFunction::IntCharacters(_),
+            inputs,
+            ..
+        } = self.heap.get(map)
+        else {
+            return None;
+        };
+        let &[input] = inputs.as_ref() else {
+            return None;
+        };
+        let super::IteratorSlice::Text(text) = self.iterator_remaining(input).ok()? else {
+            return None;
+        };
+        let width = text.len();
+        let digits = crate::objects::string_integer_values(text).ok()?;
+        let mut items = Vec::new();
+        items.try_reserve_exact(digits.len()).ok()?;
+        items.extend(
+            digits
+                .into_iter()
+                .map(|digit| self.alloc(Value::Int(digit))),
+        );
+        let Value::Iterator {
+            offset, sequence, ..
+        } = self.heap.get_mut(input)
+        else {
+            unreachable!()
+        };
+        *offset += width;
+        *sequence = None;
+        Some(self.alloc(Value::List(items)))
+    }
+
     /// Pull one row, preserving source errors and the strict mismatch probe order.
     pub(super) fn next_zip_or_map(&mut self, id: Id) -> Result<Option<Id>> {
         let mut row = PendingRow::from_iterator(self.heap.get(id))?.expect("zip or map iterator");

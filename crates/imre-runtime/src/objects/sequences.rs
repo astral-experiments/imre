@@ -669,6 +669,13 @@ pub unsafe extern "C" fn imre_str_reverse_iter(value: *const Str) -> *const Obje
 pub unsafe extern "C" fn imre_str_int_list(value: *const Str) -> *const List {
     // SAFETY: the caller keeps this immutable string rooted throughout conversion.
     let text = unsafe { &*value };
+    let list = string_integer_values(text)
+        .and_then(|values| crate::try_new_list(values).map_err(|_| Error::allocation()));
+    finish(list.map(crate::ListOwner::into_raw), std::ptr::null())
+}
+
+/// Convert the characters of an exact string before publishing the result or an error.
+pub(crate) fn string_integer_values(text: &str) -> Result<Vec<Int>> {
     let ascii = text.is_ascii();
     let length = if ascii {
         text.len()
@@ -677,7 +684,7 @@ pub unsafe extern "C" fn imre_str_int_list(value: *const Str) -> *const List {
     };
     let mut values = crate::take_list_buffer(length);
     if values.try_reserve_exact(length).is_err() {
-        return Error::allocation().returning(std::ptr::null());
+        return Err(Error::allocation());
     }
     if ascii {
         let mut invalid = false;
@@ -695,8 +702,9 @@ pub unsafe extern "C" fn imre_str_int_list(value: *const Str) -> *const List {
                 .iter()
                 .position(|byte| !byte.is_ascii_digit())
                 .unwrap();
-            return crate::integer_text::invalid_literal(&text[index..index + 1])
-                .returning(std::ptr::null());
+            return Err(crate::integer_text::invalid_literal(
+                &text[index..index + 1],
+            ));
         }
     } else {
         for (slot, character) in values.spare_capacity_mut()[..length]
@@ -705,8 +713,9 @@ pub unsafe extern "C" fn imre_str_int_list(value: *const Str) -> *const List {
         {
             let Some(digit) = crate::integer_text::decimal_digit(character) else {
                 let mut encoded = [0; 4];
-                return crate::integer_text::invalid_literal(character.encode_utf8(&mut encoded))
-                    .returning(std::ptr::null());
+                return Err(crate::integer_text::invalid_literal(
+                    character.encode_utf8(&mut encoded),
+                ));
             };
             slot.write(Int::small(i64::from(digit)).unwrap());
         }
@@ -715,10 +724,7 @@ pub unsafe extern "C" fn imre_str_int_list(value: *const Str) -> *const List {
     // including an invalid ASCII byte's unpublished conversion, fit immediate
     // Int storage and own no allocation. Errors leave length zero for cleanup.
     unsafe { values.set_len(length) };
-    match crate::try_new_list(values) {
-        Ok(list) => crate::ListOwner::into_raw(list),
-        Err(_) => Error::allocation().returning(std::ptr::null()),
-    }
+    Ok(values)
 }
 
 #[cfg(test)]

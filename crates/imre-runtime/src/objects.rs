@@ -117,6 +117,7 @@ pub(crate) mod readiness;
 pub(crate) mod records;
 mod regexes;
 mod sequences;
+pub(crate) use sequences::string_integer_values;
 mod shutil;
 pub(crate) mod socket;
 mod sorted_split_fields;
