@@ -50,10 +50,7 @@ pub(super) fn slice_equality(
         kind: ExprKind::Builtin(Builtin::StringSliceEqual, args),
     };
     Some(if *op == ast::CmpOp::NotEq {
-        Expr {
-            ty: Type::Bool,
-            kind: ExprKind::Not(Box::new(equal)),
-        }
+        Expr::not(equal)
     } else {
         equal
     })

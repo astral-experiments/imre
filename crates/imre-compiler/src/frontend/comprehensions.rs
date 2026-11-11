@@ -2,6 +2,7 @@
 //! expressions run inline with private iteration slots so writes reach their
 //! enclosing function, including when a later iteration raises.
 
+use ruff_python_ast::UnaryOp;
 use std::cell::RefCell;
 
 pub(crate) use imre_ast::comprehension::collect_target_names as target_names;
@@ -636,7 +637,7 @@ impl Checker<'_> {
             // Literal range bounds stay visible to interval analysis. Moving an
             // immutable literal into the helper cannot reorder observable work.
             let mut literal = &value;
-            while let ExprKind::Negate(inner) = &literal.kind {
+            while let ExprKind::Unary(UnaryOp::USub, inner) = &literal.kind {
                 literal = inner;
             }
             if matches!(literal.kind, ExprKind::Int(_)) {

@@ -4,6 +4,7 @@
 pub(crate) mod control;
 
 use ruff_python_ast::CmpOp;
+use ruff_python_ast::UnaryOp;
 use std::collections::BTreeSet;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -729,6 +730,27 @@ impl Expr {
         }
     }
 
+    pub(crate) fn unary(op: UnaryOp, operand: Self, ty: Type) -> Self {
+        if op == UnaryOp::UAdd && matches!(ty, Type::Int | Type::Float) && operand.ty == ty {
+            return operand;
+        }
+        Self {
+            ty,
+            kind: ExprKind::Unary(op, Box::new(operand)),
+        }
+    }
+
+    /// Negate an already checked condition.
+    pub(crate) fn not(operand: Self) -> Self {
+        Self::unary(UnaryOp::Not, operand, Type::Bool)
+    }
+
+    /// A unary operation on an object can run Python and mutate aliased storage.
+    pub(crate) fn uses_python_unary_protocol(&self) -> bool {
+        matches!(&self.kind, ExprKind::Unary(_, operand)
+            if self.ty == Type::PythonObject || operand.ty == Type::PythonObject)
+    }
+
     pub(crate) fn none() -> Self {
         Self {
             ty: Type::None,
@@ -778,7 +800,10 @@ impl Expr {
     pub(crate) fn tagged_integer_literal(&self) -> Option<i64> {
         let value = match &self.kind {
             ExprKind::Int(value) => value.parse::<i64>().ok()?,
-            ExprKind::Negate(value) => value.tagged_integer_literal()?.checked_neg()?,
+            ExprKind::Unary(..) if self.uses_python_unary_protocol() => return None,
+            ExprKind::Unary(UnaryOp::USub, value) => {
+                value.tagged_integer_literal()?.checked_neg()?
+            }
             _ => return None,
         };
         (-(1_i64 << 62)..(1_i64 << 62))
@@ -856,7 +881,7 @@ impl Expr {
             return None;
         };
         let selected = if *reverse {
-            matches!(&index.kind, ExprKind::Negate(one) if matches!(&one.kind, ExprKind::Int(n) if n == "1"))
+            matches!(&index.kind, ExprKind::Unary(UnaryOp::USub, one) if matches!(&one.kind, ExprKind::Int(n) if n == "1"))
         } else {
             matches!(&index.kind, ExprKind::Int(n) if n == "0")
         };
@@ -896,7 +921,7 @@ fn negative_component(value: &Expr) -> Option<i64> {
     };
     let value = match &value.kind {
         ExprKind::Int(value) => value.parse::<i64>().ok()?,
-        ExprKind::Negate(value) => {
+        ExprKind::Unary(UnaryOp::USub, value) => {
             let ExprKind::Int(value) = &value.kind else {
                 return None;
             };
@@ -1030,8 +1055,7 @@ pub(crate) enum ExprKind {
     BooleanValue(bool, Box<Expr>, Box<Expr>, Option<TruthPredicate>),
     /// Only the selected arm runs; both arms have the expression's storage type.
     Conditional(Box<Expr>, Box<Expr>, Box<Expr>),
-    Not(Box<Expr>),
-    Negate(Box<Expr>),
+    Unary(UnaryOp, Box<Expr>),
     Call(usize, CallArgs),
     /// Captures a fixed target and, for a bound method, one owned receiver.
     Callable {
@@ -1318,15 +1342,6 @@ pub(crate) enum ObjectCall {
     ExecText,
     SocketSendfile,
     FormatField,
-}
-
-/// Unary protocol to invoke on a materialized Python object.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ObjectUnary {
-    Positive,
-    Negative,
-    Invert,
-    Not,
 }
 
 /// Python descriptor operation on a named attribute in the live frame.
@@ -2225,7 +2240,6 @@ pub(crate) enum Builtin {
     RegisteredCall(RegisteredCall),
     /// Resolve the code name in the live registered Python scope.
     RegisteredName(String),
-    RegisteredUnary(ObjectUnary),
     /// The needle and a short constant tuple's elements, with optional negation.
     RegisteredContainsLiteral(bool),
     /// Apply Python's in-place protocol to the previously loaded target and the RHS.
@@ -4133,8 +4147,7 @@ macro_rules! expression_children {
             | ExprKind::Present(value)
             | ExprKind::Absent(value)
             | ExprKind::Unwrap(value)
-            | ExprKind::Not(value)
-            | ExprKind::Negate(value)
+            | ExprKind::Unary(_, value)
             | ExprKind::Field(value, _) => $visit(value),
             ExprKind::BooleanValue(_, left, right, predicate) => {
                 $visit(left);

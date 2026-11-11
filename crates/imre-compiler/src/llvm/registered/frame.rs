@@ -13,6 +13,7 @@ use crate::ir::{Builtin, Constant, DisplayKind, Expr};
 use crate::llvm::body::FunctionBody;
 use crate::llvm::operations::{CheckedValue, LoopEdges};
 use indexmap::IndexSet;
+use ruff_python_ast::UnaryOp;
 use ruff_text_size::{TextRange, TextSize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -1738,10 +1739,10 @@ pub(crate) trait FrameEmitter<'a, 'p>:
     fn finish_unary(
         &mut self,
         (mark, edge): (String, (String, String)),
-        op: ir::ObjectUnary,
+        op: UnaryOp,
         result: CheckedValue,
     ) -> CheckedValue {
-        if op != ir::ObjectUnary::Not
+        if op != UnaryOp::Not
             && let CheckedValue::Handle { id, .. } = &result
         {
             self.keep_operands(&mark, id, "0");

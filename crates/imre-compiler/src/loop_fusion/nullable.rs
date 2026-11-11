@@ -2,6 +2,7 @@
 use super::records::{Constructor, Row};
 use super::*;
 use crate::reductions::count_writes;
+use ruff_python_ast::UnaryOp;
 
 fn local(expr: &Expr) -> Option<usize> {
     match expr.kind {
@@ -134,7 +135,7 @@ fn guarded_body(body: &[Statement], columns: &[Column], index: usize) -> Option<
         let Statement::If(test, yes, no) = guard else {
             return None;
         };
-        let ExprKind::Not(test) = &test.kind else {
+        let ExprKind::Unary(UnaryOp::Not, test) = &test.kind else {
             return None;
         };
         let slot = none_test(test)?;

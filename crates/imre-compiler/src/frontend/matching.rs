@@ -1,5 +1,6 @@
 //! Structural patterns over closed storage, lowered to ordinary owned branches.
 
+use ruff_python_ast::UnaryOp;
 use ruff_python_ast::visitor::{Visitor, walk_expr};
 
 use super::*;
@@ -69,10 +70,7 @@ impl Pattern {
 }
 
 fn not(value: Expr) -> Expr {
-    Expr {
-        ty: Type::Bool,
-        kind: ExprKind::Not(Box::new(value)),
-    }
+    Expr::not(value)
 }
 
 fn builtin(ty: Type, operation: Builtin, args: Vec<Expr>) -> Expr {
@@ -938,7 +936,7 @@ fn mapping_key(value: Expr) -> Expr {
     }
     let number = match &value.kind {
         ExprKind::Float(value) => *value,
-        ExprKind::Negate(inner) => match &inner.kind {
+        ExprKind::Unary(UnaryOp::USub, inner) => match &inner.kind {
             ExprKind::Float(value) => -*value,
             _ => return value,
         },

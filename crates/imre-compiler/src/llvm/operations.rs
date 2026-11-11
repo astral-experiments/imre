@@ -8,8 +8,9 @@ pub(crate) use iteration::LoopEdges;
 pub(crate) mod branches;
 mod join;
 pub(crate) mod sequences;
-use crate::ir::{DisplayKind, ObjectUnary};
+use crate::ir::DisplayKind;
 pub(crate) use join::ValueJoin;
+use ruff_python_ast::UnaryOp;
 
 use super::records;
 use super::{Binary, Builtin, CallArgs, Expr, ExprKind, Statement, Type};
@@ -504,53 +505,60 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         .expect("guarded integer arithmetic has a normal result")
     }
 
-    fn unary_expression(&mut self, op: ObjectUnary, operand: &Expr, expr: &Expr) -> CheckedValue {
-        if let Entry::Registered(frame) = &mut self.0 {
-            let scope = frame.begin_unary();
-            let value = self.evaluate(operand);
-            let result = self.unary_value(op, value, false);
-            return self.python().finish_unary(scope, op, result);
-        }
-        let direct = self.fixed().ranges.integer(expr).is_some()
-            && self.fixed().ranges.integer(operand).is_some();
+    fn unary_expression(&mut self, op: UnaryOp, operand: &Expr, expr: &Expr) -> CheckedValue {
+        let (scope, direct) = match &mut self.0 {
+            Entry::Native(emitter) => (
+                None,
+                emitter.ranges.integer(expr).is_some() && emitter.ranges.integer(operand).is_some(),
+            ),
+            Entry::Registered(frame) => (Some(frame.begin_unary()), false),
+        };
         let value = self.operand(operand);
-        self.unary_value(op, value, direct)
+        let result = self.unary_value(op, value, direct);
+        if let Some(scope) = scope {
+            self.python().finish_unary(scope, op, result)
+        } else {
+            result
+        }
     }
 
-    fn unary_value(&mut self, op: ObjectUnary, value: CheckedValue, direct: bool) -> CheckedValue {
+    fn unary_value(&mut self, op: UnaryOp, value: CheckedValue, direct: bool) -> CheckedValue {
         match value {
             CheckedValue::Native(input, None) => {
                 let emitter = self.fixed();
                 let scalar = &input.value;
                 let result = match op {
-                    ObjectUnary::Not => Value {
+                    UnaryOp::Not => Value {
                         ty: Type::Bool,
                         operand: emitter.instruction(format!("xor i1 {}, true", scalar.operand)),
                         small_integer: false,
                     },
-                    ObjectUnary::Negative if scalar.ty == Type::Float => Value {
+                    UnaryOp::USub if scalar.ty == Type::Float => Value {
                         ty: Type::Float,
                         operand: emitter.instruction(format!("fneg double {}", scalar.operand)),
                         small_integer: false,
                     },
-                    ObjectUnary::Negative if direct => {
+                    UnaryOp::USub if direct => {
                         emitter.small_binary(Binary::Subtract, &small(0), scalar, false, None)
                     }
-                    ObjectUnary::Negative => emitter.binary(Binary::Subtract, &small(0), scalar),
-                    _ => unreachable!("fixed checker lowers unary plus and invert"),
+                    UnaryOp::USub => emitter.binary(Binary::Subtract, &small(0), scalar),
+                    UnaryOp::Invert if direct => {
+                        emitter.small_binary(Binary::BitXor, scalar, &small(-1), false, None)
+                    }
+                    UnaryOp::Invert => emitter.binary(Binary::BitXor, scalar, &small(-1)),
+                    UnaryOp::UAdd => return CheckedValue::Native(input, None),
                 };
                 emitter.release_operand(&input);
                 CheckedValue::owned(result)
             }
-            CheckedValue::Native(_, Some(_)) if op == ObjectUnary::Positive => value,
             _ => {
                 let frame = self.python();
                 let operand = frame.materialize(&value);
                 let name = match op {
-                    ObjectUnary::Positive => "pos",
-                    ObjectUnary::Negative => "neg",
-                    ObjectUnary::Invert => "~",
-                    ObjectUnary::Not => "not",
+                    UnaryOp::UAdd => "pos",
+                    UnaryOp::USub => "neg",
+                    UnaryOp::Invert => "~",
+                    UnaryOp::Not => "not",
                 };
                 CheckedValue::handle(frame.op_at_current_range(name, &[&operand]))
             }
@@ -795,11 +803,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 | Builtin::RegisteredDeleteItem),
                 args,
             ) => self.python().object_operation(op, args),
-            ExprKind::Builtin(Builtin::RegisteredUnary(op), args) => {
-                self.unary_expression(*op, &args[0], expr)
-            }
-            ExprKind::Negate(value) => self.unary_expression(ObjectUnary::Negative, value, expr),
-            ExprKind::Not(value) => self.unary_expression(ObjectUnary::Not, value, expr),
+            ExprKind::Unary(op, value) => self.unary_expression(*op, value, expr),
             ExprKind::Scope { body, value, clear } => self.scoped_expression(body, value, clear),
             ExprKind::Dict(entries) => self.dictionary(expr.ty, entries),
             ExprKind::Builtin(op, args) => match &mut self.0 {

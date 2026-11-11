@@ -308,6 +308,9 @@ fn loop_prefix(
 
 /// A callback could observe intermediate ownership while a producer is rescheduled.
 fn observable_consumer(expr: &Expr) -> bool {
+    if expr.uses_python_unary_protocol() {
+        return true;
+    }
     if matches!(expr.kind, ExprKind::Binary(Binary::Add, ..)) {
         // A list copy can allocate and optional string addition can raise before
         // the following iteration. Keep those effects in the original loop.
@@ -325,8 +328,7 @@ fn observable_consumer(expr: &Expr) -> bool {
             | ExprKind::Tuple(_)
             | ExprKind::Binary(..)
             | ExprKind::Compare(..)
-            | ExprKind::Not(_)
-            | ExprKind::Negate(_)
+            | ExprKind::Unary(_, _)
             | ExprKind::Boolean(..)
             | ExprKind::Conditional(..)
             | ExprKind::Builtin(Builtin::ListGet(_) | Builtin::TupleGet | Builtin::Len, _)

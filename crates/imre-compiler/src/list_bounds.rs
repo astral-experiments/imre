@@ -5,6 +5,7 @@
 //! site supplies a known interval without intervening argument effects.
 
 use crate::ir::{self, Builtin, Expr, ExprKind, Module, Statement, Type};
+use ruff_python_ast::UnaryOp;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Bounds {
@@ -269,7 +270,13 @@ impl Analysis<'_> {
     }
 
     fn expression(&mut self, expression: &mut Expr, state: &mut State) -> Fact {
+        let python_unary = expression.uses_python_unary_protocol();
         match &mut expression.kind {
+            ExprKind::Unary(_, operand) if python_unary => {
+                self.expression(operand, state);
+                state.fill(None);
+                None
+            }
             ExprKind::Local(slot) => state[*slot],
             ExprKind::Builtin(operation, args) => {
                 let arguments_readonly = args.iter().all(readonly);
@@ -443,8 +450,7 @@ impl Analysis<'_> {
             ExprKind::Present(value)
             | ExprKind::Absent(value)
             | ExprKind::Unwrap(value)
-            | ExprKind::Not(value)
-            | ExprKind::Negate(value)
+            | ExprKind::Unary(_, value)
             | ExprKind::Field(value, _) => {
                 self.expression(value, state);
                 None
@@ -468,7 +474,7 @@ impl Analysis<'_> {
 fn literal(value: &Expr) -> Option<i64> {
     let value = match &value.kind {
         ExprKind::Int(value) => value.parse().ok()?,
-        ExprKind::Negate(value) => literal(value)?.checked_neg()?,
+        ExprKind::Unary(UnaryOp::USub, value) => literal(value)?.checked_neg()?,
         _ => return None,
     };
     (-(1_i64 << 62)..(1_i64 << 62))
@@ -480,6 +486,7 @@ fn literal(value: &Expr) -> Option<i64> {
 /// heap writes and callbacks can change aliases and are never treated as pure.
 fn readonly(expression: &Expr) -> bool {
     match &expression.kind {
+        ExprKind::Unary(..) if expression.uses_python_unary_protocol() => false,
         ExprKind::Call(..) | ExprKind::Construct { .. } | ExprKind::Invoke { .. } => false,
         ExprKind::Callable { receiver, .. } => receiver.as_deref().is_none_or(readonly),
         ExprKind::Builtin(operation, args) => {
@@ -504,8 +511,7 @@ fn readonly(expression: &Expr) -> bool {
         | ExprKind::Present(value)
         | ExprKind::Absent(value)
         | ExprKind::Unwrap(value)
-        | ExprKind::Not(value)
-        | ExprKind::Negate(value)
+        | ExprKind::Unary(_, value)
         | ExprKind::Field(value, _) => readonly(value),
         ExprKind::BooleanValue(_, left, right, predicate) => {
             readonly(left)
@@ -569,6 +575,19 @@ mod tests {
             });
         }
         reads
+    }
+
+    #[test]
+    fn a_unary_protocol_call_invalidates_aliased_list_bounds() {
+        let mut state = vec![Some(Bounds { min: 0, max: 9 }), None];
+        let mut value = Expr::unary(
+            UnaryOp::Invert,
+            Expr::local(1, Type::PythonObject),
+            Type::PythonObject,
+        );
+        assert!(!readonly(&value));
+        Analysis::Rewrite.expression(&mut value, &mut state);
+        assert_eq!(state, vec![None, None]);
     }
 
     #[test]

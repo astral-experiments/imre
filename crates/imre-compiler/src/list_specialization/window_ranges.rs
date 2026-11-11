@@ -2,6 +2,7 @@ use super::{builtin, list_local};
 use crate::ir::{self, Builtin, Expr, ExprKind, Function, Statement, Type};
 use crate::ranges::{self, IntegerFacts};
 use ruff_python_ast::CmpOp;
+use ruff_python_ast::UnaryOp;
 
 const LOW: i64 = i32::MIN as i64;
 const HIGH: i64 = i32::MAX as i64;
@@ -317,7 +318,7 @@ fn visit_successful_pulls(body: &[Statement], ready: usize, mut visit: impl FnMu
         } else if let Statement::If(test, yes, no) = statement {
             match &test.kind {
                 ExprKind::Local(slot) if *slot == ready => visit(yes),
-                ExprKind::Not(value)
+                ExprKind::Unary(UnaryOp::Not, value)
                     if matches!(value.kind, ExprKind::Local(slot) if slot == ready)
                         && matches!(
                             yes.as_slice(),

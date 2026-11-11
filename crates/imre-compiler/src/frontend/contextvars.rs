@@ -188,14 +188,7 @@ impl Checker<'_> {
                 body.push(Statement::Expr(sentinel));
                 a
             };
-            let value = if negate {
-                Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Not(Box::new(value)),
-                }
-            } else {
-                value
-            };
+            let value = if negate { Expr::not(value) } else { value };
             return Ok(Some(Expr {
                 ty: Type::Bool,
                 kind: ExprKind::Scope {

@@ -65,7 +65,7 @@ fn scalar(e: &Expr) -> bool {
         ExprKind::Binary(_, a, b) => {
             a.ty == Type::Int && b.ty == Type::Int && scalar(a) && scalar(b)
         }
-        ExprKind::Negate(v) | ExprKind::Not(v) => scalar(v),
+        ExprKind::Unary(_, v) => !e.uses_python_unary_protocol() && scalar(v),
         ExprKind::Boolean(_, args) => args.iter().all(scalar),
         ExprKind::Compare(args, ops) => {
             !Compare::uses_python_protocol(e.ty, ops) && args.iter().all(scalar)

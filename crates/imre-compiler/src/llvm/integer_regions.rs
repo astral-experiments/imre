@@ -3,6 +3,7 @@
 mod assignments;
 
 use crate::ir::{Binary, Builtin, Compare, Expr, ExprKind, Function, Module, Statement, Type};
+use ruff_python_ast::UnaryOp;
 
 use super::{Emitter, Value, conditionals};
 
@@ -179,7 +180,7 @@ impl Summary {
                 };
                 self.push(operation, interval)
             }
-            ExprKind::Negate(value) => {
+            ExprKind::Unary(UnaryOp::USub, value) => {
                 let input = self.expression(value, locals)?;
                 let interval = self.nodes[input].interval;
                 self.push(

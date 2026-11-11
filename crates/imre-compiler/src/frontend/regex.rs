@@ -5,6 +5,7 @@ use imre_regex::flags::{
     ASCII as ASCII_FLAG, MULTILINE as MULTILINE_FLAG, UNICODE as UNICODE_FLAG,
     VERBOSE as VERBOSE_FLAG,
 };
+use ruff_python_ast::UnaryOp;
 
 /// A sealed literal must still be valid when checked in unreachable code.
 fn boxed_lookahead(spelling: &str, verbose: bool, ascii: bool) -> bool {
@@ -832,7 +833,7 @@ impl Checker<'_> {
         } else {
             Expr::integer(0)
         };
-        if let ExprKind::Negate(inner) = &selector.kind
+        if let ExprKind::Unary(UnaryOp::USub, inner) = &selector.kind
             && matches!(&inner.kind, ExprKind::Int(value) if value == "0")
         {
             selector.kind = ExprKind::Int("0".into());

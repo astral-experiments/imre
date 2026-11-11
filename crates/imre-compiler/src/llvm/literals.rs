@@ -11,6 +11,9 @@ fn lazy_constructor(ty: Type) -> Option<&'static str> {
 }
 
 fn immutable_literal(value: &Expr) -> bool {
+    if value.uses_python_unary_protocol() {
+        return false;
+    }
     match &value.kind {
         ExprKind::Int(_)
         | ExprKind::Float(_)
@@ -18,10 +21,9 @@ fn immutable_literal(value: &Expr) -> bool {
         | ExprKind::None
         | ExprKind::Str(_)
         | ExprKind::Bytes(_) => true,
-        ExprKind::Negate(inner)
-        | ExprKind::Not(inner)
-        | ExprKind::Present(inner)
-        | ExprKind::Absent(inner) => immutable_literal(inner),
+        ExprKind::Unary(_, inner) | ExprKind::Present(inner) | ExprKind::Absent(inner) => {
+            immutable_literal(inner)
+        }
         ExprKind::Binary(_, left, right)
             if matches!(
                 value.ty,

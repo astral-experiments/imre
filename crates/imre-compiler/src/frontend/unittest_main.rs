@@ -438,10 +438,7 @@ impl Checker<'_> {
                     ty: Type::Bool,
                     kind: ExprKind::Builtin(Builtin::Bool, vec![self.local(names)]),
                 };
-                let empty = Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Not(Box::new(nonempty)),
-                };
+                let empty = Expr::not(nonempty);
                 Expr {
                     ty: Type::Bool,
                     kind: ExprKind::Boolean(false, vec![contains, empty]),

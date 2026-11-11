@@ -357,10 +357,7 @@ impl Checker<'_> {
             return Ok(if op == ast::CmpOp::Is {
                 test
             } else {
-                Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Not(Box::new(test)),
-                }
+                Expr::not(test)
             });
         }
         let classes = (self.class_reference(left), self.class_reference(right));
@@ -430,10 +427,7 @@ impl Checker<'_> {
             },
         };
         if op == ast::CmpOp::IsNot {
-            result = Expr {
-                ty: Type::Bool,
-                kind: ExprKind::Not(Box::new(result)),
-            };
+            result = Expr::not(result);
         }
         result
     }
@@ -504,10 +498,7 @@ impl Checker<'_> {
                 ),
             };
             return Ok(if op == ast::CmpOp::IsNot {
-                Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Not(Box::new(same)),
-                }
+                Expr::not(same)
             } else {
                 same
             });
@@ -551,10 +542,7 @@ impl Checker<'_> {
                 kind: ExprKind::Builtin(identity, vec![left, right]),
             };
             return Ok(if op == ast::CmpOp::IsNot {
-                Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Not(Box::new(same)),
-                }
+                Expr::not(same)
             } else {
                 same
             });
@@ -683,10 +671,7 @@ impl Checker<'_> {
                 ),
             };
             return Ok(if op == ast::CmpOp::IsNot {
-                Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Not(Box::new(expr)),
-                }
+                Expr::not(expr)
             } else {
                 expr
             });
@@ -907,10 +892,7 @@ impl Checker<'_> {
             kind: ExprKind::Builtin(Builtin::NominalIdentity, values),
         };
         if negate {
-            Expr {
-                ty: Type::Bool,
-                kind: ExprKind::Not(Box::new(identity)),
-            }
+            Expr::not(identity)
         } else {
             identity
         }

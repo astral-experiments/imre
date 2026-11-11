@@ -4,6 +4,7 @@
 use crate::ir::{
     self, Builtin, CallArgs, Expr, ExprKind, Function, InstanceType, Module, Statement, Type,
 };
+use ruff_python_ast::UnaryOp;
 
 /// Checks identities before layouts, then validates statements and expression shapes.
 pub(crate) fn module(module: &Module) -> Result<(), String> {
@@ -659,8 +660,9 @@ impl Verifier<'_> {
                 same(yes.ty, value.ty)?;
                 same(no.ty, value.ty)
             }
-            ExprKind::Not(_) => same(value.ty, Type::Bool),
-            ExprKind::Negate(inner) => same(value.ty, inner.ty),
+            ExprKind::Unary(_, _) if value.ty == Type::PythonObject => Ok(()),
+            ExprKind::Unary(UnaryOp::Not, _) => same(value.ty, Type::Bool),
+            ExprKind::Unary(_, operand) => same(value.ty, operand.ty),
             ExprKind::Call(id, args) => {
                 let callee = self.callee(*id)?;
                 same(value.ty, callee.returns)?;

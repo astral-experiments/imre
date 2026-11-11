@@ -5,6 +5,7 @@ use crate::ir::{Binary, Builtin, Expr, ExprKind, Module, Statement, Type};
 use crate::reductions::literal;
 use crate::types::Types;
 use ruff_python_ast::CmpOp;
+use ruff_python_ast::UnaryOp;
 use std::collections::{HashMap, HashSet};
 
 /// Replace a periodic producer by an ordinary prefix and a continuation. Running the
@@ -163,7 +164,7 @@ fn expression_period(
             expression_period(a, ordinal, written, known)?
                 .max(expression_period(b, ordinal, written, known)?),
         ),
-        ExprKind::Negate(x) => expression_period(x, ordinal, written, known),
+        ExprKind::Unary(UnaryOp::USub, x) => expression_period(x, ordinal, written, known),
         ExprKind::Builtin(Builtin::Float(_), args) if args.len() == 1 => {
             expression_period(&args[0], ordinal, written, known)
         }

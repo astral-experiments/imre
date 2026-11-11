@@ -1,6 +1,7 @@
 //! Integer power has a fixed result type with a modulus or a known exponent sign.
 
 use super::*;
+use ruff_python_ast::UnaryOp;
 
 /// Python bools participate in arithmetic as zero and one.
 pub(super) fn integer(value: Expr) -> Expr {
@@ -36,7 +37,7 @@ impl Checker<'_> {
         }
         let negative = match &exponent.kind {
             ExprKind::Int(value) => value.starts_with('-'),
-            ExprKind::Negate(value) if let ExprKind::Int(integer) = &value.kind => {
+            ExprKind::Unary(UnaryOp::USub, value) if let ExprKind::Int(integer) = &value.kind => {
                 integer != "0" && !integer.starts_with('-')
             }
             ExprKind::Builtin(Builtin::Len | Builtin::Abs, _) => false,

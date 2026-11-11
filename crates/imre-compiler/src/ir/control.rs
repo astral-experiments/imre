@@ -1,5 +1,6 @@
 //! Successor planning for truth-consuming tests and operand-returning expressions.
-use super::{Builtin, Expr, ExprKind, ObjectUnary, TruthPredicate};
+use super::{Builtin, Expr, ExprKind, TruthPredicate};
+use ruff_python_ast::UnaryOp;
 
 /// A truth-consuming expression or one whose selected operand escapes.
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -121,13 +122,8 @@ impl Edges {
                     child(left, yes, next, left_test.as_ref())
                 }
             }
-            ExprKind::Not(operand) if context == Context::Condition => {
+            ExprKind::Unary(UnaryOp::Not, operand) if context == Context::Condition => {
                 child(operand, no, yes, None)
-            }
-            ExprKind::Builtin(Builtin::RegisteredUnary(ObjectUnary::Not), operands)
-                if context == Context::Condition =>
-            {
-                child(&operands[0], no, yes, None)
             }
             ExprKind::Conditional(test, body, otherwise) => {
                 let no_arm = child(otherwise, yes, no, predicate);

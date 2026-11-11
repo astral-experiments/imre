@@ -5351,13 +5351,13 @@ mod tests {
         assert_eq!(functions.len(), 1);
         let mut ops = Vec::new();
         ir::walk_expressions(&functions[&TextSize::default()].function.body, &mut |e| {
-            if let ExprKind::Builtin(Builtin::RegisteredUnary(op), args) = &e.kind {
-                assert!(matches!(args.as_slice(), [value] if value.ty == Type::PythonObject));
+            if let ExprKind::Unary(op, value) = &e.kind {
+                assert_eq!(value.ty, Type::PythonObject);
                 ops.push(*op);
             }
         });
-        use ir::ObjectUnary::{Invert, Negative, Not, Positive};
-        assert_eq!(ops, [Positive, Negative, Invert, Not]);
+        use ast::UnaryOp::{Invert, Not, UAdd, USub};
+        assert_eq!(ops, [UAdd, USub, Invert, Not]);
     }
 
     #[test]
