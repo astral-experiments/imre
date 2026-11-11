@@ -464,7 +464,15 @@ impl Inference {
 
     // Use the bound argument's storage before coercion. A map child still needs
     // its ordinary shape check, while an Any parameter retains the tagged owner.
-    fn document_parameter(&self, id: usize, index: usize, expected: Type, actual: Type) -> Type {
+    fn document_parameter(
+        &self,
+        signature: &Signature,
+        classes: &ClassInfo,
+        index: usize,
+        expected: Type,
+        actual: Type,
+    ) -> Type {
+        let id = signature.id;
         if !matches!(actual, documents::ANY | documents::MAP | documents::LIST)
             || !self.pending.borrow()[id]
                 .document_parameters
@@ -478,6 +486,17 @@ impl Inference {
             Type::List(_) => documents::LIST,
             _ => return expected,
         };
+        if ty == documents::MAP
+            && let Some(method) = signature.method
+            && method.generated_initializer(&classes.declarations)
+            && let Some(field) = classes.declarations.definitions[method.class]
+                .fields
+                .iter()
+                .position(|field| field.name == signature.params[index].name)
+            && classes.fields[method.class][field] == Type::JsonObject
+        {
+            self.document_field(method.class, field);
+        }
         self.widen_parameter(id, index, ty);
         ty
     }
@@ -877,6 +896,14 @@ impl Inference {
             for (module, function, signature) in definitions.iter() {
                 if graph.modules[*module].archive.is_some() {
                     continue; // Native declarations must be fully annotated.
+                }
+                // The call binder transfers mutable document layouts to their fields.
+                // The final body checker owns the generated parameter stores.
+                if signature
+                    .method
+                    .is_some_and(|method| method.generated_initializer(&classes.declarations))
+                {
+                    continue;
                 }
                 let (ready, infer_return, retrying) = {
                     let signatures = self.pending.borrow();
@@ -1423,7 +1450,13 @@ impl Checker<'_> {
                         })
                     {
                         let supplied = argument.value(checker)?;
-                        let ty = inference.document_parameter(signature.id, index, ty, supplied.ty);
+                        let ty = inference.document_parameter(
+                            signature,
+                            checker.classes,
+                            index,
+                            ty,
+                            supplied.ty,
+                        );
                         if supplied.ty == Type::None
                             && ty != Type::None
                             && checker.types.payload(ty).is_none()
@@ -1508,7 +1541,8 @@ impl Checker<'_> {
                             declaration,
                             |checker, value, expected, site| {
                                 let expected = inference.document_parameter(
-                                    signature.id,
+                                    signature,
+                                    checker.classes,
                                     index,
                                     expected,
                                     value.ty,

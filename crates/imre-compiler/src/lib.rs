@@ -1919,10 +1919,15 @@ print("result", call(b=2, a=1))
 
     #[test]
     fn mutable_document_arguments_preserve_independent_any_parameters() {
-        let source = r#"from numbers import Number
+        let source = r#"from dataclasses import dataclass
+from numbers import Number
 from typing import Any
 from tomli import loads
 from tomli_w import dumps
+
+@dataclass(kw_only=True, repr=False)
+class Settings:
+    table: dict[str, Any]
 
 def is_number(value: Any) -> bool:
     return isinstance(value, Number)
@@ -1932,7 +1937,9 @@ def update(table: dict[str, Any]) -> dict[str, Any]:
     return table
 
 doc = loads('name = "old"')
-print(dumps(update(doc)))
+settings = Settings(table=doc)
+print(dumps(update(settings.table)))
+print(dumps(doc))
 print(is_number(3))
 "#;
         let llvm = super::compile(source, &CompileOptions::default()).unwrap();
