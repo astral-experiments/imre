@@ -5380,7 +5380,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         let crate::ir::ExceptionMatcher::Object(site, class) = &handlers[0].matcher else {
             panic!("expected a prepared exception selector")
         };
-        let crate::ir::ExprKind::Builtin(crate::ir::Builtin::RegisteredLocation(range, _), args) =
+        let crate::ir::ExprKind::Builtin(crate::ir::Builtin::RegisteredLocation(range, ..), args) =
             &class.kind
         else {
             panic!("expected a located selector")

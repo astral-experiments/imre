@@ -3735,7 +3735,6 @@ impl Emitter<'_, '_> {
                     ))
                 }
                 Binary::Power
-                | Binary::GuardedIntAdd
                 | Binary::MatrixMultiply
                 | Binary::Repeat
                 | Binary::Concat
@@ -3754,7 +3753,7 @@ impl Emitter<'_, '_> {
             };
         }
         match op {
-            Binary::Power | Binary::GuardedIntAdd | Binary::MatrixMultiply => {
+            Binary::Power | Binary::MatrixMultiply => {
                 unreachable!("fixed operator was checked")
             }
             Binary::Repeat => {
@@ -3831,7 +3830,6 @@ impl Emitter<'_, '_> {
                 Some(!same_sign)
             }
             Binary::Power
-            | Binary::GuardedIntAdd
             | Binary::MatrixMultiply
             | Binary::Divide
             | Binary::Repeat
@@ -3951,7 +3949,6 @@ impl Emitter<'_, '_> {
                 self.instruction(format!("{instruction} i64 {left}, {right}"))
             }
             Binary::Power
-            | Binary::GuardedIntAdd
             | Binary::MatrixMultiply
             | Binary::Divide
             | Binary::Repeat

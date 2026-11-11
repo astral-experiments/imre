@@ -165,34 +165,25 @@ impl OperandTypes<'_> {
         self.session.parsed(self.session.files[self.module])
     }
 
-    pub(crate) fn integer_add(self, left: &Expr, right: &Expr) -> bool {
+    pub(crate) fn scalar_type(self, name: &ruff_python_ast::ExprName) -> Option<crate::ir::Type> {
         use ruff_python_ast::{AnyRootNodeRef, ExprContext};
-        let (Expr::Name(left), Expr::Name(right)) = (left, right) else {
-            return false;
-        };
-        let parsed = self.parsed();
         let session = self.session;
         let index = ty_python_core::semantic_index(
             &session.db,
             session.db.program_file(session.files[self.module]),
         );
-        [left, right].into_iter().all(|name| {
-            // Forwarded operands can retain an index while changing the name it reads.
-            if index
-                .try_expression_scope_id(&ruff_python_ast::ExprRef::Name(name))
-                .is_none()
-            {
-                return false;
-            }
-            let AnyRootNodeRef::Expr(original @ Expr::Name(original_name)) =
-                parsed.get_by_index(name.node_index.load())
-            else {
-                return false;
-            };
-            original_name.ctx == ExprContext::Load
-                && original_name == name
-                && session.scalar_type(self.module, original) == Some(crate::ir::Type::Int)
-        })
+        // Forwarded operands can retain an index while changing the name it reads.
+        index.try_expression_scope_id(&ruff_python_ast::ExprRef::Name(name))?;
+        let parsed = self.parsed();
+        let AnyRootNodeRef::Expr(original @ Expr::Name(original_name)) =
+            parsed.get_by_index(name.node_index.load())
+        else {
+            return None;
+        };
+        if original_name.ctx != ExprContext::Load || original_name != name {
+            return None;
+        }
+        session.scalar_type(self.module, original)
     }
 }
 

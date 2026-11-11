@@ -1191,7 +1191,6 @@ impl Binary {
     pub(crate) fn may_raise(self) -> bool {
         match self {
             Self::Power
-            | Self::GuardedIntAdd
             | Self::MatrixMultiply
             | Self::Divide
             | Self::FloorDivide

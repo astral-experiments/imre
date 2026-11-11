@@ -278,12 +278,12 @@ pub(in crate::frontend) fn located(
     value: Expr,
 ) -> Expr {
     if matches!(&value.kind,
-        ExprKind::Builtin(Builtin::RegisteredLocation(existing, start), _) if (*existing, *start) == (range, position)
+        ExprKind::Builtin(Builtin::RegisteredLocation(existing, start, ..), _) if (*existing, *start) == (range, position)
     ) {
         return value;
     }
     super::operation(
-        Builtin::RegisteredLocation(range, position),
+        Builtin::RegisteredLocation(range, position, None),
         value.ty,
         vec![value],
     )
@@ -834,16 +834,26 @@ pub(super) fn operation<E>(
     mut child: impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
 ) -> StdResult<Option<Expr>, E> {
     if let Some((op, [left, right])) = binary_operands(node) {
-        let op = if op == Binary::Add
-            && source
-                .operand_types
-                .is_some_and(|types| types.integer_add(left, right))
+        let mut lhs = child(left)?;
+        let mut rhs = child(right)?;
+        if matches!(op, Binary::Add | Binary::Subtract)
+            && let Some(types) = source.operand_types
+            && let (Some(left), Some(right)) = (left.as_name_expr(), right.as_name_expr())
         {
-            Binary::GuardedIntAdd
-        } else {
-            op
-        };
-        return Ok(Some(binary(op, child(left)?, child(right)?)));
+            for (value, name) in [(&mut lhs, left), (&mut rhs, right)] {
+                if value.ty == Type::PythonObject
+                    && let ExprKind::Builtin(Builtin::RegisteredLocation(_, _, hint), _) =
+                        &mut value.kind
+                {
+                    *hint = types.scalar_type(name);
+                }
+                // A word operation needs two integer operands.
+                if value.checked_operand_type() != Type::Int {
+                    break;
+                }
+            }
+        }
+        return Ok(Some(binary(op, lhs, rhs)));
     }
     if let Some((items, display)) = display_elements(node) {
         let values = display_operands(items, source, &mut child)?;
@@ -1312,7 +1322,7 @@ mod tests {
     use super::*;
 
     fn value_and_position(value: &Expr) -> (&ExprKind, TextSize) {
-        let ExprKind::Builtin(Builtin::RegisteredLocation(_, position), values) = &value.kind
+        let ExprKind::Builtin(Builtin::RegisteredLocation(_, position, ..), values) = &value.kind
         else {
             panic!("expected a located expression");
         };

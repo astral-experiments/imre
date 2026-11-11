@@ -456,14 +456,14 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         {
             return value;
         }
-        let guarded_ints = op == Binary::GuardedIntAdd;
         // A body placed from a native definition now receives Python handles.
         let op = match (fixed_site, op) {
-            (_, Binary::GuardedIntAdd) | (true, Binary::Concat) => Binary::Add,
+            (true, Binary::Concat) => Binary::Add,
             (true, Binary::Repeat) => Binary::Multiply,
             _ => op,
         };
-        let checked_ints = guarded_ints || (left.ty == Type::Int && right.ty == Type::Int);
+        let checked_ints =
+            left.checked_operand_type() == Type::Int && right.checked_operand_type() == Type::Int;
         let arithmetic = matches!(op, Binary::Add | Binary::Subtract | Binary::Multiply)
             && (fixed_site || expr.ty == Type::PythonObject || checked_ints)
             || op == Binary::Modulo && checked_ints;
@@ -521,7 +521,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
 
     fn emit_operation(&mut self, expr: &Expr, fixed_site: bool, usage: ValueUse) -> CheckedValue {
         match &expr.kind {
-            ExprKind::Builtin(Builtin::RegisteredLocation(range, position), operands) => {
+            ExprKind::Builtin(Builtin::RegisteredLocation(range, position, ..), operands) => {
                 self.python().located_value(*range, *position, |frame| {
                     CheckedBody::registered(frame.reborrow()).value_for(&operands[0], usage)
                 })
