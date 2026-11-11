@@ -9,6 +9,7 @@ from pathlib import Path
 
 FIXTURES = Path(__file__).parent / "fixtures" / "argparse"
 CASES = {
+    "guarded_constructor": [[], ["--name", "explicit"]],
     "evaluated_default": [[], ["--repository", "explicit"]],
     "registration_errors": [[], ["const"], ["invalid"], ["both"], ["effects"], ["interrupt"],
                             ["nested-group"], ["nested-child"], ["nested-child-group"],

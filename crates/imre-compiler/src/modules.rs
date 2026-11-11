@@ -769,7 +769,6 @@ pub(crate) enum Intrinsic {
     OperatorCall,
     BuiltinsOpen,
     SysDisplayHook,
-    ArgumentParser,
     ArgparseNamespace,
     ArgparseSuppress,
     BooleanOptionalAction,
@@ -1144,6 +1143,7 @@ pub(crate) enum Intrinsic {
 }
 
 impl Intrinsic {
+    pub(crate) const ARGUMENT_PARSER: Self = Self::ScopedObjectExport("argparse.ArgumentParser");
     pub(crate) const REGEX_DEBUG: Self = Self::ScopedObjectExport("re.DEBUG");
 
     pub(crate) fn unary_float_math(self) -> Option<(&'static str, Builtin)> {
@@ -1973,7 +1973,7 @@ impl IntrinsicModule {
             (Self::Os, "name") => Intrinsic::OsName,
             (Self::Os, "linesep") => Intrinsic::OsLinesep,
             (Self::Errno, _) => Intrinsic::ErrnoAttribute,
-            (Self::Argparse, "ArgumentParser") => Intrinsic::ArgumentParser,
+            (Self::Argparse, "ArgumentParser") => Intrinsic::ARGUMENT_PARSER,
             (Self::Argparse, "Namespace") => Intrinsic::ArgparseNamespace,
             (Self::Argparse, "SUPPRESS") => Intrinsic::ArgparseSuppress,
             (Self::Argparse, "BooleanOptionalAction") => Intrinsic::BooleanOptionalAction,
