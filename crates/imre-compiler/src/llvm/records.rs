@@ -271,7 +271,6 @@ fn field_metadata<'a>(
 
 impl Emitter<'_, '_> {
     /// Formatting borrows the exact typed root and returns a single owned string.
-    /// The descriptor traversal never calls user code or mutates child storage.
     pub(super) fn value_repr(&mut self, value: &Value) -> Value {
         let word = self.word(value);
         let operand = self.instruction(format!(
