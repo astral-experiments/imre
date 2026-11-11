@@ -736,7 +736,8 @@ enum FunctionBody<'a> {
 impl FunctionBody<'_> {
     #[cfg(test)]
     fn fully_checked(&self) -> bool {
-        self.suite().is_none_or(crate::frontend::RegisteredSuite::fully_checked)
+        self.suite()
+            .is_none_or(crate::frontend::RegisteredSuite::fully_checked)
     }
 
     fn suite(&self) -> Option<&crate::frontend::RegisteredSuite> {
@@ -1697,7 +1698,8 @@ mod tests {
         def: &ast::StmtFunctionDef,
         body: crate::frontend::RegisteredSuite,
     ) {
-        *source.function_bodies.get_mut(&def.start()).unwrap() = FunctionBody::Suite(Box::new(body));
+        *source.function_bodies.get_mut(&def.start()).unwrap() =
+            FunctionBody::Suite(Box::new(body));
     }
 
     fn test_function_suite<'s>(
