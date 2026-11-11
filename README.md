@@ -109,12 +109,12 @@ with Rust-competitive performance.
 
 ## Standard library test results
 
-Across the 44 standard library module families below, **13,137 of 16,202 tests (81.08%)** have recorded paired passes.
-The paired pass rate is 80.0% (10,668 of 13,327) for the original 25 families and 85.9% (2,469 of 2,875) for the 19 additional families.
+Across the 45 standard library module families below, **13,159 of 16,225 tests (81.10%)** have recorded paired passes.
+The paired pass rate is 80.0% (10,668 of 13,327) for the original 25 families and 86.0% (2,491 of 2,898) for the 20 additional families.
 A **paired pass** means that CPython 3.14.5 passed the original test and Imre passed it at both
 `-O0` and `-O3`. The total combines focused and intact suite runs across revisions, including
 development branches. The intact `dataclasses` run at `143809dd` replaces that family’s earlier count. Each original test occurrence counts once. Skipped and omitted tests remain
-in the denominator. The [omission decisions](docs/stdlib-omissions.md) cover 118 originals in these 44 families and [eight supplemental Decimal originals](docs/stdlib-omissions.md#decimal).
+in the denominator. The [omission decisions](docs/stdlib-omissions.md) cover 118 originals in these 45 families and [eight supplemental Decimal originals](docs/stdlib-omissions.md#decimal).
 The published totals at `58276705` include typed native code, boxed native code that calls the runtime, and earlier runs through the retired Python source evaluator. Use the recorded product and launch mode when reproducing a row. [Compiler design](docs/design.md#emitting-operations) · [Evaluator removal](https://github.com/astral-experiments/imre/pull/6309)
 
 A later Linux recheck covered 155 previously credited tests. CPython passed all 155. At both native optimization levels, 136 `importlib` tests failed in setup while loading temporary disk or ZIP packages, and seven failed inside the test method while loading a temporary module. The twelve `logging.config.fileConfig` originals reported native errors at both levels and have been removed from the paired total. [Per-test results](benchmarks/cpython_stdlib/paired-recheck-6814.tsv) · [Imre revision](https://github.com/astral-experiments/imre/commit/6f4b1f67bea8024ea216bae84194edc26b7534ed)
@@ -123,9 +123,9 @@ On public #6856, stock CPython passed all 143 previously credited `importlib` or
 
 The [supplemental `test_urllib2` decision](docs/stdlib-omissions.md#test_urllib2) covers the single packaging-specific error in a separate 80-case replay.
 
-On the campaign's x86-64 Linux runner, stock CPython 3.14.5 registered **16,191** of these originals.
-It passed **15,161**, skipped 1,023, and reported 7 errors.
-Across the 44 families, **13,039 of the 15,161 stock Linux passes (86.0%)** have paired passes, leaving **606** more to reach 90%. The other 98 paired originals skipped or recorded an error in that stock run.
+On the campaign's x86-64 Linux runner, stock CPython 3.14.5 registered **16,191** of the **16,202** originals in the earlier 44 families. It passed **15,161**, skipped 1,023, and reported 7 errors. Of the 13,137 paired originals in that cohort, **13,039** passed in that stock run. The other 98 skipped or recorded an error.
+
+The separate Linux `netrc` run added 22 stock passes, all paired, and one WASI skip. Together the two stock measurements registered 16,214 originals, with 15,183 passes, 1,024 skips, and 7 errors. Across the 45 families, **13,061 of the 15,183 stock Linux passes (86.0%)** have paired passes, leaving **604** more to reach 90%.
 
 | Module | Paired passes | Upstream tests | Omitted | How the tests ran |
 | --- | ---: | ---: | ---: | --- |
@@ -165,7 +165,7 @@ results and import coverage recorded in this repository.
 
 ### Additional module families
 
-CPython 3.14.5 discovers **2,875 test occurrences** across these 19 families on Linux. They use the same pairing rule and have a separate total.
+CPython 3.14.5 discovers **2,898 test occurrences** across these 20 families on Linux. They use the same pairing rule and have a separate total.
 
 | Module | Paired passes | Upstream tests | Omitted | How the tests ran |
 | --- | ---: | ---: | ---: | --- |
@@ -178,6 +178,7 @@ CPython 3.14.5 discovers **2,875 test occurrences** across these 19 families on 
 | `gzip` | 74 | 75 | 1 | Stock passed all 75 originals. Both native builds retained the prior 73 passes and now pass `test_decompress_limited`, which checks read-ahead after a one-byte read. The remaining original calls CPython’s private prepend helper. [Gzip fix](https://github.com/astral-experiments/imre/pull/5627) · [Omission decision](docs/stdlib-omissions.md#gzip). |
 | `inspect` | 262 | 362 | 0 | All 287 previously documented originals passed together at both native levels, including the two class-signature gains. Every isolated CLI child used its intended native default. With the same declarations, 25 originals errored at both levels on #6309 and #6368 while evaluating signatures or source, executing generated code, or importing a module created by the test. [Module command](https://github.com/astral-experiments/imre/pull/5968) · [Class signatures](https://github.com/astral-experiments/imre/pull/5983) |
 | `math` | 77 | 89 | 0 | The original testFmod and a real WGS84 route pipeline now use the same floating-remainder implementation in typed and boxed calls. [Shared operation](https://github.com/astral-experiments/imre/pull/6086) |
+| `netrc` | 22 | 23 | 0 | Stock CPython 3.14.5 passed 22 originals and skipped the WASI-only test. On public #6989, both native tiers matched all 23 outcomes with `--include-module test.test_netrc`. Without the declaration, both parents exited during import of the test module before any original started. [Whole-suite evidence](benchmarks/cpython_stdlib/full/netrc/EVIDENCE.md) · [Per-occurrence results](benchmarks/cpython_stdlib/full/netrc/occurrences.tsv) |
 | `ssl` | 66 | 195 | 0 | The SNI change retained 26 ContextTests positives and added three originals covering callbacks, dead references and reference cycles. A strict socket and BIO peer both received the same fatal alert as stock under reentrant registration. Focused native runs of 60 upstream methods with stock fixtures reproduced 20 earlier pairs and added seven, including both unconnected-socket `ENOTCONN` checks. On public #6342 (`e8fb383c`), O0 and O3 each reproduced all 66 pairs among 99 targeted stock-positive occurrences. The 39 previously carried pairs used reconstructed upstream fixtures verified on stock. On public #6347 (`98fc7222`), running the test file and running `-m test.test_ssl` each registered all 195 originals. Each entry point passed 67 at both `-O0` and `-O3`. Stock passed 179 and skipped `NetworkedTests.test_timeout_connect_ex`, leaving 66 stock-matched pairs. Of the 79 stock positives outside the earlier projection, 59 errored in the method body and 20 in `setUp`. The default CPython regrtest launcher registered zero methods on Imre because it stopped at `inspect._shadowed_dict_from_weakref_mro_tuple.cache_clear()`. [Callback ownership and measured lifetime](https://github.com/astral-experiments/imre/pull/6066) · [Wrapped client sockets](https://github.com/astral-experiments/imre/pull/6341) |
 | `struct` | 34 | 43 | 0 | Stock passed all 43 tests. Both native builds passed 34, skipped six, failed one and errored on two. The full run retained all 33 earlier passes and confirmed `StructTest.test_repr`. [Earlier 33](https://github.com/astral-experiments/imre/commit/dbeabb7cf3753ccd9de8bf53e7b5d78382d75542) · [Public revision](https://github.com/astral-experiments/imre/commit/29e1ce351ccc3cfc398c24db8d5f0fe4d5ff43f2). |
 | `tokenize` | 127 | 130 | 0 | The original `test_random_files` passed on stock and at both public native levels. Each run opened the same ten shipped source files and completed all ten file subtests, reading 501,523 bytes. The earlier unpaired original invoked the CLI on Latin-1 source, which the compiler rejected before parsing. On #6309 and #6368, `StringPrefixTest.test_prefixes` and `TestMisc.test_decistmt` errored in `eval` at both native levels in the three-test selection. Both errors also appeared before the 400-second whole-module timeout. [Public run](https://github.com/astral-experiments/imre/commit/9faed4f24231cca67a147ca070e7fd79a71bba51). |
@@ -188,11 +189,11 @@ CPython 3.14.5 discovers **2,875 test occurrences** across these 19 families on 
 | `weakref` | 169 | 183 | 7 | All 46 WeakSet originals and 123 weakref originals passed. Seven [CPython-specific tests](docs/stdlib-omissions.md#weakref) have individual omission decisions. Seven other originals remain unpaired. |
 | `zipfile` | 370 | 383 | 1 | The PyZipFile writer added the original filtered-package and invalid-syntax cases. Its source fallback preserves custom cache resolvers and up-to-date bytecode archives. Five historical denominator slots still lack verified method identities. [Archive writer](https://github.com/astral-experiments/imre/pull/6003) |
 | `zoneinfo` | 229 | 261 | 2 | All 261 original registrations completed on public Imre. Both native builds passed 228, including `test.test_zoneinfo.test_zoneinfo.MiscTests.test_pydatetime` (occurrence 1), which exercises the pure-Python datetime provider. Two private-cache tests have [documented omission decisions](docs/stdlib-omissions.md#zoneinfo). [Public change](https://github.com/astral-experiments/imre/pull/5295). The numeric replay also confirmed that both ZoneInfo classes are tracked by the garbage collector. [Pinned replay](https://github.com/astral-experiments/imre/commit/e400ad995d604f2108c031d0bf536a0d0e6c583f) |
-| **Measured total (19 of 19 families)** | **2,469** | **2,875** | **13** |  |
+| **Measured total (20 of 20 families)** | **2,491** | **2,898** | **13** |  |
 
 ### Whole-suite baselines for later additions
 
-We track these families separately to keep the original 16,202-test baseline comparable across revisions. Each row comes from complete runs of the upstream module. Across these 49 suites, 3,194 of 5,985 originals have paired passes. At both native tiers, `compileall` and `enum` stopped during import before any original test ran.
+These families are tracked separately from the 45-family census above. Each row comes from complete runs of the upstream module. Across these 49 suites, 3,194 of 5,985 originals have paired passes. At both native tiers, `compileall` and `enum` stopped during import before any original test ran.
 
 | Module | Paired passes | Upstream tests | Stock CPython | Imre O0 and O3 |
 | --- | ---: | ---: | --- | --- |
