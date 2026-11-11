@@ -40,7 +40,7 @@ fn checked_module_places_class_generator_and_following_lambda() {
         callable_code: Default::default(),
         exec_code: Default::default(),
         unit: 0,
-        positions: &SourcePositions::new(module.source.path, text, &file),
+        positions: &SourcePositions::new(&module.source.path, text, &file),
     };
     let mut frame = RegisteredFrame::new(
         &mut output,
@@ -116,7 +116,7 @@ fn checked_module_places_both_plain_and_generic_aliases_before_their_following_l
             callable_code: Default::default(),
             exec_code: Default::default(),
             unit: 0,
-            positions: &SourcePositions::new(module.source.path, &text, &file),
+            positions: &SourcePositions::new(&module.source.path, &text, &file),
         };
         let mut frame = RegisteredFrame::new(
             &mut output,
@@ -261,7 +261,7 @@ fn suspended_alias_diagnostic_follows_the_emitted_binding() {
         let outcome = module.standalone();
         if reachable {
             let positions = crate::dynamic::emit::SourcePositions::new(
-                module.source.path,
+                &module.source.path,
                 &source,
                 "stream.py",
             );

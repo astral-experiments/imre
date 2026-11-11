@@ -1367,6 +1367,29 @@ impl<'a> SuitePreparation<'a> {
         self.selected_suite(stmts, kind, SuiteSelection::All, SuiteSelection::All, false)
     }
 
+    pub(crate) fn interactive(&self, stmts: &[ast::Stmt]) -> Option<RegisteredSuite> {
+        let kind = RegisteredScope::Module;
+        let mut suite = match stmts {
+            [stmt @ ast::Stmt::Expr(expr)] => {
+                let mut scope = SourceScope::new(kind, self.source, self.operations, &self.sites);
+                let value = scope.frame_value(&expr.value)?;
+                let display = operation(Builtin::RegisteredDisplayHook, Type::None, vec![value]);
+                let body = vec![checkpoint(stmt), Statement::Expr(display)];
+                RegisteredSuite::new(scope.finish(body), Vec::new())
+            }
+            [
+                ast::Stmt::Assign(_)
+                | ast::Stmt::Raise(_)
+                | ast::Stmt::FunctionDef(_)
+                | ast::Stmt::ClassDef(_)
+                | ast::Stmt::TypeAlias(_),
+            ] => self.complete(stmts, kind)?,
+            _ => return None,
+        };
+        suite.refusal = self.checked_declaration_refusal(&suite.checked.function.body);
+        Some(suite)
+    }
+
     /// A residual statement in a suspended function owns its cursor and pending exits.
     /// Its child suites retain their physical-frame contract while its siblings use checked runs.
     pub(crate) fn function_suite(

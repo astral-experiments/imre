@@ -83,6 +83,7 @@ mod zip;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use crate::objects::exceptions::string_repr;
 use value::{
@@ -93,6 +94,7 @@ use value::{
 /// A live Python object can carry the linked body supplied by its producer.
 enum LinkedSource {
     Loader(SourceModule),
+    Doctest(SourceModule),
     Expression(Code),
 }
 
@@ -140,10 +142,20 @@ impl MainModuleFrame {
     }
 }
 
+#[derive(Clone)]
 struct SourceModule {
     path: PathBuf,
     code: ModuleInitializer,
     bundled_text: Option<&'static [u8]>,
+    single_inputs: Option<Rc<Vec<SingleInput>>>,
+}
+
+#[derive(Clone, Copy)]
+struct SingleInput {
+    filename: &'static str,
+    source: &'static [u8],
+    flags: u32,
+    code: Code,
 }
 
 impl SourceModule {

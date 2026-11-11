@@ -3,7 +3,7 @@
 
 use super::*;
 
-use crate::modules::doctest::{sealed, source_docstrings};
+use crate::modules::doctest::documents;
 
 impl Checker<'_> {
     pub(super) fn doctest_suite(&mut self, call: &ast::ExprCall) -> Result<Option<Expr>, String> {
@@ -186,32 +186,28 @@ impl Checker<'_> {
         let Some(sig) = self.functions.get(&def) else {
             return Ok(None);
         };
-        let mut docs = Vec::new();
-        let (module_name, filename) = match target {
-            Binding::Module(id) => {
-                let source = &self.graph.modules[id];
-                if source.bindings.contains_key("__test__") {
-                    return Err(error(
-                        self.source,
-                        node,
-                        "DocTestSuite __test__ additions require static documentation bindings",
-                    ));
-                }
-                source_docstrings(&source.name, &source.parsed.syntax().body, true, &mut docs);
-                (source.name.as_str(), Some(self.graph.module_filename(id)))
+        let filename = if let Binding::Module(id) = target {
+            if self.graph.modules[id].bindings.contains_key("__test__") {
+                return Err(error(
+                    self.source,
+                    node,
+                    "DocTestSuite __test__ additions require static documentation bindings",
+                ));
             }
-            Binding::IntrinsicModule(module) if let Some(catalog) = sealed(module) => {
-                catalog.append_to(&mut docs);
-                (catalog.module, None)
-            }
-            _ => return Ok(None),
+            Some(self.graph.module_filename(id))
+        } else {
+            None
         };
+        let Some((module_name, docs)) = documents(&self.graph.modules, target) else {
+            return Ok(None);
+        };
+        let mut docs: Vec<_> = docs.iter().collect();
         docs.sort_unstable_by(|a, b| a.0.cmp(&b.0));
         let optional_line = self.types.optional(Type::Int);
         let entry = self.types.tuple(vec![Type::Str, Type::Str, optional_line]);
         let mut values = Vec::with_capacity(docs.len());
         for (name, doc, offset) in docs {
-            let line = match (target, offset) {
+            let line = match (target, *offset) {
                 (Binding::Module(id), Some(offset)) => {
                     Expr::integer(self.graph.session.source_line(id, offset) - 1)
                 }

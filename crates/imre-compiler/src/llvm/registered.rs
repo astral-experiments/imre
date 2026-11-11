@@ -219,6 +219,10 @@ pub(crate) fn frame_inputs(
                 args.len() == 2
             }
             ExprKind::Builtin(Builtin::RegisteredInput(_), args) => args.is_empty(),
+            ExprKind::Builtin(Builtin::RegisteredDisplayHook, args) => {
+                uses_python_protocol = true;
+                args.len() == 1
+            }
             ExprKind::Builtin(Builtin::RegisteredStatement(..) | Builtin::RegisteredDiscard, _) => {
                 true
             }
@@ -982,6 +986,7 @@ impl Frame<'_, '_, '_> {
                     | Builtin::RegisteredDeleteName(..)
                     | Builtin::RegisteredNamespaceAnnotation(_)
                     | Builtin::RegisteredDiscard
+                    | Builtin::RegisteredDisplayHook
                     | Builtin::RegisteredAnnotationStart
                     | Builtin::RegisteredAnnotationFormat
                     | Builtin::RegisteredAnnotationInsert(_)
@@ -1238,6 +1243,13 @@ impl Frame<'_, '_, '_> {
                 for operand in operands {
                     self.discard_operand(|frame| frame.evaluate_handle(operand));
                 }
+                "0".to_owned()
+            }
+            (Builtin::RegisteredDisplayHook, [value]) => {
+                self.discard_operand(|frame| {
+                    let value = frame.evaluate_handle(value);
+                    frame.code.op("displayhook", &[&value])
+                });
                 "0".to_owned()
             }
             (Builtin::RegisteredAnnotationStart, []) => {

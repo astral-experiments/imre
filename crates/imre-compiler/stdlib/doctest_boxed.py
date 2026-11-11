@@ -98,6 +98,7 @@ class _DocTestSuite(unittest.TestSuite):
 
 
 def DocTestSuite(module=None, globs=None, extraglobs=None, *, optionflags=0, setUp=None, tearDown=None, checker=None):
+    from _imre_importlib import bind_doctest
     if module is None:
         module = sys.modules[sys._getframemodulename(1)]
     elif isinstance(module, str):
@@ -123,6 +124,7 @@ def DocTestSuite(module=None, globs=None, extraglobs=None, *, optionflags=0, set
             test = DocTest(name, doc, examples)
             test.globs = namespace.copy()
             test.filename = filename
+            bind_doctest(test, module)
             if lines is None:
                 import linecache
                 lines = linecache.getlines(filename, module.__dict__)

@@ -728,6 +728,7 @@ impl Builtin {
             | Self::RegisteredInput(_)
             | Self::RegisteredStatement(..)
             | Self::RegisteredDiscard
+            | Self::RegisteredDisplayHook
             | Self::RegisteredName(_)
             | Self::RegisteredInPlace(_)
             | Self::RegisteredAttribute { .. }

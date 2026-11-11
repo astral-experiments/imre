@@ -96,9 +96,9 @@ pub(super) fn units<'a>(
                 Some(parsed) => ParsedModule { text, parsed },
                 None => ParsedModule::parse(path, text)?,
             };
-            Ok(Initializer::Checked(Box::new(PreparedBody::from_parsed(
+            let mut body = PreparedBody::from_parsed(
                 name,
-                path,
+                path.as_path(),
                 module,
                 python_optimization,
                 origin,
@@ -106,7 +106,9 @@ pub(super) fn units<'a>(
                     .map(|unit| unit.literal_sites.clone())
                     .unwrap_or_default(),
                 types,
-            )?)))
+            )?;
+            body.prompts = checked.map_or(&[][..], |unit| unit.prompts);
+            Ok(Initializer::Checked(Box::new(body)))
         };
         // Release each checker database after its last selected first-party file.
         layouts.retain(|facts| !facts.is_empty());

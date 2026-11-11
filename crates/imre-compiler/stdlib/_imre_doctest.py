@@ -19,6 +19,7 @@ def exception_name(exc):
 
 
 def execute(test, debug, optionflags=0, checker=None):
+    from _imre_importlib import compile_single
     from doctest import (_check_output, _exception_line, _optionflags, OutputChecker,
                          FAIL_FAST, REPORT_ONLY_FIRST_FAILURE, SKIP)
     from unittest import SkipTest
@@ -46,7 +47,7 @@ def execute(test, debug, optionflags=0, checker=None):
             error = ""
             exc_info = None
             try:
-                exec(compile(example.source, filename, "single"), test.globs)
+                exec(compile_single(compile, example.source, filename, test), test.globs)
             except KeyboardInterrupt:
                 raise
             except BaseException as exc:

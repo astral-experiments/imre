@@ -628,6 +628,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "compile_filename"
             | "open_run_path"
             | "compile_file"
+            | "bind_doctest"
+            | "compile_single"
             | "get_code"
             | "loader_fields"
             | "path_stats"
@@ -1170,6 +1172,34 @@ pub(super) fn index_c_int(ctx: &mut Context, value: Id) -> Result<i32> {
         .to_i64()
         .and_then(|n| i32::try_from(n).ok())
         .ok_or_else(|| Error::new("OverflowError", "Python int too large to convert to C int"))
+}
+
+fn registered_single_code(ctx: &mut Context, source: Id, filename: Id, test: Id) -> Option<Id> {
+    let origin = ctx.raw_instance_field(test, "filename")?;
+    if !matches!(ctx.heap.get(origin), Value::Str(_) | Value::SurrogateStr(_)) {
+        return None;
+    }
+    let path = ctx.import_path(origin).ok()?;
+    let inherited = ctx.inherited_compile_flags();
+    let super::LinkedSource::Doctest(owner) = ctx.heap.linked_sources.get(&test)? else {
+        return None;
+    };
+    if owner.path.as_os_str() != path.as_os_str() {
+        return None;
+    }
+    let (Value::Str(text), Value::Str(name)) = (ctx.heap.get(source), ctx.heap.get(filename))
+    else {
+        return None;
+    };
+    let input = owner.single_inputs.as_ref()?.iter().find(|input| {
+        input.filename == name && input.source == text.as_bytes() && inherited & !input.flags == 0
+    })?;
+    let code = ctx.native_module_code(input.code, filename, Some(input.flags));
+    let Value::Code(object) = ctx.heap.get_mut(code) else {
+        unreachable!()
+    };
+    object.bind_file_constants(filename);
+    Some(code)
 }
 
 /// Convert the real builtin's path and options in argument order. A Python compiler owns its operands.
@@ -2652,6 +2682,20 @@ pub(super) fn call(
             ("uses_builtin_compile", [converter], []) => {
                 return Ok(builtins::boolean(ctx.uses_builtin_compile(*converter)));
             }
+            ("bind_doctest", [test, module], []) => {
+                ctx.bind_doctest_source(*test, *module);
+                return Ok(NONE);
+            }
+            ("compile_single", [compiler, source, filename, test], []) => {
+                if *compiler == ctx.builtin("compile")
+                    && ctx.config["optimize"].as_i64().unwrap_or(0) == 0
+                    && let Some(code) = registered_single_code(ctx, *source, *filename, *test)
+                {
+                    return Ok(code);
+                }
+                let mode = ctx.text("single");
+                return ctx.call(*compiler, vec![*source, *filename, mode], Vec::new());
+            }
             ("compile_file", [compiler, data, filename], options) => {
                 let mode = ctx.text("exec");
                 if *compiler == ctx.builtin("compile") {
@@ -3662,6 +3706,74 @@ pub(super) fn call(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn equal_prompt_names_and_bytes_keep_their_compiled_module() {
+        use crate::dynamic::{ffi, value::Code};
+
+        unsafe extern "C" fn left(_: *mut Context, _: Id) -> Id {
+            TRUE
+        }
+        unsafe extern "C" fn right(_: *mut Context, _: Id) -> Id {
+            FALSE
+        }
+
+        let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let filename = ctx.text("<doctest shared[0]>");
+        let text = ctx.text("3\n");
+        let object = ctx.builtin("object");
+        let owners = [
+            (c"left", c"left.py", left as Code),
+            (c"right", c"right.py", right as Code),
+        ];
+        let tests = owners.map(|(name, file, entry)| {
+            // SAFETY: both entries have the registered ABI, with static source bytes and names.
+            unsafe {
+                ffi::imre_dyn_register(&mut ctx, name.as_ptr(), file.as_ptr(), entry);
+                ffi::imre_dyn_register_module_single(
+                    &mut ctx,
+                    name.as_ptr(),
+                    c"<doctest shared[0]>".as_ptr(),
+                    b"3\n".as_ptr(),
+                    2,
+                    0,
+                    entry,
+                );
+            }
+            let (module, scope, module_name, _) = ctx
+                .allocate_import_module(name.to_str().unwrap(), &[], None)
+                .unwrap();
+            let path = ctx.text(file.to_str().unwrap());
+            let test = ctx.instance(object, None);
+            let Value::Instance { fields, .. } = ctx.heap.get_mut(test) else {
+                unreachable!()
+            };
+            fields.insert("filename".into(), path);
+            ctx.bind_doctest_source(test, module);
+            assert!(registered_single_code(&mut ctx, text, filename, test).is_none());
+            let code = ctx.native_module_code(entry, path, Some(0));
+            ctx.heap
+                .enter(scope, code, super::super::FrameOwner::Module(module_name));
+            ctx.op("bind_doctest_module", scope, module_name, NONE)
+                .unwrap();
+            ctx.heap.leave(NONE, true);
+            ctx.bind_doctest_source(test, module);
+            (test, path)
+        });
+
+        for ((test, _), (_, _, entry)) in tests.into_iter().zip(owners) {
+            let code = registered_single_code(&mut ctx, text, filename, test).unwrap();
+            let value::Body::Native(actual, _) = ctx.code_object(code).body else {
+                panic!("expected native prompt")
+            };
+            assert!(std::ptr::fn_addr_eq(actual, entry));
+        }
+        let Value::Instance { fields, .. } = ctx.heap.get_mut(tests[0].0) else {
+            unreachable!()
+        };
+        fields.insert("filename".into(), tests[1].1);
+        assert!(registered_single_code(&mut ctx, text, filename, tests[0].0).is_none());
+    }
 
     #[test]
     fn count_elements_keeps_a_bounded_number_of_temporary_roots() {

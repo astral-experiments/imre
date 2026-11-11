@@ -2210,6 +2210,8 @@ pub(crate) enum Builtin {
     RegisteredInput(usize),
     /// Evaluate each operand for its effects and release it before evaluating the next.
     RegisteredDiscard,
+    /// Pass a completed interactive expression to the current sys.displayhook.
+    RegisteredDisplayHook,
     /// The source position of this operand and its optional checked scalar type.
     RegisteredLocation(
         ruff_text_size::TextRange,

@@ -716,6 +716,7 @@ impl Context {
         if let Some(source) = self.registered_file(self.str_value(name)?, &filename) {
             let source = super::SourceModule {
                 path: filename,
+                single_inputs: None,
                 ..*source
             };
             self.heap
@@ -723,6 +724,61 @@ impl Context {
                 .insert(loader, super::LinkedSource::Loader(source));
         }
         Ok(())
+    }
+
+    /// Attach finite inputs to the globals in which the selected initializer actually runs.
+    pub(super) fn bind_doctest_module(&mut self, scope: Id, name: Id) -> Result<Id> {
+        let code = self.code_object(self.heap.current_code());
+        let value::Body::Native(active, _) = code.body else {
+            return Ok(NONE);
+        };
+        let path = self.import_path(code.filename)?;
+        let Some(sources) = self.sources.get(self.str_value(name)?) else {
+            return Ok(NONE);
+        };
+        let selected = sources.iter().find(|source| {
+            let (entry, alternate) = match source.code {
+                ModuleInitializer::File {
+                    entry,
+                    declared_open_path,
+                    ..
+                } => (entry, declared_open_path),
+                ModuleInitializer::Native(entry)
+                | ModuleInitializer::Builtin(entry)
+                | ModuleInitializer::Zip(entry, ..) => (entry, None),
+                ModuleInitializer::Invalid { .. } => return false,
+            };
+            std::ptr::fn_addr_eq(active, entry)
+                && source.single_inputs.is_some()
+                && (source.path.as_os_str() == path.as_os_str()
+                    || alternate.map(Path::as_os_str) == Some(path.as_os_str()))
+        });
+        let Some(source) = selected else {
+            return Ok(NONE);
+        };
+        let source = super::SourceModule {
+            path,
+            single_inputs: source.single_inputs.clone(),
+            ..*source
+        };
+        let globals = self.module_globals_storage(scope)?;
+        self.heap
+            .linked_sources
+            .insert(globals, super::LinkedSource::Doctest(source));
+        Ok(NONE)
+    }
+
+    pub(super) fn bind_doctest_source(&mut self, test: Id, module: Id) {
+        if let Value::Module { scope, .. } = *self.heap.get(module)
+            && let Some(globals) = self.scope_data(scope).namespace
+            && let Some(super::LinkedSource::Doctest(source)) =
+                self.heap.linked_sources.get(&globals)
+        {
+            let source = source.clone();
+            self.heap
+                .linked_sources
+                .insert(test, super::LinkedSource::Doctest(source));
+        }
     }
 
     fn loader_source(&mut self, loader: Id, filename: Id) -> Option<&super::SourceModule> {
