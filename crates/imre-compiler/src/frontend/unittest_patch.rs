@@ -158,14 +158,13 @@ impl Checker<'_> {
 
     /// A dictionary patch returns the original mapping itself, and restores its
     /// entire snapshot, including keys inserted or deleted by the protected body.
-    pub(super) fn mock_dictionary_scope(
+    pub(super) fn mock_dictionary_context<'s>(
         &mut self,
+        out: &'s mut Vec<Statement>,
         item: &ast::WithItem,
-        remaining: &[ast::WithItem],
-        suite: &[ast::Stmt],
         class: usize,
         manager: Expr,
-    ) -> Result<(Vec<Statement>, bool), String> {
+    ) -> Result<&'s mut Vec<Statement>, String> {
         let saved = self.hidden(manager.ty);
         let (enter_id, enter_ty) = {
             let sig = &self.classes.methods[class]["_enter"];
@@ -184,24 +183,16 @@ impl Checker<'_> {
         if let Some(target) = &item.optional_vars {
             protected.push(self.assign(target, self.local(entered))?);
         }
-        let (nested, falls) = self.with_items(remaining, suite)?;
-        protected.extend(nested);
-        let guard = Statement::Try {
-            body: protected,
-            handlers: Vec::new(),
-            orelse: Vec::new(),
-            finalbody: vec![restore],
-        };
-        Ok((
-            vec![Statement::Scope {
-                body: vec![
-                    Statement::Assign(saved, manager),
-                    Statement::Assign(entered, value),
-                    guard,
-                ],
-                clear: vec![saved, entered],
-            }],
-            falls,
+        Ok(contexts::enter_native(
+            out,
+            vec![
+                Statement::Assign(saved, manager),
+                Statement::Assign(entered, value),
+            ],
+            protected,
+            Vec::new(),
+            restore,
+            vec![saved, entered],
         ))
     }
 }
