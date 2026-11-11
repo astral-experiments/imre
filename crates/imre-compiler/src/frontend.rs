@@ -1518,17 +1518,14 @@ fn lower_graph(
     if let Some(id) = recursive_call_root(&call_graph) {
         return Err(recursion_errors.swap_remove(id).into());
     }
-    for (id, order) in initializer_ids.clone().zip(initialization_order) {
-        order.validate(
-            id,
-            graph,
-            &functions,
-            &class_reads,
-            &callable_definitions,
-            &callable_targets,
-            &globals,
-        )?;
-    }
+    globals.validate_initializers(
+        initializer_ids.clone().zip(initialization_order),
+        graph,
+        &functions,
+        &class_reads,
+        &callable_definitions,
+        &callable_targets,
+    )?;
     python_frames.push(true); // The program entry runs a Python module body.
     let mut names = false;
     let mut uses_builtin_module_names = false;
