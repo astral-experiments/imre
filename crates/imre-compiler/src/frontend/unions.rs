@@ -668,6 +668,13 @@ impl Checker<'_> {
         at: &impl Ranged,
     ) -> Result<Expr, String> {
         match (first.ty, second.ty) {
+            (Type::PythonObject, _) | (_, Type::PythonObject) => {
+                self.require_registered_operation(at);
+                Ok(Expr {
+                    ty: Type::Bool,
+                    ..Expr::unrepresented()
+                })
+            }
             (Type::BuiltinClass, Type::BuiltinClass) => Ok(Expr {
                 ty: Type::Bool,
                 kind: ExprKind::Builtin(Builtin::IsBuiltinSubclass, vec![first, second]),
