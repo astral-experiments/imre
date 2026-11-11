@@ -764,7 +764,7 @@ fn lower_graph(
                         continue;
                     }
                     let cached = function_caches::policy(graph, module_id, function)?;
-                    let physical_entry = can_transfer_frames
+                    let physical_entry = (can_transfer_frames || graph.registered_startup)
                         && module.is_program_source()
                         && fixed_frame_entry(function);
                     let mut function = function.clone();
@@ -1157,7 +1157,7 @@ fn lower_graph(
             capture_on_object,
         )?;
     }
-    if graph.registered_startup || needs_registered_entry {
+    if needs_registered_entry {
         capture();
     }
     if let Some(cache) = cache.as_deref_mut() {
@@ -1234,6 +1234,9 @@ fn lower_graph(
                 }
                 Err(error) if error.is_object() => {}
                 Err(error) => {
+                    if graph.registered_startup {
+                        capture();
+                    }
                     let report = error.terminal_in(graph, *module_id);
                     refused_body = Some(called_body(report)?);
                     break;
@@ -1272,6 +1275,9 @@ fn lower_graph(
             Ok(Some(body)) => body,
             Ok(None) => continue,
             Err(report) => {
+                if graph.registered_startup {
+                    capture();
+                }
                 refused_body = Some(called_body(report)?);
                 break;
             }
@@ -1291,7 +1297,28 @@ fn lower_graph(
         if let Some(source) = body.source
             && signature.physical_frame
         {
-            frame_sources.insert(functions.len(), (definition.start(), source));
+            if graph.registered_startup
+                && signature.method.is_none()
+                && module.parsed.syntax().body[callable_definitions[signature.id].statement]
+                    .as_function_def_stmt()
+                    == Some(definition)
+                && !graph
+                    .registered_functions()
+                    .get(module_id)
+                    .is_some_and(|bodies| bodies.contains_key(&definition.start()))
+                && source.matches(&function)
+                && source_checks.accepts(graph, *module_id, definition)
+            {
+                // The fixed graph still uses the checked instructions for call and initializer
+                // validation. Its named entry executes those operations with the Python binder.
+                graph.register_function(
+                    *module_id,
+                    definition.start(),
+                    place_fixed_function(function.clone(), source),
+                );
+            } else {
+                frame_sources.insert(functions.len(), (definition.start(), source));
+            }
         }
         graph.ordered_reads(*module_id, &definition.body, true, &mut reads);
         let (function, calls, reads) = if let Some(&policy) = classes.cached.get(&signature.id) {
@@ -1326,6 +1353,9 @@ fn lower_graph(
             definition,
             "recursive calls are unsupported in this prototype",
         ));
+    }
+    if graph.registered_startup {
+        capture();
     }
     let mut entry = None;
     let mut startup = Vec::new();
@@ -8352,7 +8382,14 @@ impl<'a> Checker<'a> {
         }
         let (ty, kind) = match expression {
             ast::Expr::NumberLiteral(value) => match &value.value {
-                ast::Number::Int(value) => (Type::Int, ExprKind::Int(value.to_string())),
+                ast::Number::Int(value) => {
+                    if let Some(sites) = &mut self.fixed_sites
+                        && let Some(integer) = value.as_i64()
+                    {
+                        sites.expression(expression.range(), FixedNode::Integer(integer));
+                    }
+                    (Type::Int, ExprKind::Int(value.to_string()))
+                }
                 ast::Number::Float(value) => (Type::Float, ExprKind::Float(*value)),
                 _ if self.graph.command_startup.is_some() => {
                     return Err(self.scoped_builtin_error("complex literal", expression));

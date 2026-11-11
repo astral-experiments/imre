@@ -20,6 +20,34 @@ mod tests {
     use super::*;
 
     #[test]
+    fn named_entry_places_the_checked_arithmetic_body() {
+        let text = "def scale(n: int) -> int:\n    return n * 31415927 + 17\n\nprint(scale(3))\n";
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.py");
+        std::fs::write(&path, text).unwrap();
+        let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
+        graph.registered_startup = true;
+        let (program, lowered) =
+            caller_cache::observe_lowerings(|| crate::checked_lower(&mut graph).unwrap());
+        assert!(matches!(program, crate::CheckedProgram::Registered(_)));
+        assert_eq!(lowered.iter().filter(|name| *name == "scale").count(), 1);
+        let functions = graph.registered_functions();
+        let body = &functions[&graph.entry][&TextSize::default()];
+        let positions: Vec<_> = body.fixed_sites.iter().map(|range| &text[*range]).collect();
+        assert_eq!(
+            positions,
+            [
+                "return n * 31415927 + 17",
+                "n * 31415927 + 17",
+                "n * 31415927",
+                "n",
+                "31415927",
+                "17"
+            ]
+        );
+    }
+
+    #[test]
     fn original_sites_survive_only_unchanged_checked_operations() {
         let text = concat!(
             "class Receiver:\n    def read(self, value: str) -> str:\n        return value\n",
