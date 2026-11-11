@@ -1706,6 +1706,7 @@ pub(crate) enum Builtin {
         stderr: bool,
     },
     SysPlatform,
+    SysMaxSize,
     SysThreadInfo,
     SysThreadText {
         field: u32,

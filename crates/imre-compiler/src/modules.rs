@@ -892,6 +892,7 @@ pub(crate) enum Intrinsic {
     SysImplementation,
     SysPycachePrefix,
     SysPlatform,
+    SysMaxSize,
     SysVersionInfo,
     SysThreadInfo,
     SysBuiltinModuleNames,
@@ -1959,6 +1960,7 @@ impl IntrinsicModule {
             (Self::Sys, "maxunicode") => Intrinsic::IntConstant(0x10FFFF),
             (Self::Sys, "hexversion") => Intrinsic::SysHexversion,
             (Self::Sys, "platform") => Intrinsic::SysPlatform,
+            (Self::Sys, "maxsize") => Intrinsic::SysMaxSize,
             #[cfg(target_os = "linux")]
             (Self::Select, "epoll") => Intrinsic::ObjectRuntimeExport("select.epoll"),
             #[cfg(target_os = "linux")]

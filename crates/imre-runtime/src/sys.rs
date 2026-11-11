@@ -1,4 +1,5 @@
 //! Process text streams and their native encoding and buffering.
+pub(crate) const MAXSIZE: usize = isize::MAX as usize;
 pub(crate) const STDLIB_MODULE_NAMES: &str = include_str!("../native/stdlib-module-names.txt");
 
 pub(crate) mod context_warnings;
@@ -264,6 +265,12 @@ pub(super) fn write_escaped_stdout(text: &str) -> super::Result<()> {
         .codec
         .encode(text, Some("backslashreplace"), || error_text(text))?;
     write_standard_buffer(false, &bytes)
+}
+
+/// Return the largest signed index for the executable target.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_sys_maxsize() -> usize {
+    Int::from_usize(MAXSIZE).into_raw()
 }
 
 /// Return the Python platform name of the target that built this runtime.
