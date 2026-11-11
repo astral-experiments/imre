@@ -11,6 +11,14 @@ IMPORT = "from typing import Callable\n"
 FUNCTION = "def identity(value: int) -> int:\n    return value\n"
 
 REJECTED = {
+    "redefined_first_return": (
+        'def f(n: int) -> int:\n    return "bad"\n'
+        'old = f\ndef f(n: int) -> int:\n    return n\nprint(old(1), f(1))\n'
+    ),
+    "redefined_second_return": (
+        'def f(n: int) -> int:\n    return n\n'
+        'old = f\ndef f(n: int) -> int:\n    return "bad"\nprint(old(1), f(1))\n'
+    ),
     "overload_result_annotation": "from typing import get_overloads\nvalues: list[int] = get_overloads(sum)\n",
     "overload_bound_or_plain": (
         "from typing import Callable, overload\n"
@@ -84,12 +92,19 @@ ERRORS = {
 }
 
 
+def check_redefinition_error(name: str, stderr: str) -> None:
+    line = {"redefined_first_return": 2, "redefined_second_return": 5}.get(name)
+    if line is not None:
+        assert f"main.py:{line}:12: Imre: expected int, got str" in stderr, (name, stderr)
+
+
 if __name__ == "__main__":
     main(
         fixtures=FIXTURES,
         rejections=REJECTED,
         imported_rejections=IMPORTED_REJECTIONS,
         errors=ERRORS,
+        check_rejection=check_redefinition_error,
         label="callable value",
         description=__doc__,
     )

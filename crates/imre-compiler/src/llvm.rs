@@ -479,7 +479,7 @@ fn emit_program(
                     extension_modules.insert(name.clone());
                 }
                 Builtin::GlobalSet(slot) => {
-                    // A checked module binding has only one initializer.
+                    // A fixed string binding has only one initializer.
                     if let [
                         Expr {
                             kind: ExprKind::Str(value),
@@ -6104,11 +6104,16 @@ impl Emitter<'_, '_> {
                 let name = self.output.global_ref(format!("module_value_{slot}"));
                 let value = &args[0].value;
                 self.retain(value);
+                let previous = matches!(value.ty, Type::Callable(_))
+                    .then(|| self.borrow_global(*slot, value.ty));
                 self.line(format!(
                     "store {} {}, ptr @{name}",
                     value.ty.llvm(),
                     value.operand
                 ));
+                if let Some(previous) = previous {
+                    self.release(&previous);
+                }
                 none()
             }
             Builtin::StringIterationList => {

@@ -693,7 +693,7 @@ fn checked_region<T>(
     }
 }
 
-fn fixed_frame_entry(function: &ast::StmtFunctionDef) -> bool {
+pub(crate) fn fixed_frame_entry(function: &ast::StmtFunctionDef) -> bool {
     !function.is_async
         && function.decorator_list.is_empty()
         && function.type_params.is_none()
@@ -1504,7 +1504,9 @@ fn lower_graph(
     let callable_targets = callables::targets(&functions, &entry, &types)?;
     for (function, calls) in functions.iter().zip(&mut call_graph) {
         ir::walk_expressions(&function.body, &mut |value| {
-            if let Some(signature) = callables::invoked_signature(value)
+            if let Some(targets) = globals.invoked_functions(value) {
+                calls.extend(targets.iter().copied());
+            } else if let Some(signature) = callables::invoked_signature(value)
                 && let Some(targets) = callable_targets.get(&signature)
             {
                 calls.extend(targets);
@@ -1525,6 +1527,7 @@ fn lower_graph(
             &class_reads,
             &callable_definitions,
             &callable_targets,
+            &globals,
         )?;
     }
     python_frames.push(true); // The program entry runs a Python module body.
