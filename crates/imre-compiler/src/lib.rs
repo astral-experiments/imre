@@ -667,17 +667,9 @@ fn object_fallback(
             }
             let (skipped, overloads) = graph.diagnostic_scopes();
             let entry = &graph.modules[graph.entry];
-            // A deferred probe can call typed functions while initializing additional names.
-            let compound_probe = graph.modules.iter().any(|module| {
-                module
-                    .optional_imports
-                    .values()
-                    .any(|names| names.len() > 1)
-            });
             let all_calls = !matches!(requested, analysis::FallbackCalls::None)
                 || checked_file && graph.has_object_constructor_fallback.get()
                 || !entry.optional_imports.is_empty()
-                || compound_probe
                 || !graph.needs_object_runtime.get() && kind.checks_object_calls()
                 || checked_file && graph.uses_source_loader();
             let checked_calls = if !checked_file {

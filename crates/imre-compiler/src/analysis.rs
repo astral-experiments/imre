@@ -1875,7 +1875,7 @@ impl Session {
         skipped: Option<&[Vec<TextRange>]>,
         overloads: &[Vec<CheckedDiagnostic>],
         calls: FallbackCalls,
-        roots: impl Iterator<Item = usize>,
+        roots: impl Iterator<Item = usize> + Clone,
         checked_modules: Option<&[crate::modules::SourceModule]>,
     ) -> Result<(), String> {
         let checks = match calls {
@@ -1889,29 +1889,57 @@ impl Session {
             matches!(calls, FallbackCalls::DecoratorFactories),
             checked_modules.is_some(),
         );
-        self.errors(roots, skipped, overloads, checks, checked_modules)?;
-        if let FallbackCalls::Entry(entry) = calls {
-            // Only the entry gained a new statement order. Imported modules retain
-            // the argument-checking policy they had before the guard.
+        self.errors(roots.clone(), skipped, overloads, checks, checked_modules)?;
+
+        let entry = match calls {
+            FallbackCalls::Entry(id) => Some(id),
+            _ => None,
+        };
+        let probe_modules = checked_modules.filter(|_| {
+            matches!(
+                checks,
+                FileChecks::FallbackReturns | FileChecks::NamedFunctionCalls
+            )
+        });
+        let probes = roots.filter_map(|id| {
+            let guards = &probe_modules?[id].optional_imports;
+            (Some(id) != entry && !guards.is_empty()).then_some((id, Some(guards)))
+        });
+        // An entry guard owns calls throughout its entry. A deferred import owns
+        // only calls inside its try statement, whose operands fixed lowering skipped.
+        let mut owners = entry
+            .map(|id| (id, None))
+            .into_iter()
+            .chain(probes)
+            .peekable();
+        if checks == FileChecks::FallbackReturns && owners.peek().is_some() {
             self.set_fallback_rules(true, false, checked_modules.is_some());
+        }
+        let mut errors = Vec::new();
+        for (id, guards) in owners {
             let checked = CheckedFile::new(
                 &self.db,
-                self.files[entry],
-                skipped.map_or(&[][..], |ranges| ranges[entry].as_slice()),
-                overloads[entry].as_slice(),
+                self.files[id],
+                skipped.map_or(&[][..], |ranges| ranges[id].as_slice()),
+                overloads[id].as_slice(),
                 FileChecks::FallbackCalls,
-                checked_modules.is_some_and(|modules| !modules[entry].bundled),
+                checked_modules.is_some_and(|modules| !modules[id].bundled),
                 self.explicit_check,
                 None,
             );
-            let errors = file_errors(&self.db, checked);
-            if !errors.is_empty() {
-                return Err(errors
-                    .iter()
-                    .map(|error| error.rendered.as_str())
-                    .collect::<Vec<_>>()
-                    .join("\n"));
+            for error in file_errors(&self.db, checked) {
+                if guards.is_none_or(|guards| {
+                    CALL_ARGUMENT_RULES.contains(&error.rule.as_str())
+                        && error.range.is_some_and(|range| {
+                            guards.keys().any(|guard| guard.contains_range(range))
+                        })
+                }) {
+                    errors.push(error.rendered.as_str());
+                }
             }
+        }
+        if !errors.is_empty() {
+            return Err(errors.join("\n"));
         }
         Ok(())
     }

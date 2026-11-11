@@ -308,6 +308,13 @@ REJECTED = {
             "import sys\n"
         ),
     }, "invalid-argument-type"),
+    "optional_probe_checks_missing_argument": ({
+        "main.py": "from probe import result\nprint(result)\n",
+        "probe.py": (
+            "def take(value: int) -> int: return value\n"
+            "try:\n    import sys\n    result = take()\nexcept ImportError:\n    result = 0\n"
+        ),
+    }, "missing-argument"),
     "optional_from_keeps_typed_call_check": ({
         "main.py": (
             "try:\n    from os.path import basename as leaf\nexcept ImportError:\n    leaf = None\n"
@@ -1205,6 +1212,18 @@ ACCEPTED = {
             "print(parent.provider is not None)\n"
         ),
         "main.py": "from helper import value\nprint(value())\n",
+    },
+    "optional_probe_with_dormant_call": {
+        "main.py": (
+            "from provider import ready\nfrom io import BytesIO\n"
+            "print(BytesIO(b'x').getbuffer().nbytes)\nprint(ready())\n"
+        ),
+        "provider.py": (
+            "def take(x: int) -> int: return x\ndef dormant(): return take()\n"
+            "try:\n    import sys as optional\n    detail = optional.maxsize\n"
+            "except ImportError:\n    detail = 0\n"
+            "def ready() -> int: return 42\n"
+        ),
     },
     "optional_stdlib_probe_in_dependency": {
         "main.py": "from pkg.probe import witness\nprint(witness.checked)\n",
