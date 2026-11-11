@@ -302,30 +302,6 @@ fn class_receiver_annotation(
     }
 }
 
-/// Only sealed empty-container factories become call-site defaults. They run
-/// after every supplied argument, allocate a fresh owner, and cannot call Python.
-pub(super) fn factory_defaults(
-    signature: &mut Signature,
-    class: &crate::classes::Class,
-    types: &Types,
-    source: &str,
-) -> std::result::Result<(), String> {
-    if !class.generated_initializer {
-        return Ok(());
-    }
-    for parameter in signature.params.iter_mut().skip(1) {
-        let field = class
-            .fields
-            .iter()
-            .find(|field| field.name == parameter.name)
-            .unwrap();
-        if matches!(field.default, Some(FieldDefault::Factory(_))) {
-            parameter.default = field_default(field, parameter.ty, types, source)?;
-        }
-    }
-    Ok(())
-}
-
 /// Class defaults are checked even when an explicit initializer hides them.
 /// Nullable container fields use the same concrete factory and pointer promotion.
 pub(super) fn field_default(
