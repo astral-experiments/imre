@@ -1,6 +1,7 @@
 //! Collects fixed class shapes before nominal type resolution and executable lowering.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use ruff_python_ast as ast;
 use ruff_python_ast::visitor::{Visitor, walk_expr};
@@ -37,6 +38,36 @@ pub(crate) enum MethodKind {
     Static,
 }
 
+/// A class can bind the same function under its method name and a property name.
+#[derive(Clone)]
+pub(crate) struct ClassMethod {
+    pub(crate) name: ast::Identifier,
+    pub(crate) function: Arc<ast::StmtFunctionDef>,
+}
+
+impl ruff_text_size::Ranged for ClassMethod {
+    fn range(&self) -> ruff_text_size::TextRange {
+        self.function.range
+    }
+}
+
+impl From<ast::StmtFunctionDef> for ClassMethod {
+    fn from(function: ast::StmtFunctionDef) -> Self {
+        Self {
+            name: function.name.clone(),
+            function: Arc::new(function),
+        }
+    }
+}
+
+impl std::ops::Deref for ClassMethod {
+    type Target = ast::StmtFunctionDef;
+
+    fn deref(&self) -> &Self::Target {
+        &self.function
+    }
+}
+
 pub(crate) struct Classes {
     pub(crate) definitions: Vec<Class>,
     /// Data members only need rebindable storage when some source writes that attribute.
@@ -66,7 +97,7 @@ pub(crate) struct Class {
     pub(crate) name: String,
     pub(crate) node: ast::StmtClassDef,
     pub(crate) fields: Vec<Field>,
-    pub(crate) methods: Vec<ast::StmtFunctionDef>,
+    pub(crate) methods: Vec<ClassMethod>,
     /// Field writes required of every override called during construction.
     pub(crate) init_hooks: init_hooks::Hooks,
     /// A base initializer that passes self to Python needs the entire derived layout ready.
@@ -642,7 +673,7 @@ fn collect_class(
     {
         return Err(module.diagnostic(node, "incompatible base for a fixed-layout class"));
     }
-    let mut methods: Vec<ast::StmtFunctionDef> = Vec::new();
+    let mut methods: Vec<ClassMethod> = Vec::new();
     let mut method_kinds = Vec::new();
     let mut needs_object_layout = false;
     let mut builds_python_namespace = false;
@@ -1089,7 +1120,7 @@ fn collect_class(
                 if forwarder.is_some() {
                     mangle_fields(node.name.as_str(), &mut method, |_| true);
                 }
-                methods.push(method);
+                methods.push(method.into());
                 method_kinds.push(kind);
                 class_bindings.insert(name.to_owned());
             }
@@ -1143,9 +1174,10 @@ fn collect_class(
                             "property accessor has the wrong number of positional parameters",
                         ));
                     }
-                    let mut alias = method.clone();
-                    alias.name = ast::Identifier::new(name.id.as_str(), name.range);
-                    methods.push(alias);
+                    methods.push(ClassMethod {
+                        name: ast::Identifier::new(name.id.as_str(), name.range),
+                        function: Arc::clone(&method.function),
+                    });
                     method_kinds.push(kind);
                 }
                 class_bindings.insert(name.id.to_string());
@@ -1317,7 +1349,12 @@ fn collect_class(
         && let Some(init) = initializer
     {
         let infer = fields.len() == inherited_fields.len();
-        inheritance::annotated_fields(graph, definition.module, &mut methods[init], &mut fields);
+        inheritance::annotated_fields(
+            graph,
+            definition.module,
+            Arc::make_mut(&mut methods[init].function),
+            &mut fields,
+        );
         if infer {
             init_mappings::infer(graph, definition.module, init, &mut methods, &mut fields);
             open_parameter_field =
@@ -1347,7 +1384,7 @@ fn collect_class(
         initializer.is_none() && dataclass.is_some_and(|options| options.init);
     let initializer = if generated_initializer {
         let index = methods.len();
-        methods.push(dataclasses::initializer(module, node, &fields)?);
+        methods.push(dataclasses::initializer(module, node, &fields)?.into());
         method_kinds.push(MethodKind::Instance);
         method_origins.push(definition);
         Some(index)
@@ -1375,7 +1412,7 @@ fn collect_class(
             Some(index)
         } else if fields.is_empty() {
             let index = methods.len();
-            methods.push(dataclasses::initializer(module, node, &[])?);
+            methods.push(dataclasses::initializer(module, node, &[])?.into());
             method_kinds.push(MethodKind::Instance);
             method_origins.push(definition);
             Some(index)

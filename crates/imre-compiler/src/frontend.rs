@@ -865,7 +865,6 @@ fn lower_graph(
                     .map_err(|error| format!("{}:{error}", module.path.display()))?;
             }
         }
-        let mut instance_signatures = HashMap::<_, Signature>::new();
         for (index, method) in class.methods.iter().enumerate() {
             if class.forwarder.is_some() && method.name.as_str() == "__init__" {
                 continue;
@@ -876,14 +875,18 @@ fn lower_graph(
                 class: class_id,
                 index,
             };
-            let origin = (class.method_origins[index], method.range());
             let kind = class.method_kinds[index];
             // property(get, set) retains the original functions. Both spellings
             // must infer one signature even if only the property is used.
             if matches!(
                 kind,
                 crate::classes::MethodKind::Property | crate::classes::MethodKind::PropertySetter
-            ) && let Some(original) = instance_signatures.get(&origin)
+            ) && let Some(original) =
+                classes.methods[class_id].get(method.function.name.as_str())
+                && let Some(owner) = original.method
+                && class.method_kinds[owner.index] == crate::classes::MethodKind::Instance
+                && class.method_origins[owner.index] == class.method_origins[index]
+                && class.methods[owner.index].range() == method.range()
             {
                 let mut alias = original.clone();
                 alias.method = Some(context);
@@ -974,7 +977,6 @@ fn lower_graph(
                 {
                     classes.raising_methods.insert(signature.id);
                 }
-                instance_signatures.insert(origin, signature.clone());
             }
             let table = if class.method_kinds[index] == crate::classes::MethodKind::PropertySetter {
                 &mut classes.setters[class_id]
