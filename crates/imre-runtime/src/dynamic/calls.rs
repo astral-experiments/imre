@@ -1791,7 +1791,8 @@ impl Context {
             _ => return None,
         };
         let owner = match (kind, name) {
-            ("int", "__doc__") | ("int" | "bool", "numerator" | "denominator") => {
+            ("int", "__doc__")
+            | ("int" | "bool", "numerator" | "denominator" | "real" | "imag") => {
                 self.builtin("int")
             }
             ("float", "real" | "imag") => self.builtin("float"),
@@ -1949,8 +1950,8 @@ impl Context {
                 ("int", "denominator") => {
                     Some("the denominator of a rational number in lowest terms")
                 }
-                ("float", "real") => Some("the real part of a complex number"),
-                ("float", "imag") => Some("the imaginary part of a complex number"),
+                ("int" | "float", "real") => Some("the real part of a complex number"),
+                ("int" | "float", "imag") => Some("the imaginary part of a complex number"),
                 ("struct.Struct", "format") => Some("struct format string"),
                 ("struct.Struct", "size") => Some("struct size in bytes"),
                 (super::deque::CLASS, "maxlen") => {
