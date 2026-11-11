@@ -141,8 +141,14 @@ impl<M> Diagnostic<M> {
         self
     }
 
-    pub(crate) fn has_declared_operand(&self, graph: &SourceGraph) -> bool {
-        self.kind == Kind::ExactType
+    pub(crate) fn check_declared_operand(
+        &self,
+        graph: &SourceGraph,
+    ) -> std::result::Result<(), String>
+    where
+        M: fmt::Display,
+    {
+        if self.kind == Kind::ExactType
             && self
                 .position
                 .as_ref()
@@ -151,6 +157,11 @@ impl<M> Diagnostic<M> {
             && graph.modules.iter().any(|m| {
                 m.checks_source_contracts() && self.path.as_deref() == Some(m.path.as_path())
             })
+        {
+            Err(self.to_string())
+        } else {
+            Ok(())
+        }
     }
 
     pub(crate) fn earlier_contract(&self, other: &Self) -> bool {

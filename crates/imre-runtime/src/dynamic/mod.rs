@@ -1197,12 +1197,16 @@ impl Context {
         crate::Str::try_new(self.str_value(id)?).map_err(|_| Error::new("MemoryError", ""))
     }
 
-    fn as_int(&self, id: Id) -> Result<crate::Int> {
+    fn borrow_int(&self, id: Id) -> Result<Cow<'_, crate::Int>> {
         match self.heap.get(self.scalar_value(id)) {
-            Value::Int(n) => Ok(n.clone()),
-            Value::Bool(b) => Ok(crate::Int::from(i64::from(*b))),
+            Value::Int(n) => Ok(Cow::Borrowed(n)),
+            Value::Bool(b) => Ok(Cow::Owned(crate::Int::from(i64::from(*b)))),
             _ => Err(Error::new("TypeError", "expected an integer")),
         }
+    }
+
+    fn as_int(&self, id: Id) -> Result<crate::Int> {
+        self.borrow_int(id).map(Cow::into_owned)
     }
 
     /// Narrow only operations that explicitly use a native-sized index or offset.

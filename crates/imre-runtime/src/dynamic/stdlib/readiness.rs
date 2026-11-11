@@ -97,10 +97,7 @@ fn fd(ctx: &mut Context, obj: Id) -> Result<Id> {
 }
 
 fn native_fd(ctx: &Context, fd: Id) -> Result<i32> {
-    ctx.as_int(fd)?
-        .to_i64()
-        .and_then(|n| i32::try_from(n).ok())
-        .ok_or_else(|| Error::new("OverflowError", "Python int too large to convert to C int"))
+    Ok(ctx.borrow_int(fd)?.to_c_int()?)
 }
 
 fn reg_fd(ctx: &mut Context, handle: &RefCell<Selector>, obj: Id) -> Result<Id> {

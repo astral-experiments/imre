@@ -829,6 +829,8 @@ impl<'a> RegisteredSource<'a> {
     }
 }
 
+pub(crate) type ProviderSources<'a> = HashMap<crate::modules::ModuleId, (&'a Path, &'a str)>;
+
 pub(crate) struct RegisteredSources<'a> {
     pub(crate) layouts: &'a mut Vec<crate::analysis::RegisteredLayouts>,
     pub(crate) root: &'a Path,
@@ -836,7 +838,7 @@ pub(crate) struct RegisteredSources<'a> {
     pub(crate) winners: &'a [RegisteredSource<'a>],
     pub(crate) file_alternatives: &'a [RegisteredSource<'a>],
     /// Selected provider bodies that replace a fixed-layout declaration in the checked graph.
-    pub(crate) provider_sources: HashMap<crate::modules::ModuleId, (&'a Path, &'a str)>,
+    pub(crate) provider_sources: ProviderSources<'a>,
     pub(crate) has_file_body: Option<&'a dyn Fn(&str) -> bool>,
 }
 
@@ -2064,10 +2066,13 @@ pub(crate) fn compile(
     }
     // These bodies extend native module scopes. Keep them out of the source finder and
     // out of the checked project's winners, even when no explicit import names them.
-    let builtins: Vec<_> = builtin_sources(options.target_os.unwrap_or(std::env::consts::OS))
-        .into_iter()
-        .map(|(name, file, body)| (name.into(), Path::new(bundled_root).join(file), body.into()))
-        .collect();
+    let builtins: Vec<(String, PathBuf, String)> =
+        builtin_sources(options.target_os.unwrap_or(std::env::consts::OS))
+            .into_iter()
+            .map(|(name, file, body)| {
+                (name.into(), Path::new(bundled_root).join(file), body.into())
+            })
+            .collect();
     // runpy selects __main__ for a package, including a namespace package.
     let module_body = module_entry.and_then(|name| {
         let main;
@@ -2191,6 +2196,36 @@ pub(crate) fn compile(
         .collect();
     let (winners, file_alternatives) =
         selected_sources.split_at(ordinary_registrations.unwrap_or(selected_sources.len()));
+    // A builtin initializer extends the native module and is not a file registration.
+    // Type its checked callers against the native provider's public declaration.
+    let mut builtin_declarations = Vec::new();
+    if let Some(graph) = checked_graph {
+        for (name, _, body) in &builtins {
+            let Some(id) = graph.replaced_adapter(name, body) else {
+                continue;
+            };
+            let provider = imre_ast::providers::builtin_finder_provider(
+                name,
+                || imre_ast::providers::is_frozen(name, || frozen_modules),
+                || {
+                    sources
+                        .iter()
+                        .any(|(n, path, _)| n == name && path.starts_with(bundled_root))
+                },
+            );
+            if !matches!(provider, Some(imre_ast::providers::Provider::Builtin))
+                || winners
+                    .iter()
+                    .any(|s| s.name == name && s.declares_signatures)
+            {
+                continue;
+            }
+            let Some(source) = builtin_declaration(name).map_err(|error| error.to_string())? else {
+                continue;
+            };
+            builtin_declarations.push((id, graph.modules[id].path.with_extension("pyi"), source));
+        }
+    }
     // Built-in SDK bodies have no file winner. Other origins, including ZIP
     // members, already have a selected source unit with its exact bytes.
     let mut provider_sources: HashMap<_, _> = checked_sdk_providers
@@ -2206,6 +2241,9 @@ pub(crate) fn compile(
                 provider_sources.insert(id, (winner.path, winner.source));
             }
         }
+    }
+    for (id, path, source) in &builtin_declarations {
+        provider_sources.insert(*id, (path.as_path(), source.as_str()));
     }
     // SDK members retain their loader-visible filenames while the ZIP is the build input.
     for path in inputs
@@ -2558,6 +2596,15 @@ pub(crate) fn builtin_inventory_sources(graph: &crate::modules::SourceGraph) -> 
     names.join("\0")
 }
 
+/// Only a published declaration displaces the checked adapter's existing contracts.
+fn builtin_declaration(name: &str) -> std::io::Result<Option<String>> {
+    let stub = format!("stdlib/{}.pyi", name.replace('.', "/"));
+    match ty_vendored::file_system().read_to_string(stub.as_str()) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        result => result.map(Some),
+    }
+}
+
 // A builtin may create native bindings before executing a fixed Python body in that scope.
 fn builtin_sources(
     target_os: &str,
@@ -2689,6 +2736,12 @@ pub(crate) fn bundled_module_source(
 
 fn imports_for_module(path: &Path, src: &str) -> Result<Imports, String> {
     scan_imports(src, SourceKind::File, None, None).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+#[test]
+fn a_native_builtin_need_not_have_a_typeshed_declaration() {
+    assert!(builtin_declaration("selectors").unwrap().is_some());
+    assert!(builtin_declaration("_typing").unwrap().is_none());
 }
 
 #[cfg(all(test, unix))]

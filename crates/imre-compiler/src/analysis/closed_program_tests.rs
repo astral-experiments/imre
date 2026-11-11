@@ -45,6 +45,21 @@ fn an_imported_function_can_read_a_registered_type_alias_as_a_value() {
     crate::check_file(&entry, None).unwrap();
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn selector_file_objects_use_the_registered_provider_and_integer_fds_stay_native() {
+    let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../benchmarks/cpython_stdlib/full/select");
+    crate::check_file(&fixtures.join("boxed_fileobjs.py"), None).unwrap();
+
+    let integer_fds = fixtures.join("selector_operations.py");
+    let mut graph = crate::modules::SourceGraph::load(&integer_fds, None, &[]).unwrap();
+    assert!(matches!(
+        crate::checked_lower(&mut graph).unwrap(),
+        crate::CheckedProgram::Native(_)
+    ));
+}
+
 #[test]
 fn registered_body_checks_its_declared_result() {
     let project = tempdir().unwrap();
@@ -124,7 +139,7 @@ fn registered_parameter_changes_recheck_the_unchanged_caller() {
             &[],
             sources.iter().map(|s| RegisteredSource::new(s, true, None)),
             None,
-            Some(&graph),
+            Some((&graph, &Default::default())),
             None,
         )
     };
@@ -150,7 +165,7 @@ fn registered_parameter_changes_recheck_the_unchanged_caller() {
             .enumerate()
             .map(|(i, s)| RegisteredSource::new(s, i == 0, None)),
         None,
-        Some(&graph),
+        Some((&graph, &Default::default())),
         None,
     )
     .unwrap_err();

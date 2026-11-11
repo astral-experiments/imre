@@ -162,7 +162,13 @@ fn a_program_root_package_keeps_the_initializer_diagnostic_on_its_own_source() {
     };
     let mut graph = resolve(dir.path(), "checked_initializer", &options).unwrap();
     crate::checked_lower(&mut graph).unwrap();
-    let error = graph.source_contract.unwrap().unwrap_err();
+    let error = graph
+        .source_contract
+        .as_ref()
+        .unwrap()
+        .original(&graph)
+        .as_ref()
+        .unwrap_err();
     assert!(
         error.contains("__init__.py:2:33: Imre: expected int, got str"),
         "{error}"
