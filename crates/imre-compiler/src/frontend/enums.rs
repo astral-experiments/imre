@@ -30,7 +30,7 @@ impl Checker<'_> {
         }
         // A finally suite also receives pending returns, breaks and exceptions.
         // ty's ordinary fallthrough narrowing does not cover all those entries.
-        if self.in_finally {
+        if self.finally_scope == FinallyScope::Cleanup {
             return Err(error(
                 self.source,
                 call,

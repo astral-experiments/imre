@@ -425,7 +425,7 @@ impl Builtin {
                 args.first().is_none_or(|arg| arg.ty != Type::Bytes),
                 PreservesLists,
             ),
-            Self::Int => Contract::new(
+            Self::Int | Self::IntFromText(_) => Contract::new(
                 args.first()
                     .is_none_or(|arg| !matches!(arg.ty, Type::Int | Type::Bool)),
                 PreservesLists,

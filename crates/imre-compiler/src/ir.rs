@@ -1763,6 +1763,7 @@ pub(crate) enum Builtin {
     ModularPower,
     NegativeIntegerPower,
     Int,
+    IntFromText(FixedOrigin),
     Float,
     /// Represents an exact integer by its sign for a proved zero-comparison parameter.
     IntExtremum {

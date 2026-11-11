@@ -2388,8 +2388,18 @@ def first(path: str) -> bytes:
         let shallow = compile(&program(8, false), &options).unwrap();
         let deep = compile(&program(12, false), &options).unwrap();
         assert!(deep.len() < 2 * shallow.len());
-        let error = compile(&program(14, true), &options).unwrap_err();
-        assert!(error.contains("finally cleanup expansion"), "{error}");
+        let nested = compile(&program(14, true), &options).unwrap();
+        assert_eq!(nested.matches("call i64 @imre_int_parse(").count(), 14);
+        for line in (3..=42).step_by(3) {
+            assert!(
+                nested.lines().any(|instruction| {
+                    instruction.contains("call ptr @imre_exception_at_frame(ptr null")
+                        && instruction.contains(&format!(", i64 1, i32 {line},"))
+                }),
+                "missing protected conversion at line {line}"
+            );
+        }
+        assert!(nested.len() < 2 * deep.len());
     }
 
     #[test]
