@@ -6325,7 +6325,8 @@ impl Emitter<'_, '_> {
                 self.void_call("imre_sys_stdout_del", &[]);
                 none()
             }
-            Builtin::TextOptionalReceiver => {
+            Builtin::RequireObjectReceiver => {
+                debug_assert!(matches!(returns.word_kind(), WordKind::Object));
                 let word = self.word(&args[0].value);
                 Value {
                     ty: returns,

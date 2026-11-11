@@ -549,6 +549,18 @@ pub(super) enum BaseInitializer {
     Record(usize),
 }
 
+/// Check a nullable native Object handle before evaluating method arguments.
+/// The runtime returns an owned receiver or raises AttributeError on None.
+pub(super) fn require_object_receiver(receiver: Expr, payload: Type, name: &str) -> Expr {
+    Expr {
+        ty: payload,
+        kind: ExprKind::Builtin(
+            Builtin::RequireObjectReceiver,
+            vec![receiver, unpacking::string(name)],
+        ),
+    }
+}
+
 impl Checker<'_> {
     /// No user code intervenes between a guard and a direct read of a stored field.
     pub(super) fn guard_field_read(&mut self, value: &ast::Expr, field: Option<(usize, usize)>) {
@@ -580,7 +592,9 @@ impl Checker<'_> {
         };
         match payload {
             // Handler.formatter is optional until explicit or basic configuration assigns it.
-            Type::LogFormatter => {}
+            Type::LogFormatter => {
+                return require_object_receiver(receiver, payload, attr.attr.as_str());
+            }
             Type::Str if attr.attr.as_str() == "encode" => {}
             Type::Class(_)
                 if matches!(&*attr.value, ast::Expr::Attribute(_))
@@ -590,16 +604,6 @@ impl Checker<'_> {
                         .narrowed_instance(self.module, &attr.value) => {}
             _ => return receiver,
         }
-        self.require_attribute_receiver(receiver, payload, attr)
-    }
-
-    /// Evaluate the receiver once and report a missing attribute before the call arguments run.
-    pub(super) fn require_attribute_receiver(
-        &mut self,
-        receiver: Expr,
-        payload: Type,
-        attr: &ast::ExprAttribute,
-    ) -> Expr {
         let slot = self.hidden(receiver.ty);
         let local = self.local(slot);
         let missing = Expr {
