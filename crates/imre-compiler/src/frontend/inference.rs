@@ -379,6 +379,8 @@ impl Pending {
 pub(super) struct Inference {
     pending: RefCell<Vec<Pending>>,
     document_fields: RefCell<HashSet<(usize, usize)>>,
+    /// Source contract checks shared by discovery, recovery and final body lowering.
+    pub(super) source_checks: registered::SourceChecks,
     /// Physical first-party definitions still awaiting a recoverable checked body.
     pub(super) pending_bodies: RefCell<Option<Vec<DefinitionId>>>,
     revision: Cell<usize>,
@@ -827,7 +829,6 @@ impl Inference {
         let mut registered = HashMap::new();
         let mut checked_bodies = HashSet::new();
         let mut registered_generators = HashSet::new();
-        let mut generator_checks = registered::SourceChecks::default();
         loop {
             let widened = self.widened.replace(false);
             if !widened && !self.unresolved() {
@@ -991,7 +992,7 @@ impl Inference {
                         && signature.method.is_none()
                         && graph.modules[*module].is_program_source()
                         && !function.is_async
-                        && generator_checks.accepts(graph, *module, function)
+                        && self.source_checks.accepts(graph, *module, function)
                         && let Some(body) = registered::generator_body(
                             &graph.modules[*module],
                             function,
