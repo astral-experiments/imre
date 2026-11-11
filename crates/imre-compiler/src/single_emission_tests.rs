@@ -145,6 +145,121 @@ fn conditional_operands_refuse_only_on_reachable_edges() {
 }
 
 #[test]
+fn indirect_literal_operand_refusal_precedes_llvm_emission() {
+    let project = tempfile::tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    let body = include_str!("../../../tests/fixtures/mix_template/source.py");
+    let caller = |child: &str| {
+        format!(
+            concat!(
+                "import sys\nsys.path\n",
+                "def run():\n    exec({}, globals())\n",
+                "globals()['run']()\n",
+                "print('build' in globals())\n",
+            ),
+            serde_json::to_string(child).unwrap(),
+        )
+    };
+    let nested = format!("exec({}, globals())", serde_json::to_string(body).unwrap());
+    for (child, prefix) in [(body, ""), (nested.as_str(), "<string>:1:6: Imre: ")] {
+        std::fs::write(&entry, caller(child)).unwrap();
+        assert_refusal_before_llvm(
+            &entry,
+            &format!(
+                "{}:4:10: Imre: {prefix}<string>:4:15: cannot compile this comprehension ahead of time (through 4:57)",
+                entry.display()
+            ),
+            &[CompileOptions::default()],
+        );
+    }
+
+    let caller = caller(&nested);
+    let after_return = caller.replacen("    exec(", "    return\n    exec(", 1);
+    std::fs::write(&entry, after_return).unwrap();
+    check_file(&entry, None).unwrap();
+    compile_file(&entry, None, &CompileOptions::default()).unwrap();
+}
+
+#[test]
+fn imported_checked_function_retains_its_literal_call_site() {
+    let project = tempfile::tempdir().unwrap();
+    let entry = project.path().join("entry.py");
+    let rules = project.path().join("rules.py");
+    std::fs::write(&entry, "import rules\nrules.invoke()\n").unwrap();
+    std::fs::write(
+        &rules,
+        "def invoke() -> None:\n    exec(\"exec(input())\", {})\n",
+    )
+    .unwrap();
+    assert_refusal_before_llvm(
+        &entry,
+        &format!(
+            concat!(
+                "{}:2:10: Imre: <string>:1:6: Imre: this call may select builtins.exec ",
+                "without a linked body for its source. Define the handlers as Python functions ",
+                "and select one by name, or declare the finite modules with --include-module."
+            ),
+            rules.display(),
+        ),
+        &[CompileOptions::default()],
+    );
+
+    std::fs::write(
+        &rules,
+        "def invoke() -> None:\n    exec(\"exec('result = 42')\", {})\n",
+    )
+    .unwrap();
+    let compilation = compile_file(&entry, None, &CompileOptions::default()).unwrap();
+    assert_eq!(
+        compilation
+            .llvm_ir
+            .matches("call i64 @imre_dyn_exec_operand(")
+            .count(),
+        2,
+    );
+}
+
+#[test]
+fn imported_function_captures_its_defining_builtins() {
+    let project = tempfile::tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    let rules = project.path().join("rules.py");
+    std::fs::write(
+        &entry,
+        "import sys\nsys.path\nimport rules\nrules.consume()\n",
+    )
+    .unwrap();
+
+    for (module, linked_calls) in [
+        (
+            concat!(
+                "def consume():\n",
+                "    scope = {}\n",
+                "    exec('value = 41', scope)\n",
+                "    return scope['value']\n",
+                "__builtins__ = {'exec': print}\n",
+            ),
+            1,
+        ),
+        (
+            "__builtins__ = {'exec': print}\ndef consume():\n    exec('bad !!!')\n",
+            0,
+        ),
+    ] {
+        std::fs::write(&rules, module).unwrap();
+        let program = compile_file(&entry, None, &CompileOptions::default()).unwrap();
+        assert_eq!(
+            program
+                .llvm_ir
+                .matches("call i64 @imre_dyn_exec_operand(")
+                .count(),
+            linked_calls,
+            "{module}",
+        );
+    }
+}
+
+#[test]
 fn suspended_assignment_refusal_precedes_llvm_emission() {
     let project = tempfile::tempdir().unwrap();
     let main = project.path().join("subject.py");

@@ -1,5 +1,6 @@
 //! Prepare expression inputs owned by residual source suites.
 use super::values::{self, RegisteredSource};
+use super::{PreparedRefusal, RegionRoot, SuitePreparation};
 use crate::ir;
 use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange, TextSize};
@@ -30,11 +31,16 @@ impl Selection {
     }
 
     /// Value and branch emission bind the same physical inputs in operation order.
-    fn refusal(&self) -> Option<super::OperandRefusal> {
+    fn refusal(&self, prepare: &SuitePreparation<'_>) -> Option<PreparedRefusal> {
         match self {
-            Self::Refused(range, reason) => Some((*range, reason)),
-            Self::Checked(_) | Self::Operand(_) => None,
-            Self::Inputs(inputs) => inputs.children.iter().find_map(PreparedInput::refusal),
+            Self::Refused(range, reason) => Some(PreparedRefusal::Operand((*range, reason))),
+            Self::Checked(value) => prepare.literal_refusal(RegionRoot::Operand(value)),
+            Self::Operand(operand) => prepare.literal_refusal(RegionRoot::Operand(&operand.value)),
+            Self::Inputs(inputs) => inputs
+                .children
+                .iter()
+                .find_map(|input| input.refusal(prepare, |value| value))
+                .or_else(|| prepare.literal_refusal(RegionRoot::Operand(&inputs.operation))),
         }
     }
 
@@ -384,10 +390,14 @@ pub(crate) enum SourceOperand<C, S> {
 }
 
 impl<C> SourceOperand<C, OwnedExpression> {
-    pub(super) fn refusal(&self) -> Option<super::OperandRefusal> {
+    pub(super) fn refusal(
+        &self,
+        prepare: &SuitePreparation<'_>,
+        value: impl FnOnce(&C) -> &ir::Expr,
+    ) -> Option<PreparedRefusal> {
         match self {
-            Self::Checked(_) => None,
-            Self::Residual(input) => input.selected.refusal(),
+            Self::Checked(checked) => prepare.literal_refusal(RegionRoot::Operand(value(checked))),
+            Self::Residual(input) => input.selected.refusal(prepare),
         }
     }
 }

@@ -210,7 +210,9 @@ pub(crate) struct Declaration {
 }
 
 /// Compile a declaration in its lexical scope when the enclosing frame first needs its site.
-pub(crate) trait SiteDefinitions {
+pub(crate) trait SiteDefinitions<'p> {
+    fn literal_sites(&self) -> &'p crate::dynamic::literal::LiteralSites;
+    fn exec_literal(&mut self, site: TextRange) -> Option<(String, u32)>;
     fn lambda(&mut self, site: TextSize, comprehension: bool) -> CompiledDefinition;
     fn declaration(&mut self, site: TextSize) -> Declaration;
     fn class_namespace(
@@ -224,6 +226,7 @@ pub(crate) trait SiteDefinitions {
 
 #[derive(Default)]
 pub(crate) struct CheckedSites {
+    pub(crate) exec_literals: HashMap<TextRange, (String, u32)>,
     pub(crate) annotation_strings: HashMap<TextSize, String>,
     pub(crate) definitions: HashMap<TextSize, Declaration>,
     pub(crate) class_namespaces:
@@ -234,7 +237,11 @@ pub(crate) struct CheckedSites {
 }
 
 impl CheckedSites {
-    pub(crate) fn place(&mut self, site: RequiredSite, definitions: &mut impl SiteDefinitions) {
+    pub(crate) fn place<'p>(
+        &mut self,
+        site: RequiredSite,
+        definitions: &mut impl SiteDefinitions<'p>,
+    ) {
         match site {
             RequiredSite::Lambda(site, comprehension) => {
                 self.lambdas
@@ -262,6 +269,14 @@ impl CheckedSites {
                     .entry(site)
                     .or_insert_with(|| definitions.type_alias(site));
             }
+            RequiredSite::ExecLiteral(site) => {
+                if let std::collections::hash_map::Entry::Vacant(entry) =
+                    self.exec_literals.entry(site)
+                    && let Some(compiled) = definitions.exec_literal(site)
+                {
+                    entry.insert(compiled);
+                }
+            }
             RequiredSite::AnnotationString(site) => {
                 self.annotation_strings
                     .entry(site)
@@ -270,20 +285,24 @@ impl CheckedSites {
         }
     }
 
-    pub(crate) fn place_operand(
+    pub(crate) fn place_operand<'p>(
         &mut self,
         value: &ir::Expr,
-        definitions: &mut impl SiteDefinitions,
+        definitions: &mut impl SiteDefinitions<'p>,
     ) {
-        RequiredSite::visit_operand(value, &mut |site| self.place(site, definitions));
+        RequiredSite::visit_operand(value, Some(definitions.literal_sites()), &mut |site| {
+            self.place(site, definitions)
+        });
     }
 
-    pub(crate) fn place_statements(
+    pub(crate) fn place_statements<'p>(
         &mut self,
         body: &[ir::Statement],
-        definitions: &mut impl SiteDefinitions,
+        definitions: &mut impl SiteDefinitions<'p>,
     ) {
-        RequiredSite::visit(body, &mut |site| self.place(site, definitions));
+        RequiredSite::visit(body, Some(definitions.literal_sites()), &mut |site| {
+            self.place(site, definitions)
+        });
     }
 
     pub(crate) fn annotation_string(

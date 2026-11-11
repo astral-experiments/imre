@@ -1019,7 +1019,7 @@ struct PendingStatement<'s> {
 }
 
 enum PendingEffect<'s> {
-    Statement(Box<Statement>, Option<OperandRefusal>),
+    Statement(Box<Statement>, Option<PreparedRefusal>),
     Source(&'s ast::Stmt),
     Refused(OperandRefusal),
 }
@@ -1047,7 +1047,7 @@ fn bind_operand(operands: &mut Vec<PhysicalOperand>, value: PhysicalOperand, ty:
 }
 
 pub(crate) struct RegisteredSuite {
-    pub(crate) refusal: Option<OperandRefusal>,
+    pub(crate) refusal: Option<PreparedRefusal>,
     falls_through: bool,
     pub(crate) checked: RegisteredFunction,
     pub(crate) operands: Vec<PhysicalOperand>,
@@ -1111,6 +1111,13 @@ pub(crate) type PhysicalOperand =
     booleans::SourceOperand<Box<RegisteredOperand>, booleans::OwnedExpression>;
 
 pub(crate) type OperandRefusal = (TextRange, &'static str);
+
+/// First reachable refusal selected in this lexical source during suite preparation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PreparedRefusal {
+    Operand(OperandRefusal),
+    ExecLiteral(TextRange),
+}
 
 /// Physical source locations and semantic operations shared by complete and residual suites.
 #[derive(Default)]
@@ -1196,8 +1203,9 @@ enum SuiteSelection {
 pub(crate) struct SuitePreparation<'a> {
     operations: &'a HashMap<TextRange, Expr>,
     source: values::RegisteredSource<'a>,
-    pub(crate) declaration_refusals: HashMap<TextSize, OperandRefusal>,
-    refusal: Option<OperandRefusal>,
+    pub(crate) declaration_refusals: HashMap<TextSize, PreparedRefusal>,
+    pub(crate) literal_refusals: Option<&'a crate::dynamic::literal::LiteralSites>,
+    refusal: Option<PreparedRefusal>,
     pub(crate) sites: StatementSites,
 }
 
@@ -1213,6 +1221,7 @@ impl<'a> SuitePreparation<'a> {
             source,
             sites: statement_sites(body, source, assertions_enabled),
             declaration_refusals: HashMap::new(),
+            literal_refusals: None,
             refusal: None,
         }
     }
@@ -1284,7 +1293,10 @@ impl<'a> SuitePreparation<'a> {
         let body = self.suite(&class.body, RegisteredScope::Class);
         if let Some(refusal) = header
             .as_ref()
-            .and_then(|header| header.body.as_ref().err().copied())
+            .and_then(|header| match &header.body {
+                Ok(provider) => self.literal_refusal(RegionRoot::Suite(&provider.function.body)),
+                Err(reason) => Some(PreparedRefusal::Operand(*reason)),
+            })
             .or(body.refusal)
         {
             self.declaration_refusals.insert(start, refusal);
@@ -1430,7 +1442,10 @@ impl<'a> SuitePreparation<'a> {
                     }
                 }
             };
-            let first = self.refusal.take().unwrap_or(refusal);
+            let first = self
+                .refusal
+                .take()
+                .unwrap_or(PreparedRefusal::Operand(refusal));
             self.refusal = preceding.or(live.then_some(first));
             suite.push_refusal(refusal);
         }
@@ -1448,20 +1463,64 @@ impl<'a> SuitePreparation<'a> {
     pub(crate) fn checked_declaration_refusal(
         &self,
         block: &[Statement],
-    ) -> Option<OperandRefusal> {
-        if self.declaration_refusals.is_empty() {
+    ) -> Option<PreparedRefusal> {
+        self.required_refusal(RegionRoot::Suite(block))
+    }
+
+    fn operand_refusal(&self, operand: &PhysicalOperand) -> Option<PreparedRefusal> {
+        operand.refusal(self, |checked| &checked.value)
+    }
+
+    fn operand_refusals(&self, operands: &[PhysicalOperand]) -> Option<PreparedRefusal> {
+        operands
+            .iter()
+            .find_map(|input| self.operand_refusal(input))
+    }
+
+    fn literal_refusal(&self, root: RegionRoot<'_>) -> Option<PreparedRefusal> {
+        if self.literal_refusals.is_some() {
+            self.required_refusal(root)
+        } else {
+            None
+        }
+    }
+
+    fn required_refusal(&self, root: RegionRoot<'_>) -> Option<PreparedRefusal> {
+        if self.declaration_refusals.is_empty() && self.literal_refusals.is_none() {
             return None;
         }
         let mut refusal = None;
-        RequiredSite::visit(block, &mut |site| {
-            if refusal.is_none()
-                && let RequiredSite::Definition(start)
+        let mut visit = |site| {
+            refusal = refusal.or_else(|| match site {
+                RequiredSite::Definition(start)
                 | RequiredSite::DefinitionAfterInputs(start)
-                | RequiredSite::ClassNamespace(start) = site
-            {
-                refusal = self.declaration_refusals.get(&start).copied();
+                | RequiredSite::ClassNamespace(start) => {
+                    self.declaration_refusals.get(&start).copied()
+                }
+                // Each activation was prepared from its lexical children before its binding.
+                RequiredSite::Lambda(start, _) if self.literal_refusals.is_some() => {
+                    let body = self.source.lambdas?.get(&start)?.body.as_ref()?;
+                    self.checked_declaration_refusal(&body.function.body)
+                }
+                RequiredSite::Generator(range) if self.literal_refusals.is_some() => {
+                    let generator = self.source.generators?.get(&range)?;
+                    self.checked_declaration_refusal(&generator.body.function.body)
+                }
+                RequiredSite::ExecLiteral(site) => self
+                    .literal_refusals?
+                    .refused(site)
+                    .then_some(PreparedRefusal::ExecLiteral(site)),
+                _ => None,
+            });
+        };
+        match root {
+            RegionRoot::Suite(block) => {
+                RequiredSite::visit(block, self.literal_refusals, &mut visit);
             }
-        });
+            RegionRoot::Operand(value) => {
+                RequiredSite::visit_operand(value, self.literal_refusals, &mut visit)
+            }
+        }
         refusal
     }
 
@@ -1487,7 +1546,7 @@ impl<'a> SuitePreparation<'a> {
     ) -> PhysicalOperand {
         let operand = RegisteredOperand::prepare_with(self.source, kind, lower);
         let input = self.retain_operand(expr, kind, suspended, operand);
-        self.refusal = self.refusal.or_else(|| input.refusal());
+        self.refusal = self.refusal.or_else(|| self.operand_refusal(&input));
         input
     }
 
@@ -1684,7 +1743,12 @@ impl<'a> SuitePreparation<'a> {
             let site = self.sites.contexts[&stmt.range()][index];
             let manager = values::located(site.range, site.anchor, manager);
             match binding {
-                Ok(binding) => managers.push((site, manager, binding)),
+                Ok(binding) => {
+                    self.refusal = self.refusal.or_else(|| {
+                        self.literal_refusal(RegionRoot::Suite(&binding.as_ref()?.body))
+                    });
+                    managers.push((site, manager, binding));
+                }
                 Err(fault) => {
                     managers.push((site, manager, None));
                     refused_binding = Some(fault);
@@ -1694,10 +1758,11 @@ impl<'a> SuitePreparation<'a> {
         }
         // A manager can itself contain a refused operand. Visit it before its binding.
         let suite = if let Some(fault) = refused_binding {
-            self.refusal.get_or_insert(fault);
+            let refusal = PreparedRefusal::Operand(fault);
+            self.refusal.get_or_insert(refusal);
             let mut suite = self.region(kind);
             suite.push_refusal(fault);
-            suite.refusal = Some(fault);
+            suite.refusal = Some(refusal);
             suite.falls_through = false;
             suite
         } else {
@@ -1776,6 +1841,9 @@ impl<'a> SuitePreparation<'a> {
                     "cannot compile this assignment target ahead of time",
                 ))
             })?;
+        self.refusal = self
+            .refusal
+            .or_else(|| self.literal_refusal(RegionRoot::Suite(&binding)));
         let mut region = RegisteredSuite::new(scope.finish(Vec::new()), operands);
         let body = region.child(self.physical_suite(&loop_.body, kind, selection, suspended));
         let otherwise = if loop_.orelse.is_empty() {
@@ -1860,7 +1928,7 @@ impl<'a> SuitePreparation<'a> {
                     at: body.len(),
                     effect: PendingEffect::Statement(
                         Box::new(branch),
-                        operands[start..].iter().find_map(PhysicalOperand::refusal),
+                        self.operand_refusals(&operands[start..]),
                     ),
                 });
                 continue;
@@ -1880,7 +1948,7 @@ impl<'a> SuitePreparation<'a> {
                             slot,
                             definition_value(class_site(class), header),
                         )),
-                        operands[start..].iter().find_map(PhysicalOperand::refusal),
+                        self.operand_refusals(&operands[start..]),
                     ),
                 });
                 body.push(scope.store(
@@ -1895,7 +1963,7 @@ impl<'a> SuitePreparation<'a> {
                     .map(|expr| {
                         let slot = scope.hidden(Type::PythonObject);
                         let input = frame_value(expr);
-                        let refusal = input.refusal();
+                        let refusal = self.operand_refusal(&input);
                         residual.push(PendingStatement {
                             at: body.len(),
                             effect: PendingEffect::Statement(
@@ -1941,7 +2009,7 @@ impl<'a> SuitePreparation<'a> {
                     at: body.len(),
                     effect: PendingEffect::Statement(
                         Box::new(output),
-                        operands[start..].iter().find_map(PhysicalOperand::refusal),
+                        self.operand_refusals(&operands[start..]),
                     ),
                 });
                 continue;
@@ -1953,7 +2021,7 @@ impl<'a> SuitePreparation<'a> {
                 if let Some(inputs) = values::bare_target_operands(&ann.target) {
                     residual.push(PendingStatement {
                         at: body.len(),
-                        effect: bound_operation(
+                        effect: self.bound_operation(
                             Builtin::RegisteredDiscard,
                             inputs.into_iter().map(frame_value),
                             &mut operands,
@@ -1968,7 +2036,7 @@ impl<'a> SuitePreparation<'a> {
                 body.push(checkpoint(stmt));
                 residual.push(PendingStatement {
                     at: body.len(),
-                    effect: bound_operation(
+                    effect: self.bound_operation(
                         attribute_opcode(effect.action, effect.field),
                         effect.operands().map(frame_value),
                         &mut operands,
@@ -2014,7 +2082,7 @@ impl<'a> SuitePreparation<'a> {
                     at: body.len(),
                     effect: PendingEffect::Statement(
                         Box::new(output),
-                        operands[start..].iter().find_map(PhysicalOperand::refusal),
+                        self.operand_refusals(&operands[start..]),
                     ),
                 });
                 body.extend(binding);
@@ -2044,7 +2112,7 @@ impl<'a> SuitePreparation<'a> {
                     Ok(targets) => (
                         {
                             let rhs = frame_value(rhs);
-                            let refusal = rhs.refusal();
+                            let refusal = self.operand_refusal(&rhs);
                             PendingEffect::Statement(
                                 Box::new(Statement::Assign(input, keep(rhs))),
                                 refusal,
@@ -2091,7 +2159,11 @@ impl<'a> SuitePreparation<'a> {
                         scope.truncate_locals(slots);
                         residual.push(PendingStatement {
                             at: body.len(),
-                            effect: bound_operation(op, inputs.map(target_input), &mut operands),
+                            effect: self.bound_operation(
+                                op,
+                                inputs.map(target_input),
+                                &mut operands,
+                            ),
                         });
                     }
                 }
@@ -2112,6 +2184,23 @@ impl<'a> SuitePreparation<'a> {
         }
     }
 
+    fn bound_operation<'s>(
+        &self,
+        opcode: Builtin,
+        inputs: impl Iterator<Item = PhysicalOperand>,
+        operands: &mut Vec<PhysicalOperand>,
+    ) -> PendingEffect<'s> {
+        let start = operands.len();
+        let values = inputs
+            .map(|input| bind_operand(operands, input, Type::PythonObject))
+            .collect();
+        let statement = Statement::Expr(operation(opcode, Type::None, values));
+        PendingEffect::Statement(
+            Box::new(statement),
+            self.operand_refusals(&operands[start..]),
+        )
+    }
+
     pub(crate) fn complete(
         &self,
         stmts: &[ast::Stmt],
@@ -2123,22 +2212,6 @@ impl<'a> SuitePreparation<'a> {
             ..lowered.suite
         })
     }
-}
-
-fn bound_operation<'s>(
-    opcode: Builtin,
-    inputs: impl Iterator<Item = PhysicalOperand>,
-    operands: &mut Vec<PhysicalOperand>,
-) -> PendingEffect<'s> {
-    let start = operands.len();
-    let values = inputs
-        .map(|input| bind_operand(operands, input, Type::PythonObject))
-        .collect();
-    let statement = Statement::Expr(operation(opcode, Type::None, values));
-    PendingEffect::Statement(
-        Box::new(statement),
-        operands[start..].iter().find_map(PhysicalOperand::refusal),
-    )
 }
 
 fn exception_matcher(
@@ -3409,15 +3482,15 @@ mod tests {
         let operations = HashMap::new();
         let mut prepare = SuitePreparation::new(&operations, literals.context(text), body, true);
         let suite = prepare.suite(body, RegisteredScope::Module);
-        let (range, reason) = suite
-            .refusal
-            .expect("the omitted alias has a ranged diagnostic");
+        let Some(PreparedRefusal::Operand((range, reason))) = suite.refusal else {
+            panic!("the omitted alias must report a ranged operand diagnostic");
+        };
         assert_eq!(&text[range], "type Alias = int");
         assert_eq!(reason, "cannot compile this statement ahead of time");
         let [operand] = suite.operands.as_slice() else {
             panic!("expected the omitted alias operand")
         };
-        assert_eq!(operand.refusal(), Some((range, reason)));
+        assert_eq!(prepare.operand_refusal(operand), suite.refusal);
         let body = &suite.checked.function.body;
         let at = body
             .iter()
@@ -4789,11 +4862,12 @@ mod tests {
     #[test]
     fn computed_positional_calls_bind_the_evaluated_callee() {
         let source = concat!(
-            "def apply(factory, obj, value):\n",
+            "def apply(factory, obj, value, exec):\n",
             "    factory()(value)\n",
             "    (obj.action if value else factory)(value)\n",
             "    obj.action(value)\n",
             "    factory(*value)\n",
+            "    exec('class Hidden: pass', value)\n",
         );
         let graph = SourceGraph::single(source).unwrap();
         let _ = super::super::lower(&graph);
@@ -4839,6 +4913,7 @@ mod tests {
                 ("(obj.action if value else factory)(value)", "conditional"),
                 ("obj.action(value)", "method"),
                 ("factory(*value)", "packed"),
+                ("exec('class Hidden: pass', value)", "local"),
             ]
         );
     }

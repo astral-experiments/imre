@@ -19,7 +19,14 @@ pub(crate) fn write(directory: &Path) -> Result<(), String> {
         let path = Path::new("<imre stdlib>").join(file);
         let compiled = ParsedModule::parse(&path, source.into())
             .and_then(|module| {
-                emit::PreparedBody::from_parsed(name, &path, module, 0, emit::ModuleOrigin::Bundled)
+                emit::PreparedBody::from_parsed(
+                    name,
+                    &path,
+                    module,
+                    0,
+                    emit::ModuleOrigin::Bundled,
+                    Default::default(),
+                )
             })
             .and_then(|body| body.standalone());
         match compiled {

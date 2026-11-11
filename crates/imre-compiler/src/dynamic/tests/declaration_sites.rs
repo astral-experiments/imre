@@ -28,6 +28,7 @@ fn checked_module_places_class_generator_and_following_lambda() {
     let location = SourceMap {
         info: &module.source,
         callable_code: Default::default(),
+        exec_code: Default::default(),
         unit: 0,
         positions: &SourcePositions::new(module.source.path, text, &file),
     };
@@ -41,7 +42,9 @@ fn checked_module_places_class_generator_and_following_lambda() {
     let mut sites = CheckedSites::default();
     let body = &module.initializer().checked.function.body;
     let mut required = Vec::new();
-    RequiredSite::visit(body, &mut |site| required.push(site));
+    RequiredSite::visit(body, Some(&module.source.exec_literals), &mut |site| {
+        required.push(site)
+    });
     let [
         RequiredSite::Definition(read),
         RequiredSite::Lambda(first, _),
@@ -99,6 +102,7 @@ fn checked_module_places_both_plain_and_generic_aliases_before_their_following_l
         let location = SourceMap {
             info: &module.source,
             callable_code: Default::default(),
+            exec_code: Default::default(),
             unit: 0,
             positions: &SourcePositions::new(module.source.path, &text, &file),
         };
@@ -112,7 +116,9 @@ fn checked_module_places_both_plain_and_generic_aliases_before_their_following_l
         let mut sites = CheckedSites::default();
         let body = &module.initializer().checked.function.body;
         let mut required = Vec::new();
-        RequiredSite::visit(body, &mut |site| required.push(site));
+        RequiredSite::visit(body, Some(&module.source.exec_literals), &mut |site| {
+            required.push(site)
+        });
         let [
             RequiredSite::Definition(class),
             RequiredSite::Alias(alias),

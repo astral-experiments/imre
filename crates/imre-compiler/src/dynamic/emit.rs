@@ -10,6 +10,7 @@ use ruff_text_size::{Ranged, TextRange, TextSize};
 
 use super::prepare::PreparedUnit;
 use crate::CodegenUnit;
+use crate::dynamic::literal::LiteralSites;
 use crate::frontend::function_scope::{CallableMetadata, ClassBindings, NamedFunction};
 use crate::frontend::module_source::{self, ParsedModule};
 use crate::frontend::{ParameterEvaluator, RegisteredGenerator, RegisteredLambda, RequiredSite};
@@ -34,6 +35,7 @@ pub(super) struct PhysicalFile {
 /// admission does not attach any checked function bodies.
 #[derive(Default)]
 pub(super) struct CheckedUnit<'a> {
+    pub(super) literal_sites: LiteralSites,
     pub(super) source: Option<module_source::CheckedFile>,
     pub(super) functions: Option<&'a super::CheckedFunctions>,
     // A declaration belongs to the selected name and origin, even when another
@@ -56,7 +58,7 @@ pub(super) struct RegisteredBodies<'a> {
 }
 
 impl RegisteredBodies<'_> {
-    pub(super) fn parsed(&self, unit: usize) -> Option<ParsedModule<'_>> {
+    pub(super) fn parsed(&self, unit: usize) -> Option<ParsedModule<'_, '_>> {
         self.checked_units
             .get(&unit)?
             .source
@@ -67,6 +69,7 @@ impl RegisteredBodies<'_> {
 #[derive(Clone, Copy)]
 pub(super) enum ModuleOrigin<'a> {
     Program(Option<&'a super::CheckedFunctions>),
+    ExecLiteral(u32),
     Provider,
     Bundled,
 }
@@ -261,7 +264,10 @@ impl<'a> PreparedBody<'a> {
             Cow::Borrowed(source),
             python_optimization,
             origin,
-            Input::Module(ParsedModule::parse(path, source.into())?.parsed),
+            Input::Module(
+                ParsedModule::parse(path, source.into())?.parsed,
+                LiteralSites::default(),
+            ),
         )?;
         use_module(module)
     }
@@ -269,9 +275,10 @@ impl<'a> PreparedBody<'a> {
     pub(super) fn from_parsed(
         name: &'a str,
         path: &'a Path,
-        module: ParsedModule<'a>,
+        module: ParsedModule<'a, '_>,
         python_optimization: i32,
         origin: ModuleOrigin<'a>,
+        literal_sites: LiteralSites,
     ) -> Result<Self, String> {
         let (body, _) = Self::prepare(
             name,
@@ -279,15 +286,24 @@ impl<'a> PreparedBody<'a> {
             module.text,
             python_optimization,
             origin,
-            Input::Module(module.parsed),
+            Input::Module(module.parsed, literal_sites),
         )?;
-        if let Some((range, reason)) = body.initializer().refusal {
-            return Err(module_source::operand_diagnostic(
-                path,
-                &body.source.text,
-                range,
-                reason,
-            ));
+        if let Some(refusal) = body.initializer().refusal {
+            use crate::frontend::PreparedRefusal;
+            return Err(match refusal {
+                PreparedRefusal::Operand((range, reason)) => {
+                    module_source::operand_diagnostic(path, &body.source.text, range, reason)
+                }
+                PreparedRefusal::ExecLiteral(site) => {
+                    let (operand, reason) = body
+                        .source
+                        .exec_literals
+                        .body(site)
+                        .and_then(Result::err)
+                        .expect("selected literal refusal belongs to this source");
+                    body.source.literal_diagnostic(operand, reason)
+                }
+            });
         }
         Ok(body)
     }
@@ -303,19 +319,23 @@ impl<'a> PreparedBody<'a> {
         #[cfg(test)]
         crate::single_emission_tests::record_preparation(
             path,
-            matches!(&input, Input::Module(Cow::Borrowed(_))),
+            matches!(&input, Input::Module(Cow::Borrowed(_), _)),
         );
         let keep_docstrings = python_optimization < 2;
         let source = text.as_ref();
         let bundled = matches!(origin, ModuleOrigin::Bundled);
         let provider = matches!(origin, ModuleOrigin::Provider);
+        let inherited_flags = match origin {
+            ModuleOrigin::ExecLiteral(flags) => flags,
+            _ => 0,
+        };
         let expression = matches!(&input, Input::Expression(..));
         let program_bodies = match origin {
             ModuleOrigin::Program(bodies) => bodies,
             _ => None,
         };
         let (syntax, tokens, replacements) = match &input {
-            Input::Module(parsed) => (
+            Input::Module(parsed, _) => (
                 parsed.syntax(),
                 parsed.tokens(),
                 module_source::validate(path, source, parsed, keep_docstrings)?,
@@ -362,12 +382,18 @@ impl<'a> PreparedBody<'a> {
             .filter(|token| token.kind() == ast::token::TokenKind::Class)
             .map(Ranged::start)
             .collect::<Vec<_>>();
-        let mut body = match input {
-            Input::Module(parsed) => module_source::into_body(parsed),
-            Input::Expression(syntax, ..) => syntax.body,
+        let (mut body, exec_literals) = match input {
+            Input::Module(parsed, sites) => (module_source::into_body(parsed), sites),
+            Input::Expression(syntax, ..) => (syntax.body, LiteralSites::default()),
         };
         let method_imports = imre_ast::module_imports(&body);
-        let private_names = module_source::lower(path, source, &mut body)?;
+        let future_flags = super::literal::future_flags(&body, inherited_flags);
+        let private_names = module_source::lower_with_future(
+            path,
+            source,
+            &mut body,
+            inherited_flags & imre_ast::code_flags::FUTURE_ANNOTATIONS != 0,
+        )?;
         let values = crate::frontend::RegisteredSource {
             text: source,
             private_names: Some(&private_names),
@@ -443,6 +469,7 @@ impl<'a> PreparedBody<'a> {
             &body,
             python_optimization == 0,
         );
+        prepare.literal_refusals = exec_literals.has_refusals().then_some(&exec_literals);
         prepare.sites.expressions = logicals;
         // Preparing inner declarations first lets their binding sites consume
         // the selected body's decision in the enclosing suite.
@@ -509,11 +536,14 @@ impl<'a> PreparedBody<'a> {
         }
         let initializer =
             (!expression).then(|| prepare.suite(&body, crate::frontend::RegisteredScope::Module));
+        #[cfg(test)]
+        let statement_sites = prepare.sites;
         let source = SourceInfo {
+            exec_literals,
             annotation_children,
             scopes,
             #[cfg(test)]
-            statement_sites: prepare.sites,
+            statement_sites,
             python_optimization,
             lambdas,
             generators,
@@ -535,8 +565,7 @@ impl<'a> PreparedBody<'a> {
             template_fields,
             replacements,
             method_imports,
-            barry_as_flufl: imre_ast::future_import(&body, "barry_as_FLUFL"),
-            string_annotations: private_names.string_annotations,
+            future_flags,
             private_names,
             text,
         };
@@ -619,13 +648,14 @@ impl<'a> PreparedBody<'a> {
         let location = SourceMap {
             info: &self.source,
             callable_code: Default::default(),
+            exec_code: Default::default(),
             unit,
             positions: &positions,
         };
         let sites = sites::CheckedSites::default();
         frame.begin_module(
             self.source.scopes.module_annotations,
-            self.source.string_annotations,
+            self.source.private_names.string_annotations,
             self.docstring.as_deref(),
         );
         let globals = &self.source.scopes.module_globals;
@@ -675,7 +705,10 @@ impl<'a> PreparedBody<'a> {
 }
 
 enum Input<'a> {
-    Module(Cow<'a, ruff_python_parser::Parsed<ast::ModModule>>),
+    Module(
+        Cow<'a, ruff_python_parser::Parsed<ast::ModModule>>,
+        LiteralSites,
+    ),
     Expression(ast::ModModule, &'a ast::token::Tokens),
 }
 
@@ -708,6 +741,7 @@ struct SourceMap<'a> {
     info: &'a SourceInfo<'a>,
     /// A duplicated cleanup path still evaluates the same lexical definition.
     callable_code: std::cell::RefCell<HashMap<ruff_text_size::TextSize, String>>,
+    exec_code: std::cell::RefCell<HashMap<TextRange, String>>,
     unit: usize,
     positions: &'a SourcePositions<'a>,
 }
@@ -752,6 +786,7 @@ impl FunctionBody<'_> {
 }
 
 struct SourceInfo<'a> {
+    exec_literals: LiteralSites,
     annotation_children:
         HashMap<TextSize, crate::frontend::AnnotationBody<Box<SourceInfo<'static>>>>,
     scopes: crate::frontend::function_scope::ScopeFacts,
@@ -779,8 +814,7 @@ struct SourceInfo<'a> {
     replacements: HashMap<ruff_text_size::TextRange, Vec<u32>>,
     private_names: imre_ast::Names,
     method_imports: std::collections::BTreeSet<String>,
-    string_annotations: bool,
-    barry_as_flufl: bool,
+    future_flags: u32,
     text: Cow<'a, str>,
 }
 
@@ -791,6 +825,12 @@ impl SourceInfo<'_> {
             FunctionBody::Suite(suite) => RegisteredBody::Suite(suite.as_ref()),
         };
         Body::Registered(body, Some(&self.scopes.functions[&site].globals))
+    }
+
+    fn literal_diagnostic(&self, site: TextSize, reason: &str) -> String {
+        crate::frontend::phase::Diagnostic::at(&self.text, &TextRange::empty(site), reason)
+            .with_path(self.path)
+            .to_string()
     }
 
     /// Keep documentation attached to the bundled definition, even when callers rebind its name.
@@ -815,22 +855,10 @@ impl SourceInfo<'_> {
     }
 }
 
-impl SourceMap<'_> {
+impl SourceInfo<'_> {
     fn function_flags(&self, nested: bool, method: bool) -> u32 {
         use imre_ast::code_flags;
-        code_flags::function_flags(None, nested, method) | self.future_flags()
-    }
-
-    fn future_flags(&self) -> u32 {
-        use imre_ast::code_flags;
-        let mut flags = 0;
-        if self.string_annotations {
-            flags |= code_flags::FUTURE_ANNOTATIONS;
-        }
-        if self.barry_as_flufl {
-            flags |= code_flags::FUTURE_BARRY_AS_BDFL;
-        }
-        flags
+        code_flags::function_flags(None, nested, method) | self.future_flags
     }
 }
 
@@ -1027,7 +1055,44 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
     }
 }
 
-impl sites::SiteDefinitions for LexicalDefinitions<'_, '_> {
+impl<'p> sites::SiteDefinitions<'p> for LexicalDefinitions<'_, 'p> {
+    fn literal_sites(&self) -> &'p LiteralSites {
+        &self.source.info.exec_literals
+    }
+
+    fn exec_literal(&mut self, site: TextRange) -> Option<(String, u32)> {
+        let child = self.source.exec_literals.body(site)?;
+        if self.output.diagnostic.is_some() {
+            return None;
+        }
+        let child = match child {
+            Ok(child) => child,
+            Err((operand, reason)) => {
+                self.output.diagnostic = Some(self.source.literal_diagnostic(operand, reason));
+                return None;
+            }
+        };
+        let mut entries = self.source.exec_code.borrow_mut();
+        let entry = match entries.entry(site) {
+            std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                let file = self.output.data(b"<string>");
+                // A decoded module interns its own constants when its prologue runs.
+                let parent_names = std::mem::take(&mut self.output.interned_identifiers);
+                let compiled = child.emit(self.output, self.source.unit, &file);
+                self.output.interned_identifiers = parent_names;
+                match compiled {
+                    Ok(symbol) => entry.insert(symbol),
+                    Err(error) => {
+                        self.output.diagnostic = Some(error);
+                        return None;
+                    }
+                }
+            }
+        };
+        Some((entry.clone(), child.source.future_flags))
+    }
+
     fn lambda(&mut self, site: TextSize, comprehension: bool) -> CompiledDefinition {
         let lambda = &self.source.lambdas[&site];
         let body = lambda.body.as_ref().expect("checked lambda body");
@@ -1135,6 +1200,7 @@ impl sites::SiteDefinitions for LexicalDefinitions<'_, '_> {
         let location = SourceMap {
             info: &body.scope,
             callable_code: Default::default(),
+            exec_code: Default::default(),
             unit: self.source.unit,
             positions: &SourcePositions::new(body.scope.path, text, &file),
         };
@@ -1407,7 +1473,9 @@ impl LexicalDefinitions<'_, '_> {
         let source = self.source;
         let annotations = header.annotations.as_ref()?;
         let start = annotations.start;
-        let class = self.class_locals.filter(|_| !source.string_annotations);
+        let class = self
+            .class_locals
+            .filter(|_| !source.private_names.string_annotations);
         let reads = annotations.reads(class);
         let mut metadata = json!({
             "posonly": ["format"],
@@ -1565,7 +1633,7 @@ mod tests {
         (files, builtins, entry_source): (
             &[ModuleSource],
             &[ModuleSource],
-            Option<ParsedModule<'_>>,
+            Option<ParsedModule<'_, '_>>,
         ),
         config: &str,
         python_optimization: i32,
@@ -1588,6 +1656,31 @@ mod tests {
         )
         .collect::<Result<Vec<_>, _>>()?;
         super::emit(units, config, python_optimization, providers, layout)
+    }
+
+    #[test]
+    fn literal_exec_sites_own_distinct_module_bodies_at_the_same_python_location() {
+        let text = concat!(
+            "def install(scope):\n",
+            "    exec('class Entry: value = 1', scope)\n",
+            "    exec('class Entry: value = 2', scope)\n",
+            "install({'__name__': 'app'})\n",
+        );
+        let ir = crate::compile(text, &crate::CompileOptions::default()).unwrap();
+        let entries: Vec<_> = ir
+            .lines()
+            .filter(|line| line.contains("call i64 @imre_dyn_exec_operand("))
+            .map(|line| {
+                line.rsplit_once("ptr @code")
+                    .unwrap()
+                    .1
+                    .split(',')
+                    .next()
+                    .unwrap()
+            })
+            .collect();
+        assert_eq!(entries.len(), 2);
+        assert_ne!(entries[0], entries[1]);
     }
 
     /// Plan the consuming suites without their lambda descriptors. The physical
@@ -1618,7 +1711,7 @@ mod tests {
         };
         let annotations = crate::frontend::annotation_operands(
             body,
-            prepared.source.string_annotations,
+            prepared.source.private_names.string_annotations,
             source,
             prepared.source.bundled,
             |text, parsed| {
@@ -1975,9 +2068,13 @@ mod tests {
         .unwrap();
         assert!(prepared.syntax.is_none());
         let mut sites = 0;
-        RequiredSite::visit(&prepared.initializer().checked.function.body, &mut |_| {
-            sites += 1;
-        });
+        RequiredSite::visit(
+            &prepared.initializer().checked.function.body,
+            Some(&prepared.source.exec_literals),
+            &mut |_| {
+                sites += 1;
+            },
+        );
         assert_eq!(sites, 4);
         assert_eq!(prepared.source.function_bodies.len(), 4);
 
@@ -2700,7 +2797,7 @@ mod tests {
         let bodies = &table[&graph.entry];
         let retained = &bodies[&ruff_text_size::TextSize::default()];
         let mut required = Vec::new();
-        RequiredSite::visit(&retained.function.body, &mut |site| match site {
+        RequiredSite::visit(&retained.function.body, None, &mut |site| match site {
             RequiredSite::Definition(_) => required.push("definition"),
             RequiredSite::Lambda(..) => required.push("lambda"),
             _ => {}
@@ -2785,7 +2882,7 @@ mod tests {
         let plan = module.source.function_bodies[&def.start()].suite().unwrap();
         assert!(plan.fully_checked());
         let mut definitions = Vec::new();
-        RequiredSite::visit(&plan.checked.function.body, &mut |required| {
+        RequiredSite::visit(&plan.checked.function.body, None, &mut |required| {
             if let RequiredSite::Definition(start) = required {
                 definitions.push(start);
             }
@@ -2848,7 +2945,7 @@ mod tests {
             panic!("expected the packed class definition result");
         };
         let mut deferred = Vec::new();
-        RequiredSite::visit(&suite.checked.function.body, &mut |site| {
+        RequiredSite::visit(&suite.checked.function.body, None, &mut |site| {
             if let RequiredSite::DefinitionAfterInputs(at) = site {
                 deferred.push(at);
             }
@@ -3506,9 +3603,11 @@ mod tests {
         // The tuple used as a slice bound is evaluated as one operand.
         assert_eq!(tuples, 1);
         assert_eq!(discarded, 7);
-        RequiredSite::visit(&module.initializer().checked.function.body, &mut |_| {
-            panic!("unexpected declaration site")
-        });
+        RequiredSite::visit(
+            &module.initializer().checked.function.body,
+            Some(&module.source.exec_literals),
+            &mut |_| panic!("unexpected declaration site"),
+        );
         assert!(module.syntax.is_none());
         let withdrawn = module.standalone().unwrap();
         assert!(withdrawn.1.contains("setup_module_annotations"));
@@ -3530,9 +3629,11 @@ mod tests {
         )
         .unwrap();
         assert!(module.syntax.is_none());
-        RequiredSite::visit(&module.initializer().checked.function.body, &mut |_| {
-            panic!("unexpected declaration site")
-        });
+        RequiredSite::visit(
+            &module.initializer().checked.function.body,
+            Some(&module.source.exec_literals),
+            &mut |_| panic!("unexpected declaration site"),
+        );
         let (_, llvm) = module.standalone().unwrap();
         assert!(llvm.contains("mark_module_annotation"));
         assert!(llvm.contains("setup_module_annotations"));
@@ -4556,7 +4657,7 @@ mod tests {
             assert!(plan.fully_checked());
             let body = plan.checked();
             let mut required = Vec::new();
-            RequiredSite::visit(&body.function.body, &mut |site| required.push(site));
+            RequiredSite::visit(&body.function.body, None, &mut |site| required.push(site));
             if i == 0 {
                 assert!(required.is_empty());
                 let header = &module.source.scopes.functions[&def.start()];

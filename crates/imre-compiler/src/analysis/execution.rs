@@ -1,10 +1,14 @@
 //! Resolve first-class execution operations using the declarations of their operands.
 
 use super::{Session, is_stdlib_function_type};
+use crate::dynamic::literal::{LiteralSite, ParsedLiteral};
 use crate::frontend::phase::Diagnostic;
+use ruff_db::files::File;
+use ruff_db::parsed::ParsedModuleRef;
+use ruff_db::system::SystemVirtualPath;
 use ruff_python_ast::visitor::{Visitor, walk_expr, walk_stmt};
 use ruff_python_ast::{Expr, ExprCall, Stmt, StmtFunctionDef};
-use ruff_text_size::{Ranged, TextRange};
+use ruff_text_size::{Ranged, TextRange, TextSize};
 use std::{collections::HashMap, path::Path};
 use ty_python_core::definition::{DefinitionKind, FunctionDefinitionKind};
 use ty_python_semantic::types::{Type, TypeDefinition};
@@ -121,7 +125,7 @@ struct Escape<'a, 'db> {
     callbacks: Vec<(TextRange, ArgumentFact)>,
     guarded_names: Vec<TextRange>,
     session: &'db Session,
-    module: usize,
+    open_providers: &'a [File],
     path: &'a Path,
     first: Option<ExecutionRequirement>,
     captured: FunctionImports,
@@ -133,7 +137,7 @@ impl<'ast> Escape<'ast, '_> {
     // parameter annotation alone cannot establish the native entry of a code object.
     fn assigned_value(&self, mut value: &'ast Expr) -> Option<&'ast Expr> {
         let mut seen = std::collections::HashSet::new();
-        while let Some(def) = self.session.sole_binding(self.module, value)
+        while let Some(def) = self.session.file_binding(self.model.file(), value)
             && let DefinitionKind::Assignment(assignment) = def.kind(self.model.db())
         {
             if !seen.insert(def) || assignment.unpack().is_some() {
@@ -160,11 +164,12 @@ impl<'ast> Escape<'ast, '_> {
             return None;
         };
         let file = def.file(db);
-        (self.session.files.contains(&file)
-            && file
-                .path(db)
-                .as_system_path()
-                .is_some_and(|path| path.extension() != Some("pyi")))
+        (file == self.model.file()
+            || self.session.files.contains(&file)
+                && file
+                    .path(db)
+                    .as_system_path()
+                    .is_some_and(|path| path.extension() != Some("pyi")))
         .then_some((file, function))
     }
 
@@ -183,8 +188,7 @@ impl<'ast> Escape<'ast, '_> {
         range: TextRange,
         message: String,
     ) -> ExecutionRequirement {
-        let source =
-            ruff_db::source::source_text(&self.session.db, self.session.files[self.module]);
+        let source = ruff_db::source::source_text(&self.session.db, self.model.file());
         ExecutionRequirement {
             source: source_callable,
             report: Diagnostic::at(source.as_str(), &range, message).with_path(self.path),
@@ -221,7 +225,7 @@ impl<'ast> Escape<'ast, '_> {
         let db = self.model.db();
         let binding = self
             .session
-            .reaching_binding(self.module, &call.func)
+            .file_binding(self.model.file(), &call.func)
             .or_else(|| {
                 // Free names in a helper use its module's global binding.
                 let index = ty_python_core::semantic_index(db, self.model.program_file());
@@ -367,7 +371,7 @@ impl<'ast> Escape<'ast, '_> {
         if self.callbacks.is_empty() || !value.is_name_expr() {
             return None;
         }
-        let binding = self.session.reaching_binding(self.module, value)?;
+        let binding = self.session.file_binding(self.model.file(), value)?;
         let kind = binding.kind(self.model.db());
         if !matches!(
             kind,
@@ -449,11 +453,18 @@ impl<'ast> Escape<'ast, '_> {
         }
     }
 
-    fn imported_callback(
+    fn imported_execution(
         &self,
-        module: usize,
+        captured_owner: Option<usize>,
         call: &'ast ExprCall,
     ) -> Option<ExecutionRequirement> {
+        let (owner, declaration) = self.declared_function(&call.func)?;
+        let follows_open_source =
+            owner != self.model.file() && self.open_providers.contains(&owner);
+        let captured = captured_owner.is_some_and(|id| self.session.files[id] == owner);
+        if !follows_open_source && !captured {
+            return None;
+        }
         let actual: Vec<_> = call
             .arguments
             .iter_source_order()
@@ -462,21 +473,31 @@ impl<'ast> Escape<'ast, '_> {
                     .map(|source| (arg.value().range(), source))
             })
             .collect();
-        if !actual
-            .iter()
-            .any(|(_, fact)| matches!(fact, ArgumentFact::Source(_)))
+        let callback = captured
+            && actual
+                .iter()
+                .any(|(_, fact)| matches!(fact, ArgumentFact::Source(_)));
+        if !follows_open_source && !callback {
+            return None;
+        }
+        let parsed = self.session.parsed(owner);
+        let function = declaration.node(&parsed);
+        if !callback
+            && (!function.decorator_list.is_empty()
+                || function.is_async
+                || imre_ast::code_flags::is_generator(&function.body)
+                || !self.reachable(call.range())
+                || !call
+                    .arguments
+                    .iter_source_order()
+                    .all(|arg| self.argument_can_return(arg.value())))
         {
             return None;
         }
-        let (owner, declaration) = self.declared_function(&call.func)?;
-        let parsed = self.session.parsed(owner);
-        let function = declaration.node(&parsed);
         let bound = crate::frontend::fixed_call_arguments(call, &function.parameters)?;
         let model = SemanticModel::new(self.model.db(), self.model.db().program_file(owner));
         let path = owner.path(self.model.db()).as_system_path()?.as_std_path();
-        let mut nested = self
-            .session
-            .execution_visitor((module, path), &parsed, &model);
+        let mut nested = self.session.execution_visitor(path, &parsed, &model);
         nested.callbacks = bound
             .into_iter()
             .filter_map(|(p, arg)| {
@@ -487,7 +508,9 @@ impl<'ast> Escape<'ast, '_> {
             })
             .collect();
         nested.visit_body(&function.body);
-        nested.first
+        nested.first.filter(|error| {
+            callback || error.source == SourceCallable::Builtin(ExecutionIntrinsic::Exec)
+        })
     }
 
     fn exposes_captured_namespace(&self, value: &Expr) -> bool {
@@ -783,7 +806,12 @@ impl<'a> Visitor<'a> for Escape<'a, '_> {
         let source_callable = intrinsic
             .map(SourceCallable::Builtin)
             .or_else(|| self.selected_builtin(&call.func))
-            .filter(|_| self.reachable(call.range()));
+            .filter(|_| self.reachable(call.range()))
+            .filter(|_| {
+                !self
+                    .session
+                    .reads_custom_builtins(self.model.file(), self.parsed, &call.func)
+            });
         if intrinsic.is_some() {
             // The builtin is the selected consumer here. Its operands still run
             // through ordinary argument and namespace dispatch.
@@ -798,6 +826,8 @@ impl<'a> Visitor<'a> for Escape<'a, '_> {
         if self.first.is_none()
             && let Some(source_callable) = source_callable
             && let Some(operand) = call.arguments.args.first()
+            && !(source_callable == SourceCallable::Builtin(ExecutionIntrinsic::Exec)
+                && crate::frontend::fixed_exec_literal(call).is_some())
             && !self.has_executable_entry(operand)
         {
             self.first = Some(self.required(
@@ -807,10 +837,11 @@ impl<'a> Visitor<'a> for Escape<'a, '_> {
             ));
             return;
         }
-        if self.first.is_none()
-            && let Some((owner, requirement)) = capture
-        {
-            self.first = requirement.or_else(|| self.imported_callback(owner, call));
+        if self.first.is_none() && (capture.is_some() || !self.open_providers.is_empty()) {
+            let (owner, requirement) = capture.unzip();
+            self.first = requirement
+                .flatten()
+                .or_else(|| self.imported_execution(owner, call));
             if self.first.is_some() {
                 return;
             }
@@ -841,10 +872,195 @@ impl<'a> Visitor<'a> for Escape<'a, '_> {
     }
 }
 
+/// A directly declared function captures the module's initial builtins when
+/// only inert declarations precede its creation. Its own name is bound afterward.
+fn captures_initial_builtins(parsed: &ParsedModuleRef, function: &StmtFunctionDef) -> bool {
+    let body = parsed.suite();
+    let Ok(at) = body.binary_search_by_key(&function.start(), Ranged::start) else {
+        return false;
+    };
+    body[at].range() == function.range()
+        && super::inert_declaration(&body[at])
+        && body[..at].iter().all(|statement| {
+            super::inert_declaration(statement)
+                && statement
+                    .as_function_def_stmt()
+                    .is_none_or(|def| def.name.as_str() != "__builtins__")
+        })
+}
+
 impl Session {
+    /// A function captures its defining namespace's __builtins__ at creation.
+    /// A lexical builtin type alone cannot establish lookup through a replacement.
+    fn has_custom_builtins(&self, file: File) -> bool {
+        let index = ty_python_core::semantic_index(&self.db, self.db.program_file(file));
+        index
+            .place_table(ty_python_core::FileScopeId::global())
+            .symbol_by_name("__builtins__")
+            .is_some_and(|symbol| symbol.is_bound())
+    }
+
+    /// A bare fallback in a function uses the captured builtins. Genuinely bound
+    /// names, qualified attributes, and the active module frame do their own lookup.
+    fn reads_custom_builtins(
+        &self,
+        file: File,
+        parsed: &ParsedModuleRef,
+        expression: &Expr,
+    ) -> bool {
+        use ty_python_core::scope::NodeWithScopeKind;
+        let Some(name) = expression.as_name_expr() else {
+            return false;
+        };
+        if !self.has_custom_builtins(file) {
+            return false;
+        }
+        let index = ty_python_core::semantic_index(&self.db, self.db.program_file(file));
+        let global = ty_python_core::FileScopeId::global();
+        if index
+            .place_table(global)
+            .symbol_by_name(name.id.as_str())
+            .is_some_and(|symbol| symbol.is_bound())
+            || self.file_binding(file, expression).is_some()
+        {
+            return false;
+        }
+        let Some(scope) = index.try_expression_scope_id(expression) else {
+            return false;
+        };
+        index
+            .ancestor_scopes(scope)
+            .find_map(|(_, scope)| match scope.node() {
+                NodeWithScopeKind::Function(def) => Some(
+                    file.path(&self.db).as_system_path().is_none()
+                        || !captures_initial_builtins(parsed, def.node(parsed)),
+                ),
+                NodeWithScopeKind::Lambda(_) => Some(true),
+                _ => None,
+            })
+            .unwrap_or(false)
+    }
+
+    /// Resolve fixed operands after the selected parent's immediate imports are registered.
+    /// Each returned parse supplies the next level's imports and its eventual checked module.
+    pub(crate) fn select_literal_level(
+        &self,
+        parent: File,
+        parsed: &ParsedModuleRef,
+        source: &str,
+        inherited_flags: u32,
+        candidates: &[TextRange],
+    ) -> Vec<(LiteralSite, Result<ParsedLiteral, String>)> {
+        use ruff_python_ast::{AnyNodeRef, find_node::covering_node};
+        if candidates.is_empty() {
+            return Vec::new();
+        }
+        let model = SemanticModel::new(&self.db, self.db.program_file(parent));
+        candidates
+            .iter()
+            .filter_map(|&range| {
+                let AnyNodeRef::ExprCall(call) =
+                    covering_node(parsed.syntax().into(), range).node()
+                else {
+                    return None;
+                };
+                if call.range() != range
+                    || ExecutionIntrinsic::resolve(&model, &call.func)
+                        != Some(ExecutionIntrinsic::Exec)
+                    || self.reads_custom_builtins(parent, parsed, &call.func)
+                {
+                    return None;
+                }
+                let literal = call.arguments.args.first()?.as_string_literal_expr()?;
+                let module = crate::frontend::exec_literal_text(literal, source)
+                    .map_err(str::to_owned)
+                    .and_then(|text| {
+                        self.parse_literal(parent, literal.start(), text, inherited_flags)
+                    });
+                Some((
+                    LiteralSite {
+                        call: range,
+                        operand: literal.start(),
+                    },
+                    module,
+                ))
+            })
+            .collect()
+    }
+
+    fn parse_literal(
+        &self,
+        parent: File,
+        site: TextSize,
+        text: &str,
+        inherited_flags: u32,
+    ) -> Result<ParsedLiteral, String> {
+        let text = crate::normalize_source(text, crate::SourceKind::Command)?;
+        let input = imre_ast::indentation::prepare(&text);
+        super::check_source_complexity(&input.text)
+            .map_err(|error| format!("<string>: {error}"))?;
+        // Virtual files do not introduce importable modules into the application's search
+        // path. Only this parent occurrence at this exact source revision can reuse its File.
+        let mut identity = blake3::Hasher::new();
+        let parent_path = parent.path(&self.db).as_str().as_bytes();
+        identity.update(&(parent_path.len() as u64).to_le_bytes());
+        identity.update(parent_path);
+        identity.update(&u32::from(site).to_le_bytes());
+        identity.update(text.as_bytes());
+        let key = format!("imre/exec/{}.py", identity.finalize().to_hex());
+        let key = SystemVirtualPath::new(&key);
+        let file = self
+            .db
+            .files
+            .try_virtual_file(key)
+            .unwrap_or_else(|| {
+                self.db
+                    .system
+                    .fs()
+                    .write_virtual_file(key, input.text.as_bytes());
+                self.db.files.virtual_file(&self.db, key)
+            })
+            .file();
+        let (parsed, _) =
+            self.checked_parse(file, "<string>", &text, &input, crate::SourceKind::Command)?;
+        Ok(ParsedLiteral::new(
+            file,
+            text.into_owned(),
+            parsed,
+            inherited_flags,
+        ))
+    }
+
+    /// Check the resolved nested operations in their originating project database.
+    pub(crate) fn check_literal(&self, source: &ParsedLiteral) -> Result<(), String> {
+        let path = Path::new("<string>");
+        let file = source.file;
+        let parsed = &source.parsed;
+        let text = source.text.as_str();
+        let body = &parsed.syntax().body;
+        if let Some(issue) = crate::dynamic::ModuleSyntaxError::in_body(text, body) {
+            return Err(Diagnostic::at(text, &issue.range, issue.message)
+                .with_path(path)
+                .to_string());
+        }
+        if let Some(error) = self.semantic_syntax_error(file) {
+            return Err(
+                Diagnostic::at(text, &error.range, format!("SyntaxError: {error}"))
+                    .with_path(path)
+                    .to_string(),
+            );
+        }
+        let model = SemanticModel::new(&self.db, self.db.program_file(file));
+        let mut visitor = self.execution_visitor(path, parsed, &model);
+        visitor.visit_body(body);
+        visitor
+            .first
+            .map_or(Ok(()), |error| Err(error.report.to_string()))
+    }
+
     fn execution_visitor<'ast, 'db>(
         &'db self,
-        (module, path): (usize, &'ast Path),
+        path: &'ast Path,
         parsed: &'ast ruff_db::parsed::ParsedModuleRef,
         model: &'ast SemanticModel<'db>,
     ) -> Escape<'ast, 'db> {
@@ -855,7 +1071,7 @@ impl Session {
             callbacks: Vec::new(),
             guarded_names: Vec::new(),
             session: self,
-            module,
+            open_providers: &[],
             path,
             first: None,
             captured: Default::default(),
@@ -883,17 +1099,7 @@ impl Session {
             "builtins",
             "compile",
         ) {
-            // A function captures its defining namespace's __builtins__ at creation.
-            // A lexical builtin type alone cannot establish lookup through a replacement.
-            let index = ty_python_core::semantic_index(
-                &self.db,
-                self.db.program_file(self.files[source.0]),
-            );
-            if index
-                .place_table(ty_python_core::FileScopeId::global())
-                .symbol_by_name("__builtins__")
-                .is_some_and(|symbol| symbol.is_bound())
-            {
+            if self.has_custom_builtins(self.files[source.0]) {
                 return None;
             }
             let [source, filename, mode] = operand.arguments.args.as_ref() else {
@@ -939,36 +1145,43 @@ impl Session {
         if !is_stdlib_function_type(model, input.func.inferred_type(model)?, "builtins", "input") {
             return None;
         }
-        let mut check = self.execution_visitor(source, parsed, model);
+        let mut check = self.execution_visitor(source.1, parsed, model);
         check.visit_expr(value);
         check.first.map(|requirement| requirement.report)
     }
 
     pub(super) fn generator_execution_error<'ast, 'db>(
         &'db self,
-        source: (usize, &'ast Path),
+        (_, path): (usize, &'ast Path),
         parsed: &'ast ruff_db::parsed::ParsedModuleRef,
         model: &'ast SemanticModel<'db>,
         function: &'ast StmtFunctionDef,
     ) -> Option<ExecutionRequirement> {
-        let mut visitor = self.execution_visitor(source, parsed, model);
+        let mut visitor = self.execution_visitor(path, parsed, model);
         visitor.visit_body(&function.body);
         visitor.first
     }
 
     pub(crate) fn check_execution_escapes<'a>(
         &self,
-        sources: impl Iterator<Item = (usize, &'a std::path::Path)>,
+        sources: impl Iterator<Item = (usize, &'a std::path::Path)> + Clone,
     ) -> Result<(), String> {
-        self.check_execution_with_imports(sources, CapturedImports::default())
+        self.check_execution_with_imports(
+            sources.map(|(id, path)| (id, path, false)),
+            CapturedImports::default(),
+        )
     }
 
     pub(super) fn check_execution_with_imports<'a>(
         &self,
-        sources: impl Iterator<Item = (usize, &'a Path)>,
+        sources: impl Iterator<Item = (usize, &'a Path, bool)> + Clone,
         mut captures: CapturedImports,
     ) -> Result<(), String> {
-        for (index, path) in sources {
+        let open_providers: Vec<_> = sources
+            .clone()
+            .filter_map(|(id, _, open)| open.then_some(self.files[id]))
+            .collect();
+        for (index, path, _) in sources {
             let file = self.files[index];
             if path.extension().is_some_and(|extension| extension == "pyi") {
                 continue;
@@ -976,7 +1189,8 @@ impl Session {
             let source = self.db.program_file(file);
             let parsed = self.parsed(file);
             let model = SemanticModel::new(&self.db, source);
-            let mut visitor = self.execution_visitor((index, path), &parsed, &model);
+            let mut visitor = self.execution_visitor(path, &parsed, &model);
+            visitor.open_providers = &open_providers;
             if let Some(imports) = captures.remove(&index)
                 && !imports.is_empty()
             {

@@ -22,7 +22,7 @@ pub(super) struct PreparedUnit<'a> {
 pub(super) fn units<'a>(
     files: &'a [ModuleSource],
     builtins: &'a [ModuleSource],
-    mut entry_source: Option<ParsedModule<'a>>,
+    mut entry_source: Option<ParsedModule<'a, 'a>>,
     python_optimization: i32,
     bundled_root: &'a Path,
     module_errors: &'a HashMap<PathBuf, Box<ModuleSyntaxError>>,
@@ -76,6 +76,9 @@ pub(super) fn units<'a>(
                 module,
                 python_optimization,
                 origin,
+                checked
+                    .map(|unit| unit.literal_sites.clone())
+                    .unwrap_or_default(),
             )?)
         };
         Ok(PreparedUnit {
