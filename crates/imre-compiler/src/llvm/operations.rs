@@ -14,6 +14,7 @@ use super::records;
 use super::{Binary, Builtin, CallArgs, Expr, ExprKind, Statement, Type};
 use super::{Emitter, Value, none, small};
 use crate::llvm::registered::{Frame as CheckedFrame, FrameEmitter};
+use ruff_text_size::TextRange;
 
 use super::{Operand, Ownership, body::FunctionBody};
 
@@ -40,6 +41,15 @@ enum ValueUse {
     General,
     IntegerOperand,
     FinalIntegerOperand,
+}
+
+/// Only the checked operation that owns a physical location may pass it to a
+/// failing protocol call. Synthesized operations have no site of their own.
+#[derive(Clone, Copy)]
+enum OperationSite {
+    Placed(TextRange),
+    Registered(TextRange),
+    Unlocated,
 }
 
 impl CheckedValue {
@@ -332,11 +342,12 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         op: Binary,
         left: &CheckedValue,
         right: &CheckedValue,
+        span: Option<[usize; 4]>,
     ) -> CheckedValue {
         let frame = self.python();
         let lhs = frame.materialize(left);
         let rhs = frame.materialize(right);
-        CheckedValue::handle(frame.binary_handles(op, &lhs, &rhs))
+        CheckedValue::handle(frame.op_at(op.protocol(), &[&lhs, &rhs], span))
     }
 
     /// A positive power-of-two remainder fits in the permanent Python integer
@@ -345,6 +356,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         &mut self,
         left: &CheckedValue,
         right: &CheckedValue,
+        span: Option<[usize; 4]>,
         divisor: &Expr,
     ) -> Option<CheckedValue> {
         use super::registered::permanent;
@@ -381,7 +393,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                     .instruction(format!("add i64 {remainder}, {zero}"));
                 CheckedValue::handle(id)
             },
-            |code| code.python_binary(Binary::Modulo, left, right),
+            |code| code.python_binary(Binary::Modulo, left, right, span),
         )
     }
 
@@ -390,6 +402,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         op: Binary,
         left: &CheckedValue,
         right: &CheckedValue,
+        span: Option<[usize; 4]>,
     ) -> CheckedValue {
         let (a, check_a) = self.integer_operand(left);
         let (b, check_b) = self.integer_operand(right);
@@ -431,7 +444,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             Self::body,
             |code, yes, no| code.body().branch(&guard, yes, no),
             exact,
-            |code| code.python_binary(op, left, right),
+            |code| code.python_binary(op, left, right, span),
         )
         .expect("guarded integer arithmetic has a normal result")
     }
@@ -495,7 +508,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         left: &Expr,
         right: &Expr,
         expr: &Expr,
-        fixed_site: bool,
+        site: OperationSite,
         usage: ValueUse,
     ) -> CheckedValue {
         if let Entry::Native(emitter) = &mut self.0
@@ -506,7 +519,9 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         let checked_ints =
             left.checked_operand_type() == Type::Int && right.checked_operand_type() == Type::Int;
         let arithmetic = matches!(op, Binary::Add | Binary::Subtract | Binary::Multiply)
-            && (fixed_site || expr.ty == Type::PythonObject || checked_ints)
+            && (matches!(site, OperationSite::Placed(_))
+                || expr.ty == Type::PythonObject
+                || checked_ints)
             || op == Binary::Modulo && checked_ints;
         let (left_use, right_use) = if arithmetic
             && (op == Binary::Multiply || checked_ints || usage != ValueUse::General)
@@ -516,12 +531,30 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         } else {
             (ValueUse::General, ValueUse::General)
         };
-        let a = self.operand_for(left, left_use);
-        let b = self.operand_for(right, right_use);
+        // On a placed body the cursor follows execution's preorder walk. Read
+        // each operand's range before evaluating it, including an entire nested lhs.
+        let mut operand = |expr, usage| {
+            let range = match &self.0 {
+                Entry::Registered(frame) => frame.operand_range(expr),
+                Entry::Native(_) => None,
+            };
+            (self.operand_for(expr, usage), range)
+        };
+        let (a, lhs) = operand(left, left_use);
+        let (b, rhs) = operand(right, right_use);
+        let span = match (&self.0, site, lhs, rhs) {
+            (
+                Entry::Registered(frame),
+                OperationSite::Placed(range) | OperationSite::Registered(range),
+                Some(lhs),
+                Some(rhs),
+            ) if arithmetic => frame.binary_span(range, lhs, rhs, op),
+            _ => None,
+        };
         let result = if op == Binary::Modulo
             && checked_ints
             && matches!(self.0, Entry::Registered(_))
-            && let Some(value) = self.cached_remainder(&a, &b, right)
+            && let Some(value) = self.cached_remainder(&a, &b, span, right)
         {
             value
         } else if arithmetic {
@@ -529,14 +562,14 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 || checked_ints
                 || a.can_use_integer_arithmetic(left.ty, &b, right.ty, usage)
             {
-                self.integer_arithmetic(op, &a, &b)
+                self.integer_arithmetic(op, &a, &b, span)
             } else {
-                self.python_binary(op, &a, &b)
+                self.python_binary(op, &a, &b, span)
             }
         } else if let (CheckedValue::Native(x, None), CheckedValue::Native(y, None)) = (&a, &b) {
             CheckedValue::owned(self.fixed().binary(op, &x.value, &y.value))
         } else {
-            self.python_binary(op, &a, &b)
+            self.python_binary(op, &a, &b, span)
         };
         self.release_input(a);
         self.release_input(b);
@@ -555,17 +588,30 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 return frame.load_fixed_field(receiver, range);
             }
             return frame.located_value(range, range.start(), |frame| {
-                CheckedBody::registered(frame.reborrow()).emit_operation(expr, true, usage)
+                CheckedBody::registered(frame.reborrow()).emit_operation(
+                    expr,
+                    OperationSite::Placed(range),
+                    usage,
+                )
             });
         }
-        self.emit_operation(expr, false, usage)
+        self.emit_operation(expr, OperationSite::Unlocated, usage)
     }
 
-    fn emit_operation(&mut self, expr: &Expr, fixed_site: bool, usage: ValueUse) -> CheckedValue {
+    fn emit_operation(
+        &mut self,
+        expr: &Expr,
+        site: OperationSite,
+        usage: ValueUse,
+    ) -> CheckedValue {
         match &expr.kind {
             ExprKind::Builtin(Builtin::RegisteredLocation(range, position, ..), operands) => {
                 self.python().located_value(*range, *position, |frame| {
-                    CheckedBody::registered(frame.reborrow()).value_for(&operands[0], usage)
+                    CheckedBody::registered(frame.reborrow()).emit_operation(
+                        &operands[0],
+                        OperationSite::Registered(*range),
+                        usage,
+                    )
                 })
             }
             ExprKind::Int(text) => {
@@ -683,7 +729,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 }
             },
             ExprKind::Binary(op, left, right) => {
-                self.binary_expression(*op, left, right, expr, fixed_site, usage)
+                self.binary_expression(*op, left, right, expr, site, usage)
             }
             ExprKind::Builtin(Builtin::FormatJoin, parts) => match &mut self.0 {
                 Entry::Native(emitter) => CheckedValue::owned(emitter.concat(expr)),

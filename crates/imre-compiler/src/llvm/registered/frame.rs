@@ -534,8 +534,31 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         ))
     }
 
-    pub(crate) fn binary_handles(&mut self, op: ir::Binary, left: &str, right: &str) -> String {
-        self.op(op.protocol(), &[left, right])
+    /// Use the physical gap between these two operands. An earlier operator
+    /// inside a parenthesized child belongs to that child's instruction.
+    pub(in crate::llvm) fn binary_span(
+        &self,
+        range: TextRange,
+        lhs: TextRange,
+        rhs: TextRange,
+        op: ir::Binary,
+    ) -> Option<[usize; 4]> {
+        if !range.contains_range(lhs) || !range.contains_range(rhs) {
+            return None;
+        }
+        let gap = self
+            .positions
+            .text
+            .get(lhs.end().to_usize()..rhs.start().to_usize())?;
+        let operator = gap.trim_start_matches([' ', '\t', '\x0c', ')']);
+        let suffix = operator.strip_prefix(op.protocol())?;
+        if !suffix.trim_matches([' ', '\t', '\x0c', '(']).is_empty() {
+            return None;
+        }
+        let (line, start) = self.positions.line_and_column(range.start());
+        let (end_line, end) = self.positions.line_and_column(range.end());
+        let split = lhs.end().to_usize() + gap.len() - operator.len();
+        (line == end_line).then(|| [line, start, start + (split - range.start().to_usize()), end])
     }
 
     pub(crate) fn op(&mut self, name: &str, args: &[&str]) -> String {

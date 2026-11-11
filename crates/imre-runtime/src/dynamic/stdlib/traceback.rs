@@ -140,34 +140,37 @@ impl<'a> FrameLine<'a> {
             return out;
         }
         let _ = writeln!(out, "    {line}");
-        if let Some([start, split, end]) = self
+        if let Some([start, split, caret_end, end]) = self
             .span
             .filter(|s| i128::from(s.end_line) == self.line)
             .and_then(|s| {
                 let end = s.end as usize;
-                let split = match s.anchor {
-                    TracebackAnchor::Uniform => s.start as usize,
-                    TracebackAnchor::Column(column) => column as usize,
+                let (split, caret_end) = match s.anchor {
+                    TracebackAnchor::Uniform => (s.start as usize, end),
+                    TracebackAnchor::Column(column) => (column as usize, end),
+                    TracebackAnchor::Operator(column) => (column as usize, column as usize + 1),
                     TracebackAnchor::Hidden => return None,
                 };
-                Some([s.start as usize, split, end])
+                Some([s.start as usize, split, caret_end, end])
             })
         {
             let indent = raw.len() - raw.trim_start().len();
-            if let (Some(prefix), Some(primary), Some(secondary)) = (
+            if let (Some(prefix), Some(primary), Some(secondary), Some(trailing)) = (
                 raw.get(indent..start),
                 raw.get(start..split),
-                raw.get(split..end),
+                raw.get(split..caret_end),
+                raw.get(caret_end..end),
             ) && (!primary.is_empty()
                 || !prefix.trim().is_empty()
                 || !raw[end..].trim().is_empty())
             {
                 let _ = writeln!(
                     out,
-                    "    {}{}{}",
+                    "    {}{}{}{}",
                     " ".repeat(display_width(prefix)),
                     "~".repeat(display_width(primary)),
-                    "^".repeat(display_width(secondary))
+                    "^".repeat(display_width(secondary)),
+                    "~".repeat(display_width(trailing))
                 );
             }
         }
