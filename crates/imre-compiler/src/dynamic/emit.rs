@@ -5378,12 +5378,12 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         )
         .unwrap();
         let original = prepared.standalone().unwrap();
-        // One binding creates closing. Normal and exceptional exits each bind cleanup.
+        // Both exits bind cleanup at the same site inside closing.
         assert_eq!(
             original.1.matches(" = private constant %code_site").count(),
             2
         );
-        assert_eq!(original.1.matches("call i64 @imre_dyn_define(").count(), 3);
+        assert_eq!(original.1.matches("call i64 @imre_dyn_define(").count(), 2);
         let closing = prepared.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
             .unwrap();
