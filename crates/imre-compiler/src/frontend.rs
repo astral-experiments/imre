@@ -190,7 +190,6 @@ pub(crate) use caller_cache::CallerCache;
 use calls::{Parameter, ParameterKind, parameter};
 pub(crate) use calls::{fixed_call_arguments, known_declared_argument, scalar_literal};
 use comprehensions::Helpers;
-pub(crate) use comprehensions::target_names;
 pub(crate) use function_text::{docstring, docstring_literal};
 use module_values::{Initialization, ModuleValues};
 
@@ -5387,29 +5386,7 @@ impl<'a> Checker<'a> {
             };
             self.bind_pattern(target, item)?
         };
-        fn remove_target_facts(
-            target: &ast::Expr,
-            names: &HashMap<String, usize>,
-            facts: &mut assignments::Narrowed,
-        ) {
-            if let ast::Expr::Name(name) = target {
-                if let Some(slot) = names.get(name.id.as_str()) {
-                    facts.remove_mut(slot);
-                }
-            } else if let ast::Expr::Starred(starred) = target {
-                remove_target_facts(&starred.value, names, facts);
-            } else if let Some(elements) = pattern_elements(target) {
-                for element in elements {
-                    remove_target_facts(element, names, facts);
-                }
-            }
-            for name in narrowing::expression_assignments(target) {
-                if let Some(slot) = names.get(&name) {
-                    facts.remove_mut(slot);
-                }
-            }
-        }
-        remove_target_facts(target, &self.names, &mut facts);
+        assignments::forget_binding_writes(&mut facts, &bindings);
         if let Some((ready, key, value)) = pull {
             let slots = std::iter::once(key).chain(value);
             cleanup.extend(slots.clone());
