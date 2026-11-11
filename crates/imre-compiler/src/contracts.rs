@@ -797,7 +797,7 @@ impl Builtin {
             | Self::SysOriginalOutput { .. }
             | Self::SysStdoutSet
             | Self::SysStdoutDelete
-            | Self::TextOptionalReceiver
+            | Self::RequireObjectReceiver
             | Self::TextMetadata { .. }
             | Self::SysHasStdout
             | Self::BuiltinsLast

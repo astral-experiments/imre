@@ -1632,7 +1632,7 @@ pub(crate) enum Builtin {
     },
     SysStdoutSet,
     SysStdoutDelete,
-    TextOptionalReceiver,
+    RequireObjectReceiver,
     TextMetadata {
         errors: bool,
     },

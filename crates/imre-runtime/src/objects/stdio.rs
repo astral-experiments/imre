@@ -59,14 +59,14 @@ pub extern "C" fn imre_sys_stdout() -> *const Object {
 }
 
 /// # Safety
-/// A nonzero optional word is a rooted native file, and name is a rooted string.
+/// A nonzero optional word points to a rooted Object, and name is a rooted string.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_text_optional_receiver(
     word: usize,
     name: *const super::Str,
 ) -> *const Object {
     if word != 0 {
-        // SAFETY: checked optional TextIO stores the file handle directly.
+        // SAFETY: an optional Object stores its rooted handle directly.
         ObjectOwner::into_raw(unsafe { ObjectOwner::acquire_word(word) })
     } else {
         // SAFETY: the caller roots the attribute's name for the diagnostic.

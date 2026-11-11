@@ -231,13 +231,7 @@ impl Checker<'_> {
                     | "fileno"
             )
         {
-            Expr {
-                ty: stream,
-                kind: ExprKind::Builtin(
-                    Builtin::TextOptionalReceiver,
-                    vec![value, unpacking::string(name)],
-                ),
-            }
+            records::require_object_receiver(value, stream, name)
         } else {
             value
         }

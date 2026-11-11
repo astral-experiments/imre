@@ -575,7 +575,7 @@ impl Checker<'_> {
         }
         let layout = self.capture_layout(&receiver);
         let receiver = if self.types.payload(receiver.ty) == Some(Type::RegexMatch) {
-            self.require_attribute_receiver(receiver, Type::RegexMatch, attribute)
+            records::require_object_receiver(receiver, Type::RegexMatch, method)
         } else {
             receiver
         };
