@@ -193,6 +193,18 @@ fn checked_subtraction_selects_integer_arithmetic_in_both_calling_conventions() 
 }
 
 #[test]
+fn integer_literal_handle_is_only_loaded_on_the_protocol_edge() {
+    let mut output = emit_captured_body("def scale(n: int, send):\n    send(n * 31415927 + 17)\n");
+    let literal = output.data(b"31415927");
+    let body = &output.functions;
+    let (_, after_product) = body.split_once("call i64 @int_mul(").unwrap();
+    let load = format!("ptr {literal}, i64 8)");
+    assert_eq!(body.matches(&load).count(), 1);
+    let (_, protocol) = after_product.split_once(&load).unwrap();
+    assert!(protocol.contains("call i64 @imre_dyn_op_at("));
+}
+
+#[test]
 fn checked_integer_remainder_keeps_its_operation_with_a_registered_sibling() {
     let mut output = emit_captured_body(concat!(
         "def remainder(a: int, b: int) -> int:\n    return a % b\n",

@@ -832,7 +832,7 @@ impl Frame<'_, '_, '_> {
         let handle = match result {
             CheckedValue::Handle { id, .. } => id.as_str(),
             CheckedValue::IntOrHandle { fallback, .. } => fallback.as_str(),
-            CheckedValue::Native(..) => "0",
+            CheckedValue::Native(..) | CheckedValue::IntegerLiteral(_) => "0",
         };
         self.code.keep_operands(&mark, handle, "0");
     }
@@ -1014,7 +1014,7 @@ impl Frame<'_, '_, '_> {
         let handle = match value {
             CheckedValue::Handle { id, .. } => Some(id),
             CheckedValue::IntOrHandle { fallback, .. } => Some(fallback),
-            CheckedValue::Native(..) => None,
+            CheckedValue::Native(..) | CheckedValue::IntegerLiteral(_) => None,
         };
         if let Some(handle) = handle {
             self.code.discard_handle(handle);
@@ -1387,6 +1387,7 @@ impl Frame<'_, '_, '_> {
     pub(crate) fn materialize(&mut self, value: &CheckedValue) -> String {
         match value {
             CheckedValue::Handle { id, .. } => id.clone(),
+            CheckedValue::IntegerLiteral(n) => self.code.integer(*n),
             CheckedValue::IntOrHandle {
                 word,
                 fallback,

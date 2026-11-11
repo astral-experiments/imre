@@ -21,6 +21,8 @@ use super::{Operand, Ownership, body::FunctionBody};
 /// original Python protocol result on the other edge. Zero is not an Int word.
 pub(crate) enum CheckedValue {
     Native(Operand, Option<usize>),
+    /// A terminal integer operand only needs a Python object on the protocol edge.
+    IntegerLiteral(i64),
     Handle {
         id: String,
         exact_word: Option<String>,
@@ -36,6 +38,7 @@ pub(crate) enum CheckedValue {
 enum ValueUse {
     General,
     IntegerOperand,
+    FinalIntegerOperand,
 }
 
 impl CheckedValue {
@@ -72,8 +75,8 @@ impl CheckedValue {
             (Self::Handle { exact_word: a, .. }, Self::Handle { exact_word: b, .. }) => {
                 match (a, b) {
                     (Some(_), Some(_)) => true,
-                    (Some(_), None) => right == Type::Int || usage == ValueUse::IntegerOperand,
-                    (None, Some(_)) => left == Type::Int || usage == ValueUse::IntegerOperand,
+                    (Some(_), None) => right == Type::Int || usage != ValueUse::General,
+                    (None, Some(_)) => left == Type::Int || usage != ValueUse::General,
                     (None, None) => left == Type::Int || right == Type::Int,
                 }
             }
@@ -96,7 +99,7 @@ impl CheckedValue {
         match self {
             Self::Native(_, owner) => *owner,
             Self::IntOrHandle { owner, .. } => Some(*owner),
-            Self::Handle { .. } => None,
+            Self::Handle { .. } | Self::IntegerLiteral(_) => None,
         }
     }
 
@@ -261,7 +264,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
 
     fn release_input(&mut self, value: CheckedValue) {
         match value {
-            CheckedValue::Handle { .. } => {}
+            CheckedValue::Handle { .. } | CheckedValue::IntegerLiteral(_) => {}
             CheckedValue::Native(operand, None) => self.fixed().release_operand(&operand),
             CheckedValue::Native(_, Some(owner)) | CheckedValue::IntOrHandle { owner, .. } => {
                 self.python().release_word(owner);
@@ -272,6 +275,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
     fn integer_operand(&mut self, value: &CheckedValue) -> (String, bool) {
         match value {
             CheckedValue::Native(v, _) => (v.value.operand.clone(), false),
+            CheckedValue::IntegerLiteral(n) => (small(*n).operand, false),
             CheckedValue::Handle { id, exact_word } => match exact_word {
                 Some(word) => (word.clone(), false),
                 None => (self.python().exact_word(id), true),
@@ -467,15 +471,16 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         let arithmetic = matches!(op, Binary::Add | Binary::Subtract | Binary::Multiply)
             && (fixed_site || expr.ty == Type::PythonObject || checked_ints)
             || op == Binary::Modulo && checked_ints;
-        let operand_use = if arithmetic
-            && (op == Binary::Multiply || checked_ints || usage == ValueUse::IntegerOperand)
+        let (left_use, right_use) = if arithmetic
+            && (op == Binary::Multiply || checked_ints || usage != ValueUse::General)
         {
-            ValueUse::IntegerOperand
+            // The left operand must be ready before the right can call Python.
+            (ValueUse::IntegerOperand, ValueUse::FinalIntegerOperand)
         } else {
-            ValueUse::General
+            (ValueUse::General, ValueUse::General)
         };
-        let a = self.operand_for(left, operand_use);
-        let b = self.operand_for(right, operand_use);
+        let a = self.operand_for(left, left_use);
+        let b = self.operand_for(right, right_use);
         let result = if op == Binary::Modulo
             && checked_ints
             && matches!(self.0, Entry::Registered(_))
@@ -534,7 +539,16 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                             .and_then(exact_integer_literal)
                             .unwrap_or_else(|| emitter.pooled_literal(text.as_bytes(), Type::Int)),
                     ),
-                    Entry::Registered(frame) => frame.integer(text, integer),
+                    Entry::Registered(frame) => {
+                        if usage == ValueUse::FinalIntegerOperand
+                            && let Some(n) = expr.tagged_integer_literal()
+                            && super::registered::permanent::small_integer_id(n).is_none()
+                        {
+                            CheckedValue::IntegerLiteral(n)
+                        } else {
+                            frame.integer(text, integer)
+                        }
+                    }
                 }
             }
             ExprKind::Str(text) => match &mut self.0 {
