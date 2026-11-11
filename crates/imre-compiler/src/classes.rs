@@ -42,7 +42,7 @@ pub(crate) struct Classes {
     /// Data members only need rebindable storage when some source writes that attribute.
     pub(crate) attribute_writes: HashMap<String, HashSet<Type>>,
     pub(crate) exceptions: HashMap<DefinitionId, u32>,
-    pub(crate) registered_exceptions: HashSet<DefinitionId>,
+    pub(crate) registered_classes: HashSet<DefinitionId>,
     pub(crate) exception_declarations: Vec<crate::types::NamedException>,
     pub(crate) ids: HashMap<DefinitionId, usize>,
 }
@@ -287,7 +287,9 @@ impl Classes {
             .iter()
             .map(|(def, node)| (*def, node.as_ref()))
             .collect::<Vec<_>>();
-        let definitions = inheritance::resolve(graph, &nodes, &ids, &resolved)?;
+        let (definitions, mut registered_classes) =
+            inheritance::resolve(graph, &nodes, &mut ids, &resolved)?;
+        registered_classes.extend(resolved.registered);
         // An inner class uses the object runtime, but every fixed class must validate first.
         if let Some(error) = graph.class_layout_error.borrow().as_ref() {
             return Err(error.clone());
@@ -306,7 +308,7 @@ impl Classes {
             attribute_writes,
             ids,
             exceptions: resolved.ids,
-            registered_exceptions: resolved.registered,
+            registered_classes,
             exception_declarations: resolved.named,
         })
     }
@@ -499,7 +501,7 @@ fn collect_class(
     parents: [Option<(usize, &Class)>; 2],
     declarations: &exceptions::Declarations,
     decorators: &mut DeferredMethodDecorators,
-) -> Result<Class, Diagnostic> {
+) -> Result<Option<Class>, Diagnostic> {
     let exception_layout = declarations.layouts.contains(&definition);
     let exceptions = &declarations.ids;
     let base = parents[0];
@@ -1285,6 +1287,7 @@ fn collect_class(
             }
         }
     }
+    let mut open_parameter_field = false;
     if !is_enum
         && dataclass.is_none()
         && let Some(init) = initializer
@@ -1293,7 +1296,8 @@ fn collect_class(
         inheritance::annotated_fields(graph, definition.module, &mut methods[init], &mut fields);
         if infer {
             init_mappings::infer(graph, definition.module, init, &mut methods, &mut fields);
-            inheritance::infer_fields(graph, definition.module, &methods[init], &mut fields);
+            open_parameter_field =
+                inheritance::infer_fields(graph, definition.module, &methods[init], &mut fields);
             // A write to inherited or local class data creates an instance shadow.
             fields.retain(|f| {
                 !matches!(
@@ -1442,6 +1446,9 @@ fn collect_class(
         // A proven forwarding exception constructor writes each field through its plan.
         && forwarder.is_none()
     {
+        if open_parameter_field && fields.is_empty() && base.is_none() && !exception_layout {
+            return Ok(None);
+        }
         init_exposes_self |= check_initializer(
             module,
             &methods[initializer],
@@ -1471,7 +1478,7 @@ fn collect_class(
             |name| hook_writes(name, None),
         )?;
     }
-    Ok(Class {
+    Ok(Some(Class {
         definition,
         skip_decorators,
         forwarder,
@@ -1495,7 +1502,7 @@ fn collect_class(
         static_bindings,
         generated_initializer,
         initializer,
-    })
+    }))
 }
 
 /// Recognize a fixed property declared from locally named accessors.

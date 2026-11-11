@@ -785,7 +785,7 @@ impl Checker<'_> {
                 if self
                     .classes
                     .declarations
-                    .registered_exceptions
+                    .registered_classes
                     .contains(&definition)
                 {
                     return Some(Binding::RegisteredClass(definition));
