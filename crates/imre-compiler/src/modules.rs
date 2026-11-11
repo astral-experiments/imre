@@ -2857,6 +2857,7 @@ pub(crate) struct SourceModule {
     /// Physical text when newline normalization changed the source for analysis.
     original_source: Option<Box<str>>,
     doctest_documents: std::sync::OnceLock<Vec<doctest::Docstring>>,
+    registered_values: std::sync::OnceLock<Box<crate::frontend::RegisteredModuleSource>>,
     pub(crate) doctest_prompts: Vec<doctest::Prompt>,
     pub(crate) bundled: bool,
     /// The registered source initializer publishes this module's live attributes.
@@ -2891,6 +2892,12 @@ pub(crate) struct SourceModule {
 }
 
 impl SourceModule {
+    /// Share the module's import names, string escapes, and template tokens across its function bodies.
+    pub(crate) fn registered_values(&self) -> &crate::frontend::RegisteredModuleSource {
+        self.registered_values
+            .get_or_init(|| Box::new(crate::frontend::RegisteredModuleSource::new(self)))
+    }
+
     pub(crate) fn original_source(&self) -> &str {
         self.original_source.as_deref().unwrap_or(&self.source)
     }
@@ -4853,6 +4860,7 @@ impl<'a> Loader<'a> {
             source,
             original_source,
             doctest_documents: Default::default(),
+            registered_values: Default::default(),
             doctest_prompts: Vec::new(),
             bundled: false,
             registered_namespace: false,

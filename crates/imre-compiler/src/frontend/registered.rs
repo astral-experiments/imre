@@ -251,7 +251,6 @@ pub(super) fn generator_body(
     module: &crate::modules::SourceModule,
     definition: &ast::StmtFunctionDef,
     optimization: i32,
-    source: &values::ModuleSource,
 ) -> Option<RegisteredFunction> {
     let physical = module.parsed.syntax().body.iter().find_map(|stmt| {
         stmt.as_function_def_stmt()
@@ -263,7 +262,7 @@ pub(super) fn generator_body(
     let operations = HashMap::new();
     let preparation = SuitePreparation::new(
         &operations,
-        source.context(&module.source),
+        module.registered_values().context(&module.source),
         optimization == 0,
     );
     preparation
@@ -274,13 +273,12 @@ pub(super) fn generator_body(
         .map(|suite| suite.checked)
 }
 
-pub(super) fn lower_definition<'a>(
-    mut checker: Checker<'a>,
+pub(super) fn lower_definition(
+    mut checker: Checker<'_>,
     definition: &ast::StmtFunctionDef,
     signature: &Signature,
-    literals: &'a values::ModuleSource,
 ) -> Result<RegisteredFunction, String> {
-    checker.registered = Some(literals);
+    checker.registered = Some(checker.graph.modules[checker.module].registered_values());
     let source = checker.source;
     let helpers = checker.helpers;
     let first_helper = helpers.len();
@@ -424,7 +422,6 @@ pub(super) fn capture(
     globals: &ModuleValues,
     mode: Capture<'_>,
 ) {
-    let mut sources = HashMap::new();
     let mut pending = inference.pending_bodies.borrow_mut();
     let owners = pending.get_or_insert_with(|| {
         // Inference can request recovery before signatures settle.
@@ -484,10 +481,7 @@ pub(super) fn capture(
         // The fixed checker validated this physical signature in the settled round.
         checker.checked_callback_effects =
             solved && matches!(mode, Capture::Entry(checked) if checked.contains(&signature.id));
-        let literals = sources
-            .entry(id)
-            .or_insert_with(|| values::ModuleSource::new(module));
-        let lower = || lower_definition(checker, function, &signature, literals).ok();
+        let lower = || lower_definition(checker, function, &signature).ok();
         let body = if solved {
             graph.try_registered_body(id, lower)
         } else {

@@ -133,8 +133,9 @@ pub(crate) use registered::type_alias_body;
 #[cfg(test)]
 pub(crate) use registered::values::registered_value;
 pub(crate) use registered::values::{
-    RegisteredSource, exec_literal_text, fixed_exec_literal, literal_replacements,
-    module_literal_replacements, packed_arguments, push_codepoints,
+    ModuleSource as RegisteredModuleSource, RegisteredSource, exec_literal_text,
+    fixed_exec_literal, literal_replacements, module_literal_replacements, packed_arguments,
+    push_codepoints,
 };
 pub(crate) use registered::{
     AnnotationProvider, CheckedProvider, DeclarationSite, DeferredAnnotation, FrameInputs,
@@ -1165,7 +1166,6 @@ fn lower_graph(
             capture();
         }
     };
-    let mut literals = HashMap::new();
     if needs_registered_entry {
         // A checked body or a real function-value read can establish the registered binding.
         globals.missing_bindings.borrow_mut().extend(
@@ -1278,10 +1278,7 @@ fn lower_graph(
             // unused, unresolved signature cannot select this calling convention.
             checker.bound_function_imports =
                 signature.registered_frame() && inference.used_as_value(signature.id);
-            let literals = literals
-                .entry(*module_id)
-                .or_insert_with(|| registered::values::ModuleSource::new(module));
-            match registered::lower_definition(checker, definition, signature, literals) {
+            match registered::lower_definition(checker, definition, signature) {
                 Ok(body) if accepted => {
                     graph.register_function(*module_id, definition.start(), body);
                     globals.missing_bindings.borrow_mut().remove(&signature.id);
