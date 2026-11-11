@@ -55,8 +55,8 @@ impl ValueUse {
 /// Only the checked operation that owns a physical location may pass it to a
 /// failing protocol call. Synthesized operations have no site of their own.
 #[derive(Clone, Copy)]
-enum OperationSite {
-    Placed(TextRange),
+enum OperationSite<'s> {
+    Placed(TextRange, Option<&'s crate::frontend::FixedField>),
     Registered(TextRange),
     Unlocated,
 }
@@ -623,7 +623,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         left: &Expr,
         right: &Expr,
         expr: &Expr,
-        site: OperationSite,
+        site: OperationSite<'_>,
         usage: ValueUse,
     ) -> CheckedValue {
         if let Entry::Native(emitter) = &mut self.0
@@ -634,7 +634,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         let checked_ints =
             left.checked_operand_type() == Type::Int && right.checked_operand_type() == Type::Int;
         let arithmetic = matches!(op, Binary::Add | Binary::Subtract | Binary::Multiply)
-            && (matches!(site, OperationSite::Placed(_))
+            && (matches!(site, OperationSite::Placed(..))
                 || expr.ty == Type::PythonObject
                 || checked_ints)
             || op == Binary::Modulo && checked_ints;
@@ -659,7 +659,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         let span = match (&self.0, site, lhs, rhs) {
             (
                 Entry::Registered(frame),
-                OperationSite::Placed(range) | OperationSite::Registered(range),
+                OperationSite::Placed(range, _) | OperationSite::Registered(range),
                 Some(lhs),
                 Some(rhs),
             ) if arithmetic => frame.binary_span(range, lhs, rhs, op),
@@ -698,15 +698,11 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         if let Entry::Registered(frame) = &mut self.0
             && let Some(range) = frame.next_fixed_site()
         {
-            if let ExprKind::Field(receiver, _) = &expr.kind {
-                return frame.load_fixed_field(receiver, range);
-            }
-            return frame.located_value(range, range.start(), |frame| {
-                CheckedBody::registered(frame.reborrow()).emit_operation(
-                    expr,
-                    OperationSite::Placed(range),
-                    usage,
-                )
+            let field = frame.fixed_field(range);
+            let position = field.map_or(range.start(), |field| field.position);
+            let site = OperationSite::Placed(range, field);
+            return frame.located_value(range, position, |frame| {
+                CheckedBody::registered(frame.reborrow()).emit_operation(expr, site, usage)
             });
         }
         self.emit_operation(expr, OperationSite::Unlocated, usage)
@@ -715,7 +711,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
     fn emit_operation(
         &mut self,
         expr: &Expr,
-        site: OperationSite,
+        site: OperationSite<'_>,
         usage: ValueUse,
     ) -> CheckedValue {
         match &expr.kind {
@@ -882,7 +878,54 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 Entry::Native(emitter) => CheckedValue::owned(emitter.builtin(op, args, expr.ty)),
                 Entry::Registered(frame) => frame.builtin(op, args),
             },
-            _ => CheckedValue::owned(self.fixed().other_expression(expr)),
+            ExprKind::Present(value) => {
+                let emitter = self.fixed();
+                let value = emitter.operand(value);
+                let value = emitter.own_operand(value);
+                CheckedValue::owned(emitter.present(value, expr.ty))
+            }
+            ExprKind::Absent(value) => {
+                let emitter = self.fixed();
+                let value = emitter.expr(value);
+                emitter.release(&value);
+                CheckedValue::owned(Value {
+                    ty: expr.ty,
+                    ..none()
+                })
+            }
+            ExprKind::Unwrap(value) => {
+                CheckedValue::owned(self.fixed().unwrap_optional(value, expr.ty))
+            }
+            ExprKind::Call(id, args) => {
+                CheckedValue::owned(self.fixed().direct_call(*id, args, expr.ty))
+            }
+            ExprKind::Callable { function, receiver } => CheckedValue::owned(
+                self.fixed()
+                    .callable_value(expr.ty, *function, receiver.as_deref()),
+            ),
+            ExprKind::Construct { initializer, args } => {
+                CheckedValue::owned(self.fixed().construct_record(expr.ty, *initializer, args))
+            }
+            ExprKind::Exception { kind, message } => {
+                CheckedValue::owned(self.fixed().exception_value(*kind, message.as_deref()))
+            }
+            ExprKind::Field(receiver, index) => {
+                if let OperationSite::Placed(range, field) = site {
+                    let field = field.expect("placed field has a physical attribute");
+                    return self.python().load_fixed_field(receiver, range, &field.name);
+                }
+                let emitter = self.fixed();
+                let value = if let Some(snapshot) = emitter.struct_snapshot(receiver) {
+                    let ptr = emitter.field_pointer(&snapshot, *index);
+                    emitter.field_value(&ptr, expr.ty)
+                } else {
+                    let receiver = emitter.immediate_receiver(receiver);
+                    let value = emitter.get_field(&receiver.value, *index, expr.ty);
+                    emitter.release_operand(&receiver);
+                    value
+                };
+                CheckedValue::owned(value)
+            }
         }
     }
 
