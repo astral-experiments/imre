@@ -482,16 +482,15 @@ class NonCallableMock(_FixedMock):
             raise AttributeError(name)
         if methods is None and not self._mock_unsafe:
             _check_child_name(name)
-        if self._mock_children.get(name) is _deleted:
+        child = self._mock_children.get(name)
+        if child is _deleted:
             raise AttributeError(name)
         members = getattr(self._node, "_autospec_members", {})
         if name in members:
-            value, eat_self = members[name]
-            child = _make_autospec(value, self._mock_strict, False, eat_self=eat_self)
-            if isinstance(value, (FunctionType, MethodType)):
-                # A spec method has a return value even if first read after seal().
-                child.return_value = child._get_child_mock()
-            self._adopt(child, "." + name)
+            if child is None:
+                value, eat_self = members[name]
+                child = _make_autospec(value, self._mock_strict, False, eat_self=eat_self)
+                self._adopt(child, "." + name)
             object.__setattr__(self, name, child)
             if self._mock_sealed:
                 seal(child)
@@ -967,6 +966,19 @@ def _mock_signature(mock, spec, as_instance, eat_self):
         return None
 
 
+def _autospec_mock(cls, spec, strict, as_instance, eat_self, name=None, wraps=None):
+    spec_arg = {"spec_set": spec} if strict else {"spec": spec}
+    mock = cls(name=name, wraps=wraps, _spec_as_instance=as_instance, _eat_self=eat_self, **spec_arg)
+    # A descriptor can return a different callable for each lookup. The spec
+    # constructor resolved the matcher; resolve the invocation guard separately
+    # before reading child attributes, as create_autospec does.
+    call_sig = _mock_signature(mock, spec, as_instance, isinstance(spec, type) or eat_self)
+    if call_sig is not None:
+        mock._node._call_signature = call_sig
+        type(mock).__signature__ = call_sig
+    return mock
+
+
 def _make_autospec(spec, strict, as_instance, name=None, *, eat_self=False, wraps=None):
     from dataclasses import fields, is_dataclass
     from inspect import getattr_static, iscoroutinefunction, isdatadescriptor
@@ -989,19 +1001,12 @@ def _make_autospec(spec, strict, as_instance, name=None, *, eat_self=False, wrap
         cls = AsyncMock
     elif not _callable(spec) or (is_class and as_instance and not _instance_callable(spec)):
         cls = NonCallableMagicMock
-    spec_arg = {"spec_set": spec} if strict else {"spec": spec}
-    mock = cls(name=name, wraps=wraps, _spec_as_instance=as_instance, _eat_self=eat_self, **spec_arg)
-    # A descriptor can return a different callable for each lookup. The spec
-    # constructor resolved the matcher; resolve the invocation guard separately
-    # before reading child attributes, as create_autospec does.
-    call_sig = _mock_signature(mock, spec, as_instance, is_class or eat_self)
-    if call_sig is not None:
-        mock._node._call_signature = call_sig
-        type(mock).__signature__ = call_sig
+    mock = _autospec_mock(cls, spec, strict, as_instance, eat_self, name, wraps)
     if is_class and not as_instance:
         mock.return_value = _make_autospec(spec, strict, True, eat_self=True)
     if spec is not None:
-        # Capture the original attributes now; build their mocks on first access.
+        # Capture each attribute once. Methods have signatures even before
+        # attribute access, including on the class mock of a returned instance.
         members = {}
         for entry in entries:
             if entry.startswith("__") and entry.endswith("__"):
@@ -1014,6 +1019,11 @@ def _make_autospec(spec, strict, as_instance, name=None, *, eat_self=False, wrap
             skip_receiver = (is_class and isinstance(value, FunctionType)
                              and isinstance(getattr_static(spec, entry, value), FunctionType))
             members[entry] = (value, skip_receiver)
+            if isinstance(value, (FunctionType, MethodType)):
+                child_cls = AsyncMock if iscoroutinefunction(value) else MagicMock
+                child = _autospec_mock(child_cls, value, strict, False, skip_receiver)
+                child.return_value = child._get_child_mock()
+                mock._adopt(child, "." + entry)
         # Fields without defaults need not appear in dir(spec). Their declared
         # types supply the instance attributes' specs.
         for field in instance_fields:
