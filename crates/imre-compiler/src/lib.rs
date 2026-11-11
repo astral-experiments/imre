@@ -2434,6 +2434,29 @@ def present_after_exhaustion(value: int | None) -> int:
     }
 
     #[test]
+    fn an_installed_exception_class_read_needs_a_python_frame() {
+        let directory = tempfile::tempdir().unwrap();
+        let installed = tempfile::tempdir().unwrap();
+        let entry = directory.path().join("main.py");
+        std::fs::write(
+            &entry,
+            "from helper import project\nprint(project(ValueError('test'), 3))\n",
+        )
+        .unwrap();
+        std::fs::write(
+            installed.path().join("helper.py"),
+            "def project(error: BaseException, n: int) -> int:\n    module = type(error).__module__\n    return n * 31415927\n",
+        )
+        .unwrap();
+        let options = CompileOptions {
+            extension_paths: vec![installed.path().to_owned()],
+            ..CompileOptions::default()
+        };
+        let program = super::compile_file(&entry, None, &options).unwrap();
+        assert!(program.llvm_ir.contains("call ptr @imre_dyn_new("));
+    }
+
+    #[test]
     fn a_caught_exception_keeps_its_runtime_class_in_a_file() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("main.py");
