@@ -247,7 +247,9 @@ pub(crate) fn frame_inputs(
                     matches!(op, UnaryOp::Not | UnaryOp::Invert | UnaryOp::UAdd)
                 }
             }
-            ExprKind::Builtin(Builtin::RegisteredSubscript(..), operands) => operands.len() == 2,
+            ExprKind::Builtin(Builtin::RegisteredSubscript(..) | Builtin::ListGet(_), operands) => {
+                operands.len() == 2
+            }
             ExprKind::Builtin(Builtin::RegisteredName(_), scope) => scope.len() <= 1,
             ExprKind::Builtin(
                 Builtin::RegisteredEllipsis
@@ -1030,11 +1032,6 @@ impl Frame<'_, '_, '_> {
                         let value = self.evaluate_handle(value);
                         self.code.op("truth", &[&value])
                     }
-                    Get([base, key]) => {
-                        let base = self.evaluate_handle(base);
-                        let key = self.evaluate_handle(key);
-                        self.code.op("get", &[&base, &key])
-                    }
                     Insert([out, item]) => {
                         let out = self.evaluate_handle(out);
                         let (op, item) = match sequences::spread(item) {
@@ -1294,20 +1291,6 @@ impl Frame<'_, '_, '_> {
                 let right = self.evaluate_handle(right);
                 self.code.inplace(op, &left, &right)
             }
-            (Builtin::RegisteredSubscript(range, base_end), [base, key]) => {
-                let base = self.evaluate_handle(base);
-                let key = self.read_key(key);
-                let read = |frame: &mut Self| frame.read_item(&base, key, *range, *base_end);
-                // An injected exception belongs to the parked key. Once it returns,
-                // the read itself can fail across several source lines.
-                if self.native_suspension
-                    && self.positions.line(range.start()) != self.positions.line(range.end())
-                {
-                    self.with_source_range(*range, read)
-                } else {
-                    read(self)
-                }
-            }
             _ => unreachable!("unsupported registered operation"),
         };
         CheckedValue::handle(handle)
@@ -1407,7 +1390,12 @@ impl Frame<'_, '_, '_> {
         })
     }
 
-    fn read_key(&mut self, key: &Expr) -> ReadKey {
+    pub(super) fn slice_subscript(
+        &mut self,
+        op: &Builtin,
+        base: &str,
+        key: &Expr,
+    ) -> Option<CheckedValue> {
         if let ExprKind::Builtin(Builtin::RegisteredLocation(..), located) = &key.kind
             && let [value] = located.as_slice()
         {
@@ -1423,20 +1411,37 @@ impl Frame<'_, '_, '_> {
                 let start = self.evaluate_handle(lower);
                 let stop = self.evaluate_handle(upper);
                 let slot = constant.map(|value| self.constant_slot(value.clone()));
-                return ReadKey::Bounds { start, stop, slot };
+                return Some(self.subscript_at(op, |frame, span| {
+                    frame.read_slice(base, &start, &stop, slot.as_deref(), span)
+                }));
             }
         }
-        ReadKey::Object(self.evaluate_handle(key))
+        None
     }
-}
 
-pub(crate) enum ReadKey {
-    Object(String),
-    Bounds {
-        start: String,
-        stop: String,
-        slot: Option<String>,
-    },
+    pub(super) fn subscript_at(
+        &mut self,
+        op: &Builtin,
+        read: impl FnOnce(&mut Self, Option<[usize; 4]>) -> String,
+    ) -> CheckedValue {
+        let Builtin::RegisteredSubscript(range, base_end) = op else {
+            return CheckedValue::handle(read(self, None));
+        };
+        let read = |frame: &mut Self| {
+            let span = frame.expression_range_span(*range, *base_end, b'[');
+            read(frame, span)
+        };
+        // An injected exception belongs to the parked key. Once it returns,
+        // the read itself can fail across several source lines.
+        let value = if self.native_suspension
+            && self.positions.line(range.start()) != self.positions.line(range.end())
+        {
+            self.with_source_range(*range, read)
+        } else {
+            read(self)
+        };
+        CheckedValue::handle(value)
+    }
 }
 
 impl RegisteredFrame<'_, '_> {

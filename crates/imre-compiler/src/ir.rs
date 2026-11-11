@@ -1452,7 +1452,6 @@ pub(crate) enum IterationOperands<'a> {
     Iter(&'a Expr, IteratorOp),
     PairNeedsRow(&'a Expr),
     Truth(&'a Expr),
-    Get(&'a [Expr; 2]),
     Insert(&'a [Expr; 2]),
     Unpack(
         &'a Expr,
@@ -1481,7 +1480,6 @@ impl Builtin {
             Self::RegisteredIter(op) => one().map(|value| Iter(value, *op)),
             Self::RegisteredPairNeedsRow => one().map(PairNeedsRow),
             Self::Bool => one().map(Truth),
-            Self::ListGet(_) => two().map(Get),
             Self::Append | Self::SetAdd => two().map(Insert),
             Self::RegisteredUnpack {
                 count,

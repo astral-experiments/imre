@@ -1,10 +1,10 @@
 //! Object-frame ABI operations used by registered LLVM code.
 
 use super::sequences::{permanent_handle, spread};
+use super::suspension::Suspension;
 use super::{
     CallArguments, GUARDED_LIT, GUARDED_NAMED_OP, NAMED_OP, Output, permanent, suspension,
 };
-use super::{ReadKey, suspension::Suspension};
 use crate::frontend::function_scope::ClassBindings;
 use crate::frontend::module_source::SourceFile;
 use crate::frontend::push_codepoints;
@@ -1659,26 +1659,20 @@ pub(crate) trait FrameEmitter<'a, 'p>:
         self.op("slice_object", &[&start, &stop, &step])
     }
 
-    fn read_item(
+    fn read_slice(
         &mut self,
         base: &str,
-        key: ReadKey,
-        range: TextRange,
-        base_end: TextSize,
+        start: &str,
+        stop: &str,
+        slot: Option<&str>,
+        span: Option<[usize; 4]>,
     ) -> String {
-        let span = self.expression_range_span(range, base_end, b'[');
-        match key {
-            ReadKey::Object(key) => self.op_at("get", &[base, &key], span),
-            ReadKey::Bounds { start, stop, slot } => {
-                self.take_matching_check();
-                let position =
-                    span.map_or_else(|| "null".into(), |span| self.output.position(span));
-                if let Some(slot) = slot {
-                    self.checked(&format!("call i64 @imre_dyn_get_linked_slice_at(ptr %ctx, i64 {base}, i64 {start}, i64 {stop}, ptr {slot}, ptr {position})"))
-                } else {
-                    self.checked(&format!("call i64 @imre_dyn_get_slice_at(ptr %ctx, i64 {base}, i64 {start}, i64 {stop}, ptr {position})"))
-                }
-            }
+        self.take_matching_check();
+        let position = span.map_or_else(|| "null".into(), |span| self.output.position(span));
+        if let Some(slot) = slot {
+            self.checked(&format!("call i64 @imre_dyn_get_linked_slice_at(ptr %ctx, i64 {base}, i64 {start}, i64 {stop}, ptr {slot}, ptr {position})"))
+        } else {
+            self.checked(&format!("call i64 @imre_dyn_get_slice_at(ptr %ctx, i64 {base}, i64 {start}, i64 {stop}, ptr {position})"))
         }
     }
 
