@@ -1005,7 +1005,7 @@ impl IndentationDiagnostic {
         None
     }
 
-    pub(super) fn raise(self, ctx: &mut Context, filename: Id) -> Result<Id> {
+    pub(super) fn raise<T>(self, ctx: &mut Context, filename: Id) -> Result<T> {
         let message = self.message;
         if self.kind == "NotImplementedError" {
             return Err(Error::new(self.kind, message));
@@ -2800,22 +2800,6 @@ impl Context {
             .expect_err("surrogates cannot encode as UTF-8"))
     }
 
-    pub(super) fn compile_source(
-        &mut self,
-        source: Id,
-        filename: Id,
-        mode: Id,
-        strip_indent: bool,
-    ) -> Result<Id> {
-        self.compile_source_with_flags(
-            source,
-            filename,
-            mode,
-            strip_indent,
-            self.inherited_compile_flags(),
-        )
-    }
-
     pub(super) fn inherited_compile_flags(&self) -> u32 {
         match self.heap.get(self.heap.current_code()) {
             Value::Code(caller) => {
@@ -2837,9 +2821,20 @@ impl Context {
         source: Id,
         filename: Id,
         mode: Id,
-        strip_indent: bool,
         inherited: u32,
     ) -> Result<Id> {
+        let program = self.prepare_source_program(source, filename, mode, false, inherited)?;
+        Ok(self.box_source_code(program))
+    }
+
+    fn prepare_source_program(
+        &mut self,
+        source: Id,
+        filename: Id,
+        mode: Id,
+        strip_indent: bool,
+        inherited: u32,
+    ) -> Result<Program> {
         use ruff_python_parser::Mode;
         let mode = self.str_value(mode)?;
         let interactive = mode == "single";
@@ -3100,7 +3095,7 @@ impl Context {
         if let Some(issue) = pending_syntax(self, &code)? {
             return Err(issue);
         }
-        Ok(self.box_source_code(code))
+        Ok(code)
     }
 
     /// Attach the filename after tokenization, just as compile does for string input.
@@ -3479,7 +3474,12 @@ impl Context {
         }
         let filename = self.text("<string>");
         let mode = self.text("eval");
-        let code = match self.compile_source(text, filename, mode, false) {
+        let code = match self.compile_source_with_flags(
+            text,
+            filename,
+            mode,
+            self.inherited_compile_flags(),
+        ) {
             Ok(code) => code,
             Err(error) => {
                 // Preserve the forward-reference diagnostic for invalid grammar, while
@@ -3771,7 +3771,18 @@ impl Context {
             Value::Str(_) | Value::Bytes(_) | Value::ByteArray(_) => {
                 let filename = self.text("<string>");
                 let mode_id = self.text(mode);
-                self.compile_source(source, filename, mode_id, mode == "eval")?
+                let program = self.prepare_source_program(
+                    source,
+                    filename,
+                    mode_id,
+                    mode == "eval",
+                    self.inherited_compile_flags(),
+                )?;
+                return Err(Self::missing_body_error(
+                    &program.qualname,
+                    &program.filename.display,
+                    program.first_line,
+                ));
             }
             _ => {
                 return Err(Error::new(
@@ -3821,15 +3832,18 @@ impl Context {
 
     pub(super) fn missing_compiled_body<T>(&self, code: Id) -> Result<T> {
         let info = self.code_object(code);
-        Err(Error::new(
-            "NotImplementedError",
-            format!(
-                "no compiled Python body for {} ({}:{})",
-                self.str_value(info.qualname)?,
-                self.filename_display(info.filename)?,
-                info.first_line
-            ),
+        Err(Self::missing_body_error(
+            self.str_value(info.qualname)?,
+            &self.filename_display(info.filename)?,
+            info.first_line,
         ))
+    }
+
+    fn missing_body_error(qualname: &str, filename: &str, first_line: u32) -> Error {
+        Error::new(
+            "NotImplementedError",
+            format!("no compiled Python body for {qualname} ({filename}:{first_line})"),
+        )
     }
 
     pub(super) fn bind_source_name(&mut self, scope: Id, name: &str, value: Id) -> Result<()> {
