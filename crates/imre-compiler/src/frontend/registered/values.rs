@@ -1215,6 +1215,15 @@ impl Checker<'_> {
             let value = self.binary_operation(binary)?;
             return Ok(Some(source.located(node, value)));
         }
+        if let ast::Expr::Call(call) = node
+            && let Some(method) = stdlib::runtime_format_method(call)
+            && self.graph.session.scalar_type(self.module, &method.value) == Some(Type::Str)
+        {
+            // The receiver has a scalar layout. Place this method call in the same
+            // checked frame as its operands and let normal attribute lookup bind it.
+            let value = self.call(call)?;
+            return Ok(Some(source.located(node, value)));
+        }
         let local = node
             .as_name_expr()
             .and_then(|n| self.names.get(n.id.as_str()))

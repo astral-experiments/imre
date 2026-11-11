@@ -2,6 +2,17 @@
 
 use super::*;
 
+/// The fixed positional specialization only knows templates written as string literals.
+pub(super) fn runtime_format_method(call: &ast::ExprCall) -> Option<&ast::ExprAttribute> {
+    let method = call.func.as_attribute_expr()?;
+    (method.attr.as_str() == "format"
+        && !method.value.is_string_literal_expr()
+        && !call.arguments.args.is_empty()
+        && !call.arguments.args.iter().any(ast::Expr::is_starred_expr)
+        && call.arguments.keywords.iter().all(|kw| kw.arg.is_some()))
+    .then_some(method)
+}
+
 fn replace_arguments(call: &ast::ExprCall) -> Option<(&ast::Expr, &ast::Expr, Option<&ast::Expr>)> {
     match (&*call.arguments.args, &*call.arguments.keywords) {
         ([old, new], []) => Some((old, new, None)),
@@ -787,6 +798,21 @@ impl Checker<'_> {
         receiver: Expr,
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
+        if let Some(method) = runtime_format_method(call) {
+            // A runtime template determines which positional and keyword values it uses.
+            // Bind the original method and operands with the ordinary Python call operation.
+            let target = registered::values::loaded_attribute(method, receiver);
+            let mut value = self.call_with_target(call, target)?;
+            if self.registered.is_none() {
+                // Check the result against the fixed caller's contract before selecting its frame.
+                let failure = self.scoped_builtin_error("str.format", call);
+                if !self.missing_operation(&failure) {
+                    return Err(failure);
+                }
+                value.ty = Type::Str;
+            }
+            return Ok(value);
+        }
         let mut args = vec![receiver];
         if !call.arguments.args.is_empty() {
             let ast::Expr::Attribute(method) = &*call.func else {
