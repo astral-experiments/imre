@@ -32,7 +32,7 @@ const STDLIB_ARCHIVE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/imre-std
 const PYTHON_HEADER: &str = include_str!("../../imre-runtime/include/Python.h");
 
 const USAGE: &str = "Usage: imre check SOURCE.py [--module-root DIRECTORY] [--extension-path DIRECTORY] [--include-module MODULE] [--reachable-only] [--entry-profile FILE] [--watch | -w]
-       imre [-I] [-E] [-P] [-s] [-S] [-B] [-O] [-u] [-W OPTION] [-X frozen_modules[=on|off]] [-X faulthandler] [-X tracemalloc[=NFRAME]] [-X utf8[=0|1]] [-X warn_default_encoding] [-X context_aware_warnings=0|1] (-c CODE | SCRIPT) [PROGRAM_ARGUMENTS...]
+       imre [--include-module MODULE] [-I] [-E] [-P] [-s] [-S] [-B] [-O] [-u] [-W OPTION] [-X frozen_modules[=on|off]] [-X faulthandler] [-X tracemalloc[=NFRAME]] [-X utf8[=0|1]] [-X warn_default_encoding] [-X context_aware_warnings=0|1] (-c CODE | -m MODULE | SCRIPT) [PROGRAM_ARGUMENTS...]
        On Linux, -X cpu_count=N|default sets the number of logical CPUs.
        imre extension-header
        imre build-target [--output-dir DIRECTORY]
@@ -134,7 +134,8 @@ fn run() -> Result<ExitCode, String> {
             .is_some_and(|ext| ext == "py")
         || command.as_encoded_bytes().ends_with(b".pyc")
     {
-        let invocation = match python_command::parse(command.clone(), &mut args) {
+        let (invocation, include_modules) = match python_command::parse(command.clone(), &mut args)
+        {
             Ok(value) => value,
             Err(python_command::ParseError::Usage(message)) => {
                 eprintln!("{message}");
@@ -187,7 +188,9 @@ fn run() -> Result<ExitCode, String> {
             eprintln!("imre: can't open file '{}': {error}", path.display());
             return Ok(ExitCode::from(2));
         }
-        (BuildOptions::for_python(invocation)?, true)
+        let mut options = BuildOptions::for_python(invocation)?;
+        options.compile.include_modules.extend(include_modules);
+        (options, true)
     } else {
         return Err(USAGE.to_owned());
     };

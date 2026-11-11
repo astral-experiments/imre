@@ -600,11 +600,13 @@ A file entry runs as `__main__`. When its object code imports a missing runtime 
 
 Use `--include-module myproject.plugins.csv` to link a Python source module that the program may select by name at runtime. Repeat the option to declare other modules. The usual import paths determine which source is linked, and importing it runs its initializer. A fully typed entry has no runtime module loader and rejects this option.
 
+For a Python entry, pass `--include-module` before the script, `-m` or `-c` to declare a module for that invocation. Declarations supplied through `IMREFLAGS` or `IMRE_ENCODED_FLAGS` also apply to child Imre processes that inherit those variables.
+
 For `-m unittest`, declare the modules that contain the tests. The standard unittest loader selects classes and methods from those modules.
 
 ```sh
-IMREFLAGS='--include-module tests.test_rates' imre -m unittest -v tests.test_rates
-IMREFLAGS='--include-module tests.test_rates' imre -m unittest discover -s tests -t . -p 'test_rates.py'
+IMREFLAGS='--opt-level 0' imre -B --include-module tests.test_rates -m unittest -v tests.test_rates
+imre --include-module tests.test_rates -m unittest discover -s tests -t . -p 'test_rates.py'
 ```
 
 For a larger suite, repeat `--include-module` for each module that discovery will import by name. Declaring a package links its initializer. Its ordinary imports follow the usual dependency rules.

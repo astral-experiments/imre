@@ -47,9 +47,11 @@ enum Input {
 
 /// The command or script ends interpreter option parsing; remaining words belong to the program.
 pub(super) fn parse(
-    mut arg: OsString,
+    first: OsString,
     args: &mut impl Iterator<Item = OsString>,
-) -> Result<Invocation, ParseError> {
+) -> Result<(Invocation, Vec<String>), ParseError> {
+    let mut include_modules = Vec::new();
+    let mut args = std::iter::once(first).chain(args);
     let mut isolated = false;
     let mut safe_path = false;
     let mut no_site = false;
@@ -65,6 +67,11 @@ pub(super) fn parse(
     let mut xoptions = Vec::new();
     let mut faulthandler = false;
     let input = 'options: loop {
+        let arg = args.next().ok_or("expected -c and a command string")?;
+        if arg == "--include-module" {
+            include_modules.push(operand("", &mut args, "--include-module")?);
+            continue;
+        }
         if arg == "--" {
             break Input::Script(args.next().ok_or("expected a script after --")?.into());
         }
@@ -89,14 +96,14 @@ pub(super) fn parse(
                 'O' => optimize = optimize.checked_add(1).ok_or("too many -O options")?,
                 'B' => dont_write_bytecode = true,
                 'u' => unbuffered = true,
-                'c' => break 'options Input::Command(operand(flags.as_str(), args, "-c")?),
-                'm' => break 'options Input::Module(operand(flags.as_str(), args, "-m")?),
+                'c' => break 'options Input::Command(operand(flags.as_str(), &mut args, "-c")?),
+                'm' => break 'options Input::Module(operand(flags.as_str(), &mut args, "-m")?),
                 'W' => {
-                    warnoptions.push(operand(flags.as_str(), args, "-W")?);
+                    warnoptions.push(operand(flags.as_str(), &mut args, "-W")?);
                     break;
                 }
                 'X' => {
-                    let option = operand(flags.as_str(), args, "-X")?;
+                    let option = operand(flags.as_str(), &mut args, "-X")?;
                     match option.split_once('=').unwrap_or((&option, "")) {
                         ("faulthandler", _) => faulthandler = true,
                         ("tracemalloc" | "frozen_modules", _) => {}
@@ -122,7 +129,6 @@ pub(super) fn parse(
                 _ => return Err(format!("unknown interpreter option: -{flag}").into()),
             }
         }
-        arg = args.next().ok_or("expected -c and a command string")?;
     };
     let utf8_mode = match utf8 {
         Some(value) => Some(value),
@@ -256,7 +262,7 @@ pub(super) fn parse(
         .into_os_string()
         .into_string()
         .map_err(|_| "interpreter path is not UTF-8")?;
-    Ok(match input {
+    let invocation = match input {
         Input::Command(source) => Invocation::Command(PythonCommand {
             source: dedent(source),
             flags,
@@ -272,7 +278,8 @@ pub(super) fn parse(
             flags,
             executable,
         },
-    })
+    };
+    Ok((invocation, include_modules))
 }
 
 /// Retain the invocation path when a virtual environment symlinks the public launcher.
