@@ -3165,13 +3165,13 @@ impl SourceScope<'_> {
         slot
     }
 
+    fn comprehension_target(&self, name: &str) -> Option<usize> {
+        self.comprehension.as_ref()?.targets.get(name).copied()
+    }
+
     fn store(&mut self, name: &str, value: Expr) -> Statement {
-        if let Some(slot) = self
-            .comprehension
-            .as_ref()
-            .and_then(|scope| scope.targets.get(name))
-        {
-            return Statement::Assign(*slot, value);
+        if let Some(slot) = self.comprehension_target(name) {
+            return Statement::Assign(slot, value);
         }
         let slot = self.slot(name);
         if matches!(self.kind, RegisteredScope::Module) {
@@ -3412,10 +3412,14 @@ impl SourceScope<'_> {
                 kind: ExprKind::Bind(self.slot(&target.id), Box::new(value)),
             }
         } else {
+            let local = expr
+                .as_name_expr()
+                .and_then(|name| self.comprehension_target(&name.id))
+                .map(|slot| Expr::local(slot, Type::PythonObject));
             values::operation(
                 expr,
                 self.source,
-                None,
+                local,
                 matches!(self.kind, RegisteredScope::Class),
                 ir::control::boolean_literal,
                 |_| true,
