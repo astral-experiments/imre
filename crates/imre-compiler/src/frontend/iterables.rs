@@ -199,7 +199,7 @@ impl Checker<'_> {
             let receiver = self.expr(&method.value)?;
             if receiver.ty == Type::PythonObject {
                 let iterable = self.call_on(view, Some(receiver))?;
-                return self.registered_iterable_call(call, "sum", iterable);
+                return self.bind_registered_builtin_call(call, "sum", vec![iterable]);
             }
             if view.arguments.is_empty()
                 && self

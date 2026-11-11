@@ -12872,6 +12872,9 @@ impl<'a> Checker<'a> {
             "sum" => return self.sum_call(call),
             "min" | "max" => return self.extremum_call(call, name == "min"),
             "any" | "all" => return self.quantifier_call(call, name == "all"),
+            "map" if self.unshadowed_builtin(&call.func, name) => {
+                return self.bind_registered_builtin_call(call, name, Vec::new());
+            }
             "map" | "filter" | "zip" | "reversed" | "enumerate" | "range" => {
                 return Err(error(
                     self.source,
@@ -13687,16 +13690,14 @@ impl<'a> Checker<'a> {
         })
     }
 
-    /// The first argument is already checked. Bind the remaining positional and
-    /// keyword arguments in the original call layout.
-    fn registered_iterable_call(
+    /// Complete the checked arguments in the original positional and keyword order.
+    fn bind_registered_builtin_call(
         &mut self,
         call: &ast::ExprCall,
         name: &str,
-        iterable: Expr,
+        mut args: Vec<Expr>,
     ) -> Result<Expr, String> {
-        let mut args = vec![iterable];
-        for argument in imre_ast::argument_values(&call.arguments).skip(1) {
+        for argument in imre_ast::argument_values(&call.arguments).skip(args.len()) {
             args.push(self.expr(argument)?);
         }
         Ok(self.registered_builtin_call(call, name, args))
