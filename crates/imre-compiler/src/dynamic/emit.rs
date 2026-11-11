@@ -1734,6 +1734,51 @@ mod tests {
     }
 
     #[test]
+    fn imported_generator_binds_the_generic_default_at_its_definition() {
+        use crate::ir::{Builtin, DefinitionSite, ExprKind, SuspendValue};
+
+        let driver = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/suspended_generic_default/main.py");
+        let mut graph = crate::modules::SourceGraph::load(&driver, None, &[]).unwrap();
+        let _ = crate::checked_lower(&mut graph).unwrap();
+        let app = graph.python_file("app").unwrap();
+        let file = &graph.modules[app];
+        let functions = graph.registered_functions();
+        let module = PreparedBody::module(
+            "app",
+            &file.path,
+            &file.source,
+            0,
+            ModuleOrigin::Program(functions.get(&app)),
+        )
+        .unwrap();
+        let maker = &module.source.function_bodies[&TextSize::new(0)];
+        assert!(maker.fully_checked());
+        let mut defaults = Vec::new();
+        crate::ir::walk_expressions(&maker.checked().function.body, &mut |expr| {
+            if let ExprKind::Builtin(
+                Builtin::RegisteredDefinition(DefinitionSite::Function(site)),
+                inputs,
+            ) = &expr.kind
+            {
+                let [default] = inputs.as_slice() else {
+                    panic!("expected one default");
+                };
+                crate::ir::walk_operand_expressions(default, &mut |child| {
+                    if let ExprKind::Builtin(
+                        Builtin::RegisteredSuspend(SuspendValue::Yield, range),
+                        _,
+                    ) = child.kind
+                    {
+                        defaults.push((site.to_usize(), &file.source[range]));
+                    }
+                });
+            }
+        });
+        assert_eq!(defaults, [(17, "yield 'default'")]);
+    }
+
+    #[test]
     fn starred_annotation_retains_the_scoped_input_and_its_unpack() {
         use crate::ir::{Builtin, Expr, ExprKind, Statement};
 
@@ -2125,17 +2170,19 @@ mod tests {
         let deletion = "        del sink[(yield 1)]";
         let manager = "        with manager((yield 1)): pass";
         let checked_lambda = "        selected = (lambda value=(yield 1): value)()";
-        let mixed = "        def hold[T](value=(yield 1)):\n            return value";
+        let generic_default = "        def hold[T](value=(yield 1)):\n            return value";
         let annotated = "        sink[0]: int = 1";
         let checked_default = "        def resume(answer=(yield 1)):\n            return answer";
         let checked = "        publish(x, y)";
         let pair_header = "def f(rows):\n    for x, y in rows:";
+        let suspended_target = "def f(rows):\n    for sink[(yield 'slot')], y in rows:";
         let yielded_rows = "def f():\n    for x, y in (yield 'rows'):";
         for (header, body, partial_pair) in [
             (pair_header, deletion, false),
             (pair_header, manager, false),
             (pair_header, checked_lambda, false),
-            (pair_header, mixed, true),
+            (pair_header, generic_default, false),
+            (suspended_target, generic_default, true),
             (yielded_rows, checked, false),
             (pair_header, annotated, false),
             (pair_header, checked_raise, false),
@@ -2147,10 +2194,18 @@ mod tests {
                 false,
             ),
             ("def f(table):\n    for x in table.items():", manager, false),
-            ("def f(table):\n    for x in table.items():", mixed, false),
+            (
+                "def f(table):\n    for x in table.items():",
+                generic_default,
+                false,
+            ),
             ("def f(rows):\n    for x, *ys in rows:", deletion, false),
             ("def f(rows):\n    for x, *ys in rows:", manager, false),
-            ("def f(rows):\n    for x, *ys in rows:", mixed, false),
+            (
+                "def f(rows):\n    for x, *ys in rows:",
+                generic_default,
+                false,
+            ),
             (
                 "def f(manager):\n    with manager as (x, y):",
                 deletion,
@@ -2161,7 +2216,11 @@ mod tests {
                 manager,
                 false,
             ),
-            ("def f(manager):\n    with manager as (x, y):", mixed, false),
+            (
+                "def f(manager):\n    with manager as (x, y):",
+                generic_default,
+                false,
+            ),
             (
                 "async def f(rows):\n    async for x, y in rows:",
                 checked,
@@ -2180,7 +2239,11 @@ mod tests {
             let plan = module.source.function_bodies[&ruff_text_size::TextSize::new(0)]
                 .suite()
                 .expect("prepared function suite");
-            if body == deletion || body == manager || body == checked_lambda {
+            if body == deletion
+                || body == manager
+                || body == checked_lambda
+                || (header == pair_header && body == generic_default)
+            {
                 assert!(plan.fully_checked(), "{source}");
             }
             if body == annotated {
@@ -2213,7 +2276,7 @@ mod tests {
             let (_, llvm) = module.standalone().unwrap();
             let test = "call i1 @imre_dyn_plain_items_cursor(";
             let pull = "call i64 @imre_dyn_next_pair(";
-            let projects_pair = header == pair_header || header == yielded_rows;
+            let projects_pair = [pair_header, yielded_rows, suspended_target].contains(&header);
             assert_eq!(
                 llvm.matches(test).count(),
                 usize::from(projects_pair),
@@ -2264,8 +2327,9 @@ mod tests {
             ),
             (
                 "for entry in rows:\n            def hold[T](value=(yield entry)):\n                return value",
-                false,
+                true,
             ),
+            ("for sink[(yield 'slot')] in rows: pass", false),
         ] {
             let source = format!(
                 "def make():
@@ -2381,6 +2445,16 @@ mod tests {
         }
         .into();
         assert_eq!(module.standalone().unwrap(), original);
+
+        let plan = test_function_suite(&mut module.source, start);
+        let Ok(crate::frontend::SourceEffect::Region(region)) = &mut plan.residual[0].effect else {
+            panic!("missing registered loop");
+        };
+        let crate::frontend::PhysicalOperand::Checked(iterable) = &mut region.operands[0] else {
+            panic!("expected the retained iterable");
+        };
+        iterable.value = crate::ir::Expr::none();
+        assert_ne!(module.standalone().unwrap(), original);
     }
 
     #[test]
