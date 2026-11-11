@@ -2940,13 +2940,7 @@ impl Checker<'_> {
         let before = self.assigned.clone();
         let mut facts = self.narrowed.clone();
         let binding = self.bind_iterator_pattern(target, input.value)?;
-        let mut rebound = narrowing::expression_assignments(target);
-        target_names(target, &mut rebound);
-        for name in rebound {
-            if let Some(slot) = self.names.get(&name) {
-                facts.remove_mut(slot);
-            }
-        }
+        assignments::forget_binding_writes(&mut facts, &binding);
         self.loop_breaks.push(None);
         let body = lower_body(self)?;
         let breaks = self.loop_breaks.pop().unwrap();

@@ -389,6 +389,15 @@ impl Assigned {
 
 pub(super) type Narrowed = rpds::HashTrieMap<usize, Type>;
 
+/// A successful pull can replace any local written while binding its target.
+pub(super) fn forget_binding_writes(facts: &mut Narrowed, binding: &[Statement]) {
+    if !facts.is_empty() {
+        ir::walk_writes(binding, |slot, _| {
+            facts.remove_mut(&slot);
+        });
+    }
+}
+
 pub(super) fn intersect(
     assigned: &mut Assigned,
     narrowed: &mut Narrowed,
