@@ -19,6 +19,7 @@ try:
 except ImportError:
     pass
 
+from _collections import deque
 _MutableSequence.register(deque)
 
 
