@@ -28,8 +28,12 @@ pub(super) type Code = unsafe extern "C" fn(*mut Context, Id) -> Id;
 pub(super) type ResumeCode =
     unsafe extern "C" fn(*mut super::native_suspension::Activation, Id) -> *mut std::ffi::c_void;
 
-/// Sibling code objects share physical literal slots for the lifetime of this compilation.
-pub(super) type CompilationConstants = std::rc::Rc<RefCell<HashMap<usize, Id>>>;
+/// Sibling code objects share their literal slots and any filename supplied by file compilation.
+#[derive(Default)]
+pub(super) struct CompilationConstants {
+    slots: RefCell<HashMap<usize, Id>>,
+    pub(super) filename: Option<Id>,
+}
 
 #[derive(Clone)]
 pub(super) struct CodeObject {
@@ -55,12 +59,19 @@ pub(super) struct CodeObject {
     pub flags_complete: bool,
     pub generator_lambda: bool,
     pub nested: Vec<(usize, Id)>,
-    pub compilation_constants: Option<CompilationConstants>,
+    pub compilation_constants: Option<std::rc::Rc<CompilationConstants>>,
     pub freevars: Vec<String>,
     pub closure_supported: bool,
 }
 
 impl CodeObject {
+    pub(super) fn bind_file_constants(&mut self, filename: Id) {
+        self.compilation_constants = Some(std::rc::Rc::new(CompilationConstants {
+            filename: Some(filename),
+            ..Default::default()
+        }));
+    }
+
     pub(super) fn is_coroutine(&self) -> bool {
         self.flags & imre_ast::code_flags::COROUTINE != 0
     }
@@ -2442,7 +2453,8 @@ impl Value {
             }
             Self::Code(code) => {
                 if let Some(keys) = &code.compilation_constants {
-                    visit.extend(keys.borrow().values().copied());
+                    visit.extend(keys.filename);
+                    visit.extend(keys.slots.borrow().values().copied());
                 }
 
                 visit.push(code.name);
@@ -4282,6 +4294,7 @@ impl Heap {
             return code
                 .compilation_constants
                 .as_ref()?
+                .slots
                 .borrow()
                 .get(slot)
                 .copied();
@@ -4305,11 +4318,12 @@ impl Heap {
                 .compilation_constants
                 .get_or_insert_with(Default::default)
                 .clone();
-            pool.borrow_mut()
+            pool.slots
+                .borrow_mut()
                 .try_reserve(1)
                 .map_err(|_| Error::new("MemoryError", ""))?;
             let value = build(self)?;
-            pool.borrow_mut().insert(slot, value);
+            pool.slots.borrow_mut().insert(slot, value);
             return Ok(value);
         }
         self.linked_constants

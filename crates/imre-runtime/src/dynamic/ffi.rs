@@ -2603,11 +2603,20 @@ pub(super) unsafe extern "C" fn imre_dyn_define(
     {
         code
     } else {
-        // SAFETY: the filename is a nul-terminated constant in the native executable.
-        let file = unsafe { native_path(definition.filename) };
-        let filename = match ctx.import_path_text(file) {
-            Ok(filename) => filename,
-            Err(error) => return finish(ctx, Err(error)),
+        let filename = if let Some(filename) = ctx
+            .code_object(owner)
+            .compilation_constants
+            .as_ref()
+            .and_then(|constants| constants.filename)
+        {
+            filename
+        } else {
+            // SAFETY: the filename is a nul-terminated constant in the native executable.
+            let file = unsafe { native_path(definition.filename) };
+            match ctx.import_path_text(file) {
+                Ok(filename) => filename,
+                Err(error) => return finish(ctx, Err(error)),
+            }
         };
         // SAFETY: the emitter initializes the union with the function ABI selected by the tag.
         let body = unsafe {
