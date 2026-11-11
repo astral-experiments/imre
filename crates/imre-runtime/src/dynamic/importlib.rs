@@ -71,8 +71,8 @@ impl Context {
         Ok(module)
     }
 
-    /// Receive the launcher's argument vector before imports can run Python code.
-    pub(super) fn startup_sys(&mut self) -> Result<Id> {
+    /// Return whether a launcher supplied the original argument vector.
+    pub(super) fn startup_sys(&mut self) -> Result<bool> {
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         let arguments =
             if self.config["module_entry"].is_string() || self.config["executable"].is_string() {
@@ -80,8 +80,10 @@ impl Context {
             } else {
                 None
             };
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        let arguments: Option<Vec<u8>> = None;
+        let launched = arguments.is_some();
         let sys = self.module("sys")?;
-        #[cfg(any(target_os = "linux", target_os = "macos"))]
         if let Some(bytes) = arguments {
             let codec = crate::objects::Codec::lookup(crate::sys::filesystem_encoding()?.as_str())?;
             let mut original = Vec::new();
@@ -95,7 +97,7 @@ impl Context {
             let original = self.alloc(Value::List(original));
             self.set_attr(sys, "orig_argv", original)?;
         }
-        Ok(sys)
+        Ok(launched)
     }
 
     /// Enter the selected module in the startup __main__ namespace via the selected runpy.

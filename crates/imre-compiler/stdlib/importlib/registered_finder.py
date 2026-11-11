@@ -29,10 +29,11 @@ def _installed_source_spec(fullname, registry_path, target):
 
 
 class _RegisteredFileFinder(FileFinder):
-    def __init__(self, path, registry_path):
+    def __init__(self, path, registry_path, saved_path=None):
         super().__init__(path, *_get_supported_file_loaders())
         # The compiler also registers virtual paths, such as '<imre stdlib>/unittest'.
         self._registry_path = registry_path
+        self._saved_path = saved_path
 
     def find_spec(self, fullname, target=None):
         registered = registered_path_spec(fullname, self._registry_path)
@@ -51,7 +52,18 @@ class _RegisteredFileFinder(FileFinder):
                     and type(on_disk.origin) is str and on_disk.origin == registered.origin):
                 return registered
             return on_disk
-        return registered if registered is not None else on_disk
+        spec = registered if registered is not None else on_disk
+        if self._saved_path is None or (spec is not None and spec.loader is not None):
+            return spec
+        # The compiled files belong to this search slot. Moving or removing the slot
+        # moves or removes their precedence without exposing the old directory on disk.
+        saved = registered_path_spec(fullname, self._saved_path)
+        if saved is None:
+            return spec
+        if spec is None or saved.loader is not None:
+            return saved
+        spec.submodule_search_locations.extend(saved.submodule_search_locations)
+        return spec
 
 
 _file_path_hook = FileFinder.path_hook(*_get_supported_file_loaders())
@@ -61,6 +73,8 @@ def _registered_path_hook(path):
     registry_path = registered_path(path)
     if registry_path is None:
         raise ImportError('not a registered module path', path=path)
+    if type(registry_path) is tuple:
+        return _RegisteredFileFinder(path, *registry_path)
     return _RegisteredFileFinder(path, registry_path)
 
 def _set_bootstrap_module(_bootstrap_module):
