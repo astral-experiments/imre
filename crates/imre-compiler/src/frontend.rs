@@ -2404,6 +2404,9 @@ fn declaration_annotation(
                 .map_or(Type::Exception, Type::NamedException),
         );
     }
+    if classes.registered_classes.contains(&definition) {
+        return Some(Type::PythonObject);
+    }
     classes.ids.get(&definition).map(|&id| classes.instance(id))
 }
 
