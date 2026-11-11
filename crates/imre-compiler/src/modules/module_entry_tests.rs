@@ -164,7 +164,7 @@ fn a_program_root_package_keeps_the_initializer_diagnostic_on_its_own_source() {
     crate::checked_lower(&mut graph).unwrap();
     let error = graph.source_contract.unwrap().unwrap_err();
     assert!(
-        error.contains("__init__.py:2:33") && error.contains("invalid-argument-type"),
+        error.contains("__init__.py:2:33: Imre: expected int, got str"),
         "{error}"
     );
 }
