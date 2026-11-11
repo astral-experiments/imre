@@ -50,8 +50,6 @@ struct Program {
     items: Vec<SourceItem>,
     // Declarations in source lowering order, including nested suites.
     deferred_annotations: Vec<(String, ast::Expr)>,
-    // Indices of the class declarations guarded by the private annotation cell.
-    conditional_fields: Vec<usize>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -186,7 +184,6 @@ enum SourceItem {
     DeleteName(String),
     DeleteItem(ast::ExprSubscript),
     DeleteAttr(ast::ExprAttribute),
-    Assign(Vec<ast::Expr>, ast::Expr),
     Import {
         module: String,
         alias: Option<String>,
@@ -194,10 +191,8 @@ enum SourceItem {
     From(String, Vec<(String, String)>),
     Define(Definition),
     Annotations(Vec<(String, ast::Expr)>),
-    ModuleAnnotations(Option<Box<Program>>),
     ModuleDoc(String),
     StringAnnotation(String, ast::Expr),
-    ClassAnnotator(Box<Program>),
     MakeGenerator(ast::Expr),
     Raise(ast::StmtRaise),
     Assert(ast::StmtAssert),
@@ -208,7 +203,6 @@ enum SourceItem {
     Name(ast::Identifier),
     Keywords(Vec<ast::Identifier>),
     EnterWith(ast::WithItem),
-    BindSent(Vec<ast::Expr>),
 }
 
 struct SourceCase {
@@ -222,7 +216,6 @@ struct Definition {
     decorators: Vec<ast::Decorator>,
     body: Box<Program>,
     kind: DefinitionKind,
-    annotate: Option<Box<Program>>,
 }
 
 enum DefinitionKind {
@@ -875,9 +868,7 @@ impl<'a, 'ctx> CompiledStrings<'a, 'ctx> {
                     let mut strings =
                         CompiledStrings::new(self.heap, self.shared, self.spellings, &directives);
                     strings.visit_expr(body);
-                    let nested = strings.scan(&mut false)?;
-                    strings.prepare_children(nested, has_named_bindings, false)?;
-                    strings.finish()
+                    strings.finish_nested_scope(has_named_bindings)?
                 }
                 Child::Lowered(mut program) => {
                     program.prepare_strings(self.heap, self.shared, self.spellings)?
@@ -888,6 +879,12 @@ impl<'a, 'ctx> CompiledStrings<'a, 'ctx> {
             }
         }
         Ok(())
+    }
+
+    fn finish_nested_scope(mut self, has_named_bindings: bool) -> Result<Id> {
+        let children = self.scan(&mut false)?;
+        self.prepare_children(children, has_named_bindings, false)?;
+        Ok(self.finish())
     }
 
     fn finish(self) -> Id {
@@ -1127,6 +1124,15 @@ impl Program {
         use ast::visitor::Visitor;
         let stringized = self.string_annotations();
         let mut strings = CompiledStrings::new(heap, shared, spellings, &self.directives);
+        // Module annotation constants are prepared before its statements; class annotations follow them.
+        if !self.deferred_annotations.is_empty() {
+            strings.annotation_scope(
+                &std::mem::take(&mut self.deferred_annotations),
+                false,
+                stringized,
+                self.has_named_bindings,
+            )?;
+        }
         let mut prepared_generators = Vec::new();
         let mut items = std::mem::take(&mut self.items);
         for op in &mut items {
@@ -1194,12 +1200,6 @@ impl Program {
                     let id = strings.text(text.as_str().into())?;
                     strings.keep(id)?;
                 }
-                SourceItem::Assign(targets, e) => {
-                    for target in targets {
-                        strings.visit_expr(target);
-                    }
-                    strings.visit_expr(e);
-                }
                 SourceItem::Import { module, alias } => {
                     for part in module.split('.') {
                         strings.heap.code_name(part);
@@ -1216,19 +1216,15 @@ impl Program {
                     }
                 }
                 SourceItem::Annotations(entries) => {
-                    for (name, expr) in entries {
-                        strings.annotation(name, expr, stringized)?;
-                    }
+                    strings.annotation_scope(
+                        entries,
+                        self.class_scope,
+                        stringized,
+                        self.has_named_bindings,
+                    )?;
                 }
                 SourceItem::StringAnnotation(name, expr) => strings.annotation(name, expr, true)?,
-                SourceItem::ClassAnnotator(provider)
-                | SourceItem::ModuleAnnotations(Some(provider)) => {
-                    strings.annotation_code(provider, self.class_scope)?;
-                }
                 SourceItem::Define(definition) => {
-                    if let Some(provider) = &mut definition.annotate {
-                        strings.annotation_code(provider, self.class_scope)?;
-                    }
                     let child = &mut definition.body;
                     strings.heap.code_name(&definition.binding);
                     let roots = child.prepare_strings(strings.heap, strings.shared, spellings)?;
@@ -1249,18 +1245,12 @@ impl Program {
                         _ => {}
                     }
                 }
-                SourceItem::ModuleAnnotations(None) => {}
                 SourceItem::Raise(statement) => {
                     if let Some(e) = &statement.exc {
                         strings.visit_expr(e);
                     }
                     if let Some(e) = &statement.cause {
                         strings.visit_expr(e);
-                    }
-                }
-                SourceItem::BindSent(targets) => {
-                    for target in targets {
-                        strings.visit_expr(target);
                     }
                 }
             }
@@ -1436,7 +1426,6 @@ impl Program {
             private_names: None,
             items: Vec::new(),
             deferred_annotations: Vec::new(),
-            conditional_fields: Vec::new(),
         }
     }
 
@@ -1574,6 +1563,18 @@ impl Program {
         Ok(())
     }
 
+    fn assignment_operands(
+        &mut self,
+        targets: impl IntoIterator<Item = ast::Expr>,
+        value: ast::Expr,
+        function: bool,
+    ) -> Result<()> {
+        let value = self.lower_suspension(value, function)?;
+        self.items
+            .extend(targets.into_iter().chain(value).map(SourceItem::Discard));
+        Ok(())
+    }
+
     fn record_expression(&mut self, expr: ast::Expr, function: bool) -> Result<()> {
         if let Some(expr) = self.lower_suspension(expr, function)? {
             self.items.push(SourceItem::Discard(expr));
@@ -1625,9 +1626,6 @@ impl Program {
 
     fn lower_namespace(&mut self, mut body: ast::Suite, function: bool) -> Result<()> {
         let class = self.class_scope;
-        if !function && !class && imre_ast::annotations::has_variable_annotation(&body) {
-            self.items.push(SourceItem::ModuleAnnotations(None));
-        }
         if !self.interactive
             && let Some(ast::Stmt::Expr(first)) = body.first()
             && let ast::Expr::StringLiteral(doc) = first.value.as_ref()
@@ -1645,35 +1643,19 @@ impl Program {
                 body.remove(0);
             }
         }
-        self.lower_block(body, function, None, class)?;
-        if !self.deferred_annotations.is_empty() {
+        self.lower(body, function, None)?;
+        if class && !self.deferred_annotations.is_empty() {
             let entries = std::mem::take(&mut self.deferred_annotations);
-            let fields = std::mem::take(&mut self.conditional_fields);
-            let provider = self.annotation_provider(entries, fields);
-            if class {
-                self.items.push(SourceItem::ClassAnnotator(provider));
-            } else {
-                self.items[0] = SourceItem::ModuleAnnotations(Some(provider));
-            }
+            self.items.push(SourceItem::Annotations(entries));
         }
         Ok(())
     }
 
     fn lower(
         &mut self,
-        body: ast::Suite,
-        function: bool,
-        active: Option<&mut usize>,
-    ) -> Result<()> {
-        self.lower_block(body, function, active, false)
-    }
-
-    fn lower_block(
-        &mut self,
         mut body: ast::Suite,
         function: bool,
         active: Option<&mut usize>,
-        class_top_level: bool,
     ) -> Result<()> {
         stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
             if let Some(limit) = self.syntax_limit {
@@ -1691,7 +1673,7 @@ impl Program {
                     named.visit_stmt(stmt);
                 }
             }
-            self.lower_suite(body, function, active, class_top_level)?;
+            self.lower_suite(body, function, active)?;
             named.declare(self)
         })
     }
@@ -1701,7 +1683,6 @@ impl Program {
         body: ast::Suite,
         function: bool,
         mut active: Option<&mut usize>,
-        class_top_level: bool,
     ) -> Result<()> {
         use ast::Stmt;
         for mut stmt in body {
@@ -1736,10 +1717,8 @@ impl Program {
                     for target in &s.targets {
                         self.declare_target(target)?;
                     }
-                    match self.lower_suspension(*s.value, function)? {
-                        Some(value) => SourceItem::Assign(s.targets, value),
-                        None => SourceItem::BindSent(s.targets),
-                    }
+                    self.assignment_operands(s.targets, *s.value, function)?;
+                    continue;
                 }
                 Stmt::AnnAssign(s) => {
                     let name = s.target.as_name_expr().map(|name| name.id.to_string());
@@ -1766,11 +1745,7 @@ impl Program {
                     }
                     annotations::validate(&s.annotation, name.is_some())?;
                     if let Some(value) = s.value {
-                        let op = match self.lower_suspension(*value, function)? {
-                            Some(value) => SourceItem::Assign(vec![*s.target], value),
-                            None => SourceItem::BindSent(vec![*s.target]),
-                        };
-                        self.items.push(op);
+                        self.assignment_operands([*s.target], *value, function)?;
                     } else {
                         match *s.target {
                             ast::Expr::Attribute(attr) => {
@@ -1795,14 +1770,7 @@ impl Program {
                             annotations::string_literal(&s.annotation),
                         )
                     } else {
-                        let index = self.deferred_annotations.len();
                         self.deferred_annotations.push((name, *s.annotation));
-                        if class_top_level {
-                            continue;
-                        }
-                        if self.class_scope {
-                            self.conditional_fields.push(index);
-                        }
                         continue;
                     }
                 }
@@ -1895,7 +1863,6 @@ impl Program {
                         decorators: Vec::new(),
                         body: Box::new(child),
                         kind: DefinitionKind::TypeAlias(s.type_params),
-                        annotate: None,
                     })
                 }
                 Stmt::FunctionDef(mut s) => {
@@ -1908,7 +1875,7 @@ impl Program {
                         s.type_params.is_some(),
                         self.class_scope && s.type_params.is_none(),
                     );
-                    let annotate = self.annotation_program(&mut s)?;
+                    let annotations = self.function_annotations(&mut s)?;
                     if s.is_async {
                         child.kind = if imre_ast::code_flags::is_generator(&s.body) {
                             FunctionKind::AsyncGenerator
@@ -1927,6 +1894,9 @@ impl Program {
                         }
                         child.locals.insert(name.to_owned());
                     }
+                    if !annotations.is_empty() {
+                        self.items.push(SourceItem::Annotations(annotations));
+                    }
                     self.locals.insert(s.name.to_string());
                     SourceItem::Define(Definition {
                         binding: s.name.to_string(),
@@ -1936,7 +1906,6 @@ impl Program {
                             parameters: s.parameters,
                             type_params: s.type_params,
                         },
-                        annotate,
                     })
                 }
                 Stmt::ClassDef(mut s) => {
@@ -1969,7 +1938,6 @@ impl Program {
                         kind: DefinitionKind::Class {
                             arguments: s.arguments,
                         },
-                        annotate: None,
                     };
                     if let Some(params) = s.type_params {
                         definition.body.validate_type_params(&params, "class")?;
@@ -1985,7 +1953,6 @@ impl Program {
                             decorators,
                             body: Box::new(header),
                             kind: DefinitionKind::ClassParameters(params),
-                            annotate: None,
                         };
                     }
                     SourceItem::Define(definition)
@@ -2106,12 +2073,7 @@ impl Program {
                         }
                         // CPython emits another copy of finally for exception unwinding.
                         // Keep both ranges of deferred annotation sites.
-                        let exceptional = self.deferred_annotations.len();
                         self.deferred_annotations.extend_from_within(first..);
-                        if self.class_scope {
-                            self.conditional_fields
-                                .extend(exceptional..exceptional + annotation_count);
-                        }
                     }
                     continue;
                 }
