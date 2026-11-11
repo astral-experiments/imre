@@ -122,8 +122,6 @@ enum ModuleInitializer {
 /// The caller roots the script module and the entered frame roots its scope and code.
 struct MainModuleFrame {
     module: Id,
-    code: Id,
-    scope: Id,
     entry: Code,
 }
 
@@ -133,11 +131,9 @@ impl MainModuleFrame {
     /// initializer remains loaded until it returns.
     unsafe fn run(self, context: *mut Context) -> Result<Id> {
         // SAFETY: the caller keeps the initializer loaded and the prepared frame active.
-        let value = unsafe { (self.entry)(context, self.scope) };
-        // SAFETY: the initializer has returned to the exclusive owner of the live Context.
-        let ctx = unsafe { &mut *context };
-        let result = ctx.finish_module_frame(self.code, self.entry, self.scope, value);
-        ctx.finish_initialization(self.module);
+        let result = unsafe { Context::run_module_frame(context, self.entry) };
+        // SAFETY: the module initializer has returned to the owner of the live Context.
+        unsafe { &mut *context }.finish_initialization(self.module);
         result.map(|_| self.module)
     }
 }
@@ -3492,21 +3488,29 @@ impl Context {
             value::Body::Parsed { .. } => return self.missing_compiled_body(code),
         };
         self.heap.enter(scope, code, owner);
-        // SAFETY: a compiler-generated initializer or function uses this ABI and
-        // returns before this Context can move or outlive the native module.
-        let result = unsafe { entry(self, scope) };
         if matches!(owner, FrameOwner::Module(_)) {
-            self.finish_module_frame(code, entry, scope, result)
-        } else {
-            self.finish_native_frame(result)
+            // SAFETY: the module frame is active and its native entry remains loaded.
+            return unsafe { Self::run_module_frame(self, entry) };
         }
+        // SAFETY: the entered function owns this scope until the native callback returns.
+        let result = unsafe { entry(self, scope) };
+        self.finish_native_frame(result)
     }
 
-    fn finish_module_frame(&mut self, code: Id, entry: Code, scope: Id, result: Id) -> Result<Id> {
-        if self.pending.is_none() {
-            self.register_decimal_class(code, entry, scope);
+    /// Run the linked initializer against the already-entered module frame.
+    ///
+    /// # Safety
+    /// The caller owns the context and keeps the initializer loaded until it returns.
+    unsafe fn run_module_frame(context: *mut Self, entry: Code) -> Result<Id> {
+        // SAFETY: the module frame roots the scope through native reentry.
+        let scope = unsafe { &*context }.heap.current_scope();
+        let result = unsafe { entry(context, scope) };
+        // SAFETY: the native initializer has returned to the owner of the context.
+        let ctx = unsafe { &mut *context };
+        if ctx.pending.is_none() {
+            ctx.register_decimal_class(ctx.heap.current_code(), entry, scope);
         }
-        self.finish_native_frame(result)
+        ctx.finish_native_frame(result)
     }
 
     fn finish_native_frame(&mut self, result: Id) -> Result<Id> {
@@ -4007,7 +4011,7 @@ impl Context {
             importlib::SourceBody::Registered(initializer),
         );
         let packaged = packaged.map(str::to_owned);
-        let (module, scope, name, _) =
+        let (module, scope, name, origin) =
             self.allocate_import_module("__main__", &[], Some(&source))?;
         self.publish_module("__main__", module)?;
         let (module, scope) = if let Some(qualified) = packaged {
@@ -4015,19 +4019,18 @@ impl Context {
         } else {
             (module, scope)
         };
-        let code = self.module_code(initializer, &source.0).inspect_err(|_| {
+        let code = match origin {
+            Some(filename) => self.module_code_at(initializer, &source.0, filename),
+            None => self.module_code(initializer, &source.0),
+        }
+        .inspect_err(|_| {
             self.finish_initialization(module);
         })?;
         let value::Body::Native(entry, _) = self.code_object(code).body else {
             unreachable!("registered module code has a native entry")
         };
         self.heap.enter(scope, code, FrameOwner::Module(name));
-        Ok(Some(MainModuleFrame {
-            module,
-            code,
-            scope,
-            entry,
-        }))
+        Ok(Some(MainModuleFrame { module, entry }))
     }
 
     /// Before installing the registry, execute its dependencies and the script's explicit entry.

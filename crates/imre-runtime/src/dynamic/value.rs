@@ -28,11 +28,10 @@ pub(super) type Code = unsafe extern "C" fn(*mut Context, Id) -> Id;
 pub(super) type ResumeCode =
     unsafe extern "C" fn(*mut super::native_suspension::Activation, Id) -> *mut std::ffi::c_void;
 
-/// Sibling code objects share their literal slots and any filename supplied by file compilation.
+/// Sibling code objects share the literal slots for their compilation.
 #[derive(Default)]
 pub(super) struct CompilationConstants {
     slots: RefCell<HashMap<usize, Id>>,
-    pub(super) filename: Option<Id>,
 }
 
 #[derive(Clone)]
@@ -65,13 +64,6 @@ pub(super) struct CodeObject {
 }
 
 impl CodeObject {
-    pub(super) fn bind_file_constants(&mut self, filename: Id) {
-        self.compilation_constants = Some(std::rc::Rc::new(CompilationConstants {
-            filename: Some(filename),
-            ..Default::default()
-        }));
-    }
-
     pub(super) fn is_coroutine(&self) -> bool {
         self.flags & imre_ast::code_flags::COROUTINE != 0
     }
@@ -2454,7 +2446,6 @@ impl Value {
             }
             Self::Code(code) => {
                 if let Some(keys) = &code.compilation_constants {
-                    visit.extend(keys.filename);
                     visit.extend(keys.slots.borrow().values().copied());
                 }
 
