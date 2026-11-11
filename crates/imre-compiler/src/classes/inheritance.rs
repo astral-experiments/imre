@@ -585,7 +585,11 @@ class OpenChild(Open):
 
 class FixedChild(Fixed):
     pass
+
+assert issubclass(OpenChild, Open)
+assert not issubclass(Open, OpenChild)
 "#;
+        crate::compile(source, &crate::CompileOptions::default()).unwrap();
         let graph = SourceGraph::single(source).unwrap();
         let classes = Classes::collect(&graph).unwrap();
         let id = |statement| DefinitionId {
