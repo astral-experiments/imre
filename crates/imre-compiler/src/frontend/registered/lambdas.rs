@@ -412,6 +412,8 @@ async def factory(seed, rows, mark):
             lambdas: None,
             private_names: None,
         };
+        let suspended = values::Region::SuspendedOperand;
+        assert!(suspended.operand(&expression, source).is_none());
         let plan = RegisteredLambda::prepare(
             lambda,
             source,
@@ -425,6 +427,7 @@ async def factory(seed, rows, mark):
         };
         let plan = &sites[&lambda.start()];
         assert_eq!(plan.metadata.defaults.as_ref(), ["x", "y"]);
+        assert!(suspended.operand(&expression, source).is_some());
         let binding = values::checked_binding(lambda, source).unwrap();
         let ExprKind::Builtin(Builtin::RegisteredLambda(site, false), defaults) = &binding.kind
         else {
