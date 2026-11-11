@@ -728,6 +728,9 @@ impl Initialization {
             {
                 available.insert(definition);
             }
+            if let Some(site) = module.registered_imports.get(&index) {
+                checker.require_registered_operation(site)?;
+            }
             match statement {
                 ast::Stmt::ClassDef(_) => {
                     let declarations = &checker.classes.declarations;

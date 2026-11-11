@@ -1,5 +1,6 @@
 //! Resolve a demanded member in the selected runtime source, using the current ty database.
 use super::*;
+use crate::modules::Binding;
 use ruff_db::files::FileRange;
 use ruff_python_ast::name::Name;
 use ty_python_core::definition::{Definition, DefinitionKind, DefinitionState};
@@ -49,10 +50,10 @@ impl Session {
         (defs.next().is_none() && def.file(&self.db) == file).then_some(def)
     }
 
-    pub(crate) fn shipped_class(&self, owner: &str, name: &str) -> Option<FileRange> {
+    pub(crate) fn shipped_declaration(&self, owner: &str, name: &str) -> Option<Binding> {
         let (filename, _) = crate::dynamic::bundled_module_source(owner, false)?;
         let file = shipped_file(&self.db, filename)?;
-        *selected_class(&self.db, file, Name::new(owner), Name::new(name))
+        *selected_declaration(&self.db, file, Name::new(owner), Name::new(name))
     }
 }
 
@@ -153,10 +154,11 @@ fn local_declaration(
     file: File,
     parsed: &ParsedModuleRef,
     name: &str,
-) -> (TextSize, Option<FileRange>) {
+) -> (TextSize, Option<Binding>) {
     let mut result = None;
     let mut last = TextSize::default();
     let mut valid = true;
+    let mut may_use_accelerator = false;
     for state in bindings(db, file, name) {
         let Some(def) = state.definition() else {
             return (TextSize::new(u32::MAX), None);
@@ -179,21 +181,35 @@ fn local_declaration(
                                 .is_some_and(|d| matches!(d.kind(db), DefinitionKind::Import(_)))
                     }) =>
             {
+                may_use_accelerator = true;
                 continue;
             }
             _ => Some(def),
         };
-        let selected = source
-            .filter(|source| matches!(source.kind(db), DefinitionKind::Class(_)))
-            .map(|source| source.focus_range(db, parsed));
+        let selected = source.and_then(|source| match source.kind(db) {
+            DefinitionKind::Class(_) => {
+                Some(Binding::RegisteredClass(source.focus_range(db, parsed)))
+            }
+            DefinitionKind::Function(function)
+                if function.node(parsed).decorator_list.is_empty() =>
+            {
+                Some(Binding::RegisteredFunction(source.focus_range(db, parsed)))
+            }
+            _ => None,
+        });
         valid &= result.is_none() && selected.is_some();
         result = selected;
     }
-    (last, result.filter(|_| valid))
+    (
+        last,
+        result.filter(|binding| {
+            valid && (!may_use_accelerator || matches!(binding, Binding::RegisteredClass(_)))
+        }),
+    )
 }
 
 #[salsa::tracked(returns(ref), no_eq)]
-fn selected_class(db: &dyn Db, file: File, owner: Name, name: Name) -> Option<FileRange> {
+fn selected_declaration(db: &dyn Db, file: File, owner: Name, name: Name) -> Option<Binding> {
     let (filename, _) = crate::dynamic::bundled_module_source(owner.as_str(), false)?;
     let parsed = ruff_db::parsed::parsed_module(db, db.program_file(file).python_file(db)).load(db);
     let (last, mut selected) = local_declaration(db, file, &parsed, name.as_str());
