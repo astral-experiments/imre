@@ -764,7 +764,9 @@ fn lower_graph(
                         continue;
                     }
                     let cached = function_caches::policy(graph, module_id, function)?;
-                    let physical_entry = (can_transfer_frames || graph.registered_startup)
+                    let physical_entry = (can_transfer_frames
+                        || graph.registered_startup
+                        || module_id == graph.entry)
                         && module.is_program_source()
                         && fixed_frame_entry(function);
                     let mut function = function.clone();
@@ -1165,6 +1167,7 @@ fn lower_graph(
     }
     let mut functions = Vec::new();
     let mut frame_sources = HashMap::new();
+    let mut entry_frames = HashMap::new();
     let mut has_wrapper_link = false;
     let mut refused_body = None;
     let mut zip_sums = Vec::new();
@@ -1297,11 +1300,14 @@ fn lower_graph(
         if let Some(source) = body.source
             && signature.physical_frame
         {
-            if graph.registered_startup
-                && signature.method.is_none()
+            let original = signature.method.is_none()
                 && module.parsed.syntax().body[callable_definitions[signature.id].statement]
                     .as_function_def_stmt()
-                    == Some(definition)
+                    == Some(definition);
+            if !graph.registered_startup && *module_id == graph.entry && original {
+                entry_frames.insert(functions.len(), (definition, source));
+            } else if graph.registered_startup
+                && original
                 && !graph
                     .registered_functions()
                     .get(module_id)
@@ -1316,7 +1322,7 @@ fn lower_graph(
                     definition.start(),
                     place_fixed_function(function.clone(), source),
                 );
-            } else {
+            } else if can_transfer_frames || graph.registered_startup {
                 frame_sources.insert(functions.len(), (definition.start(), source));
             }
         }
@@ -1399,13 +1405,29 @@ fn lower_graph(
         let mut fixed_entry = (!needs_registered_entry).then(Vec::new);
         let result = checker.lower_block(&statements, fixed_entry.as_mut());
         let result = checker.finish_region(result);
-        if checked_region(
-            result,
-            graph,
-            module_id,
-            &mut unavailable,
-            capture_on_object,
-        )?
+        if checked_region(result, graph, module_id, &mut unavailable, |failure| {
+            // Entry checking has finished. An object refusal discards the fixed graph, so
+            // its completed functions can move to the Python binder before ordinary recovery.
+            if failure.is_object() && !captured.get() && !entry_frames.is_empty() {
+                for (id, function) in functions.drain(..).enumerate() {
+                    if let Some((definition, source)) = entry_frames.remove(&id)
+                        && !graph
+                            .registered_functions()
+                            .get(&module_id)
+                            .is_some_and(|entries| entries.contains_key(&definition.start()))
+                        && source.matches(&function)
+                        && source_checks.accepts(graph, module_id, definition)
+                    {
+                        graph.register_function(
+                            module_id,
+                            definition.start(),
+                            place_fixed_function(function, source),
+                        );
+                    }
+                }
+            }
+            capture_on_object(failure);
+        })?
         .is_some()
             && let Some(body) = fixed_entry
         {
@@ -1432,6 +1454,13 @@ fn lower_graph(
             capture();
         }
         return Err(error);
+    }
+    if can_transfer_frames {
+        frame_sources.extend(
+            entry_frames
+                .into_iter()
+                .map(|(id, (definition, source))| (id, (definition.start(), source))),
+        );
     }
     let fault_enabled = graph
         .command_startup
