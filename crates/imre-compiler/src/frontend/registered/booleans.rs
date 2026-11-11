@@ -273,20 +273,6 @@ impl PhysicalPreparation<'_, '_> {
                 inputs.into_boxed_slice(),
             )));
         }
-        if let ast::Expr::UnaryOp(unary) = node {
-            let input = self.ordinary_input(&unary.operand);
-            let operation = ir::Expr::unary(
-                unary.op,
-                ir::Expr::local(0, ir::Type::PythonObject),
-                ir::Type::PythonObject,
-            );
-            return Some(Selection::Inputs(self.inputs(
-                node,
-                operation,
-                Box::new([input]),
-                InputEvaluation::AtUse,
-            )));
-        }
         if let ast::Expr::Compare(cmp) = node {
             return Some(Selection::Operand(self.slotted_operation(
                 node,
@@ -295,7 +281,14 @@ impl PhysicalPreparation<'_, '_> {
             )));
         }
         let mut children = Vec::new();
-        let op = if let Some((op, [left, right])) = values::binary_operands(node) {
+        let op = if let ast::Expr::UnaryOp(unary) = node {
+            let operand = super::bind_operand(
+                &mut children,
+                self.ordinary_input(&unary.operand),
+                ir::Type::PythonObject,
+            );
+            ir::Expr::unary(unary.op, operand, ir::Type::PythonObject)
+        } else if let Some((op, [left, right])) = values::binary_operands(node) {
             let left = super::bind_operand(
                 &mut children,
                 self.ordinary_input(left),
