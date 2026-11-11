@@ -5691,7 +5691,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             else {
                 panic!("expected the checked assertion failure")
             };
-            assert_eq!((*statement, *position), (start, test_range.start()));
+            assert_eq!((*statement, *position), (start, test_range));
             assert!(matches!(
                 message.as_slice(),
                 [Expr {

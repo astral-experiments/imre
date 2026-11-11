@@ -452,7 +452,7 @@ fn assertion_statements(
     let failure = operation(
         Builtin::RegisteredAssertionFailure {
             statement: stmt.start(),
-            test: stmt.test.start(),
+            test: stmt.test.range(),
         },
         Type::None,
         message.into_iter().collect(),
@@ -3670,7 +3670,7 @@ mod tests {
         };
         assert_eq!(
             (*statement, *test),
-            (assertion.start(), assertion.test.start())
+            (assertion.start(), assertion.test.range())
         );
         assert!(matches!(
             args.as_slice(),

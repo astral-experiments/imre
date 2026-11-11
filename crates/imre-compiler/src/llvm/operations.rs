@@ -437,7 +437,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                     ObjectUnary::Invert => "~",
                     ObjectUnary::Not => "not",
                 };
-                CheckedValue::handle(frame.op(name, &[&operand]))
+                CheckedValue::handle(frame.op_at_current_range(name, &[&operand]))
             }
         }
     }
