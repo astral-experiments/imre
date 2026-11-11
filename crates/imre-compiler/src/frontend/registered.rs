@@ -4355,6 +4355,33 @@ mod tests {
     }
 
     #[test]
+    fn ordinary_admission_visits_both_parts_of_an_eager_scope() {
+        let range = TextRange::default();
+        let suspend = operation(
+            Builtin::RegisteredSuspend(ir::SuspendValue::Yield, range),
+            Type::PythonObject,
+            vec![Expr::none()],
+        );
+        for (step, value, accepted) in [
+            (Expr::none(), Expr::none(), true),
+            (suspend.clone(), Expr::none(), false),
+            (Expr::none(), suspend, false),
+        ] {
+            let scoped = Expr {
+                ty: value.ty,
+                kind: ExprKind::Scope {
+                    body: vec![Statement::Expr(step)],
+                    value: Box::new(value),
+                    clear: Vec::new(),
+                },
+            };
+            let body = RegisteredFunction::expression(range, scoped);
+            crate::verify::registered(body.region()).unwrap();
+            assert_eq!(crate::llvm::registered::supports(&body), accepted);
+        }
+    }
+
+    #[test]
     fn eager_first_iterable_can_delegate_before_the_cursor_exists() {
         let text = "def gather():\n    return [value for value in ((yield from rows) or ())]\n";
         let graph = SourceGraph::single(text).unwrap();
