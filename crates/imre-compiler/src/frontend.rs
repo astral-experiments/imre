@@ -1876,6 +1876,12 @@ fn lower_function(
                 },
             )
         }));
+        // The Python binder installs the public name even when the fixed checker renamed a local.
+        for (slot, parameter) in params.iter().zip(&signature.params) {
+            if let Some(binding) = names.get_mut(slot) {
+                binding.name.clone_from(&parameter.name);
+            }
+        }
     } else if module.archive.is_none() {
         checker.fault_frame(&mut body, definition.name.as_str(), definition.start());
         if let Some(sites) = checker.fixed_sites {
