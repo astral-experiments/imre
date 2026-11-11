@@ -100,10 +100,16 @@ impl SourceCallable {
 
     fn missing_body(self) -> String {
         match self {
-            Self::Builtin(builtin) => format!(
-                "this call may select builtins.{} without a linked body for its source. Define the handlers as Python functions and select one by name, or declare the finite modules with --include-module.",
-                builtin.name()
-            ),
+            Self::Builtin(builtin) => {
+                let literal_hint = match builtin {
+                    ExecutionIntrinsic::Eval => " For Python literal data, use ast.literal_eval.",
+                    ExecutionIntrinsic::Exec => "",
+                };
+                format!(
+                    "this call may select builtins.{} without a linked body for its source. Define the handlers as Python functions and select one by name, or declare the finite modules with --include-module.{literal_hint}",
+                    builtin.name()
+                )
+            }
             Self::SelectedBuiltin => "this call selects a builtin by name and can execute source without a linked Python body. Call a fixed function or select from an explicit table such as {'len': len}.".into(),
         }
     }
