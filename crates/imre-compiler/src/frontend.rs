@@ -2965,6 +2965,13 @@ struct CaughtException {
     fields: processes::CapturedFields,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FinallyScope {
+    Outside,
+    Protected,
+    Cleanup,
+}
+
 struct Checker<'a> {
     frame: LexicalFrame,
     unhighlighted_call: Option<TextRange>,
@@ -3041,7 +3048,7 @@ struct Checker<'a> {
     default_reads: Option<Vec<caller_cache::DefaultId>>,
     loop_breaks: Vec<Option<LocalState>>,
     block_depth: usize,
-    in_finally: bool,
+    finally_scope: FinallyScope,
     reachable: bool,
     module_scope: bool,
     class: Option<usize>,
@@ -3129,7 +3136,7 @@ impl<'a> Checker<'a> {
             default_reads: None,
             loop_breaks: Vec::new(),
             block_depth: 0,
-            in_finally: false,
+            finally_scope: FinallyScope::Outside,
             reachable: true,
             module_scope: false,
             class: None,
@@ -7026,10 +7033,11 @@ impl<'a> Checker<'a> {
         } else {
             self.take_breaks()
         };
-        let outer_finally = self.in_finally;
-        self.in_finally = true;
-        let (finalbody, final_falls) = self.block(&try_.finalbody)?;
-        self.in_finally = outer_finally;
+        let outer_finally = self.finally_scope;
+        self.finally_scope = FinallyScope::Cleanup;
+        let final_result = self.block(&try_.finalbody);
+        self.finally_scope = outer_finally;
+        let (finalbody, final_falls) = final_result?;
         if final_falls && let Some(mut pending) = pending_breaks {
             let final_state = self.local_state();
             let written = narrowing::assigned_names(&try_.finalbody)
@@ -13908,6 +13916,15 @@ impl<'a> Checker<'a> {
                 return Ok(self.registered_builtin_call(call, name, args));
             }
             _ => return Err(error(self.source, call, UNSUPPORTED_ARGUMENTS)),
+        };
+        // Each parse failure can become a separate link in a finally's exception chain.
+        let builtin = if matches!(builtin, Builtin::Int)
+            && args[0].ty == Type::Str
+            && self.finally_scope != FinallyScope::Outside
+        {
+            Builtin::IntFromText(self.fixed_origin(call.range(), Some(call.func.end())))
+        } else {
+            builtin
         };
         Ok(Expr {
             ty,

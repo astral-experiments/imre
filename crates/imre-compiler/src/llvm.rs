@@ -26,6 +26,7 @@ mod callables;
 mod character_filters;
 mod conditionals;
 mod contextvars;
+mod finally;
 mod int_buffers;
 mod integer_regions;
 mod json;
@@ -311,9 +312,10 @@ struct LoopTarget {
 #[derive(Clone)]
 enum Cleanup {
     Handler(String),
-    Finally {
-        body: Vec<Statement>,
-        loops: Vec<LoopTarget>,
+    Finally(usize),
+    PendingException {
+        error: Value,
+        previous: Value,
     },
     Slots(Vec<usize>),
     Active {
@@ -323,8 +325,9 @@ enum Cleanup {
     Owner(Value),
 }
 
-enum Completion {
-    Return(Value),
+#[derive(PartialEq, Eq)]
+enum Completion<T = Value> {
+    Return(T),
     Jump { label: String, depth: usize },
     Error,
 }
@@ -578,6 +581,7 @@ fn emit_program(
         small_locals: Vec::new(),
         temporaries: Vec::new(),
         cleanups: Vec::new(),
+        finalbodies: Vec::new(),
         try_nesting: 0,
         cleanup_bytes: 0,
         cleanup_limit_hit: false,
@@ -867,6 +871,7 @@ struct Emitter<'a, 'module> {
     small_locals: Vec<bool>,
     temporaries: Vec<Value>,
     cleanups: Vec<Cleanup>,
+    finalbodies: Vec<finally::Finalbody>,
     try_nesting: usize,
     cleanup_bytes: usize,
     cleanup_limit_hit: bool,
@@ -2034,10 +2039,8 @@ impl Emitter<'_, '_> {
     /// from the loops surrounding the instruction that initiated unwinding.
     fn route(&mut self, completion: Completion) {
         let cleanups = self.cleanups.clone();
-        let loops = self.loops.clone();
         self.unwind(completion);
         self.cleanups = cleanups;
-        self.loops = loops;
     }
 
     fn unwind(&mut self, completion: Completion) {
@@ -2056,49 +2059,12 @@ impl Emitter<'_, '_> {
                 Cleanup::Slots(slots) => self.clear_slots(&slots),
                 Cleanup::Active { previous, name } => self.restore_active(&previous, name),
                 Cleanup::Owner(value) => self.release(&value),
-                Cleanup::Finally { body, loops } => {
-                    // A finalbody can itself contain transfers and protected
-                    // regions. Bound copied cleanup IR across one outer try.
-                    const MAX_CLEANUP_BYTES: usize = 8 * 1024 * 1024;
-                    if self.cleanup_limit_hit || self.cleanup_bytes >= MAX_CLEANUP_BYTES {
-                        self.cleanup_limit_hit = true;
-                        self.body.terminated = true;
-                        return;
-                    }
-                    let depth = self.cleanups.len();
-                    let error = if matches!(completion, Completion::Error) {
-                        let error = self.call("imre_error_take", Type::Exception, &[]);
-                        let previous =
-                            self.call("imre_exception_swap_active", Type::Exception, &[&error]);
-                        self.forget(&error);
-                        self.forget(&previous);
-                        self.cleanups.push(Cleanup::Owner(error.clone()));
-                        self.cleanups.push(Cleanup::Active {
-                            previous: previous.clone(),
-                            name: None,
-                        });
-                        Some((error, previous))
-                    } else {
-                        if let Completion::Return(value) = &completion {
-                            self.cleanups.push(Cleanup::Owner(value.clone()));
-                        }
-                        None
-                    };
-                    self.loops = loops;
-                    let before = self.body.code.len();
-                    let previous_bytes = self.cleanup_bytes;
-                    self.block(&body);
-                    // Nested copies are already included in this byte range.
-                    self.cleanup_bytes = previous_bytes + (self.body.code.len() - before);
-                    self.cleanups.truncate(depth);
-                    if self.body.terminated {
-                        return;
-                    }
-                    if let Some((error, previous)) = error {
-                        self.restore_active(&previous, None);
-                        self.void_call("imre_error_set", &[&error]);
-                        self.release(&error);
-                    }
+                Cleanup::PendingException { error, previous } => {
+                    self.discard_pending_exception(&error, &previous);
+                }
+                Cleanup::Finally(region) => {
+                    self.enter_finalbody(region, completion);
+                    return;
                 }
             }
         }
@@ -2170,10 +2136,7 @@ impl Emitter<'_, '_> {
         let depth = self.cleanups.len();
         let end = self.label();
         if !finalbody.is_empty() {
-            self.cleanups.push(Cleanup::Finally {
-                body: finalbody.to_vec(),
-                loops: self.loops.clone(),
-            });
+            self.push_finalbody();
         }
         let dispatch = self.label();
         let catches_error = !handlers.is_empty() || !finalbody.is_empty();
@@ -2249,6 +2212,10 @@ impl Emitter<'_, '_> {
             // cleanup. Outer protected bodies provide their own landing pads.
             self.start(&dispatch);
             self.route(Completion::Error);
+        }
+        if !finalbody.is_empty() {
+            self.cleanups.truncate(depth);
+            self.emit_finalbody(finalbody);
         }
         self.cleanups.truncate(outer_depth);
         self.temporaries = outer_temporaries;
@@ -7752,7 +7719,7 @@ impl Emitter<'_, '_> {
                 Type::Class(_) => self.value_repr(&args[0].value),
                 _ => unreachable!("scalar string conversion was checked"),
             },
-            Builtin::Int => match args[0].value.ty {
+            Builtin::Int | Builtin::IntFromText(_) => match args[0].value.ty {
                 Type::Int => return self.own_operand(args.into_iter().next().unwrap()),
                 Type::Bool => {
                     let wide =
@@ -7764,10 +7731,18 @@ impl Emitter<'_, '_> {
                         small_integer: true,
                     }
                 }
-                Type::Str if args.len() == 2 => {
-                    self.call("imre_int_parse_hex", Type::Int, &[&args[0].value])
+                Type::Str => {
+                    let parser = if args.len() == 2 {
+                        "imre_int_parse_hex"
+                    } else {
+                        "imre_int_parse"
+                    };
+                    let origin = match builtin {
+                        Builtin::IntFromText(origin) => Some(origin),
+                        _ => None,
+                    };
+                    self.call_at(parser, Type::Int, &[&args[0].value], origin)
                 }
-                Type::Str => self.call("imre_int_parse", Type::Int, &[&args[0].value]),
                 Type::Float => self.call("imre_float_int", Type::Int, &[&args[0].value]),
                 _ => unreachable!("int conversion was checked"),
             },

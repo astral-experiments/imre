@@ -236,7 +236,15 @@ impl StatementLowering for Checker<'_> {
                 self.defer_object_error(&error);
                 Ok((Vec::new(), true))
             }
-            ast::Stmt::Try(try_) if !try_.is_star => self.try_statement(try_),
+            ast::Stmt::Try(try_) if !try_.is_star => {
+                let outer = self.finally_scope;
+                if outer == FinallyScope::Outside && !try_.finalbody.is_empty() {
+                    self.finally_scope = FinallyScope::Protected;
+                }
+                let result = self.try_statement(try_);
+                self.finally_scope = outer;
+                result
+            }
             _ => self.specialized_statement(stmt),
         }
     }
