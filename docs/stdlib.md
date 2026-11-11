@@ -2,7 +2,7 @@
 
 Imre checks every name in the [CPython 3.14.5](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib) top-level module registry (`sys.stdlib_module_names`) on Linux. The first tables cover 194 names without a leading underscore; [the appendix](#names-beginning-with-an-underscore) covers the other 103. Dotted APIs such as `os.path` appear under their parent.
 
-**At a glance:** 152 of 297 modules accept an ordinary import; 2 more accept it only with `--reachable-only`. Across 44 modules with recorded suites, 295 complete test executions pass natively at both optimization levels; 15,152 of 15,426 upstream executions have a classification.
+**At a glance:** 153 of 297 modules accept an ordinary import; 2 more accept it only with `--reachable-only`. Across 44 modules with recorded suites, 295 complete test executions pass natively at both optimization levels; 15,152 of 15,426 upstream executions have a classification.
 
 **Import** checks an otherwise empty file containing `import module`, in ordinary and reachable-only compilation. A successful import does not establish that any function works. Follow the evidence links for the supported operations and their limits.
 
@@ -23,6 +23,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `atexit` | Yes | No API example recorded. | — | — | — |
 | `base64` | Yes | `b64encode`, `b64decode`, alternate alphabets and strict validation for immutable inputs, plus URL-safe encoding. [Evidence](../benchmarks/cpython_stdlib/full/base64/README.md) | [1 / 41](../benchmarks/cpython_stdlib/full/base64/) | 0 | 1 |
 | `binascii` | Yes | Standard Base64 encoding, strict or permissive decoding of bytes and ASCII text, and the module exception hierarchy. [Evidence](../benchmarks/cpython_stdlib/full/binascii/README.md) | [0 / 93](../benchmarks/cpython_stdlib/full/binascii/) | 2 | 4 |
+| `bisect` | Yes | No API example recorded. | — | — | — |
 | `builtins` | Yes | Read, assign and delete `builtins._`; escape supported representations with `ascii` and f-string `!a`. [Evidence](../benchmarks/cpython_stdlib/full/builtins/README.md) | [— / 147 (0 assessed)](../benchmarks/cpython_stdlib/full/builtins/) | — | — |
 | `calendar` | Yes | No API example recorded. | — | — | — |
 | `code` | Yes | No API example recorded. | — | — | — |
@@ -149,7 +150,6 @@ Both import probes reject these names. No native API example or full-suite ledge
 | Module |
 | --- |
 | `bdb` |
-| `bisect` |
 | `bz2` |
 | `cProfile` |
 | `cmath` |
