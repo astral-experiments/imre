@@ -38,17 +38,13 @@ struct Program {
     pub name: String,
     qualname: String,
     nested_global: bool,
-    class_attributes: Option<BTreeSet<String>>,
+    class_scope: bool,
     class_cell: bool,
-    method_class_cell: Option<bool>,
+    method_scope: bool,
     class_nonlocal: bool,
-    needs_class_cell: bool,
-    needs_dict_cell: bool,
-    postponed_annotations: bool,
     has_named_bindings: bool,
     doc: Option<ruff_text_size::TextRange>,
     strip_docstrings: bool,
-    literals: HashMap<ruff_text_size::TextRange, Id>,
     string_roots: Id,
     first_line: u32,
     kind: FunctionKind,
@@ -60,13 +56,14 @@ struct Program {
     reads: BTreeSet<String>,
     private_names: Option<Rc<imre_ast::Names>>,
     template_expressions: Rc<HashMap<ruff_text_size::TextSize, String>>,
-    items: Vec<(u32, SourceItem)>,
+    items: Vec<SourceItem>,
     // Declarations in source lowering order, including nested suites.
     deferred_annotations: Vec<(String, ast::Expr)>,
     // Indices of the class declarations guarded by the private annotation cell.
     conditional_fields: Vec<usize>,
     class_binds_conditional_name: bool,
-    expression_functions: HashMap<ruff_text_size::TextRange, (usize, Definition)>,
+    // Keep anonymous scopes alive while the shared constant pool borrows their literals.
+    expression_scopes: HashMap<TextRange, Box<Program>>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -110,12 +107,11 @@ enum EnclosingBinding {
 /// after collecting code metadata; untouched subtrees are visited in place.
 struct OperandPlan {
     sites: smallvec::SmallVec<[ruff_text_size::TextSize; 1]>,
-    line: u32,
     function: bool,
 }
 
 impl OperandPlan {
-    fn new(root: &ast::Expr, kind: FunctionKind, line: u32, function: bool) -> Self {
+    fn new(root: &ast::Expr, kind: FunctionKind, function: bool) -> Self {
         let mut sites = smallvec::SmallVec::new();
         if kind.is_async() || function {
             let mut work = smallvec::SmallVec::<[&ast::Expr; 8]>::new();
@@ -185,11 +181,7 @@ impl OperandPlan {
             }
             sites.sort_unstable();
         }
-        Self {
-            sites,
-            line,
-            function,
-        }
+        Self { sites, function }
     }
 
     fn suspends(&self, expr: &ast::Expr) -> bool {
@@ -216,7 +208,7 @@ enum SourceItem {
     ReturnClass(Definition),
     Annotations(Vec<(String, ast::Expr)>),
     ModuleAnnotations(Option<Rc<Program>>),
-    ModuleDoc(TextRange, String),
+    ModuleDoc(String),
     StringAnnotation(String, ast::Expr),
     ClassAnnotator(Rc<Program>),
     MakeGenerator(ast::Expr),
@@ -400,7 +392,7 @@ impl NamedBindings {
             return Err(error);
         }
         for (name, offset, comprehension) in self.targets {
-            if comprehension && program.class_attributes.is_some() {
+            if comprehension && program.class_scope {
                 return Err(Error::new(
                     "SyntaxError",
                     "assignment expression within a comprehension cannot be used in a class body",
@@ -488,7 +480,6 @@ struct CompiledStrings<'a, 'ctx> {
     heap: &'ctx mut value::Heap,
     shared: &'ctx mut SharedConstants<'a>,
     spellings: &'ctx StringReplacements,
-    constants: &'ctx mut HashMap<ruff_text_size::TextRange, Id>,
     roots: Vec<Id>,
     pending: Vec<ScopedExpression<'a>>,
     bound: Option<Rc<HashSet<String>>>,
@@ -651,7 +642,7 @@ impl<'a> CompiledStrings<'a, '_> {
             .flat_map(|(_, points)| points.iter().copied());
         if replacements.clone().any(|p| p != 0xfffd) {
             let id = self.decoded_text(text.into(), replacements)?;
-            self.constant(range, id)?;
+            self.keep(id)?;
         }
         Ok(())
     }
@@ -689,7 +680,7 @@ impl<'a> CompiledStrings<'a, '_> {
                         let mut spec = TemplateSegment::default();
                         spec.push(lit, self.spellings);
                         let id = self.template_text(spec)?;
-                        self.constant(lit.range(), id)?;
+                        self.keep(id)?;
                     }
                 }
             }
@@ -699,15 +690,6 @@ impl<'a> CompiledStrings<'a, '_> {
             .map_err(|_| crate::Error::allocation())?;
         items.push(self.template_text(segment)?);
         let id = self.tuple_constant(items)?;
-        self.constant(template.range(), id)
-    }
-
-    /// Root a literal for later evaluation at its source position.
-    fn constant(&mut self, range: ruff_text_size::TextRange, id: Id) -> Result<()> {
-        self.constants
-            .try_reserve(1)
-            .map_err(|_| Error::new("MemoryError", ""))?;
-        self.constants.insert(range, id);
         self.keep(id)
     }
 
@@ -829,7 +811,7 @@ impl<'a> CompiledStrings<'a, '_> {
                 | ast::Expr::EllipsisLiteral(_) => {}
                 _ if imre_ast::literal_tuple_element(expr) => {
                     let id = self.literal(expr)?;
-                    self.constant(expr.range(), id)?;
+                    self.keep(id)?;
                     continue;
                 }
                 _ => {}
@@ -1083,14 +1065,13 @@ impl Program {
         let nested_scope_flags = self.nested_scope_flags();
         let mut nested_reads = BTreeSet::new();
         let stringized = self.string_annotations();
-        let class_locals = self.class_attributes.as_ref().map(|_| &self.locals);
+        let class_locals = self.class_scope.then_some(&self.locals);
         let mut strings = CompiledStrings {
             reads: &mut self.reads,
             directives: &self.directives,
             heap,
             shared,
             spellings,
-            constants: &mut self.literals,
             roots: Vec::new(),
             pending: Vec::new(),
             bound: None,
@@ -1099,7 +1080,7 @@ impl Program {
         };
         let mut enclosing_bindings = Vec::new();
         let mut prepared_generators = Vec::new();
-        for (_, op) in &mut self.items {
+        for op in &mut self.items {
             match op {
                 SourceItem::EnterComprehension(targets) => {
                     let mut bound = targets.clone();
@@ -1117,7 +1098,7 @@ impl Program {
                 {
                     let text = imre_ast::strings::clean_doc(doc.value.to_str());
                     let id = strings.text(text.into())?;
-                    strings.constant(doc.range(), id)?;
+                    strings.keep(id)?;
                 }
                 SourceItem::Eval(e) | SourceItem::Discard(e) => strings.visit_expr(e),
                 SourceItem::Name(name) => {
@@ -1170,9 +1151,9 @@ impl Program {
                     strings.visit_expr(&stmt.target);
                     strings.visit_expr(&stmt.value);
                 }
-                SourceItem::ModuleDoc(range, text) => {
+                SourceItem::ModuleDoc(text) => {
                     let id = strings.text(text.as_str().into())?;
-                    strings.constant(*range, id)?;
+                    strings.keep(id)?;
                 }
                 SourceItem::Assign(targets, e) => {
                     for target in targets {
@@ -1279,11 +1260,11 @@ impl Program {
         let (class_cell, mut functions) = strings.scan(&mut self.unlowered_yield)?;
         functions.extend(prepared_generators);
         self.class_cell |= class_cell;
-        self.expression_functions
+        self.expression_scopes
             .try_reserve(functions.len())
             .map_err(|_| Error::new("MemoryError", ""))?;
         let mut comprehension_sites = HashMap::new();
-        for (site, (expr, bound)) in functions.into_iter().enumerate() {
+        for (expr, bound) in functions {
             let in_comprehension = bound.is_some();
             if let Some(names) = bound {
                 comprehension_sites.insert(expr.range(), names);
@@ -1297,36 +1278,27 @@ impl Program {
             child.scope_flags = nested_scope_flags;
             child.strip_docstrings = self.strip_docstrings;
 
-            child.qualname =
-                Self::qualified_name(&self.qualname, self.class_attributes.is_some(), name);
+            child.qualname = Self::qualified_name(&self.qualname, self.class_scope, name);
             child.template_expressions = self.template_expressions.clone();
             child.private_names = self.private_names.clone();
             child.first_line = line_at(expr.start().to_usize());
             let params = match expr {
                 ast::Expr::Lambda(lambda) => {
-                    if !in_comprehension && self.class_attributes.is_some() {
-                        child.method_class_cell = Some(imre_ast::class_cell::expression_needed(
-                            &lambda.body,
-                            lambda.parameters.as_deref(),
-                            stringized,
-                        ));
-                    }
+                    child.method_scope = !in_comprehension && self.class_scope;
                     if self.has_named_bindings {
                         let mut named = NamedBindings::default();
                         named.visit_expr(&lambda.body);
                         named.declare(&mut child)?;
                     }
-                    let params = lambda.parameters.clone().unwrap_or_default();
-                    let line = child.first_line;
-                    let end = match child.lower_suspension(*lambda.body.clone(), line, true)? {
+                    let end = match child.lower_suspension(*lambda.body.clone(), true)? {
                         Some(body) => SourceItem::Return(Some(body)),
                         None => {
                             child.kind = FunctionKind::GeneratorLambda;
                             SourceItem::Return(None)
                         }
                     };
-                    child.items.push((line, end));
-                    params
+                    child.items.push(end);
+                    lambda.parameters.as_deref()
                 }
                 ast::Expr::Generator(genexpr) => {
                     // Assignment expressions in the deferred frame still bind in the
@@ -1349,45 +1321,31 @@ impl Program {
                                 .insert(name, (kind, ruff_text_size::TextRange::empty(offset)));
                         }
                     }
-                    child.lower_genexpr(genexpr, line_at)?
+                    child.lower_genexpr(genexpr)?;
+                    None
                 }
                 _ => unreachable!("anonymous function expression"),
             };
             child.scope_flags |= code_flags::function_flags(
-                Some(&params),
+                params,
                 in_comprehension,
-                !in_comprehension && self.class_attributes.is_some(),
+                !in_comprehension && self.class_scope,
             );
-            child
-                .locals
-                .extend(params.iter().map(|p| p.name().to_string()));
-            self.expression_functions.insert(
-                expr.range(),
-                (
-                    site,
-                    Definition {
-                        binding: name.to_owned(),
-                        decorators: Vec::new(),
-                        body: Rc::new(child),
-                        kind: DefinitionKind::Function {
-                            parameters: params,
-                            type_params: None,
-                        },
-                        annotate: None,
-                    },
-                ),
-            );
+            if let Some(params) = params {
+                child
+                    .locals
+                    .extend(params.iter().map(|p| p.name().to_string()));
+            }
+            self.expression_scopes.insert(expr.range(), Box::new(child));
         }
-        for (range, (_, definition)) in &mut self.expression_functions {
-            let child =
-                Rc::get_mut(&mut definition.body).expect("newly lowered expression function");
+        for (range, child) in &mut self.expression_scopes {
             let bound = comprehension_sites.get(range);
             let (roots, reads) =
                 child.prepare_strings(strings.heap, strings.shared, spellings, line_at)?;
             let captured = reads
                 .iter()
                 .filter(|n| !bound.is_some_and(|b| b.contains(n.as_str())));
-            if self.class_attributes.is_none() && !self.locals.contains("__class__") {
+            if !self.class_scope && !self.locals.contains("__class__") {
                 self.class_cell |= captured.clone().any(|n| n == "__class__" || n == "super");
             }
             nested_reads.extend(captured.cloned());
@@ -1411,7 +1369,7 @@ impl Program {
             self.reads
                 .retain(|name| name == "__classdict__" || !class.contains(name));
         }
-        if self.method_class_cell.is_none()
+        if !self.method_scope
             && self.class_cell
             && self.reads.contains("super")
             && self.reads.contains(CONDITIONAL)
@@ -1425,7 +1383,7 @@ impl Program {
                 .filter(|(_, (kind, _))| *kind == ScopeDirective::Nonlocal)
                 .map(|(name, _)| name.clone()),
         );
-        if self.class_attributes.is_some() {
+        if self.class_scope {
             self.reads.retain(|name| {
                 !matches!(self.directives.get(name), Some((ScopeDirective::Global, _)))
             });
@@ -1513,9 +1471,9 @@ impl Program {
                 ));
             }
         }
-        let function = self.name != "<module>" && self.class_attributes.is_none();
+        let function = self.name != "<module>" && !self.class_scope;
         let bound = |name: &str| {
-            if self.class_attributes.is_some() && name == "__class__" {
+            if self.class_scope && name == "__class__" {
                 if !self.locals.contains(name)
                     && matches!(enclosing(name), Some(EnclosingBinding::TypeParameter))
                 {
@@ -1533,12 +1491,11 @@ impl Program {
             } else {
                 // A method can bind the class's conditional annotation cell without an outer binding.
                 enclosing(name).or_else(|| {
-                    (self.class_attributes.is_some() && name == CONDITIONAL)
-                        .then_some(EnclosingBinding::Local)
+                    (self.class_scope && name == CONDITIONAL).then_some(EnclosingBinding::Local)
                 })
             }
         };
-        for (_, op) in &mut self.items {
+        for op in &mut self.items {
             if let SourceItem::Define(definition) | SourceItem::ReturnClass(definition) = op {
                 let child = Rc::get_mut(&mut definition.body).expect("newly lowered child code");
                 if let Some(params) = definition.kind.type_params() {
@@ -1567,7 +1524,7 @@ impl Program {
     }
 
     fn class_parameter_header(&self) -> bool {
-        matches!(self.items.first(), Some((_, SourceItem::ReturnClass(_))))
+        matches!(self.items.first(), Some(SourceItem::ReturnClass(_)))
     }
 
     fn nested_program(&self, name: &str) -> Self {
@@ -1586,7 +1543,7 @@ impl Program {
                 | code_flags::FUTURE_BARRY_AS_BDFL
                 | code_flags::NESTED);
         // A class body keeps its enclosing function scope even when bound by a global declaration.
-        if self.name != "<module>" && self.class_attributes.is_none() {
+        if self.name != "<module>" && !self.class_scope {
             flags |= code_flags::NESTED;
         }
         flags
@@ -1601,17 +1558,13 @@ impl Program {
             name: name.to_owned(),
             qualname: name.to_owned(),
             nested_global: false,
-            class_attributes: None,
+            class_scope: false,
             class_cell: false,
-            method_class_cell: None,
+            method_scope: false,
             class_nonlocal: false,
-            needs_class_cell: false,
-            needs_dict_cell: false,
-            postponed_annotations: false,
             has_named_bindings,
             doc: None,
             strip_docstrings: false,
-            literals: HashMap::new(),
             string_roots: NONE,
             first_line: 1,
             kind: FunctionKind::Plain,
@@ -1628,20 +1581,15 @@ impl Program {
             deferred_annotations: Vec::new(),
             conditional_fields: Vec::new(),
             class_binds_conditional_name: false,
-            expression_functions: HashMap::new(),
+            expression_scopes: HashMap::new(),
         }
     }
 
-    fn lower_suspension(
-        &mut self,
-        expr: ast::Expr,
-        line: u32,
-        function: bool,
-    ) -> Result<Option<ast::Expr>> {
+    fn lower_suspension(&mut self, expr: ast::Expr, function: bool) -> Result<Option<ast::Expr>> {
         if function && !self.kind.is_async() && !code_flags::yields_in_expression(&expr) {
             return Ok(Some(expr));
         }
-        let plan = OperandPlan::new(&expr, self.kind, line, function);
+        let plan = OperandPlan::new(&expr, self.kind, function);
         self.lower_operand(expr, &plan)
     }
 
@@ -1652,7 +1600,6 @@ impl Program {
     }
 
     fn emit_operand(&mut self, expr: ast::Expr, plan: &OperandPlan) -> Result<Option<ast::Expr>> {
-        let line = plan.line;
         if matches!(expr, ast::Expr::Yield(_) | ast::Expr::YieldFrom(_)) {
             if !plan.function {
                 self.invalid_transfer(expr.range(), "'yield' outside function")?;
@@ -1667,12 +1614,11 @@ impl Program {
         if let ast::Expr::Generator(genexpr) = &expr {
             if let Some(outer) = self.lower_suspension(
                 outer_clause(&genexpr.generators).iter.clone(),
-                line,
                 plan.function,
             )? {
-                self.items.push((line, SourceItem::Discard(outer)));
+                self.items.push(SourceItem::Discard(outer));
             }
-            self.items.push((line, SourceItem::MakeGenerator(expr)));
+            self.items.push(SourceItem::MakeGenerator(expr));
             return Ok(None);
         }
         if let Some(comp) = Plan::from_expr(&expr) {
@@ -1697,7 +1643,7 @@ impl Program {
                     keywords.push(kw.arg.expect("fixed keyword"));
                     self.record_operand(kw.value, plan)?;
                 }
-                self.items.push((line, SourceItem::Keywords(keywords)));
+                self.items.push(SourceItem::Keywords(keywords));
             }
             ast::Expr::Tuple(ast::ExprTuple { elts, .. })
             | ast::Expr::List(ast::ExprList { elts, .. })
@@ -1723,10 +1669,8 @@ impl Program {
                     return Err(unsupported("assignment expression target"));
                 };
                 self.record_operand(*named.value, plan)?;
-                self.items.push((
-                    line,
-                    SourceItem::Name(ast::Identifier::new(name.id, name.range)),
-                ));
+                self.items
+                    .push(SourceItem::Name(ast::Identifier::new(name.id, name.range)));
             }
             ast::Expr::Dict(dict) => {
                 for item in dict.items {
@@ -1753,7 +1697,7 @@ impl Program {
             ast::Expr::UnaryOp(u) => self.record_operand(*u.operand, plan)?,
             ast::Expr::Attribute(a) => {
                 self.record_operand(*a.value, plan)?;
-                self.items.push((line, SourceItem::Name(a.attr)));
+                self.items.push(SourceItem::Name(a.attr));
             }
             ast::Expr::If(b) => {
                 for expr in [b.test, b.body, b.orelse] {
@@ -1767,14 +1711,14 @@ impl Program {
 
     fn record_operand(&mut self, expr: ast::Expr, plan: &OperandPlan) -> Result<()> {
         if let Some(expr) = self.lower_operand(expr, plan)? {
-            self.items.push((plan.line, SourceItem::Discard(expr)));
+            self.items.push(SourceItem::Discard(expr));
         }
         Ok(())
     }
 
-    fn record_expression(&mut self, expr: ast::Expr, line: u32, function: bool) -> Result<()> {
-        if let Some(expr) = self.lower_suspension(expr, line, function)? {
-            self.items.push((line, SourceItem::Discard(expr)));
+    fn record_expression(&mut self, expr: ast::Expr, function: bool) -> Result<()> {
+        if let Some(expr) = self.lower_suspension(expr, function)? {
+            self.items.push(SourceItem::Discard(expr));
         }
         Ok(())
     }
@@ -1834,8 +1778,7 @@ impl Program {
                 Some((ScopeDirective::Global, _))
             );
         if !child.nested_global {
-            child.qualname =
-                Self::qualified_name(&self.qualname, self.class_attributes.is_some(), original);
+            child.qualname = Self::qualified_name(&self.qualname, self.class_scope, original);
         }
         child.private_names = self.private_names.clone();
         child.template_expressions = self.template_expressions.clone();
@@ -1857,10 +1800,9 @@ impl Program {
         lines: &[usize],
         function: bool,
     ) -> Result<()> {
-        let class = self.class_attributes.is_some();
+        let class = self.class_scope;
         if !function && !class && imre_ast::annotations::has_variable_annotation(&body) {
-            self.items
-                .push((self.first_line, SourceItem::ModuleAnnotations(None)));
+            self.items.push(SourceItem::ModuleAnnotations(None));
         }
         if !self.interactive
             && let Some(ast::Stmt::Expr(first)) = body.first()
@@ -1874,20 +1816,11 @@ impl Program {
                 }
                 self.doc = Some(doc.range());
             } else {
-                let line = lines.partition_point(|n| *n <= first.start().to_usize()) as u32;
                 let text = imre_ast::strings::clean_doc(doc.value.to_str());
-                self.items
-                    .push((line, SourceItem::ModuleDoc(doc.range(), text)));
+                self.items.push(SourceItem::ModuleDoc(text));
                 body.remove(0);
             }
         }
-        self.postponed_annotations = class
-            && self.string_annotations()
-            && imre_ast::annotations::has_variable_annotation(&body);
-        self.needs_class_cell =
-            class && imre_ast::class_cell::needed(&body, self.string_annotations());
-        self.needs_dict_cell =
-            class && imre_ast::class_cell::dict_needed(&body, self.string_annotations());
         self.lower_block(body, lines, function, None, class)?;
         if !self.deferred_annotations.is_empty() {
             let entries = std::mem::take(&mut self.deferred_annotations);
@@ -1899,10 +1832,9 @@ impl Program {
                 fields,
             );
             if class {
-                self.items
-                    .push((self.first_line, SourceItem::ClassAnnotator(provider)));
+                self.items.push(SourceItem::ClassAnnotator(provider));
             } else {
-                self.items[0].1 = SourceItem::ModuleAnnotations(Some(provider));
+                self.items[0] = SourceItem::ModuleAnnotations(Some(provider));
             }
         }
         Ok(())
@@ -1957,7 +1889,6 @@ impl Program {
     ) -> Result<()> {
         use ast::Stmt;
         for mut stmt in body {
-            let line = lines.partition_point(|n| *n <= stmt.start().to_usize()) as u32;
             // A generic class's header selectively mangles its private type parameters.
             // Keep the shared spelling map for both the parameter frame and its body.
             let class_names = if self.private_names.is_none()
@@ -1981,7 +1912,7 @@ impl Program {
                     self.declare(ScopeDirective::Nonlocal, &s.names, s.range())?;
                     continue;
                 }
-                Stmt::Expr(s) => match self.lower_suspension(*s.value, line, function)? {
+                Stmt::Expr(s) => match self.lower_suspension(*s.value, function)? {
                     Some(expr) => SourceItem::Eval(expr),
                     None => continue,
                 },
@@ -1989,7 +1920,7 @@ impl Program {
                     for target in &s.targets {
                         self.declare_target(target)?;
                     }
-                    match self.lower_suspension(*s.value, line, function)? {
+                    match self.lower_suspension(*s.value, function)? {
                         Some(value) => SourceItem::Assign(s.targets, value),
                         None => SourceItem::BindSent(s.targets),
                     }
@@ -2006,9 +1937,7 @@ impl Program {
                     if let Some(name) = &name {
                         if s.simple
                             && let Some((kind, _)) = self.directives.get(name)
-                            && (function
-                                || self.class_attributes.is_some()
-                                || *kind != ScopeDirective::Global)
+                            && (function || self.class_scope || *kind != ScopeDirective::Global)
                         {
                             return Err(Error::new(
                                 "SyntaxError",
@@ -2021,19 +1950,19 @@ impl Program {
                     }
                     annotations::validate(&s.annotation, name.is_some())?;
                     if let Some(value) = s.value {
-                        let op = match self.lower_suspension(*value, line, function)? {
+                        let op = match self.lower_suspension(*value, function)? {
                             Some(value) => SourceItem::Assign(vec![*s.target], value),
                             None => SourceItem::BindSent(vec![*s.target]),
                         };
-                        self.items.push((line, op));
+                        self.items.push(op);
                     } else {
                         match *s.target {
                             ast::Expr::Attribute(attr) => {
-                                self.discard_annotation_operand(*attr.value, line, function)?;
+                                self.record_expression(*attr.value, function)?;
                             }
                             ast::Expr::Subscript(item) => {
-                                self.discard_annotation_operand(*item.value, line, function)?;
-                                self.discard_annotation_slice(*item.slice, line, function)?;
+                                self.record_expression(*item.value, function)?;
+                                self.discard_annotation_slice(*item.slice, function)?;
                             }
                             ast::Expr::Name(_) => {}
                             _ => return Err(unsupported("annotated assignment target")),
@@ -2055,7 +1984,7 @@ impl Program {
                         if class_top_level {
                             continue;
                         }
-                        if self.class_attributes.is_some() {
+                        if self.class_scope {
                             self.conditional_fields.push(index);
                         }
                         continue;
@@ -2067,13 +1996,13 @@ impl Program {
                             ast::Expr::Name(name) => {
                                 let name = name.id.to_string();
                                 self.locals.insert(name.clone());
-                                self.items.push((line, SourceItem::DeleteName(name)));
+                                self.items.push(SourceItem::DeleteName(name));
                             }
                             ast::Expr::Subscript(item) => {
-                                self.items.push((line, SourceItem::DeleteItem(item)));
+                                self.items.push(SourceItem::DeleteItem(item));
                             }
                             ast::Expr::Attribute(attr) => {
-                                self.items.push((line, SourceItem::DeleteAttr(attr)));
+                                self.items.push(SourceItem::DeleteAttr(attr));
                             }
                             _ => return Err(unsupported("deletion target")),
                         }
@@ -2089,10 +2018,10 @@ impl Program {
                         self.invalid_transfer(s.range(), "'return' outside function")?;
                     }
                     let Some(value) = s.value else {
-                        self.items.push((line, SourceItem::Return(None)));
+                        self.items.push(SourceItem::Return(None));
                         continue;
                     };
-                    match self.lower_suspension(*value, line, function)? {
+                    match self.lower_suspension(*value, function)? {
                         Some(value) => SourceItem::Return(Some(value)),
                         None => continue,
                     }
@@ -2106,8 +2035,7 @@ impl Program {
                             .as_deref()
                             .unwrap_or_else(|| module.split('.').next().unwrap());
                         self.locals.insert(local.to_owned());
-                        self.items
-                            .push((line, SourceItem::Import { module, alias }));
+                        self.items.push(SourceItem::Import { module, alias });
                     }
                     continue;
                 }
@@ -2118,7 +2046,7 @@ impl Program {
                     for alias in &s.names {
                         let local = alias.asname.as_ref().unwrap_or(&alias.name).to_string();
                         if alias.name.as_str() == "*" {
-                            if function || self.class_attributes.is_some() {
+                            if function || self.class_scope {
                                 return Err(Error::new(
                                     "SyntaxError",
                                     "import * only allowed at module level",
@@ -2132,8 +2060,7 @@ impl Program {
                     SourceItem::From(module.to_owned(), names)
                 }
                 Stmt::TypeAlias(s)
-                    if self.class_attributes.is_none()
-                        && (!function || s.type_params.is_some()) =>
+                    if !self.class_scope && (!function || s.type_params.is_some()) =>
                 {
                     if s.type_params.as_deref().is_some_and(|params| {
                         params.iter().any(|param| {
@@ -2143,17 +2070,14 @@ impl Program {
                     }) {
                         return Err(unsupported("type alias parameter bounds and defaults"));
                     }
+                    let line = lines.partition_point(|n| *n <= s.start().to_usize()) as u32;
                     let ast::Expr::Name(name) = *s.name else {
                         return Err(unsupported("type alias target"));
                     };
                     let name = ast::Identifier::new(name.id, name.range);
                     let mut child = self.definition_body(&name, &[], line, lines);
                     child.locals.insert(".format".to_owned());
-                    let rhs_line =
-                        lines.partition_point(|n| *n <= s.value.start().to_usize()) as u32;
-                    child
-                        .items
-                        .push((rhs_line, SourceItem::Return(Some(*s.value))));
+                    child.items.push(SourceItem::Return(Some(*s.value)));
                     self.locals.insert(name.to_string());
                     SourceItem::Define(Definition {
                         binding: name.to_string(),
@@ -2164,21 +2088,16 @@ impl Program {
                     })
                 }
                 Stmt::FunctionDef(mut s) => {
+                    let line = lines.partition_point(|n| *n <= s.start().to_usize()) as u32;
                     let mut child = self.definition_body(&s.name, &s.decorator_list, line, lines);
-                    if self.class_attributes.is_some() && s.type_params.is_none() {
-                        child.method_class_cell = Some(imre_ast::class_cell::function_needed(
-                            &s.body,
-                            Some(&s.parameters),
-                            self.string_annotations(),
-                        ));
-                    }
+                    child.method_scope = self.class_scope && s.type_params.is_none();
                     if let Some(params) = &s.type_params {
                         child.validate_type_params(params, "function")?;
                     }
                     child.scope_flags |= code_flags::function_flags(
                         Some(&s.parameters),
                         s.type_params.is_some(),
-                        self.class_attributes.is_some() && s.type_params.is_none(),
+                        self.class_scope && s.type_params.is_none(),
                     );
                     let annotate = self.annotation_program(&mut s, &child, line)?;
                     if s.is_async {
@@ -2212,6 +2131,7 @@ impl Program {
                     })
                 }
                 Stmt::ClassDef(mut s) => {
+                    let line = lines.partition_point(|n| *n <= s.start().to_usize()) as u32;
                     let mut child = self.definition_body(&s.name, &s.decorator_list, line, lines);
                     if let Some(names) = &class_names {
                         child.private_names = Some(Rc::clone(names));
@@ -2224,16 +2144,14 @@ impl Program {
                     {
                         return Err(Error::new("SyntaxError", reason));
                     }
-                    let spellings = child.private_names.get_or_insert_with(|| {
+                    child.private_names.get_or_insert_with(|| {
                         Rc::new(imre_ast::lower_in(&mut s.body, &child.name, false))
                     });
                     // The implicit type-parameter function encloses the class body.
                     if s.type_params.is_some() {
                         child.scope_flags |= code_flags::NESTED;
                     }
-                    child.class_attributes = Some(imre_ast::class_attributes::static_attributes(
-                        &s.body, spellings,
-                    ));
+                    child.class_scope = true;
                     child.lower_namespace(s.body, lines, false)?;
                     self.locals.insert(s.name.to_string());
                     let mut definition = Definition {
@@ -2251,18 +2169,13 @@ impl Program {
                         // Decorators are evaluated and applied in the enclosing scope.
                         let mut header = self.definition_body(&s.name, &[], line, lines);
                         header.name = format!("<generic parameters of {}>", definition.body.name);
-                        header.qualname = Self::qualified_name(
-                            &self.qualname,
-                            self.class_attributes.is_some(),
-                            &header.name,
-                        );
+                        header.qualname =
+                            Self::qualified_name(&self.qualname, self.class_scope, &header.name);
                         header.nested_global = false;
                         header.first_line = definition.body.first_line;
                         header.private_names = definition.body.private_names.clone();
                         let decorators = std::mem::take(&mut definition.decorators);
-                        header
-                            .items
-                            .push((line, SourceItem::ReturnClass(definition)));
+                        header.items.push(SourceItem::ReturnClass(definition));
                         definition = Definition {
                             binding: s.name.to_string(),
                             decorators,
@@ -2296,12 +2209,12 @@ impl Program {
                                     "'async for' outside async function",
                                 ));
                             }
-                            self.record_expression(*s.iter, line, function)?;
-                            self.items.push((line, SourceItem::Discard(*s.target)));
+                            self.record_expression(*s.iter, function)?;
+                            self.items.push(SourceItem::Discard(*s.target));
                             (s.body, s.orelse)
                         }
                         Stmt::While(s) => {
-                            self.record_expression(*s.test, line, function)?;
+                            self.record_expression(*s.test, function)?;
                             (s.body, s.orelse)
                         }
                         _ => unreachable!(),
@@ -2322,12 +2235,12 @@ impl Program {
                             self.declare_target(target)?;
                         }
                         if s.is_async {
-                            self.record_expression(item.context_expr, line, function)?;
+                            self.record_expression(item.context_expr, function)?;
                             if let Some(target) = item.optional_vars {
-                                self.items.push((line, SourceItem::Discard(*target)));
+                                self.items.push(SourceItem::Discard(*target));
                             }
                         } else {
-                            self.items.push((line, SourceItem::EnterWith(item)));
+                            self.items.push(SourceItem::EnterWith(item));
                         }
                     }
                     self.lower(s.body, lines, function, active.as_deref_mut())?;
@@ -2336,7 +2249,7 @@ impl Program {
                 Stmt::Try(s)
                     if s.is_star
                         && !function
-                        && self.class_attributes.is_none()
+                        && !self.class_scope
                         && !self.string_annotations()
                         && imre_ast::annotations::has_variable_annotation(
                             std::slice::from_ref(&stmt),
@@ -2348,14 +2261,12 @@ impl Program {
                     self.lower(s.body, lines, function, active.as_deref_mut())?;
                     let before_handlers = self.deferred_annotations.len();
                     for ast::ExceptHandler::ExceptHandler(h) in s.handlers {
-                        let handler_line =
-                            lines.partition_point(|n| *n <= h.start().to_usize()) as u32;
                         if let Some(class) = h.type_ {
-                            self.items.push((handler_line, SourceItem::Discard(*class)));
+                            self.items.push(SourceItem::Discard(*class));
                         }
                         if let Some(name) = h.name {
                             self.locals.insert(name.to_string());
-                            self.items.push((handler_line, SourceItem::Name(name)));
+                            self.items.push(SourceItem::Name(name));
                         }
                         self.lower(h.body, lines, function, active.as_deref_mut())?;
                     }
@@ -2393,7 +2304,7 @@ impl Program {
                         // Keep both ranges of deferred annotation sites.
                         let exceptional = self.deferred_annotations.len();
                         self.deferred_annotations.extend_from_within(first..);
-                        if self.class_attributes.is_some() {
+                        if self.class_scope {
                             self.conditional_fields
                                 .extend(exceptional..exceptional + annotation_count);
                         }
@@ -2415,22 +2326,19 @@ impl Program {
                     }
                     self.items.insert(
                         dispatch,
-                        (
-                            line,
-                            SourceItem::Match {
-                                subject: *s.subject,
-                                cases,
-                            },
-                        ),
+                        SourceItem::Match {
+                            subject: *s.subject,
+                            cases,
+                        },
                     );
                     continue;
                 }
                 Stmt::If(s) => {
-                    self.record_expression(*s.test, line, function)?;
+                    self.record_expression(*s.test, function)?;
                     self.lower(s.body, lines, function, active.as_deref_mut())?;
                     for clause in s.elif_else_clauses {
                         if let Some(test) = clause.test {
-                            self.record_expression(test, line, function)?;
+                            self.record_expression(test, function)?;
                         }
                         self.lower(clause.body, lines, function, active.as_deref_mut())?;
                     }
@@ -2443,7 +2351,7 @@ impl Program {
                     )));
                 }
             };
-            self.items.push((line, op));
+            self.items.push(op);
         }
         Ok(())
     }
@@ -3040,8 +2948,7 @@ impl Context {
                     named.visit_expr(&expression.body);
                     named.declare(&mut code)?;
                 }
-                code.items
-                    .push((1, SourceItem::Return(Some(*expression.body))));
+                code.items.push(SourceItem::Return(Some(*expression.body)));
             }
             ast::Mod::Module(module) => {
                 let mut body = module.body;
@@ -3169,10 +3076,6 @@ impl Context {
         let name = self.heap.code_name(&program.name);
         let qualname = self.heap.code_name(&program.qualname);
         let filename = program.filename.object;
-        let doc = program
-            .doc
-            .and_then(|range| program.literals.get(&range).copied())
-            .unwrap_or(NONE);
         self.alloc(Value::Code(value::CodeObject {
             compilation_constants: Default::default(),
             parsed_parameters: Default::default(),
@@ -3181,7 +3084,8 @@ impl Context {
             freevar_names: NONE,
             name,
             qualname,
-            doc,
+            // compile() returns the module code object. Its docstring is a rooted constant.
+            doc: NONE,
             filename,
             first_line: program.first_line,
             module_definition: !program.nested_global && program.name == program.qualname,
@@ -3765,6 +3669,9 @@ impl Context {
                     "TypeError",
                     "cannot use a closure with this code object",
                 ));
+            }
+            Value::Code(code) if matches!(code.body, Body::Parsed { .. }) => {
+                return self.missing_compiled_body(source);
             }
             Value::Code(_) => source,
             _ if closure.is_some() => {

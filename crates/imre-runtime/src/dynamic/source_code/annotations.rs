@@ -84,35 +84,22 @@ pub(super) fn string_literal(expr: &ast::Expr) -> ast::Expr {
 }
 
 impl Program {
-    pub(super) fn discard_annotation_operand(
-        &mut self,
-        operand: ast::Expr,
-        line: u32,
-        function: bool,
-    ) -> Result<()> {
-        if let Some(expr) = self.lower_suspension(operand, line, function)? {
-            self.items.push((line, SourceItem::Discard(expr)));
-        }
-        Ok(())
-    }
-
     // A bare subscript annotation evaluates the keys and bounds in order,
     // without constructing a slice or fetching the final item.
     pub(super) fn discard_annotation_slice(
         &mut self,
         slice: ast::Expr,
-        line: u32,
         function: bool,
     ) -> Result<()> {
         match slice {
             ast::Expr::Slice(slice) => {
                 for bound in [slice.lower, slice.upper, slice.step].into_iter().flatten() {
-                    self.discard_annotation_operand(*bound, line, function)?;
+                    self.record_expression(*bound, function)?;
                 }
             }
             ast::Expr::Tuple(items) => {
                 for item in items.elts {
-                    self.discard_annotation_slice(item, line, function)?;
+                    self.discard_annotation_slice(item, function)?;
                 }
             }
             ast::Expr::Starred(_) => {
@@ -121,7 +108,7 @@ impl Program {
                     "can't use starred expression here",
                 ));
             }
-            expr => self.discard_annotation_operand(expr, line, function)?,
+            expr => self.record_expression(expr, function)?,
         }
         Ok(())
     }
@@ -184,12 +171,10 @@ impl Program {
         provider.private_names = self.private_names.clone();
         provider.template_expressions = self.template_expressions.clone();
         provider.conditional_fields = conditional_fields;
-        if owner.is_some() && self.class_attributes.is_some() && !self.string_annotations() {
+        if owner.is_some() && self.class_scope && !self.string_annotations() {
             provider.reads.insert("__classdict__".into());
         }
-        provider
-            .items
-            .push((line, SourceItem::Annotations(entries)));
+        provider.items.push(SourceItem::Annotations(entries));
         Rc::new(provider)
     }
 }
