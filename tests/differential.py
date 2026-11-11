@@ -84,19 +84,14 @@ SOURCE_BOUNDARIES = {
     "literal_indentation_data": 'x = """a\n\tb\n\fc"""\nprint(x == "a\\n\\tb\\n\\fc")\n',
 }
 
-ERRORS = {
-    "division_zero": ("print(1 // 0)\n", "ZeroDivisionError"),
-    "modulo_zero": ("print(-1 % 0)\n", "ZeroDivisionError"),
-    "dynamic_division_zero": ('zero = int("0")\nprint(1 // zero)\n', "ZeroDivisionError"),
-    "dynamic_modulo_zero": ('zero = int("0")\nprint(-1 % zero)\n', "ZeroDivisionError"),
-    "modulo_zero_big": ("print(1000000000000000000000000 % 0)\n", "ZeroDivisionError"),
+# Fixed subscripts and integer conversion carry the failing source range.
+TRACEBACK_ERRORS = {
     "bounds": ("x = [1]\nprint(x[1])\n", "IndexError"),
     "negative_bounds": ("x = [1]\nprint(x[-2])\n", "IndexError"),
     "empty_negative_bounds": ("x: list[int] = []\nprint(x[-1])\n", "IndexError"),
     "minimum_machine_index": ("x = [1]\nprint(x[-9223372036854775808])\n", "IndexError"),
     "negative_big_bounds": ("x = [1]\nprint(x[-1000000000000000000000000])\n", "IndexError"),
     "big_bounds": ("x = [1]\nprint(x[1000000000000000000000000])\n", "IndexError"),
-    "empty_pop": ("x: list[int] = []\nprint(x.pop())\n", "IndexError"),
     "bad_integer": ('print(int("12__3"))\n', "ValueError"),
     "empty_integer": ('print(int(""))\n', "ValueError"),
     "sign_only_integer": ('print(int("+"))\n', "ValueError"),
@@ -109,6 +104,16 @@ ERRORS = {
         'print(int("999999999999999999999999999999999999999999999__1"))\n',
         "ValueError",
     ),
+}
+
+ERRORS = {
+    **TRACEBACK_ERRORS,
+    "division_zero": ("print(1 // 0)\n", "ZeroDivisionError"),
+    "modulo_zero": ("print(-1 % 0)\n", "ZeroDivisionError"),
+    "dynamic_division_zero": ('zero = int("0")\nprint(1 // zero)\n', "ZeroDivisionError"),
+    "dynamic_modulo_zero": ('zero = int("0")\nprint(-1 % zero)\n', "ZeroDivisionError"),
+    "modulo_zero_big": ("print(1000000000000000000000000 % 0)\n", "ZeroDivisionError"),
+    "empty_pop": ("x: list[int] = []\nprint(x.pop())\n", "IndexError"),
     "zero_step": ("for x in range(0, 1, 0):\n    print(x)\n", "ValueError"),
     "assertion": ("assert False\n", "AssertionError"),
     "repeat_overflow": ("x = [1] * -100000000000000000000000\n", "OverflowError"),
@@ -164,10 +169,10 @@ def main() -> None:
                 if expected_error:
                     assert reference.returncode > 0 and expected_error in reference.stderr, (name, reference)
                     assert actual.returncode > 0, (name, actual)
-                    if reference.stderr.splitlines()[-1] == expected_error:
-                        assert actual.stderr == f"{expected_error}\n", (name, actual)
-                    else:
-                        assert actual.stderr.startswith(expected_error + ":"), (name, actual)
+                    expected_stderr = [reference.stderr]
+                    if name not in TRACEBACK_ERRORS:
+                        expected_stderr.append(reference.stderr.splitlines(keepends=True)[-1])
+                    assert actual.stderr in expected_stderr, (name, actual.stderr, reference.stderr)
                 else:
                     assert reference.returncode == actual.returncode == 0, (name, reference.stderr, actual.stderr)
                     assert not actual.stderr, (name, actual.stderr)
