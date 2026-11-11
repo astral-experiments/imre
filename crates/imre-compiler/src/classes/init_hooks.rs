@@ -174,7 +174,7 @@ fn writes(
 /// Resolve the method in the actual layout; ordinary virtual dispatch remains in the emitted code.
 pub(super) fn method_writes(
     graph: &SourceGraph,
-    methods: &[ast::StmtFunctionDef],
+    methods: &[super::ClassMethod],
     kinds: &[MethodKind],
     origins: &[DefinitionId],
     name: &str,

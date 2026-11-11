@@ -89,7 +89,7 @@ pub(super) fn infer(
     graph: &SourceGraph,
     module: usize,
     init: usize,
-    methods: &mut [ast::StmtFunctionDef],
+    methods: &mut [ClassMethod],
     fields: &mut Vec<Field>,
 ) {
     let initializer = &methods[init];
@@ -188,6 +188,6 @@ pub(super) fn infer(
         });
     }
     for (index, annotation) in inferred_returns {
-        methods[index].returns = Some(Box::new(annotation));
+        Arc::make_mut(&mut methods[index].function).returns = Some(Box::new(annotation));
     }
 }

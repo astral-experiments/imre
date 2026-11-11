@@ -18,13 +18,14 @@ impl MethodContext {
 /// A class method has a statically bound class, so its native function needs no
 /// runtime receiver. The original declaration remains available for diagnostics.
 pub(super) fn executable_method(
-    method: &ast::StmtFunctionDef,
+    binding: &crate::classes::ClassMethod,
     context: MethodContext,
     classes: &Classes,
     graph: &SourceGraph,
     types: &Types,
 ) -> std::result::Result<ast::StmtFunctionDef, String> {
-    let mut method = method.clone();
+    let mut method = (*binding.function).clone();
+    method.name.clone_from(&binding.name);
     method.decorator_list.clear();
     if classes.definitions[context.class].forwarder.is_some()
         && matches!(method.name.as_str(), "__str__" | "__repr__")

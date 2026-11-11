@@ -622,6 +622,9 @@ class Fixed:
     def __init__(self, value: int): self.stored = value
     def get(self) -> int: return self.stored
     item = property(get)
+
+class Child(Fixed):
+    def get(self) -> int: return 23
 "#,
         )
         .unwrap();
@@ -631,7 +634,24 @@ class Fixed:
             statement,
         };
         assert_eq!(classes.registered_classes, HashSet::from([id(2), id(3)]));
-        assert!(classes.ids.contains_key(&id(4)));
+        let fixed = &classes.definitions[classes.ids[&id(4)]];
+        let child = &classes.definitions[classes.ids[&id(5)]];
+        let method = |class: &super::Class, name: &str| {
+            class
+                .methods
+                .iter()
+                .position(|method| method.name.as_str() == name)
+                .unwrap()
+        };
+        let get = &fixed.methods[method(fixed, "get")].function;
+        let property = &fixed.methods[method(fixed, "item")].function;
+        let inherited = &child.methods[method(child, "item")].function;
+        assert!(std::sync::Arc::ptr_eq(get, property));
+        assert!(std::sync::Arc::ptr_eq(get, inherited));
+        assert!(!std::sync::Arc::ptr_eq(
+            get,
+            &child.methods[method(child, "get")].function
+        ));
     }
 
     #[test]
