@@ -225,6 +225,19 @@ impl StatementLowering for Checker<'_> {
     }
 
     fn other_statement(&mut self, stmt: &ast::Stmt) -> Result<Block, String> {
-        self.specialized_statement(stmt)
+        // A nested try keeps this frame live while its protected and cleanup suites are checked.
+        match stmt {
+            ast::Stmt::Try(_)
+                if self.graph.modules[self.module]
+                    .optional_imports
+                    .contains_key(&stmt.range()) =>
+            {
+                let error = self.scoped_builtin_error("an optional standard-library import", stmt);
+                self.defer_object_error(&error);
+                Ok((Vec::new(), true))
+            }
+            ast::Stmt::Try(try_) if !try_.is_star => self.try_statement(try_),
+            _ => self.specialized_statement(stmt),
+        }
     }
 }

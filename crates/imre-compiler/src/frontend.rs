@@ -6209,19 +6209,6 @@ impl<'a> Checker<'a> {
                 self.apply_facts(&assert.test, true);
                 Some(result)
             }
-            ast::Stmt::Try(_)
-                if self.graph.modules[self.module]
-                    .optional_imports
-                    .contains_key(&statement.range()) =>
-            {
-                let error =
-                    self.scoped_builtin_error("an optional standard-library import", statement);
-                self.defer_object_error(&error);
-                return Ok((Vec::new(), true));
-            }
-            ast::Stmt::Try(try_) if !try_.is_star => {
-                return self.try_statement(try_);
-            }
             ast::Stmt::With(with_) if !with_.is_async => {
                 if !with_.body.iter().any(ast::Stmt::is_function_def_stmt) {
                     return self.with_items(&with_.items, &with_.body);
