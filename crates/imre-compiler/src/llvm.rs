@@ -2702,6 +2702,28 @@ impl Emitter<'_, '_> {
         CheckedBody::native(self).emit_block(statements);
     }
 
+    fn move_local(&mut self, target: usize, source: usize) {
+        debug_assert_eq!(self.locals[target], self.locals[source]);
+        if self.line_slots[target] {
+            debug_assert!(self.line_slots[source]);
+            self.copy_line(source, target);
+        }
+        let value = if self.borrowed_locals[source] {
+            let value = self.borrow_slot(source);
+            if self.borrowed_locals[target] {
+                self.reset_borrowed(source);
+                self.store_borrowed(target, &value);
+                return;
+            }
+            self.retain(&value);
+            self.reset_borrowed(source);
+            value
+        } else {
+            self.take_slot(source)
+        };
+        self.store(target, &value);
+    }
+
     /// A copy immediately followed by clearing its private source transfers one owner.
     fn move_cleared_local(&mut self, first: &Statement, second: &Statement) -> bool {
         if let Statement::Assign(target, value) = first
@@ -2711,7 +2733,7 @@ impl Emitter<'_, '_> {
             && self.owns_slot(source)
             && self.owns_slot(*target)
         {
-            CheckedBody::native(self).emit_statement(&Statement::Move(*target, source));
+            self.move_local(*target, source);
             return true;
         }
         false
@@ -2912,211 +2934,6 @@ impl Emitter<'_, '_> {
             self.small_locals[slot] = false;
         }
         self.guarded_integer_lists.truncate(facts.guarded_lists);
-    }
-
-    fn other_statement(&mut self, statement: &Statement) {
-        match statement {
-            Statement::Assign(..)
-            | Statement::Expr(_)
-            | Statement::Return(_)
-            | Statement::Raise(_)
-            | Statement::Scope { .. }
-            | Statement::Try { .. }
-            | Statement::With { .. }
-            | Statement::Clear(_)
-            | Statement::SetItem(..)
-            | Statement::AugmentItem(..)
-            | Statement::Match(..)
-            | Statement::If(..)
-            | Statement::While(..)
-            | Statement::IterNext { .. }
-            | Statement::Break
-            | Statement::Continue
-            | Statement::Exhaust => {
-                unreachable!("shared IR statement")
-            }
-            Statement::Move(target, source) => {
-                debug_assert_eq!(self.locals[*target], self.locals[*source]);
-                if self.line_slots[*target] {
-                    debug_assert!(self.line_slots[*source]);
-                    self.copy_line(*source, *target);
-                }
-                if self.borrowed_locals[*source] {
-                    let value = self.borrow_slot(*source);
-                    if self.borrowed_locals[*target] {
-                        self.reset_borrowed(*source);
-                        self.store_borrowed(*target, &value);
-                    } else {
-                        self.retain(&value);
-                        self.reset_borrowed(*source);
-                        self.store(*target, &value);
-                    }
-                    return;
-                }
-                let value = self.take_slot(*source);
-                self.store(*target, &value);
-            }
-            Statement::SetField(receiver, field, expression) => {
-                let value = self.operand(expression);
-                let receiver = self.operand(receiver);
-                self.set_field(&receiver.value, *field, &value.value);
-                self.release_operand(&receiver);
-                self.release_operand(&value);
-            }
-            Statement::AugmentField(receiver, field, op, expression) => {
-                let receiver = self.operand(receiver);
-                let Type::Class(class) = receiver.value.ty else {
-                    unreachable!()
-                };
-                let ty = self.module.class_fields[class][*field];
-                // A scalar or a non-reentrant exact length read cannot replace
-                // this field. Other right-hand sides must own the original
-                // value across arbitrary mutation and exceptions.
-                let stable = matches!(expression.kind, ExprKind::Int(_) | ExprKind::Local(_))
-                    || matches!(&expression.kind, ExprKind::Builtin(Builtin::Len, values)
-                        if matches!(values.as_slice(), [list] if matches!(list.ty, Type::ListInt | Type::List(_))
-                            && (matches!(list.kind, ExprKind::Local(_))
-                                || borrows::getters::selected(list, &self.module.functions).is_some())));
-                let old = if stable && ty == Type::Int {
-                    let pointer = self.field_pointer(&receiver.value, *field);
-                    Operand {
-                        value: self.field_value(&pointer, ty),
-                        ownership: Ownership::Borrowed,
-                    }
-                } else {
-                    Operand {
-                        value: self.get_field(&receiver.value, *field, ty),
-                        ownership: Ownership::Owned,
-                    }
-                };
-                let right = self.operand(expression);
-                let value = self.binary(*op, &old.value, &right.value);
-                self.forget(&value);
-                self.replace_field(&receiver.value, *field, &value);
-                self.release_operand(&right);
-                self.release_operand(&old);
-                self.release_operand(&receiver);
-            }
-            Statement::For {
-                target,
-                cursor,
-                stop,
-                step,
-                args,
-                body,
-                orelse,
-            } => {
-                // This proof includes the final increment and the hidden cursor,
-                // independently of reassignment of the visible loop target.
-                let small_cursor = self.ranges.range_cursor(statement).is_some();
-                let unit_step = match args.as_slice() {
-                    [_] | [_, _] => true,
-                    [_, _, step] => matches!(&step.kind, ExprKind::Int(n) if n == "1"),
-                    _ => false,
-                };
-                let mut args = args.iter().map(|arg| self.expr(arg)).collect::<Vec<_>>();
-                if args.len() == 1 {
-                    args.insert(0, small(0));
-                }
-                if args.len() == 2 {
-                    args.push(small(1));
-                }
-                for (&slot, value) in [*cursor, *stop, *step].iter().zip(&args) {
-                    self.store(slot, value);
-                }
-                let zero = self.compare(Compare::Equal, &args[2], &small(0));
-                let (fail, condition, body_label, increment, end) = (
-                    self.label(),
-                    self.label(),
-                    self.label(),
-                    self.label(),
-                    self.label(),
-                );
-                let exhausted = if orelse.is_empty() {
-                    end.clone()
-                } else {
-                    self.label()
-                };
-                self.uniform_append(body, &args, *target, *cursor, &exhausted);
-                if unit_step {
-                    self.uniform_indexed_sum(body, *target, *cursor, &args, &exhausted);
-                }
-                self.branch(&zero.operand, &fail, &condition);
-                self.start(&fail);
-                self.checked_line("call void @imre_range_step_zero()");
-                self.body.end("unreachable");
-                self.start(&condition);
-                self.check_interrupt();
-                let mut current = self.borrow_slot(*cursor);
-                current.small_integer |= small_cursor;
-                let mut stop_value = self.borrow_slot(*stop);
-                stop_value.small_integer |= args[1].small_integer;
-                let mut step_value = self.borrow_slot(*step);
-                step_value.small_integer |= args[2].small_integer;
-                let positive = self.compare(Compare::Greater, &step_value, &small(0));
-                let below = self.compare(Compare::Less, &current, &stop_value);
-                let above = self.compare(Compare::Greater, &current, &stop_value);
-                let test = self.instruction(format!(
-                    "select i1 {}, i1 {}, i1 {}",
-                    positive.operand, below.operand, above.operand
-                ));
-                self.branch(&test, &body_label, &exhausted);
-                self.start(&body_label);
-                if unit_step {
-                    self.advance_affine(body, *target, *cursor, *stop);
-                }
-                let current = self.load(*cursor, small_cursor);
-                self.store(*target, &current);
-                self.loops.push(NativeLoop {
-                    target: LoopTarget {
-                        edges: LoopEdges {
-                            step: increment.clone(),
-                            exhausted: exhausted.clone(),
-                            done: end.clone(),
-                        },
-                        cleanup_depth: self.cleanups.len(),
-                    },
-                    raw_subtotal: None,
-                });
-                self.block(body);
-                self.loops.pop();
-                if !self.body.terminated {
-                    if unit_step {
-                        self.batch_modular_writes(body, *target, *cursor, *stop);
-                    }
-                    self.jump(&increment);
-                }
-                self.start(&increment);
-                let mut current = self.borrow_slot(*cursor);
-                current.small_integer |= small_cursor;
-                let mut step_value = self.borrow_slot(*step);
-                step_value.small_integer |= args[2].small_integer;
-                let next = if small_cursor {
-                    self.small_binary(Binary::Add, &current, &step_value, false, None)
-                } else {
-                    self.binary(Binary::Add, &current, &step_value)
-                };
-                self.store(*cursor, &next);
-                self.jump(&condition);
-                if !orelse.is_empty() {
-                    self.start(&exhausted);
-                    self.block(orelse);
-                    if !self.body.terminated {
-                        self.jump(&end);
-                    }
-                }
-                self.start(&end);
-            }
-            Statement::Assert(test) => {
-                let test = self.expr(test);
-                let (success, fail) = (self.label(), self.label());
-                self.branch(&test.operand, &success, &fail);
-                self.start(&fail);
-                self.checked_line("call void @imre_assert_fail()");
-                self.body.end("unreachable");
-                self.start(&success);
-            }
-        }
     }
 
     fn byte_array(&mut self, bytes: Vec<u8>) -> String {
@@ -9808,6 +9625,32 @@ impl Emitter<'_, '_> {
         let value = self.field_value(&pointer, ty);
         self.retain(&value);
         self.owned(value)
+    }
+
+    fn field_update_operand(&mut self, receiver: &Value, field: usize, rhs: &Expr) -> Operand {
+        let Type::Class(class) = receiver.ty else {
+            unreachable!()
+        };
+        let ty = self.module.class_fields[class][field];
+        // A scalar or a non-reentrant exact length read cannot replace this
+        // field. Other right-hand sides must own it across mutation and errors.
+        let stable = matches!(rhs.kind, ExprKind::Int(_) | ExprKind::Local(_))
+            || matches!(&rhs.kind, ExprKind::Builtin(Builtin::Len, values)
+                if matches!(values.as_slice(), [list] if matches!(list.ty, Type::ListInt | Type::List(_))
+                    && (matches!(list.kind, ExprKind::Local(_))
+                        || borrows::getters::selected(list, &self.module.functions).is_some())));
+        if stable && ty == Type::Int {
+            let pointer = self.field_pointer(receiver, field);
+            Operand {
+                value: self.field_value(&pointer, ty),
+                ownership: Ownership::Borrowed,
+            }
+        } else {
+            Operand {
+                value: self.get_field(receiver, field, ty),
+                ownership: Ownership::Owned,
+            }
+        }
     }
 
     /// Acquires before publishing and releases afterward, including self-aliasing
