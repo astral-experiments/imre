@@ -669,16 +669,27 @@ fn checked_region<T>(
     graph: &SourceGraph,
     module: ModuleId,
     unavailable: &mut Option<Diagnostic>,
+    capture_on_object: impl FnOnce(&Failure),
 ) -> StdResult<Option<T>, Diagnostic> {
-    match result {
-        Ok(body) => Ok(Some(body)),
-        Err(failure)
-            if graph.modules[module].is_program_source() && failure.is_representation() =>
-        {
-            unavailable.get_or_insert_with(|| failure.terminal_in(graph, module));
-            Ok(None)
-        }
-        Err(failure) => Err(failure.terminal_in(graph, module)),
+    let failure = match result {
+        Ok(body) => return Ok(Some(body)),
+        Err(failure) => failure,
+    };
+    // A failed set-layout trial is discarded. Finish checking and capture any
+    // registered siblings in the ordinary pass. Reachable key formatters and
+    // native float components have their own retries inside the set trial.
+    if graph.set_layout_hint.get() == crate::modules::SetLayoutHint::Applied
+        && !graph.reachable_only()
+        && graph.float_components.get() == crate::modules::FloatComponents::Native
+    {
+        return Err(failure.terminal_in(graph, module));
+    }
+    capture_on_object(&failure);
+    if graph.modules[module].is_program_source() && failure.is_representation() {
+        unavailable.get_or_insert_with(|| failure.terminal_in(graph, module));
+        Ok(None)
+    } else {
+        Err(failure.terminal_in(graph, module))
     }
 }
 
@@ -1137,9 +1148,14 @@ fn lower_graph(
             &mut available,
             range,
             (!needs_registered_entry).then_some(&mut initializations),
-        )
-        .inspect_err(capture_on_object);
-        checked_region(result, graph, module_id, &mut unavailable)?;
+        );
+        checked_region(
+            result,
+            graph,
+            module_id,
+            &mut unavailable,
+            capture_on_object,
+        )?;
     }
     if graph.registered_startup || needs_registered_entry {
         capture();
@@ -1247,10 +1263,11 @@ fn lower_graph(
             _ => lower_body(checker, definition, signature),
         };
         let (body, sums) = match checked_region(
-            result.inspect_err(capture_on_object),
+            result,
             graph,
             *module_id,
             &mut unavailable,
+            capture_on_object,
         ) {
             Ok(Some(body)) => body,
             Ok(None) => continue,
@@ -1350,8 +1367,15 @@ fn lower_graph(
         }
         let mut fixed_entry = (!needs_registered_entry).then(Vec::new);
         let result = checker.lower_block(&statements, fixed_entry.as_mut());
-        let result = checker.finish_region(result).inspect_err(capture_on_object);
-        if checked_region(result, graph, module_id, &mut unavailable)?.is_some()
+        let result = checker.finish_region(result);
+        if checked_region(
+            result,
+            graph,
+            module_id,
+            &mut unavailable,
+            capture_on_object,
+        )?
+        .is_some()
             && let Some(body) = fixed_entry
         {
             checker.fault_frame(&mut startup, "<module>", TextSize::default());
