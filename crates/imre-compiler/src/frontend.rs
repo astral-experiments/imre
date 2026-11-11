@@ -13919,7 +13919,9 @@ impl<'a> Checker<'a> {
     /// A fixed caller still checks the following operations before choosing its frame.
     fn require_builtin_scope(&self, name: &str, site: &impl Ranged) {
         if self.registered.is_none() && !self.globals.registered_initializers {
-            self.missing_operation(&self.scoped_builtin_error(name, site));
+            self.unrepresented
+                .borrow_mut()
+                .get_or_insert_with(|| self.scoped_builtin_error(name, site));
         }
     }
 
