@@ -8,11 +8,7 @@ impl Program {
     /// Describe the implicit generator function with its outer iterator parameter.
     pub(super) fn lower_genexpr(&mut self, genexpr: &ast::ExprGenerator) -> Result<()> {
         let plan = Plan::generator(genexpr);
-        self.kind = if plan.body_suspends() {
-            FunctionKind::AsyncGenerator
-        } else {
-            FunctionKind::Generator
-        };
+        self.is_async = plan.body_suspends();
         self.lower_comprehension_body(&plan)?;
         Ok(())
     }
@@ -35,7 +31,7 @@ impl Program {
                     if matches!(comp.output, Output::Generator(_)) {
                         self.declare_target(target)?;
                     }
-                    if self.kind.is_async() {
+                    if self.is_async {
                         self.lower_suspended_target(target)?;
                     } else {
                         self.items.push(SourceItem::Discard(target.clone()));

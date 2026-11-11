@@ -23,7 +23,6 @@ use super::*;
 struct ParsedModule {
     constants: Id,
     flags: u32,
-    flags_complete: bool,
 }
 
 struct Program {
@@ -39,9 +38,7 @@ struct Program {
     class_nonlocal: bool,
     has_named_bindings: bool,
     strip_docstrings: bool,
-    kind: FunctionKind,
-    scope_flags: u32,
-    unlowered_yield: bool,
+    is_async: bool,
     interactive: bool,
     locals: indexmap::IndexSet<String>,
     directives: HashMap<String, (ScopeDirective, ruff_text_size::TextRange)>,
@@ -49,20 +46,6 @@ struct Program {
     items: Vec<SourceItem>,
     // Declarations in source lowering order, including nested suites.
     deferred_annotations: Vec<(String, ast::Expr)>,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum FunctionKind {
-    Plain,
-    Generator,
-    Coroutine,
-    AsyncGenerator,
-}
-
-impl FunctionKind {
-    fn is_async(self) -> bool {
-        matches!(self, Self::Coroutine | Self::AsyncGenerator)
-    }
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -94,13 +77,13 @@ struct OperandPlan {
 }
 
 impl OperandPlan {
-    fn new(root: &ast::Expr, kind: FunctionKind) -> Self {
+    fn new(root: &ast::Expr, is_async: bool) -> Self {
         let mut sites = smallvec::SmallVec::new();
         let mut work = smallvec::SmallVec::<[&ast::Expr; 8]>::new();
         work.push(root);
         while let Some(expr) = work.pop() {
             match expr {
-                ast::Expr::Await(a) if kind.is_async() => {
+                ast::Expr::Await(a) if is_async => {
                     sites.push(a.start());
                     work.push(&a.value);
                 }
@@ -165,8 +148,8 @@ impl OperandPlan {
         Self { sites }
     }
 
-    fn for_function(expr: &ast::Expr, kind: FunctionKind) -> Option<Self> {
-        (kind.is_async() || code_flags::yields_in_expression(expr)).then(|| Self::new(expr, kind))
+    fn for_function(expr: &ast::Expr, is_async: bool) -> Option<Self> {
+        (is_async || code_flags::yields_in_expression(expr)).then(|| Self::new(expr, is_async))
     }
 
     fn suspends(&self, expr: &ast::Expr) -> bool {
@@ -727,7 +710,7 @@ impl<'a, 'ctx> CompiledStrings<'a, 'ctx> {
         Ok(())
     }
 
-    fn scan(&mut self, unlowered_yield: &mut bool) -> Result<Vec<&'a ast::Expr>> {
+    fn scan(&mut self) -> Result<Vec<&'a ast::Expr>> {
         use ast::visitor::Visitor;
         let mut functions = Vec::new();
         if !self.directives.is_empty() {
@@ -735,8 +718,6 @@ impl<'a, 'ctx> CompiledStrings<'a, 'ctx> {
         }
         while let Some(expr) = self.pending.pop() {
             match expr {
-                // A yield still present in an expression has no suspension instruction.
-                ast::Expr::Yield(_) | ast::Expr::YieldFrom(_) => *unlowered_yield = true,
                 ast::Expr::Name(name) => {
                     self.heap.code_name(name.id.as_str());
                 }
@@ -823,8 +804,7 @@ impl<'a, 'ctx> CompiledStrings<'a, 'ctx> {
                         named.visit_expr(&lambda.body);
                         named.declare(child)?;
                     }
-                    if let Some(plan) = OperandPlan::for_function(&lambda.body, FunctionKind::Plain)
-                    {
+                    if let Some(plan) = OperandPlan::for_function(&lambda.body, false) {
                         let mut child = declared.unwrap_or_else(new_program);
                         child.record_operand(*lambda.body.clone(), &plan)?;
                         Child::Lowered(Box::new(child))
@@ -880,7 +860,7 @@ impl<'a, 'ctx> CompiledStrings<'a, 'ctx> {
     }
 
     fn finish_nested_scope(mut self, has_named_bindings: bool) -> Result<Id> {
-        let children = self.scan(&mut false)?;
+        let children = self.scan()?;
         self.prepare_children(children, has_named_bindings, false)?;
         Ok(self.finish())
     }
@@ -1249,7 +1229,7 @@ impl Program {
         if let Some(body) = expression_body {
             strings.visit_expr(body);
         }
-        let mut functions = strings.scan(&mut self.unlowered_yield)?;
+        let mut functions = strings.scan()?;
         functions.extend(prepared_generators);
         strings.prepare_children(functions, self.has_named_bindings, self.name == "<module>")?;
         Ok(strings.finish())
@@ -1380,20 +1360,7 @@ impl Program {
         child.syntax_limit = self.syntax_limit;
         child.deferred_pattern.clone_from(&self.deferred_pattern);
         child.strip_docstrings = self.strip_docstrings;
-        child.scope_flags = self.nested_scope_flags();
         child
-    }
-
-    fn nested_scope_flags(&self) -> u32 {
-        let mut flags = self.scope_flags
-            & (code_flags::FUTURE_ANNOTATIONS
-                | code_flags::FUTURE_BARRY_AS_BDFL
-                | code_flags::NESTED);
-        // A class body keeps its enclosing function scope even when bound by a global declaration.
-        if self.name != "<module>" && !self.class_scope {
-            flags |= code_flags::NESTED;
-        }
-        flags
     }
 
     fn new(name: &str, has_named_bindings: bool) -> Self {
@@ -1406,9 +1373,7 @@ impl Program {
             class_nonlocal: false,
             has_named_bindings,
             strip_docstrings: false,
-            kind: FunctionKind::Plain,
-            scope_flags: 0,
-            unlowered_yield: false,
+            is_async: false,
             interactive: false,
             locals: indexmap::IndexSet::new(),
             directives: HashMap::new(),
@@ -1423,11 +1388,10 @@ impl Program {
         if !function {
             if matches!(expr, ast::Expr::Yield(_) | ast::Expr::YieldFrom(_)) {
                 self.invalid_transfer(expr.range(), "'yield' outside function")?;
-                self.kind = FunctionKind::Generator;
             }
             return Ok(Some(expr));
         }
-        if let Some(plan) = OperandPlan::for_function(&expr, self.kind) {
+        if let Some(plan) = OperandPlan::for_function(&expr, self.is_async) {
             self.lower_operand(expr, &plan)
         } else {
             Ok(Some(expr))
@@ -1441,11 +1405,6 @@ impl Program {
     }
 
     fn emit_operand(&mut self, expr: ast::Expr, plan: &OperandPlan) -> Result<Option<ast::Expr>> {
-        if matches!(expr, ast::Expr::Yield(_) | ast::Expr::YieldFrom(_))
-            && self.kind != FunctionKind::AsyncGenerator
-        {
-            self.kind = FunctionKind::Generator;
-        }
         if !plan.suspends(&expr) {
             return Ok(Some(expr));
         }
@@ -1622,9 +1581,6 @@ impl Program {
         {
             let first = body.remove(0).expr_stmt().unwrap();
             if !self.strip_docstrings {
-                if function {
-                    self.scope_flags |= code_flags::HAS_DOCSTRING;
-                }
                 // A pending symbol error can exclude the entire function suite.
                 if !function
                     || self
@@ -1863,19 +1819,8 @@ impl Program {
                     if let Some(params) = &s.type_params {
                         child.validate_type_params(params, "function")?;
                     }
-                    child.scope_flags |= code_flags::function_flags(
-                        Some(&s.parameters),
-                        s.type_params.is_some(),
-                        self.class_scope && s.type_params.is_none(),
-                    );
                     let annotations = self.function_annotations(&mut s)?;
-                    if s.is_async {
-                        child.kind = if imre_ast::code_flags::is_generator(&s.body) {
-                            FunctionKind::AsyncGenerator
-                        } else {
-                            FunctionKind::Coroutine
-                        };
-                    }
+                    child.is_async = s.is_async;
                     child.lower_namespace(s.body, true)?;
                     for param in s.parameters.iter() {
                         let name = param.name().as_str();
@@ -1917,10 +1862,6 @@ impl Program {
                     child.private_names.get_or_insert_with(|| {
                         Rc::new(imre_ast::lower_in(&mut s.body, &child.name, false))
                     });
-                    // The implicit type-parameter function encloses the class body.
-                    if s.type_params.is_some() {
-                        child.scope_flags |= code_flags::NESTED;
-                    }
                     child.class_scope = true;
                     child.lower_namespace(s.body, false)?;
                     self.locals.insert(s.name.to_string());
@@ -1967,7 +1908,7 @@ impl Program {
                     let (body, orelse) = match stmt {
                         Stmt::For(s) => {
                             self.declare_target(&s.target)?;
-                            if s.is_async && !self.kind.is_async() {
+                            if s.is_async && !self.is_async {
                                 return Err(Error::new(
                                     "SyntaxError",
                                     "'async for' outside async function",
@@ -1988,7 +1929,7 @@ impl Program {
                     continue;
                 }
                 Stmt::With(s) => {
-                    if s.is_async && !self.kind.is_async() {
+                    if s.is_async && !self.is_async {
                         return Err(Error::new(
                             "SyntaxError",
                             "'async with' outside async function",
@@ -2686,7 +2627,7 @@ impl Context {
             }
             Ok(None)
         };
-        code.scope_flags = inherited;
+        let mut flags = inherited;
         code.strip_docstrings = self.config["optimize"].as_i64().unwrap_or(0) >= 2;
         code.interactive = interactive;
         let expression_body = match parsed.into_syntax() {
@@ -2705,12 +2646,12 @@ impl Context {
                     self.check_source_docstrings(&body, !interactive, &spellings)?;
                 }
                 if imre_ast::future_import(&body, "barry_as_FLUFL") {
-                    code.scope_flags |= code_flags::FUTURE_BARRY_AS_BDFL;
+                    flags |= code_flags::FUTURE_BARRY_AS_BDFL;
                 }
-                if code.scope_flags & code_flags::FUTURE_ANNOTATIONS != 0
+                if flags & code_flags::FUTURE_ANNOTATIONS != 0
                     || imre_ast::future_annotations(&body)
                 {
-                    code.scope_flags |= code_flags::FUTURE_ANNOTATIONS;
+                    flags |= code_flags::FUTURE_ANNOTATIONS;
                     code.private_names = Some(Rc::new(imre_ast::lower_in(&mut body, "", true)));
                 }
                 code.syntax_limit = symbol_error.map(|(range, _)| range);
@@ -2757,17 +2698,7 @@ impl Context {
         if let Some(issue) = pending_syntax(self, &code)? {
             return Err(issue);
         }
-        Ok(ParsedModule {
-            constants,
-            flags: code.scope_flags
-                | match code.kind {
-                    FunctionKind::Generator => imre_ast::code_flags::GENERATOR,
-                    FunctionKind::Coroutine => imre_ast::code_flags::COROUTINE,
-                    FunctionKind::AsyncGenerator => imre_ast::code_flags::ASYNC_GENERATOR,
-                    FunctionKind::Plain => 0,
-                },
-            flags_complete: code.scope_flags & code_flags::OPTIMIZED != 0 && !code.unlowered_yield,
-        })
+        Ok(ParsedModule { constants, flags })
     }
 
     /// Attach the filename after tokenization, just as compile does for string input.
@@ -2848,7 +2779,8 @@ impl Context {
             first_line: 1,
             module_definition: true,
             flags: module.flags,
-            flags_complete: module.flags_complete,
+            // Parsed module metadata records only the future flags.
+            flags_complete: false,
             generator_lambda: false,
             body: Body::Parsed {
                 constants: module.constants,
