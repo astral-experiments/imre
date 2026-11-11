@@ -604,6 +604,37 @@ assert not issubclass(Open, OpenChild)
     }
 
     #[test]
+    fn property_uses_its_module_functions_or_its_instance_methods() {
+        let graph = SourceGraph::single(
+            r#"def read(owner): return owner.stored
+def write(owner, value): owner.stored = value
+
+class Captured:
+    def __init__(self, value: int): self.stored = value
+    item = property(read, write)
+
+class WriteOnly:
+    def __init__(self, value: int): self.stored = value
+    def set(self, value: int): self.stored = value
+    item = property(None, set)
+
+class Fixed:
+    def __init__(self, value: int): self.stored = value
+    def get(self) -> int: return self.stored
+    item = property(get)
+"#,
+        )
+        .unwrap();
+        let classes = Classes::collect(&graph).unwrap();
+        let id = |statement| DefinitionId {
+            module: graph.entry,
+            statement,
+        };
+        assert_eq!(classes.registered_classes, HashSet::from([id(2), id(3)]));
+        assert!(classes.ids.contains_key(&id(4)));
+    }
+
+    #[test]
     fn async_iterator_registers_only_its_class_and_subclasses() {
         let source = r#"from typing import AsyncIterator
 
