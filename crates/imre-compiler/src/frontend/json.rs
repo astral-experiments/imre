@@ -614,7 +614,7 @@ impl Checker<'_> {
                     Type::Str | Type::StrLiteral(_) => Self::string_value(value),
                     Type::Bool if value.ty == Type::Bool => Expr {
                         ty: Type::Int,
-                        kind: ExprKind::Builtin(Builtin::Int, vec![value]),
+                        kind: ExprKind::Builtin(Builtin::Int(None), vec![value]),
                     },
                     _ => self.coerce(value, optional_int, &keyword.value)?,
                 }

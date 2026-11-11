@@ -179,7 +179,7 @@ impl Checker<'_> {
             if value.ty == Type::Bool {
                 value = Expr {
                     ty: Type::Int,
-                    kind: ExprKind::Builtin(Builtin::Int, vec![value]),
+                    kind: ExprKind::Builtin(Builtin::Int(None), vec![value]),
                 };
             }
             if !matches!(value.ty, Type::None | Type::Int) && value.ty != optional {

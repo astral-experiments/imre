@@ -540,6 +540,7 @@ fn emit_program(
         uses_byte_output_windows: false,
         byte_output_owners: Vec::new(),
         strings: Vec::new(),
+        fault_origin: None,
         frame_strings: HashMap::new(),
         string_literals: BTreeMap::new(),
         uses_string_interning: false,
@@ -816,6 +817,12 @@ struct CallSite<'a> {
     inline: bool,
 }
 
+/// Source to attach only when an already-evaluated checked operation fails.
+enum CheckedFaultOrigin {
+    Single(ir::FixedOrigin),
+    SplitField(ir::SplitFieldOrigins),
+}
+
 struct Emitter<'a, 'module> {
     module: &'a Module,
     output: &'a mut Output,
@@ -830,6 +837,7 @@ struct Emitter<'a, 'module> {
     uses_byte_output_windows: bool,
     byte_output_owners: Vec<Option<usize>>,
     strings: Vec<Vec<u8>>,
+    fault_origin: Option<CheckedFaultOrigin>,
     frame_strings: HashMap<usize, HashMap<String, String>>,
     string_literals: BTreeMap<Vec<u8>, usize>,
     uses_string_interning: bool,
@@ -1225,14 +1233,74 @@ impl Emitter<'_, '_> {
         self.check_failed_at(failed, None);
     }
 
+    fn at_builtin_origin<R>(&mut self, builtin: &Builtin, emit: impl FnOnce(&mut Self) -> R) -> R {
+        let origin = match builtin {
+            Builtin::Int(origin)
+            | Builtin::Float(origin)
+            | Builtin::ListGet(origin)
+            | Builtin::ListGetI32(origin)
+            | Builtin::ListGetStable(origin)
+            | Builtin::ListGetBounded { origin, .. }
+            | Builtin::GetInAppendWindow(_, origin)
+            | Builtin::SplitTextField(_, origin)
+            | Builtin::GetBoundedInAppendWindow { origin, .. } => {
+                origin.as_deref().cloned().map(CheckedFaultOrigin::Single)
+            }
+            Builtin::SplitIntField(_, origins) | Builtin::SplitIntCached(_, origins) => {
+                Some(CheckedFaultOrigin::SplitField((**origins).clone()))
+            }
+            _ => None,
+        };
+        let parent = std::mem::replace(&mut self.fault_origin, origin);
+        let value = emit(self);
+        self.fault_origin = parent;
+        value
+    }
+
+    fn attach_pending_frame(&mut self, origin: &ir::FixedOrigin) {
+        let frame = self.exception_frame("null", origin);
+        self.line(frame);
+    }
+
+    /// The fused helper raises IndexError during the lookup. Its other failures
+    /// arise in the subsequent conversion. Inspect pending only on the cold edge.
+    fn attach_split_field_frame(&mut self, origins: &ir::SplitFieldOrigins) {
+        if origins.index.is_none() && origins.conversion.is_none() {
+            return;
+        }
+        let kind = imre_ast::exceptions::Kind::IndexError as u32;
+        let missing = self.instruction(format!("call i32 @imre_error_matches(i32 {kind})"));
+        let missing = self.instruction(format!("icmp ne i32 {missing}, 0"));
+        let (lookup, conversion, done) = (self.label(), self.label(), self.label());
+        self.branch(&missing, &lookup, &conversion);
+        self.start(&lookup);
+        if let Some(origin) = &origins.index {
+            self.attach_pending_frame(origin);
+        }
+        self.jump(&done);
+        self.start(&conversion);
+        if let Some(origin) = &origins.conversion {
+            self.attach_pending_frame(origin);
+        }
+        self.jump(&done);
+        self.start(&done);
+    }
+
     fn check_failed_at(&mut self, failed: &str, origin: Option<&ir::FixedOrigin>) {
         let (error, success) = (self.label(), self.label());
         self.body.conditional(failed, &error, &success, Some(false));
         let temporaries = self.temporaries.clone();
         self.start(&error);
+        // Cleanup may emit another checked operation. Its failures have their
+        // own source and cannot inherit the operation that entered cleanup.
+        let active = self.fault_origin.take();
         if let Some(origin) = origin {
-            let attach = self.exception_frame("null", origin);
-            self.line(attach);
+            self.attach_pending_frame(origin);
+        } else if let Some(site) = &active {
+            match site {
+                CheckedFaultOrigin::Single(origin) => self.attach_pending_frame(origin),
+                CheckedFaultOrigin::SplitField(origins) => self.attach_split_field_frame(origins),
+            }
         }
         for value in temporaries.iter().rev() {
             self.release(value);
@@ -1240,6 +1308,7 @@ impl Emitter<'_, '_> {
         self.route(Completion::Error);
         self.start(&success);
         self.temporaries = temporaries;
+        self.fault_origin = active;
     }
 
     /// Borrows pooled literals and direct locals whose slots cannot be replaced.
@@ -4627,7 +4696,7 @@ impl Emitter<'_, '_> {
     /// entire operation is read-only, so the element stays live through its use.
     fn read_only_integer_operand(&mut self, expression: &Expr) -> Operand {
         debug_assert!(read_only_integer(expression));
-        if let ExprKind::Builtin(Builtin::ListGet, args) = &expression.kind
+        if let ExprKind::Builtin(op @ Builtin::ListGet(_), args) = &expression.kind
             && let [receiver, index] = args.as_slice()
             && receiver.ty == Type::ListInt
             && matches!(receiver.kind, ExprKind::Local(_))
@@ -4638,16 +4707,17 @@ impl Emitter<'_, '_> {
             let ExprKind::Local(slot) = receiver.kind else {
                 unreachable!()
             };
-            let borrowed =
-                if let Some(value) = self.int_buffer_borrow(slot, &list.value, &index.value) {
+            let borrowed = self.at_builtin_origin(op, |e| {
+                if let Some(value) = e.int_buffer_borrow(slot, &list.value, &index.value) {
                     Operand {
                         value,
                         ownership: Ownership::Borrowed,
                     }
                 } else {
-                    let at = self.native_index(&index.value);
-                    self.runtime_call(&LIST_BORROW_INDEX, [&list.value, &at])
-                };
+                    let at = e.native_index(&index.value);
+                    e.runtime_call(&LIST_BORROW_INDEX, [&list.value, &at])
+                }
+            });
             self.release_operand(&index);
             self.release_operand(&list);
             return borrowed;
@@ -4671,7 +4741,7 @@ impl Emitter<'_, '_> {
     }
 
     fn builtin(&mut self, builtin: &Builtin, expressions: &[Expr], returns: Type) -> Value {
-        if let Some(v) = self.line_builtin(builtin, expressions) {
+        if let Some(v) = self.at_builtin_origin(builtin, |e| e.line_builtin(builtin, expressions)) {
             return v;
         }
         if let (Builtin::Append, [receiver, item]) = (builtin, expressions)
@@ -4806,7 +4876,7 @@ impl Emitter<'_, '_> {
                 })
         });
         let mut probe_fields = Vec::new();
-        let mut args = expressions
+        let args = expressions
             .iter()
             .enumerate()
             .map(|(index, arg)| {
@@ -4837,6 +4907,20 @@ impl Emitter<'_, '_> {
                 }
             })
             .collect::<Vec<_>>();
+        // Each operand has already performed its own checks at its own site.
+        self.at_builtin_origin(builtin, |e| {
+            e.prepared_builtin(builtin, expressions, returns, args, probe_fields)
+        })
+    }
+
+    fn prepared_builtin(
+        &mut self,
+        builtin: &Builtin,
+        expressions: &[Expr],
+        returns: Type,
+        mut args: Vec<Operand>,
+        probe_fields: Vec<Value>,
+    ) -> Value {
         let result = match builtin {
             Builtin::RegisteredImport(_)
             | Builtin::RegisteredSuspend(..)
@@ -7710,7 +7794,7 @@ impl Emitter<'_, '_> {
                 Type::Class(_) => self.value_repr(&args[0].value),
                 _ => unreachable!("scalar string conversion was checked"),
             },
-            Builtin::Int | Builtin::IntFromText(_) => match args[0].value.ty {
+            Builtin::Int(_) => match args[0].value.ty {
                 Type::Int => return self.own_operand(args.into_iter().next().unwrap()),
                 Type::Bool => {
                     let wide =
@@ -7728,11 +7812,7 @@ impl Emitter<'_, '_> {
                     } else {
                         "imre_int_parse"
                     };
-                    let origin = match builtin {
-                        Builtin::IntFromText(origin) => Some(origin),
-                        _ => None,
-                    };
-                    self.call_at(parser, Type::Int, &[&args[0].value], origin)
+                    self.call(parser, Type::Int, &[&args[0].value])
                 }
                 Type::Float => self.call("imre_float_int", Type::Int, &[&args[0].value]),
                 _ => unreachable!("int conversion was checked"),
@@ -7843,7 +7923,7 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
-            Builtin::Float => match args[0].value.ty {
+            Builtin::Float(_) => match args[0].value.ty {
                 Type::Float => return self.own_operand(args.into_iter().next().unwrap()),
                 Type::Int => self.call("imre_int_float", Type::Float, &[&args[0].value]),
                 Type::Str => self.call("imre_float_parse", Type::Float, &[&args[0].value]),
@@ -7921,14 +8001,14 @@ impl Emitter<'_, '_> {
                 self.retain(&selected);
                 selected
             }
-            Builtin::ListGet if matches!(expressions[0].kind, ExprKind::Local(slot) if self.fixed_int_lists[slot] && self.int_buffers.contains_key(&slot)) =>
+            Builtin::ListGet(_) if matches!(expressions[0].kind, ExprKind::Local(slot) if self.fixed_int_lists[slot] && self.int_buffers.contains_key(&slot)) =>
             {
                 let ExprKind::Local(slot) = expressions[0].kind else {
                     unreachable!()
                 };
                 self.fixed_int_get(slot, &args[1].value)
             }
-            Builtin::ListGetStable => self
+            Builtin::ListGetStable(_) => self
                 .guarded_owned_integer(&expressions[0], &args[0].value, &args[1].value, false)
                 .unwrap_or_else(|| {
                     self.get_item(
@@ -7938,7 +8018,7 @@ impl Emitter<'_, '_> {
                         self.nonnegative_index(&expressions[1]),
                     )
                 }),
-            Builtin::ListGet => self.get_item(
+            Builtin::ListGet(_) => self.get_item(
                 &args[0].value,
                 &args[1].value,
                 returns,
@@ -8006,11 +8086,11 @@ impl Emitter<'_, '_> {
                 Type::Int,
                 &args.iter().map(|arg| &arg.value).collect::<Vec<_>>(),
             ),
-            Builtin::ListGetI32
+            Builtin::ListGetI32(_)
             | Builtin::ListGetBounded { .. }
             | Builtin::ListGetBoundedInBounds { .. } => {
                 let (min, max) = match builtin {
-                    Builtin::ListGetBounded { min, max }
+                    Builtin::ListGetBounded { min, max, .. }
                     | Builtin::ListGetBoundedInBounds { min, max } => (*min, *max),
                     _ => (i64::from(i32::MIN), i64::from(i32::MAX)),
                 };
@@ -8028,13 +8108,13 @@ impl Emitter<'_, '_> {
                     } else {
                         self.proven_list_word(slot, &args[0].value, &index)
                     }
-                } else if matches!(builtin, Builtin::ListGetI32)
+                } else if matches!(builtin, Builtin::ListGetI32(_))
                     && self.nonnegative_index(&expressions[1])
                     && let Some(word) =
                         self.guarded_integer_word(&expressions[0], &args[0].value, &args[1].value)
                 {
                     word
-                } else if matches!(builtin, Builtin::ListGetI32)
+                } else if matches!(builtin, Builtin::ListGetI32(_))
                     && let Some(value) = self.guarded_owned_integer(
                         &expressions[0],
                         &args[0].value,
@@ -9145,7 +9225,7 @@ impl Emitter<'_, '_> {
                 ));
                 none()
             }
-            Builtin::GetInAppendWindow(output)
+            Builtin::GetInAppendWindow(output, _)
             | Builtin::GetBoundedInAppendWindow { output, .. } => {
                 let window = self.append_window(*output);
                 let word = self.checked_int_list_word(format!(
@@ -9209,12 +9289,12 @@ impl Emitter<'_, '_> {
             Builtin::SplitTextSource(_) | Builtin::SplitIntSource(_) => {
                 return self.own_operand(args.into_iter().next().unwrap());
             }
-            Builtin::SplitTextLen | Builtin::SplitTextField(_) => {
+            Builtin::SplitTextLen | Builtin::SplitTextField(..) => {
                 let ExprKind::Local(slot) = expressions[0].kind else {
                     unreachable!()
                 };
                 match builtin {
-                    Builtin::SplitTextField(index) => Value {
+                    Builtin::SplitTextField(index, _) => Value {
                         ty: Type::Str,
                         operand: self.checked_pointer(format!("call ptr @imre_str_field_at(ptr {}, ptr %text_fields{slot}, i32 {index})", args[0].value.operand)),
                         small_integer: false,
@@ -9226,7 +9306,7 @@ impl Emitter<'_, '_> {
                     },
                 }
             }
-            Builtin::SplitIntCached(index) => {
+            Builtin::SplitIntCached(index, _) => {
                 let ExprKind::Local(slot) = expressions[0].kind else {
                     unreachable!()
                 };
@@ -9260,7 +9340,7 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
-            Builtin::SplitIntField(index) => {
+            Builtin::SplitIntField(index, _) => {
                 let operand = self.checked_instruction(format!(
                     "call i64 @imre_str_split_int_field(ptr {}, i32 {index})",
                     args[0].value.operand
@@ -10087,7 +10167,7 @@ impl Emitter<'_, '_> {
         if receiver.ty != Type::ListInt || value.ty != Type::Int {
             return false;
         }
-        let ExprKind::Builtin(Builtin::ListGet, args) = &value.kind else {
+        let ExprKind::Builtin(Builtin::ListGet(_), args) = &value.kind else {
             return false;
         };
         let [source_receiver, source] = args.as_slice() else {
@@ -10267,7 +10347,7 @@ fn read_only_integer(expression: &Expr) -> bool {
                 && read_only_integer(right)
         }
         ExprKind::Negate(value) => read_only_integer(value),
-        ExprKind::Builtin(Builtin::ListGet, args) => {
+        ExprKind::Builtin(Builtin::ListGet(_), args) => {
             matches!(args.as_slice(), [receiver, index]
                 if receiver.ty == Type::ListInt
                     && matches!(receiver.kind, ExprKind::Local(_))
@@ -11002,6 +11082,7 @@ declare i64 @imre_binary_write(ptr, ptr)
 declare i1 @imre_typed_interrupt()
 declare i32 @imre_error_pending()
 declare ptr @imre_error_take()
+declare i32 @imre_error_matches(i32)
 declare void @imre_error_set(ptr)
 declare void @imre_report_unhandled(ptr)
 declare i32 @imre_finish_unhandled(ptr)

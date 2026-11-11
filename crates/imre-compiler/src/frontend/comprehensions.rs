@@ -435,7 +435,7 @@ impl Checker<'_> {
                     if matches!(input.ty, Type::List(_)) {
                         Builtin::SequenceGetInBounds
                     } else {
-                        Builtin::ListGet
+                        Builtin::ListGet(None)
                     },
                     vec![input.clone(), Expr::integer(index)],
                 ),

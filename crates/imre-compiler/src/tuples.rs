@@ -805,7 +805,7 @@ def total(left: str, right: str) -> int:
                 ExprKind::Call(1, _) => order.push("start"),
                 ExprKind::Binary(crate::ir::Binary::FloorDivide, _, _) => order.push("floor"),
                 ExprKind::Binary(crate::ir::Binary::Modulo, _, _) => order.push("modulo"),
-                ExprKind::Builtin(Builtin::Int, _) => order.push("convert"),
+                ExprKind::Builtin(Builtin::Int(_), _) => order.push("convert"),
                 _ => {}
             });
             assert_eq!(order, expected);

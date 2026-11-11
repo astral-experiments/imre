@@ -154,9 +154,10 @@ impl Checker<'_> {
             ty if let Some(element) = self.types.homogeneous_tuple_element(ty) => {
                 (element, Builtin::TupleGet)
             }
-            Type::ListInt | Type::List(_) => {
-                (self.types.element(value.ty).unwrap(), Builtin::ListGet)
-            }
+            Type::ListInt | Type::List(_) => (
+                self.types.element(value.ty).unwrap(),
+                Builtin::ListGet(None),
+            ),
             _ => {
                 return Err(error(
                     self.source,

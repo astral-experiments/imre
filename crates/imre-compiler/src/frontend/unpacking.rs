@@ -127,7 +127,7 @@ fn protocol_snapshot(
             } else {
                 Type::PythonObject
             },
-            Builtin::ListGet,
+            Builtin::ListGet(None),
             vec![binder.pattern_local(root), Expr::integer(index)],
         );
         snapshot.capture(binder, item);
@@ -1186,7 +1186,7 @@ impl PatternBinder for Checker<'_> {
                 let kind = match self.locals[captured] {
                     Type::Str => Builtin::StringGet,
                     Type::Bytes => Builtin::BytesGet,
-                    _ => Builtin::ListGet,
+                    _ => Builtin::ListGet(None),
                 };
                 builtin(
                     element.unwrap(),

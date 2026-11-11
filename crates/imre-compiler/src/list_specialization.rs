@@ -88,12 +88,13 @@ fn rewrite_loop(statement: &mut Statement, locals: &mut Vec<Type>, private_curso
     if !plan.scan_inputs {
         // Only this loop body was checked. Its else suite may run arbitrary code.
         crate::ir::walk_expressions_mut(body, &mut |value| {
-            if let ExprKind::Builtin(operation @ Builtin::ListGet, args) = &mut value.kind
+            if let ExprKind::Builtin(operation, args) = &mut value.kind
+                && let Builtin::ListGet(origin) = operation
                 && let ExprKind::Local(slot) = args[0].kind
                 && plan.inputs.contains_key(&slot)
                 && args[1].ty == Type::Int
             {
-                *operation = Builtin::ListGetStable;
+                *operation = Builtin::ListGetStable(origin.take());
             }
         });
     }
@@ -224,18 +225,18 @@ fn buffer_appends(
     });
     crate::ir::walk_expressions(body, &mut |value| {
         safe &= match &value.kind {
-            ExprKind::Builtin(Builtin::ListGet, args) => {
+            ExprKind::Builtin(Builtin::ListGet(_), args) => {
                 let reads = matches!(args[0].kind, ExprKind::Local(slot) if slot == output)
                     && args[1].tagged_integer_literal() == Some(-1);
                 tail |= reads;
                 reads
             }
-            ExprKind::Builtin(Builtin::ListGetStable, _) => true,
+            ExprKind::Builtin(Builtin::ListGetStable(_), _) => true,
             ExprKind::Builtin(Builtin::Append, args) => {
                 args[0].ty == Type::ListInt && args[1].ty == Type::Int
             }
             ExprKind::Builtin(
-                Builtin::Int
+                Builtin::Int(_)
                 | Builtin::Ord
                 | Builtin::Bool
                 | Builtin::Abs
@@ -258,7 +259,7 @@ fn buffer_appends(
     crate::ir::walk_expressions_mut(body, &mut |value| {
         if let ExprKind::Builtin(op, _) = &mut value.kind {
             match op {
-                Builtin::ListGet => *op = Builtin::GetInAppendWindow(output),
+                Builtin::ListGet(origin) => *op = Builtin::GetInAppendWindow(output, origin.take()),
                 Builtin::Append => *op = Builtin::AppendInWindow(output),
                 _ => {}
             }
@@ -369,12 +370,12 @@ impl Plan<'_> {
                     return false;
                 }
                 match operation {
-                    Builtin::ListGet if args[0].ty == Type::ListInt => {
+                    Builtin::ListGet(origin) if args[0].ty == Type::ListInt => {
                         let Some(root) = receiver else {
                             return false;
                         };
                         if self.scan_inputs {
-                            *operation = Builtin::ListGetI32;
+                            *operation = Builtin::ListGetI32(origin.take());
                         } else if args[1].ty == Type::Int {
                             // A loop-local alias denotes this same rooted input.
                             args[0] = list_local(root);
@@ -618,7 +619,7 @@ fn prove_range_windows(
             return;
         }
         crate::ir::walk_expressions_mut(yes, &mut |value| {
-            let ExprKind::Builtin(op @ Builtin::ListGetI32, args) = &mut value.kind else {
+            let ExprKind::Builtin(op @ Builtin::ListGetI32(_), args) = &mut value.kind else {
                 return;
             };
             let [source, index] = args.as_slice() else {
@@ -803,7 +804,7 @@ print(windows([1, 2, 3, 4], 4))
             for function in &module.functions {
                 walk_expressions(&function.body, &mut |value| match value.kind {
                     ExprKind::Builtin(Builtin::AppendInWindow(_), _) => calls.0 += 1,
-                    ExprKind::Builtin(Builtin::GetInAppendWindow(_), _) => calls.1 += 1,
+                    ExprKind::Builtin(Builtin::GetInAppendWindow(..), _) => calls.1 += 1,
                     ExprKind::Builtin(Builtin::FinishListAppends(_), _) => calls.2 += 1,
                     _ => {}
                 });
@@ -837,7 +838,7 @@ print(windows([1, 2, 3, 4], 4))
                     result.0 += 1;
                 }
                 ExprKind::Builtin(Builtin::ListDistinct, _) => result.1 += 1,
-                ExprKind::Builtin(Builtin::ListGetI32, _) => result.2 += 1,
+                ExprKind::Builtin(Builtin::ListGetI32(_), _) => result.2 += 1,
                 _ => {}
             });
         }
@@ -863,7 +864,7 @@ fill([1, 2], [0], "abc")
         for function in &module.functions {
             walk_expressions(&function.body, &mut |expr| match &expr.kind {
                 ExprKind::Builtin(Builtin::ListPresent, _) => present += 1,
-                ExprKind::Builtin(Builtin::ListGetStable, _) => reads += 1,
+                ExprKind::Builtin(Builtin::ListGetStable(_), _) => reads += 1,
                 _ => {}
             });
         }
@@ -935,7 +936,7 @@ def triples(data: list[int], output: list[int]) -> None:
         assert_eq!(counts(&module), (1, 1, 3));
         let mut fallback_reads = 0;
         walk_expressions(&module.functions[0].body, &mut |value| {
-            if matches!(value.kind, ExprKind::Builtin(Builtin::ListGet, _)) {
+            if matches!(value.kind, ExprKind::Builtin(Builtin::ListGet(_), _)) {
                 fallback_reads += 1;
             }
         });
@@ -955,7 +956,7 @@ def transform(data: list[int]) -> list[int]:
         let mut reservations = 0;
         for function in &module.functions {
             walk_expressions(&function.body, &mut |value| match &value.kind {
-                ExprKind::Builtin(Builtin::ListGet, _) => fallback_reads += 1,
+                ExprKind::Builtin(Builtin::ListGet(_), _) => fallback_reads += 1,
                 ExprKind::Builtin(Builtin::ListReserveRange, args) => {
                     assert!(matches!(&args[4].kind, ExprKind::Int(value) if value == "1"));
                     reservations += 1;

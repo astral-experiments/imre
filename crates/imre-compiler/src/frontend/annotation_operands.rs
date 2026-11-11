@@ -71,7 +71,7 @@ pub(super) fn unpack_annotation(value: Expr) -> Expr {
     };
     Expr {
         ty: Type::PythonObject,
-        kind: ExprKind::Builtin(Builtin::ListGet, vec![items, Expr::integer(0)]),
+        kind: ExprKind::Builtin(Builtin::ListGet(None), vec![items, Expr::integer(0)]),
     }
 }
 
@@ -300,7 +300,7 @@ mod tests {
         for spelling in ["mark(1)", "token", "lambda"] {
             assert!(sites.values.contains_key(&offset(spelling)));
         }
-        let ExprKind::Builtin(Builtin::ListGet, items) = &sites.values[&offset("*items")].kind
+        let ExprKind::Builtin(Builtin::ListGet(_), items) = &sites.values[&offset("*items")].kind
         else {
             panic!("expected an unpacked annotation");
         };

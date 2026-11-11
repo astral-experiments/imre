@@ -101,7 +101,7 @@ impl Checker<'_> {
             };
             return Ok(Some(Expr {
                 ty: Type::Int,
-                kind: ExprKind::Builtin(Builtin::Int, vec![mode]),
+                kind: ExprKind::Builtin(Builtin::Int(None), vec![mode]),
             }));
         }
         let Some((flags, _)) = &self.graph.command_startup else {
@@ -800,7 +800,7 @@ fn normalize_len_key(types: &Types, value: Expr) -> Expr {
     match value.ty {
         Type::Bool => Expr {
             ty: Type::Int,
-            kind: ExprKind::Builtin(Builtin::Int, vec![value]),
+            kind: ExprKind::Builtin(Builtin::Int(None), vec![value]),
         },
         Type::StrLiteral(_) => literals::view(value, Type::Str),
         Type::Tuple(_) => {

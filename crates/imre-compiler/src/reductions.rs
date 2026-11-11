@@ -212,7 +212,7 @@ fn version(
 fn prove_prefix_reads(body: &mut [Statement], source: usize, cursor: usize) {
     fn expression(value: &mut Expr, source: usize, cursor: usize) {
         if let ExprKind::Builtin(operation, args) = &mut value.kind
-            && let Builtin::ListGetBounded { min, max } = *operation
+            && let Builtin::ListGetBounded { min, max, .. } = *operation
             && let [receiver, index] = args.as_slice()
             && matches!(receiver.kind, ExprKind::Local(slot) if slot == source)
             && matches!(index.kind, ExprKind::Local(slot) if slot == cursor)

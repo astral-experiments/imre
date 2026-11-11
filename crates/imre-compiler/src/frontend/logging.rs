@@ -539,7 +539,7 @@ impl Checker<'_> {
             Type::Int => Ok(value),
             Type::Bool => Ok(Expr {
                 ty: Type::Int,
-                kind: ExprKind::Builtin(Builtin::Int, vec![value]),
+                kind: ExprKind::Builtin(Builtin::Int(None), vec![value]),
             }),
             Type::Str => Ok(operation(Log::CheckLevel, Type::Int, vec![value])),
             ty if dataclass_values::can_format(ty, self.types, self.classes)

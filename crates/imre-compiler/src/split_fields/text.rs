@@ -9,7 +9,7 @@ fn projection(value: &Expr) -> Option<(usize, Option<u8>)> {
     let (source, index) = match (op, args.as_slice()) {
         (Builtin::Len, [source]) => (source, None),
         (
-            Builtin::ListGet,
+            Builtin::ListGet(_),
             [
                 source,
                 Expr {
@@ -110,7 +110,13 @@ pub(super) fn specialize(f: &mut Function, reads: &[usize], writes: &[usize]) {
         if let Some((slot, index)) = projection(value)
             && uses_by_slot[slot].mask != 0
         {
-            let op = index.map_or(Builtin::SplitTextLen, Builtin::SplitTextField);
+            let op = match (index, &mut value.kind) {
+                (None, _) => Builtin::SplitTextLen,
+                (Some(index), ExprKind::Builtin(Builtin::ListGet(origin), _)) => {
+                    Builtin::SplitTextField(index, origin.take())
+                }
+                _ => unreachable!("indexed projections use a checked list read"),
+            };
             value.kind = ExprKind::Builtin(op, vec![Expr::local(slot, Type::Str)]);
         }
     });

@@ -228,7 +228,7 @@ impl Checker<'_> {
         Expr {
             ty: c.ty,
             kind: ExprKind::Builtin(
-                Builtin::ListGet,
+                Builtin::ListGet(None),
                 vec![self.globals.slot_value(c.slot), Expr::integer(0)],
             ),
         }

@@ -195,7 +195,7 @@ fn mapped_helper(function: &Function) -> Option<Lane> {
     let ExprKind::Compare(test, ops) = &test.kind else {
         return None;
     };
-    let ExprKind::Builtin(Builtin::ListGet, args) = &load.kind else {
+    let ExprKind::Builtin(Builtin::ListGet(_), args) = &load.kind else {
         return None;
     };
     let ExprKind::Binary(Binary::Add, length, offset) = &start.kind else {

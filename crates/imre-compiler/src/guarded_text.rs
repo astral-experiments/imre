@@ -152,7 +152,7 @@ fn source(expression: &mut Expr) -> Option<&mut Expr> {
     };
     let values = match argument {
         Expr {
-            kind: ExprKind::Builtin(Builtin::ListGet, values),
+            kind: ExprKind::Builtin(Builtin::ListGet(_), values),
             ..
         } => values,
         input => return Some(input),

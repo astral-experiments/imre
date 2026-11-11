@@ -89,7 +89,7 @@ impl Checker<'_> {
             }
             return Ok(Expr {
                 ty: Type::Int,
-                kind: ExprKind::Builtin(Builtin::Int, vec![value]),
+                kind: ExprKind::Builtin(Builtin::Int(None), vec![value]),
             });
         }
         if let Some((slot, test, first, second)) = self.protocol_alternatives(value.ty) {

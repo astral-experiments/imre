@@ -105,7 +105,7 @@ impl Checker<'_> {
             return Ok(Expr {
                 ty: Type::ListInt,
                 kind: ExprKind::Builtin(
-                    Builtin::StringIntList(self.fixed_origin(call.range(), Some(call.func.end()))),
+                    Builtin::StringIntList(self.call_origin(call)),
                     vec![iterable.clone()],
                 ),
             });
@@ -499,7 +499,7 @@ impl Checker<'_> {
         }
         Ok(Expr {
             ty: Type::Int,
-            kind: ExprKind::Builtin(Builtin::Int, vec![value]),
+            kind: ExprKind::Builtin(Builtin::Int(None), vec![value]),
         })
     }
 

@@ -113,7 +113,7 @@ fn call(op: Op, args: Vec<Expr>, ty: Type) -> Expr {
 }
 
 fn row_at(value: &Expr, table: Type) -> Option<(&Expr, &Expr)> {
-    let ExprKind::Builtin(Builtin::ListGet | Builtin::SequenceGetInBounds, args) = &value.kind
+    let ExprKind::Builtin(Builtin::ListGet(_) | Builtin::SequenceGetInBounds, args) = &value.kind
     else {
         return None;
     };

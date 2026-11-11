@@ -128,9 +128,9 @@ impl Emitter<'_, '_> {
         expressions: &[Expr],
     ) -> Option<Value> {
         let (fields, unquote) = match (builtin, expressions) {
-            (Builtin::ListGet, args) => (args, false),
+            (Builtin::ListGet(_), args) => (args, false),
             (Builtin::Text(TextOperation::Unquote), [arg]) => match &arg.kind {
-                ExprKind::Builtin(Builtin::ListGet, args) => (args.as_slice(), true),
+                ExprKind::Builtin(Builtin::ListGet(_), args) => (args.as_slice(), true),
                 _ => return None,
             },
             _ => return None,

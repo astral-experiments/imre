@@ -1974,7 +1974,7 @@ impl Checker<'_> {
                         } else if matches!(ty, Type::List(_)) {
                             Builtin::SequenceGetInBounds
                         } else {
-                            Builtin::ListGet
+                            Builtin::ListGet(None)
                         },
                         vec![self.local(source), self.local(cursor)],
                     ),

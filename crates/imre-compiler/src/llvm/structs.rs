@@ -4,7 +4,7 @@ use super::*;
 
 /// ListGet also represents dictionary subscriptions; only a list carries rows.
 pub(super) fn packed_get(item: &Expr) -> Option<(&Builtin, &[Expr])> {
-    if let ExprKind::Builtin(op @ (Builtin::SequenceGetInBounds | Builtin::ListGet), args) =
+    if let ExprKind::Builtin(op @ (Builtin::SequenceGetInBounds | Builtin::ListGet(_)), args) =
         &item.kind
         && matches!(args[0].ty, Type::List(_))
     {
@@ -427,10 +427,12 @@ impl Emitter<'_, '_> {
                 ))
             }
         } else {
-            self.checked_pointer(format!(
-                "call ptr @imre_struct_row_checked(ptr {}, i64 {})",
-                list.value.operand, index.value.operand
-            ))
+            self.at_builtin_origin(op, |e| {
+                e.checked_pointer(format!(
+                    "call ptr @imre_struct_row_checked(ptr {}, i64 {})",
+                    list.value.operand, index.value.operand
+                ))
+            })
         };
         let scratch = self.entry_alloca(format!("%{name}"));
         let value = self.instruction(format!("load %{name}, ptr {src}"));

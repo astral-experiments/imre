@@ -16,7 +16,7 @@ impl Checker<'_> {
             Type::Bool => {
                 needle = Expr {
                     ty: Type::Int,
-                    kind: ExprKind::Builtin(Builtin::Int, vec![needle]),
+                    kind: ExprKind::Builtin(Builtin::Int(None), vec![needle]),
                 };
                 Builtin::BytesContainsInt
             }

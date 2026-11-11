@@ -217,7 +217,7 @@ impl Checker<'_> {
         match (from, to) {
             (Type::Bool, Type::Int) => Some(|value| Expr {
                 ty: Type::Int,
-                kind: ExprKind::Builtin(Builtin::Int, vec![value]),
+                kind: ExprKind::Builtin(Builtin::Int(None), vec![value]),
             }),
             (Type::IntEnum(_), Type::Int) => Some(Self::enum_integer),
             (Type::StrEnum(_), Type::Str) => Some(Self::enum_text),

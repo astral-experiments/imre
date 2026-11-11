@@ -41,7 +41,7 @@ pub(super) fn fixed_locals(f: &Function) -> Vec<bool> {
     });
     ir::walk_expressions(&f.body, &mut |value| match &value.kind {
         ExprKind::Local(slot) => uses[*slot] += 1,
-        ExprKind::Builtin(Builtin::ListGet | Builtin::Len | Builtin::Bool, args) => {
+        ExprKind::Builtin(Builtin::ListGet(_) | Builtin::Len | Builtin::Bool, args) => {
             if let Some(Expr {
                 kind: ExprKind::Local(slot),
                 ..
@@ -67,7 +67,7 @@ fn scalar(e: &Expr) -> bool {
         }
         ExprKind::Negate(v) | ExprKind::Not(v) => scalar(v),
         ExprKind::Boolean(_, args) | ExprKind::Compare(args, _) => args.iter().all(scalar),
-        ExprKind::Builtin(Builtin::ListGet | Builtin::Len | Builtin::Bool, args) => {
+        ExprKind::Builtin(Builtin::ListGet(_) | Builtin::Len | Builtin::Bool, args) => {
             args.iter().all(scalar)
         }
         _ => false,
@@ -80,7 +80,7 @@ fn updates(emit: &Emitter<'_, '_>, st: &Statement, targets: &mut BTreeSet<usize>
             let ExprKind::Local(slot) = receiver.kind else {
                 return false;
             };
-            let ExprKind::Builtin(Builtin::ListGet, args) = &item.kind else {
+            let ExprKind::Builtin(Builtin::ListGet(_), args) = &item.kind else {
                 return false;
             };
             let [source, from] = args.as_slice() else {

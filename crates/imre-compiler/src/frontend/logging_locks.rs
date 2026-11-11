@@ -83,7 +83,7 @@ impl Checker<'_> {
                 if value.ty == Type::Bool {
                     return Ok(Expr {
                         ty: Type::Int,
-                        kind: ExprKind::Builtin(Builtin::Int, vec![value]),
+                        kind: ExprKind::Builtin(Builtin::Int(None), vec![value]),
                     });
                 }
                 return Ok(value);

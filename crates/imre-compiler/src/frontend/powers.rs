@@ -7,7 +7,7 @@ pub(super) fn integer(value: Expr) -> Expr {
     if value.ty == Type::Bool {
         Expr {
             ty: Type::Int,
-            kind: ExprKind::Builtin(Builtin::Int, vec![value]),
+            kind: ExprKind::Builtin(Builtin::Int(None), vec![value]),
         }
     } else {
         value

@@ -145,7 +145,7 @@ fn credential_integer(mut value: Expr, group: bool, owner: &str) -> Expr {
     if value.ty == Type::Bool {
         value = Expr {
             ty: Type::Int,
-            kind: ExprKind::Builtin(Builtin::Int, vec![value]),
+            kind: ExprKind::Builtin(Builtin::Int(None), vec![value]),
         };
     } else if value.ty != Type::Int {
         return invalid_id(group, owner);

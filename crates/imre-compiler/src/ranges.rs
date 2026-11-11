@@ -1020,7 +1020,7 @@ impl Analyzer {
                     }
                     Builtin::BytesGet => Interval::bounded(0, 255),
                     Builtin::TryDigitSums(_) => Interval::bounded(-1, MAX_SMALL),
-                    Builtin::ListGetI32 => {
+                    Builtin::ListGetI32(_) => {
                         Interval::bounded(i128::from(i32::MIN), i128::from(i32::MAX))
                     }
                     Builtin::IntExtremum { minimum } => values
@@ -1035,14 +1035,14 @@ impl Analyzer {
                         })
                         .unwrap_or(Interval::UNKNOWN),
                     Builtin::GetBoundedInAppendWindow { min, max, .. }
-                    | Builtin::ListGetBounded { min, max }
+                    | Builtin::ListGetBounded { min, max, .. }
                     | Builtin::ListGetBoundedInBounds { min, max }
                     | Builtin::BoundedCursorValue { min, max }
                     | Builtin::IntBounded { min, max } => {
                         Interval::bounded(i128::from(*min), i128::from(*max))
                     }
-                    Builtin::Int if args[0].ty == Type::Int => values[0],
-                    Builtin::Int if args[0].ty == Type::Bool => Interval::bounded(0, 1),
+                    Builtin::Int(_) if args[0].ty == Type::Int => values[0],
+                    Builtin::Int(_) if args[0].ty == Type::Bool => Interval::bounded(0, 1),
                     _ => Interval::UNKNOWN,
                 }
             }
@@ -1485,7 +1485,7 @@ mod tests {
             let access = expressions(&module.functions[0])
                 .into_iter()
                 .find_map(|expression| match &expression.kind {
-                    ExprKind::Builtin(Builtin::ListGet, args) => Some(&args[1]),
+                    ExprKind::Builtin(Builtin::ListGet(_), args) => Some(&args[1]),
                     _ => None,
                 })
                 .unwrap();
@@ -1502,7 +1502,7 @@ mod tests {
         let accesses = expressions(&module.functions[0])
             .into_iter()
             .filter_map(|value| match &value.kind {
-                ExprKind::Builtin(Builtin::ListGet, args) => Some(&args[1]),
+                ExprKind::Builtin(Builtin::ListGet(_), args) => Some(&args[1]),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -1618,7 +1618,7 @@ mod tests {
             let facts = analyze(&module);
             let mut accesses = 0;
             for value in expressions(&module.functions[0]) {
-                if let ExprKind::Builtin(Builtin::ListGet, args) = &value.kind {
+                if let ExprKind::Builtin(Builtin::ListGet(_), args) = &value.kind {
                     accesses += 1;
                     assert_eq!(
                         facts.integer(&args[1]),
@@ -1857,7 +1857,7 @@ def pop_ready(ready: list[int]) -> int:
         let mut arithmetic = 0;
         for expression in expressions(&module.functions[0]) {
             match &expression.kind {
-                ExprKind::Builtin(Builtin::ListGet, args) => {
+                ExprKind::Builtin(Builtin::ListGet(_), args) => {
                     accesses += 1;
                     assert!(facts.integer(&args[1]).is_some_and(|range| range.min >= 0));
                     assert_eq!(
@@ -1908,7 +1908,7 @@ def chained(value: int, values: list[int]) -> int:
             let mut accesses = 0;
             for expression in expressions(function) {
                 match &expression.kind {
-                    ExprKind::Builtin(Builtin::ListGet, args) => {
+                    ExprKind::Builtin(Builtin::ListGet(_), args) => {
                         accesses += 1;
                         assert_eq!(
                             facts.integer(&args[1]),
@@ -2224,7 +2224,7 @@ def snapshot(values: list[int]) -> int:
         let mut reads = 0;
         for expression in expressions(&module.functions[1]) {
             match &expression.kind {
-                ExprKind::Builtin(Builtin::ListGet, _) => {
+                ExprKind::Builtin(Builtin::ListGet(_), _) => {
                     reads += 1;
                     assert_eq!(facts.integer(expression), None);
                 }

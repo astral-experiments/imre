@@ -51,7 +51,7 @@ impl Checker<'_> {
                 "filename" if v.ty == Type::Str || (op == Op::Check && v.ty == Type::None) => Ok(v),
                 "filename" => Err(error(c.source,node,"linecache filename requires a string")),
                 "lineno" if matches!(v.ty,Type::Int|Type::Float)=>Ok(v),
-                "lineno" if v.ty == Type::Bool=> Ok(Expr{ty:Type::Int,kind:ExprKind::Builtin(Builtin::Int,vec![v])}),
+                "lineno" if v.ty == Type::Bool=> Ok(Expr{ty:Type::Int,kind:ExprKind::Builtin(Builtin::Int(None),vec![v])}),
                 "lineno" => Err(error(c.source,node,"linecache line number requires int, bool or float")),
                 _ if v.ty==Type::None || c.types.mapping(v.ty)==Some((Type::Str,Type::Str)) => Ok(v),
                 _ => Err(error(c.source,node,"linecache source loaders need a supported callable; only None or dict[str, str] globals are supported")),

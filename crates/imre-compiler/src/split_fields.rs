@@ -1,8 +1,8 @@
 //! Elide unobserved split lists when their only consumers parse fixed fields.
 
 use crate::ir::{
-    Builtin, ChildMut, Expr, ExprKind, Module, Statement, Type, statement_children_mut,
-    walk_expressions, walk_expressions_mut,
+    Builtin, ChildMut, Expr, ExprKind, FixedOrigin, Module, SplitFieldOrigins, Statement, Type,
+    statement_children_mut, walk_expressions, walk_expressions_mut,
 };
 use crate::reductions::count_writes;
 mod text;
@@ -41,19 +41,27 @@ pub(crate) fn specialize(module: &mut Module) {
             Some(mask)
         });
         walk_expressions_mut(&mut function.body, &mut |value| {
-            let Some((source, index)) = field(value) else {
+            let Some(field) = field(value) else {
                 return;
             };
-            let mut op = Builtin::SplitIntField(index);
-            let input = match &source.kind {
-                ExprKind::Local(slot) if masks[*slot] != 0 => {
-                    if masks[*slot].count_ones() >= 2 {
-                        op = Builtin::SplitIntCached(index);
-                    }
-                    Expr::local(*slot, Type::Str)
+            let (input, cached) = match &field.source.kind {
+                ExprKind::Local(slot) if masks[*slot] != 0 => (
+                    Expr::local(*slot, Type::Str),
+                    masks[*slot].count_ones() >= 2,
+                ),
+                ExprKind::Builtin(Builtin::Split, args) if split(field.source) => {
+                    (args[0].clone(), false)
                 }
-                ExprKind::Builtin(Builtin::Split, args) if split(source) => args[0].clone(),
                 _ => return,
+            };
+            let origins = Box::new(SplitFieldOrigins {
+                index: field.lookup.clone(),
+                conversion: field.conversion.clone(),
+            });
+            let op = if cached {
+                Builtin::SplitIntCached(field.index, origins)
+            } else {
+                Builtin::SplitIntField(field.index, origins)
             };
             value.kind = ExprKind::Builtin(op, vec![input]);
         });
@@ -66,12 +74,19 @@ fn split(value: &Expr) -> bool {
         if matches!(inputs.as_slice(), [input] if input.ty == Type::Str))
 }
 
-fn field(value: &Expr) -> Option<(&Expr, u32)> {
-    let ExprKind::Builtin(Builtin::Int, args) = &value.kind else {
+struct Field<'a> {
+    source: &'a Expr,
+    index: u32,
+    lookup: &'a Option<Box<FixedOrigin>>,
+    conversion: &'a Option<Box<FixedOrigin>>,
+}
+
+fn field(value: &Expr) -> Option<Field<'_>> {
+    let ExprKind::Builtin(Builtin::Int(conversion), args) = &value.kind else {
         return None;
     };
     let [arg] = args.as_slice() else { return None };
-    let ExprKind::Builtin(Builtin::ListGet, args) = &arg.kind else {
+    let ExprKind::Builtin(Builtin::ListGet(lookup), args) = &arg.kind else {
         return None;
     };
     let [source, index] = args.as_slice() else {
@@ -81,7 +96,12 @@ fn field(value: &Expr) -> Option<(&Expr, u32)> {
         return None;
     };
     let index = literal.parse().ok()?;
-    (arg.ty == Type::Str).then_some((source, index))
+    (arg.ty == Type::Str).then_some(Field {
+        source,
+        index,
+        lookup,
+        conversion,
+    })
 }
 
 /// A retained split list can be cheaper than rescanning a string across a loop.
@@ -100,12 +120,12 @@ fn nearby_fields(body: &[Statement], slot: usize) -> (usize, u8) {
         let mut scoped = false;
         walk_expressions(std::slice::from_ref(statement), &mut |value| {
             scoped |= matches!(value.kind, ExprKind::Scope { .. });
-            if let Some((source, index)) = field(value)
-                && index < 8
-                && matches!(source.kind, ExprKind::Local(read) if read == slot)
+            if let Some(field) = field(value)
+                && field.index < 8
+                && matches!(field.source.kind, ExprKind::Local(read) if read == slot)
             {
                 found += 1;
-                fields |= 1 << index;
+                fields |= 1 << field.index;
             }
         });
         if scoped {
@@ -158,8 +178,8 @@ mod tests {
         for function in module.functions.iter().chain([&module.entry]) {
             walk_expressions(&function.body, &mut |value| match value.kind {
                 ExprKind::Builtin(Builtin::Split, _) => counts.0 += 1,
-                ExprKind::Builtin(Builtin::SplitIntField(_), _) => counts.1 += 1,
-                ExprKind::Builtin(Builtin::SplitIntCached(_), _) => counts.2 += 1,
+                ExprKind::Builtin(Builtin::SplitIntField(..), _) => counts.1 += 1,
+                ExprKind::Builtin(Builtin::SplitIntCached(..), _) => counts.2 += 1,
                 _ => {}
             });
         }

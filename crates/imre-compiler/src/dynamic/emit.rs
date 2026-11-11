@@ -1928,7 +1928,7 @@ mod tests {
         let [value] = fields.as_mut_slice() else {
             panic!("expected one annotation value");
         };
-        let ExprKind::Builtin(Builtin::ListGet, items) = &value.kind else {
+        let ExprKind::Builtin(Builtin::ListGet(_), items) = &value.kind else {
             panic!("expected the value from the checked unpack");
         };
         assert!(matches!(

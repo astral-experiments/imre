@@ -23,7 +23,7 @@ impl Checker<'_> {
         let value = if value.ty == Type::Bool {
             Expr {
                 ty: Type::Int,
-                kind: ExprKind::Builtin(Builtin::Int, vec![value]),
+                kind: ExprKind::Builtin(Builtin::Int(None), vec![value]),
             }
         } else {
             value
@@ -38,7 +38,7 @@ impl Checker<'_> {
         };
         let seconds = Expr {
             ty: Type::Float,
-            kind: ExprKind::Builtin(Builtin::Float, vec![value]),
+            kind: ExprKind::Builtin(Builtin::Float(None), vec![value]),
         };
         let zero = Expr {
             ty: Type::Float,
