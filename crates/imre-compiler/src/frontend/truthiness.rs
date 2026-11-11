@@ -3,6 +3,7 @@
 
 use super::*;
 use ruff_python_ast::CmpOp;
+use ruff_python_ast::UnaryOp;
 
 impl Checker<'_> {
     /// Consumes truth directly so mixed operands such as `items and len(items)`
@@ -362,7 +363,7 @@ fn guarded_string_boundary(values: &[Expr]) -> Option<Expr> {
         let op = match &index.kind {
             ExprKind::Int(index) if index == "0" => ir::TextOperation::StartsWith,
             ExprKind::Int(index) if index == "-1" => ir::TextOperation::EndsWith,
-            ExprKind::Negate(one) if matches!(&one.kind, ExprKind::Int(index) if index == "1") => {
+            ExprKind::Unary(UnaryOp::USub, one) if matches!(&one.kind, ExprKind::Int(index) if index == "1") => {
                 ir::TextOperation::EndsWith
             }
             _ => return None,

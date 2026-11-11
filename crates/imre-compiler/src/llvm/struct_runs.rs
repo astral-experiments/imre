@@ -1,6 +1,7 @@
 //! Fold uniform runs and repeated cycles of pure scalar-row projections when binary64 addition is exact.
 use super::*;
 use ruff_python_ast::CmpOp;
+use ruff_python_ast::UnaryOp;
 
 struct RunSum<'a> {
     list: usize,
@@ -25,7 +26,7 @@ fn pure_term(
         ExprKind::Float(_) => true,
         ExprKind::Local(slot) => accumulator.is_some_and(|sum| *slot != sum),
         ExprKind::Field(receiver, _) => row(receiver),
-        ExprKind::Negate(inner) => pure_term(module, inner, row, accumulator),
+        ExprKind::Unary(UnaryOp::USub, inner) => pure_term(module, inner, row, accumulator),
         ExprKind::Binary(Binary::Add | Binary::Subtract | Binary::Multiply, left, right) => {
             pure_term(module, left, row, accumulator) && pure_term(module, right, row, accumulator)
         }
@@ -123,7 +124,7 @@ impl Emitter<'_, '_> {
                 let pointer = self.field_pointer(&row, *field);
                 self.field_value(&pointer, term.ty)
             }
-            ExprKind::Negate(inner) => {
+            ExprKind::Unary(UnaryOp::USub, inner) => {
                 let value = self.dictionary_projection(inner, payload);
                 Value {
                     operand: self.instruction(format!("fneg double {}", value.operand)),

@@ -2,6 +2,7 @@
 
 use crate::ir::{Expr, ExprKind, Type};
 use ruff_python_ast::CmpOp;
+use ruff_python_ast::UnaryOp;
 
 /// Recognizes `-x if x < 0 else x` and equivalent zero comparisons. All reads
 /// must name the same exact integer local, so evaluation cannot call user code,
@@ -36,7 +37,7 @@ pub(super) fn absolute_operand<'a>(test: &'a Expr, yes: &Expr, no: &Expr) -> Opt
         _ => return None,
     };
     let (negated, unchanged) = if negative { (yes, no) } else { (no, yes) };
-    let ExprKind::Negate(value) = &negated.kind else {
+    let ExprKind::Unary(UnaryOp::USub, value) = &negated.kind else {
         return None;
     };
     let same = |value: &Expr| {

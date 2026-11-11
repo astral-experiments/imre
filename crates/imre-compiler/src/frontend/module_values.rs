@@ -297,10 +297,7 @@ impl Checker<'_> {
             let condition = self.class_skip_condition(&skip.condition)?;
             self.expect(Type::Bool, condition.ty, &skip.condition)?;
             let flag = if skip.unless {
-                Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Not(Box::new(condition)),
-                }
+                Expr::not(condition)
             } else {
                 condition
             };

@@ -2,6 +2,7 @@
 
 use super::comprehensions::dict_entry;
 use super::*;
+use ruff_python_ast::UnaryOp;
 
 enum ExpansionSource {
     Value(Expr),
@@ -1046,7 +1047,7 @@ impl Checker<'_> {
             Statement::If(
                 Expr {
                     ty: Type::Bool,
-                    kind: ExprKind::Not(Box::new(self.local(ready))),
+                    kind: ExprKind::Unary(UnaryOp::Not, Box::new(self.local(ready))),
                 },
                 vec![Statement::Exhaust],
                 Vec::new(),

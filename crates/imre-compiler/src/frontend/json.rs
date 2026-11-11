@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::ir::{JsonDefault, JsonField, JsonRecordSchema};
+use ruff_python_ast::UnaryOp;
 
 /// Folds successive literal subscripts into one traversal. The keys have no
 /// evaluation effects; the first failing lookup still determines the exception.
@@ -104,10 +105,7 @@ pub(super) fn compare(
     Ok(if *op == ast::CmpOp::Eq {
         result
     } else {
-        Expr {
-            ty: Type::Bool,
-            kind: ExprKind::Not(Box::new(result)),
-        }
+        Expr::not(result)
     })
 }
 
@@ -941,7 +939,7 @@ fn scalar_default(value: &Expr) -> std::result::Result<JsonDefault, &'static str
         ExprKind::None => JsonDefault::None,
         ExprKind::List(values) if values.is_empty() => JsonDefault::EmptyList,
         ExprKind::Present(value) | ExprKind::Absent(value) => return scalar_default(value),
-        ExprKind::Negate(value) => match &value.kind {
+        ExprKind::Unary(UnaryOp::USub, value) => match &value.kind {
             ExprKind::Int(value) => JsonDefault::Int(format!("-{value}")),
             ExprKind::Float(value) if value.is_finite() => JsonDefault::Float(-value),
             _ => return Err("JSON defaults require finite scalar literals"),

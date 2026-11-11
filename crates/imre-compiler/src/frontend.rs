@@ -1,6 +1,7 @@
 //! Enforces the closed typed subset independently of gradual Python typing.
 
 use ruff_python_ast::CmpOp;
+use ruff_python_ast::UnaryOp;
 use std::collections::{HashMap, HashSet};
 use std::result::Result as StdResult;
 use std::sync::Arc;
@@ -6349,7 +6350,10 @@ impl<'a> Checker<'a> {
                         Builtin::Process(ir::ProcessOperation::ExceptionAt),
                         args,
                     ) = &raised.kind
-                        && matches!(&args[1].kind, ExprKind::Int(_) | ExprKind::Negate(_))
+                        && matches!(
+                            &args[1].kind,
+                            ExprKind::Int(_) | ExprKind::Unary(UnaryOp::USub, _)
+                        )
                         && let ExprKind::Local(slot) = args[0].kind
                         && let Some(name) = cause.as_name_expr()
                         && self.names.get(name.id.as_str()) == Some(&slot)
@@ -8739,18 +8743,11 @@ impl<'a> Checker<'a> {
                 } else {
                     self.expr(&unary.operand)?
                 };
-                match unary.op {
-                    ast::UnaryOp::Not => (Type::Bool, ExprKind::Not(Box::new(value))),
+                let ty = match unary.op {
+                    ast::UnaryOp::Not => Type::Bool,
                     ast::UnaryOp::Invert => {
                         self.expect(Type::Int, value.ty, expression)?;
-                        (
-                            Type::Int,
-                            ExprKind::Binary(
-                                Binary::BitXor,
-                                Box::new(value),
-                                Box::new(Expr::integer(-1)),
-                            ),
-                        )
+                        Type::Int
                     }
                     ast::UnaryOp::USub | ast::UnaryOp::UAdd => {
                         if value.ty == Type::Calendar(ir::CalendarType::Delta)
@@ -8779,12 +8776,10 @@ impl<'a> Checker<'a> {
                                 "unary signs require int or float",
                             ));
                         }
-                        if unary.op == ast::UnaryOp::UAdd {
-                            return Ok(value);
-                        }
-                        (value.ty, ExprKind::Negate(Box::new(value)))
+                        value.ty
                     }
-                }
+                };
+                return Ok(Expr::unary(unary.op, value, ty));
             }
             ast::Expr::BoolOp(boolean) => {
                 return self.boolean_value(boolean, None);
@@ -8815,10 +8810,7 @@ impl<'a> Checker<'a> {
                             vec![key, receiver],
                         );
                         return Ok(if compare.ops[0] == ast::CmpOp::NotIn {
-                            Expr {
-                                ty: Type::Bool,
-                                kind: ExprKind::Not(Box::new(found)),
-                            }
+                            Expr::not(found)
                         } else {
                             found
                         });
@@ -8831,10 +8823,7 @@ impl<'a> Checker<'a> {
                     if self.mapping_class(receiver.ty).is_some() {
                         let found = self.mapping_membership(key, receiver, expression)?;
                         return Ok(if compare.ops[0] == ast::CmpOp::NotIn {
-                            Expr {
-                                ty: Type::Bool,
-                                kind: ExprKind::Not(Box::new(found)),
-                            }
+                            Expr::not(found)
                         } else {
                             found
                         });
@@ -8909,10 +8898,7 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Builtin(builtin, vec![key, receiver]),
                     };
                     if compare.ops[0] == ast::CmpOp::NotIn {
-                        result = Expr {
-                            ty: Type::Bool,
-                            kind: ExprKind::Not(Box::new(result)),
-                        };
+                        result = Expr::not(result);
                     }
                     return Ok(result);
                 }
@@ -9170,10 +9156,7 @@ impl<'a> Checker<'a> {
                     };
                     return Ok(
                         if matches!(compare.ops[0], ast::CmpOp::NotEq | ast::CmpOp::IsNot) {
-                            Expr {
-                                ty: Type::Bool,
-                                kind: ExprKind::Not(Box::new(eq)),
-                            }
+                            Expr::not(eq)
                         } else {
                             eq
                         },
@@ -11552,10 +11535,7 @@ impl<'a> Checker<'a> {
                     // A function argument is evaluated as a value before its truth is tested.
                     let value = self.expr(arg)?;
                     let truth = self.test_truth(value, arg)?;
-                    return Ok(Expr {
-                        ty: Type::Bool,
-                        kind: ExprKind::Not(Box::new(truth)),
-                    });
+                    return Ok(Expr::not(truth));
                 }
                 return Err(error(
                     self.source,

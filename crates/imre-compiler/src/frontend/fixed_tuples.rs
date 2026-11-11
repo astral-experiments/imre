@@ -4,6 +4,7 @@
 
 use super::*;
 use ruff_python_ast::CmpOp;
+use ruff_python_ast::UnaryOp;
 
 #[derive(Clone, Copy)]
 pub(super) struct Guard {
@@ -70,10 +71,7 @@ impl Checker<'_> {
             },
         };
         let value = if comparison.ops[0] == ast::CmpOp::NotIn {
-            Expr {
-                ty: Type::Bool,
-                kind: ExprKind::Not(Box::new(contains)),
-            }
+            Expr::not(contains)
         } else {
             contains
         };
@@ -217,7 +215,7 @@ pub(super) fn preserves(guard: Guard, statements: &[Statement]) -> bool {
     let mut pure = true;
     ir::walk_expressions(statements, &mut |expr| {
         pure &= match &expr.kind {
-            ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) | ExprKind::Str(_) | ExprKind::Bytes(_) | ExprKind::None | ExprKind::Local(_) | ExprKind::Binary(..) | ExprKind::Negate(_) => true,
+            ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) | ExprKind::Str(_) | ExprKind::Bytes(_) | ExprKind::None | ExprKind::Local(_) | ExprKind::Binary(..) | ExprKind::Unary(UnaryOp::USub, _) => true,
             ExprKind::Builtin(b,args) => b.contract(args).preserves_list_storage(),
             ExprKind::Scope { body, clear, .. } => !clear.contains(&guard.slot)
                 && body.iter().all(|s| matches!(s, Statement::Assign(slot, _) | Statement::Clear(slot) if *slot != guard.slot)),

@@ -9,6 +9,7 @@ use crate::ir::{Binary, Builtin, Expr, ExprKind, Module, Statement, Type, walk_e
 use crate::list_bounds::block_readonly;
 use crate::ranges::{IntRange, IntegerFacts};
 use ruff_python_ast::CmpOp;
+use ruff_python_ast::UnaryOp;
 
 const MIN_SMALL: i128 = -(1_i128 << 62);
 const MAX_SMALL: i128 = (1_i128 << 62) - 1;
@@ -392,7 +393,7 @@ fn list_length(value: &Expr) -> Option<usize> {
 pub(super) fn literal(value: &Expr) -> Option<i64> {
     let value = match &value.kind {
         ExprKind::Int(value) => value.parse().ok()?,
-        ExprKind::Negate(value) => literal(value)?.checked_neg()?,
+        ExprKind::Unary(UnaryOp::USub, value) => literal(value)?.checked_neg()?,
         _ => return None,
     };
     (MIN_SMALL..=MAX_SMALL)

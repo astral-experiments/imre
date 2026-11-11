@@ -1,6 +1,7 @@
 //! Ownership lowering and textual LLVM emission, with no C or interpreter layer.
 
 use ruff_python_ast::CmpOp;
+use ruff_python_ast::UnaryOp;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt::Write;
 
@@ -3195,8 +3196,7 @@ impl Emitter<'_, '_> {
 
     fn other_expression(&mut self, expression: &Expr) -> Value {
         match &expression.kind {
-            ExprKind::Negate(_)
-            | ExprKind::Not(_)
+            ExprKind::Unary(_, _)
             | ExprKind::Scope { .. }
             | ExprKind::Int(_)
             | ExprKind::Float(_)
@@ -4821,7 +4821,6 @@ impl Emitter<'_, '_> {
             | Builtin::RegisteredPairNeedsRow
             | Builtin::RegisteredCall(..)
             | Builtin::RegisteredName(_)
-            | Builtin::RegisteredUnary(_)
             | Builtin::Unrepresented
             | Builtin::RegisteredContainsLiteral(_)
             | Builtin::RegisteredInPlace(_)
@@ -10255,7 +10254,7 @@ fn read_only_integer(expression: &Expr) -> bool {
             ) && read_only_integer(left)
                 && read_only_integer(right)
         }
-        ExprKind::Negate(value) => read_only_integer(value),
+        ExprKind::Unary(UnaryOp::USub, value) => read_only_integer(value),
         ExprKind::Builtin(Builtin::ListGet(_), args) => {
             matches!(args.as_slice(), [receiver, index]
                 if receiver.ty == Type::ListInt

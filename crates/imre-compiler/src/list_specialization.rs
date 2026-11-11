@@ -368,6 +368,9 @@ impl Plan<'_> {
     /// Appends are the only permitted mutation. Capturing their receiver's root
     /// before later operands preserves the source language's evaluation order.
     fn expression(&mut self, expression: &mut Expr, aliases: &mut [Option<usize>]) -> bool {
+        if expression.uses_python_unary_protocol() {
+            return false;
+        }
         match &mut expression.kind {
             ExprKind::Builtin(operation, args) => {
                 let receiver = args.first().and_then(|value| alias(value, aliases));
@@ -456,8 +459,7 @@ impl Plan<'_> {
             ExprKind::Present(value)
             | ExprKind::Absent(value)
             | ExprKind::Unwrap(value)
-            | ExprKind::Not(value)
-            | ExprKind::Negate(value)
+            | ExprKind::Unary(_, value)
             | ExprKind::Field(value, _) => {
                 if !self.expression(value, aliases) {
                     return false;

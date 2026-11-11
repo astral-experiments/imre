@@ -86,11 +86,6 @@ impl RegisteredSource<'_> {
     pub(crate) fn object_operation(self, node: &ast::Expr) -> Option<ObjectOperation<'_>> {
         let (opcode, target, arguments) = match node {
             ast::Expr::Attribute(field) => (attribute_load(field), field.value.as_ref(), None),
-            ast::Expr::UnaryOp(unary) => (
-                Builtin::RegisteredUnary(unary.op.into()),
-                unary.operand.as_ref(),
-                None,
-            ),
             ast::Expr::Call(call) => {
                 let (site, target) = self.call(call);
                 (Builtin::RegisteredCall(site), target, Some(&call.arguments))
@@ -276,17 +271,6 @@ pub(crate) fn packed_arguments(args: &ast::Arguments) -> ir::PackedArguments {
             .iter()
             .map(|key| key.arg.as_ref().map(ToString::to_string))
             .collect(),
-    }
-}
-
-impl From<ast::UnaryOp> for ir::ObjectUnary {
-    fn from(op: ast::UnaryOp) -> Self {
-        match op {
-            ast::UnaryOp::UAdd => Self::Positive,
-            ast::UnaryOp::USub => Self::Negative,
-            ast::UnaryOp::Invert => Self::Invert,
-            ast::UnaryOp::Not => Self::Not,
-        }
     }
 }
 
@@ -867,6 +851,14 @@ pub(super) fn operation<'a, E>(
                 },
             },
         }));
+    }
+    if let ast::Expr::UnaryOp(unary) = node {
+        if !dynamic_receiver(&unary.operand) {
+            return Ok(None);
+        }
+        let value = child(&unary.operand)?;
+        return Ok((allow_typed_receiver || value.ty == Type::PythonObject)
+            .then(|| Expr::unary(unary.op, value, Type::PythonObject)));
     }
     if let Some(selected) = source.object_operation(node) {
         if !matches!(

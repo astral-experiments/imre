@@ -1,6 +1,7 @@
 //! Binds closed signatures without conflating argument evaluation and ABI order.
 
 use super::*;
+use ruff_python_ast::UnaryOp;
 
 /// Evaluate the supplied call operands in order, then raise the checked TypeError.
 pub(super) fn type_error(ty: Type, values: Vec<Expr>, message: String) -> Expr {
@@ -295,7 +296,7 @@ pub(crate) fn scalar_literal(
                 _ => unreachable!(),
             };
             let kind = if unary.op == ast::UnaryOp::USub {
-                ExprKind::Negate(Box::new(Expr { ty, kind }))
+                ExprKind::Unary(UnaryOp::USub, Box::new(Expr { ty, kind }))
             } else {
                 kind
             };

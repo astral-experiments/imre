@@ -3,6 +3,7 @@
 use super::*;
 use crate::ir::{CalendarType, InstanceType};
 use ruff_python_ast::CmpOp;
+use ruff_python_ast::UnaryOp;
 use ty_python_semantic::types::KnownClass;
 
 impl Checker<'_> {
@@ -820,7 +821,9 @@ impl Checker<'_> {
                     _ => None,
                 }
             }
-            ExprKind::Not(value) => self.instance_condition(value).map(|value| !value),
+            ExprKind::Unary(UnaryOp::Not, value) => {
+                self.instance_condition(value).map(|value| !value)
+            }
             _ => None,
         }
     }

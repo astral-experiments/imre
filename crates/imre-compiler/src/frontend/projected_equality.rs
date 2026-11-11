@@ -407,10 +407,7 @@ impl Checker<'_> {
             },
         };
         if !answers.equal {
-            value = Expr {
-                ty: Type::Bool,
-                kind: ExprKind::Not(Box::new(value)),
-            };
+            value = Expr::not(value);
         }
         branches.extend([
             Statement::If(both_one, vec![Statement::Return(value)], vec![]),

@@ -242,10 +242,7 @@ fn guard_return(function: &mut Function, types: &Types, sets: &[LiteralSet]) {
     function.locals.push(Type::Str);
     let source = std::mem::replace(input, Expr::local(temp, Type::Str));
     let miss_unless = |check| {
-        let skip = Expr {
-            ty: Type::Bool,
-            kind: ExprKind::Not(Box::new(check)),
-        };
+        let skip = Expr::not(check);
         Statement::If(skip, vec![Statement::Return(miss.clone())], vec![])
     };
     let mut body = Vec::new();

@@ -19,6 +19,7 @@ pub(crate) use abi::{ABI, CallArguments, Output, permanent};
 use abi::{GUARDED_LIT, GUARDED_NAMED_OP, NAMED_OP};
 pub(crate) use frame::{AnnotationScope, FrameEmitter, RegisteredFrame, SourcePositions};
 use ruff_python_ast::CmpOp;
+use ruff_python_ast::UnaryOp;
 use sites::CheckedSites;
 
 use crate::llvm::operations::{CheckedBody, CheckedValue, LoopEdges};
@@ -147,7 +148,6 @@ pub(crate) fn frame_inputs(
             | ExprKind::Float(_)
             | ExprKind::Str(_)
             | ExprKind::Bytes(_)
-            | ExprKind::Not(_)
             | ExprKind::Scope { .. } => true,
             ExprKind::Conditional(..) | ExprKind::BooleanValue(..) | ExprKind::Boolean(..) => true,
             ExprKind::Dict(entries) => expr.ty == Type::PythonObject || entries.is_empty(),
@@ -232,8 +232,12 @@ pub(crate) fn frame_inputs(
                         AttributeAction::Store | AttributeAction::InPlace(_) => 2,
                     }
             }
-            ExprKind::Builtin(Builtin::RegisteredUnary(_), operands) => {
-                matches!(operands.as_slice(), [operand] if operand.ty == Type::PythonObject)
+            ExprKind::Unary(op, operand) => {
+                if expr.ty == Type::PythonObject {
+                    operand.ty == Type::PythonObject
+                } else {
+                    matches!(op, UnaryOp::Not | UnaryOp::Invert | UnaryOp::UAdd)
+                }
             }
             ExprKind::Builtin(Builtin::RegisteredSubscript(..), operands) => operands.len() == 2,
             ExprKind::Builtin(Builtin::RegisteredName(_), scope) => scope.len() <= 1,
@@ -598,11 +602,8 @@ impl Frame<'_, '_, '_> {
             ExprKind::Conditional(..)
                 | ExprKind::Boolean(..)
                 | ExprKind::BooleanValue(..)
-                | ExprKind::Not(_)
-                | ExprKind::Builtin(
-                    Builtin::Bool | Builtin::RegisteredUnary(ir::ObjectUnary::Not),
-                    _
-                )
+                | ExprKind::Unary(UnaryOp::Not, _)
+                | ExprKind::Builtin(Builtin::Bool, _)
         ) {
             return crate::llvm::operations::ValueJoin::select(
                 self,

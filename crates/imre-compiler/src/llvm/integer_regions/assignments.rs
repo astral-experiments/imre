@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::llvm::operations::CheckedBody;
+use ruff_python_ast::UnaryOp;
 
 struct Input {
     slot: usize,
@@ -31,7 +32,7 @@ impl Assignments {
             || !matches!(
                 first.kind,
                 ExprKind::Binary(..)
-                    | ExprKind::Negate(_)
+                    | ExprKind::Unary(UnaryOp::USub, _)
                     | ExprKind::Conditional(..)
                     | ExprKind::Builtin(Builtin::Abs, _)
             )

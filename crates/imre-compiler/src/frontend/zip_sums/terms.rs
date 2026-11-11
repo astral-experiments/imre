@@ -1,5 +1,6 @@
 //! Lower pure integer terms into the shared, owned locals of one zip row.
 
+use ruff_python_ast::UnaryOp;
 use std::collections::HashMap;
 use std::mem::{Discriminant, discriminant};
 
@@ -35,7 +36,7 @@ impl Operation {
                 ExprKind::Local(slot) => Some(Self::Field(slot, *field)),
                 _ => None,
             },
-            ExprKind::Negate(value) => Some(Self::Negate(Operand::of(value)?)),
+            ExprKind::Unary(UnaryOp::USub, value) => Some(Self::Negate(Operand::of(value)?)),
             ExprKind::Binary(op, a, b) => Some(Self::Binary(
                 discriminant(op),
                 Operand::of(a)?,
@@ -134,8 +135,8 @@ impl Projection<'_> {
             {
                 ExprKind::Field(Box::new(self.value(owner, bindings, eager)?), *field)
             }
-            ExprKind::Negate(value) if ty == Type::Int && value.ty == Type::Int => {
-                ExprKind::Negate(Box::new(self.value(value, bindings, eager)?))
+            ExprKind::Unary(UnaryOp::USub, value) if ty == Type::Int && value.ty == Type::Int => {
+                ExprKind::Unary(UnaryOp::USub, Box::new(self.value(value, bindings, eager)?))
             }
             ExprKind::Binary(op @ (Binary::Add | Binary::Subtract | Binary::Multiply), a, b)
                 if ty == Type::Int && a.ty == Type::Int && b.ty == Type::Int =>

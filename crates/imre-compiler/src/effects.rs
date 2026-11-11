@@ -131,6 +131,7 @@ fn expression(value: &Expr, functions: &[bool], targets: Context<'_>) -> bool {
         | ExprKind::Bytes(_)
         | ExprKind::None
         | ExprKind::Local(_) => false,
+        ExprKind::Unary(..) if value.uses_python_unary_protocol() => true,
         ExprKind::Compare(_, ops) if crate::ir::Compare::uses_python_protocol(value.ty, ops) => {
             true
         }
@@ -186,8 +187,7 @@ fn expression(value: &Expr, functions: &[bool], targets: Context<'_>) -> bool {
         | ExprKind::Present(value)
         | ExprKind::Absent(value)
         | ExprKind::Unwrap(value)
-        | ExprKind::Not(value)
-        | ExprKind::Negate(value)
+        | ExprKind::Unary(_, value)
         | ExprKind::Field(value, _) => expression(value, functions, targets),
         ExprKind::Binary(op, left, right) => {
             op.may_raise_with_operands(left.ty, right.ty)

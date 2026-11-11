@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::classes::{ContainerFactory, FieldDefault, MethodKind};
+use ruff_python_ast::UnaryOp;
 
 #[derive(Clone, Copy)]
 pub(super) struct MethodContext {
@@ -506,7 +507,7 @@ pub(super) fn record_factories(
 /// A successful None check can establish the current value of a stored field.
 /// A property or other callable access has no such fact.
 pub(super) fn present_field(test: &Expr, truth: bool) -> Option<(usize, usize)> {
-    if let ExprKind::Not(inner) = &test.kind {
+    if let ExprKind::Unary(UnaryOp::Not, inner) = &test.kind {
         return present_field(inner, !truth);
     }
     if !truth

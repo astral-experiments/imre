@@ -3,6 +3,7 @@
 //! Python's lazy evaluation and mutation checks without escaping iterator values.
 
 use imre_ast::comprehension::Plan;
+use ruff_python_ast::UnaryOp;
 
 use super::comprehensions::EagerDisplay;
 use super::*;
@@ -396,10 +397,7 @@ pub(super) fn compare(operation: Compare, left: Expr, right: Expr) -> Expr {
 }
 
 fn not(value: Expr) -> Expr {
-    Expr {
-        ty: Type::Bool,
-        kind: ExprKind::Not(Box::new(value)),
-    }
+    Expr::not(value)
 }
 
 /// Handle exhaustion only inside the iterator or generator operation being pulled.
@@ -1717,7 +1715,7 @@ impl Checker<'_> {
                         stride,
                         Expr {
                             ty: Type::Int,
-                            kind: ExprKind::Negate(Box::new(step)),
+                            kind: ExprKind::Unary(UnaryOp::USub, Box::new(step)),
                         },
                     ),
                 ],

@@ -28,10 +28,7 @@ pub(super) fn equality(types: &Types, values: &mut Vec<Expr>, ops: &[ast::CmpOp]
     }
     let equal = op(Op::NullableEqual, Type::Bool, std::mem::take(values));
     Some(if *cmp == ast::CmpOp::NotEq {
-        Expr {
-            ty: Type::Bool,
-            kind: ExprKind::Not(Box::new(equal)),
-        }
+        Expr::not(equal)
     } else {
         equal
     })

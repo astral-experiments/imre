@@ -7,6 +7,7 @@
 //! accesses must keep checking current bounds, including after alias mutation.
 
 use ruff_python_ast::CmpOp;
+use ruff_python_ast::UnaryOp;
 use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
 
@@ -910,7 +911,15 @@ impl Analyzer {
                     Interval::UNKNOWN
                 }
             }
-            ExprKind::Negate(value) => self.expression(value, state, record).negate(),
+            ExprKind::Unary(_, operand) if expression.uses_python_unary_protocol() => {
+                self.expression(operand, state, record);
+                Interval::UNKNOWN
+            }
+            ExprKind::Unary(UnaryOp::UAdd, operand) => self.expression(operand, state, record),
+            ExprKind::Unary(UnaryOp::Invert, operand) => self
+                .expression(operand, state, record)
+                .binary(Binary::BitXor, Interval::exact(-1)),
+            ExprKind::Unary(UnaryOp::USub, value) => self.expression(value, state, record).negate(),
             ExprKind::Boolean(and, values) => {
                 let mut current = Some(state.clone());
                 let mut exits = None;
@@ -1093,7 +1102,7 @@ impl Analyzer {
             ExprKind::Present(value)
             | ExprKind::Absent(value)
             | ExprKind::Unwrap(value)
-            | ExprKind::Not(value)
+            | ExprKind::Unary(UnaryOp::Not, value)
             | ExprKind::Field(value, _) => {
                 self.expression(value, state, record);
                 Interval::UNKNOWN
@@ -1125,7 +1134,7 @@ impl Analyzer {
         }
         match &test.kind {
             ExprKind::Bool(value) => (*value == truth).then_some(state),
-            ExprKind::Not(value) => self.assume(value, !truth, state),
+            ExprKind::Unary(UnaryOp::Not, value) => self.assume(value, !truth, state),
             ExprKind::Builtin(Builtin::Bool, values) => self.assume(&values[0], truth, state),
             ExprKind::BooleanValue(and, left, right, None) => {
                 if *and == truth {
@@ -1281,8 +1290,7 @@ fn contains_scope(expression: &Expr) -> bool {
         ExprKind::Present(value)
         | ExprKind::Absent(value)
         | ExprKind::Unwrap(value)
-        | ExprKind::Not(value)
-        | ExprKind::Negate(value)
+        | ExprKind::Unary(_, value)
         | ExprKind::Field(value, _) => contains_scope(value),
         ExprKind::BooleanValue(_, left, right, predicate) => {
             predicate.is_some() || contains_scope(left) || contains_scope(right)
@@ -1380,7 +1388,7 @@ fn affine(expression: &Expr) -> Option<Affine> {
             scale: 0,
             offset: value.parse().ok()?,
         }),
-        ExprKind::Negate(value) => {
+        ExprKind::Unary(UnaryOp::USub, value) => {
             let value = affine(value)?;
             Some(Affine {
                 slot: value.slot,
