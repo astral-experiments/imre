@@ -16,10 +16,12 @@ for function in (sum, print):
 
     std::fs::write(&path, format!("{caller}\ntakes_int('wrong')\n")).unwrap();
     let error = imre_compiler::check_file(&path, None).unwrap_err();
-    assert!(
-        error.contains("error[invalid-argument-type]")
-            && error.contains("Argument to function `takes_int`"),
-        "{error}"
+    assert_eq!(
+        error,
+        format!(
+            "{}:9:11: Imre: expected int, got str; annotations are enforced contracts",
+            path.canonicalize().unwrap().display()
+        )
     );
 }
 
