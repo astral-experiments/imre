@@ -3600,11 +3600,11 @@ pub(crate) fn check_scope_syntax(
             "SyntaxError: import * only allowed at module level",
         ));
     }
-    if let Some((range, message)) = imre_ast::async_generators::syntax_error(module) {
+    if let Some(error) = imre_ast::async_generators::check(module.into(), source.contains(":=")) {
         return Err(crate::frontend::diagnostic_message(
             source,
-            &range,
-            &format!("SyntaxError: {message}"),
+            &error.range,
+            &format!("SyntaxError: {}", error.message),
         ));
     }
     Ok(())
