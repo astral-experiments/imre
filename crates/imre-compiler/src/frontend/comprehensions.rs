@@ -111,7 +111,6 @@ pub(super) enum Collector {
 /// and target types. The outer iterator is already acquired when the first target binds.
 pub(super) trait EagerDisplay: Sized {
     type Input;
-    type Destination: Copy;
     type Error;
 
     fn before_pull(&mut self, _plan: &Plan<'_>, _depth: usize) {}
@@ -124,28 +123,107 @@ pub(super) trait EagerDisplay: Sized {
         body: impl FnOnce(&mut Self) -> StdResult<Vec<Statement>, Self::Error>,
     ) -> StdResult<Vec<Statement>, Self::Error>;
     fn filter(&mut self, test: &ast::Expr) -> StdResult<Expr, Self::Error>;
-    fn collect(
+    fn collection_locals(&self) -> &[Type];
+    fn collection_guard(_: &[Expr]) -> Option<(usize, usize)> {
+        None
+    }
+    fn collection_key(
+        &mut self,
+        key: &ast::Expr,
+        expected: Option<Type>,
+        guarded: Option<(usize, usize)>,
+    ) -> StdResult<(usize, Expr), Self::Error>;
+    fn collection_value(
         &mut self,
         output: Output<'_>,
-        destination: Self::Destination,
+        collector: Collector,
         result: usize,
-        conditions: &[Expr],
-    ) -> StdResult<Vec<Statement>, Self::Error>;
+        key: Option<&Expr>,
+        guarded: Option<(usize, usize)>,
+    ) -> StdResult<Expr, Self::Error>;
 
     fn eager_filters(&mut self, clause: &ast::Comprehension) -> StdResult<Vec<Expr>, Self::Error> {
         clause.ifs.iter().map(|test| self.filter(test)).collect()
     }
 
-    fn eager_loop(
+    /// Seed the accumulator before its first pull and update it only after the filters pass.
+    fn comprehension_body(
         &mut self,
         plan: &Plan<'_>,
         input: Self::Input,
-        destination: Self::Destination,
+        collector: Collector,
         result: usize,
-    ) -> StdResult<Vec<Statement>, Self::Error> {
-        self.comprehension_loop(plan, 0, input, &mut |lower, output, conditions| {
-            lower.collect(output, destination, result, conditions)
-        })
+        mut checked_leaf: impl FnMut(&Self, &[Statement]),
+    ) -> StdResult<(Type, Vec<Statement>), Self::Error> {
+        let mut body = Vec::new();
+        let loops = self.comprehension_loop(plan, 0, input, &mut |scope, output, conditions| {
+            let guarded = Self::collection_guard(conditions);
+            let value = |scope: &mut Self, key: Option<&Expr>| {
+                scope.collection_value(output, collector, result, key, guarded)
+            };
+            let (empty, store) = match (collector, output) {
+                (Collector::Display(expected), Output::Dict(key, _)) => {
+                    let (captured, key) = scope.collection_key(key, expected, guarded)?;
+                    let value = value(scope, Some(&key))?;
+                    (
+                        ExprKind::Dict(Vec::new()),
+                        dict_entry(scope.collection_locals(), result, captured, key, value),
+                    )
+                }
+                (Collector::Display(_), Output::List(_) | Output::Set(_)) => {
+                    let item = value(scope, None)?;
+                    let ty = scope.collection_locals()[result];
+                    let (empty, operation) = if matches!(output, Output::Set(_)) {
+                        let element = if ty == Type::PythonObject {
+                            ty
+                        } else {
+                            item.ty
+                        };
+                        (
+                            ExprKind::Set {
+                                element,
+                                values: Vec::new(),
+                            },
+                            Builtin::SetAdd,
+                        )
+                    } else {
+                        (ExprKind::List(Vec::new()), Builtin::Append)
+                    };
+                    (
+                        empty,
+                        Statement::Expr(Expr {
+                            ty: Type::None,
+                            kind: ExprKind::Builtin(operation, vec![Expr::local(result, ty), item]),
+                        }),
+                    )
+                }
+                (Collector::IntegerSum, Output::List(_)) => {
+                    let item = value(scope, None)?;
+                    (
+                        ExprKind::Int("0".into()),
+                        Statement::Assign(
+                            result,
+                            Expr {
+                                ty: Type::Int,
+                                kind: ExprKind::Binary(
+                                    Binary::Add,
+                                    Box::new(Expr::local(result, Type::Int)),
+                                    Box::new(item),
+                                ),
+                            },
+                        ),
+                    )
+                }
+                _ => unreachable!("invalid eager comprehension collector"),
+            };
+            let ty = scope.collection_locals()[result];
+            body.push(Statement::Assign(result, Expr { ty, kind: empty }));
+            let leaf = vec![store];
+            checked_leaf(scope, &leaf);
+            Ok(leaf)
+        })?;
+        body.extend(loops);
+        Ok((self.collection_locals()[result], body))
     }
 
     fn comprehension_loop<'p>(
@@ -182,7 +260,6 @@ pub(super) fn async_pull(clause: &ast::Comprehension) -> Option<ir::AsyncPull> {
 
 impl EagerDisplay for Checker<'_> {
     type Input = Iteration;
-    type Destination = Collector;
     type Error = Failure;
 
     fn before_pull(&mut self, plan: &Plan<'_>, depth: usize) {
@@ -227,21 +304,86 @@ impl EagerDisplay for Checker<'_> {
         Ok(condition)
     }
 
-    fn collect(
+    fn collection_locals(&self) -> &[Type] {
+        &self.locals
+    }
+
+    fn collection_guard(conditions: &[Expr]) -> Option<(usize, usize)> {
+        conditions
+            .last()
+            .and_then(|test| records::present_field(test, true))
+    }
+
+    fn collection_key(
+        &mut self,
+        key: &ast::Expr,
+        expected: Option<Type>,
+        guarded: Option<(usize, usize)>,
+    ) -> Result<(usize, Expr), String> {
+        let expected = expected
+            .and_then(|ty| self.types.mapping(ty))
+            .map(|(key, _)| key);
+        let value = self.guarded_element(key, expected, guarded)?;
+        if !self.comprehension_key(value.ty) {
+            return Err(error(
+                self.source,
+                key,
+                "dictionary keys must be int, str, bytes, Path, or immutable scalar tuples",
+            ));
+        }
+        Ok((self.hidden(value.ty), value))
+    }
+
+    fn collection_value(
         &mut self,
         output: Output<'_>,
-        destination: Collector,
+        collector: Collector,
         result: usize,
-        conditions: &[Expr],
-    ) -> Result<Vec<Statement>, String> {
-        self.comprehension_leaf(
-            output,
-            destination,
-            result,
-            conditions
-                .last()
-                .and_then(|test| records::present_field(test, true)),
-        )
+        key: Option<&Expr>,
+        guarded: Option<(usize, usize)>,
+    ) -> Result<Expr, String> {
+        let item = output.value();
+        let (value, ty) = match (collector, key) {
+            (Collector::IntegerSum, _) => (
+                self.guarded_element(item, Some(Type::Int), guarded)?,
+                Type::Int,
+            ),
+            (Collector::Display(expected), Some(key)) => {
+                let expected = expected
+                    .and_then(|ty| self.types.mapping(ty))
+                    .map(|(_, value)| value);
+                let value =
+                    self.guarded_element(item, expected, guarded.filter(|_| preserves_field(key)))?;
+                let ty = self.types.dict(key.ty, value.ty);
+                (value, ty)
+            }
+            (Collector::Display(expected), None) => {
+                let is_set = matches!(output, Output::Set(_));
+                let element = expected.and_then(|ty| {
+                    if is_set {
+                        self.types.set_element(ty)
+                    } else {
+                        self.types.element(ty)
+                    }
+                });
+                let value = self.guarded_element(item, element, guarded)?;
+                let ty = if is_set {
+                    if !self.comprehension_key(value.ty) {
+                        return Err(error(
+                            self.source,
+                            item,
+                            "set elements must be int, str, bytes, Path, or immutable scalar tuples",
+                        ));
+                    }
+                    self.types.set(value.ty)
+                } else {
+                    self.types.list(value.ty)
+                };
+                (value, ty)
+            }
+        };
+        self.locals[result] = ty;
+        Ok(value)
     }
 }
 
@@ -973,37 +1115,6 @@ impl Checker<'_> {
         })
     }
 
-    /// Lower the loops first so their leaf determines the type of the initial value.
-    fn comprehension_body(
-        &mut self,
-        display: &Plan<'_>,
-        input: Iteration,
-        collector: Collector,
-        result: usize,
-        mut checked_leaf: impl FnMut(&Self, &[Statement]),
-    ) -> Result<(Type, Vec<Statement>), String> {
-        let loops =
-            self.comprehension_loop(display, 0, input, &mut |lower, output, conditions| {
-                let leaf = lower.collect(output, collector, result, conditions)?;
-                checked_leaf(lower, &leaf);
-                Ok(leaf)
-            })?;
-        let ty = self.locals[result];
-        let empty = match (collector, display.output) {
-            (Collector::Display(_), Output::List(_)) => ExprKind::List(Vec::new()),
-            (Collector::IntegerSum, Output::List(_)) => ExprKind::Int("0".into()),
-            (Collector::Display(_), Output::Set(_)) => ExprKind::Set {
-                element: self.types.set_element(ty).unwrap(),
-                values: Vec::new(),
-            },
-            (Collector::Display(_), Output::Dict(..)) => ExprKind::Dict(Vec::new()),
-            _ => unreachable!("invalid eager comprehension collector"),
-        };
-        let mut body = vec![Statement::Assign(result, Expr { ty, kind: empty })];
-        body.extend(loops);
-        Ok((ty, body))
-    }
-
     pub(super) fn forget_comprehension_writes(&mut self, plan: &Plan<'_>, depth: usize) {
         if self.narrowed.is_empty() {
             return;
@@ -1012,84 +1123,6 @@ impl Checker<'_> {
             if let Some(slot) = self.names.get(&name) {
                 self.narrowed.remove_mut(slot);
             }
-        }
-    }
-
-    fn comprehension_leaf(
-        &mut self,
-        value: Output<'_>,
-        collector: Collector,
-        result: usize,
-        guarded: Option<(usize, usize)>,
-    ) -> Result<Vec<Statement>, String> {
-        match (collector, value) {
-            (Collector::IntegerSum, Output::List(expression)) => {
-                let value = self.guarded_element(expression, Some(Type::Int), guarded)?;
-                self.locals[result] = Type::Int;
-                Ok(vec![Statement::Assign(
-                    result,
-                    Expr {
-                        ty: Type::Int,
-                        kind: ExprKind::Binary(
-                            Binary::Add,
-                            Box::new(self.local(result)),
-                            Box::new(value),
-                        ),
-                    },
-                )])
-            }
-            (Collector::Display(expected), Output::List(expression) | Output::Set(expression)) => {
-                let is_set = matches!(value, Output::Set(_));
-                let element = expected.and_then(|ty| {
-                    if is_set {
-                        self.types.set_element(ty)
-                    } else {
-                        self.types.element(ty)
-                    }
-                });
-                let value = self.guarded_element(expression, element, guarded)?;
-                if is_set && !self.comprehension_key(value.ty) {
-                    return Err(error(
-                        self.source,
-                        expression,
-                        "set elements must be int, str, bytes, Path, or immutable scalar tuples",
-                    ));
-                }
-                self.locals[result] = if is_set {
-                    self.types.set(value.ty)
-                } else {
-                    self.types.list(value.ty)
-                };
-                Ok(vec![Statement::Expr(Expr {
-                    ty: Type::None,
-                    kind: ExprKind::Builtin(
-                        if is_set {
-                            Builtin::SetAdd
-                        } else {
-                            Builtin::Append
-                        },
-                        vec![self.local(result), value],
-                    ),
-                })])
-            }
-            (Collector::Display(expected), Output::Dict(key, value)) => {
-                let expected = expected.and_then(|ty| self.types.mapping(ty));
-                let key_value = self.guarded_element(key, expected.map(|(ty, _)| ty), guarded)?;
-                if !self.comprehension_key(key_value.ty) {
-                    return Err(error(
-                        self.source,
-                        key,
-                        "dictionary keys must be int, str, bytes, Path, or immutable scalar tuples",
-                    ));
-                }
-                let captured = self.hidden(key_value.ty);
-                let guarded = guarded.filter(|_| preserves_field(&key_value));
-                let value = self.guarded_element(value, expected.map(|(_, ty)| ty), guarded)?;
-                self.locals[result] = self.types.dict(key_value.ty, value.ty);
-                let entry = dict_entry(&self.locals, result, captured, key_value, value);
-                Ok(vec![entry])
-            }
-            _ => unreachable!("invalid eager comprehension collector"),
         }
     }
 
