@@ -130,12 +130,20 @@ impl<'a> Plan<'a> {
 
     /// Collect binding names in clause and unpacking order using the caller's collection.
     pub fn collect_target_names<T: Default + Extend<String>>(&self) -> T {
-        self.target_names_with(|_| Ok(()))
+        self.target_bindings(|_| {})
+    }
+
+    /// Collect declarations and visit the expressions evaluated to store into their targets.
+    pub fn target_bindings<T: Default + Extend<String>>(
+        &self,
+        visit: impl FnMut(&'a ast::Expr),
+    ) -> T {
+        self.target_names_with(|_| Ok(()), visit)
             .expect("collecting names without validation")
     }
 
     pub fn try_target_names(&self) -> Result<HashSet<String>, InvalidTarget> {
-        self.target_names_with(Err)
+        self.target_names_with(Err, |_| {})
     }
 
     /// Declare the targets of all pulls, including an inner clause that may
@@ -143,10 +151,11 @@ impl<'a> Plan<'a> {
     fn target_names_with<T: Default + Extend<String>>(
         &self,
         invalid: impl Fn(InvalidTarget) -> Result<(), InvalidTarget>,
+        mut visit: impl FnMut(&'a ast::Expr),
     ) -> Result<T, InvalidTarget> {
         let mut names = T::default();
         for clause in self.clauses {
-            visit_target(&clause.target, &mut names, &invalid, |_| {})?;
+            visit_target(&clause.target, &mut names, &invalid, &mut visit)?;
         }
         Ok(names)
     }
@@ -414,6 +423,10 @@ mod tests {
             ["first", "rest", "item", "first"]
         );
         let mut reads = Vec::new();
+        let names: Vec<_> = plan.target_bindings(|expr| reads.push(&text[expr.range()]));
+        assert_eq!(names, ["first", "rest", "item", "first"]);
+        assert_eq!(reads, ["items[index]", "box.value"]);
+        reads.clear();
         let names: Vec<_> = plan.scope_bindings(|expr| reads.push(&text[expr.range()]));
         assert_eq!(names, ["first", "rest", "item", "first"]);
         assert_eq!(
