@@ -321,6 +321,16 @@ pub(super) struct SourceChecks {
 }
 
 impl SourceChecks {
+    fn cached(&self, module: ModuleId, definition: &ast::StmtFunctionDef) -> Option<bool> {
+        let errors = self.errors.borrow();
+        Some(
+            errors
+                .get(&module)?
+                .iter()
+                .all(|range| !definition.range().contains_range(*range)),
+        )
+    }
+
     pub(super) fn accepts(
         &self,
         graph: &SourceGraph,
@@ -336,9 +346,8 @@ impl SourceChecks {
         self.errors
             .borrow_mut()
             .entry(module)
-            .or_insert_with(|| session.source_error_ranges(module))
-            .iter()
-            .all(|range| !definition.range().contains_range(*range))
+            .or_insert_with(|| session.source_error_ranges(module));
+        self.cached(module, definition).expect("checked module")
     }
 }
 
@@ -464,6 +473,15 @@ pub(super) fn capture(
         } else {
             return true;
         };
+        // A solved trial cannot change a source error already checked for this module.
+        let contract = if solved {
+            inference.source_checks.cached(id, function)
+        } else {
+            None
+        };
+        if contract == Some(false) {
+            return false;
+        }
         let helpers = Helpers::new(inference.len());
         // A solved definition reads names from the Python namespace. Its trial
         // must not establish a native caller or consume a missing binding.
@@ -488,7 +506,7 @@ pub(super) fn capture(
             lower()
         };
         if let Some(body) = body
-            && inference.source_checks.accepts(graph, id, function)
+            && contract.unwrap_or_else(|| inference.source_checks.accepts(graph, id, function))
         {
             graph.register_function(id, function.start(), body);
             return false;
