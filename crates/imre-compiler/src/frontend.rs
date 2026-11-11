@@ -128,11 +128,8 @@ mod regex;
 mod registered;
 mod required_sites;
 #[cfg(test)]
-pub(crate) use registered::booleans::ExpressionInput;
-pub(crate) use registered::booleans::{
-    BorrowedOperand, ExpressionSites, PhysicalInputs, Selection as ExpressionSelection,
-    SourceOperand,
-};
+pub(crate) use registered::booleans::{ExpressionInput, SourceOperand};
+pub(crate) use registered::booleans::{ExpressionSites, Selection as ExpressionSelection};
 pub(crate) use registered::type_alias_body;
 #[cfg(test)]
 pub(crate) use registered::values::registered_value;

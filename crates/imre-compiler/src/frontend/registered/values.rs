@@ -716,21 +716,11 @@ fn slice_key<'a, E>(
 
 /// Only the input producers may need the enclosing source adapter. The operation
 /// itself uses ordinary checked IR with positional inputs, independent of Python locals.
-pub(super) struct IndexOperands<'a> {
-    pub(super) value: Expr,
-    pub(super) inputs: Vec<(&'a ast::Expr, Option<Expr>)>,
-}
-
-pub(super) fn index_operands<'a>(
+pub(super) fn index_operation<'a>(
     node: &'a ast::Expr,
     source: RegisteredSource<'_>,
-) -> Option<IndexOperands<'a>> {
-    let mut inputs = Vec::new();
-    let mut input = |expr: &'a ast::Expr, value: Option<Expr>| {
-        let slot = inputs.len();
-        inputs.push((expr, value));
-        Expr::local(slot, Type::PythonObject)
-    };
+    mut input: impl FnMut(&'a ast::Expr, Option<Expr>) -> Expr,
+) -> Option<Expr> {
     let (read, key) = match node {
         ast::Expr::Subscript(index) => {
             let receiver = input(&index.value, registered_value(&index.value, source));
@@ -760,11 +750,10 @@ pub(super) fn index_operands<'a>(
     } else {
         input(key, None)
     };
-    let value = match read {
+    Some(match read {
         Some((index, receiver)) => subscript(index, receiver, value, source.text),
         None => value,
-    };
-    Some(IndexOperands { value, inputs })
+    })
 }
 
 pub(super) fn collection_item<E>(
@@ -1683,24 +1672,31 @@ mod index_constant_tests {
         let entry = &graph.modules[graph.entry];
         let module = ModuleSource::new(entry);
         let expr = &entry.parsed.syntax().body[0].as_expr_stmt().unwrap().value;
-        let plan = index_operands(expr, module.context(source)).unwrap();
-        let mut residual = Vec::new();
-        for (child, value) in &plan.inputs {
-            if value.is_none() {
-                residual.push(&source[child.range()]);
-            }
-        }
-        assert_eq!(residual, ["next(i for i in items)"]);
-        assert_eq!(plan.inputs.len(), 4);
+        let mut inputs = Vec::new();
+        let value = index_operation(expr, module.context(source), |child, checked| {
+            let slot = inputs.len();
+            inputs.push((&source[child.range()], checked.is_some()));
+            Expr::registered_input(slot, Type::PythonObject)
+        })
+        .unwrap();
+        assert_eq!(
+            inputs,
+            [
+                ("owner()", true),
+                ("1000", true),
+                ("next(i for i in items)", false),
+                ("1001", true)
+            ]
+        );
         let mut slots = Vec::new();
-        ir::walk_operand_expressions(&plan.value, &mut |operand| {
-            if let ExprKind::Local(slot) = operand.kind {
+        ir::walk_operand_expressions(&value, &mut |operand| {
+            if let ExprKind::Builtin(Builtin::RegisteredInput(slot), _) = operand.kind {
                 slots.push(slot);
             }
         });
         assert_eq!(slots, [0, 1, 2, 3]);
         assert!(matches!(
-            plan.value.kind,
+            value.kind,
             ExprKind::Builtin(Builtin::RegisteredSubscript(..), _)
         ));
     }
