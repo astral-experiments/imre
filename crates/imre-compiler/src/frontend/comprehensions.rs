@@ -80,6 +80,25 @@ impl Helpers {
     }
 }
 
+/// A mapping display saves its key before evaluating the value. The ordinary
+/// subscript store evaluates its RHS first, then hashes and inserts the saved key.
+pub(super) fn dict_entry(
+    locals: &[Type],
+    result: usize,
+    captured: usize,
+    key: Expr,
+    value: Expr,
+) -> Statement {
+    let local = |slot| Expr::local(slot, locals[slot]);
+    Statement::Scope {
+        body: vec![
+            Statement::Assign(captured, key),
+            Statement::SetItem(local(result), local(captured), value),
+        ],
+        clear: vec![captured],
+    }
+}
+
 /// A consumer can fuse integer addition into an eager list plan.
 #[derive(Clone, Copy)]
 pub(super) enum Collector {
@@ -1019,8 +1038,6 @@ impl Checker<'_> {
         self.eager_filters(plan, pull, parent)
     }
 
-    /// A dict display evaluates and roots its key before its value. Ordinary
-    /// subscript assignment cannot express that order because it evaluates RHS first.
     fn comprehension_leaf(
         &mut self,
         value: Output<'_>,
@@ -1092,13 +1109,8 @@ impl Checker<'_> {
                 let guarded = guarded.filter(|_| preserves_field(&key_value));
                 let value = self.guarded_element(value, expected.map(|(_, ty)| ty), guarded)?;
                 self.locals[result] = self.types.dict(key_value.ty, value.ty);
-                Ok(vec![Statement::Scope {
-                    body: vec![
-                        Statement::Assign(captured, key_value),
-                        Statement::SetItem(self.local(result), self.local(captured), value),
-                    ],
-                    clear: vec![captured],
-                }])
+                let entry = dict_entry(&self.locals, result, captured, key_value, value);
+                Ok(vec![entry])
             }
             _ => unreachable!("invalid eager comprehension collector"),
         }

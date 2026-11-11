@@ -1,7 +1,7 @@
 //! Eager displays in prepared Python suites use the checked frontend's loop traversal.
 
 use super::*;
-use crate::frontend::comprehensions::EagerDisplay;
+use crate::frontend::comprehensions::{EagerDisplay, dict_entry};
 use imre_ast::comprehension::{Output, Plan};
 
 pub(super) struct Namespace {
@@ -173,17 +173,7 @@ impl EagerDisplay for SourceScope<'_> {
                 let key = self.ordinary_operand(key).ok_or(())?;
                 let captured = self.hidden(Type::PythonObject);
                 let value = self.ordinary_operand(value).ok_or(())?;
-                vec![Statement::Scope {
-                    body: vec![
-                        Statement::Assign(captured, key),
-                        Statement::SetItem(
-                            collection,
-                            Expr::local(captured, Type::PythonObject),
-                            value,
-                        ),
-                    ],
-                    clear: vec![captured],
-                }]
+                vec![dict_entry(&self.locals, result, captured, key, value)]
             }
             Output::Generator(_) => return Err(()),
         })

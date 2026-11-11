@@ -1,5 +1,6 @@
 //! Eager display expansion keeps every copy before the following source entry.
 
+use super::comprehensions::dict_entry;
 use super::*;
 
 enum ExpansionSource {
@@ -1197,13 +1198,7 @@ impl Checker<'_> {
                 };
                 let (key_type, value_type) = *types.get_or_insert((key_expr.ty, value.ty));
                 self.locals[result] = self.types.dict(key_type, value_type);
-                body.push(Statement::Scope {
-                    body: vec![
-                        Statement::Assign(captured, key_expr),
-                        Statement::SetItem(self.local(result), self.local(captured), value),
-                    ],
-                    clear: vec![captured],
-                });
+                body.push(dict_entry(&self.locals, result, captured, key_expr, value));
             } else {
                 let hint = types.map(|(key, value)| self.types.dict(key, value));
                 let value = self.boolean_operand(&item.value, hint)?;
