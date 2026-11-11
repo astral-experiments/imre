@@ -367,12 +367,7 @@ pub(super) fn field_default(
                 && !types.is_default_list_dict(concrete)
                 && !types.is_counter(concrete) =>
         {
-            let (key, value) = types.mapping(concrete).unwrap();
-            ExprKind::Dict {
-                key,
-                value,
-                entries: Vec::new(),
-            }
+            ExprKind::Dict(Vec::new())
         }
         ContainerFactory::Set if types.set_element(concrete).is_some() => ExprKind::Set {
             element: types.set_element(concrete).unwrap(),

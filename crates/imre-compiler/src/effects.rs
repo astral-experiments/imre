@@ -173,7 +173,7 @@ fn expression(value: &Expr, functions: &[bool], targets: Context<'_>) -> bool {
         ExprKind::List(values) | ExprKind::Boolean(_, values) => values
             .iter()
             .any(|value| expression(value, functions, targets)),
-        ExprKind::Dict { entries, .. } => !entries.is_empty(),
+        ExprKind::Dict(entries) => value.ty == Type::PythonObject || !entries.is_empty(),
         ExprKind::Set { values, .. } => !values.is_empty(),
         ExprKind::Scope { body, value, .. } => {
             block(body, functions, targets) || expression(value, functions, targets)

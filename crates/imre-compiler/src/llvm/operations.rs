@@ -1,6 +1,7 @@
 //! Emit checked operations using the storage and ownership of each operand.
 
 mod comparisons;
+mod dictionaries;
 mod handlers;
 mod iteration;
 pub(crate) use iteration::LoopEdges;
@@ -802,9 +803,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             ExprKind::Negate(value) => self.unary_expression(ObjectUnary::Negative, value, expr),
             ExprKind::Not(value) => self.unary_expression(ObjectUnary::Not, value, expr),
             ExprKind::Scope { body, value, clear } => self.scoped_expression(body, value, clear),
-            ExprKind::Dict { .. } if matches!(self.0, Entry::Registered(_)) => {
-                CheckedValue::handle(self.python().op("dict", &[]))
-            }
+            ExprKind::Dict(entries) => self.dictionary(expr.ty, entries),
             ExprKind::Builtin(op, args) => match &mut self.0 {
                 Entry::Native(emitter) => CheckedValue::owned(emitter.builtin(op, args, expr.ty)),
                 Entry::Registered(frame) => frame.builtin(op, args),

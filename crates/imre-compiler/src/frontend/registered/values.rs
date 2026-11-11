@@ -983,17 +983,12 @@ pub(super) fn operation<'a, E>(
         ast::Expr::EllipsisLiteral(_) => ExprKind::Builtin(Builtin::RegisteredEllipsis, vec![]),
         ast::Expr::Dict(dict) => {
             let mut entries = Vec::with_capacity(dict.items.len());
-            let mut operands = Vec::new();
             for item in &dict.items {
-                if let Some(key) = &item.key {
-                    entries.push(ir::DictEntryKind::Pair);
-                    operands.push(child(key)?);
-                } else {
-                    entries.push(ir::DictEntryKind::Unpack);
-                }
-                operands.push(child(&item.value)?);
+                let key = item.key.as_ref().map(&mut child).transpose()?;
+                let value = child(&item.value)?;
+                entries.push(ir::DictEntry { key, value });
             }
-            ExprKind::Builtin(Builtin::RegisteredDict(entries), operands)
+            ExprKind::Dict(entries)
         }
         ast::Expr::Subscript(index) => {
             return Ok(Some(subscript(

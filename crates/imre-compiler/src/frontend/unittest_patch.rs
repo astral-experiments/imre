@@ -88,11 +88,7 @@ impl Checker<'_> {
                     self.coerce(
                         Expr {
                             ty: dict,
-                            kind: ExprKind::Dict {
-                                key: Type::Str,
-                                value: Type::Str,
-                                entries,
-                            },
+                            kind: ExprKind::dict_pairs(entries),
                         },
                         optional,
                         arg,
@@ -125,11 +121,7 @@ impl Checker<'_> {
             self.coerce(
                 Expr {
                     ty: dict,
-                    kind: ExprKind::Dict {
-                        key: Type::Str,
-                        value: Type::Str,
-                        entries: Vec::new(),
-                    },
+                    kind: ExprKind::Dict(Vec::new()),
                 },
                 optional,
                 call,
@@ -138,11 +130,7 @@ impl Checker<'_> {
         let reset = slots[2].map_or(Expr::boolean(false), |slot| self.local(slot));
         let kwargs = Expr {
             ty: dict,
-            kind: ExprKind::Dict {
-                key: Type::Str,
-                value: Type::Str,
-                entries: extras,
-            },
+            kind: ExprKind::dict_pairs(extras),
         };
         self.calls.insert(sig.id);
         let result = Expr {

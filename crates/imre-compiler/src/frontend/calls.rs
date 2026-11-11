@@ -956,11 +956,7 @@ impl Checker<'_> {
                 } else {
                     let first = Expr {
                         ty: params[index].ty,
-                        kind: ExprKind::Dict {
-                            key,
-                            value,
-                            entries: extra,
-                        },
+                        kind: ExprKind::dict_pairs(extra),
                     };
                     self.plain_dictionary(
                         ArgumentScope::default(),
@@ -977,11 +973,7 @@ impl Checker<'_> {
             } else {
                 Expr {
                     ty: params[index].ty,
-                    kind: ExprKind::Dict {
-                        key,
-                        value,
-                        entries: extra,
-                    },
+                    kind: ExprKind::dict_pairs(extra),
                 }
             };
             values.push(dictionary);
@@ -1089,11 +1081,7 @@ impl Checker<'_> {
         let input = scope.hold(self, input);
         let empty = |key| Expr {
             ty: self.types.dict(key, element),
-            kind: ExprKind::Dict {
-                key,
-                value: element,
-                entries: vec![],
-            },
+            kind: ExprKind::Dict(Vec::new()),
         };
         let fixed = empty(Type::Int);
         let rest = empty(Type::Str);

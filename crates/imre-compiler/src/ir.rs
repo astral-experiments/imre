@@ -1012,11 +1012,7 @@ pub(crate) enum ExprKind {
         clear: Vec<usize>,
     },
     List(Vec<Expr>),
-    Dict {
-        key: Type,
-        value: Type,
-        entries: Vec<(Expr, Expr)>,
-    },
+    Dict(Vec<DictEntry>),
     Set {
         element: Type,
         values: Vec<Expr>,
@@ -1308,11 +1304,25 @@ pub(crate) enum AttributeAction {
     InPlace(&'static str),
 }
 
-/// Operand layout of one entry in a registered Python dictionary display.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum DictEntryKind {
-    Pair,
-    Unpack,
+/// An omitted key expands the value as a mapping at this point in the display.
+#[derive(Clone)]
+pub(crate) struct DictEntry {
+    pub(crate) key: Option<Expr>,
+    pub(crate) value: Expr,
+}
+
+impl ExprKind {
+    pub(crate) fn dict_pairs(entries: Vec<(Expr, Expr)>) -> Self {
+        Self::Dict(
+            entries
+                .into_iter()
+                .map(|(key, value)| DictEntry {
+                    key: Some(key),
+                    value,
+                })
+                .collect(),
+        )
+    }
 }
 
 /// A type parameter owns its binding and its lazy fields in declaration order.
@@ -2196,7 +2206,6 @@ pub(crate) enum Builtin {
     },
     /// In source order, each pair consumes a key and value, and each unpack one mapping.
     /// The registered frame owns these operands through dictionary construction.
-    RegisteredDict(Vec<DictEntryKind>),
     /// A starred operand consumed by its enclosing registered list or tuple display.
     RegisteredSpread,
     /// Object and key operands, with the original subscript and end of its receiver.
@@ -4058,9 +4067,11 @@ macro_rules! expression_children {
                     $visit(message);
                 }
             }
-            ExprKind::Dict { entries, .. } => {
-                for (key, value) in entries {
-                    $visit(key);
+            ExprKind::Dict(entries) => {
+                for DictEntry { key, value } in entries {
+                    if let Some(key) = key {
+                        $visit(key);
+                    }
                     $visit(value);
                 }
             }

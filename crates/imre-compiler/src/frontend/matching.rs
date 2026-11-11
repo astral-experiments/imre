@@ -812,11 +812,7 @@ impl Checker<'_> {
                 result,
                 Expr {
                     ty: dictionary,
-                    kind: ExprKind::Dict {
-                        key: key_type,
-                        value: value_type,
-                        entries: Vec::new(),
-                    },
+                    kind: ExprKind::Dict(Vec::new()),
                 },
             ),
             Statement::Assign(

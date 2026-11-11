@@ -181,11 +181,7 @@ impl Checker<'_> {
             .collect();
         let mapping = Expr {
             ty: self.types.dict(Type::Str, ty),
-            kind: ExprKind::Dict {
-                key: Type::Str,
-                value: ty,
-                entries,
-            },
+            kind: ExprKind::dict_pairs(entries),
         };
         let key = self.expr_expected(&sub.slice, Type::Str)?;
         Ok(Some(Expr {

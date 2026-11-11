@@ -2108,11 +2108,7 @@ fn signature(
                     // The read-only surface exposes neither identity nor mutation.
                     let empty = Expr {
                         ty: types.dict(Type::Str, Type::ObjectValue),
-                        kind: ExprKind::Dict {
-                            key: Type::Str,
-                            value: Type::ObjectValue,
-                            entries: Vec::new(),
-                        },
+                        kind: ExprKind::Dict(Vec::new()),
                     };
                     let view = Expr {
                         ty: Type::ReadOnlyObjectMapping,
@@ -4737,7 +4733,10 @@ impl<'a> Checker<'a> {
                 types = Some((key_value.ty, value.ty));
                 (key_value, value)
             };
-            entries.push((key, value));
+            entries.push(ir::DictEntry {
+                key: Some(key),
+                value,
+            });
         }
         let (key, value) = types.ok_or_else(|| {
             error(
@@ -4748,11 +4747,7 @@ impl<'a> Checker<'a> {
         })?;
         Ok(Expr {
             ty: self.types.dict(key, value),
-            kind: ExprKind::Dict {
-                key,
-                value,
-                entries,
-            },
+            kind: ExprKind::Dict(entries),
         })
     }
 

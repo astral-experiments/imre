@@ -4517,15 +4517,14 @@ mod tests {
             else {
                 panic!("expected a located dictionary operand")
             };
-            let ExprKind::Builtin(Builtin::RegisteredDict(entries), elements) = &display[0].kind
-            else {
-                panic!("expected the registered Python dictionary protocol")
+            let ExprKind::Dict(entries) = &display[0].kind else {
+                panic!("expected a dictionary display")
             };
-            assert_eq!(
-                entries,
-                &[ir::DictEntryKind::Pair, ir::DictEntryKind::Unpack]
-            );
-            assert_eq!(elements.len(), 3);
+            let [pair, expansion] = entries.as_slice() else {
+                panic!("expected a pair followed by a mapping expansion")
+            };
+            assert!(pair.key.is_some());
+            assert!(expansion.key.is_none());
             let mut names = Vec::new();
             ir::walk_expressions(&suite.function.body, &mut |expr| {
                 if let ExprKind::Builtin(Builtin::RegisteredName(name), _) = &expr.kind {
@@ -5012,8 +5011,11 @@ mod tests {
             .expect("registered callback");
         let mut operations = Vec::new();
         ir::walk_expressions(&body.function.body, &mut |value| match &value.kind {
-            ExprKind::Builtin(Builtin::RegisteredDict(entries), _) => {
-                assert_eq!(entries, &[ir::DictEntryKind::Pair]);
+            ExprKind::Dict(entries) => {
+                assert!(matches!(
+                    entries.as_slice(),
+                    [ir::DictEntry { key: Some(_), .. }]
+                ));
                 operations.push("dict");
             }
             ExprKind::Builtin(Builtin::RegisteredName(name), _) if name == "KEY" => {

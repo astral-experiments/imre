@@ -608,11 +608,7 @@ impl Checker<'_> {
         ];
         let result = Expr {
             ty: self.types.dict(Type::Str, documents::ANY),
-            kind: ExprKind::Dict {
-                key: Type::Str,
-                value: documents::ANY,
-                entries,
-            },
+            kind: ExprKind::dict_pairs(entries),
         };
         Ok(Expr {
             ty: result.ty,

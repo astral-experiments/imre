@@ -990,14 +990,7 @@ impl Checker<'_> {
                 element: self.types.set_element(ty).unwrap(),
                 values: Vec::new(),
             },
-            (Collector::Display(_), Output::Dict(..)) => {
-                let (key, value) = self.types.mapping(ty).unwrap();
-                ExprKind::Dict {
-                    key,
-                    value,
-                    entries: Vec::new(),
-                }
-            }
+            (Collector::Display(_), Output::Dict(..)) => ExprKind::Dict(Vec::new()),
             _ => unreachable!("invalid eager comprehension collector"),
         };
         let mut body = vec![Statement::Assign(result, Expr { ty, kind: empty })];

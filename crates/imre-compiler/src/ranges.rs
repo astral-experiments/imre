@@ -1074,9 +1074,11 @@ impl Analyzer {
                 }
                 Interval::UNKNOWN
             }
-            ExprKind::Dict { entries, .. } => {
-                for (key, value) in entries {
-                    self.expression(key, state, record);
+            ExprKind::Dict(entries) => {
+                for crate::ir::DictEntry { key, value } in entries {
+                    if let Some(key) = key {
+                        self.expression(key, state, record);
+                    }
                     self.expression(value, state, record);
                 }
                 Interval::UNKNOWN
@@ -1263,9 +1265,9 @@ fn contains_scope(expression: &Expr) -> bool {
         ExprKind::Invoke { callable, args } => {
             contains_scope(callable) || args.values.iter().any(contains_scope)
         }
-        ExprKind::Dict { entries, .. } => entries
-            .iter()
-            .any(|(key, value)| contains_scope(key) || contains_scope(value)),
+        ExprKind::Dict(entries) => entries.iter().any(|entry| {
+            entry.key.as_ref().is_some_and(contains_scope) || contains_scope(&entry.value)
+        }),
         ExprKind::Present(value)
         | ExprKind::Absent(value)
         | ExprKind::Unwrap(value)

@@ -268,11 +268,7 @@ impl Checker<'_> {
                     },
                     Expr {
                         ty: keywords,
-                        kind: ExprKind::Dict {
-                            key: Type::Str,
-                            value: Type::Class(argument),
-                            entries: kwargs,
-                        },
+                        kind: ExprKind::dict_pairs(kwargs),
                     },
                 ]),
             ),

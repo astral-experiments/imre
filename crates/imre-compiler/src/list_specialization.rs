@@ -434,10 +434,16 @@ impl Plan<'_> {
                     }
                 }
             }
-            ExprKind::Dict { entries, .. } => {
-                if !entries.iter_mut().all(|(key, value)| {
-                    self.expression(key, aliases) && self.expression(value, aliases)
-                }) {
+            ExprKind::Dict(entries) => {
+                if expression.ty == Type::PythonObject
+                    || !entries.iter_mut().all(|entry| {
+                        entry
+                            .key
+                            .as_mut()
+                            .is_some_and(|key| self.expression(key, aliases))
+                            && self.expression(&mut entry.value, aliases)
+                    })
+                {
                     return false;
                 }
             }

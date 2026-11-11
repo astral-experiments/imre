@@ -4,16 +4,19 @@ use crate::llvm::{
     Emitter, Expr, LIST_APPEND_PAIR, Operand, Type, Value, representation_kind, structs::PackedRow,
 };
 
+pub(in crate::llvm) const STACK_USE_GUIDELINE: usize = 30;
+
 pub(crate) fn build<C, T, V, R>(
     context: &mut C,
     items: &[T],
+    max_buffered: usize,
     spread: impl Fn(&T) -> Option<&T>,
     mut evaluate: impl FnMut(&mut C, &T) -> V,
     start: impl FnOnce(&mut C, Vec<V>, bool) -> R,
     mut push: impl FnMut(&mut C, &R, usize, V, bool),
 ) -> (R, bool) {
     // CPython's starunpack_helper bounds the evaluation stack for large displays.
-    let prefix = if items.len() > 30 {
+    let prefix = if items.len() > max_buffered {
         0
     } else {
         items
@@ -62,6 +65,7 @@ impl Emitter<'_, '_> {
         build(
             self,
             items,
+            STACK_USE_GUIDELINE,
             |_| None,
             |emitter, expr| {
                 if packed && let Some(row) = emitter.packed_constructor(expr) {

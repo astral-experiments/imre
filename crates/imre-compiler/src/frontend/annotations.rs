@@ -390,11 +390,7 @@ impl Checker<'_> {
         let (format, eval_str) = options;
         let dict = |types: &Types, value: Type, entries| Expr {
             ty: types.dict(Type::Str, value),
-            kind: ExprKind::Dict {
-                key: Type::Str,
-                value,
-                entries,
-            },
+            kind: ExprKind::dict_pairs(entries),
         };
         let error_ty = self.types.dict(Type::Str, Type::Str);
 
