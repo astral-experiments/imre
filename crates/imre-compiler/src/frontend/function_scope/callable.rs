@@ -107,10 +107,14 @@ impl NamedFunction {
         if !suspended && let Some(ty) = scalar("return") {
             signature["return_type"] = json!(ty);
         }
-        for parameter in def.parameters.iter_non_variadic_params() {
+        for (position, parameter) in def.parameters.iter_non_variadic_params().enumerate() {
             let name = parameter.parameter.name.as_str();
             if let Some(ty) = scalar(name) {
-                signature["types"][name] = json!(ty);
+                self.metadata.parameter_types.push(ParameterType {
+                    position,
+                    name: name.to_owned(),
+                    reference: ty.clone(),
+                });
                 if ty == "float" && crate::frontend::only_compares_zero(&def.body, name) {
                     signature["integer_sign_parameters"][name] = json!(true);
                 }
@@ -119,9 +123,16 @@ impl NamedFunction {
     }
 }
 
+struct ParameterType {
+    position: usize,
+    name: String,
+    reference: String,
+}
+
 /// Parameter and closure metadata independent of the activation that binds the function.
 pub(crate) struct CallableMetadata {
     layout: serde_json::Value,
+    parameter_types: Vec<ParameterType>,
     flags: u32,
     captures_class: bool,
     /// Keys for the default values evaluated in order by the enclosing expression.
@@ -167,6 +178,7 @@ impl CallableMetadata {
         scope.write_signature(&mut layout);
         Self {
             layout,
+            parameter_types: Vec::new(),
             flags,
             captures_class: scope.captures_class,
             defaults: if defaults.is_empty() {
@@ -213,8 +225,24 @@ impl CallableMetadata {
         &self,
         placement_flags: u32,
         method_class_cell: bool,
+        checked: Option<&crate::frontend::RegisteredFunction>,
     ) -> serde_json::Value {
         let mut signature = self.layout.clone();
+        for parameter in &self.parameter_types {
+            let builtin = checked.and_then(|body| {
+                let &slot = body.function.params.get(parameter.position)?;
+                let binding = body.local_names.get(&slot)?;
+                if binding.namespace.is_some() || binding.name != parameter.name {
+                    return None;
+                }
+                body.function.locals[slot].builtin_scalar_name()
+            });
+            signature["types"][&parameter.name] = if builtin == Some(parameter.reference.as_str()) {
+                json!({ "builtin": parameter.reference })
+            } else {
+                json!(parameter.reference)
+            };
+        }
         if method_class_cell {
             signature["method_class_cell"] = json!(self.captures_class);
         }
@@ -256,9 +284,10 @@ mod tests {
             ordinary.decorator_offsets,
             [method.decorator_list[0].expression.start()]
         );
-        let signature = ordinary
-            .metadata
-            .signature(code_flags::METHOD | code_flags::HAS_DOCSTRING, true);
+        let signature =
+            ordinary
+                .metadata
+                .signature(code_flags::METHOD | code_flags::HAS_DOCSTRING, true, None);
         assert_eq!(signature["class_cell"], true);
         assert_eq!(signature["method_class_cell"], true);
         let stream = facts.function(class.body[1].as_function_def_stmt().unwrap());

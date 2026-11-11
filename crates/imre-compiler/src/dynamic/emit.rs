@@ -1264,6 +1264,14 @@ impl LexicalDefinitions<'_, '_> {
             ),
             Callable::Lambda { .. } | Callable::Generator(_) => (false, true, None),
         };
+        let checked = match (&callable, &body) {
+            (Callable::Named(_), Body::Registered(RegisteredBody::Function(checked), _))
+                if self.prefix.is_empty() && !self.in_function && !self.method_scope =>
+            {
+                Some(*checked)
+            }
+            _ => None,
+        };
         let suspension = metadata.suspension_flags();
         // Several expression regions can place the same lexical lambda.
         let cache = match callable {
@@ -1297,7 +1305,7 @@ impl LexicalDefinitions<'_, '_> {
         if doc.is_some() {
             flags |= imre_ast::code_flags::HAS_DOCSTRING;
         }
-        let signature = metadata.signature(flags, method && class_cell);
+        let signature = metadata.signature(flags, method && class_cell, checked);
         if !matches!(callable, Callable::Generator(_)) {
             self.output
                 .interned_identifiers
@@ -4722,7 +4730,7 @@ mod tests {
                 let header = &module.source.scopes.functions[&def.start()];
                 assert_eq!(header.doc.as_deref(), Some("Record the sign."));
                 assert_eq!(
-                    header.metadata.signature(0, false)["integer_sign_parameters"],
+                    header.metadata.signature(0, false, None)["integer_sign_parameters"],
                     serde_json::json!({"value": true})
                 );
             } else {
@@ -5004,10 +5012,12 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             };
             let functions = &prepared.source.scopes.functions;
             assert_eq!(
-                functions[&start(target)].metadata.signature(0, false)[key],
+                functions[&start(target)].metadata.signature(0, false, None)[key],
                 expected
             );
-            let excluded = functions[&start(excluded)].metadata.signature(0, false);
+            let excluded = functions[&start(excluded)]
+                .metadata
+                .signature(0, false, None);
             assert!(
                 [
                     "thread_bound_lock_field",

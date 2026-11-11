@@ -320,11 +320,19 @@ impl Type {
         matches!(self, Self::Path | Self::PurePath(_))
     }
 
+    pub(crate) fn builtin_scalar_name(self) -> Option<&'static str> {
+        Some(match self {
+            Self::Bool => "bool",
+            Self::Int => "int",
+            Self::Float => "float",
+            Self::Str => "str",
+            Self::Bytes => "bytes",
+            _ => return None,
+        })
+    }
+
     pub(crate) fn is_format_scalar(self) -> bool {
-        matches!(
-            self,
-            Self::Bool | Self::Int | Self::Float | Self::Str | Self::Bytes
-        )
+        self.builtin_scalar_name().is_some()
     }
 }
 

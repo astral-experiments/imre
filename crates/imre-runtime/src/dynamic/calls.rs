@@ -284,7 +284,7 @@ impl FunctionReturn {
                 self.callable,
                 "return",
                 value,
-                expected,
+                (expected, None),
                 false,
                 format_args!("{} return value", self.name),
             )?;
@@ -9285,11 +9285,23 @@ impl Context {
         if let Some(types) = sig.types.as_object() {
             for (param, expected) in types {
                 if let Some(&id) = self.scope_data(local).names.get(param.as_str()) {
+                    let builtin = expected.get("builtin").and_then(serde_json::Value::as_str);
+                    let target = builtin.and_then(|name| {
+                        let Value::Function { scope, .. } = self.heap.get(function) else {
+                            return None;
+                        };
+                        let canonical = *self.builtins.get(name)?;
+                        (self.module_type_reference(*scope, name) == Some(canonical))
+                            .then_some(canonical)
+                    });
                     self.require_scalar(
                         function,
                         param,
                         id,
-                        expected.as_str().unwrap_or_default(),
+                        (
+                            builtin.or_else(|| expected.as_str()).unwrap_or_default(),
+                            target,
+                        ),
                         sig.integer_sign_parameters[param] == true,
                         format_args!("{name} argument {param:?}"),
                     )?;
@@ -9485,7 +9497,7 @@ impl Context {
         function: Id,
         slot: &str,
         value: Id,
-        expected: &str,
+        declaration: (&str, Option<Id>),
         integer_sign: bool,
         context: std::fmt::Arguments<'_>,
     ) -> Result<()> {
@@ -9499,8 +9511,14 @@ impl Context {
             _ => None,
         };
         let boxed = self.heap.get(value);
+        let (expected, checked_builtin) = declaration;
         let integer_argument = slot != "return" && matches!(boxed, Value::Int(_));
-        let target = match self.checked_annotation(function, slot, integer_argument)? {
+        let annotation = if let Some(target) = checked_builtin {
+            ScalarAnnotation::Value(target)
+        } else {
+            self.checked_annotation(function, slot, integer_argument)?
+        };
+        let target = match annotation {
             ScalarAnnotation::Value(target) => Some(target),
             ScalarAnnotation::Missing => return Ok(()),
             ScalarAnnotation::Unresolved => None,
