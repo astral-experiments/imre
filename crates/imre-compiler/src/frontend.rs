@@ -859,18 +859,9 @@ fn lower_graph(
                     if let Some(element) = element {
                         classes.producer_items.insert(signature.id, element);
                     }
-                    signatures.insert(
-                        DefinitionId {
-                            module: module_id,
-                            statement: statement_id,
-                        },
-                        signature.clone(),
-                    );
-                    definitions.push((module_id, function.clone(), signature));
-                    callable_definitions.push(DefinitionId {
-                        module: module_id,
-                        statement: statement_id,
-                    });
+                    signatures.insert(owner, signature.clone());
+                    definitions.push((module_id, function, signature));
+                    callable_definitions.push(owner);
                 }
                 ast::Stmt::Expr(value) => {
                     if let ast::Expr::StringLiteral(value) = &*value.value {
