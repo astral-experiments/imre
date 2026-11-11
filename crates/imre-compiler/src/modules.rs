@@ -5043,18 +5043,6 @@ impl<'a> Loader<'a> {
                 ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_)
             )
         });
-        let mut pending_builtin_functions = HashSet::new();
-        if is_entry {
-            pending_builtin_functions.extend(
-                parsed
-                    .syntax()
-                    .body
-                    .iter()
-                    .filter_map(ast::Stmt::as_function_def_stmt)
-                    .map(|function| function.name.as_str())
-                    .filter(|name| crate::frontend::reserved_builtin_function(name)),
-            );
-        }
         let mut executable = false;
         let mut segment = 0;
         let mut definition_prefix = false;
@@ -5115,14 +5103,7 @@ impl<'a> Loader<'a> {
                 }
                 ast::Stmt::FunctionDef(function) => {
                     definition_prefix |= self.partial_source(id);
-                    if executable && is_entry {
-                        return Err(self.modules[id].error(
-                            statement,
-                            "definitions must precede executable module statements",
-                        ));
-                    }
                     let name = function.name.as_str();
-                    pending_builtin_functions.remove(name);
                     let current = Binding::Definition(DefinitionId {
                         module: id,
                         statement: index,
@@ -5149,12 +5130,6 @@ impl<'a> Loader<'a> {
                             .body
                             .iter()
                             .any(|stmt| matches!(stmt, ast::Stmt::Assign(_)));
-                    if executable && is_entry {
-                        return Err(self.modules[id].error(
-                            statement,
-                            "definitions must precede executable module statements",
-                        ));
-                    }
                     self.bind(
                         id,
                         class.name.as_str(),
@@ -5318,32 +5293,20 @@ impl<'a> Loader<'a> {
                                 module_value(statement),
                                 Some(ast::Expr::Call(call)) if resolve_binding(&self.modules, id, &call.func) == Some(Binding::Intrinsic(Intrinsic::RegexCompile))
                             ));
-                    if entry_global {
-                        if let ast::Stmt::If(guard) = statement
-                            && guard.elif_else_clauses.is_empty()
-                            && let [ast::Stmt::ClassDef(class)] = guard.body.as_slice()
-                        {
-                            self.bind(
-                                id,
-                                class.name.as_str(),
-                                Binding::ConditionalValue,
-                                statement,
-                            )?;
-                            self.needs_object_imports = true;
-                            self.modules[id].entry_globals.push(index);
-                            continue;
-                        }
-                        if module_attribute_guard(&self.modules, id, statement)
-                            || entry_prefix_call(
-                                &self.modules,
-                                id,
-                                statement,
-                                &pending_builtin_functions,
-                            )
-                        {
-                            self.modules[id].entry_globals.push(index);
-                            continue;
-                        }
+                    if entry_global
+                        && let ast::Stmt::If(guard) = statement
+                        && guard.elif_else_clauses.is_empty()
+                        && let [ast::Stmt::ClassDef(class)] = guard.body.as_slice()
+                    {
+                        self.bind(
+                            id,
+                            class.name.as_str(),
+                            Binding::ConditionalValue,
+                            statement,
+                        )?;
+                        self.needs_object_imports = true;
+                        self.modules[id].entry_globals.push(index);
+                        continue;
                     }
                     self.scan_value_writes(id, statement)?;
                     if let Some(name) = value_name(statement) {
@@ -5363,14 +5326,26 @@ impl<'a> Loader<'a> {
                                 self.modules[id].rebound_values.insert(index);
                             }
                         }
-                        if entry_global {
-                            self.modules[id].entry_globals.push(index);
-                            continue;
-                        }
+                    }
+                    if entry_global {
+                        self.modules[id].entry_globals.push(index);
+                        continue;
                     }
                     executable = true;
                     self.modules[id].executable.push(index);
                 }
+            }
+        }
+        if is_entry && let Some(last) = last_definition {
+            let module = &mut self.modules[id];
+            // Optional imports and type aliases keep their import-scan rules. Execute
+            // their prefix in the same initializer as the intervening declarations.
+            let prefix = module.executable.partition_point(|&index| index < last);
+            if prefix != 0 {
+                module
+                    .entry_globals
+                    .extend(module.executable.drain(..prefix));
+                module.entry_globals.sort_unstable();
             }
         }
         // Expose otherwise unbound classes after module initialization. Preserve the
@@ -7037,55 +7012,6 @@ fn single_import_binding(body: &[ast::Stmt]) -> Option<&str> {
     // An unaliased dotted import binds only the first component.
     let name = alias.name.as_str().split('.').next()?;
     (name != "*").then_some(name)
-}
-
-/// Resolve a standalone call before adding subsequent definitions to the entry namespace.
-fn entry_prefix_call(
-    modules: &[SourceModule],
-    id: ModuleId,
-    statement: &ast::Stmt,
-    pending_builtin_functions: &HashSet<&str>,
-) -> bool {
-    let ast::Stmt::Expr(expr) = statement else {
-        return false;
-    };
-    let Some(call) = expr.value.as_call_expr() else {
-        return false;
-    };
-    match resolve_binding(modules, id, &call.func) {
-        Some(Binding::Definition(def)) => {
-            modules[def.module].parsed.syntax().body[def.statement].is_function_def_stmt()
-                && (def.module != id || !pending_builtin_functions.is_empty())
-        }
-        Some(Binding::Intrinsic(Intrinsic::BuiltinsPrint)) => {
-            pending_builtin_functions.contains("print")
-        }
-        None => call
-            .func
-            .as_name_expr()
-            .is_some_and(|name| pending_builtin_functions.contains(name.id.as_str())),
-        _ => false,
-    }
-}
-
-/// Recognize a module attribute test whose only branch raises.
-fn module_attribute_guard(modules: &[SourceModule], id: ModuleId, statement: &ast::Stmt) -> bool {
-    let ast::Stmt::If(guard) = statement else {
-        return false;
-    };
-    if !guard.elif_else_clauses.is_empty()
-        || !matches!(guard.body.as_slice(), [ast::Stmt::Raise(_)])
-    {
-        return false;
-    }
-    let test = match &*guard.test {
-        ast::Expr::UnaryOp(op) if op.op == ast::UnaryOp::Not => &*op.operand,
-        other => other,
-    };
-    matches!(test, ast::Expr::Attribute(attr) if matches!(
-        resolve_binding(modules, id, &attr.value),
-        Some(Binding::Module(_) | Binding::IntrinsicModule(_))
-    ))
 }
 
 /// Allow an identity check with a closed builtin raise before importing a dependency.

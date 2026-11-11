@@ -14,6 +14,13 @@ import tempfile
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "imports"
 HELPER = "def f(value: int) -> int:\n    return value + 1\n"
 IMPORT = "from helper import f\nprint(f(2))\n"
+ORDERED_DEFINITIONS = (
+    "from helper import f\n"
+    "def scale(value: int) -> int: return value * 7 + 3\n"
+    "print(scale(f(2)))\n"
+    "def bound(value: int) -> int: return scale(value)\n"
+    "print(bound(f(3)))\n"
+)
 
 # The wrong call is never executed. Checked builds must diagnose it in either source order.
 LOCALE_CALL = "def typed(n: int) -> int: return n\ndef unused() -> int: return typed({argument})\n"
@@ -777,7 +784,14 @@ REJECTED = {
         "feature.py": "def require(enabled: bool):\n    if not enabled: raise RuntimeError('unavailable')\n",
         "main.py": "import feature\nfeature.require(True)\ndef typed(value: int) -> int: return value\ntyped('bad')\n",
     }, "expected int, got str"),
-    "definition_after_execution": ({"main.py": "print(1)\n" + HELPER}, "definitions must precede"),
+    "later_definition_keeps_external_signature": ({
+        "main.py": ORDERED_DEFINITIONS,
+        "helper.py": HELPER + "def dormant(value: complex) -> complex: return value + 1j\n",
+    }, "unsupported exact type annotation"),
+    "later_definition_keeps_scalar_argument": ({
+        "main.py": ORDERED_DEFINITIONS + "scale('bad')\n",
+        "helper.py": HELPER,
+    }, "expected int, got str"),
     "missing_installed_root": ({
         "main.py": "from invoice_rates.lookup import rate\nprint(rate(7))\n",
     }, "--extension-path DIRECTORY"),
@@ -835,6 +849,14 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "definition_after_execution": {"main.py": ORDERED_DEFINITIONS, "helper.py": HELPER},
+    "class_after_execution": {
+        "main.py": (
+            "value = 1\nprint(value)\n"
+            "class Box:\n    field = value\n"
+            "value = 2\nprint(Box.field, value)\n"
+        ),
+    },
     "sdk_dependency_keeps_unused_frozen_shadow_dormant": {
         "main.py": (
             "import sys\n"
