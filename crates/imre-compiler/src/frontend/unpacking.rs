@@ -630,6 +630,19 @@ impl Checker<'_> {
                     return self.store_class_data(class, attribute, value);
                 }
                 let receiver = Self::weak_target(self.expr(&attribute.value)?);
+                if attribute.attr.as_str() == "__wrapped__"
+                    && (self.types.cache_declaration(receiver.ty).is_some()
+                        || self.types.cached_function(receiver.ty).is_some())
+                    && self.types.wrapped_link_type(value.ty)
+                        == self.types.wrapped_link_type(receiver.ty)
+                {
+                    // Assignment evaluates the RHS before the receiver. The public link
+                    // owns this reference independently of the cache's invocation target.
+                    let mut scope = calls::ArgumentScope::default();
+                    let value = scope.hold(self, value);
+                    let store = self.attach_wrapped(receiver, value, attribute)?;
+                    return Ok(Statement::Expr(scope.finish(store)));
+                }
                 if matches!(receiver.ty, Type::Callable(_))
                     && attribute.attr.as_str() == "__defaults__"
                 {
