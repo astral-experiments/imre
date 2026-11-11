@@ -1670,7 +1670,9 @@ fn remove_affix(ctx: &mut Context, receiver: Id, name: &str, affix: Id) -> Resul
             return None;
         }
         if prefix {
-            source.starts_with(affix).then(|| affix.len()..source.len())
+            source
+                .starts_with(affix)
+                .then_some(affix.len()..source.len())
         } else {
             source
                 .ends_with(affix)
