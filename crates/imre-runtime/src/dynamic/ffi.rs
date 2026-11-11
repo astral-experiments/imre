@@ -646,7 +646,7 @@ impl Context {
                 Ok(NONE)
             }
             "truth" => Ok(flag(self.truth(a)?)),
-            "generator" => self.generator(a, b, c),
+            "generator" => self.generator(a, b),
             "iter" => self.loop_iterator(a),
             "get_iter" => self.iterator(a),
             "loop_cursor" => Ok(self.loop_cursor(a)),

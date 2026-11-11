@@ -375,7 +375,6 @@ pub(crate) struct ScopeFacts {
     pub(crate) lambdas: HashMap<TextSize, FunctionScope>,
     pub(crate) aliases: HashMap<TextSize, FunctionScope>,
     pub(crate) generators: HashMap<TextRange, FunctionScope>,
-    pub(crate) comprehension_targets: HashMap<TextRange, String>,
     pub(crate) classes: HashMap<TextSize, classes::ClassScope>,
     pub(crate) annotations: annotations::AnnotationScopes,
     pub(crate) module_globals: BTreeSet<String>,
@@ -516,25 +515,15 @@ impl<'a, A: FnMut(&'a ast::StmtTypeAlias, Option<TextSize>)> Visitor<'a> for Col
             self.scopes
                 .lambdas
                 .insert(lambda.start(), FunctionScope::lambda(lambda, strings));
-        } else if let Some(plan) = imre_ast::comprehension::Plan::from_expr(expr) {
-            let targets: indexmap::IndexSet<String> = plan.collect_target_names();
-            self.scopes.comprehension_targets.insert(
+        } else if let ast::Expr::Generator(generator) = expr {
+            let plan = imre_ast::comprehension::Plan::generator(generator);
+            let mut names = class_metadata::generator_scope(&plan, strings);
+            let captures_class = names.reads.contains("__class__");
+            names.locals.insert(".0".into());
+            self.scopes.generators.insert(
                 expr.range(),
-                targets
-                    .iter()
-                    .map(String::as_str)
-                    .collect::<Vec<_>>()
-                    .join(" "),
+                FunctionScope::new(names, None, captures_class),
             );
-            if matches!(expr, ast::Expr::Generator(_)) {
-                let mut names = class_metadata::generator_scope(&plan, targets, strings);
-                let captures_class = names.reads.contains("__class__");
-                names.locals.insert(".0".into());
-                self.scopes.generators.insert(
-                    expr.range(),
-                    FunctionScope::new(names, None, captures_class),
-                );
-            }
         }
         visitor::walk_expr(self, expr);
     }

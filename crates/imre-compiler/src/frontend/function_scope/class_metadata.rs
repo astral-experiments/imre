@@ -82,7 +82,6 @@ pub(super) fn comprehension_scope(
 /// evaluated in the enclosing scope and cannot contribute to this code's cells.
 pub(super) fn generator_scope(
     plan: &imre_ast::comprehension::Plan<'_>,
-    locals: indexmap::IndexSet<String>,
     string_annotations: bool,
 ) -> ClosureNames {
     let mut uses = Uses {
@@ -92,7 +91,7 @@ pub(super) fn generator_scope(
     plan.visit_body(|expr| uses.visit_expr(expr));
     uses.direct.append(&mut uses.nested);
     let mut scope = ClosureNames {
-        locals,
+        locals: plan.collect_target_names(),
         reads: uses.direct,
         nonlocals: uses.walrus,
         ..ClosureNames::default()
