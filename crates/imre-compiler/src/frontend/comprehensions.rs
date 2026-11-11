@@ -1024,6 +1024,9 @@ impl Checker<'_> {
     }
 
     pub(super) fn forget_comprehension_writes(&mut self, plan: &Plan<'_>, depth: usize) {
+        if self.narrowed.is_empty() {
+            return;
+        }
         for name in repeated_writes(plan, depth) {
             if let Some(slot) = self.names.get(&name) {
                 self.narrowed.remove_mut(slot);
