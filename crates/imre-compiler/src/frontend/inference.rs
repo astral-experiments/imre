@@ -697,11 +697,14 @@ impl Inference {
         let mut pending = self.pending.borrow_mut();
         let candidate = &mut pending[signature.id];
         candidate.used_as_value |= needs_parameters;
+        let missing_callable_parameters =
+            needs_parameters && candidate.params.iter().any(Option::is_none);
         candidate
             .returns
-            .filter(|_| !needs_parameters || candidate.params.iter().all(Option::is_some))
+            .filter(|_| !missing_callable_parameters)
             .ok_or(Failure::PendingSignature {
                 signature: signature.id,
+                missing_callable_parameters,
                 module,
                 range,
             })
@@ -1080,9 +1083,18 @@ impl Inference {
                 .map(|&index| module.parsed.syntax().body[index].clone())
                 .collect::<Vec<_>>();
             let result = checker.lower_block(&statements, None);
-            if let Err(diagnostic) = checker.finish_region(result) {
-                errors.push((graph.entry, diagnostic));
-            }
+            let entry_callable = match checker.finish_region(result) {
+                Err(Failure::PendingSignature {
+                    signature,
+                    missing_callable_parameters: true,
+                    ..
+                }) => Some(signature),
+                Err(diagnostic) => {
+                    errors.push((graph.entry, diagnostic));
+                    None
+                }
+                Ok(_) => None,
+            };
             self.apply_document_fields(classes);
             if self.revision.get() == before {
                 // Reproduce the canonical diagnostic pass if discovery stalls.
@@ -1154,7 +1166,11 @@ impl Inference {
                     return Err(primary.with_following(reports));
                 }
                 let pending = self.pending.borrow();
-                for (module, function, signature) in definitions.iter() {
+                // The entry's callable read already resolved a declaration. Use its
+                // binder diagnostic before consulting unrelated unsolved signatures.
+                let selected = entry_callable.map(|id| &definitions[id]);
+                for (module, function, signature) in selected.into_iter().chain(definitions.iter())
+                {
                     let Some(unresolved) =
                         pending[signature.id].unresolved(graph, *module, function, signature)
                     else {

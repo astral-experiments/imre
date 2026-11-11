@@ -66,6 +66,7 @@ pub(crate) enum Failure<M = String> {
     Diagnostic(Box<Diagnostic<M>>),
     PendingSignature {
         signature: usize,
+        missing_callable_parameters: bool,
         module: ModuleId,
         range: TextRange,
     },
@@ -258,10 +259,12 @@ impl Failure<&'static str> {
         match self {
             Self::PendingSignature {
                 signature,
+                missing_callable_parameters,
                 module,
                 range,
             } => Failure::PendingSignature {
                 signature,
+                missing_callable_parameters,
                 module,
                 range,
             },
