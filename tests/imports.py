@@ -856,6 +856,13 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "unreached_initializer_local": {
+        "main.py": "import child\nprint('after child')\n",
+        "child.py": (
+            "for item in range(0):\n    pass\n"
+            "print('started')\nraise SystemExit(0)\nprint(item)\n"
+        ),
+    },
     "bisect_from_its_module_initializer": {
         "main.py": (
             "import bisect\nfrom bisect import bisect_left\n"
