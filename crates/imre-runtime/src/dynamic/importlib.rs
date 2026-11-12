@@ -994,8 +994,15 @@ impl Context {
         }
         let (child, search, top_level) =
             if let Some((parent_name, child)) = fullname.rsplit_once('.') {
-                // util.find_spec imports the parent through the ordinary __import__ fast path.
-                let parent = self.module(parent_name)?;
+                let parent = if for_resource {
+                    self.module(parent_name)?
+                } else {
+                    let import = self.lookup(self.heap.current_scope(), "__import__")?;
+                    let name = self.text(parent_name);
+                    let path = self.heap.code_name("__path__");
+                    let fromlist = self.alloc(Value::List(vec![path]));
+                    self.call(import, vec![name], vec![("fromlist".into(), fromlist)])?
+                };
                 let path = match self.lookup_attr(parent, "__path__") {
                     Err(cause) if self.is_attribute_error(&cause) => {
                         let mut error = Error::new(
