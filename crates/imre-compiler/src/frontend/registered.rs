@@ -2574,7 +2574,8 @@ impl statements::StatementLowering for SourceScope<'_> {
         let mut falls = false;
         for (test, suite) in if_clauses(branch) {
             if let Some(test) = test {
-                let condition = truth(self.condition_operand(test).ok_or(())?);
+                // The branch writer consumes the checked operand as a condition.
+                let condition = self.condition_operand(test).ok_or(())?;
                 let (body, continues) = self.block(suite)?;
                 arms.push((condition, body));
                 falls |= continues;
@@ -3641,6 +3642,27 @@ mod tests {
         SuitePreparation::new(&operations, source, true)
             .complete(stmts, kind)
             .map(|plan| plan.checked)
+    }
+
+    #[test]
+    fn a_registered_if_passes_its_comparison_to_the_branch() {
+        let text = "if value is None:\n    pass\n";
+        let graph = SourceGraph::single(text).unwrap();
+        let module = &graph.modules[graph.entry];
+        let source = values::ModuleSource::new(module);
+        let suite = registered_suite(
+            &module.parsed.syntax().body,
+            RegisteredScope::Module,
+            source.context(text),
+        )
+        .unwrap();
+        let condition = suite.function.body.iter().find_map(|stmt| match stmt {
+            Statement::If(test, _, _) => Some(&test.without_location().kind),
+            _ => None,
+        });
+        assert!(
+            matches!(condition, Some(ExprKind::Compare(_, ops)) if ops.as_slice() == [ast::CmpOp::Is])
+        );
     }
 
     #[test]
