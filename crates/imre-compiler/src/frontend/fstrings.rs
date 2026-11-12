@@ -215,7 +215,7 @@ impl Checker<'_> {
                     let context = method.method?;
                     let class = &self.classes.declarations.definitions[context.class];
                     if method.asynchronous
-                        || context.kind(&self.classes.declarations)
+                        || context.kind(self.classes.declarations)
                             != crate::classes::MethodKind::Instance
                         || class.method_origins[context.index] != owner
                         || class.methods[context.index].range() != definition.range()

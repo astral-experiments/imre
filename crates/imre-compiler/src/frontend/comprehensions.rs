@@ -1142,7 +1142,8 @@ mod tests {
     #[test]
     fn provisional_displays_keep_call_edges_and_slice_rewrites_without_filling_helpers() {
         use super::{
-            Checker, ClassInfo, HashMap, Helpers, ModuleValues, SourceGraph, Types, ast, inference,
+            Checker, ClassInfo, Classes, HashMap, Helpers, ModuleValues, SourceGraph, Types, ast,
+            inference,
         };
 
         let graph = SourceGraph::single(concat!(
@@ -1153,7 +1154,8 @@ mod tests {
         .unwrap();
         let module = graph.entry;
         let types = Types::default();
-        let (classes, _) = ClassInfo::new(&graph, &types).unwrap();
+        let mut declarations = Classes::collect(&graph).unwrap();
+        let (classes, _) = ClassInfo::new(&graph, &types, &mut declarations).unwrap();
         let signatures = HashMap::new();
         let globals = ModuleValues::default();
         let helpers = Helpers::new(0);

@@ -70,7 +70,7 @@ impl Checker<'_> {
         let name = attr.attr.as_str();
         let Some(setter) = self.classes.setters[class].get(name) else {
             if self.classes.methods[class].get(name).is_some_and(|s| {
-                s.method.unwrap().kind(&self.classes.declarations)
+                s.method.unwrap().kind(self.classes.declarations)
                     == crate::classes::MethodKind::Property
             }) {
                 let owner = &self.classes.declarations.definitions[class].name;

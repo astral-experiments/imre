@@ -692,7 +692,7 @@ impl Checker<'_> {
         });
         self.class_receiver = context.and_then(|context| {
             let declaration = &self.classes.declarations.definitions[context.class];
-            (context.kind(&self.classes.declarations) == MethodKind::Class).then(|| {
+            (context.kind(self.classes.declarations) == MethodKind::Class).then(|| {
                 declaration.methods[context.index]
                     .parameters
                     .iter_non_variadic_params()
@@ -702,8 +702,8 @@ impl Checker<'_> {
                     .to_string()
             })
         });
-        self.initializing = context
-            .is_some_and(|context| context.generated_initializer(&self.classes.declarations));
+        self.initializing =
+            context.is_some_and(|context| context.generated_initializer(self.classes.declarations));
     }
 
     /// An erased receiver shadows module-level bindings with the same name.
@@ -1151,7 +1151,7 @@ impl Checker<'_> {
                 )
             })?
             .clone();
-        match signature.method.unwrap().kind(&self.classes.declarations) {
+        match signature.method.unwrap().kind(self.classes.declarations) {
             MethodKind::Property => {
                 let receiver = receiver.ok_or_else(|| {
                     error(self.source, attribute, "a property requires an instance")
@@ -1453,7 +1453,7 @@ impl Checker<'_> {
                 )
             })?
             .clone();
-        let kind = signature.method.unwrap().kind(&self.classes.declarations);
+        let kind = signature.method.unwrap().kind(self.classes.declarations);
         if self.classes.keyword_copies.contains(&signature.id)
             && let Some(receiver) = receiver
         {
@@ -1921,7 +1921,7 @@ impl Checker<'_> {
         let signature = self.classes.methods[base]
             .get(method.attr.as_str())
             .filter(|sig| {
-                sig.method.unwrap().kind(&self.classes.declarations) == MethodKind::Instance
+                sig.method.unwrap().kind(self.classes.declarations) == MethodKind::Instance
             })
             .ok_or_else(|| {
                 error(

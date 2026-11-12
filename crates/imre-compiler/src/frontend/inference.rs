@@ -490,7 +490,7 @@ impl Inference {
         };
         if ty == documents::MAP
             && let Some(method) = signature.method
-            && method.generated_initializer(&classes.declarations)
+            && method.generated_initializer(classes.declarations)
             && let Some(field) = classes.declarations.definitions[method.class]
                 .fields
                 .iter()
@@ -759,7 +759,7 @@ impl Inference {
         let mut copies = HashMap::new();
         for (_, function, signature) in definitions {
             if let Some(method) = signature.method
-                && method.kind(&classes.declarations) == crate::classes::MethodKind::Instance
+                && method.kind(classes.declarations) == crate::classes::MethodKind::Instance
             {
                 let class = &classes.declarations.definitions[method.class];
                 let origin = (
@@ -905,7 +905,7 @@ impl Inference {
                 // The final body checker owns the generated parameter stores.
                 if signature
                     .method
-                    .is_some_and(|method| method.generated_initializer(&classes.declarations))
+                    .is_some_and(|method| method.generated_initializer(classes.declarations))
                 {
                     continue;
                 }
