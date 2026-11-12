@@ -641,9 +641,17 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         }
         let checked_ints =
             left.checked_operand_type() == Type::Int && right.checked_operand_type() == Type::Int;
+        // Refining a Python operand for arithmetic must preserve its original error site.
         let positioned = matches!(op, Binary::Add | Binary::Subtract | Binary::Multiply)
-            || op == Binary::Modulo && checked_ints;
-        let arithmetic = matches!(op, Binary::FloorDivide | Binary::RightShift) && checked_ints
+            || op == Binary::Modulo
+                && [left, right].into_iter().all(|operand| {
+                    operand.ty == Type::Int
+                        || matches!(operand.without_location().kind, ExprKind::Int(_))
+                });
+        let arithmetic = matches!(
+            op,
+            Binary::FloorDivide | Binary::Modulo | Binary::RightShift
+        ) && checked_ints
             || positioned
                 && (matches!(site, OperationSite::Placed(..))
                     || expr.ty == Type::PythonObject
