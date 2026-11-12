@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::frontend::comprehensions::EagerDisplay;
-use crate::frontend::function_scope::{CallableMetadata, FunctionScope, LexicalSites, ScopeFacts};
+use crate::frontend::function_scope::{CallableMetadata, FunctionScope, LexicalSite};
 use imre_ast::comprehension::Plan;
 
 pub(crate) struct RegisteredGenerator {
@@ -11,40 +11,52 @@ pub(crate) struct RegisteredGenerator {
     pub(crate) acquire: ir::IteratorOp,
 }
 
+#[derive(Default)]
+pub(crate) struct LexicalOperands {
+    pub(crate) generators: HashMap<TextRange, RegisteredGenerator>,
+    pub(crate) lambdas: HashMap<TextSize, RegisteredLambda>,
+    pub(crate) expressions: ExpressionSites,
+}
+
+impl LexicalOperands {
+    pub(crate) fn prepare(
+        &mut self,
+        site: LexicalSite<'_, '_>,
+        source: values::RegisteredSource<'_>,
+        strings: bool,
+    ) {
+        let source = values::RegisteredSource {
+            generators: Some(&self.generators),
+            lambdas: Some(&self.lambdas),
+            ..source
+        };
+        match site {
+            LexicalSite::Generator(range, plan, is_async, scope) => {
+                let child = stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
+                    RegisteredGenerator::prepare(plan, is_async, source, scope)
+                });
+                if let Some(child) = child {
+                    self.generators.insert(range, child);
+                }
+            }
+            LexicalSite::Operand(expr @ ast::Expr::Lambda(lambda), owner) => {
+                let scope = FunctionScope::lambda(lambda, strings);
+                let plan = RegisteredLambda::prepare(lambda, source, &scope, owner);
+                self.expressions
+                    .register_lexical(expr, std::rc::Rc::clone(&plan.binding));
+                self.lambdas.insert(lambda.start(), plan);
+            }
+            LexicalSite::Operand(template, owner) => {
+                self.expressions.prepare_template(template, source, owner);
+            }
+        }
+    }
+}
+
 impl RegisteredGenerator {
     #[cfg(test)]
     pub(super) fn is_async(&self) -> bool {
         self.metadata.suspension_flags() == imre_ast::code_flags::ASYNC_GENERATOR
-    }
-
-    /// Prepare nested generator activations as their lexical scopes close.
-    pub(crate) fn collect_scopes<'a>(
-        body: &'a [ast::Stmt],
-        names: &imre_ast::Names,
-        source: values::RegisteredSource<'_>,
-        alias_site: impl FnMut(&'a ast::StmtTypeAlias, Option<TextSize>),
-        expressions: &mut LexicalSites<'a>,
-    ) -> (ScopeFacts, HashMap<TextRange, Self>) {
-        let mut sites = HashMap::new();
-        let scopes = ScopeFacts::prepare(
-            body,
-            names,
-            alias_site,
-            |range, plan, is_async, scope| {
-                let source = values::RegisteredSource {
-                    generators: Some(&sites),
-                    ..source
-                };
-                let child = stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
-                    Self::prepare(plan, is_async, source, &scope)
-                });
-                if let Some(child) = child {
-                    sites.insert(range, child);
-                }
-            },
-            expressions,
-        );
-        (scopes, sites)
     }
 
     fn prepare(
@@ -166,14 +178,14 @@ mod tests {
     fn prepared(module: &crate::modules::SourceModule) -> HashMap<TextRange, RegisteredGenerator> {
         let body = &module.parsed.syntax().body;
         let literals = values::ModuleSource::new(module);
-        let (_, generators) = RegisteredGenerator::collect_scopes(
+        let mut sites = LexicalOperands::default();
+        crate::frontend::function_scope::ScopeFacts::prepare(
             body,
             &Default::default(),
-            literals.context(&module.source),
             |_, _| {},
-            &mut Vec::new(),
+            |site| sites.prepare(site, literals.context(&module.source), false),
         );
-        generators
+        sites.generators
     }
 
     fn iterator_parameter(child: &RegisteredGenerator) -> usize {

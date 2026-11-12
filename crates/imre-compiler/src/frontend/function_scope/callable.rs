@@ -275,7 +275,7 @@ mod tests {
         .into_syntax()
         .body;
         let names = imre_ast::lower(&mut body);
-        let facts = ScopeFacts::prepare(&body, &names, |_, _| {}, |_, _, _, _| {}, &mut Vec::new());
+        let facts = ScopeFacts::prepare(&body, &names, |_, _| {}, |_| {});
         let class = body[0].as_class_def_stmt().unwrap();
         let method = class.body[0].as_function_def_stmt().unwrap();
         let ordinary = facts.function(method);
