@@ -845,12 +845,14 @@ impl Inference {
         let mut registered = HashMap::new();
         let mut checked_bodies = HashSet::new();
         let mut registered_generators = HashSet::new();
+        let mut checked_before_registration = HashSet::new();
         loop {
             let widened = self.widened.replace(false);
             let signatures_settled = !self.unresolved();
             if !widened && signatures_settled {
                 break;
             }
+            let previous_checks = std::mem::take(&mut checked_before_registration);
             checked_bodies.clear();
             if widened {
                 self.revisit_checked_returns();
@@ -923,7 +925,9 @@ impl Inference {
                 if !ready {
                     continue;
                 }
-                if registered_generators.contains(&signature.id) {
+                if (before == self.revision.get() && previous_checks.contains(&signature.id))
+                    || registered_generators.contains(&signature.id)
+                {
                     checked_bodies.insert(signature.id);
                     continue;
                 }
@@ -941,7 +945,7 @@ impl Inference {
                     })
                     && graph
                         .session
-                        .function_uses_fixed_names(*module, function, |_| false)
+                        .function_uses_fixed_names(*module, function, false, |_| false)
                 {
                     continue;
                 }
@@ -1086,9 +1090,11 @@ impl Inference {
                         && self.pending.borrow()[signature.id].returns == Some(Type::None)
                         && checker.calls.is_empty()
                         && checker.class_reads.borrow().is_empty()
-                        && graph
-                            .session
-                            .function_uses_fixed_names(*module, function, |name| {
+                        && graph.session.function_uses_fixed_names(
+                            *module,
+                            function,
+                            false,
+                            |name| {
                                 exception_kind(name).is_some()
                                     && !graph.modules[*module].bindings.contains_key(name)
                             })
@@ -1182,6 +1188,28 @@ impl Inference {
                     continue;
                 }
                 if self.use_registered_arguments(graph, definitions, &mut registered) {
+                    // Giving other functions Python arguments does not change a checked scalar
+                    // contract that reads only its locals and the unshadowed builtins.
+                    checked_before_registration = std::mem::take(&mut checked_bodies);
+                    checked_before_registration.retain(|id| {
+                        let (module, function, signature) = &definitions[*id];
+                        !completed_calls.contains(id)
+                            && signature.method.is_none()
+                            && signature.returns.builtin_scalar_name().is_some()
+                            && signature.params.iter().all(|p| {
+                                p.ty.builtin_scalar_name().is_some() && p.default.is_none()
+                            })
+                            && graph.session.function_uses_fixed_names(
+                                *module,
+                                function,
+                                true,
+                                |name| {
+                                    !graph.modules[*module].bindings.contains_key(name)
+                                        && (reserved_builtin_function(name)
+                                            || imre_ast::providers::BUILTIN_TYPES.contains(&name))
+                                },
+                            )
+                    });
                     // Revisit actual calls now that registered initializers can supply their operands.
                     self.widened.set(true);
                     continue;

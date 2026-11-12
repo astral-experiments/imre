@@ -415,27 +415,41 @@ impl Session {
         &self,
         module: usize,
         function: &ruff_python_ast::StmtFunctionDef,
+        eager_displays: bool,
         fixed_global: impl Fn(&str) -> bool,
     ) -> bool {
-        use ty_python_core::scope::NodeWithScopeRef;
+        use ty_python_core::scope::{NodeWithScopeKind, NodeWithScopeRef};
 
         let file = self.db.program_file(self.files[module]);
         let index = ty_python_core::semantic_index(&self.db, file);
         let Some(scope) = index.try_node_scope(NodeWithScopeRef::Function(function)) else {
             return false;
         };
-        let places = index.place_table(scope);
+        let fixed = |scope| {
+            let places = index.place_table(scope);
+            places.members().next().is_none()
+                && places
+                    .symbols()
+                    .all(|symbol| symbol.is_local() || fixed_global(symbol.name().as_str()))
+                && !index
+                    .use_def_map(scope)
+                    .definitions_with_usage()
+                    .any(|(_, definition, _)| definition.kind(&self.db).is_import())
+        };
         !function.is_async
             && !scope.is_generator_function(index)
-            && index.child_scopes(scope).next().is_none()
-            && places.members().next().is_none()
-            && places
-                .symbols()
-                .all(|symbol| symbol.is_local() || fixed_global(symbol.name().as_str()))
-            && !index
-                .use_def_map(scope)
-                .definitions_with_usage()
-                .any(|(_, definition, _)| definition.kind(&self.db).is_import())
+            && fixed(scope)
+            && index.child_scopes(scope).all(|(id, child)| {
+                eager_displays
+                    && matches!(
+                        child.node(),
+                        NodeWithScopeKind::ListComprehension(_)
+                            | NodeWithScopeKind::SetComprehension(_)
+                            | NodeWithScopeKind::DictComprehension(_)
+                    )
+                    && index.child_scopes(id).next().is_none()
+                    && fixed(id)
+            })
     }
 
     /// Query the already indexed declarations in this physical scope.
