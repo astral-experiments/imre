@@ -96,16 +96,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
         "shutil" => bundled_source!("shutil.py"),
         "socket" => bundled_source!("socket.py"),
         "ssl" => bundled_source!("ssl.py"),
-        "tempfile" => Some((
-            "tempfile.py",
-            concat!(
-                include_str!("../../stdlib/tempfile/names.py"),
-                "\n",
-                include_str!("../../stdlib/tempfile/boxed_spool.py"),
-                "\n",
-                include_str!("../../stdlib/tempfile/directory.py"),
-            ),
-        )),
+        "tempfile" => bundled_source!("tempfile.py"),
         "doctest" => Some((
             "doctest.py",
             concat!(
@@ -180,14 +171,9 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
             include_str!("../../stdlib/importlib/_bootstrap.py"),
         )),
         "importlib._bootstrap" => bundled_source!("importlib/_bootstrap.py"),
-        "_frozen_importlib_external" | "importlib._bootstrap_external" => Some((
-            "importlib/_bootstrap_external.py",
-            concat!(
-                include_str!("../../stdlib/importlib/_bootstrap_external.py"),
-                "\n\n\n",
-                include_str!("../../stdlib/importlib/registered_finder.py"),
-            ),
-        )),
+        "_frozen_importlib_external" | "importlib._bootstrap_external" => {
+            bundled_source!("importlib/_bootstrap_external.py")
+        }
         // CPython 3.14.5 Lib/uuid.py with a public Enum declaration for SafeUUID.
         "uuid" => Some(("uuid.py", include_str!("../../stdlib/uuid_boxed.py"))),
         "asyncio" => bundled_source!("asyncio/__init__.py"),
