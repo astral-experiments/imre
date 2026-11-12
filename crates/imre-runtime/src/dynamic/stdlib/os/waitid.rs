@@ -3,15 +3,7 @@
 use super::{Context, Error, Id, NONE, Result, c_int, native};
 use crate::dynamic::stdlib::fixed_structseq;
 
-pub(in crate::dynamic) fn initialize(
-    ctx: &mut Context,
-    scope: Id,
-    posix: Option<Id>,
-) -> Result<()> {
-    for name in ["waitid", "waitid_result"] {
-        let value = ctx.builtin(&format!("posix.{name}"));
-        ctx.bind(scope, name, value);
-    }
+pub(in crate::dynamic) fn initialize(ctx: &mut Context, scope: Id) {
     for (name, value) in [
         ("P_ALL", libc::P_ALL as i32),
         ("P_PID", libc::P_PID as i32),
@@ -29,13 +21,9 @@ pub(in crate::dynamic) fn initialize(
         ("CLD_STOPPED", libc::CLD_STOPPED),
         ("CLD_CONTINUED", libc::CLD_CONTINUED),
     ] {
-        let value = match posix {
-            Some(module) => ctx.lookup_attr(module, name)?,
-            None => ctx.int(i64::from(value)),
-        };
+        let value = ctx.int(i64::from(value));
         ctx.bind(scope, name, value);
     }
-    Ok(())
 }
 
 pub(super) fn call(ctx: &mut Context, args: &[Id]) -> Result<Id> {

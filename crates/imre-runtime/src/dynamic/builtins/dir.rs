@@ -25,8 +25,8 @@ pub(super) fn call(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> R
     };
     let names = if let Some(method) = ctx.bound_slot(object, "__dir__")? {
         ctx.call(method, vec![], vec![])?
-    } else if let Value::Module { scope, .. } = *ctx.heap.get(object) {
-        ctx.module_dir(object, scope)?
+    } else if matches!(ctx.heap.get(object), Value::Module { .. }) {
+        ctx.module_dir(object)?
     } else {
         object_names(ctx, object)?
     };

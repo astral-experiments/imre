@@ -510,10 +510,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
     {
         return Ok(ctx.int(i64::from(value)));
     }
-    #[cfg(target_os = "linux")]
-    if matches!(module, "os" | "posix") && os::xattr::FUNCTIONS.contains(&name) {
-        return Ok(ctx.builtin(&format!("posix.{name}")));
-    }
     if module == "_imre_subprocess" && subprocess::function(name) {
         return Ok(ctx.builtin(&format!("{module}.{name}")));
     }
@@ -522,15 +518,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
     {
         return Ok(ctx.int(value));
     }
-    if matches!((module, name), ("importlib", "machinery") | ("os", "path")) {
-        return ctx.module(&format!("{module}.{name}"));
-    }
-    // os defines the three standard origins itself. The other flags come from posix.
-    if matches!(module, "os" | "posix")
-        && (module == "os" || !matches!(name, "SEEK_SET" | "SEEK_CUR" | "SEEK_END"))
-        && let Some(value) = crate::objects::os::descriptor_constant(name)
-    {
-        return Ok(ctx.int(i64::from(value)));
+    if (module, name) == ("importlib", "machinery") {
+        return ctx.module("importlib.machinery");
     }
     let id = match (module, name) {
         ("sysconfig", "_INSTALL_SCHEMES") => return install_schemes(ctx),
@@ -866,59 +855,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             ctx.lookup_attr(provider, "reduce")?
         }
         ("functools", "_CacheInfo") => functools::cache_info_type(ctx)?,
-        ("os" | "posix", "getcwd" | "getcwdb" | "strerror") if cfg!(unix) => {
-            ctx.builtin(&format!("posix.{name}"))
-        }
-        #[cfg(unix)]
-        ("os" | "posix", "getuid" | "geteuid" | "getgid" | "getgroups") => {
-            ctx.builtin(&format!("posix.{name}"))
-        }
-        ("os" | "posix", "DirEntry") => ctx.builtin(os::scandir::ENTRY),
-        #[cfg(target_os = "linux")]
-        ("os" | "posix", "waitid_result") => ctx.builtin(fixed_structseq::WAITID_RESULT),
-        #[cfg(unix)]
-        ("os" | "posix", "times_result") => ctx.builtin(fixed_structseq::TIMES_RESULT),
-        ("os" | "posix", "terminal_size") => ctx.builtin(fixed_structseq::TERMINAL_SIZE),
-        #[cfg(target_os = "linux")]
-        ("os" | "posix", "statvfs_result") => ctx.builtin(os::stat::VFS_CLASS),
-        #[cfg(target_os = "linux")]
-        ("os" | "posix", name @ ("statvfs" | "fstatvfs" | "pipe2")) => {
-            ctx.builtin(&format!("posix.{name}"))
-        }
-        ("os" | "posix", "stat_result") => ctx.builtin(os::stat::CLASS),
-        ("os" | "posix", name @ ("stat" | "lstat" | "fstat")) => {
-            ctx.builtin(&format!("posix.{name}"))
-        }
-        ("os" | "posix", "listdir") if cfg!(unix) => ctx.builtin("posix.listdir"),
-        ("os" | "posix", "fspath") => ctx.builtin("posix.fspath"),
-        #[cfg(target_os = "linux")]
-        ("posix", "_spawn_exec") => ctx.builtin("posix._spawn_exec"),
-        #[cfg(target_os = "linux")]
-        ("os" | "posix", name @ ("fork" | "register_at_fork")) if os::fork_available() => {
-            ctx.builtin(&format!("posix.{name}"))
-        }
-        ("os" | "posix", name)
-            if os::is_descriptor_function(name) || os::is_process_function(name) =>
-        {
-            ctx.builtin(&format!("posix.{name}"))
-        }
-        ("posixpath", "normpath") | ("posix", "_path_normpath") => {
-            ctx.builtin("posix._path_normpath")
-        }
-        ("posixpath", "splitroot") | ("posix", "_path_splitroot_ex") => {
-            ctx.builtin("posix._path_splitroot_ex")
-        }
-        ("posix", "environ") => os::environment(ctx),
-        ("posix", "_create_environ" | "putenv" | "unsetenv") => {
-            ctx.builtin(&format!("posix.{name}"))
-        }
-        #[cfg(target_os = "linux")]
-        ("os" | "posix", "getrandom") => ctx.builtin("posix.getrandom"),
-        ("os" | "posix", "abort" | "getpid" | "urandom") if cfg!(unix) => {
-            ctx.builtin(&format!("posix.{name}"))
-        }
-        #[cfg(not(target_os = "linux"))]
-        ("os", "confstr") => ctx.builtin("os.confstr"),
+        ("posixpath", "normpath") => ctx.builtin("posix._path_normpath"),
+        ("posixpath", "splitroot") => ctx.builtin("posix._path_splitroot_ex"),
         ("posixpath", "sep") => ctx.text("/"),
         ("posixpath", "altsep") => NONE,
         ("contextvars" | "_contextvars", "ContextVar" | "Context" | "Token" | "copy_context") => {
@@ -927,14 +865,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("functools", "Placeholder") => functools::placeholder(ctx),
         ("functools", "_PlaceholderType") => ctx.builtin("functools._PlaceholderType"),
         ("sys", name) if SYS_LAZY_FUNCTIONS.contains(&name) => ctx.builtin(&format!("sys.{name}")),
-        #[cfg(target_os = "linux")]
-        ("os" | "posix", name @ ("uname" | "getloadavg" | "ctermid" | "sync")) => {
-            ctx.builtin(&format!("posix.{name}"))
-        }
-        #[cfg(target_os = "linux")]
-        ("os" | "posix", "uname_result") => ctx.builtin(fixed_structseq::UNAME_RESULT),
-        #[cfg(not(target_os = "linux"))]
-        ("os", "uname") => ctx.builtin("os.uname"),
         ("sysconfig", "_getuserbase" | "get_path_names" | "get_platform")
         | ("_imre_pkgutil", "filenames" | "isdir" | "find_module" | "find_spec")
         | ("_imre_base32", "encode" | "decode")
@@ -2200,9 +2130,7 @@ pub(super) fn call(
         return os::spawn_exec(ctx, args, kwargs);
     }
     if let Some(op) = name.strip_prefix("posix.")
-        && (os::is_descriptor_function(op)
-            || os::is_process_function(op)
-            || (cfg!(unix) && op == "getpgrp"))
+        && (os::attributes::is_descriptor_function(op) || (cfg!(unix) && op == "getpgrp"))
     {
         return os::descriptor(ctx, op, args, kwargs);
     }

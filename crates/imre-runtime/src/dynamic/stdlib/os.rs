@@ -1,3 +1,4 @@
+pub(in crate::dynamic) mod attributes;
 #[cfg(target_os = "linux")]
 pub(in crate::dynamic) mod device;
 #[cfg(target_os = "linux")]
@@ -33,7 +34,7 @@ use crate::objects::os as native;
 #[cfg(unix)]
 pub(in crate::dynamic) fn install_capabilities(
     ctx: &mut Context,
-    module: Id,
+    posix: Id,
     scope: Id,
 ) -> Result<()> {
     for (capability, functions) in [
@@ -98,16 +99,20 @@ pub(in crate::dynamic) fn install_capabilities(
             if function == "mkfifo" && mkfifo::at_function().is_none() {
                 continue;
             }
-            let value = ctx.lookup_attr(module, function)?;
+            let value = match ctx.lookup_attr(posix, function) {
+                Ok(value) => value,
+                Err(error) if ctx.is_attribute_error(&error) => continue,
+                Err(error) => return Err(error),
+            };
             builtins::set_add(ctx, set, value)?;
         }
-        // os copies the current posix dictionary, including reassigned optional functions.
         #[cfg(target_os = "linux")]
-        if capability == "supports_fd"
-            && let Some(execve) = ctx.module_value("posix", "execve")
-        {
-            ctx.bind(scope, "execve", execve);
-            builtins::set_add(ctx, set, execve)?;
+        if capability == "supports_fd" {
+            match ctx.lookup_attr(posix, "execve") {
+                Ok(execve) => builtins::set_add(ctx, set, execve)?,
+                Err(error) if ctx.is_attribute_error(&error) => (),
+                Err(error) => return Err(error),
+            }
         }
         ctx.bind(scope, capability, set);
     }
@@ -213,10 +218,6 @@ pub(super) fn memfd_create(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id
     let fd = rustix::fs::memfd_create(name.as_c_str(), MemfdFlags::from_bits_retain(flags))
         .map_err(|e| super::os_error(e.into()))?;
     Ok(ctx.int(i64::from(fd.into_raw_fd())))
-}
-
-pub(super) fn is_process_function(name: &str) -> bool {
-    cfg!(unix) && matches!(name, "execv" | "times" | "WIFSTOPPED")
 }
 
 /// Audit after signature validation and before any Python fork handlers run.
@@ -535,9 +536,6 @@ pub(super) fn change_environment(
             },
         ));
     }
-    // posix.putenv can run before os is imported. Preserve the initial dictionary first.
-    let posix = ctx.module("posix")?;
-    ctx.lookup_attr(posix, "environ")?;
     let key = fs_argument(ctx, args[0])?;
     let value = if set {
         Some(fs_argument(ctx, args[1])?)
@@ -591,96 +589,6 @@ fn setgroups(ctx: &mut Context, groups: Id) -> Result<Id> {
     }
     native::setgroups(&ids)?;
     Ok(NONE)
-}
-
-/// POSIX functions exported as the same builtins by both os and posix.
-pub(super) fn is_descriptor_function(name: &str) -> bool {
-    if matches!(
-        name,
-        "getpgid" | "setpgid" | "setgroups" | "setregid" | "setreuid"
-    ) {
-        return cfg!(unix);
-    }
-    if name == "_exit" {
-        return cfg!(unix);
-    }
-    if matches!(
-        name,
-        "device_encoding" | "fchdir" | "fsync" | "pread" | "pwrite" | "readinto"
-    ) {
-        return cfg!(unix);
-    }
-    matches!(
-        name,
-        "access"
-            | "open"
-            | "getsid"
-            | "waitpid"
-            | "rename"
-            | "replace"
-            | "readlink"
-            | "scandir"
-            | "remove"
-            | "unlink"
-            | "rmdir"
-            | "mkdir"
-            | "mkfifo"
-            | "chmod"
-            | "fchmod"
-            | "chown"
-            | "fchown"
-            | "lchown"
-            | "chdir"
-            | "umask"
-            | "utime"
-            | "dup"
-            | "dup2"
-            | "isatty"
-            | "lseek"
-            | "truncate"
-            | "ftruncate"
-            | "pipe"
-            | "openpty"
-            | "read"
-            | "write"
-            | "close"
-            | "closerange"
-            | "get_blocking"
-            | "set_blocking"
-            | "get_inheritable"
-            | "set_inheritable"
-            | "link"
-            | "symlink"
-    ) || (cfg!(unix) && matches!(name, "kill" | "getppid" | "waitstatus_to_exitcode"))
-        || (cfg!(target_os = "linux")
-            && matches!(
-                name,
-                "copy_file_range"
-                    | "setresgid"
-                    | "setresuid"
-                    | "waitid"
-                    | "pidfd_open"
-                    | "get_terminal_size"
-                    | "tcgetpgrp"
-                    | "tcsetpgrp"
-                    | "timerfd_create"
-                    | "timerfd_gettime"
-                    | "timerfd_gettime_ns"
-                    | "timerfd_settime"
-                    | "timerfd_settime_ns"
-                    | "ttyname"
-                    | "preadv"
-                    | "pwritev"
-                    | "readv"
-                    | "writev"
-                    | "splice"
-                    | "lockf"
-                    | "fdatasync"
-                    | "mknod"
-                    | "posix_fadvise"
-                    | "posix_fallocate"
-                    | "sendfile"
-            ))
 }
 
 /// Retry a POSIX call that returns its error number directly instead of setting errno.

@@ -4705,6 +4705,7 @@ for name in ("md4", "ripemd160"):
             "boxed_select_selector.py",
             "boxed_pipe_flags.py",
             "boxed_os_environb.py",
+            "boxed_os_exports.py",
             "boxed_os_python_fspath.py",
             "boxed_os_file_descriptors.py",
             "boxed_os_fdopen.py",

@@ -4,12 +4,7 @@ use super::{Context, Error, Id, NONE, Result, audit, builtins, os, posixpath, pr
 mod actions;
 mod attributes;
 
-/// The os facade copies the current posix namespace, including any reassigned exports.
-pub(in crate::dynamic) fn initialize(
-    ctx: &mut Context,
-    scope: Id,
-    posix: Option<Id>,
-) -> Result<()> {
+pub(in crate::dynamic) fn initialize(ctx: &mut Context, scope: Id) {
     for (name, number) in [
         ("posix_spawn", None),
         ("posix_spawnp", None),
@@ -18,21 +13,15 @@ pub(in crate::dynamic) fn initialize(
         ("POSIX_SPAWN_DUP2", Some(2)),
         ("POSIX_SPAWN_CLOSEFROM", Some(3)),
     ] {
-        let value = match posix {
-            Some(module) => match ctx.lookup_attr(module, name) {
-                Ok(value) => value,
-                Err(error) if ctx.is_attribute_error(&error) => continue,
-                Err(error) => return Err(error),
-            },
-            None if name == "POSIX_SPAWN_CLOSEFROM" && !actions::has_closefrom() => continue,
-            None => match number {
-                Some(code) => ctx.int(code),
-                None => ctx.builtin(&format!("posix.{name}")),
-            },
+        if name == "POSIX_SPAWN_CLOSEFROM" && !actions::has_closefrom() {
+            continue;
+        }
+        let value = match number {
+            Some(code) => ctx.int(code),
+            None => ctx.builtin(&format!("posix.{name}")),
         };
         ctx.bind(scope, name, value);
     }
-    Ok(())
 }
 
 pub(super) fn call(

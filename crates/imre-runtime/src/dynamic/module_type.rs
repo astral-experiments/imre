@@ -210,21 +210,27 @@ impl Context {
         )
     }
 
-    pub(super) fn module_dir(&mut self, module: Id, scope: Id) -> Result<Id> {
-        if let Some(hook) = self.scope_name(scope, "__dir__") {
-            return self.call(hook, vec![], vec![]);
-        }
-        if let Value::Module { name, .. } = self.heap.get(module)
+    pub(super) fn module_dir(&mut self, module: Id) -> Result<Id> {
+        if let Value::Module { name, scope, .. } = self.heap.get(module)
             && super::stdlib::has_lazy_attributes(name)
         {
+            if let Some(hook) = self.scope_name(*scope, "__dir__") {
+                return self.call(hook, vec![], vec![]);
+            }
             return Err(Error::new(
                 "NotImplementedError",
                 "dir() cannot enumerate lazy native module exports",
             ));
         }
-        let dict = self.module_globals(scope)?;
+        let dict = self.lookup_attr(module, "__dict__")?;
+        let storage = self
+            .dict_storage(dict)
+            .ok_or_else(|| Error::new("TypeError", "<module>.__dict__ is not a dictionary"))?;
+        if let Some(hook) = self.dict_named_item(storage, "__dir__") {
+            return self.call(hook, vec![], vec![]);
+        }
         let keys = self
-            .dict_entries(dict)
+            .dict_entries(storage)
             .unwrap()
             .iter()
             .map(|&(key, _)| key)
@@ -424,7 +430,7 @@ impl Context {
                 let repr = self.checked_format(receiver, true)?;
                 return Ok(self.text(repr));
             }
-            return self.module_dir(receiver, scope);
+            return self.module_dir(receiver);
         }
         let class = self.builtin("module");
         if !self.is_type_object(receiver) {

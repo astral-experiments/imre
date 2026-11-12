@@ -157,10 +157,12 @@ macro_rules! descriptor_constants {
         $(#[unsafe(no_mangle)]
         pub static $name: usize = ((libc::$flag as usize) << 1) | 1;)*
     };
+    ($names:ident: $ty:ty; $($name:ident = $flag:ident),* $(,)?) => {
+        descriptor_constants! { $($name = $flag),* }
+        pub(crate) const $names: &[(&str, $ty)] = &[$((stringify!($flag), libc::$flag)),*];
+    };
     ($lookup:ident -> $ty:ty; $($name:ident = $flag:ident),* $(,)?) => {
         descriptor_constants! { $($name = $flag),* }
-
-        /// Look up the platform constant exported by the corresponding boxed module.
         pub(crate) fn $lookup(name: &str) -> Option<$ty> {
             match name {
                 $(stringify!($flag) => Some(libc::$flag),)*
@@ -169,15 +171,18 @@ macro_rules! descriptor_constants {
         }
     };
 }
-descriptor_constants! { descriptor_constant -> i32;
+descriptor_constants! { DESCRIPTOR_CONSTANTS: i32;
     imre_os_f_ok = F_OK, imre_os_r_ok = R_OK, imre_os_w_ok = W_OK, imre_os_x_ok = X_OK,
     imre_os_wnohang = WNOHANG,
     imre_os_o_rdonly = O_RDONLY, imre_os_o_wronly = O_WRONLY, imre_os_o_rdwr = O_RDWR,
     imre_os_o_append = O_APPEND, imre_os_o_creat = O_CREAT, imre_os_o_excl = O_EXCL,
     imre_os_o_trunc = O_TRUNC, imre_os_o_cloexec = O_CLOEXEC, imre_os_o_directory = O_DIRECTORY,
     imre_os_o_nofollow = O_NOFOLLOW, imre_os_o_nonblock = O_NONBLOCK,
-    imre_os_seek_set = SEEK_SET, imre_os_seek_cur = SEEK_CUR, imre_os_seek_end = SEEK_END,
     imre_os_seek_data = SEEK_DATA, imre_os_seek_hole = SEEK_HOLE,
+}
+// os defines the standard seek origins itself; POSIX only publishes the other flags.
+descriptor_constants! { SEEK_ORIGINS: i32;
+    imre_os_seek_set = SEEK_SET, imre_os_seek_cur = SEEK_CUR, imre_os_seek_end = SEEK_END,
 }
 // The Linux posix initializer installs these flags in the live module dictionary.
 #[cfg(target_os = "linux")]
