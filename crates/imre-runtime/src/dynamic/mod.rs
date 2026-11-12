@@ -4365,25 +4365,20 @@ impl Context {
         source_globals: Id,
         source: Option<(PathBuf, importlib::SourceBody, Option<Id>)>,
     ) -> Result<()> {
+        if name == "posix" && source.is_none() {
+            stdlib::os::attributes::initialize(self, scope);
+        }
         #[cfg(target_os = "linux")]
-        if source.is_none() && matches!(name, "os" | "posix") {
+        if name == "posix" && source.is_none() {
             stdlib::os::eventfd::initialize(self, scope);
             for name in [
                 "major",
                 "minor",
                 "makedev",
-                "mknod",
-                "pidfd_open",
                 "uname",
-                "uname_result",
                 "getloadavg",
                 "ctermid",
                 "sync",
-                "timerfd_create",
-                "timerfd_gettime",
-                "timerfd_gettime_ns",
-                "timerfd_settime",
-                "timerfd_settime_ns",
             ] {
                 let function = self.builtin(&format!("posix.{name}"));
                 self.bind(scope, name, function);
@@ -4411,7 +4406,7 @@ impl Context {
             self.bind(scope, "RLock", rlock);
         }
         #[cfg(target_os = "linux")]
-        if source.is_none() && matches!(name, "os" | "posix") {
+        if name == "posix" && source.is_none() {
             let memfd = self.builtin("posix.memfd_create");
             self.bind(scope, "memfd_create", memfd);
             let close_on_exec = self.int(i64::from(libc::MFD_CLOEXEC));
@@ -4422,70 +4417,20 @@ impl Context {
             self.bind(scope, "BlockingIOError", error);
         }
         #[cfg(unix)]
-        if source.is_none() && matches!(name, "os" | "posix") {
-            let posix = if name == "os" {
-                Some(self.module("posix")?)
-            } else {
-                None
-            };
-            #[cfg(target_os = "linux")]
-            stdlib::posix_spawn::initialize(self, scope, posix)?;
-            #[cfg(target_os = "linux")]
-            stdlib::os::waitid::initialize(self, scope, posix)?;
+        if name == "posix" && source.is_none() {
             for attr in [
-                "fchdir",
-                "chown",
-                "fchown",
-                "lchown",
                 "getuid",
                 "geteuid",
                 "getgid",
                 "getgroups",
                 "getpgrp",
-                "times",
-                "times_result",
-            ] {
-                let value = match posix {
-                    Some(posix) => match self.lookup_attr(posix, attr) {
-                        Ok(value) => value,
-                        Err(error) if self.is_attribute_error(&error) => continue,
-                        Err(error) => return Err(error),
-                    },
-                    None => self.builtin(&format!("posix.{attr}")),
-                };
-                self.bind(scope, attr, value);
-            }
-            for attr in [
-                "fsync",
-                #[cfg(target_os = "linux")]
-                "fdatasync",
-                #[cfg(target_os = "linux")]
-                "tcgetpgrp",
-                #[cfg(target_os = "linux")]
-                "tcsetpgrp",
-                #[cfg(target_os = "linux")]
-                "ttyname",
                 "getegid",
-                "setgroups",
-                "setregid",
-                "setreuid",
                 #[cfg(target_os = "linux")]
                 "getresgid",
                 #[cfg(target_os = "linux")]
                 "getresuid",
-                #[cfg(target_os = "linux")]
-                "setresgid",
-                #[cfg(target_os = "linux")]
-                "setresuid",
             ] {
-                let value = match posix {
-                    Some(module) => match self.lookup_attr(module, attr) {
-                        Ok(value) => value,
-                        Err(error) if self.is_attribute_error(&error) => continue,
-                        Err(error) => return Err(error),
-                    },
-                    None => self.builtin(&format!("posix.{attr}")),
-                };
+                let value = self.builtin(&format!("posix.{attr}"));
                 self.bind(scope, attr, value);
             }
         }
@@ -4604,6 +4549,8 @@ impl Context {
             }
             #[cfg(target_os = "linux")]
             "posix" if source.is_none() => {
+                stdlib::posix_spawn::initialize(self, scope);
+                stdlib::os::waitid::initialize(self, scope);
                 let cpu_count = self.builtin("posix.cpu_count");
                 self.bind(scope, "cpu_count", cpu_count);
                 stdlib::os::scheduler::initialize(self, scope);
@@ -4724,76 +4671,28 @@ impl Context {
                 self.bind(scope, "TIMEOUT_MAX", limit);
             }
             "os" => {
-                #[cfg(target_os = "linux")]
-                if source.is_none() {
-                    let posix = self.module("posix")?;
-                    for attr in stdlib::os::scheduler::SCHEDULER_EXPORTS
-                        .into_iter()
-                        .chain(["sched_getscheduler", "sched_param"])
-                        .chain(stdlib::os::scheduler::POLICIES.map(|(name, _)| name))
-                    {
-                        match self.lookup_attr(posix, attr) {
-                            Ok(value) => self.bind(scope, attr, value),
-                            Err(error) if self.is_attribute_error(&error) => continue,
-                            Err(error) => return Err(error),
-                        }
-                    }
-                    for attr in [
-                        "getrandom",
-                        "GRND_NONBLOCK",
-                        "GRND_RANDOM",
-                        "get_terminal_size",
-                        "posix_openpt",
-                        "grantpt",
-                        "unlockpt",
-                        "ptsname",
-                        "preadv",
-                        "pwritev",
-                        "readv",
-                        "writev",
-                        "RWF_APPEND",
-                        "RWF_DSYNC",
-                        "RWF_SYNC",
-                        "RWF_HIPRI",
-                        "RWF_NOWAIT",
-                        "O_NOCTTY",
-                        "splice",
-                        "SPLICE_F_MOVE",
-                        "SPLICE_F_NONBLOCK",
-                        "SPLICE_F_MORE",
-                        "getxattr",
-                        "setxattr",
-                        "listxattr",
-                        "removexattr",
-                        "XATTR_CREATE",
-                        "XATTR_REPLACE",
-                        "XATTR_SIZE_MAX",
-                    ] {
-                        let value = self.lookup_attr(posix, attr)?;
-                        self.bind(scope, attr, value);
-                    }
-                    match self.lookup_attr(posix, "getgrouplist") {
-                        Ok(value) => self.bind(scope, "getgrouplist", value),
+                let posix = self.module("posix")?;
+                // The bundled Python body performs its own imports. The native-only
+                // facade copies the provider's current bindings here instead.
+                if source.is_none() && self.builtin_initializer(name).is_none() {
+                    self.import_star(scope, posix)?;
+                    match self.lookup_attr(posix, "_exit") {
+                        Ok(value) => self.bind(scope, "_exit", value),
                         Err(error) if self.is_attribute_error(&error) => (),
                         Err(error) => return Err(error),
                     }
                 }
-                #[cfg(target_os = "linux")]
-                {
-                    let posix = self.module("posix")?;
-                    for attr in [
-                        "confstr",
-                        "confstr_names",
-                        "fpathconf",
-                        "pathconf",
-                        "pathconf_names",
-                    ] {
-                        let value = self.lookup_attr(posix, attr)?;
-                        self.bind(scope, attr, value);
-                    }
+                for &(name, flag) in crate::objects::os::SEEK_ORIGINS {
+                    let value = self.int(i64::from(flag));
+                    self.bind(scope, name, value);
+                }
+                #[cfg(not(target_os = "linux"))]
+                for name in ["confstr", "uname"] {
+                    let value = self.builtin(&format!("os.{name}"));
+                    self.bind(scope, name, value);
                 }
                 #[cfg(unix)]
-                stdlib::os::install_capabilities(self, module, scope)?;
+                stdlib::os::install_capabilities(self, posix, scope)?;
                 let path = self.module("posixpath")?;
                 let posix_sep = self.lookup_attr(path, "sep")?;
                 for (name, alternate) in [("sep", false), ("altsep", true)] {

@@ -1,85 +1,35 @@
 """POSIX filesystem spellings for runtime-loaded modules."""
 import abc
 import sys
-from posix import device_encoding, openpty
+import posix as _posix
 import posixpath as path
 import stat as st
-from posix import chown, fchown, geteuid, getgid, getgroups, getuid, lchown
-from posix import _exit, times, times_result
-from posix import pread, pwrite, readinto
 from _collections_abc import _check_methods
 from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping
-from posix import _create_environ, abort, access, environ as _environ, fspath, getcwd, getcwdb, getpgid, getppid, kill, listdir, mkdir, putenv, read, scandir, setpgid, terminal_size, unsetenv, waitpid, write, WNOHANG
+from posix import *
+from posix import _create_environ, environ as _environ
 from types import GenericAlias
-from posix import O_NONBLOCK, O_RDONLY, chdir, close, closerange, fchdir, fsync, open, rmdir, stat, truncate
+
+
+# From CPython 3.14.5, Lib/os.py. See stdlib/docstrings/LICENSE.
+__all__ = ["altsep", "curdir", "pardir", "sep", "pathsep", "linesep",
+           "defpath", "name", "path", "devnull", "SEEK_SET", "SEEK_CUR",
+           "SEEK_END", "fsencode", "fsdecode", "get_exec_path", "fdopen",
+           "extsep"]
 
 try:
-    from posix import getpgrp
+    from posix import _exit
 except ImportError:
     pass
+else:
+    __all__.append("_exit")
 
 try:
-    from posix import fork, register_at_fork
-except ImportError:
-    pass
-
-try:
-    from posix import waitstatus_to_exitcode
-except ImportError:
-    pass
-
-if sys.platform == "linux":
-    from posix import ctermid, fdatasync, getloadavg, sync, uname, uname_result
-    from posix import (
-        CLD_CONTINUED, CLD_DUMPED, CLD_EXITED, CLD_KILLED, CLD_STOPPED, CLD_TRAPPED,
-        P_ALL, P_PGID, P_PID, P_PIDFD, WCONTINUED, WEXITED, WNOWAIT, WSTOPPED,
-        WUNTRACED, waitid, waitid_result,
-    )
-    from posix import F_LOCK, F_TEST, F_TLOCK, F_ULOCK, lockf
-    from posix import MFD_CLOEXEC, memfd_create
-    from posix import RWF_APPEND, RWF_DSYNC, RWF_HIPRI, RWF_NOWAIT, RWF_SYNC, preadv, pwritev
-    from posix import GRND_NONBLOCK, GRND_RANDOM, getrandom
-    from posix import SPLICE_F_MORE, SPLICE_F_MOVE, SPLICE_F_NONBLOCK, splice
-    import posix as _posix
-    from posix import O_NOCTTY, grantpt, posix_openpt, ptsname, unlockpt
-    from posix import get_terminal_size, pipe2, readv, tcgetpgrp, tcsetpgrp, ttyname, writev
-    for _name in vars(_posix):
-        if _name.startswith(("RTLD_", "POSIX_SPAWN_", "SCHED_")) or _name in (
-            "sched_getscheduler", "sched_param",
-            "posix_spawn", "posix_spawnp", "sched_get_priority_min", "sched_get_priority_max", "sched_yield",
-            "sched_getaffinity", "sched_setaffinity", "sched_rr_get_interval",
-            "sched_getparam", "sched_setparam", "sched_setscheduler",
-        ):
-            globals()[_name] = getattr(_posix, _name)
-    del _name, _posix
-    from posix import O_PATH, O_TMPFILE, cpu_count, fstatvfs, statvfs, statvfs_result, sysconf, sysconf_names
-    from posix import (
-        POSIX_FADV_DONTNEED, POSIX_FADV_NOREUSE, POSIX_FADV_NORMAL, POSIX_FADV_RANDOM,
-        POSIX_FADV_SEQUENTIAL, POSIX_FADV_WILLNEED, posix_fadvise, posix_fallocate,
-    )
-    from posix import major, makedev, minor, mknod
-    from posix import (
-        TFD_CLOEXEC, TFD_NONBLOCK, TFD_TIMER_ABSTIME, TFD_TIMER_CANCEL_ON_SET,
-        timerfd_create, timerfd_gettime, timerfd_gettime_ns, timerfd_settime, timerfd_settime_ns,
-    )
-    from posix import EFD_CLOEXEC, EFD_NONBLOCK, EFD_SEMAPHORE, eventfd, eventfd_read, eventfd_write
-    from posix import PIDFD_NONBLOCK, pidfd_open
-
-if sys.platform == "linux":
-    try:
-        from posix import getgrouplist
-    except ImportError:
-        pass
-    from posix import (
-        XATTR_CREATE, XATTR_REPLACE, XATTR_SIZE_MAX, getxattr, listxattr, removexattr, setxattr,
-    )
-
-
-import posix as _posix
-for _name in ("getegid", "getresgid", "getresuid", "setgroups", "setregid", "setresgid", "setresuid", "setreuid"):
-    if _name in vars(_posix):
-        globals()[_name] = getattr(_posix, _name)
-del _name, _posix
+    _exports = list(_posix.__all__)
+except AttributeError:
+    _exports = [_name for _name in dir(_posix) if not _name.startswith("_")]
+__all__.extend(_exports)
+del _exports, _posix
 
 # From CPython 3.14.5, Lib/os.py. See stdlib/docstrings/LICENSE.
 if "sched_getaffinity" in globals() and sys._get_cpu_count_config() < 0:
@@ -333,7 +283,6 @@ def makedirs(name, mode=0o777, exist_ok=False):
             raise
 
 
-from posix import WIFSTOPPED, execv
 
 
 # Adapted from CPython 3.14.5, Lib/os.py. See stdlib/docstrings/LICENSE.
@@ -827,3 +776,15 @@ if {open, stat} <= supports_dir_fd and {scandir, stat} <= supports_fd:
             stack.extend(
                 (_fwalk_walk, (False, topfd, toppath + name, name, entry))
                 for name, entry in zip(dirs[::-1], entries[::-1]))
+
+
+for _name in (
+    "makedirs", "removedirs", "renames", "walk", "fwalk",
+    "execl", "execle", "execlp", "execlpe", "execvp", "execvpe",
+    "reload_environ", "getenv", "supports_bytes_environ", "environb", "getenvb",
+    "P_WAIT", "P_NOWAIT", "P_NOWAITO", "spawnv", "spawnve", "spawnvp", "spawnvpe",
+    "spawnl", "spawnle", "spawnlp", "spawnlpe", "popen",
+):
+    if _name in globals():
+        __all__.append(_name)
+del _name
