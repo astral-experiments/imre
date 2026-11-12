@@ -5891,7 +5891,8 @@ impl<'a> Checker<'a> {
                 ast::Stmt::If(_) => true,
                 ast::Stmt::Try(protected) => !protected.is_star,
                 ast::Stmt::Break(_) | ast::Stmt::Continue(_) => true,
-                ast::Stmt::Return(_) | ast::Stmt::Expr(_) | ast::Stmt::Pass(_) => true,
+                ast::Stmt::Return(_) | ast::Stmt::Raise(_) => true,
+                ast::Stmt::Expr(_) | ast::Stmt::Pass(_) => true,
                 _ => false,
             };
             if !supported {
