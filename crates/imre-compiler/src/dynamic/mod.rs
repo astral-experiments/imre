@@ -2026,7 +2026,10 @@ pub(crate) fn compile(
                     };
                     let checked =
                         graph_file.filter(|(graph, id)| graph.inputs.files[*id].1 == identity);
-                    let (src, digest) = if let Some((graph, id)) = checked {
+                    // A later disk origin is read by SourceFileLoader if sys.path changes.
+                    // Retain its decoded syntax error even when startup selected the earlier file.
+                    let later_file = checked.is_none() && entry_sources.contains_key(&prefix);
+                    let (mut src, digest) = if let Some((graph, id)) = checked {
                         inputs.files.push((
                             path.clone(),
                             identity,
@@ -2101,7 +2104,13 @@ pub(crate) fn compile(
                         }
                         scan_imports_for_preparation(&src, kind, declaration.as_deref(), None, None)
                     } else {
-                        scan_imports(&src, kind, None, alternative).map(|imports| (imports, None))
+                        let parser_kind = if later_file {
+                            SourceKind::DecodedFile
+                        } else {
+                            kind
+                        };
+                        scan_imports(&src, parser_kind, None, alternative)
+                            .map(|imports| (imports, None))
                     };
                     let (mut imports, scanned) = match imports {
                         Ok(imports) => imports,
@@ -2137,8 +2146,12 @@ pub(crate) fn compile(
                         .as_ref()
                         .is_none_or(|error| error.validate_at_origin)
                         || startup.is_none()
+                        || later_file
                     {
                         if let Some(error) = imports.invalid_executable {
+                            if later_file && error.parse_error {
+                                src = imre_ast::source_encoding::universal_newlines(src);
+                            }
                             module_errors.insert(path.clone(), error);
                         } else {
                             if winner && named_registrations.is_none() {
