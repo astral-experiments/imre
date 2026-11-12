@@ -91,7 +91,11 @@ pub(crate) fn write(directory: &Path) -> Result<(), String> {
         if !seen.insert(name.clone()) {
             continue;
         }
-        let Some((file, source)) = bundled_module_source(&name, true) else {
+        let (file, source) = if let Some(provider) = bundled_module_source(&name, true) {
+            provider
+        } else if let Some(member) = crate::zip_entry::packaged_member(&name) {
+            (member, crate::zip_entry::installed_source(member)?.into())
+        } else {
             continue;
         };
         write_module(&name, file, &source, Some(&mut pending)).map_err(|err| err.to_string())?;
