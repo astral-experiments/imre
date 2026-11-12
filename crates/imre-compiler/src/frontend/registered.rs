@@ -6432,6 +6432,38 @@ publish(5, callback)
     }
 
     #[test]
+    fn registered_cursor_keeps_the_checked_loop_target() {
+        let graph = SourceGraph::single(concat!(
+            "def deliver(items: list[int], emit):\n",
+            "    for item in items:\n",
+            "        emit(item)\n",
+        ))
+        .unwrap();
+        let _ = super::super::lower(&graph);
+        let bodies = graph.registered_functions();
+        let body = &bodies[&graph.entry][&TextSize::default()];
+        crate::verify::registered(body.region()).unwrap();
+        let (&item, _) = body
+            .local_names
+            .iter()
+            .find(|(_, name)| name.name == "item")
+            .unwrap();
+        assert_eq!(body.function.locals[item], Type::Int);
+        let mut keys = Vec::new();
+        ir::walk_statements(&body.function.body, &mut |statement| {
+            if let Statement::IterNext {
+                kind: ir::IterNextKind::Generic,
+                key,
+                ..
+            } = statement
+            {
+                keys.push(body.function.locals[*key]);
+            }
+        });
+        assert_eq!(keys, [Type::PythonObject]);
+    }
+
+    #[test]
     fn registered_for_uses_the_prepared_iterator_and_its_exhaustion_edge() {
         let graph = SourceGraph::single(concat!(
             "def deliver(items, emit, exhausted):\n",

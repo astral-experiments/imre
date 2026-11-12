@@ -1143,6 +1143,12 @@ impl PatternBinder for Checker<'_> {
         self.hidden(ty)
     }
     fn pattern_local(&self, slot: usize) -> Expr {
+        if self.registered.is_some()
+            && self.locals[slot] == Type::PythonObject
+            && let Some(&element) = self.narrowed.get(&slot)
+        {
+            return Expr::local(slot, element);
+        }
         self.local(slot)
     }
     fn pattern_store(

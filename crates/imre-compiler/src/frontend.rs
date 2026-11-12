@@ -5017,13 +5017,19 @@ impl<'a> Checker<'a> {
                         )
                     })?
             };
-            return Ok(Iteration::Prepared(registered::cursor_input(
+            let input = registered::cursor_input(
                 value,
-                element,
+                Type::PythonObject,
                 Some(expression.range()),
                 None,
                 |ty| self.hidden(ty),
-            )));
+            );
+            // The private item owns the Python handle returned by next(). Its
+            // checked element type belongs to the subsequent target binding.
+            if element != Type::PythonObject {
+                self.narrowed.insert_mut(input.value, element);
+            }
+            return Ok(Iteration::Prepared(input));
         }
         if let Some(input) = self.pipeline_input(expression, None, split_needle)? {
             return Ok(input);
@@ -5158,6 +5164,7 @@ impl<'a> Checker<'a> {
             && self.block_depth == 1
             && let Iteration::Prepared(row) = &input
             && self.locals[row.value] == Type::PythonObject
+            && !self.narrowed.contains_key(&row.value)
             && let Some(slot) = loop_
                 .target
                 .as_name_expr()
