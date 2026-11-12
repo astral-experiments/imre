@@ -375,7 +375,6 @@ pub(crate) struct ScopeFacts {
     pub(crate) functions: HashMap<TextSize, NamedFunction>,
     pub(crate) aliases: HashMap<TextSize, FunctionScope>,
     pub(crate) classes: HashMap<TextSize, classes::ClassScope>,
-    pub(crate) annotations: annotations::AnnotationScopes,
     pub(crate) module_globals: BTreeSet<String>,
 }
 
@@ -542,7 +541,6 @@ where
             ast::Stmt::AnnAssign(assign) => match self.scope {
                 Scope::Module => self.scopes.module_annotations = true,
                 Scope::Class(site) if !strings => {
-                    self.scopes.annotations.assignment(assign);
                     self.scopes
                         .classes
                         .get_mut(&site)
@@ -562,9 +560,7 @@ where
                     .any(imre_ast::code_flags::yields_in_expression);
             }
             let scope = self.scopes.classes.get_mut(&start).unwrap();
-            scope
-                .annotations
-                .finish(class, &self.scopes.annotations, &scope.bindings);
+            scope.annotations.finish(class, &scope.bindings);
         }
     }
 
