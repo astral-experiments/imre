@@ -4356,8 +4356,13 @@ impl Context {
             module_slots: None,
             constructor: None,
         });
-        if name == "builtins" {
-            self.original_builtins.get_or_insert(module);
+        match (name, source) {
+            ("builtins", _) => {
+                self.original_builtins.get_or_insert(module);
+            }
+            ("_opcode", None) => stdlib::opcode::install(self, module, scope),
+            ("_bisect", None) => stdlib::bisect::install(self, module, scope),
+            _ => {}
         }
         Ok((module, scope, name_id, origin))
     }
@@ -4839,7 +4844,6 @@ impl Context {
                     self.bind(scope, name, class);
                 }
             }
-            "_bisect" if source.is_none() => stdlib::bisect::install(self, module, scope),
             "_lzma" if source.is_none() => {
                 for name in [
                     "is_check_supported",
@@ -4948,7 +4952,6 @@ impl Context {
                 stdlib::import_socket_constants(self, scope)?
             }
             "_opcode" => {
-                stdlib::opcode::install(self, module, scope);
                 // Imre emits native code and has no adaptive bytecode interpreter.
                 let disabled = self.int(0);
                 self.bind(scope, "ENABLE_SPECIALIZATION", disabled);

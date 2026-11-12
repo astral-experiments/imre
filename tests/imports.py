@@ -1825,6 +1825,9 @@ ACCEPTED = {
         "main.py": (FIXTURES.parent / "frozen_importer.py").read_text(),
         "frozen_price_plugin.py": "def quote(n): return n * 7\n",
     },
+    "builtin_method_creation": {
+        "main.py": (FIXTURES.parent / "builtin_method_creation.py").read_text(),
+    },
     "builtin_importer": {
         "main.py": (FIXTURES.parent / "builtin_importer.py").read_text(),
         "price_plugin.py": "executions = globals().get('executions', 0) + 1\ndef quote(n): return n * 7\n",
@@ -2289,7 +2292,7 @@ def main() -> None:
                 # Optimizing these bundled-module integration cases can take several minutes.
                 slow_optimized = name in {
                     "boxed_unittest_lazy_import", "builtin_importer", "bundled_source_loader_data", "frozen_importer",
-                    "email_address_parsers", "filesystem_resources", "fractions_indirect",
+                    "builtin_method_creation", "email_address_parsers", "filesystem_resources", "fractions_indirect",
                     "function_type_for_selected_callback", "lzma_formats_and_error",
                     "optional_stdlib_probe_in_dependency", "platform_iot_indirect", "record_warnings",
                     "sdk_import_after_provider_hint", "source_loader_external_code", "source_loader_namespace_directory",
