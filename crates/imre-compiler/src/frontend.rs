@@ -5863,6 +5863,7 @@ impl<'a> Checker<'a> {
                 ast::Stmt::For(loop_) => !loop_.is_async,
                 ast::Stmt::While(_) => true,
                 ast::Stmt::If(_) => true,
+                ast::Stmt::Try(protected) => !protected.is_star,
                 ast::Stmt::Break(_) | ast::Stmt::Continue(_) => true,
                 ast::Stmt::Return(_) | ast::Stmt::Expr(_) | ast::Stmt::Pass(_) => true,
                 _ => false,
@@ -7096,7 +7097,11 @@ impl<'a> Checker<'a> {
         let mut handlers = Vec::new();
         for (index, handler) in try_.handlers.iter().enumerate() {
             let ast::ExceptHandler::ExceptHandler(handler) = handler;
-            let kinds = if let Some(target) = &handler.type_ {
+            self.assigned = handler_assigned.clone();
+            self.narrowed = handler_facts.clone();
+            let matcher = if self.registered.is_some() {
+                registered::exception_matcher(handler, try_.is_star, |class, _| self.expr(class))?
+            } else if let Some(target) = &handler.type_ {
                 let expressions = if let ast::Expr::Tuple(tuple) = &**target {
                     tuple.elts.as_slice()
                 } else {
@@ -7109,7 +7114,7 @@ impl<'a> Checker<'a> {
                         "an exception handler requires at least one builtin category",
                     ));
                 }
-                expressions
+                let kinds = expressions
                     .iter()
                     .map(|target| {
                         if let Some(kind) = self
@@ -7138,23 +7143,28 @@ impl<'a> Checker<'a> {
                             "exception handlers require fixed builtin categories",
                         ))
                     })
-                    .collect::<StdResult<Vec<_>, _>>()?
+                    .collect::<StdResult<Vec<_>, _>>()?;
+                ir::ExceptionMatcher::Categories(kinds)
             } else {
                 if index + 1 != try_.handlers.len() {
                     return Err(error(self.source, handler, "a bare handler must be last"));
                 }
-                Vec::new()
+                ir::ExceptionMatcher::Categories(Vec::new())
             };
-            self.assigned = handler_assigned.clone();
-            self.narrowed = handler_facts.clone();
             let name = handler
                 .name
                 .as_ref()
                 .map(|name| {
-                    let slot = self.declare(name.as_str(), Type::Exception, handler)?;
+                    let (ty, kinds) = match &matcher {
+                        ir::ExceptionMatcher::Categories(kinds) => {
+                            (Type::Exception, kinds.as_slice())
+                        }
+                        _ => (Type::PythonObject, &[][..]),
+                    };
+                    let slot = self.declare(name.as_str(), ty, handler)?;
                     self.assigned.insert(slot);
                     self.narrowed.remove_mut(&slot);
-                    if let [kind] = kinds.as_slice()
+                    if let [kind] = kinds
                         && let Some((&def, _)) = self
                             .classes
                             .declarations
@@ -7177,12 +7187,13 @@ impl<'a> Checker<'a> {
             let before_handler = name.and_then(|_| self.take_breaks());
             let capture_depth = self.caught_exceptions.len();
             if let (Some(slot), Some(target)) = (name, &handler.name)
+                && let ir::ExceptionMatcher::Categories(kinds) = &matcher
                 && !narrowing::assigned_names(&handler.body).contains(target.as_str())
             {
                 self.caught_exceptions.push(CaughtException {
                     slot,
-                    builtin_class: Self::directly_raised_builtin(&body, &kinds),
-                    fields: processes::process_error_view(&try_.body, &body, self.types, &kinds),
+                    builtin_class: Self::directly_raised_builtin(&body, kinds),
+                    fields: processes::process_error_view(&try_.body, &body, self.types, kinds),
                 });
             }
             let (handler_body, falls) = self.block(&handler.body)?;
@@ -7201,7 +7212,7 @@ impl<'a> Checker<'a> {
                 self.merge_exit(&mut normal_exit);
             }
             handlers.push(ir::ExceptHandler {
-                matcher: crate::ir::ExceptionMatcher::Categories(kinds),
+                matcher,
                 name,
                 body: handler_body,
             });
