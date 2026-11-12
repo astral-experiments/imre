@@ -4167,7 +4167,10 @@ impl<'a> Checker<'a> {
         {
             return Ok(value);
         }
-        self.reject_class_receiver_value(expression)?;
+        let mut concrete = self.types.payload(expected).unwrap_or(expected);
+        if self.types.constructor_base(concrete).is_none() {
+            self.reject_class_receiver_value(expression)?;
+        }
         if self.types.element(expected) == Some(Type::Str)
             && let Some(separator) = self.joined_lines.start_buffer(expression.range())
         {
@@ -4182,7 +4185,6 @@ impl<'a> Checker<'a> {
                 ),
             });
         }
-        let mut concrete = self.types.payload(expected).unwrap_or(expected);
         if let ast::Expr::Call(call) = expression
             && let Some(raised) = self.defaultdict_factory_error(call, expected)?
         {
