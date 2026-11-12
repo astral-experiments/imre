@@ -747,7 +747,6 @@ pub(crate) fn check_native_syntax(
         let session = Session::registered_syntax(scratch, root, &[])?;
         let origin = path.to_str().ok_or("module paths must be valid UTF-8")?;
         let file = session.write_file(origin, &input.text)?;
-        file.sync(&mut session.db);
         (&*session, file)
     };
     let parsed = keep_parser.then(|| session.parsed(file));
