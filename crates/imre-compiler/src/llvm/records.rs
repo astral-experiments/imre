@@ -47,19 +47,6 @@ pub(super) fn replacement_fields<'a>(module: &Module, expression: &'a Expr) -> O
     Some(&args.values)
 }
 
-fn bytes(output: &mut String, name: &str, value: &str) {
-    write!(
-        output,
-        "@{name} = private unnamed_addr constant [{} x i8] c\"",
-        value.len()
-    )
-    .unwrap();
-    for byte in value.bytes() {
-        write!(output, "\\{byte:02X}").unwrap();
-    }
-    output.push_str("\"\n");
-}
-
 /// Names and field flags are shared constants. Record allocation size, field
 /// offsets, and ownership operations do not depend on generated value behavior.
 pub(super) fn semantics(
@@ -219,7 +206,7 @@ pub(super) fn semantics(
             return "ptr null, i64 0".to_owned();
         }
         let symbol = format!("repr_{prefix}_{name}");
-        bytes(output, &symbol, value);
+        write_private_bytes(output, &symbol, value);
         format!("ptr @{symbol}, i64 {}", value.len())
     };
     let class_name = names(output, "name", class_name);
@@ -253,7 +240,7 @@ fn field_metadata<'a>(
             continue;
         }
         let symbol = format!("repr_field_{name}_{index}");
-        bytes(output, &symbol, field);
+        write_private_bytes(output, &symbol, field);
         fields.push(format!(
             "{{ ptr, i64, i32 }} {{ ptr @{symbol}, i64 {}, i32 {flags} }}",
             field.len()

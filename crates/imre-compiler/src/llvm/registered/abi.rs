@@ -1,5 +1,6 @@
 //! Registered call ABI, module constants and emitted definitions.
 use crate::ir::Constant;
+use crate::llvm::{ByteEscapes, write_byte_string};
 use std::collections::{BTreeSet, HashMap};
 use std::fmt::Write as _;
 
@@ -177,18 +178,15 @@ impl Output {
         if index == count {
             write!(
                 self.constants,
-                "@str{index} = private unnamed_addr constant [{} x i8] c\"",
+                "@str{index} = private unnamed_addr constant [{} x i8] ",
                 bytes.len() + 1
             )
             .unwrap();
-            for &byte in bytes {
-                if (b' '..=b'~').contains(&byte) && !matches!(byte, b'"' | b'\\') {
-                    self.constants.push(char::from(byte));
-                } else {
-                    write!(self.constants, "\\{byte:02X}").unwrap();
-                }
-            }
-            self.constants.push_str("\\00\"\n");
+            write_byte_string(
+                &mut self.constants,
+                bytes.iter().copied().chain([0]),
+                ByteEscapes::NonPrintable,
+            );
         }
         let local = format!("@str{index}");
         match &mut self.whole {
