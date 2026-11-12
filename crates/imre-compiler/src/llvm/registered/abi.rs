@@ -174,24 +174,37 @@ impl Output {
     }
 
     pub(crate) fn data(&mut self, bytes: &[u8]) -> String {
+        self.place_data(bytes, None)
+    }
+
+    /// Use this output's symbol number and share the written initializer with the whole dump.
+    fn place_data(&mut self, bytes: &[u8], initializer: Option<&str>) -> String {
         let count = self.strings.len() as u32;
         let index = *self.strings.entry(bytes.to_vec()).or_insert(count);
-        if index == count {
+        let initializer = if index == count {
             write!(
                 self.constants,
                 "@str{index} = private unnamed_addr constant [{} x i8] ",
                 bytes.len() + 1
             )
             .unwrap();
-            write_byte_string(
-                &mut self.constants,
-                bytes.iter().copied().chain([0]),
-                ByteEscapes::NonPrintable,
-            );
-        }
+            let start = self.constants.len();
+            if let Some(initializer) = initializer {
+                self.constants.push_str(initializer);
+            } else {
+                write_byte_string(
+                    &mut self.constants,
+                    bytes.iter().copied().chain([0]),
+                    ByteEscapes::NonPrintable,
+                );
+            }
+            Some(&self.constants[start..])
+        } else {
+            initializer
+        };
         let local = format!("@str{index}");
         match &mut self.whole {
-            Some(whole) => Self::operand(local, whole.data(bytes)),
+            Some(whole) => Self::operand(local, whole.place_data(bytes, initializer)),
             None => local,
         }
     }
