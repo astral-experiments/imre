@@ -550,19 +550,6 @@ impl Inference {
         self.pending.borrow()[id].used_as_value
     }
 
-    pub(super) fn registered_signature(&self, signature: &Signature) -> Option<Signature> {
-        let pending = self.pending.borrow();
-        let params = &pending[signature.id].params;
-        if params.iter().all(Option::is_some) {
-            return None;
-        }
-        let mut signature = signature.clone();
-        for (param, inferred) in signature.params.iter_mut().zip(params) {
-            param.ty = inferred.unwrap_or(Type::PythonObject);
-        }
-        Some(signature)
-    }
-
     fn unresolved(&self) -> bool {
         self.pending
             .borrow()
@@ -1202,15 +1189,7 @@ impl Inference {
                 let mut reports = reports.into_iter();
                 if let Some(primary) = reports.next() {
                     if primary.kind.is_object() {
-                        registered::capture(
-                            graph,
-                            signatures,
-                            classes,
-                            types,
-                            self,
-                            &globals,
-                            registered::Capture::Solved,
-                        );
+                        registered::capture(graph, signatures, classes, types, self, None);
                     }
                     return Err(primary.with_following(reports));
                 }
@@ -1228,15 +1207,7 @@ impl Inference {
                     if unresolved.kind.is_object()
                         || matches!(unresolved.kind, Kind::UnresolvedParameter(..))
                     {
-                        registered::capture(
-                            graph,
-                            signatures,
-                            classes,
-                            types,
-                            self,
-                            &globals,
-                            registered::Capture::IncludeLive,
-                        );
+                        registered::capture(graph, signatures, classes, types, self, None);
                     }
                     return Err(unresolved);
                 }

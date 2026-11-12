@@ -418,20 +418,13 @@ impl FixedFunctions {
     }
 }
 
-pub(super) enum Capture<'a> {
-    Solved,
-    IncludeLive,
-    Entry(&'a HashSet<usize>),
-}
-
 pub(super) fn capture(
     graph: &SourceGraph,
     signatures: &HashMap<DefinitionId, Signature>,
     classes: &ClassInfo,
     types: &Types,
     inference: &inference::Inference,
-    globals: &ModuleValues,
-    mode: Capture<'_>,
+    checked_bodies: Option<&HashSet<usize>>,
 ) {
     let mut pending = inference.pending_bodies.borrow_mut();
     let owners = pending.get_or_insert_with(|| {
@@ -459,54 +452,28 @@ pub(super) fn capture(
         {
             return false;
         }
-        let (signature, solved) = if let Some(signature) = inference.registered_signature(signature)
-        {
-            if !matches!(mode, Capture::IncludeLive) {
-                return true;
-            }
-            (signature, false)
-        } else if let Some(mut signature) = inference.checked_signature(signature)
-            && signature.params.iter().all(|p| p.ty != Type::PythonObject)
-        {
-            // The fixed-layout checker owns the source return contract. The Python
-            // activation returns a handle, including the result of an open call.
-            signature.returns = Type::PythonObject;
-            (signature, true)
-        } else {
+        let Some(mut signature) = inference.checked_signature(signature) else {
             return true;
         };
-        // A solved trial cannot change a source error already checked for this module.
-        let contract = if solved {
-            inference.source_checks.cached(id, function)
-        } else {
-            None
-        };
+        if signature.registered_frame() {
+            return true;
+        }
+        // The fixed-layout checker owns the return contract. The registered activation returns a handle.
+        signature.returns = Type::PythonObject;
+        let contract = inference.source_checks.cached(id, function);
         if contract == Some(false) {
             return false;
         }
         let helpers = Helpers::new(inference.len());
         // A solved definition reads names from the Python namespace. Its trial
         // must not establish a native caller or consume a missing binding.
-        let private = solved.then(ModuleValues::default);
-        let mut checker = Checker::new(
-            graph,
-            id,
-            signatures,
-            classes,
-            types,
-            &helpers,
-            private.as_ref().unwrap_or(globals),
-        );
-        checker.registered_local_start = solved.then_some(signature.params.len());
-        // The fixed checker validated this physical signature in the settled round.
+        let private = ModuleValues::default();
+        let mut checker = Checker::new(graph, id, signatures, classes, types, &helpers, &private);
+        checker.registered_local_start = Some(signature.params.len());
         checker.checked_callback_effects =
-            solved && matches!(mode, Capture::Entry(checked) if checked.contains(&signature.id));
-        let lower = || lower_definition(checker, function, &signature).ok();
-        let body = if solved {
-            graph.try_registered_body(id, lower)
-        } else {
-            lower()
-        };
+            checked_bodies.is_some_and(|checked| checked.contains(&signature.id));
+        let body =
+            graph.try_registered_body(id, || lower_definition(checker, function, &signature).ok());
         if let Some(body) = body
             && contract.unwrap_or_else(|| inference.source_checks.accepts(graph, id, function))
         {
@@ -4792,53 +4759,21 @@ mod tests {
 
     #[test]
     fn recovery_reuses_the_solved_body_and_lowers_the_missing_callback() {
-        let graph = SourceGraph::single(concat!(
+        let mut graph = SourceGraph::single(concat!(
             "def square(n: int) -> int:\n    return n * n\n",
             "def publish(send) -> None:\n    send(1)\n",
         ))
         .unwrap();
+        let (_, lowered) =
+            caller_cache::observe_lowerings(|| crate::checked_lower(&mut graph).unwrap());
         let module = graph.entry;
         let definitions = &graph.modules[module].parsed.syntax().body;
-        let types = Types::default();
-        let (classes, _) = ClassInfo::new(&graph, &types).unwrap();
-        let inference = inference::Inference::default();
-        let mut signatures = HashMap::new();
-        for (statement, definition) in definitions.iter().enumerate() {
-            let signature = signature(
-                definition.as_function_def_stmt().unwrap(),
-                &graph,
-                keyword_forwarding::Defaults::local(module),
-                &classes.declarations,
-                &types,
-                None,
-                &inference,
-            )
-            .unwrap();
-            signatures.insert(DefinitionId { module, statement }, signature);
+        for name in ["square", "publish"] {
+            assert_eq!(
+                lowered.iter().filter(|function| *function == name).count(),
+                1
+            );
         }
-        let globals = ModuleValues::default();
-        let capture_bodies = |live| {
-            caller_cache::observe_lowerings(|| {
-                capture(
-                    &graph,
-                    &signatures,
-                    &classes,
-                    &types,
-                    &inference,
-                    &globals,
-                    if live {
-                        Capture::IncludeLive
-                    } else {
-                        Capture::Solved
-                    },
-                )
-            })
-            .1
-        };
-
-        assert_eq!(capture_bodies(false), ["square"]);
-        assert!(graph.registered_functions()[&module].contains_key(&definitions[0].start()));
-        assert_eq!(capture_bodies(true), ["publish"]);
         let bodies = graph.registered_functions();
         assert!(
             definitions
