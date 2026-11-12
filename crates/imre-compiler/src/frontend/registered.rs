@@ -1899,7 +1899,7 @@ impl<'a> SuitePreparation<'a> {
             |ty| scope.hidden(ty),
         );
         let binding = scope
-            .with_binding_operands(|scope| scope.for_binding(loop_, &mut input))
+            .with_binding_operands(|scope| input.bind_loop_target(scope, &loop_.target))
             .map_err(|()| {
                 scope.refusal.unwrap_or((
                     loop_.target.range(),
@@ -2533,7 +2533,7 @@ impl statements::StatementLowering for SourceScope<'_> {
         let mut input = self
             .creating_iterable(|scope| scope.iteration_input(&loop_.iter, for_pull(loop_)))
             .ok_or(())?;
-        let binding = self.for_binding(loop_, &mut input)?;
+        let binding = input.bind_loop_target(self, &loop_.target)?;
         let body = self.in_loop(LoopScope::WithCursor, |scope| scope.suite(&loop_.body))?;
         let otherwise = self.suite(&loop_.orelse)?;
         Ok((input.for_suite(binding, body, otherwise, Vec::new()), true))
@@ -3222,24 +3222,6 @@ impl SourceScope<'_> {
         } else {
             Statement::Assign(slot, value)
         }
-    }
-
-    fn for_binding(
-        &mut self,
-        loop_: &ast::StmtFor,
-        input: &mut pipelines::Prepared,
-    ) -> StdResult<Vec<Statement>, ()> {
-        let (binding, pair) = unpacking::bind_input(
-            self,
-            &loop_.target,
-            Expr::local(input.value, Type::PythonObject),
-            None,
-            !loop_.is_async,
-        )?;
-        if let Some(pair) = pair {
-            input.project_items(pair);
-        }
-        Ok(binding)
     }
 
     fn iteration_input(
@@ -6119,6 +6101,45 @@ mod tests {
             _ => {}
         });
         assert_eq!((opens, pulls, exhausts, calls), (1, 1, 1, 2));
+    }
+
+    #[test]
+    fn retained_pair_target_uses_the_same_acquired_cursor_for_both_pulls() {
+        let text = concat!(
+            "def consume() -> None:\n",
+            "    for key, value in available_rows:\n",
+            "        print(key, value)\n",
+            "available_rows = {'left': 1, 'right': 2}.items()\n",
+            "consume()\n",
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.py");
+        std::fs::write(&path, text).unwrap();
+        let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
+        graph.registered_startup = true;
+        crate::checked_lower(&mut graph).unwrap();
+        let bodies = graph.registered_functions();
+        let function = &bodies[&graph.entry][&TextSize::default()].function;
+        let mut acquired = Vec::new();
+        let mut pulls = Vec::new();
+        ir::walk_statements(&function.body, &mut |stmt| match stmt {
+            Statement::Assign(slot, value)
+                if matches!(
+                    value.kind,
+                    ExprKind::Builtin(Builtin::RegisteredIter(ir::IteratorOp::Loop(_)), _)
+                ) =>
+            {
+                acquired.push(*slot);
+            }
+            Statement::IterNext {
+                iterator, value, ..
+            } => pulls.push((*iterator, value.is_some())),
+            _ => {}
+        });
+        let [cursor] = acquired[..] else {
+            panic!("expected one acquired cursor")
+        };
+        assert_eq!(pulls, [(cursor, false), (cursor, true)]);
     }
 
     #[test]

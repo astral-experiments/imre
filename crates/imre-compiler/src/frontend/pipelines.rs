@@ -110,19 +110,52 @@ impl Prepared {
         }
     }
 
-    /// A plain dictionary-items cursor can supply both target values without creating a row.
-    pub(super) fn project_items(&mut self, pair: unpacking::PairBinding) {
-        let ordinary = self.next.pop().expect("a prepared cursor ends in its pull");
-        let Statement::IterNext { iterator, .. } = ordinary else {
-            unreachable!("registered for loops prepare a cursor pull")
+    /// A direct Python cursor can supply both target values without creating a row.
+    pub(super) fn bind_loop_target<B: unpacking::PatternBinder>(
+        &mut self,
+        binder: &mut B,
+        target: &ast::Expr,
+    ) -> StdResult<Vec<Statement>, B::Error> {
+        let row = binder.pattern_local(self.value);
+        // The acquired Python cursor and its unadapted one-row pull must still
+        // refer to the same slots. Typed rows keep their own snapshot layout.
+        let cursor = match (self.evaluate.last(), self.next.as_slice()) {
+            (
+                Some(Statement::Assign(slot, acquisition)),
+                [
+                    Statement::Clear(clear),
+                    Statement::IterNext {
+                        kind: ir::IterNextKind::Generic,
+                        iterator,
+                        key,
+                        value: None,
+                        ready,
+                    },
+                ],
+            ) if slot == iterator
+                && *clear == self.value
+                && *key == self.value
+                && *ready == self.ready
+                && row.ty == Type::PythonObject
+                && matches!(
+                    acquisition.kind,
+                    ExprKind::Builtin(Builtin::RegisteredIter(ir::IteratorOp::Loop(_)), _)
+                ) =>
+            {
+                *iterator
+            }
+            _ => return self.bind_target(binder, target),
         };
-        self.evaluate.push(Statement::Assign(
+        let (binding, pair) = unpacking::bind_input(binder, target, row, None, true)?;
+        let Some(pair) = pair else { return Ok(binding) };
+        let ordinary = self.next.pop().unwrap();
+        self.acquire.push(Statement::Assign(
             pair.ordinary,
             Expr {
                 ty: Type::Bool,
                 kind: ExprKind::Builtin(
                     Builtin::RegisteredPairNeedsRow,
-                    vec![Expr::local(iterator, Type::PythonObject)],
+                    vec![Expr::local(cursor, Type::PythonObject)],
                 ),
             },
         ));
@@ -132,12 +165,13 @@ impl Prepared {
             vec![ordinary],
             vec![Statement::IterNext {
                 kind: ir::IterNextKind::Generic,
-                iterator,
+                iterator: cursor,
                 key: pair.items[0],
                 value: Some(pair.items[1]),
                 ready: self.ready,
             }],
         ));
+        Ok(binding)
     }
 
     /// An enclosing adapter has its own iteration semantics even if it reuses this state.
@@ -2846,7 +2880,7 @@ impl Checker<'_> {
     pub(super) fn lower_prepared_iteration(
         &mut self,
         target: &ast::Expr,
-        input: Prepared,
+        mut input: Prepared,
         orelse: &[ast::Stmt],
         before_iteration: Vec<Statement>,
         lower_body: impl FnOnce(&mut Self) -> Result<Vec<Statement>, String>,
@@ -2860,7 +2894,7 @@ impl Checker<'_> {
         }
         let before = self.assigned.clone();
         let mut facts = self.narrowed.clone();
-        let binding = input.bind_target(self, target)?;
+        let binding = input.bind_loop_target(self, target)?;
         assignments::forget_binding_writes(&mut facts, &binding);
         self.loop_breaks.push(None);
         let body = lower_body(self)?;
