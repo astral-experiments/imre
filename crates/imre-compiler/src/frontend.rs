@@ -8144,10 +8144,11 @@ impl<'a> Checker<'a> {
         if self.unshadowed_len(expression) {
             return Ok(self.builtin_len());
         }
-        if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::AttrGetter)) {
+        let binding = self.resolve(expression);
+        if binding == Some(Binding::Intrinsic(Intrinsic::AttrGetter)) {
             return Err(self.runtime_attrgetter(expression));
         }
-        if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::PopenActive)) {
+        if binding == Some(Binding::Intrinsic(Intrinsic::PopenActive)) {
             return Ok(Expr {
                 ty: self.types.list(Type::ActivePopen),
                 kind: ExprKind::Builtin(
@@ -8156,11 +8157,13 @@ impl<'a> Checker<'a> {
                 ),
             });
         }
-        if typing::is_dummy(self.graph, self.resolve(expression)) {
+        if typing::is_dummy(self.graph, binding) {
             return Ok(typing::dummy());
         }
 
-        if let Some(name) = self.collection_class_name(expression) {
+        if let Some(name) = Self::collection_class_name(binding)
+            && !self.local_collection_root(expression)
+        {
             return Ok(annotations::class_value(name));
         }
         if let ast::Expr::Attribute(attr) = expression
@@ -8178,7 +8181,7 @@ impl<'a> Checker<'a> {
                 _ => {}
             }
         }
-        let selector = match self.resolve(expression) {
+        let selector = match binding {
             Some(Binding::Intrinsic(Intrinsic::PopenSelector)) => Some(None),
             Some(Binding::Intrinsic(Intrinsic::SelectorClass(select))) => Some(Some(select)),
             Some(binding @ Binding::Definition(def))
@@ -8203,7 +8206,7 @@ impl<'a> Checker<'a> {
         }
         if let Some(Binding::Intrinsic(
             Intrinsic::Declaration(symbol) | Intrinsic::RuntimeImport(symbol),
-        )) = self.resolve(expression)
+        )) = binding
         {
             return Err(error(
                 self.source,
@@ -8216,7 +8219,7 @@ impl<'a> Checker<'a> {
         {
             return Ok(value);
         }
-        if let Some(target) = self.resolve(expression) {
+        if let Some(target) = binding {
             // Calls to the sealed compile intrinsic have their own checked operands.
             // Taking the callable, flag object, or module itself requires its live namespace.
             if matches!(
@@ -8253,15 +8256,14 @@ impl<'a> Checker<'a> {
                 return Ok(value);
             }
         }
-        if let Some(Binding::Intrinsic(Intrinsic::SocketConstant(name))) = self.resolve(expression)
-        {
+        if let Some(Binding::Intrinsic(Intrinsic::SocketConstant(name))) = binding {
             return Ok(socket::constant(name));
         }
         if let Some(Binding::Intrinsic(
             Intrinsic::LogLevel(level)
             | Intrinsic::IntConstant(level)
             | Intrinsic::AnnotationFormat(level),
-        )) = self.resolve(expression)
+        )) = binding
         {
             return Ok(Expr::integer(level));
         }
@@ -8294,8 +8296,8 @@ impl<'a> Checker<'a> {
                 "local functions require a direct call or a noncapturing map/filter callback",
             ));
         }
-        if let Some(Binding::Definition(definition)) = self.resolve(expression)
-            && let Some(signature) = self.functions.get(&definition).cloned()
+        if let Some(Binding::Definition(definition)) = binding
+            && let Some(signature) = self.functions.get(&definition)
         {
             // A registered definition lives in its Python namespace. Its value can be
             // stored in a container without inventing a fixed callable signature.
@@ -8313,15 +8315,15 @@ impl<'a> Checker<'a> {
                     "function lookup requires its Python namespace",
                 ));
             }
-            return self.callable_value(&signature, None, None, expression);
+            return self.callable_value(signature, None, None, expression);
         }
         if let Some(Binding::Intrinsic(
             op @ (Intrinsic::Copy(_) | Intrinsic::RmTree | Intrinsic::Move | Intrinsic::DestInSrc),
-        )) = self.resolve(expression)
+        )) = binding
         {
             return self.shutil_function_value(op, None, expression);
         }
-        match self.resolve(expression) {
+        match binding {
             Some(Binding::Value(definition)) => {
                 return self.read_module_value(definition, None, expression);
             }
@@ -8336,11 +8338,10 @@ impl<'a> Checker<'a> {
         {
             return Ok(Expr::boolean(true));
         }
-        if let Some(Binding::Intrinsic(Intrinsic::AccessMode(mode))) = self.resolve(expression) {
+        if let Some(Binding::Intrinsic(Intrinsic::AccessMode(mode))) = binding {
             return Ok(Expr::integer(mode));
         }
-        if let Some(Binding::Intrinsic(symbol @ (Intrinsic::Argv | Intrinsic::OrigArgv))) =
-            self.resolve(expression)
+        if let Some(Binding::Intrinsic(symbol @ (Intrinsic::Argv | Intrinsic::OrigArgv))) = binding
         {
             return Ok(Expr {
                 ty: self.types.list(Type::Str),
@@ -8354,7 +8355,6 @@ impl<'a> Checker<'a> {
                 ),
             });
         }
-        let binding = self.resolve(expression);
         if binding.is_some_and(Binding::is_registered_object) {
             self.require_registered_operation(expression)?;
             return Ok(Expr::unrepresented());
