@@ -188,7 +188,7 @@ impl Transformer for KeywordTuples {
 }
 
 pub(super) fn scalarize(
-    function: &mut ast::StmtFunctionDef,
+    function: &mut Cow<'_, ast::StmtFunctionDef>,
     graph: &SourceGraph,
     module: ModuleId,
 ) -> bool {
@@ -205,6 +205,6 @@ pub(super) fn scalarize(
     if scan.assigned.is_empty() {
         return false;
     }
-    KeywordTuples(scan.assigned).visit_body(&mut function.body);
+    KeywordTuples(scan.assigned).visit_body(&mut function.to_mut().body);
     true
 }

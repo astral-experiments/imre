@@ -2,6 +2,7 @@
 
 use ruff_python_ast::CmpOp;
 use ruff_python_ast::UnaryOp;
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::result::Result as StdResult;
 use std::sync::Arc;
@@ -797,24 +798,26 @@ fn lower_graph(
                         || module_id == graph.entry)
                         && module.is_program_source()
                         && fixed_frame_entry(function);
-                    let mut function = function.clone();
+                    let mut function = Cow::Borrowed(function);
                     if module.overloads.contains(&statement_id) {
                         graph.runtime_overload(module_id, function.name.range());
-                        typing::strip_overload(&mut function);
+                        typing::strip_overload(function.to_mut());
                     }
                     if cached.is_some() || inspect::marks_function(graph, module_id, &function) {
-                        function.decorator_list.clear();
+                        function.to_mut().decorator_list.clear();
                     }
                     let element = native_generators::item_type(
                         &function, graph, module_id, &classes, &types,
                     )?;
                     if element.is_some() {
                         if cached.is_some() {
-                            return Err(module
-                                .diagnostic(&function, "generator functions cannot be cached"));
+                            return Err(module.diagnostic(
+                                function.as_ref(),
+                                "generator functions cannot be cached",
+                            ));
                         }
                         let range = function.returns.as_ref().unwrap().range();
-                        function.returns =
+                        function.to_mut().returns =
                             Some(Box::new(ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
                                 range,
                                 node_index: ast::AtomicNodeIndex::NONE,
@@ -852,7 +855,7 @@ fn lower_graph(
                                     )
                             })
                         {
-                            return Err(module.diagnostic(&function, "cached functions require exact immutable positional keys and an annotated synchronous result"));
+                            return Err(module.diagnostic(function.as_ref(), "cached functions require exact immutable positional keys and an annotated synchronous result"));
                         }
                         classes.cached.insert(signature.id, policy);
                     }
@@ -939,6 +942,7 @@ fn lower_graph(
                 })]
                 .into();
             }
+            let mut method = Cow::Owned(method);
             let (defaults, forwarded_base) = keyword_forwarding::prepare_method(
                 graph,
                 module_id,
@@ -967,7 +971,7 @@ fn lower_graph(
             .map_err(|error| format!("{}:{error}", module.path.display()))?;
             if method.name.as_str() == "__init__" {
                 if signature.returns != Type::None {
-                    return Err(module.diagnostic(&method, "__init__ must return None"));
+                    return Err(module.diagnostic(method.as_ref(), "__init__ must return None"));
                 }
                 if let Some(defaults) = initializer_defaults.remove(&class_id) {
                     for (index, value) in defaults {
@@ -986,14 +990,16 @@ fn lower_graph(
                     }
                 }
                 if class.generated_initializer {
-                    records::private_initializer_parameters(&mut method, module);
+                    records::private_initializer_parameters(method.to_mut(), module);
                 }
             } else if method.name.as_str() == "__post_init__" && signature.returns != Type::None {
-                return Err(module.diagnostic(&method, "__post_init__ must return None"));
+                return Err(module.diagnostic(method.as_ref(), "__post_init__ must return None"));
             } else if matches!(method.name.as_str(), "__str__" | "__repr__")
                 && signature.returns != Type::Str
             {
-                return Err(module.diagnostic(&method, &format!("{} must return str", method.name)));
+                return Err(
+                    module.diagnostic(method.as_ref(), &format!("{} must return str", method.name))
+                );
             }
             if let Some(base) = forwarded_base {
                 classes.forwarded_initializers.insert(signature.id, base);
@@ -1020,12 +1026,13 @@ fn lower_graph(
             table.insert(method.name.to_string(), signature.clone());
             if contexts::decorated(&class.methods[index], graph, module_id) {
                 if !contexts::single_yield(&method) {
-                    return Err(module.diagnostic(&method, "a context manager requires one bare yield on each successful path and an optional finally suite"));
+                    return Err(module.diagnostic(method.as_ref(), "a context manager requires one bare yield on each successful path and an optional finally suite"));
                 }
                 if signature.returns != Type::None {
-                    return Err(
-                        module.diagnostic(&method, "a bare-yield context manager must return None")
-                    );
+                    return Err(module.diagnostic(
+                        method.as_ref(),
+                        "a bare-yield context manager must return None",
+                    ));
                 }
                 classes.contexts.insert(signature.id);
             }
@@ -1230,6 +1237,7 @@ fn lower_graph(
     let mut class_reads = Vec::new();
     let mut recursion_errors = Vec::new();
     for (module_id, definition, signature) in &definitions {
+        let definition = definition.as_ref();
         let module = &graph.modules[*module_id];
         let mut checker = checker_for(*module_id);
         // Both calling conventions can diagnose the same body. Named startup uses the
@@ -1791,6 +1799,8 @@ struct LoweredBody {
 }
 
 type BodyResult = Result<(LoweredBody, HashMap<usize, zip_sums::Sum>), String>;
+
+type FunctionDefinition<'a> = (ModuleId, Cow<'a, ast::StmtFunctionDef>, Signature);
 
 fn lower_body(
     checker: Checker<'_>,

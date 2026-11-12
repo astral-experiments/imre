@@ -136,7 +136,7 @@ pub(super) fn keyword_field(expr: &ast::Expr) -> bool {
 /// and its arguments together. Only one arm or its continuation runs. Keeping
 /// their native locals separate preserves correlations a tuple of unions loses.
 pub(super) fn prepare(
-    function: &mut ast::StmtFunctionDef,
+    function: &mut Cow<'_, ast::StmtFunctionDef>,
     graph: &SourceGraph,
     module: ModuleId,
 ) -> (bool, bool) {

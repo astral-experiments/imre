@@ -135,7 +135,7 @@ fn dispatch_plans(
 }
 
 pub(super) fn specialize(
-    function: &mut ast::StmtFunctionDef,
+    function: &mut Cow<'_, ast::StmtFunctionDef>,
     graph: &SourceGraph,
     module: ModuleId,
 ) -> bool {
@@ -156,6 +156,7 @@ pub(super) fn specialize(
                 &writes,
             )
         {
+            let function = function.to_mut();
             let tail = function.body.split_off(index + 1);
             let ast::Stmt::Match(branch) = &mut function.body[index] else {
                 unreachable!()
