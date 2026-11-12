@@ -1188,6 +1188,16 @@ impl Inference {
                             }
                         }
                     }
+                    if !checked_bodies.is_empty() && !retries_failed_layout(graph) {
+                        registered::capture(
+                            graph,
+                            signatures,
+                            classes,
+                            types,
+                            self,
+                            Some(&checked_bodies),
+                        );
+                    }
                     let primary = reports.remove(index);
                     return Err(primary.with_following(reports.into_iter()));
                 }
