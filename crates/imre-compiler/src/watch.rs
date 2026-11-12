@@ -24,7 +24,6 @@ enum Fact {
     Directory(bool),
     Exists(bool),
     Identity(Result<PathBuf, String>),
-    Content(Result<blake3::Hash, String>),
     Bytes(Result<blake3::Hash, String>),
     WheelRecords(Vec<PathBuf>),
 }
@@ -108,14 +107,6 @@ impl FileSystem<'_> {
         value
     }
 
-    pub(crate) fn read_source_string(&mut self, path: &Path) -> io::Result<String> {
-        let value = with_source(path, |file| io::read_to_string(file));
-        self.record(path, || {
-            Fact::Content(outcome(&value, |s| blake3::hash(s.as_bytes())))
-        });
-        value
-    }
-
     pub(crate) fn read_source(&mut self, path: &Path) -> io::Result<Vec<u8>> {
         let value = with_source(path, |file| {
             let mut bytes = Vec::new();
@@ -153,11 +144,6 @@ impl Inputs {
             Fact::Directory(value) => path.is_dir() == *value,
             Fact::Exists(value) => path.exists() == *value,
             Fact::Identity(value) => path.canonicalize().map_err(|e| e.to_string()) == *value,
-            Fact::Content(value) => {
-                outcome(&std::fs::read_to_string(path), |s| {
-                    blake3::hash(s.as_bytes())
-                }) == *value
-            }
             Fact::Bytes(value) => outcome(&std::fs::read(path), |b| blake3::hash(b)) == *value,
         })
     }
@@ -411,9 +397,8 @@ mod tests {
             io::ErrorKind::Interrupted
         );
         assert_eq!(
-            fs.read_source_string(&path.canonicalize().unwrap())
-                .unwrap(),
-            "replacement"
+            fs.read_source(&path.canonicalize().unwrap()).unwrap(),
+            b"replacement"
         );
     }
 

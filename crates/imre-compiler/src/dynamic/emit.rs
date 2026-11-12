@@ -26,6 +26,7 @@ use serde_json::json;
 
 #[derive(Clone, Copy, Default)]
 pub(super) struct PhysicalFile {
+    pub(super) source_kind: Option<crate::SourceKind>,
     pub(super) digest: Option<[u8; 32]>,
     pub(super) future_flags: u32,
 }
@@ -6505,6 +6506,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
                 PhysicalFile {
                     digest: Some([b'F'; 32]),
                     future_flags: 8,
+                    ..Default::default()
                 },
             )]),
             archive_members: HashMap::from([(modules[1].1.clone(), ([b'Z'; 32], 16))]),

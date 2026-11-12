@@ -963,14 +963,21 @@ pub(crate) fn compile(
     let checked_graph = project.as_ref();
     let typed_graph = checked_graph.filter(|graph| !graph.has_checked_only_import);
     let file_entry = checked_graph.filter(|_| !in_memory);
-    let (src, entry_identity) = if module_entry.is_some() {
+    let (src, entry_snapshot) = if module_entry.is_some() {
         (String::new(), None)
     } else if let Some(command) = command {
         (command.to_owned(), None)
     } else if let Some(graph) = file_entry {
         (
             graph.modules[graph.entry].original_source().to_owned(),
-            (!source_entry).then(|| graph.inputs.files[graph.entry].1.clone()),
+            (!source_entry).then(|| {
+                let (_, identity, hash) = &graph.inputs.files[graph.entry];
+                (
+                    identity.clone(),
+                    hash.clone(),
+                    graph.modules[graph.entry].raw_digest,
+                )
+            }),
         )
     } else {
         // A direct .pyc operand already received its bytecode diagnostic from the script loader.
@@ -980,30 +987,38 @@ pub(crate) fn compile(
         let Ok(identity) = filesystem.canonicalize(path) else {
             return Ok(None);
         };
-        let source = match filesystem.read_source_string(&identity) {
+        let bytes = match filesystem.read_source(&identity) {
             Ok(source) => source,
             Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {
                 return Err(format!("{}: {error}", path.display()));
             }
             Err(_) => return Ok(None),
         };
-        if options.script_startup.is_some()
-            && crate::bytecode_script_error(path, source.as_bytes()).is_some()
+        if options.script_startup.is_some() && crate::bytecode_script_error(path, &bytes).is_some()
         {
             return Ok(None);
         }
-        (source, Some(identity))
+        let hash = blake3::hash(&bytes).to_hex().to_string();
+        let Ok(source) = crate::DiskSource::decode(path, bytes) else {
+            return Ok(None);
+        };
+        (source.text, Some((identity, hash, source.raw_digest)))
     };
+    let entry_identity = entry_snapshot
+        .as_ref()
+        .map(|(identity, _, _)| identity.as_path());
     let startup_fallback = startup.is_some();
     let ordered_command = matches!(operation, Some(ObjectOperation::OrderedCommandImport));
     let kind = if command.is_some() {
         SourceKind::Command
+    } else if entry_snapshot.is_some() {
+        SourceKind::DiskFile
     } else {
         SourceKind::File
     };
     let modules = checked_graph.map_or(&[][..], |graph| graph.modules.as_slice());
-    let entry_file = file_entry
-        .and_then(|graph| CheckedFile::entry(graph, entry_identity.as_deref().unwrap_or(path)));
+    let entry_file =
+        file_entry.and_then(|graph| CheckedFile::entry(graph, entry_identity.unwrap_or(path)));
     let checked_entry = matches!(operation, Some(ObjectOperation::CheckedEntry));
     let mut scanned_modules = HashMap::new();
     let mut entry_imports = |text: &str, mut body: ast::Suite| -> Result<Imports, String> {
@@ -1053,7 +1068,7 @@ pub(crate) fn compile(
         // Preserve diagnostics owned by the original first-party graph before
         // reporting why this entry cannot supply an executable Python body.
         check(project.as_mut(), false, None)?;
-        let source = crate::normalize_source(&src, SourceKind::File)?;
+        let source = crate::normalize_source(&src, kind)?;
         let diagnostic = crate::frontend::phase::Diagnostic::at(
             &source,
             &error.range,
@@ -1278,21 +1293,19 @@ pub(crate) fn compile(
         },
         src.as_str().into(),
     )];
-    if let Some(identity) = entry_identity {
-        registrations
+    if let Some((identity, hash, digest)) = entry_snapshot {
+        let physical = registrations
             .physical_files
             .entry(sources[0].1.clone())
-            .or_default()
-            .future_flags = first.module_flags;
+            .or_default();
+        physical.future_flags = first.module_flags;
+        physical.source_kind = Some(SourceKind::DiskFile);
+        physical.digest = digest;
         if module_entry.is_none() && options.include_modules.contains("__main__") {
             registrations.checked_units.entry(0).or_default().run_path =
                 declared_open_path(&sources[0].1, &identity, &mut inputs, &mut filesystem)?;
         }
-        let digest = file_entry.map_or_else(
-            || blake3::hash(src.as_bytes()).to_hex().to_string(),
-            |graph| graph.inputs.files[graph.entry].2.clone(),
-        );
-        inputs.files.push((path.to_owned(), identity, digest));
+        inputs.files.push((path.to_owned(), identity, hash));
     }
     let mut selected_sources = Vec::new();
     let mut site_initializer = None;
@@ -1996,25 +2009,27 @@ pub(crate) fn compile(
                     };
                     let checked =
                         graph_file.filter(|(graph, id)| graph.inputs.files[*id].1 == identity);
-                    let src = if let Some((graph, id)) = checked {
+                    let (src, digest) = if let Some((graph, id)) = checked {
                         inputs.files.push((
                             path.clone(),
                             identity,
                             graph.inputs.files[id].2.clone(),
                         ));
-                        graph.modules[id].original_source().to_owned()
-                    } else if file_alternatives {
-                        // Only a usable snapshot can supply linked file code. Otherwise the
-                        // ordinary filesystem loader reports the error if Python selects it.
+                        (
+                            graph.modules[id].original_source().to_owned(),
+                            graph.modules[id].raw_digest,
+                        )
+                    } else {
                         let bytes = match filesystem.read_source(&identity) {
                             Ok(bytes) => bytes,
-                            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {
-                                return Err(format!("{}: {error}", path.display()));
-                            }
-                            Err(_) => {
+                            Err(error)
+                                if file_alternatives
+                                    && error.kind() != std::io::ErrorKind::Interrupted =>
+                            {
                                 inputs.missing.push(path);
                                 continue;
                             }
+                            Err(error) => return Err(format!("{}: {error}", path.display())),
                         };
                         inputs.files.push((
                             path.clone(),
@@ -2033,43 +2048,31 @@ pub(crate) fn compile(
                                 .physical_files
                                 .entry(path.clone())
                                 .or_default()
-                                .digest = Some(Sha256::digest(&bytes).into());
-                            text
+                                .source_kind = Some(SourceKind::DecodedFile);
+                            (text, Some(Sha256::digest(&bytes).into()))
                         } else {
-                            let Ok(text) = String::from_utf8(bytes) else {
-                                continue;
+                            let source = match crate::DiskSource::decode(&path, bytes) {
+                                Ok(text) => text,
+                                Err(_) if file_alternatives => continue,
+                                Err(error) => return Err(error),
                             };
-                            text
+                            (source.text, source.raw_digest)
                         }
-                    } else {
-                        let src = filesystem
-                            .read_source_string(&identity)
-                            .map_err(|e| format!("{}: {e}", path.display()))?;
-                        inputs.files.push((
-                            path.clone(),
-                            identity,
-                            blake3::hash(src.as_bytes()).to_hex().to_string(),
-                        ));
-                        src
                     };
                     let alternative = (file_alternatives && checked.is_none())
                         .then_some((path.as_path(), keep_docstrings));
-                    let kind = if registrations
+                    let kind = registrations
                         .physical_files
                         .get(&path)
-                        .is_some_and(|file| file.digest.is_some())
-                    {
-                        SourceKind::DecodedFile
-                    } else {
-                        SourceKind::File
-                    };
+                        .and_then(|file| file.source_kind)
+                        .unwrap_or(SourceKind::DiskFile);
                     // The snapshot above came from the checked resolver's physical file.
                     // ZIP members, decoded alternatives and sources rewritten for inference
                     // keep their own parser input.
                     let checked_package =
                         checked.filter(|(graph, id)| graph.modules[*id].is_package == package);
                     let parsed = checked_package
-                        .filter(|_| winner && kind == SourceKind::File)
+                        .filter(|_| winner && kind == SourceKind::DiskFile)
                         .and_then(|(graph, id)| CheckedFile::select(graph, id));
                     let imports = if let Some(file) = parsed {
                         retained_imports(file.parsed(modules), None, None)
@@ -2081,11 +2084,13 @@ pub(crate) fn compile(
                         Err(_) if file_alternatives => continue,
                         Err(error) => return Err(format!("{}: {error}", path.display())),
                     };
-                    registrations
+                    let physical = registrations
                         .physical_files
                         .entry(path.clone())
-                        .or_default()
-                        .future_flags = imports.module_flags;
+                        .or_default();
+                    physical.future_flags = imports.module_flags;
+                    physical.source_kind = Some(kind);
+                    physical.digest = digest.or(physical.digest);
                     // Later alternatives remain available to the runtime finder. Only the
                     // winning provider supplies the initial module binding.
                     if winner {
@@ -2386,12 +2391,14 @@ pub(crate) fn compile(
             if registrations
                 .archive_members
                 .contains_key(registration.path)
-                || registrations
-                    .physical_files
-                    .get(registration.path)
-                    .is_some_and(|file| file.digest.is_some())
             {
                 registration.kind = SourceKind::DecodedFile;
+            } else if let Some(kind) = registrations
+                .physical_files
+                .get(registration.path)
+                .and_then(|file| file.source_kind)
+            {
+                registration.kind = kind;
             }
             registration
         })

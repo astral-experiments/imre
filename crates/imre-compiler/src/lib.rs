@@ -1332,6 +1332,7 @@ fn verify_after(module: &ir::Module, stage: &str) -> Result<(), String> {
 /// Python applies file encodings and source-file indentation policy only to disk input.
 #[derive(Clone, Copy, PartialEq)]
 enum SourceKind {
+    DiskFile,
     File,
     DecodedFile,
     Command,
@@ -1349,116 +1350,101 @@ fn normalize_source(source: &str, kind: SourceKind) -> Result<Cow<'_, str>, Stri
     } else {
         Cow::Borrowed(source)
     };
-    // A -c operand is already decoded; Python ignores file encoding cookies here.
-    if kind == SourceKind::File {
-        check_encoding(&source)?;
+    // String-backed file inputs retain their UTF-8 contract. Disk files are already decoded.
+    if kind == SourceKind::File
+        && let Some(encoding) = imre_ast::source_encoding::declared_encoding(&source)
+        && !matches!(
+            encoding.to_ascii_lowercase().as_str(),
+            "utf-8" | "utf_8" | "utf8"
+        )
+    {
+        return Err(format!(
+            "unsupported source encoding {encoding:?}; use utf-8"
+        ));
     }
     Ok(source)
 }
 
-/// Diagnose a malformed on-disk script after the file itself was read successfully.
-fn script_decode_error(path: &Path, error: std::string::FromUtf8Error) -> String {
-    let bytes = error.as_bytes();
-    let invalid = error.utf8_error();
-    let offset = invalid.valid_up_to();
-    let byte = bytes[offset];
-    // CR, LF and CRLF each terminate one physical line.
-    let endings = bytes.iter().enumerate().filter_map(|(i, &c)| {
-        (c == b'\n' || (c == b'\r' && bytes.get(i + 1) != Some(&b'\n'))).then_some(i)
-    });
-    let header_end = endings.clone().nth(1).unwrap_or(bytes.len());
-    let mut line = 1;
-    let mut start = 0;
-    for end in endings.take_while(|&end| end < offset) {
-        line += 1;
-        start = end + 1;
-    }
-    let source = String::from_utf8_lossy(&bytes[..header_end])
-        .replace("\r\n", "\n")
-        .replace('\r', "\n");
-    let path = path.display();
-    let declared = match check_encoding(&source) {
-        Ok(declared) => declared,
-        Err(message) => return format!("{path}: {message}"),
-    };
-    let message = if declared {
-        let bom = usize::from(start == 0 && bytes.starts_with(b"\xEF\xBB\xBF")) * 3;
-        let mut position = offset - start - bom;
-        if line == 2 {
-            // While looking for a second-line cookie the tokenizer retains line one.
-            let header = source.strip_prefix('\u{feff}').unwrap_or(&source);
-            let first = header.lines().next().unwrap_or_default();
-            let first_token = first.trim_start_matches([' ', '\t', '\x0c']);
-            if (first_token.is_empty() || first_token.starts_with('#'))
-                && check_encoding(first) == Ok(false)
-            {
-                position += first.len() + 1;
-            }
-        }
-        let length = invalid.error_len().unwrap_or(bytes.len() - offset);
-        // The tokenizer reads a final physical line with an implicit newline.
-        let reason = if (0xc2..=0xf4).contains(&byte) {
-            "invalid continuation byte"
-        } else {
-            "invalid start byte"
-        };
-        let span = if length == 1 {
-            format!("byte 0x{byte:02x} in position {position}")
-        } else {
-            format!("bytes in position {position}-{}", position + length - 1)
-        };
-        format!("(unicode error) 'utf-8' codec can't decode {span}: {reason}")
-    } else {
-        format!(
-            "Non-UTF-8 code starting with '\\x{byte:02x}' in file {path} on line {line}, but no encoding declared; see https://peps.python.org/pep-0263/ for details"
-        )
-    };
-    format!("  File \"{path}\", line {line}\nSyntaxError: {message}")
+struct DiskSource {
+    text: String,
+    raw_digest: Option<[u8; 32]>,
 }
 
-/// Validate the first two lines and report whether a UTF-8 cookie or BOM was present.
-fn check_encoding(source: &str) -> Result<bool, String> {
-    let stripped = source.strip_prefix('\u{feff}');
-    let source = stripped.unwrap_or(source);
-    for line in source.lines().take(2) {
-        let line = line.trim_start_matches([' ', '\t', '\x0c']);
-        if !line.starts_with('#') {
-            if line.is_empty() {
-                continue;
+impl DiskSource {
+    /// Keep the read buffer when the decoder borrowed all of it. A different
+    /// spelling, including a stripped BOM, needs the physical registration digest.
+    fn decode(path: &Path, bytes: Vec<u8>) -> Result<Self, String> {
+        use imre_ast::source_encoding::{SourceDecodeError, decode_disk_source};
+        use sha2::{Digest, Sha256};
+        let (text, original) = decode_disk_source(bytes, path).map_err(|error| {
+            let path = path.display();
+            match error {
+                SourceDecodeError::Invalid(msg, Some(range)) => {
+                    format!("  File \"{path}\", line {}\nSyntaxError: {msg}", range.line)
+                }
+                SourceDecodeError::Invalid(msg, None) | SourceDecodeError::NonText(msg) => {
+                    format!("{path}: SyntaxError: {msg}")
+                }
+                SourceDecodeError::Null => format!("{path}: source code cannot contain null bytes"),
+                SourceDecodeError::Unsupported(codec) => {
+                    format!("{path}: native source decoder for '{codec}' is unavailable")
+                }
+                SourceDecodeError::Allocation => format!("{path}: out of memory decoding source"),
             }
-            break;
-        }
-        for (offset, _) in line.match_indices("coding") {
-            let rest = &line[offset + "coding".len()..];
-            if !rest.starts_with([':', '=']) {
-                continue;
-            }
-            let rest = rest[1..].trim_start_matches([' ', '\t']);
-            let end = rest
-                .find(|c: char| !c.is_ascii_alphanumeric() && !matches!(c, '-' | '_' | '.'))
-                .unwrap_or(rest.len());
-            if end == 0 {
-                continue;
-            }
-            let encoding = &rest[..end];
-            return if matches!(
-                encoding.to_ascii_lowercase().as_str(),
-                "utf-8" | "utf_8" | "utf8"
-            ) {
-                Ok(true)
-            } else {
-                Err(format!(
-                    "unsupported source encoding {encoding:?}; use utf-8"
-                ))
-            };
-        }
+        })?;
+        let raw_digest = original.map(|raw| Sha256::digest(raw).into());
+        Ok(Self { text, raw_digest })
     }
-    Ok(stripped.is_some())
 }
 
 #[cfg(test)]
 mod tests {
     use super::{CompileOptions, compile};
+
+    #[test]
+    fn selected_disk_source_uses_physical_bytes_and_decoded_spans() {
+        use ruff_text_size::Ranged;
+        use sha2::{Digest, Sha256};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("main.py");
+        let raw = b"#!/usr/bin/python\r# coding: latin-1\rvalue = '\xe9'; other = 1";
+        std::fs::write(&path, raw).unwrap();
+        let graph = crate::modules::SourceGraph::load(&path, None, &[]).unwrap();
+        let module = &graph.modules[graph.entry];
+        let second = module.parsed.syntax().body[1].range();
+        assert_eq!(&module.source[second], "other = 1");
+        assert!(module.source.ends_with("value = 'é'; other = 1"));
+        assert_eq!(module.raw_digest, Some(Sha256::digest(raw).into()));
+        assert_eq!(
+            graph.inputs.files[graph.entry].2,
+            blake3::hash(raw).to_hex().as_str()
+        );
+        for raw in ["s = 'π'\n", "s = 'π'\r\n", "# coding: utf_8\rs = 'π'"] {
+            let bytes = raw.as_bytes().to_vec();
+            let allocation = bytes.as_ptr();
+            let capacity = bytes.capacity();
+            let decoded = super::DiskSource::decode(&path, bytes).unwrap();
+            assert_eq!(decoded.text.as_ptr(), allocation);
+            assert_eq!(
+                (
+                    decoded.text.as_str(),
+                    decoded.text.capacity(),
+                    decoded.raw_digest
+                ),
+                (raw, capacity, None)
+            );
+        }
+        let err = super::DiskSource::decode(&path, b"\xef\xbb\xbf# coding: utf8\n#\xff".to_vec())
+            .err()
+            .unwrap();
+        assert_eq!(
+            err,
+            format!(
+                "  File \"{}\", line 1\nSyntaxError: encoding problem: utf8 with BOM",
+                path.display()
+            )
+        );
+    }
 
     #[test]
     fn a_registered_call_preserves_later_operand_diagnostics() {
