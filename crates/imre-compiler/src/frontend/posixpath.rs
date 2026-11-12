@@ -120,7 +120,11 @@ impl Checker<'_> {
         }
         let mut operands = Vec::with_capacity(1 + rest.len());
         for expression in std::iter::once(first).chain(rest) {
-            operands.push((expression, self.expr(expression)?));
+            let value = self.expr(expression)?;
+            if operation == PosixPathOperation::Abspath && value.ty == Type::PythonObject {
+                return self.call_import_with_operand(call, value);
+            }
+            operands.push((expression, value));
         }
         let bytes = operands[0].1.ty == Type::Bytes;
         let mixed = join
