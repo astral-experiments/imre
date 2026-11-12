@@ -4547,6 +4547,7 @@ for name in ("md4", "ripemd160"):
             "boxed_math_frexp.py",
             "boxed_statistics_correlation.py",
             "boxed_statistics_covariance.py",
+            "boxed_statistics_linear_regression.py",
             "boxed_statistics_mean.py",
             "boxed_statistics_harmonic_mean.py",
             "boxed_statistics_decimal_ratio.py",
