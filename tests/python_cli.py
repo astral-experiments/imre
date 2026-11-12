@@ -4530,6 +4530,7 @@ for name in ("md4", "ripemd160"):
             "boxed_divmod_slots.py",
             "boxed_integer_division_slots.py",
             "boxed_integer_shift_slots.py",
+            "boxed_integer_shift_descriptors.py",
             "boxed_complex.py",
             "boxed_float.py",
             "boxed_round.py",

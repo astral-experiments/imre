@@ -807,6 +807,10 @@ impl BuiltinDescriptor {
             "__text_signature__" if self.name == "__index__" => ctx.text("($self, /)"),
             "__doc__" if self.name == "__pow__" => ctx.text("Return pow(self, value, mod)."),
             "__text_signature__" if self.name == "__pow__" => ctx.text("($self, value, mod=None, /)"),
+            "__doc__" if self.owner == "int" && let Some((op, reflected)) = super::operators::int_shift_slot(self.name) => {
+                ctx.text(if reflected { format!("Return value{op}self.") } else { format!("Return self{op}value.") })
+            }
+            "__text_signature__" if self.owner == "int" && super::operators::int_shift_slot(self.name).is_some() => ctx.text("($self, value, /)"),
             "__doc__" if self.name == "__add__" => ctx.text("Return self+value."),
             "__doc__" if self.name == "__radd__" => ctx.text("Return value+self."),
             "__doc__" if self.name == "__sub__" => ctx.text("Return self-value."),

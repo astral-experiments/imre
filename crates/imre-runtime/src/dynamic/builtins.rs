@@ -729,10 +729,14 @@ pub(super) fn real_methods(owner: &str) -> &'static [&'static str] {
             "__hash__",
             "__int__",
             "__le__",
+            "__lshift__",
             "__lt__",
             "__ne__",
             "__pow__",
+            "__rlshift__",
             "__round__",
+            "__rrshift__",
+            "__rshift__",
             "__trunc__",
         ],
         "float" => &[
@@ -2426,7 +2430,7 @@ pub(super) fn call(
                 if matches!(
                     method,
                     "__add__" | "__bool__" | "__hash__" | "__index__" | "__pow__"
-                ) =>
+                ) || super::operators::int_shift_slot(method).is_some() =>
             {
                 collections::builtin_slot(ctx, name, args, kwargs)
             }
