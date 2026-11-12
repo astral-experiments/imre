@@ -5354,36 +5354,22 @@ impl<'a> Checker<'a> {
             let breaks = self.loop_breaks.pop().unwrap();
             self.assigned.after_iteration(before);
             self.narrowed = facts;
-            let (mut orelse, falls) = self.loop_else(orelse, breaks, true)?;
+            let (orelse, falls) = self.loop_else(orelse, breaks, true)?;
             let cursor = self.hidden(Type::Int);
             let stop = self.hidden(Type::Int);
             let step = self.hidden(Type::Int);
             let clear = vec![cursor, stop, step];
-            if !orelse.is_empty() {
-                orelse = clear
-                    .iter()
-                    .copied()
-                    .map(Statement::Clear)
-                    .chain(orelse)
-                    .collect();
-            }
-            let mut output = before_iteration;
-            output.push(Statement::For {
-                target,
-                cursor,
-                stop,
-                step,
-                args,
-                body,
-                orelse,
-            });
-            return Ok((
-                vec![Statement::Scope {
-                    body: output,
-                    clear,
-                }],
-                falls,
-            ));
+            let output =
+                pipelines::scoped_loop(before_iteration, clear, orelse, |orelse| Statement::For {
+                    target,
+                    cursor,
+                    stop,
+                    step,
+                    args,
+                    body,
+                    orelse,
+                });
+            return Ok((output, falls));
         }
         let Iteration::Container {
             iterable,
@@ -5609,29 +5595,13 @@ impl<'a> Checker<'a> {
         let breaks = self.loop_breaks.pop().unwrap();
         self.assigned.after_iteration(before);
         self.narrowed = facts;
-        let (mut orelse, falls) = self.loop_else(orelse, breaks, true)?;
+        let (orelse, falls) = self.loop_else(orelse, breaks, true)?;
         cleanup.extend(counter);
-        if !orelse.is_empty() {
-            // CPython drops the exhausted iterator before entering else. A
-            // temporary container may own buffered files whose drop flushes
-            // writes that the else suite can observe. Scope cleanup remains
-            // idempotent after these private roots have been cleared.
-            orelse = cleanup
-                .iter()
-                .copied()
-                .map(Statement::Clear)
-                .chain(orelse)
-                .collect();
-        }
         output.extend(before_iteration);
-        output.push(Statement::While(test, body, orelse));
-        Ok((
-            vec![Statement::Scope {
-                body: output,
-                clear: cleanup,
-            }],
-            falls,
-        ))
+        let output = pipelines::scoped_loop(output, cleanup, orelse, |orelse| {
+            Statement::While(test, body, orelse)
+        });
+        Ok((output, falls))
     }
 
     // A transfer inside this suite can target only the innermost enclosing
