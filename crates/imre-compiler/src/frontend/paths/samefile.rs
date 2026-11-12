@@ -184,7 +184,7 @@ impl Checker<'_> {
         let result = self.types.stat_result();
         let record = &self.classes.declarations.definitions[class];
         let value = if let Some(method) = self.classes.methods[class].get("stat").cloned() {
-            if method.method.unwrap().kind(&self.classes.declarations)
+            if method.method.unwrap().kind(self.classes.declarations)
                 != crate::classes::MethodKind::Property
             {
                 return self

@@ -36,7 +36,7 @@ impl Checker<'_> {
         syscall: Option<(&str, &str)>,
     ) -> Result<Expr, String> {
         let call = protocol_call(at, "__fspath__");
-        if signature.method.unwrap().kind(&self.classes.declarations) == MethodKind::Property {
+        if signature.method.unwrap().kind(self.classes.declarations) == MethodKind::Property {
             return self.call_fspath_property(class, receiver, &call, syscall);
         }
         self.call_path_method(&call, receiver, signature, Type::Str)

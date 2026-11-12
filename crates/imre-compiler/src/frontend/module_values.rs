@@ -480,7 +480,7 @@ impl Checker<'_> {
                         &assignment.annotation,
                         self.graph,
                         self.module,
-                        &self.classes.declarations,
+                        self.classes.declarations,
                         self.types,
                     )?;
                     self.expr_expected(value, ty)

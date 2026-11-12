@@ -471,7 +471,7 @@ impl Checker<'_> {
             signature_def,
             self.graph,
             keyword_forwarding::Defaults::local(self.module),
-            &self.classes.declarations,
+            self.classes.declarations,
             self.types,
             None,
             &inference::Inference::default(),

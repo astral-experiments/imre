@@ -2,7 +2,7 @@
 
 use super::*;
 
-impl ClassInfo {
+impl ClassInfo<'_> {
     /// Concrete layouts whose objects can inhabit a slot typed as the base class.
     pub(super) fn concrete_layouts(&self, base: usize) -> Vec<usize> {
         self.declarations
@@ -232,7 +232,7 @@ impl Checker<'_> {
             .clone();
         if method.params.len() != arguments.len() + 1
             || (matches!(name, "get" | "__setitem__")
-                && method.method.unwrap().kind(&self.classes.declarations)
+                && method.method.unwrap().kind(self.classes.declarations)
                     != crate::classes::MethodKind::Instance)
         {
             return Err(error(

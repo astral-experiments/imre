@@ -445,7 +445,7 @@ impl Checker<'_> {
         if let Some(base) = self.types.constructor_base(receiver.ty)
             && self.classes.methods[base].get(name).is_some_and(|sig| {
                 sig.method.is_some_and(|m| {
-                    m.kind(&self.classes.declarations) == crate::classes::MethodKind::Class
+                    m.kind(self.classes.declarations) == crate::classes::MethodKind::Class
                 })
             })
         {

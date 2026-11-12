@@ -281,7 +281,7 @@ impl Checker<'_> {
             ));
         }
         let class_method = signature.method.is_some_and(|method| {
-            method.kind(&self.classes.declarations) == crate::classes::MethodKind::Class
+            method.kind(self.classes.declarations) == crate::classes::MethodKind::Class
         });
         let method_site = signature
             .method
@@ -364,7 +364,7 @@ impl Checker<'_> {
         let function = if unbound
             && !signature.asynchronous
             && let Some(method) = signature.method
-            && method.kind(&self.classes.declarations) == crate::classes::MethodKind::Instance
+            && method.kind(self.classes.declarations) == crate::classes::MethodKind::Instance
             && !self.classes.cached.contains_key(&signature.id)
         {
             let class = &self.classes.declarations.definitions[method.class];

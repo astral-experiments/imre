@@ -844,7 +844,7 @@ impl Checker<'_> {
                             .get(attr.attr.as_str())
                             .is_some_and(|s| {
                                 s.method.is_some_and(|m| {
-                                    m.kind(&self.classes.declarations)
+                                    m.kind(self.classes.declarations)
                                         == crate::classes::MethodKind::Property
                                 })
                             })

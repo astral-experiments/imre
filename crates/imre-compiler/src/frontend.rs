@@ -219,9 +219,9 @@ impl Signature {
 
 type InitializerDefaults = HashMap<usize, Vec<(usize, Expr)>>;
 
-struct ClassInfo {
+struct ClassInfo<'a> {
     parsers: argparse::Parsers,
-    declarations: Arc<Classes>,
+    declarations: &'a Classes,
     fields: Vec<Vec<Type>>,
     methods: Vec<HashMap<String, Signature>>,
     setters: Vec<HashMap<String, Signature>>,
@@ -239,13 +239,13 @@ struct ClassInfo {
     contexts: HashSet<usize>,
 }
 
-impl ClassInfo {
+impl<'a> ClassInfo<'a> {
     /// Resolves all nominal field types before checking constructors and methods.
     fn new(
         graph: &SourceGraph,
         types: &Types,
+        declarations: &'a mut Classes,
     ) -> StdResult<(Self, InitializerDefaults), Diagnostic> {
-        let mut declarations = Classes::collect(graph)?;
         let mut initializer_defaults = InitializerDefaults::new();
         types.set_exception_declarations(declarations.exception_declarations.clone());
         types.set_value_structs(
@@ -329,7 +329,7 @@ impl ClassInfo {
                             &field.annotation,
                             graph,
                             field.module,
-                            &declarations,
+                            declarations,
                             types,
                             Some(class_id),
                         )
@@ -403,8 +403,8 @@ impl ClassInfo {
                 ));
             }
         }
-        let cached_properties = cached_properties::slots(graph, types, &declarations, &mut fields)?;
-        let setup_fields = unittest_setup::slots(graph, types, &mut declarations, &mut fields)?;
+        let cached_properties = cached_properties::slots(graph, types, declarations, &mut fields)?;
+        let setup_fields = unittest_setup::slots(graph, types, declarations, &mut fields)?;
         // Reference counting is sufficient only while no accepted field graph can
         // close a cycle. This concerns storage types, not method signatures.
         if let Some(id) = Self::cyclic_field_root(&fields, types) {
@@ -487,7 +487,7 @@ impl ClassInfo {
                 }
             }
         }
-        let parsers = argparse::Parsers::collect(graph, types, &mut declarations, &mut fields)?;
+        let parsers = argparse::Parsers::collect(graph, types, declarations, &mut fields)?;
         let classes = Self {
             parsers,
             truth_dispatch,
@@ -502,7 +502,7 @@ impl ClassInfo {
             generators: HashSet::new(),
             producer_items: HashMap::new(),
             contexts: HashSet::new(),
-            declarations: Arc::new(declarations),
+            declarations,
             fields,
         };
         Ok((classes, initializer_defaults))
@@ -772,7 +772,8 @@ fn lower_graph(
     let types = Types::default();
     typing::collect_sites(graph, &types);
     namedtuples::collect(graph, &types)?;
-    let (mut classes, mut initializer_defaults) = ClassInfo::new(graph, &types)?;
+    let mut declarations = Classes::collect(graph)?;
+    let (mut classes, mut initializer_defaults) = ClassInfo::new(graph, &types, &mut declarations)?;
     dataclass_values::validate(&classes, graph, &types)?;
     let mut signatures = HashMap::new();
     let mut definitions = Vec::new();
@@ -876,7 +877,7 @@ fn lower_graph(
                         &function,
                         graph,
                         defaults,
-                        &classes.declarations,
+                        classes.declarations,
                         &types,
                         None,
                         inference,
@@ -919,9 +920,7 @@ fn lower_graph(
             }
         }
     }
-    // Unchanged method definitions can borrow the class declaration through signature inference.
-    let declarations = Arc::clone(&classes.declarations);
-    for (class_id, class) in declarations.definitions.iter().enumerate() {
+    for (class_id, class) in classes.declarations.definitions.iter().enumerate() {
         let module_id = class.definition.module;
         let module = &graph.modules[module_id];
         for statement in &class.node.body {
@@ -966,7 +965,7 @@ fn lower_graph(
                 continue;
             }
             let (mut method, returns_iterator) =
-                records::executable_method(method, context, &classes.declarations, graph, &types)?;
+                records::executable_method(method, context, classes.declarations, graph, &types)?;
             let keyword_copy =
                 record_inputs::copies_keywords(&class.methods[index], graph, module_id);
             if keyword_copy {
@@ -993,7 +992,7 @@ fn lower_graph(
                 module_id,
                 &mut method,
                 context,
-                &classes.declarations,
+                classes.declarations,
             );
             // Ordinary methods are the physical class members. Inherited copies,
             // property aliases and synthesized initializers have separate native slots.
@@ -1008,7 +1007,7 @@ fn lower_graph(
                 &method,
                 graph,
                 defaults,
-                &classes.declarations,
+                classes.declarations,
                 &types,
                 Some(context),
                 inference,
@@ -1950,7 +1949,7 @@ fn lower_function(
         }
     };
     if let Some(context) = signature.method
-        && context.generated_initializer(&classes.declarations)
+        && context.generated_initializer(classes.declarations)
         && let Some(post) = classes.methods[context.class].get("__post_init__")
     {
         checker.calls.insert(post.id);
@@ -3218,7 +3217,7 @@ struct Checker<'a> {
     graph: &'a SourceGraph,
     module: ModuleId,
     functions: &'a HashMap<DefinitionId, Signature>,
-    classes: &'a ClassInfo,
+    classes: &'a ClassInfo<'a>,
     types: &'a Types,
     helpers: &'a Helpers,
     globals: &'a ModuleValues,
@@ -3280,7 +3279,7 @@ impl<'a> Checker<'a> {
         graph: &'a SourceGraph,
         module: ModuleId,
         functions: &'a HashMap<DefinitionId, Signature>,
-        classes: &'a ClassInfo,
+        classes: &'a ClassInfo<'a>,
         types: &'a Types,
         helpers: &'a Helpers,
         globals: &'a ModuleValues,
@@ -3563,7 +3562,7 @@ impl<'a> Checker<'a> {
             if self.classes.methods[class]
                 .get(attribute.attr.as_str())
                 .is_some_and(|signature| {
-                    signature.method.unwrap().kind(&self.classes.declarations)
+                    signature.method.unwrap().kind(self.classes.declarations)
                         == crate::classes::MethodKind::Property
                 })
             {
@@ -6132,7 +6131,7 @@ impl<'a> Checker<'a> {
                         &assign.annotation,
                         self.graph,
                         self.module,
-                        &self.classes.declarations,
+                        self.classes.declarations,
                         self.types,
                         self.class,
                     )?
@@ -11545,7 +11544,7 @@ impl<'a> Checker<'a> {
                 &s.slice,
                 self.graph,
                 self.module,
-                &self.classes.declarations,
+                self.classes.declarations,
                 self.types,
             )?;
             return self.deque_new(call, Some(ty));
@@ -11557,7 +11556,7 @@ impl<'a> Checker<'a> {
                 &s.slice,
                 self.graph,
                 self.module,
-                &self.classes.declarations,
+                self.classes.declarations,
                 self.types,
             )?;
             return self.counter(call, None, Some(ty));

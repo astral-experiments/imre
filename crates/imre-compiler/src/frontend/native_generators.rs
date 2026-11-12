@@ -71,7 +71,7 @@ pub(super) fn item_type(
     {
         return Err(unsupported());
     }
-    let element = annotation(&result.slice, graph, module, &classes.declarations, types)?;
+    let element = annotation(&result.slice, graph, module, classes.declarations, types)?;
     if types.may_own_file(element, &classes.fields, true) {
         return Err(graph.modules[module].error(
             &**value,
