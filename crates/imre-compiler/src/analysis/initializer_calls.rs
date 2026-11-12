@@ -94,7 +94,11 @@ fn after_docstring(body: &[Stmt]) -> &[Stmt] {
 
 /// A standalone call with no earlier operation in its statement. A literal guard may
 /// make the entire suite unreachable to ty without changing any argument bindings.
-fn statement_call(mut stmt: &Stmt, bound_name: impl Fn(&Expr) -> bool) -> Option<&ExprCall> {
+fn statement_call<'a>(
+    mut stmt: &'a Stmt,
+    bound_name: impl Fn(&Expr) -> bool,
+    nested_operand: impl Fn(&'a ExprCall) -> Option<&'a Expr>,
+) -> Option<&'a ExprCall> {
     while let Stmt::If(guard) = stmt {
         let [body] = guard.body.as_slice() else {
             return None;
@@ -127,12 +131,7 @@ fn statement_call(mut stmt: &Stmt, bound_name: impl Fn(&Expr) -> bool) -> Option
     // invoking the outer callable. Assignment targets follow the entire RHS.
     while call.func.is_name_expr()
         && bound_name(&call.func)
-        && let Some(nested) = call
-            .arguments
-            .args
-            .iter()
-            .find(|arg| !arg.is_literal_expr())
-            .and_then(Expr::as_call_expr)
+        && let Some(nested) = nested_operand(call).and_then(Expr::as_call_expr)
     {
         call = nested;
     }
@@ -404,15 +403,35 @@ impl Session {
     ) -> Option<Diagnostic> {
         let (module, path) = source;
         let file = self.files[module];
+        let literal = |value| {
+            self.assigned_value(file, parsed, value, Expr::is_name_expr)
+                .filter(|origin| origin.is_literal_expr())
+        };
         let call = match stmt {
             Stmt::For(loop_) if !loop_.is_async => loop_.iter.as_call_expr()?,
-            _ => statement_call(stmt, |name| {
-                self.reaching_binding(module, name).is_some()
-                    || name.as_name_expr().is_some_and(|n| {
-                        imre_ast::providers::BUILTIN_FUNCTIONS.contains(&n.id.as_str())
-                            && self.is_unbound_module_read(module, name)
-                    })
-            })?,
+            _ => statement_call(
+                stmt,
+                |name| {
+                    self.reaching_binding(module, name).is_some()
+                        || name.as_name_expr().is_some_and(|n| {
+                            imre_ast::providers::BUILTIN_FUNCTIONS.contains(&n.id.as_str())
+                                && self.is_unbound_module_read(module, name)
+                        })
+                },
+                |call| {
+                    let args = &call.arguments;
+                    let operand = imre_ast::evaluated_arguments(args)
+                        .take_while(|arg| !arg.is_variadic())
+                        .map(|arg| arg.value())
+                        .find(|arg| literal(arg).is_none())?;
+                    if self.unconditional_module_operand(module, stmt.start(), operand.range()) {
+                        Some(operand)
+                    } else {
+                        // Dormant source retains its existing positional scalar contracts.
+                        args.args.iter().find(|arg| !arg.is_literal_expr())
+                    }
+                },
+            )?,
         };
         let (name, attr) = match call.func.as_ref() {
             name @ Expr::Name(_) => (name, None),
@@ -467,10 +486,7 @@ impl Session {
         // Every supplied argument must be passive, including the ones following a mismatch.
         let operands = bound
             .into_iter()
-            .map(|(p, value)| {
-                self.literal_origin(module, parsed, value)
-                    .map(|origin| (p, value, origin))
-            })
+            .map(|(p, value)| Some((p, value, literal(value)?)))
             .collect::<Option<Vec<_>>>()?;
         let owner_model = SemanticModel::new(&self.db, self.db.program_file(owner));
         for (p, value, origin) in operands {
@@ -546,26 +562,6 @@ impl Session {
             .iter()
             .any(|s| s.range() == range)
             .then_some(def)
-    }
-
-    fn literal_origin<'a>(
-        &self,
-        module: usize,
-        parsed: &'a ruff_db::parsed::ParsedModuleRef,
-        value: &'a Expr,
-    ) -> Option<&'a Expr> {
-        if value.is_literal_expr() {
-            return Some(value);
-        }
-        let def = self.reaching_binding(module, value)?;
-        if def.file(&self.db) != self.files[module] || !value.is_name_expr() {
-            return None;
-        }
-        let DefinitionKind::Assignment(assignment) = def.kind(&self.db) else {
-            return None;
-        };
-        let literal = assignment.value(parsed);
-        (assignment.unpack().is_none() && literal.is_literal_expr()).then_some(literal)
     }
 
     pub(super) fn scalar_argument_error<'db>(
