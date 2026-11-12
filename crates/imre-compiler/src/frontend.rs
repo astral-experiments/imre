@@ -4139,12 +4139,16 @@ impl<'a> Checker<'a> {
         let coerce = |checker: &Self, value, ty, site: &ast::Expr| {
             coerce(checker, value, ty, site).map_err(|e| e.expected_from(declaration, site.range()))
         };
-        if self.registered.is_some() {
-            let layout = self.types.payload(expected).unwrap_or(expected);
+        let mut concrete = self.types.payload(expected).unwrap_or(expected);
+        // An empty list gets its element type from its destination in either frame.
+        if self.registered.is_some()
+            && !(matches!(expression, ast::Expr::List(list) if list.elts.is_empty())
+                && self.types.element(concrete).is_some())
+        {
             let concrete_display = match expression {
-                ast::Expr::List(_) => self.types.element(layout).is_some(),
-                ast::Expr::Tuple(_) => self.types.fields(layout).is_some(),
-                ast::Expr::Set(_) => self.types.set_element(layout).is_some(),
+                ast::Expr::List(_) => self.types.element(concrete).is_some(),
+                ast::Expr::Tuple(_) => self.types.fields(concrete).is_some(),
+                ast::Expr::Set(_) => self.types.set_element(concrete).is_some(),
                 _ => false,
             };
             let value = if concrete_display {
@@ -4223,7 +4227,6 @@ impl<'a> Checker<'a> {
         {
             return Ok(value);
         }
-        let mut concrete = self.types.payload(expected).unwrap_or(expected);
         if expected == Type::BuiltinClass
             && let Some(class) = self.class_reference(expression)
         {
@@ -4232,7 +4235,8 @@ impl<'a> Checker<'a> {
         if self.types.constructor_base(concrete).is_none() {
             self.reject_class_receiver_value(expression)?;
         }
-        if self.types.element(expected) == Some(Type::Str)
+        if self.registered.is_none()
+            && self.types.element(expected) == Some(Type::Str)
             && let Some(separator) = self.joined_lines.start_buffer(expression.range())
         {
             return Ok(Expr {
