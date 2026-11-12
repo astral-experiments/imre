@@ -362,6 +362,10 @@ mod tests {
                 );
             }
             assert_eq!(ir.contains("call i64 @int_add("), unit.name == "math_ops");
+            assert_eq!(
+                ir.matches("define internal i32 @compare_int(").count(),
+                usize::from(ir.contains("call i32 @compare_int("))
+            );
         }
     }
 
