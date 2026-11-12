@@ -3390,7 +3390,7 @@ impl Context {
             self.dict_storage(namespace)
                 .expect("module globals dictionary")
         } else {
-            self.bind(scope, name, value);
+            self.bind_local(scope, name, value);
             return Ok(replaced);
         };
         let key = self.heap.code_name(name);
