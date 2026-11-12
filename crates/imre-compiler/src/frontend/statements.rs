@@ -43,7 +43,7 @@ pub(super) trait StatementLowering {
         def: &ast::StmtFunctionDef,
     ) -> StdResult<Option<Statement>, Self::Error>;
     fn effect(&mut self, value: &ast::Expr) -> StdResult<(Option<Statement>, bool), Self::Error>;
-    fn returned(&mut self, ret: &ast::StmtReturn) -> StdResult<Expr, Self::Error>;
+    fn returned(&mut self, ret: &ast::StmtReturn) -> StdResult<Statement, Self::Error>;
     fn raised_value(
         &mut self,
         raise: &ast::StmtRaise,
@@ -76,9 +76,7 @@ pub(super) trait StatementLowering {
             ast::Stmt::FunctionDef(def) => (self.definition(def)?, true),
             ast::Stmt::Expr(expr) if expr.value.is_string_literal_expr() => (None, true),
             ast::Stmt::Expr(expr) => self.effect(&expr.value)?,
-            ast::Stmt::Return(ret) if !module => {
-                (Some(Statement::Return(self.returned(ret)?)), false)
-            }
+            ast::Stmt::Return(ret) if !module => (Some(self.returned(ret)?), false),
             ast::Stmt::For(loop_) if !loop_.is_async || self.async_iteration() => {
                 return self.for_loop(loop_);
             }
@@ -205,14 +203,14 @@ impl StatementLowering for Checker<'_> {
         }
         let value = self.expr(expr)?;
         // Only a direct call selects one implementation; a dispatched override may return.
-        let continues = !matches!(&value.kind, ExprKind::Call(id, _) if self.classes.raising_methods.contains(id));
+        let continues = !self.terminating_call(&value);
         if let Some(sites) = &mut self.fixed_sites {
             sites.statement(expr.range(), FixedNode::Effect);
         }
         Ok((Some(Statement::Expr(value)), continues))
     }
 
-    fn returned(&mut self, ret: &ast::StmtReturn) -> Result<Expr, String> {
+    fn returned(&mut self, ret: &ast::StmtReturn) -> Result<Statement, String> {
         let value = if let Some(value) = &ret.value {
             if let Some(repr) = self.exception_formatter {
                 let value = self.expr(value)?;
@@ -231,7 +229,8 @@ impl StatementLowering for Checker<'_> {
                 if documents::fresh_display(value, document) {
                     // This checked literal can take either layout during final lowering.
                     // Only an already existing mutable owner selects the document ABI.
-                    return self.expr_expected(value, document);
+                    self.explicit_return = true;
+                    return self.expr_expected(value, document).map(Statement::Return);
                 }
                 self.document_annotation_value(value, self.returns, document)?
             } else if self.inferred_returns.is_some() {
@@ -242,16 +241,28 @@ impl StatementLowering for Checker<'_> {
         } else {
             Expr::none()
         };
-        if let Some(types) = &mut self.inferred_returns {
+        let terminates = self.terminating_call(&value);
+        self.explicit_return |= !terminates;
+        let value = if let Some(types) = &mut self.inferred_returns {
             types.push(value.ty);
-            Ok(value)
+            value
         } else {
             let value = self.coerce_return(value, self.returns, ret)?;
             if let (Some(sites), Some(operand)) = (&mut self.fixed_sites, &ret.value) {
-                sites.statement(operand.range(), FixedNode::Return);
+                let kind = if terminates {
+                    FixedNode::Effect
+                } else {
+                    FixedNode::Return
+                };
+                sites.statement(operand.range(), kind);
             }
-            Ok(value)
-        }
+            value
+        };
+        Ok(if terminates {
+            Statement::Expr(value)
+        } else {
+            Statement::Return(value)
+        })
     }
 
     fn for_loop(&mut self, loop_: &ast::StmtFor) -> Result<Block, String> {

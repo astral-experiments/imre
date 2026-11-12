@@ -967,6 +967,7 @@ impl Inference {
                 checker.discover_document_return = document_return;
                 checker.inferred_returns = discover_returns.then(Vec::new);
                 let mut checked_return = false;
+                let mut superseded_returns = false;
                 let result = (|| {
                     checker.bind_function_signature(function, &signature, |_| {})?;
                     checker.collect_local_definitions(&function.body)?;
@@ -992,6 +993,8 @@ impl Inference {
                             self.layout_changed();
                         }
                     } else if let Some(mut returns) = checker.inferred_returns.take() {
+                        superseded_returns =
+                            !falls_through && !returns.is_empty() && !checker.explicit_return;
                         if falls_through || returns.is_empty() {
                             returns.push(Type::None);
                         }
@@ -1101,6 +1104,11 @@ impl Inference {
                     } else if retrying {
                         self.pending.borrow_mut()[signature.id].discovery =
                             ReturnDiscovery::Checked;
+                    }
+                    if superseded_returns
+                        && !graph.session.call_may_return_implicitly(*module, function)
+                    {
+                        classes.nonreturning_functions.insert(signature.id);
                     }
                 }
             }
@@ -1327,7 +1335,14 @@ impl Checker<'_> {
         None
     }
 
+    pub(super) fn terminating_call(&self, value: &Expr) -> bool {
+        matches!(&value.kind, ExprKind::Call(id, _) if self.classes.nonreturning_functions.contains(id))
+    }
+
     fn call_operand_returns(&self, value: &Expr) -> bool {
+        if self.terminating_call(value) {
+            return false;
+        }
         if let ExprKind::Call(callee, _) = &value.kind {
             return self.source_function_may_return(*callee);
         }
@@ -1372,7 +1387,8 @@ impl Checker<'_> {
         }
         let entry_site = self.observed_entry_call(call, signature);
         let mut scope = calls::ArgumentScope::default();
-        let (ty, args) = self.bind_source(
+        let direct = self.registered.is_none() && receiver.is_none() && skip == 0;
+        let mut args = self.source_arguments(
             call,
             signature,
             receiver,
@@ -1384,6 +1400,14 @@ impl Checker<'_> {
                 }))
             .then_some(&mut scope),
         )?;
+        if direct
+            && signature.params.len() == 1
+            && let [value] = args.values.as_slice()
+            && self.terminating_call(value)
+        {
+            return Ok(scope.finish(args.values.pop().expect("one checked argument")));
+        }
+        let ty = self.enter_source_call(call, signature)?;
         let entry_site =
             entry_site.filter(|_| args.values.iter().all(|arg| self.call_operand_returns(arg)));
         if let (Some(site), Some(seen)) = (entry_site, &mut self.observed_definition) {
@@ -1405,6 +1429,33 @@ impl Checker<'_> {
         skip: usize,
         scope: Option<&mut calls::ArgumentScope>,
     ) -> Result<(Type, ir::CallArgs), String> {
+        let args = self.source_arguments(call, signature, receiver, skip, scope)?;
+        Ok((self.enter_source_call(call, signature)?, args))
+    }
+
+    /// The caller needs the return layout only after evaluating its arguments.
+    fn enter_source_call(
+        &mut self,
+        call: &ast::ExprCall,
+        signature: &Signature,
+    ) -> Result<Type, String> {
+        self.calls.insert(signature.id);
+        match self.inference {
+            Some(inference) => inference
+                .lookup(signature, SignatureUse::Return, self.module, call.range())
+                .map_err(|failure| failure.at(self.source, call)),
+            None => Ok(signature.returns),
+        }
+    }
+
+    fn source_arguments(
+        &mut self,
+        call: &ast::ExprCall,
+        signature: &Signature,
+        receiver: Option<Expr>,
+        skip: usize,
+        scope: Option<&mut calls::ArgumentScope>,
+    ) -> Result<ir::CallArgs, String> {
         // CPython's accelerated stat functions take an unsigned mode_t through
         // the index protocol. A boolean argument must reach their integer body
         // as 0 or 1; ordinary annotated Python functions retain their own types.
@@ -1416,7 +1467,12 @@ impl Checker<'_> {
                 && class.methods[method.index].name.as_str() == "select"
         });
         let inference = self.inference;
-        let args = self.bind_supplied(
+        let direct_input = self.registered.is_none()
+            && receiver.is_none()
+            && skip == 0
+            && scope.is_none()
+            && signature.params.len() == 1;
+        self.bind_supplied(
             call,
             &signature.params[skip..],
             receiver,
@@ -1426,6 +1482,21 @@ impl Checker<'_> {
                 let index = index + skip;
                 let parameter = &signature.params[index];
                 let declaration = signature.parameter_declaration(index);
+                // A direct source call supplies its own result layout. Keep the checked
+                // value for the ordinary binder if it returns to this argument.
+                let node = argument.site();
+                let argument = if direct_input
+                    && let Some(inner) = node.as_call_expr()
+                    && matches!(checker.resolve(&inner.func), Some(Binding::Definition(id)) if checker.functions.contains_key(&id))
+                {
+                    let value = argument.value(checker)?;
+                    if checker.terminating_call(&value) {
+                        return Ok(value);
+                    }
+                    calls::Supplied::Field(value, node)
+                } else {
+                    argument
+                };
                 if selector_wait && parameter.name == "timeout" {
                     let node = argument.site();
                     let value = argument.value(checker)?;
@@ -1596,15 +1667,7 @@ impl Checker<'_> {
                 inference.learn_parameter(signature.id, index, value.ty);
                 Ok(value)
             },
-        )?;
-        self.calls.insert(signature.id);
-        let returns = match inference {
-            Some(inference) => inference
-                .lookup(signature, SignatureUse::Return, self.module, call.range())
-                .map_err(|failure| failure.at(self.source, call))?,
-            None => signature.returns,
-        };
-        Ok((returns, args))
+        )
     }
 }
 
@@ -1644,6 +1707,31 @@ mod tests {
             .unwrap();
         assert_eq!(error.kind, Kind::ExactType);
         assert!(error.to_string().contains(":5:19:"));
+    }
+
+    #[test]
+    fn a_return_replaced_by_finally_does_not_supply_a_forwarded_argument() {
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("main.py");
+        let source = concat!(
+            "def choose():\n",
+            "    try: return 'wrong'\n",
+            "    finally: raise SystemExit(13)\n",
+            "def take(value: int) -> int: return value\n",
+            "def relay(arg): return take(arg)\n",
+            "print(relay(choose()))\n",
+        );
+        std::fs::write(&file, source).unwrap();
+        crate::check_file(&file, None).unwrap();
+        let typed = source.replace(
+            "print(relay(choose()))",
+            "def caller() -> int: return take(choose())\nprint(caller())",
+        );
+        std::fs::write(&file, typed).unwrap();
+        crate::check_file(&file, None).unwrap();
+        std::fs::write(&file, source.replace("raise SystemExit(13)", "pass")).unwrap();
+        let error = crate::check_file(&file, None).unwrap_err();
+        assert!(error.contains("expected int, got str"), "{error}");
     }
 
     #[test]
