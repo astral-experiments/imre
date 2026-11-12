@@ -886,6 +886,7 @@ impl Inference {
             let mut completed_calls = classes.nonreturning_functions.clone();
             let mut conflicting_returns = None;
             let mut opaque_returns = Vec::new();
+            let mut staged_returns = Vec::new();
             for (module, range) in graph.initializers(class_globals) {
                 let mut checker = Checker::new(
                     graph, module, signatures, classes, types, &helpers, &globals,
@@ -1029,6 +1030,14 @@ impl Inference {
                     Ok::<_, Failure>(())
                 })();
                 if let Err(diagnostic) = checker.finish_region(result) {
+                    // A completed return check can still require Python operations. Only the
+                    // registered frame may own that body, after its ordinary source check.
+                    if checked_return
+                        && diagnostic.is_representation()
+                        && graph.modules[*module].is_program_source()
+                    {
+                        staged_returns.push(owners[signature.id]);
+                    }
                     // An invalid operand does not give a procedure a different return type.
                     // Let the ordinary binder report the same body as an explicit -> None.
                     if infer_return
@@ -1188,7 +1197,9 @@ impl Inference {
                             }
                         }
                     }
-                    if !checked_bodies.is_empty() && !retries_failed_layout(graph) {
+                    if (!checked_bodies.is_empty() || !staged_returns.is_empty())
+                        && !retries_failed_layout(graph)
+                    {
                         registered::capture(
                             graph,
                             signatures,
@@ -1196,6 +1207,7 @@ impl Inference {
                             types,
                             self,
                             Some(&checked_bodies),
+                            staged_returns,
                         );
                     }
                     let primary = reports.remove(index);
@@ -1242,7 +1254,7 @@ impl Inference {
                 let mut reports = reports.into_iter();
                 if let Some(primary) = reports.next() {
                     if primary.kind.is_object() && !retries_failed_layout(graph) {
-                        registered::capture(graph, signatures, classes, types, self, None);
+                        registered::capture(graph, signatures, classes, types, self, None, []);
                     }
                     return Err(primary.with_following(reports));
                 }
@@ -1261,7 +1273,7 @@ impl Inference {
                         && (unresolved.kind.is_object()
                             || matches!(unresolved.kind, Kind::UnresolvedParameter(..)))
                     {
-                        registered::capture(graph, signatures, classes, types, self, None);
+                        registered::capture(graph, signatures, classes, types, self, None, []);
                     }
                     return Err(unresolved);
                 }
