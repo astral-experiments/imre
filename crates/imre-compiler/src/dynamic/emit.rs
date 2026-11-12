@@ -359,19 +359,24 @@ impl<'a> PreparedBody<'a> {
         python_optimization: i32,
         origin: ModuleOrigin<'a>,
         literal_sites: LiteralSites,
-        (operand_types, registered_values): (
+        (operand_types, checked_source): (
             Option<crate::analysis::OperandTypes<'_>>,
-            Option<&'a crate::frontend::RegisteredModuleSource>,
+            Option<&'a crate::modules::SourceModule>,
         ),
     ) -> Result<Self, String> {
         let (module, normalized) = module.into();
+        // Layouts can supply a different parser. Only the physical graph's own
+        // parser carries its successful scope check and cached module values.
+        let checked_source = checked_source.filter(|source| {
+            source.is_program_source() && std::ptr::eq(&*source.parsed, &*module.parsed)
+        });
         let (body, _) = Self::prepare(
             name,
             path.into(),
             module.text,
             python_optimization,
             origin,
-            registered_values,
+            checked_source,
             Input::Module(
                 module.parsed,
                 literal_sites,
@@ -408,7 +413,7 @@ impl<'a> PreparedBody<'a> {
         text: Cow<'a, str>,
         python_optimization: i32,
         origin: ModuleOrigin<'a>,
-        registered_values: Option<&'a crate::frontend::RegisteredModuleSource>,
+        checked_source: Option<&'a crate::modules::SourceModule>,
         input: Input<'_>,
     ) -> Result<(Self, Option<crate::frontend::AnnotationCode>), String> {
         #[cfg(test)]
@@ -438,6 +443,7 @@ impl<'a> PreparedBody<'a> {
                     &path,
                     source,
                     parsed,
+                    checked_source.is_some(),
                     keep_docstrings
                         && !(interactive
                             && parsed
@@ -459,6 +465,7 @@ impl<'a> PreparedBody<'a> {
         } else {
             None
         };
+        let registered_values = checked_source.and_then(|source| source.cached_registered_values());
         let has_templates = registered_values.map_or_else(
             || {
                 tokens
