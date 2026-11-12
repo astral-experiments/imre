@@ -544,7 +544,7 @@ def _rank(data, /, *, key=None, reverse=False, ties='average', start=1) -> list[
         data = map(key, data)
     val_pos = sorted(zip(data, count()), reverse=reverse)
     i = start - 1
-    result = [0] * len(val_pos)
+    result = [0.0] * len(val_pos)
     for _, g in groupby(val_pos, key=itemgetter(0)):
         group = list(g)
         size = len(group)
