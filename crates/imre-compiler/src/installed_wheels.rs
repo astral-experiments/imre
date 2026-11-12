@@ -162,7 +162,7 @@ impl WheelRecords {
 impl InstalledWheel {
     pub(crate) fn take_active(
         pending: &mut Vec<Self>,
-        sources: &[(String, PathBuf, String)],
+        sources: &[crate::dynamic::ModuleSource<'_>],
         candidates: &mut HashMap<String, HashSet<PathBuf>>,
     ) -> Option<BTreeSet<String>> {
         if pending.is_empty() {
@@ -216,11 +216,7 @@ mod tests {
         let mut wheels = catalog.discover(root, &mut inputs, &mut FileSystem::default());
         let mut candidates = HashMap::new();
         assert!(InstalledWheel::take_active(&mut wheels, &[], &mut candidates).is_none());
-        let files = vec![(
-            "demo".to_owned(),
-            root.join("demo/__init__.py"),
-            String::new(),
-        )];
+        let files = vec![("demo".to_owned(), root.join("demo/__init__.py"), "".into())];
         let names = InstalledWheel::take_active(&mut wheels, &files, &mut candidates).unwrap();
         assert_eq!(names, BTreeSet::from(["demo.with,comma".to_owned()]));
         assert_eq!(
@@ -255,7 +251,7 @@ mod tests {
         let mut wheels =
             WheelRecords::default().discover(&alias, &mut inputs, &mut FileSystem::default());
         let mut candidates = HashMap::new();
-        let sources = vec![("plugins".to_owned(), alias.join("plugins"), String::new())];
+        let sources = vec![("plugins".to_owned(), alias.join("plugins"), "".into())];
         let names = InstalledWheel::take_active(&mut wheels, &sources, &mut candidates).unwrap();
         assert_eq!(names, BTreeSet::from(["plugins.one".to_owned()]));
         assert_eq!(

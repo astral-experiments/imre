@@ -727,7 +727,7 @@ pub(crate) fn check_native_syntax(
     root: &Path,
     scratch: &mut Option<Session>,
     checked: Option<&crate::modules::SourceGraph>,
-    (name, path, source): &(String, PathBuf, String),
+    (name, path, source): &crate::dynamic::ModuleSource<'_>,
     keep_parser: bool,
     is_alternative: impl Fn(&Path) -> bool,
     module_errors: &mut HashMap<PathBuf, Box<crate::dynamic::ModuleSyntaxError>>,

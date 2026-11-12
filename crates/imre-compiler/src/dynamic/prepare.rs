@@ -9,7 +9,7 @@ use super::provider_archive::Providers;
 use crate::frontend::module_source::ParsedModule;
 use crate::ir::PhysicalModuleKind;
 
-pub(super) type ModuleSource = (String, PathBuf, String);
+pub(crate) type ModuleSource<'a> = (String, PathBuf, Cow<'a, str>);
 
 pub(super) enum Initializer<'a> {
     Checked(Box<PreparedBody<'a>>),
@@ -17,7 +17,7 @@ pub(super) enum Initializer<'a> {
 }
 
 pub(super) struct PreparedUnit<'a> {
-    pub(super) module: &'a ModuleSource,
+    pub(super) module: &'a ModuleSource<'a>,
     pub(super) builtin: bool,
     pub(super) physical: Option<(&'a PhysicalFile, PhysicalModuleKind<'a>)>,
     pub(super) zip: Option<&'a ([u8; 32], u32)>,
@@ -46,7 +46,7 @@ pub(super) fn check_shipped(
 /// Check consumes this iterator one unit at a time. A build retains the same
 /// initializers until every source has passed preparation.
 pub(super) fn units<'a>(
-    (files, builtins): (&'a [ModuleSource], &'a [ModuleSource]),
+    (files, builtins): (&'a [ModuleSource<'a>], &'a [ModuleSource<'a>]),
     (mut entry_source, mut scanned_modules, mut shipped_checks): (
         Option<ParsedModule<'a, 'a>>,
         HashMap<usize, super::ScannedModule>,
@@ -115,7 +115,7 @@ pub(super) fn units<'a>(
                     } else if file_digest.is_some() || zip.is_some() {
                         crate::normalize_source(source, crate::SourceKind::DecodedFile)?
                     } else {
-                        Cow::Borrowed(source.as_str())
+                        Cow::Borrowed(source.as_ref())
                     };
                     (text, None)
                 };

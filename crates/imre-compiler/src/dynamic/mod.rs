@@ -5,6 +5,7 @@ pub(crate) use emit::Prompt;
 mod import_module;
 pub(crate) mod literal;
 mod prepare;
+pub(crate) use prepare::ModuleSource;
 mod provider_archive;
 pub(crate) mod provider_pack;
 
@@ -876,7 +877,7 @@ pub(crate) struct RegisteredSource<'a> {
 
 impl<'a> RegisteredSource<'a> {
     pub(crate) fn new(
-        (name, path, source): &'a (String, PathBuf, String),
+        (name, path, source): &'a ModuleSource<'_>,
         is_program: bool,
         checked_module: Option<crate::modules::ModuleId>,
     ) -> Self {
@@ -1253,14 +1254,14 @@ pub(crate) fn compile(
     // The runtime executes the first FILE body in __main__. Its finder and
     // relative imports use the qualified name belonging to that same file.
     let entry_name = packaged_file_module.unwrap_or("__main__");
-    let mut sources = vec![(
+    let mut sources: Vec<ModuleSource<'_>> = vec![(
         entry_name.to_owned(),
         if in_memory {
             PathBuf::from("<string>")
         } else {
             entry
         },
-        src.clone(),
+        src.as_str().into(),
     )];
     if let Some(identity) = entry_identity {
         registrations
@@ -1732,7 +1733,7 @@ pub(crate) fn compile(
                     {
                         checked_sdk_providers.push((id, sources.len()));
                     }
-                    sources.push((prefix.clone(), path, source.into_owned()));
+                    sources.push((prefix.clone(), path, source));
                 }
                 // Frozen runpy drives -m before a project runpy on sys.path.
                 if frozen && (!file_alternatives || prefix == "runpy") {
@@ -1816,7 +1817,7 @@ pub(crate) fn compile(
                                         selected_sources.push((sources.len(), program, checked));
                                     }
                                 }
-                                sources.push((prefix.clone(), member.path, member.source));
+                                sources.push((prefix.clone(), member.path, member.source.into()));
                             }
                             if !implicit_dirs.is_empty() {
                                 before_site.insert(prefix.clone());
@@ -1859,7 +1860,7 @@ pub(crate) fn compile(
                                 stem.clone(),
                                 filesystem.canonicalize(&stem).map_err(|e| e.to_string())?,
                             ));
-                            sources.push((prefix.clone(), stem, String::new()));
+                            sources.push((prefix.clone(), stem, "".into()));
                         } else {
                             inputs.missing.push(stem);
                         }
@@ -2089,7 +2090,7 @@ pub(crate) fn compile(
                             ));
                         }
                         file_origins.push((sources.len(), root));
-                        let registration = (prefix.clone(), path, src);
+                        let registration = (prefix.clone(), path, src.into());
                         if winner {
                             // Only path zero belongs to the program. With safe path
                             // the first remaining search entry may be an installation.
@@ -2184,7 +2185,7 @@ pub(crate) fn compile(
                     } else {
                         bundled_imports.push_back(((prefix.clone(), package, imports), false));
                     }
-                    sources.push((prefix.clone(), path, source));
+                    sources.push((prefix.clone(), path, source.into()));
                 }
             }
         }
@@ -2200,7 +2201,7 @@ pub(crate) fn compile(
     }
     // These bodies extend native module scopes. Keep them out of the source finder and
     // out of the checked project's winners, even when no explicit import names them.
-    let builtins: Vec<(String, PathBuf, String)> =
+    let builtins: Vec<ModuleSource<'_>> =
         builtin_sources(options.target_os.unwrap_or(std::env::consts::OS))
             .into_iter()
             .map(|(name, file, body)| {
@@ -2377,7 +2378,7 @@ pub(crate) fn compile(
         .into_iter()
         .filter_map(|(id, unit)| {
             let (name, path, body) = &sources[unit];
-            (!entry_sources.contains_key(name)).then_some((id, (path.as_path(), body.as_str())))
+            (!entry_sources.contains_key(name)).then_some((id, (path.as_path(), body.as_ref())))
         })
         .collect();
     if let Some(graph) = checked_graph {

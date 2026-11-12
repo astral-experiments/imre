@@ -664,7 +664,7 @@ fn dormant_lexical_checks_keep_known_parameters_of_partial_calls() {
         let source = (
             "scores".to_owned(),
             root.join("scores.py"),
-            format!("def take({parameters}): pass\nif False:\n    {call}\n"),
+            format!("def take({parameters}): pass\nif False:\n    {call}\n").into(),
         );
         let error = super::check_registered_project(
             root,
@@ -857,12 +857,8 @@ fn a_linked_signature_requires_a_reaching_initializer_call() {
     let root = project.path();
     let check = |main: &str, dependency: &str, declares: bool| {
         let sources = [
-            ("job".to_owned(), root.join("job.py"), main.to_owned()),
-            (
-                "rules".to_owned(),
-                root.join("rules.py"),
-                dependency.to_owned(),
-            ),
+            ("job".to_owned(), root.join("job.py"), main.into()),
+            ("rules".to_owned(), root.join("rules.py"), dependency.into()),
         ];
         super::check_registered_project(
             root,
@@ -925,7 +921,7 @@ fn registered_generators_require_a_linked_source_body() {
     let path = project.path().join("main.py");
     let source = "def rows():\n    yield eval(input())\nfor row in rows(): print(row)\n";
     fs::write(&path, source).unwrap();
-    let module = ("__main__".to_owned(), path, source.to_owned());
+    let module = ("__main__".to_owned(), path, source.into());
     let error = super::check_registered_project(
         project.path(),
         &[],
@@ -970,21 +966,21 @@ fn a_builtin_namespace_lookup_only_requires_a_source_body_when_invoked() {
 #[test]
 fn captured_generator_keeps_its_source_requirement_through_a_helper() {
     let project = tempdir().unwrap();
-    let provider = (
+    let provider: crate::dynamic::ModuleSource<'_> = (
         "producer".to_owned(),
         project.path().join("producer.py"),
-        "def rows():\n    yield eval(input())\n".to_owned(),
+        "def rows():\n    yield eval(input())\n".into(),
     );
-    fs::write(&provider.1, &provider.2).unwrap();
+    fs::write(&provider.1, provider.2.as_bytes()).unwrap();
     let check = |tail: &str| {
-        let entry = (
+        let entry: crate::dynamic::ModuleSource<'_> = (
             "__main__".to_owned(),
             project.path().join("main.py"),
             format!(
                 "from producer import rows\ndef run():\n    for row in rows(): print(row)\n{tail}\nrun()\n"
-            ),
+            ).into(),
         );
-        fs::write(&entry.1, &entry.2).unwrap();
+        fs::write(&entry.1, entry.2.as_bytes()).unwrap();
         let mut main = RegisteredSource::new(&entry, true, None);
         main.initial = true;
         main.main_body = true;
