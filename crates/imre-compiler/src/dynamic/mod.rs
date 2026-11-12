@@ -52,17 +52,26 @@ fn declared_open_path(
 /// Only a winning file can add a first-party frozen override while walking SDK dependencies.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ImportOrigin {
+    Startup,
     File,
     Provider,
     Alternative,
 }
 
 impl ImportOrigin {
-    fn file(winner: bool) -> Self {
-        if winner {
-            Self::File
+    fn file(self, winner: bool) -> Self {
+        match (winner, self) {
+            (true, Self::Startup) => Self::Startup,
+            (true, _) => Self::File,
+            (false, _) => Self::Alternative,
+        }
+    }
+
+    fn enqueue<T>(self, work: &mut VecDeque<(T, Self)>, item: T) {
+        if self == Self::Startup {
+            work.push_front((item, self));
         } else {
-            Self::Alternative
+            work.push_back((item, self));
         }
     }
 }
@@ -857,11 +866,17 @@ pub(crate) enum ObjectOperation {
 }
 
 #[derive(Clone, Copy)]
+pub(crate) enum EntryStart<'a> {
+    Immediate,
+    After(&'a Path),
+}
+
+#[derive(Clone, Copy)]
 pub(crate) struct RegisteredSource<'a> {
     pub(crate) has_open_exec: bool,
     pub(crate) unit: Option<usize>,
-    /// This registration can start the application before any custom startup module runs.
-    pub(crate) initial: bool,
+    /// The first application initializer and its selected startup predecessor, if any.
+    pub(crate) initial: Option<EntryStart<'a>>,
     /// The ordinary launcher selected this source to execute in the startup namespace.
     pub(crate) main_body: bool,
     /// This exact source supplies the annotations in the linked application.
@@ -895,7 +910,7 @@ impl<'a> RegisteredSource<'a> {
             is_program,
             check_execution: is_program,
             checked_module,
-            initial: false,
+            initial: None,
             main_body: false,
             declares_signatures: is_program,
         }
@@ -1280,6 +1295,7 @@ pub(crate) fn compile(
         inputs.files.push((path.to_owned(), identity, digest));
     }
     let mut selected_sources = Vec::new();
+    let mut site_initializer = None;
     if module_entry.is_none() {
         selected_sources.push((0, true, checked_graph.map(|graph| graph.entry)));
     }
@@ -1329,6 +1345,25 @@ pub(crate) fn compile(
     let mut searched_frozen_files = HashSet::new();
     let mut selected_work =
         VecDeque::from([((entry_name.to_owned(), false, first), ImportOrigin::File)]);
+    // Site imports its hook before the launcher inserts path[0]. Let the
+    // ordinary source collector prepare its initializer and dependencies.
+    let mut site_roots = Vec::new();
+    let mut site_root_count = 0;
+    if options.sitecustomize || options.stdlib_sitecustomize {
+        site_roots.extend_from_slice(startup_paths);
+        site_roots.extend_from_slice(&installed_dirs);
+        site_root_count = site_roots.len();
+        // These alternatives can be imported after Python installs the script path.
+        site_roots.extend(
+            roots
+                .iter()
+                .filter(|root| !startup_paths.contains(root) && !installed_dirs.contains(root))
+                .cloned(),
+        );
+        let mut hook = Imports::default();
+        hook.add(0, "sitecustomize");
+        selected_work.push_front(((String::new(), false, hook), ImportOrigin::Startup));
+    }
     let mut sdk_work = VecDeque::new();
     let mut following_sdk = false;
     let mut work = VecDeque::new();
@@ -1741,7 +1776,12 @@ pub(crate) fn compile(
                 }
                 let graph_file =
                     checked_graph.and_then(|graph| Some((graph, graph.python_file(&prefix)?)));
-                for root in roots.iter().filter(|_| !bundled_only) {
+                let search_roots = if origin == ImportOrigin::Startup {
+                    &site_roots
+                } else {
+                    &roots
+                };
+                for (index, root) in search_roots.iter().enumerate().filter(|_| !bundled_only) {
                     if implicit_dirs.contains(root) && before_site.contains(&prefix) {
                         continue;
                     }
@@ -1749,7 +1789,13 @@ pub(crate) fn compile(
                     let selected_parent = parent.and_then(|name| entry_sources.get(name));
                     let on_package_path = selected_parent
                         .is_none_or(|(selected, package)| *package && selected == root);
-                    let winner = on_package_path && !entry_sources.contains_key(&prefix);
+                    let winner = on_package_path
+                        && !entry_sources.contains_key(&prefix)
+                        && (origin != ImportOrigin::Startup || index < site_root_count);
+                    let child_origin = origin
+                        .file(winner && (filesystem_import || origin == ImportOrigin::Startup));
+                    let selected_child = winner
+                        && (select_member && filesystem_import || origin == ImportOrigin::Startup);
                     if !on_package_path && let Some(parent) = parent {
                         // A different known package may become the live parent after sys.path changes.
                         let available = if let Some(archive) = archives.get(root) {
@@ -1794,18 +1840,15 @@ pub(crate) fn compile(
                                             &mut imports,
                                             package,
                                             select_member && filesystem_import,
-                                            ImportOrigin::file(filesystem_import),
+                                            child_origin,
                                         );
                                     }
-                                    let queue = if winner && select_member && filesystem_import {
+                                    let queue = if selected_child {
                                         &mut selected_work
                                     } else {
                                         &mut work
                                     };
-                                    queue.push_back((
-                                        (prefix.clone(), package, imports),
-                                        ImportOrigin::file(winner && filesystem_import),
-                                    ));
+                                    child_origin.enqueue(queue, (prefix.clone(), package, imports));
                                     if winner {
                                         let program = initial[..path0_len].contains(root);
                                         let checked = graph_file.and_then(|(graph, id)| {
@@ -1814,6 +1857,9 @@ pub(crate) fn compile(
                                                 && checked.original_source() == member.source)
                                                 .then_some(id)
                                         });
+                                        if origin == ImportOrigin::Startup && owner.is_empty() {
+                                            site_initializer = Some(sources.len());
+                                        }
                                         selected_sources.push((sources.len(), program, checked));
                                     }
                                 }
@@ -1903,7 +1949,8 @@ pub(crate) fn compile(
                         continue;
                     }
                     // A -m program can reorder its search paths before importing this name.
-                    let shadowed = module_entry.is_some() && !winner;
+                    let shadowed =
+                        (module_entry.is_some() || origin == ImportOrigin::Startup) && !winner;
                     let file_alternatives =
                         file_alternatives || wheel_origins.is_some() || shadowed;
                     let identity = if let Some((identity, _)) = checked_slot {
@@ -2044,15 +2091,16 @@ pub(crate) fn compile(
                     if winner {
                         entry_sources.insert(prefix.clone(), (root.clone(), package));
                         if let Some(error) = &imports.invalid_executable {
-                            unavailable_sources.insert(
-                                prefix.clone(),
-                                crate::frontend::phase::Diagnostic::at(
-                                    &src,
-                                    &error.range,
-                                    format!("SyntaxError: {}", error.message),
-                                )
-                                .with_path(&path),
-                            );
+                            let report = crate::frontend::phase::Diagnostic::at(
+                                &src,
+                                &error.range,
+                                format!("SyntaxError: {}", error.message),
+                            )
+                            .with_path(&path);
+                            if origin == ImportOrigin::Startup && owner.is_empty() {
+                                return Err(report.to_string());
+                            }
+                            unavailable_sources.insert(prefix.clone(), report);
                         }
                     }
                     if imports
@@ -2070,10 +2118,10 @@ pub(crate) fn compile(
                                     &mut imports,
                                     package,
                                     select_member && filesystem_import,
-                                    ImportOrigin::file(filesystem_import),
+                                    child_origin,
                                 );
                             }
-                            let queue = if winner && select_member && filesystem_import {
+                            let queue = if selected_child {
                                 &mut selected_work
                             } else if shadowed && ordinary_registrations.is_none() {
                                 // A dependency unique to a shadow must not veto the winning graph.
@@ -2084,10 +2132,7 @@ pub(crate) fn compile(
                             if let Some(module) = scanned.and_then(ScannedModule::from_input) {
                                 scanned_modules.insert(sources.len(), module);
                             }
-                            queue.push_back((
-                                (prefix.clone(), package, imports),
-                                ImportOrigin::file(winner && filesystem_import),
-                            ));
+                            child_origin.enqueue(queue, (prefix.clone(), package, imports));
                         }
                         file_origins.push((sources.len(), root));
                         let registration = (prefix.clone(), path, src.into());
@@ -2108,6 +2153,9 @@ pub(crate) fn compile(
                                     .entry(sources.len())
                                     .or_default()
                                     .run_path = run_path;
+                            }
+                            if origin == ImportOrigin::Startup && owner.is_empty() {
+                                site_initializer = Some(sources.len());
                             }
                             selected_sources.push((
                                 sources.len(),
@@ -2268,6 +2316,14 @@ pub(crate) fn compile(
     let functions = checked_graph
         .map(crate::modules::SourceGraph::take_registered_functions)
         .unwrap_or_default();
+    let entry_start = if options.sitecustomize || options.stdlib_sitecustomize {
+        // With unfrozen startup the physical site module can run before this hook.
+        site_initializer
+            .filter(|_| frozen_modules)
+            .map(|unit| EntryStart::After(sources[unit].1.as_path()))
+    } else {
+        Some(EntryStart::Immediate)
+    };
     let mut declared_open_paths = HashSet::new();
     let selected_sources: Vec<_> = selected_sources
         .into_iter()
@@ -2309,18 +2365,18 @@ pub(crate) fn compile(
                 None => id == 0,
                 Some(_) => module_body.is_some_and(|(body, _, package)| id == body && !package),
             };
-            registration.initial = index < ordinary_registrations.unwrap_or(usize::MAX)
-                && registration.name == module_entry.unwrap_or("__main__")
-                && !registration.name.contains('.')
-                && !options.sitecustomize
-                && !options.stdlib_sitecustomize
-                && options.user_site_pth.is_none()
-                && module_entry.is_none_or(|name| {
-                    sdk_runpy
-                        && (options.path_entry && name == "__main__"
-                            || crate::analysis::unambiguous_file_module(name))
-                })
-                && !startup.is_some_and(|(flags, _)| flags.has_warning_options);
+            registration.initial = entry_start.filter(|_| {
+                index < ordinary_registrations.unwrap_or(usize::MAX)
+                    && registration.name == module_entry.unwrap_or("__main__")
+                    && !registration.name.contains('.')
+                    && options.user_site_pth.is_none()
+                    && module_entry.is_none_or(|name| {
+                        sdk_runpy
+                            && (options.path_entry && name == "__main__"
+                                || crate::analysis::unambiguous_file_module(name))
+                    })
+                    && !startup.is_some_and(|(flags, _)| flags.has_warning_options)
+            });
             // The selected source can execute from any user search root. Only the
             // SDK winner uses bundled_root, including when its bytes come from the SDK ZIP.
             registration.check_execution |= index < named_registrations.unwrap_or(0)

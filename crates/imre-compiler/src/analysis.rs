@@ -635,10 +635,17 @@ impl Session {
         original: Option<&crate::modules::SourceGraph>,
     ) -> Result<(), String> {
         let mut captures = execution::CapturedImports::default();
-        if let Some((entry, start)) = sources
-            .clone()
-            .find(|(_, source)| source.initial && source.declares_signatures)
-        {
+        if let Some((entry, start)) = sources.clone().find(|(_, source)| {
+            source.declares_signatures
+                && match source.initial {
+                    None => false,
+                    Some(crate::dynamic::EntryStart::Immediate) => true,
+                    Some(crate::dynamic::EntryStart::After(path)) => sources
+                        .clone()
+                        .find(|(_, candidate)| candidate.path == path)
+                        .is_some_and(|(id, _)| self.empty_initializer(id)),
+                }
+        }) {
             // runpy imports the parent package before executing the selected body
             // as __main__. Only an inert parent can be passed without running code.
             let (entry, start) = if !start.main_body && self.empty_initializer(entry) {

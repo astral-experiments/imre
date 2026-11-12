@@ -644,6 +644,20 @@ def check_script_sitecustomize(imre, root, run):
     packages = root / "startup-packages"
     for directory in (app, hooks, packages):
         directory.mkdir()
+    # The hook runs before the script directory enters sys.path. After a failed
+    # import the script can import a different file under the same module name.
+    (app / "sitecustomize.py").write_text("print('script local')\n")
+    (app / "startup_helper.py").write_text("def (\n")
+    (hooks / "startup_helper.py").write_text("print('installed helper')\n")
+    (hooks / "sitecustomize.py").write_text(
+        "import startup_helper\nraise RuntimeError('setup failed')\n"
+    )
+    script = app / "reimport.py"
+    script.write_text("import sitecustomize\nprint('entry')\n")
+    result = run(imre, "-B", script, extra={"PYTHONPATH": str(hooks)}, timeout=300)
+    assert (result.returncode, result.stdout) == (0, b"installed helper\nscript local\nentry\n"), result
+    assert b"RuntimeError: setup failed" in result.stderr, result
+
     (app / "sitecustomize.py").write_text("print('script-local hook ran')\n")
     (hooks / "sitecustomize.py").write_text(f"import sys\nsys.path.insert(0, {str(packages)!r})\n")
     (packages / "startup_plugin.py").write_text("value = 'plugin loaded'\n")

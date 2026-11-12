@@ -896,7 +896,7 @@ fn a_linked_signature_requires_a_reaching_initializer_call() {
             &[],
             sources.iter().enumerate().map(|(index, source)| {
                 let mut registered = RegisteredSource::new(source, false, None);
-                registered.initial = index == 0;
+                registered.initial = (index == 0).then_some(crate::dynamic::EntryStart::Immediate);
                 registered.main_body = index == 0;
                 registered.declares_signatures = index == 0 || declares;
                 registered
@@ -944,6 +944,49 @@ fn a_linked_signature_requires_a_reaching_initializer_call() {
         true,
     )
     .unwrap();
+}
+
+#[test]
+fn selected_startup_precedes_the_package_and_main_body() {
+    let project = tempdir().unwrap();
+    let root = project.path();
+    let startup = root.join("external/sitecustomize.py");
+    let check = |hook: &str, parent: &str, selected: &std::path::Path| {
+        let sources = [
+            ("sitecustomize".into(), startup.clone(), hook.into()),
+            ("pkg".into(), root.join("pkg/__init__.py"), parent.into()),
+            (
+                "pkg.job".into(),
+                root.join("pkg/job.py"),
+                "from rules import take as apply\napply('x')\n".into(),
+            ),
+            (
+                "rules".into(),
+                root.join("rules.py"),
+                "def take(n: int): return n\n".into(),
+            ),
+        ];
+        super::check_registered_project(
+            root,
+            &[],
+            sources.iter().enumerate().map(|(i, source)| {
+                let mut registration = RegisteredSource::new(source, false, None);
+                registration.declares_signatures = i != 0;
+                registration.main_body = i == 2;
+                registration.initial =
+                    (i == 1).then_some(crate::dynamic::EntryStart::After(selected));
+                registration
+            }),
+            None,
+            None,
+            None,
+        )
+    };
+    let error = check("pass\n", "pass\n", &startup).unwrap_err();
+    assert!(error.contains("job.py:2:7"), "{error}");
+    check("raise SystemExit(19)\n", "pass\n", &startup).unwrap();
+    check("pass\n", "raise SystemExit(13)\n", &startup).unwrap();
+    check("pass\n", "pass\n", &root.join("other/sitecustomize.py")).unwrap();
 }
 
 #[test]
@@ -1013,7 +1056,7 @@ fn captured_generator_keeps_its_source_requirement_through_a_helper() {
         );
         fs::write(&entry.1, entry.2.as_bytes()).unwrap();
         let mut main = RegisteredSource::new(&entry, true, None);
-        main.initial = true;
+        main.initial = Some(crate::dynamic::EntryStart::Immediate);
         main.main_body = true;
         super::check_registered_project(
             project.path(),
