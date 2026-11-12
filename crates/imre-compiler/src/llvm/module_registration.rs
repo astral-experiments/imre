@@ -2,7 +2,6 @@
 
 use super::body::write_main;
 use super::registered::{ABI, Output};
-use crate::CodegenUnit;
 use crate::ir::{ModuleLoader, ModuleRegistration, PhysicalModuleKind};
 use std::collections::HashSet;
 use std::fmt::Write as _;
@@ -124,7 +123,7 @@ impl ModuleLauncher {
         );
     }
 
-    pub(crate) fn finish(mut self) -> CodegenUnit {
+    pub(crate) fn finish(mut self) -> String {
         self.output.integer_prelude();
         let mut llvm_ir = format!(
             "{ABI}\n{}\n{}\n",
@@ -137,10 +136,7 @@ impl ModuleLauncher {
             "",
             "@imre_dyn_finish(ptr %ctx)",
         );
-        CodegenUnit {
-            name: "__main__".into(),
-            llvm_ir,
-        }
+        llvm_ir
     }
 }
 

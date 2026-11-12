@@ -8,7 +8,7 @@ use crate::CodegenUnit;
 pub(super) struct Output {
     /// Whether a reference to this named type also needs its destruction descriptor.
     pub(super) record_types: HashMap<Type, bool>,
-    units: Vec<String>,
+    units: Vec<CodegenUnit>,
     integers: Vec<body::IntegerFunctions>,
     common: Option<String>,
     pub entry: usize,
@@ -23,12 +23,13 @@ pub(super) struct Output {
 impl Output {
     fn new(
         functions: impl IntoIterator<Item = usize>,
-        count: usize,
+        units: Vec<CodegenUnit>,
         entry: usize,
         split: bool,
     ) -> Self {
         #[cfg(test)]
         crate::single_emission_tests::record_llvm_start();
+        let count = units.len();
         let mut next = vec![0; count];
         let functions = functions
             .into_iter()
@@ -40,7 +41,7 @@ impl Output {
             .collect();
         Self {
             record_types: HashMap::new(),
-            units: vec![String::new(); count],
+            units,
             integers: vec![body::IntegerFunctions::default(); count],
             common: split.then(|| "source_filename = \"imre-unit\"\n".to_owned()),
             entry,
@@ -53,8 +54,13 @@ impl Output {
         }
     }
 
-    pub(super) fn whole(functions: usize) -> Self {
-        Self::new(std::iter::repeat_n(0, functions), 1, 0, false)
+    pub(super) fn whole() -> Self {
+        Self::new(
+            [],
+            vec![CodegenUnit::new("__main__", String::new())],
+            0,
+            false,
+        )
     }
 
     pub(super) fn include_integers(&mut self, function: body::IntegerFunctions) {
@@ -66,21 +72,31 @@ impl Output {
     }
 
     pub fn common(&mut self) -> &mut String {
-        self.common.as_mut().unwrap_or(&mut self.units[self.entry])
+        self.common
+            .as_mut()
+            .unwrap_or(&mut self.units[self.entry].llvm_ir)
     }
 
     pub fn local_helper(&mut self, name: &'static str, definition: &str) {
         if self.local_helpers.insert((self.current, name)) {
-            self.units[self.current].push_str(definition);
+            self.units[self.current].llvm_ir.push_str(definition);
         }
     }
 
     pub fn entry_buffer(&mut self) -> &mut String {
-        &mut self.units[self.entry]
+        &mut self.units[self.entry].llvm_ir
+    }
+
+    fn function_location(&self, id: usize) -> (usize, usize) {
+        if self.split() {
+            self.functions[id]
+        } else {
+            (0, id)
+        }
     }
 
     pub fn function_owner(&self, id: usize) -> usize {
-        self.functions[id].0
+        self.function_location(id).0
     }
 
     pub fn add_string(&mut self) {
@@ -102,18 +118,18 @@ impl Output {
     }
 
     pub fn function_name(&self, id: usize) -> String {
-        self.numbered("fn", id, self.functions[id])
+        self.numbered("fn", id, self.function_location(id))
     }
 
     pub fn adapter_name(&self, id: usize, bound: bool) -> String {
-        let name = self.numbered("callable", id, self.functions[id]);
+        let name = self.numbered("callable", id, self.function_location(id));
         format!("{name}_{}", if bound { "bound" } else { "plain" })
     }
 
     pub fn async_name(&self, id: usize) -> String {
         format!(
             "{}_async",
-            self.numbered("callable", id, self.functions[id])
+            self.numbered("callable", id, self.function_location(id))
         )
     }
 
@@ -201,7 +217,7 @@ impl Output {
                     "constant"
                 };
                 writeln!(
-                    self.units[unit],
+                    self.units[unit].llvm_ir,
                     "@{name} = external hidden {declaration} {ty}"
                 )
                 .unwrap();
@@ -212,8 +228,12 @@ impl Output {
         } else {
             "private"
         };
-        write!(self.units[owner], "@{name} = {linkage} {kind} {ty} ").unwrap();
-        &mut self.units[owner]
+        write!(
+            self.units[owner].llvm_ir,
+            "@{name} = {linkage} {kind} {ty} "
+        )
+        .unwrap();
+        &mut self.units[owner].llvm_ir
     }
 
     pub(super) fn define_function(
@@ -228,7 +248,7 @@ impl Output {
         let linkage = if let Some(users) = self.users.get(name) {
             for &unit in users {
                 writeln!(
-                    self.units[unit],
+                    self.units[unit].llvm_ir,
                     "declare hidden {returns} @{name}({params})"
                 )
                 .unwrap();
@@ -238,7 +258,7 @@ impl Output {
             "internal"
         };
         body::write_definition(
-            &mut self.units[owner],
+            &mut self.units[owner].llvm_ir,
             format_args!("{linkage} {returns} @{name}({params}){attrs}"),
             write_body,
         );
@@ -250,24 +270,15 @@ impl Output {
         ranges: &RangeFacts<'_>,
         sanitize: bool,
         program: NativeProgram,
-    ) -> Result<Vec<String>, Unsupported> {
+    ) -> Result<Vec<CodegenUnit>, Unsupported> {
         emit_program(module, ranges, sanitize, &mut self, program)?;
         for (integers, unit) in self.integers.into_iter().zip(&mut self.units) {
-            integers.write(unit, false);
+            integers.write(&mut unit.llvm_ir, false);
+            if let Some(common) = &self.common {
+                unit.llvm_ir.insert_str(0, common);
+            }
         }
-        let Some(common) = self.common else {
-            return Ok(self.units);
-        };
-        Ok(self
-            .units
-            .into_iter()
-            .map(|body| {
-                let mut unit = String::with_capacity(common.len() + body.len());
-                unit.push_str(&common);
-                unit.push_str(&body);
-                unit
-            })
-            .collect())
+        Ok(self.units)
     }
 }
 
@@ -278,26 +289,18 @@ pub(crate) fn emit_units(
     layout: &crate::CodegenLayout,
     sanitize: bool,
 ) -> Result<Vec<CodegenUnit>, Unsupported> {
-    let split = matches!(layout, crate::CodegenLayout::Split);
-    let output = if split {
-        Output::new(owners, graph.modules.len(), graph.entry, true)
+    let output = if matches!(layout, crate::CodegenLayout::Split) {
+        let units = graph
+            .modules
+            .iter()
+            .map(|source| CodegenUnit::new(&source.name, String::new()))
+            .collect();
+        Output::new(owners, units, graph.entry, true)
     } else {
-        Output::whole(module.functions.len())
+        Output::whole()
     };
     let ranges = crate::ranges::analyze(&module);
-    Ok(output
-        .emit(&module, &ranges, sanitize, program)?
-        .into_iter()
-        .enumerate()
-        .map(|(id, llvm_ir)| CodegenUnit {
-            name: if split {
-                graph.modules[id].name.clone()
-            } else {
-                "__main__".to_owned()
-            },
-            llvm_ir,
-        })
-        .collect())
+    output.emit(&module, &ranges, sanitize, program)
 }
 
 #[cfg(test)]
