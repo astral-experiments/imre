@@ -968,7 +968,7 @@ impl Inference {
                 checker.inferred_returns = discover_returns.then(Vec::new);
                 let mut checked_return = false;
                 let mut superseded_returns = false;
-                let mut declared_call_cannot_return = false;
+                let mut checked_call_cannot_return = false;
                 let result = (|| {
                     checker.bind_function_signature(function, &signature, |_| {})?;
                     checker.collect_local_definitions(&function.body)?;
@@ -981,8 +981,8 @@ impl Inference {
                     ) {
                         return Ok(());
                     }
-                    declared_call_cannot_return =
-                        checker.declared_call_cannot_return(function, falls_through);
+                    checked_call_cannot_return =
+                        checker.checked_call_cannot_return(function, falls_through);
                     if let Some(document) = checker.discover_document_return {
                         let returns = checker.inferred_returns.take().unwrap();
                         if !falls_through
@@ -1086,7 +1086,7 @@ impl Inference {
                     }
                     errors.push((*module, diagnostic));
                 } else {
-                    if declared_call_cannot_return {
+                    if checked_call_cannot_return {
                         completed_calls.insert(signature.id);
                     }
                     if checked_return {
@@ -1347,15 +1347,14 @@ impl Checker<'_> {
         None
     }
 
-    /// A declared result is observable only if a return escapes the checked body.
-    pub(super) fn declared_call_cannot_return(
+    /// A call can supply a value only if its checked body has a normal exit.
+    pub(super) fn checked_call_cannot_return(
         &self,
         function: &ast::StmtFunctionDef,
         falls: bool,
     ) -> bool {
         !falls
             && !self.explicit_return
-            && function.returns.is_some()
             && !self
                 .graph
                 .session
