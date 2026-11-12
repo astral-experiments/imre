@@ -1735,15 +1735,15 @@ pub(crate) fn compile(
                         && !frozen
                         && literal
                         && origin != ImportOrigin::Alternative);
-                let filesystem_import = inspect_file
-                    && !matches!(
-                        imre_ast::providers::builtin_finder_provider(
-                            &prefix,
-                            || false,
-                            || bundled.is_some() || installed.is_some()
-                        ),
-                        Some(imre_ast::providers::Provider::Builtin)
-                    );
+                let builtin = matches!(
+                    imre_ast::providers::builtin_finder_provider(
+                        &prefix,
+                        || frozen,
+                        || bundled.is_some() || installed.is_some()
+                    ),
+                    Some(imre_ast::providers::Provider::Builtin)
+                );
+                let filesystem_import = inspect_file && !builtin;
                 if let Some((filename, source)) = bundled
                     && new_module
                 {
@@ -2026,9 +2026,11 @@ pub(crate) fn compile(
                     };
                     let checked =
                         graph_file.filter(|(graph, id)| graph.inputs.files[*id].1 == identity);
-                    // A later disk origin is read by SourceFileLoader if sys.path changes.
-                    // Retain its decoded syntax error even when startup selected the earlier file.
-                    let later_file = checked.is_none() && entry_sources.contains_key(&prefix);
+                    // A registered file can still be selected after the path or finder order
+                    // changes. Keep its syntax failure with the loader that would execute it.
+                    let file_alternate = checked.is_none()
+                        && (entry_sources.contains_key(&prefix)
+                            || builtin && !options.include_modules.contains(&prefix));
                     let (mut src, digest) = if let Some((graph, id)) = checked {
                         inputs.files.push((
                             path.clone(),
@@ -2097,14 +2099,15 @@ pub(crate) fn compile(
                     let mut declaration = None;
                     let imports = if let Some(file) = parsed {
                         retained_imports(file.parsed(modules), None, None)
-                    } else if output.is_none() && winner && alternative.is_none() {
+                    } else if output.is_none() && winner && alternative.is_none() && !file_alternate
+                    {
                         if checked.is_none() && kind == SourceKind::DiskFile {
                             declaration = checked_graph
                                 .and_then(|graph| graph.session.declaration_parser(&path, &src));
                         }
                         scan_imports_for_preparation(&src, kind, declaration.as_deref(), None, None)
                     } else {
-                        let parser_kind = if later_file {
+                        let parser_kind = if file_alternate {
                             SourceKind::DecodedFile
                         } else {
                             kind
@@ -2141,15 +2144,16 @@ pub(crate) fn compile(
                             unavailable_sources.insert(prefix.clone(), report);
                         }
                     }
+                    let loader_error = file_alternate && imports.invalid_executable.is_some();
                     if imports
                         .invalid_executable
                         .as_ref()
                         .is_none_or(|error| error.validate_at_origin)
                         || startup.is_none()
-                        || later_file
+                        || loader_error
                     {
                         if let Some(error) = imports.invalid_executable {
-                            if later_file && error.parse_error {
+                            if file_alternate && error.parse_error {
                                 src = imre_ast::source_encoding::universal_newlines(src);
                             }
                             module_errors.insert(path.clone(), error);
@@ -2181,7 +2185,7 @@ pub(crate) fn compile(
                         }
                         file_origins.push((sources.len(), root));
                         let registration = (prefix.clone(), path, src.into());
-                        if winner {
+                        if winner && !loader_error {
                             // Only path zero belongs to the program. With safe path
                             // the first remaining search entry may be an installation.
                             let program = initial[..path0_len].contains(root);
