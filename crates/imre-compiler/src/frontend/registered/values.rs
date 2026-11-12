@@ -820,7 +820,9 @@ pub(in crate::frontend) fn binary(
     types: Option<crate::analysis::OperandTypes<'_>>,
 ) -> Expr {
     let op = source.op.into();
-    if let Some(types) = types.filter(|_| matches!(op, Binary::Add | Binary::Subtract)) {
+    if let Some(types) =
+        types.filter(|_| matches!(op, Binary::Add | Binary::Subtract | Binary::FloorDivide))
+    {
         let refine = |node: &ast::Expr, value: &mut Expr| {
             if value.ty == Type::PythonObject
                 && let ExprKind::Builtin(Builtin::RegisteredLocation(range, _, hint), _) =

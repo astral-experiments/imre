@@ -483,14 +483,15 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         let out = self.body();
         // A declined projection is zero. Integer zero is the tagged word one.
         // The Python frame owns the exception when a divisor is zero.
+        let guard_zero = matches!(op, Binary::FloorDivide | Binary::Modulo);
         let right_guard = |out: &mut FunctionBody| {
-            if op == Binary::Modulo {
+            if guard_zero {
                 out.instruction(format!("icmp ugt i64 {b}, 1"))
             } else {
                 out.instruction(format!("icmp ne i64 {b}, 0"))
             }
         };
-        let guard = match (check_a, check_b || op == Binary::Modulo) {
+        let guard = match (check_a, check_b || guard_zero) {
             (false, false) => None,
             (true, false) => Some(out.instruction(format!("icmp ne i64 {a}, 0"))),
             (false, true) => Some(right_guard(out)),
@@ -632,10 +633,11 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             left.checked_operand_type() == Type::Int && right.checked_operand_type() == Type::Int;
         let positioned = matches!(op, Binary::Add | Binary::Subtract | Binary::Multiply)
             || op == Binary::Modulo && checked_ints;
-        let arithmetic = positioned
-            && (matches!(site, OperationSite::Placed(..))
-                || expr.ty == Type::PythonObject
-                || checked_ints);
+        let arithmetic = op == Binary::FloorDivide && checked_ints
+            || positioned
+                && (matches!(site, OperationSite::Placed(..))
+                    || expr.ty == Type::PythonObject
+                    || checked_ints);
         let (left_use, right_use) =
             if arithmetic && (op == Binary::Multiply || checked_ints || usage.needs_integer()) {
                 // The left operand must be ready before the right can call Python.
