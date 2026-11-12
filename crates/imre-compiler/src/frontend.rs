@@ -3126,8 +3126,8 @@ struct Checker<'a> {
     registered: Option<&'a registered::values::ModuleSource>,
     bound_function_imports: bool,
     checked_callback_effects: bool,
-    /// Only a complete body can be retained by a solved-signature registration trial.
-    optional_registered_body: bool,
+    /// First non-parameter slot of a solved-signature registered body, when being tried.
+    registered_local_start: Option<usize>,
     /// This body takes a lexical callable binding with live parameter annotations.
     live_protocol_parameters: bool,
     /// The first operation whose execution requires a different representation. All
@@ -3239,7 +3239,7 @@ impl<'a> Checker<'a> {
             registered: None,
             bound_function_imports: false,
             checked_callback_effects: false,
-            optional_registered_body: false,
+            registered_local_start: None,
             live_protocol_parameters: false,
             unrepresented: Default::default(),
             namespace_calls: HashSet::new(),
@@ -5130,6 +5130,21 @@ impl<'a> Checker<'a> {
                 self.narrowed.remove_mut(slot);
             }
         }
+        // A Python frame stores each pulled object in the same lexical binding.
+        // At an outermost loop, earlier uses of its inferred layout cannot be re-entered.
+        if let Some(first_local) = self.registered_local_start
+            && self.block_depth == 1
+            && let Iteration::Prepared(row) = &input
+            && self.locals[row.value] == Type::PythonObject
+            && let Some(slot) = loop_
+                .target
+                .as_name_expr()
+                .and_then(|name| self.names.get(name.id.as_str()))
+            && *slot >= first_local
+            && !self.declared_slots.contains_key(slot)
+        {
+            self.locals[*slot] = Type::PythonObject;
+        }
         self.lower_iteration(&loop_.target, input, &loop_.orelse, |checker| {
             Ok(checker.block(&loop_.body)?.0)
         })
@@ -5768,7 +5783,7 @@ impl<'a> Checker<'a> {
                 "operation requires its compiled object representation",
             )
         });
-        if self.optional_registered_body {
+        if self.registered_local_start.is_some() {
             return Err(failure.clone());
         }
         Ok(())
@@ -5781,7 +5796,7 @@ impl<'a> Checker<'a> {
         self.unrepresented
             .borrow_mut()
             .get_or_insert_with(|| failure.clone());
-        !self.optional_registered_body
+        self.registered_local_start.is_none()
     }
 
     /// Check-only operands cannot leave the source region in an executable body.

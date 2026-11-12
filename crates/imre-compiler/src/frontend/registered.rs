@@ -494,7 +494,7 @@ pub(super) fn capture(
             &helpers,
             private.as_ref().unwrap_or(globals),
         );
-        checker.optional_registered_body = solved;
+        checker.registered_local_start = solved.then_some(signature.params.len());
         // The fixed checker validated this physical signature in the settled round.
         checker.checked_callback_effects =
             solved && matches!(mode, Capture::Entry(checked) if checked.contains(&signature.id));
@@ -6254,6 +6254,27 @@ mod tests {
         });
         assert_eq!(pulls.len(), 1);
         assert_eq!(&source[pulls[0]], "item");
+    }
+
+    #[test]
+    fn a_registered_loop_binds_its_opaque_row_to_the_existing_inferred_local() {
+        let graph = SourceGraph::single(concat!(
+            "def consume() -> None:\n",
+            "    offset = 7\n",
+            "    for offset in (value for value in [1, 2, 3]):\n",
+            "        print('entered', offset)\n",
+            "    print('last', offset)\n",
+            "def publish(sink):\n    sink(1)\n",
+        ))
+        .unwrap();
+        assert!(super::super::lower(&graph).is_err());
+        let functions = graph.registered_functions();
+        let body = &functions[&graph.entry][&TextSize::default()];
+        assert!(body.local_names.iter().any(|(&slot, binding)| {
+            binding.name == "offset"
+                && binding.namespace.is_none()
+                && body.function.locals[slot] == Type::PythonObject
+        }));
     }
 
     #[test]

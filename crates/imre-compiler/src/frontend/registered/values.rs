@@ -1158,14 +1158,14 @@ impl Checker<'_> {
     ) -> Result<Option<Expr>, String> {
         let source = module.context(self.source);
         if let ast::Expr::FString(value) = node
-            && self.optional_registered_body
+            && self.registered_local_start.is_some()
         {
             let value = fstrings::registered_fstring(value, source, |child| self.expr(child))?;
             self.live_protocol_parameters = true;
             return Ok(Some(source.located(node, value)));
         }
         if let ast::Expr::Generator(generator) = node
-            && self.optional_registered_body
+            && self.registered_local_start.is_some()
         {
             let mut value = generator_binding(generator, |outer| self.expr(outer))?;
             self.live_protocol_parameters = true;
@@ -1263,7 +1263,7 @@ impl Checker<'_> {
         // A typed receiver in this frame can still be a subclass with an overriding method.
         let method = node
             .as_call_expr()
-            .filter(|_| self.optional_registered_body)
+            .filter(|_| self.registered_local_start.is_some())
             .and_then(|call| source.direct_method(call));
         let string_method = method.is_some_and(|method| {
             matches!(method.attr.as_str(), "join" | "split" | "replace")
