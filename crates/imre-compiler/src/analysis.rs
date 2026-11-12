@@ -263,10 +263,13 @@ impl OperandTypes<'_> {
         let session = self.session;
         let file = session.db.program_file(session.files[self.module]);
         let model = SemanticModel::new(&session.db, file);
-        matches!(
-            original.inferred_type(&model),
-            Some(ty_python_semantic::types::Type::BoundMethod(_))
-        )
+        use ty_python_semantic::types::Type;
+        let bound = |ty| matches!(ty, Type::BoundMethod(_));
+        match original.inferred_type(&model) {
+            Some(Type::Union(union)) => union.elements(&session.db).iter().copied().all(bound),
+            Some(ty) => bound(ty),
+            None => false,
+        }
     }
 
     fn original_operand<'p>(

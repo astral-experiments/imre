@@ -9232,8 +9232,9 @@ impl<'a> Checker<'a> {
                     && let [op] = compare.ops.as_ref()
                     && ir::Compare::from_operator(*op).is_some()
                 {
-                    if matches!(op, ast::CmpOp::Eq | ast::CmpOp::NotEq)
-                        && values.iter().any(|value| value.ty == Type::PythonObject)
+                    if values.iter().all(|value| value.ty == Type::PythonObject)
+                        || matches!(op, ast::CmpOp::Eq | ast::CmpOp::NotEq)
+                            && values.iter().any(|value| value.ty == Type::PythonObject)
                     {
                         return Ok(Expr {
                             ty: Type::PythonObject,
