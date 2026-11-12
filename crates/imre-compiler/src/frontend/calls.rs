@@ -1,5 +1,7 @@
 //! Binds closed signatures without conflating argument evaluation and ABI order.
 
+use std::ops::ControlFlow;
+
 use super::*;
 use ruff_python_ast::UnaryOp;
 
@@ -112,14 +114,14 @@ fn keyword_slot<'a>(
 /// Bind supplied values in evaluation order, then fill omitted defaults. Checked
 /// lowering and the initializer proof use different value consumers for the same
 /// slots. Checking one supplied value can fail before a later binding error.
-fn bind_fixed<'a, P, E>(
+fn bind_fixed<'a, P, E, B>(
     call: &'a ast::ExprCall,
     parameters: &[P],
     shape: impl Fn(&P) -> (&str, ParameterKind, bool),
     offset: usize,
-    mut bind: impl FnMut(usize, Option<&'a ast::Expr>) -> std::result::Result<(), E>,
+    mut bind: impl FnMut(usize, Option<&'a ast::Expr>) -> std::result::Result<ControlFlow<B>, E>,
     error: impl Fn(TextRange, String) -> E,
-) -> std::result::Result<Vec<usize>, E> {
+) -> std::result::Result<ControlFlow<B, Vec<usize>>, E> {
     let mut order = vec![usize::MAX; parameters.len() + offset];
     if offset > 0 {
         order[0] = 0;
@@ -150,7 +152,9 @@ fn bind_fixed<'a, P, E>(
                 .map_err(|reason| error(keyword.range(), reason))?
             }
         };
-        bind(index, Some(supplied.value()))?;
+        if let ControlFlow::Break(stop) = bind(index, Some(supplied.value()))? {
+            return Ok(ControlFlow::Break(stop));
+        }
         order[index + offset] = next;
         next += 1;
     }
@@ -163,12 +167,14 @@ fn bind_fixed<'a, P, E>(
                     format!("missing required argument {name:?}"),
                 ));
             }
-            bind(index, None)?;
+            if let ControlFlow::Break(stop) = bind(index, None)? {
+                return Ok(ControlFlow::Break(stop));
+            }
             order[index + offset] = next;
             next += 1;
         }
     }
-    Ok(order)
+    Ok(ControlFlow::Continue(order))
 }
 
 /// Return the explicit fixed operands of a proved source declaration. Dynamic
@@ -195,11 +201,12 @@ pub(crate) fn fixed_call_arguments<'a>(
             if let Some(value) = value {
                 bound.push((fixed[index].0, value));
             }
-            Ok(())
+            Ok(ControlFlow::<()>::Continue(()))
         },
         |_, _| (),
     )
-    .ok()?;
+    .ok()?
+    .continue_value()?;
     Some(bound)
 }
 
@@ -726,10 +733,26 @@ impl Checker<'_> {
         call: &ast::ExprCall,
         params: &[Parameter],
         receiver: Option<Expr>,
-        mut scope: Option<&mut ArgumentScope>,
+        scope: Option<&mut ArgumentScope>,
         source_signature: Option<(&Signature, usize)>,
         check: &mut dyn FnMut(&mut Self, usize, Supplied<'_>) -> Result<Expr, String>,
     ) -> Result<ir::CallArgs, String> {
+        Ok(self
+            .bind_eager_arguments(call, params, receiver, scope, source_signature, None, check)?
+            .continue_value()
+            .expect("only direct source calls can stop during binding"))
+    }
+
+    pub(super) fn bind_eager_arguments(
+        &mut self,
+        call: &ast::ExprCall,
+        params: &[Parameter],
+        receiver: Option<Expr>,
+        mut scope: Option<&mut ArgumentScope>,
+        source_signature: Option<(&Signature, usize)>,
+        stop_return: Option<Type>,
+        check: &mut dyn FnMut(&mut Self, usize, Supplied<'_>) -> Result<Expr, String>,
+    ) -> Result<ControlFlow<Expr, ir::CallArgs>, String> {
         let default_owner = source_signature.map(|(sig, skip)| (sig.id, skip));
         let declaration = |index| {
             source_signature.and_then(|(sig, skip)| sig.parameter_declaration(index + skip))
@@ -764,6 +787,21 @@ impl Checker<'_> {
                 |index, supplied| {
                     let value = if let Some(supplied) = supplied {
                         let value = check(self, index, Supplied::Source(supplied))?;
+                        if let Some(returns) = stop_return
+                            && self.terminating_operand(&value)
+                        {
+                            let stop = if values.is_empty() {
+                                value
+                            } else {
+                                ArgumentScope::stopped(
+                                    self,
+                                    std::mem::take(&mut values),
+                                    value,
+                                    returns,
+                                )
+                            };
+                            return Ok(ControlFlow::Break(stop));
+                        }
                         if let Some(scope) = scope.as_deref_mut() {
                             scope.hold(self, value)
                         } else {
@@ -777,16 +815,20 @@ impl Checker<'_> {
                         )
                     };
                     values.push(value);
-                    Ok(())
+                    Ok(ControlFlow::Continue(()))
                 },
                 |at, msg| error(source, &at, &msg),
             )?;
-            return Ok(ir::CallArgs {
+            let order = match order {
+                ControlFlow::Continue(order) => order,
+                ControlFlow::Break(stop) => return Ok(ControlFlow::Break(stop)),
+            };
+            return Ok(ControlFlow::Continue(ir::CallArgs {
                 values,
                 order,
                 site: ir::CallSite::None,
                 exhaustive_enum_match: false,
-            });
+            }));
         }
         let mut order = vec![usize::MAX; params.len() + offset];
         if offset > 0 {
@@ -1016,12 +1058,12 @@ impl Checker<'_> {
                 values.push(self.call_default(default, default_owner, index));
             }
         }
-        Ok(ir::CallArgs {
+        Ok(ControlFlow::Continue(ir::CallArgs {
             values,
             order,
             site: ir::CallSite::None,
             exhaustive_enum_match: false,
-        })
+        }))
     }
 
     fn call_default(
