@@ -142,9 +142,9 @@ impl<M> Diagnostic<M> {
         self
     }
 
-    pub(crate) fn check_declared_operand(
+    pub(crate) fn check_declared_operand<'p>(
         &self,
-        graph: &SourceGraph,
+        mut selected: impl Iterator<Item = (ModuleId, &'p Path)> + Clone,
     ) -> std::result::Result<(), String>
     where
         M: fmt::Display,
@@ -153,11 +153,9 @@ impl<M> Diagnostic<M> {
             && self
                 .position
                 .as_ref()
-                .and_then(|p| p.expected_from)
-                .is_some_and(|owner| graph.modules[owner.module].checks_source_contracts())
-            && graph.modules.iter().any(|m| {
-                m.checks_source_contracts() && self.path.as_deref() == Some(m.path.as_path())
-            })
+                .and_then(|position| position.expected_from)
+                .is_some_and(|owner| selected.clone().any(|(id, _)| id == owner.module))
+            && selected.any(|(_, path)| self.path.as_deref() == Some(path))
         {
             Err(self.to_string())
         } else {

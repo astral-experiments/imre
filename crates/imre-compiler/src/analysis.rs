@@ -130,15 +130,12 @@ impl SourceContract {
             Self::Checked(result) => result,
             Self::Pending { native, result } => result.get_or_init(|| {
                 let (skipped, overloads) = graph.diagnostic_scopes();
-                graph
-                    .session
-                    .closed_program_errors(
-                        &graph.modules,
-                        skipped.as_deref(),
-                        &overloads,
-                        Some(native),
-                    )
-                    .and_then(|()| native.check_declared_operand(graph))
+                graph.session.closed_program_errors(
+                    &graph.modules,
+                    skipped.as_deref(),
+                    &overloads,
+                    Some(native),
+                )
             }),
         }
     }
@@ -147,6 +144,10 @@ impl SourceContract {
 /// Source ownership used by the same diagnostics for checked graphs and object registrations.
 pub(crate) trait ClosedSource {
     fn project_path(&self) -> Option<&Path>;
+    /// The project source and module ID used by the original fixed checker.
+    fn checked_source(&self, module: usize) -> Option<(usize, &Path)> {
+        Some((module, self.project_path()?))
+    }
     fn supplies_declarations(&self) -> bool {
         true
     }
@@ -161,9 +162,13 @@ impl ClosedSource for crate::modules::SourceModule {
     }
 }
 
-impl ClosedSource for (PathBuf, bool) {
+impl ClosedSource for (PathBuf, bool, Option<usize>) {
     fn project_path(&self) -> Option<&Path> {
         self.1.then_some(&self.0)
+    }
+
+    fn checked_source(&self, _: usize) -> Option<(usize, &Path)> {
+        Some((self.2?, self.project_path()?))
     }
 }
 
@@ -415,7 +420,7 @@ pub(crate) fn check_registered_project<'a>(
     let mut paths = Vec::with_capacity(sources.len());
     for (path, source) in declarations {
         session.add(path, source, crate::SourceKind::File)?;
-        paths.push((path.to_owned(), false));
+        paths.push((path.to_owned(), false, None));
     }
     // Static SDK declarations can type an import even though there is no Python
     // body to register. An actual same-name registration supplies its own types.
@@ -428,7 +433,7 @@ pub(crate) fn check_registered_project<'a>(
                 && !replaced.contains(module.name.as_str())
             {
                 session.add(&module.path, &module.source, crate::SourceKind::File)?;
-                paths.push((module.path.clone(), false));
+                paths.push((module.path.clone(), false, None));
             }
         }
     }
@@ -449,9 +454,19 @@ pub(crate) fn check_registered_project<'a>(
         let source = crate::normalize_source(source, kind)
             .map_err(|error| format!("{}: {error}", path.display()))?;
         session.add(&path, &source, kind)?;
-        paths.push((path, is_program));
+        let original = winner.checked_module.filter(|&id| {
+            winner.declares_signatures
+                && is_program
+                && checked.is_some_and(|graph| {
+                    let module = &graph.modules[id];
+                    module.checks_source_contracts()
+                        && module.path == path
+                        && module.original_source() == winner.source
+                })
+        });
+        paths.push((path, is_program, original));
     }
-    let contracts = session.check_closed_program(&paths, None, &[], None);
+    let contracts = session.check_closed_program(&paths, None, &[], refusal);
     let winners = (first_winner..).zip(sources);
     session.check_registered_execution(
         contracts,
@@ -2690,15 +2705,22 @@ impl Session {
             for error in file_errors(&self.db, checked) {
                 let original = native.and_then(|report| {
                     let (owner, annotation) = error.declaration?;
-                    let module = self.files.iter().position(|&file| file == owner)?;
-                    modules[module].project_path()?;
-                    report.matching_declared_operand(path, error.range?, module, annotation)
+                    let owner = self.files.iter().position(|&file| file == owner)?;
+                    let (declaration, _) = modules[owner].checked_source(owner)?;
+                    let (_, path) = module.checked_source(index)?;
+                    report.matching_declared_operand(path, error.range?, declaration, annotation)
                 });
                 errors.push(original.map_or_else(|| error.rendered.clone(), ToString::to_string));
             }
         }
         if errors.is_empty() {
-            Ok(())
+            native.map_or(Ok(()), |report| {
+                let selected = modules
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(id, module)| module.checked_source(id));
+                report.check_declared_operand(selected)
+            })
         } else {
             Err(errors.join("\n"))
         }
