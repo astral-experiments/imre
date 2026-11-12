@@ -1460,6 +1460,32 @@ impl<'f> Frame<'f, '_, '_> {
         None
     }
 
+    pub(super) fn read_index(
+        &mut self,
+        base: &str,
+        key: &CheckedValue,
+        span: Option<[usize; 4]>,
+    ) -> String {
+        let (word, fallback, owner) = match key {
+            CheckedValue::IntOrHandle {
+                word,
+                fallback,
+                owner,
+            } => (word.as_str(), fallback.as_str(), *owner),
+            CheckedValue::Native(operand, Some(owner)) => (operand.int_word(true).0, "0", *owner),
+            _ => {
+                let key = self.materialize(key);
+                return self.op_at("get", &[base, &key], span);
+            }
+        };
+        // Transfer the key to the read; a Python receiver may keep the boxed index.
+        self.line(&format!("store i64 1, ptr %int_owner{owner}"));
+        let position = span.map_or_else(|| "null".into(), |span| self.output.position(span));
+        self.checked(&format!(
+            "call i64 @imre_dyn_get_int_item(ptr %ctx, i64 {base}, i64 {word}, i64 {fallback}, ptr {position})"
+        ))
+    }
+
     pub(super) fn subscript_at(
         &mut self,
         op: &Builtin,

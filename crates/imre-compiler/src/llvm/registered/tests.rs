@@ -267,6 +267,19 @@ fn checked_integer_remainder_keeps_its_operation_with_a_registered_sibling() {
 }
 
 #[test]
+fn registered_subscription_consumes_its_checked_integer_key() {
+    let output = emit_captured_body(
+        "def publish(values: list[int], i: int, n: int, send):\n    send(values[i % n])\n",
+    );
+    assert!(output.functions.contains("call i64 @int_mod("));
+    assert!(
+        output
+            .functions
+            .contains("call i64 @imre_dyn_get_int_item(")
+    );
+}
+
+#[test]
 fn checked_floor_division_can_call_a_python_override() {
     let mut output = emit_captured_body("def publish(a: int, b: int, send):\n    send(a // b)\n");
     let floor = output.data(b"//");
