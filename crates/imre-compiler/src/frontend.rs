@@ -4412,14 +4412,10 @@ impl<'a> Checker<'a> {
             {
                 self.ordered_dict_constructor(call, self.types.mapping(concrete))?
             }
-            ast::Expr::Call(call) if self.is_defaultdict_constructor(&call.func) => {
-                let (key, value) = self.types.mapping(concrete).ok_or_else(|| {
-                    error(
-                        self.source,
-                        call,
-                        "defaultdict(list) requires a typed dictionary context",
-                    )
-                })?;
+            ast::Expr::Call(call)
+                if let Some((key, value)) = self.types.mapping(concrete)
+                    && self.is_defaultdict_constructor(&call.func) =>
+            {
                 if self.types.element(value).is_none()
                     || !matches!(call.arguments.args.as_slice(), [factory @ ast::Expr::Name(name)]
                         if name.id == "list" && !self.names.contains_key("list") && self.resolve(factory).is_none())
@@ -8372,6 +8368,18 @@ impl<'a> Checker<'a> {
                     Vec::new(),
                 ),
             });
+        }
+        if binding == Some(Binding::Intrinsic(Intrinsic::DefaultDict))
+            && self.has_static_namespace_root(expression)
+        {
+            let source = self
+                .registered
+                .unwrap_or_else(|| self.graph.modules[self.module].registered_values())
+                .context(self.source);
+            if let Some(value) = registered::values::registered_value(expression, source) {
+                self.require_registered_operation(expression)?;
+                return Ok(value);
+            }
         }
         if binding.is_some_and(Binding::is_registered_object) {
             self.require_registered_operation(expression)?;
@@ -12485,11 +12493,13 @@ impl<'a> Checker<'a> {
         if let Some(kind) = self.exception_category(&call.func) {
             return self.simple_exception(call, kind);
         }
-        if let Some(binding) = self.resolve(&call.func) {
+        if let Some(binding) = binding {
             if binding == Binding::Intrinsic(Intrinsic::BuiltinsPrint) {
                 return self.named_builtin_call(call, "print");
             }
-            if matches!(binding, Binding::Value(_) | Binding::ImportedValue(..)) {
+            if matches!(binding, Binding::Value(_) | Binding::ImportedValue(..))
+                || binding == Binding::Intrinsic(Intrinsic::DefaultDict)
+            {
                 let callable = self.expr(&call.func)?;
                 return self.invoke(call, callable);
             }

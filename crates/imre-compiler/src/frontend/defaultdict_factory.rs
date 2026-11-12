@@ -5,14 +5,7 @@ use super::*;
 impl Checker<'_> {
     /// A local named like the import (or its module) remains a normal callable.
     pub(super) fn is_defaultdict_constructor(&self, func: &ast::Expr) -> bool {
-        let mut root = func;
-        while let ast::Expr::Attribute(attr) = root {
-            root = &attr.value;
-        }
-        !root
-            .as_name_expr()
-            .is_some_and(|n| self.names.contains_key(n.id.as_str()))
-            && self.resolve(func) == Some(Binding::Intrinsic(Intrinsic::DefaultDict))
+        self.collection_binding(func) == Some(Binding::Intrinsic(Intrinsic::DefaultDict))
     }
 
     /// Construct even empty argument containers before raising. Their elements
