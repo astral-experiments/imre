@@ -1664,6 +1664,11 @@ impl<'a> SuitePreparation<'a> {
         if self.declaration_refusals.is_empty() && self.literal_refusals.is_none() {
             return None;
         }
+        self.check_required_sites(root).err()
+    }
+
+    /// A successful check returns whether the declaration scanner reaches the next statement.
+    fn check_required_sites(&self, root: RegionRoot<'_>) -> StdResult<bool, PreparedRefusal> {
         let mut refusal = None;
         let mut visit = |site| {
             refusal = refusal.or_else(|| match site {
@@ -1688,15 +1693,16 @@ impl<'a> SuitePreparation<'a> {
                 _ => None,
             });
         };
-        match root {
+        let continues = match root {
             RegionRoot::Suite(block) => {
-                RequiredSite::visit(block, self.literal_refusals, &mut visit);
+                RequiredSite::visit(block, self.literal_refusals, &mut visit)
             }
             RegionRoot::Operand(value) => {
-                RequiredSite::visit_operand(value, self.literal_refusals, &mut visit)
+                RequiredSite::visit_operand(value, self.literal_refusals, &mut visit);
+                true
             }
-        }
-        refusal
+        };
+        refusal.map_or(Ok(continues), Err)
     }
 
     fn physical_operand(
@@ -3148,10 +3154,28 @@ impl SourceScope<'_> {
         let begin = body.len();
         let continues = self.statement(stmt, body)?;
         let checked = &body[begin..];
-        // A refused declaration needs the protected suite's original diagnostic order.
-        if region == PhysicalRegion::Protected
-            && preparation.checked_declaration_refusal(checked).is_none()
-        {
+        let complete = match region {
+            // A suspended conditional can prune literal arms. If every arm exits,
+            // the checked body must also stop the search for later declarations.
+            PhysicalRegion::Fallthrough => {
+                !continues
+                    && matches!(
+                        preparation.check_required_sites(RegionRoot::Suite(checked)),
+                        Ok(false)
+                    )
+            }
+            // A disabled loop takes the normal edge of its selected else suite.
+            PhysicalRegion::Loop
+                if matches!(checked.last(), Some(Statement::While(test, _, _))
+                    if ir::control::boolean_literal(test) == Some(false)) =>
+            {
+                false
+            }
+            PhysicalRegion::Loop | PhysicalRegion::Protected => {
+                preparation.checked_declaration_refusal(checked).is_none()
+            }
+        };
+        if complete {
             return Ok(continues);
         }
         if !region.accepts(checked) {
@@ -3742,6 +3766,28 @@ mod tests {
             })
             .expect("the omitted alias is evaluated between the two assignments");
         assert!(at > 0 && at + 1 < body.len());
+    }
+
+    #[test]
+    fn suspended_loops_and_exiting_branches_keep_their_checked_bodies() {
+        let text = "def stream(flag):\n    while flag:\n        yield flag\n        break\n    if flag:\n        yield 1\n        return 2\n    else:\n        return 3\n";
+        let graph = SourceGraph::single(text).unwrap();
+        let module = &graph.modules[graph.entry];
+        let function = module.parsed.syntax().body[0]
+            .as_function_def_stmt()
+            .unwrap();
+        let operations = HashMap::new();
+        let mut prepare =
+            SuitePreparation::new(&operations, module.registered_values().context(text), true);
+        let suite = prepare.named_body(
+            &function.body,
+            RegisteredScope::Function { is_async: false },
+            true,
+            false,
+        );
+        assert!(suite.refusal.is_none());
+        assert!(suite.fully_checked());
+        assert!(!suite.falls_through);
     }
 
     #[test]

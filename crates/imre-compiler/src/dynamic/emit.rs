@@ -4148,24 +4148,38 @@ mod tests {
     }
 
     #[test]
-    fn a_physical_if_places_the_following_declaration_on_its_normal_edge() {
+    fn physical_branches_check_the_declarations_on_their_normal_edge() {
         let path = Path::new("example.py");
-        for (otherwise, continues) in [
-            ("", true),
-            ("        else:\n            pass\n", true),
-            ("        else:\n            raise SystemExit(2)\n", false),
+        for (branch, otherwise, continues) in [
+            ("if flag", "", true),
+            ("if flag", "        else:\n            pass\n", true),
+            (
+                "if flag",
+                "        else:\n            raise SystemExit(2)\n",
+                false,
+            ),
+            (
+                "while False",
+                "        else:\n            raise SystemExit(2)\n",
+                false,
+            ),
+            (
+                "while False",
+                "        else:\n            if True:\n                yield 1\n                return 2\n",
+                false,
+            ),
         ] {
             let source = format!(
                 concat!(
                     "class Choice:\n",
                     "    def run[T: int](self, flag):\n",
-                    "        if flag:\n",
+                    "        {}:\n",
                     "            raise SystemExit(1)\n",
                     "{}",
                     "        async def refused(values):\n",
                     "            values += [lambda v=await get(x): v for x in [0]]\n",
                 ),
-                otherwise,
+                branch, otherwise,
             );
             let parsed = ParsedModule::parse(path, source.as_str().into()).unwrap();
             let module = PreparedBody::from_parsed(
