@@ -117,46 +117,48 @@ pub(super) fn adapters(emitter: &mut Emitter<'_, '_>) {
         };
         let target = output.function_name(id);
         let name = output.adapter_name(id, bound);
-        let body = output.function(
+        output.define_function(
             output.function_owner(id),
             &name,
             returns,
             &signature.join(", "),
             attributes,
+            |body| {
+                if cold && bound {
+                    body.push_str("  %slot = getelementptr %callable, ptr %callable, i32 0, i32 1\n  %context = load ptr, ptr %slot\n");
+                }
+                let owns_receiver = bound
+                    && emitter
+                        .resource_types
+                        .contains(&function.locals[function.params[0]]);
+                if scalar {
+                    body.push_str("  %tag = ptrtoint ptr %context to i64\n");
+                } else if owns_receiver {
+                    let family = if matches!(function.locals[function.params[0]], Type::Deque(_)) {
+                        "object"
+                    } else {
+                        "record"
+                    };
+                    writeln!(body, "  call void @imre_{family}_retain(ptr %context)").unwrap();
+                }
+                if cold && owns_receiver {
+                    // The callee now owns self. A temporary bound method must not keep
+                    // the previous self alive after its parameter is rebound.
+                    body.push_str("  call void @imre_record_release(ptr %callable)\n");
+                }
+                writeln!(
+                    body,
+                    "  %result = call {returns} @{target}({})",
+                    inputs.join(", ")
+                )
+                .unwrap();
+                if cold && !owns_receiver {
+                    // A non-resource receiver can stay borrowed until the call returns.
+                    body.push_str("  call void @imre_record_release(ptr %callable)\n");
+                }
+                writeln!(body, "  ret {returns} %result").unwrap();
+            },
         );
-        if cold && bound {
-            body.push_str("  %slot = getelementptr %callable, ptr %callable, i32 0, i32 1\n  %context = load ptr, ptr %slot\n");
-        }
-        let owns_receiver = bound
-            && emitter
-                .resource_types
-                .contains(&function.locals[function.params[0]]);
-        if scalar {
-            body.push_str("  %tag = ptrtoint ptr %context to i64\n");
-        } else if owns_receiver {
-            let family = if matches!(function.locals[function.params[0]], Type::Deque(_)) {
-                "object"
-            } else {
-                "record"
-            };
-            writeln!(body, "  call void @imre_{family}_retain(ptr %context)").unwrap();
-        }
-        if cold && owns_receiver {
-            // The callee now owns self. A temporary bound method must not keep
-            // the previous self alive after its parameter is rebound.
-            body.push_str("  call void @imre_record_release(ptr %callable)\n");
-        }
-        writeln!(
-            body,
-            "  %result = call {returns} @{target}({})",
-            inputs.join(", ")
-        )
-        .unwrap();
-        if cold && !owns_receiver {
-            // A non-resource receiver can stay borrowed until the call returns.
-            body.push_str("  call void @imre_record_release(ptr %callable)\n");
-        }
-        writeln!(body, "  ret {returns} %result\n}}").unwrap();
         output.common().push('\n');
     }
 }
