@@ -5846,9 +5846,7 @@ impl<'a> Loader<'a> {
                                     self.modules[provider].export(member)
                                 }
                                 Err(StdlibMiss::Unclaimed) => {
-                                    self.session.prepare_shipped_source(&name)?.and_then(|file| {
-                                        self.session.shipped_declaration_at(file, &name, member)
-                                    })
+                                    self.session.demanded_shipped_declaration(&name, member)?
                                 }
                                 Err(StdlibMiss::Sealed) => None,
                             }
@@ -6028,6 +6026,13 @@ impl<'a> Loader<'a> {
                     {
                         // These source providers resolve additional exports at runtime.
                         Binding::ConditionalValue
+                    } else if self.modules[target].bundled
+                        && !self.loading.contains(&target)
+                        && let Some(binding @ Binding::RegisteredClass(_)) = self
+                            .session
+                            .demanded_shipped_declaration(&name, alias.name.as_str())?
+                    {
+                        binding
                     } else {
                         return Err(format!(
                             "module {name:?} has no static binding {:?}",
