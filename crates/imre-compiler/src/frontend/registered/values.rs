@@ -78,7 +78,7 @@ impl RegisteredSource<'_> {
     pub(super) fn object_operation<E>(
         self,
         node: &ast::Expr,
-        allow_typed_receiver: impl FnOnce(Option<(&str, &ast::Expr)>, &ast::Expr, &Expr) -> bool,
+        allow_typed_receiver: impl FnOnce(Option<&ast::Expr>, &ast::Expr, &Expr) -> bool,
         dynamic_receiver: impl FnOnce(&ast::Expr) -> bool,
         mut child: impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
     ) -> StdResult<Option<Expr>, E> {
@@ -95,12 +95,8 @@ impl RegisteredSource<'_> {
         match node {
             ast::Expr::Call(call) => {
                 let (selection, target) = self.call_target(call);
-                let method = match &selection {
-                    ir::RegisteredCallTarget::Method { name, .. } => {
-                        Some((name.as_str(), call.func.as_ref()))
-                    }
-                    ir::RegisteredCallTarget::Callable { .. } => None,
-                };
+                let method = matches!(selection, ir::RegisteredCallTarget::Method { .. })
+                    .then_some(call.func.as_ref());
                 let Some(target) = receiver(target, method.is_some(), method)? else {
                     return Ok(None);
                 };
@@ -898,7 +894,7 @@ pub(in crate::frontend) fn binary(
 pub(super) fn operation<E>(
     node: &ast::Expr,
     source: RegisteredSource<'_>,
-    allow_typed_receiver: impl FnOnce(Option<(&str, &ast::Expr)>, &ast::Expr, &Expr) -> bool,
+    allow_typed_receiver: impl FnOnce(Option<&ast::Expr>, &ast::Expr, &Expr) -> bool,
     literal: impl Fn(&Expr) -> Option<bool>,
     dynamic_receiver: impl FnOnce(&ast::Expr) -> bool,
     mut child: impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
@@ -1370,16 +1366,17 @@ impl Checker<'_> {
                 let Some(first) = first_local else {
                     return false;
                 };
-                // A parameter read in this frame is the object supplied by the caller.
-                let parameter = receiver.is_name_expr()
-                    && matches!(operand.without_location().kind, ExprKind::Local(slot) if slot < first);
-                if let Some((name, callee)) = method {
+                let local = match operand.without_location().kind {
+                    ExprKind::Local(slot) if receiver.is_name_expr() => Some(slot),
+                    _ => None,
+                };
+                let parameter = local.is_some_and(|slot| slot < first);
+                if let Some(callee) = method {
                     let list_parameter =
                         parameter && matches!(operand.ty, Type::ListInt | Type::List(_));
-                    let string_method = matches!(name, "join" | "split" | "replace")
-                        && graph.session.scalar_type(owner, receiver) == Some(Type::Str);
-                    live_method =
-                        string_method || parameter && !list_parameter && is_bound_method(callee);
+                    live_method = !list_parameter
+                        && (local.is_some() || operand.ty == Type::Str)
+                        && is_bound_method(callee);
                     list_parameter || live_method
                 } else {
                     node.is_attribute_expr() && parameter
