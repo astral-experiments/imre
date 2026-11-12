@@ -518,11 +518,9 @@ pub(super) enum Operation {
     },
 }
 
-struct Started {
-    handle: Arc<Handle>,
-    active: Arc<AtomicBool>,
-    ident: usize,
-    native_id: Option<u64>,
+enum Registration {
+    Thread(RegisteredThread),
+    Detached(String),
 }
 
 /// Match the interpreter's lookup of an already imported threading module at exit.
@@ -564,11 +562,15 @@ pub(super) fn check_start(ctx: &Context) -> Result<()> {
 
 /// Both public launch paths use the same bootstrap, count guard and native startup handshake.
 fn launch(
-    ctx: &Context,
+    ctx: &mut Context,
     operation: Operation,
-    detached_label: Option<String>,
-    handle: Arc<Handle>,
-) -> Result<Started> {
+    registration: Registration,
+    operands: Vec<Id>,
+) -> Result<(usize, Option<u64>)> {
+    let (handle, thread, detached_label) = match registration {
+        Registration::Thread(thread) => (Arc::clone(&thread.handle), Some(thread), None),
+        Registration::Detached(label) => (Arc::default(), None, Some(label)),
+    };
     let (ready, started) = mpsc::sync_channel(0);
     let (operand_bound, wait_for_operand) = match &operation {
         Operation::Python(callback) if callback.awaits_receiver() => {
@@ -580,6 +582,7 @@ fn launch(
     let count = Arc::clone(&ctx.threads.count);
     let active = Arc::new(AtomicBool::new(true));
     let worker_active = Arc::clone(&active);
+    let starting = Arc::clone(&handle);
     let fault_workers =
         matches!(operation, Operation::Python(_)).then(|| ctx.heap.begin_fault_worker());
     let interpreter = fault_workers.as_ref().map(|_| ctx.finalizing.clone());
@@ -628,6 +631,9 @@ fn launch(
         #[cfg(not(any(target_os = "linux", target_os = "macos")))]
         let native_id = None;
         if ready.send(Ok((thread_ident(), native_id))).is_ok() {
+            // The creator publishes the native identity after rooting the Python operands.
+            starting.ident.wait();
+            drop(starting);
             if let Some((mut worker, function, slots)) = python {
                 let result = match worker.prepare_bound_function(function, slots) {
                     // SAFETY: the ABI pointer comes from the Context owned by this
@@ -670,18 +676,18 @@ fn launch(
             return Err(Error::new("RuntimeError", reason));
         }
     };
+    ctx.workers.entries.push(Entry {
+        active,
+        operands,
+        thread,
+    });
     let _ = handle.ident.set(ident);
     if let Some(received) = wait_for_operand {
         // The caller is the only Python evaluator that can change this cell. An
         // early worker error also ends the wait and follows the usual reporting path.
         let _ = received.recv();
     }
-    Ok(Started {
-        handle,
-        active,
-        ident,
-        native_id,
-    })
+    Ok((ident, native_id))
 }
 
 /// A low-level caller owns only the bootstrap roots after the native worker is detached.
@@ -695,13 +701,8 @@ pub(super) fn start_detached(
         .reap_where(&mut ctx.heap, |entry| entry.thread.is_none());
     ctx.workers.reserve_entry()?;
     let label = ctx.repr(function);
-    let worker = launch(ctx, callback, Some(label), Arc::default())?;
-    ctx.workers.entries.push(Entry {
-        active: worker.active,
-        operands,
-        thread: None,
-    });
-    Ok(worker.ident)
+    let (ident, _) = launch(ctx, callback, Registration::Detached(label), operands)?;
+    Ok(ident)
 }
 
 /// Thread.run expands *args and **kwargs before calling the target. A bound method
@@ -840,13 +841,13 @@ pub(super) fn call(
                 ));
             }
             ctx.workers.reserve_entry()?;
-            let Started {
+            let thread = RegisteredThread {
                 handle,
-                active,
-                ident,
-                native_id: tid,
-            } = match launch(ctx, operation, None, Arc::clone(&handle)) {
-                Ok(worker) => worker,
+                daemon,
+                owner: Some(owner),
+            };
+            let (ident, tid) = match launch(ctx, operation, Registration::Thread(thread), roots) {
+                Ok(identity) => identity,
                 Err(error) => {
                     // Once native startup is attempted CPython consumes the handle,
                     // even if the OS refuses to create a thread. No identity is published.
@@ -854,15 +855,6 @@ pub(super) fn call(
                     return Err(error);
                 }
             };
-            ctx.workers.entries.push(Entry {
-                active,
-                operands: roots,
-                thread: Some(RegisteredThread {
-                    handle,
-                    daemon,
-                    owner: Some(owner),
-                }),
-            });
             let ident = ctx.alloc(Value::Int(crate::Int::from_usize(ident)));
             let tid = tid.map_or(NONE, |id| {
                 ctx.alloc(Value::Int(crate::Int::from_usize(id as usize)))
