@@ -1525,9 +1525,23 @@ impl RegisteredFrame<'_, '_> {
     }
 
     pub(super) fn take_integer(&mut self, word: &str) -> String {
-        self.checked(&format!(
-            "call i64 @imre_dyn_take_int(ptr %ctx, i64 {word})"
-        ))
+        // An immediate has no reference to transfer. Use the same permanent
+        // Python object as a literal when its value is in the cache.
+        let raw = self.value(&format!("ashr i64 {word}, 1"));
+        let minimum = permanent::SMALL_INT_MIN;
+        let maximum_offset = permanent::SMALL_INT_MAX - minimum;
+        let offset = self.value(&format!("sub i64 {raw}, {minimum}"));
+        let fits = self.value(&format!("icmp ule i64 {offset}, {maximum_offset}"));
+        let immediate = self.value(&format!("trunc i64 {word} to i1"));
+        let hit = self.value(&format!("and i1 {immediate}, {fits}"));
+        let first = permanent::FIRST_SMALL_INT;
+        let id = self.value(&format!("add i64 {offset}, {first}"));
+        let mut frame = self;
+        frame.cached_handle_or(&hit, &id, |frame| {
+            frame.checked(&format!(
+                "call i64 @imre_dyn_take_int(ptr %ctx, i64 {word})"
+            ))
+        })
     }
 }
 

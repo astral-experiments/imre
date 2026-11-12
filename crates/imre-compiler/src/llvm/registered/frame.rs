@@ -1952,10 +1952,19 @@ pub(crate) trait FrameEmitter<'a, 'p>:
             "call i64 @imre_dyn_cached_handle(ptr %ctx, ptr {slot})"
         ));
         let hit = self.value(&format!("icmp ne i64 {cached}, 0"));
+        self.cached_handle_or(&hit, &cached, build)
+    }
+
+    fn cached_handle_or(
+        &mut self,
+        hit: &str,
+        cached: &str,
+        build: impl FnOnce(&mut Self) -> String,
+    ) -> String {
         let previous = self.current_block().to_owned();
         let load = self.name("b");
         let done = self.name("b");
-        self.branch(&hit, &done, &load);
+        self.branch(hit, &done, &load);
         self.label(&load);
         let result = build(self);
         let loaded = self.current_block().to_owned();
