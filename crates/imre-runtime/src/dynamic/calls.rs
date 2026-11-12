@@ -3329,7 +3329,7 @@ impl Context {
         {
             return self.heap.string_literal(member);
         }
-        if matches!(name, "__reduce__" | "__reduce_ex__") {
+        if matches!(name, "__get__" | "__reduce__" | "__reduce_ex__") {
             let class = match self.heap.get(obj) {
                 Value::Native(kind)
                     if matches!(
@@ -8344,6 +8344,9 @@ impl Context {
             }
             Value::Native(name) if name == "super.__get__" => {
                 wrapper_descriptor::descriptor_get(self, "super", &args, &kwargs)
+            }
+            Value::Native(name) if name == "method.__get__" => {
+                wrapper_descriptor::descriptor_get(self, "method", &args, &kwargs)
             }
             Value::Native(name) if name == "function.__get__" => {
                 wrapper_descriptor::descriptor_get(self, "function", &args, &kwargs)
