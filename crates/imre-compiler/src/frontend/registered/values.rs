@@ -440,7 +440,7 @@ fn positional_invoke(
 }
 
 impl Checker<'_> {
-    pub(in crate::frontend) fn located_callback_effect(
+    pub(in crate::frontend) fn located_callback(
         &self,
         expr: &ast::Expr,
         call: &ast::ExprCall,

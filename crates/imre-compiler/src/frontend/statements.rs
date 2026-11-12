@@ -150,7 +150,7 @@ impl StatementLowering for Checker<'_> {
             }
         }
         if self.checked_callback_effects
-            && let Some(value) = self.registered_callback_effect(expr)?
+            && let Some(value) = self.registered_callback(expr)?
         {
             return Ok((Some(Statement::Expr(value)), true));
         }

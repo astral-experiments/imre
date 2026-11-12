@@ -736,10 +736,7 @@ impl Checker<'_> {
         self.positional_invoke(call, callable, params, returns, None)
     }
 
-    pub(super) fn registered_callback_effect(
-        &mut self,
-        expr: &ast::Expr,
-    ) -> Result<Option<Expr>, String> {
+    pub(super) fn registered_callback(&mut self, expr: &ast::Expr) -> Result<Option<Expr>, String> {
         let Some(call) = expr.as_call_expr() else {
             return Ok(None);
         };
@@ -771,7 +768,7 @@ impl Checker<'_> {
         callable: Expr,
         params: Vec<Type>,
         returns: Type,
-        registered_effect: Option<&ast::Expr>,
+        registered_site: Option<&ast::Expr>,
     ) -> Result<Expr, String> {
         let needs_cell_default = call.arguments.args.len() < params.len()
             && matches!(callable.kind, ExprKind::Local(slot)
@@ -803,7 +800,7 @@ impl Checker<'_> {
                 .zip(params)
                 .enumerate()
                 .map(|(slot, (argument, ty))| {
-                    if registered_effect.is_some() {
+                    if registered_site.is_some() {
                         // A Python activation passes the source object, including its identity.
                         // A native conversion or expected display layout cannot supply that handle.
                         let value = self.expr(argument)?;
@@ -847,8 +844,8 @@ impl Checker<'_> {
                 ..Expr::unrepresented()
             });
         }
-        if let Some(expr) = registered_effect {
-            return Ok(self.located_callback_effect(expr, call, callable, values));
+        if let Some(expr) = registered_site {
+            return Ok(self.located_callback(expr, call, callable, values));
         }
         if let Type::Coroutine(_) = returns {
             return Ok(self.indirect_coroutine(callable, values, returns));
@@ -960,6 +957,54 @@ mod tests {
         assert!(
             error.contains("app.py:3:10: Imre: expected int, got str"),
             "{error}"
+        );
+    }
+
+    #[test]
+    fn a_named_loop_tests_the_checked_callbacks_python_result() {
+        use crate::ir;
+        use crate::modules::SourceGraph;
+        use ruff_text_size::Ranged;
+
+        let source = include_str!("../../../../tests/fixtures/boxed_while_truth.py");
+        let dir = tempfile::tempdir().unwrap();
+        let app = dir.path().join("app.py");
+        std::fs::write(&app, "import subject\nsubject.current()\n").unwrap();
+        std::fs::write(dir.path().join("subject.py"), source).unwrap();
+        let mut graph = SourceGraph::load(&app, None, &[]).unwrap();
+        graph.registered_startup = true;
+        crate::checked_lower(&mut graph).unwrap();
+
+        let (module, subject) = graph
+            .modules
+            .iter()
+            .enumerate()
+            .find(|(_, module)| module.name == "subject")
+            .unwrap();
+        let consume = subject
+            .parsed
+            .syntax()
+            .body
+            .iter()
+            .find_map(|stmt| {
+                stmt.as_function_def_stmt()
+                    .filter(|f| f.name.as_str() == "consume")
+            })
+            .unwrap();
+        let functions = graph.registered_functions();
+        let body = &functions[&module][&consume.start()].function;
+        let mut calls = Vec::new();
+        ir::walk_expressions(&body.body, &mut |expr| {
+            if expr.is_registered_invoke()
+                && let ir::ExprKind::Invoke { args, .. } = &expr.kind
+            {
+                calls.push(&source[args.site.python().unwrap().range]);
+            }
+        });
+        assert_eq!(
+            calls.iter().filter(|&&site| site == "right()").count(),
+            1,
+            "{calls:?}"
         );
     }
 

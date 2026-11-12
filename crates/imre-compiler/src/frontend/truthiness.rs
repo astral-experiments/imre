@@ -40,7 +40,15 @@ impl Checker<'_> {
                 kind: ExprKind::Boolean(and, values),
             });
         }
-        let value = self.expr(expression)?;
+        // A fixed callable signature checks the arguments. The frame tests the
+        // actual Python result, which can implement its own truth protocol.
+        let value = if self.registered_local_start.is_some()
+            && let Some(call) = self.registered_callback(expression)?
+        {
+            call
+        } else {
+            self.expr(expression)?
+        };
         self.test_truth_at(value, expression, site)
     }
 
