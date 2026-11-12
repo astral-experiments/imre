@@ -4354,8 +4354,10 @@ impl Context {
         }
         #[cfg(target_os = "linux")]
         if source.is_none() && matches!(name, "os" | "posix") {
-            let memfd = self.builtin("posix.memfd_create");
-            self.bind(scope, "memfd_create", memfd);
+            for name in ["memfd_create", "pidfd_open"] {
+                let function = self.builtin(&format!("posix.{name}"));
+                self.bind(scope, name, function);
+            }
             let close_on_exec = self.int(i64::from(libc::MFD_CLOEXEC));
             self.bind(scope, "MFD_CLOEXEC", close_on_exec);
         }

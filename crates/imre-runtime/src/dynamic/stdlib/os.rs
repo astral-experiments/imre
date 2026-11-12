@@ -215,6 +215,24 @@ pub(super) fn memfd_create(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id
     Ok(ctx.int(i64::from(fd.into_raw_fd())))
 }
 
+/// Open a close-on-exec descriptor for a Linux process.
+#[cfg(target_os = "linux")]
+pub(super) fn pidfd_open(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let [pid, flags] =
+        builtins::bind_builtin_arguments("pidfd_open", args, kwargs, ["pid", "flags"], 1)?;
+    let pid = c_int(ctx, pid.unwrap())?;
+    let flags = flags
+        .map(|id| unsigned(ctx, id, u64::from(u32::MAX), "int"))
+        .transpose()?
+        .unwrap_or(0) as u32;
+    // SAFETY: pidfd_open takes two integers and returns a caller-owned file descriptor.
+    let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, flags) };
+    if fd < 0 {
+        return Err(super::os_error(std::io::Error::last_os_error()));
+    }
+    Ok(ctx.int(i64::from(fd as libc::c_int)))
+}
+
 pub(super) fn is_process_function(name: &str) -> bool {
     cfg!(unix) && matches!(name, "execv" | "times" | "WIFSTOPPED")
 }

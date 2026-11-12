@@ -2288,6 +2288,10 @@ pub(super) fn call(
     if name == "posix.memfd_create" {
         return os::memfd_create(ctx, args, kwargs);
     }
+    #[cfg(target_os = "linux")]
+    if name == "posix.pidfd_open" {
+        return os::pidfd_open(ctx, args, kwargs);
+    }
     if name == "posix.listdir" {
         return os::listdir(ctx, args, kwargs);
     }
