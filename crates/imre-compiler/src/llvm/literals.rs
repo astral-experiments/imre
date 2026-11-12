@@ -66,7 +66,7 @@ impl Emitter<'_, '_> {
     }
 
     /// Loads the pool's reference, materializing lazy literals on first use.
-    fn literal_root(&mut self, contents: &[u8], ty: Type) -> Value {
+    pub(super) fn literal_root(&mut self, contents: &[u8], ty: Type) -> Value {
         let id = self.intern_literal(contents, ty);
         let name = self.output.literal_ref(id);
         let repr = ty.llvm();

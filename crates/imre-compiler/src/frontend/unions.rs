@@ -480,7 +480,11 @@ impl Checker<'_> {
                 .map(|(id, _)| InstanceType::Exact(records.instance(id)))
                 .collect());
         }
-        if let ast::Expr::Name(name) = expression {
+        if let ast::Expr::Name(name) = expression
+            && !self.is_class_receiver(expression)
+            && !self.comprehension_targets.contains(name.id.as_str())
+            && self.unshadowed_builtin(expression, name.id.as_str())
+        {
             let ty = match name.id.as_str() {
                 "str" => InstanceType::Exact(Type::Str),
                 "type" => InstanceType::Exact(Type::BuiltinClass),
@@ -554,6 +558,14 @@ impl Checker<'_> {
             Err(diagnostic) => {
                 if let Ok(target) = self.expr(classes) {
                     match target.ty {
+                        Type::BuiltinClass if self.has_plain_factory_metaclass(value.ty) => {
+                            let result = self.builtin_subclass_values(
+                                annotations::class_value("type"),
+                                target,
+                                call,
+                            )?;
+                            return Ok(self.evaluated_receiver(Some(value), result));
+                        }
                         Type::Placeholder(ir::PlaceholderKind::Class) => {
                             // Looking up either operand can run Python code.
                             let mut scope = calls::ArgumentScope::default();

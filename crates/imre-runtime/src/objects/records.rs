@@ -531,8 +531,26 @@ pub unsafe extern "C" fn imre_record_class_factory(
     layout: *const RecordDescriptor,
     adapter: *const (),
 ) -> *mut usize {
-    // SAFETY: the caller owns the slot and the descriptor's zeroed callable
-    // payload. The slot adopts the initial owner; the caller receives another.
+    // SAFETY: the legacy unbound callable has a null context.
+    unsafe { imre_record_class_value(slot, layout, adapter, std::ptr::null()) }
+}
+
+/// Returns the module's canonical checked class, retaining its fixed class value
+/// alongside the constructor entry on first materialization.
+///
+/// # Safety
+/// The slot is initially null and exclusive to the module. The static layout
+/// describes the adapter and a managed class-name word. A non-null name is
+/// borrowed from the module's literal pool for the duration of this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_record_class_value(
+    slot: *mut *mut usize,
+    layout: *const RecordDescriptor,
+    adapter: *const (),
+    name: *const crate::Str,
+) -> *mut usize {
+    // SAFETY: the slot adopts the initial record owner. A successful first
+    // allocation takes its own reference to the class before publication.
     unsafe {
         let mut class = *slot;
         if class.is_null() {
@@ -541,6 +559,8 @@ pub unsafe extern "C" fn imre_record_class_factory(
                 return class;
             }
             class.write(adapter as usize);
+            crate::imre_str_retain(name);
+            class.add(1).cast::<*const crate::Str>().write(name);
             *slot = class;
         }
         imre_record_retain(class);

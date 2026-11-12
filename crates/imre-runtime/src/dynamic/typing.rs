@@ -2973,6 +2973,16 @@ impl Context {
                         return Ok(result);
                     }
                 }
+                if !self.is_type_object(class)
+                    && self
+                        .optional_attr(class, "__bases__")?
+                        .is_none_or(|bases| self.tuple_elements(bases).is_none())
+                {
+                    return Err(Error::new(
+                        "TypeError",
+                        "isinstance() arg 2 must be a type, a tuple of types, or a union",
+                    ));
+                }
                 if self.instance_of(value, class) {
                     return Ok(true);
                 }
