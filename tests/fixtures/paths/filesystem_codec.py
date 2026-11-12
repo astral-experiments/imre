@@ -47,6 +47,15 @@ class EnumPath:
         return Name.upload
 
 
+def check_filename(value: str | bytes | Path) -> None:
+    assert fsdecode(value) == "report.txt"
+    assert fsencode(value) == b"report.txt"
+    assert fsdecode(fspath(value)) == "report.txt"
+
+
+check_filename("report.txt")
+check_filename(b"report.txt")
+check_filename(Path("report.txt"))
 assert fsdecode(getcwdb()) == getcwd()
 
 text = "café/🧪.txt"
