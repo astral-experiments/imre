@@ -1044,13 +1044,14 @@ impl Checker<'_> {
         };
         let mut protected = Vec::new();
         if let Some(target) = &item.optional_vars {
-            protected.push(self.assign(
+            self.assign(
                 target,
                 Expr {
                     ty: Type::None,
                     kind: ExprKind::None,
                 },
-            )?);
+                Some(&mut protected),
+            )?;
         }
         protected.extend(self.suppressed_with_body(remaining, suite)?);
         let handled = call(handle, Type::Bool, vec![self.local(saved), self.local(exc)]);
@@ -1097,7 +1098,7 @@ impl Checker<'_> {
                     "assertRaises targets must be local names",
                 ));
             }
-            enter.push(self.assign(target, self.local(root))?);
+            self.assign(target, self.local(root), Some(&mut enter))?;
         }
         let earlier_breaks = self.take_breaks();
         let protected = self.suppressed_with_body(remaining, suite)?;

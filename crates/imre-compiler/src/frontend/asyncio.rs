@@ -335,7 +335,7 @@ impl Checker<'_> {
             } else {
                 self.local(slot)
             };
-            entered.push(self.assign(target, value)?);
+            self.assign(target, value, Some(&mut entered))?;
         }
         let (rest, falls) = self.async_with(remaining, suite)?;
         entered.extend(rest);

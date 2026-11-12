@@ -185,7 +185,7 @@ impl Checker<'_> {
         let slot = self.hidden(manager.ty);
         let mut protected = Vec::new();
         if let Some(target) = &item.optional_vars {
-            protected.push(self.assign(target, Expr::none())?);
+            self.assign(target, Expr::none(), Some(&mut protected))?;
         }
         let exception = self.hidden(Type::Exception);
         let handled = op(

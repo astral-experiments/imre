@@ -413,7 +413,7 @@ impl Checker<'_> {
             }
             for (target, &slot) in targets.elts.iter().zip(&slots) {
                 let value = self.take_temporary(slot);
-                body.push(self.assign_value(target, value)?);
+                self.store_value(target, value, None, Some(&mut body))?;
             }
             return Ok((vec![Statement::Scope { body, clear: slots }], true));
         }
@@ -467,14 +467,15 @@ impl Checker<'_> {
                 value
             };
             let value_site = scalar_item.map(|_| assignment.value.as_ref());
-            let statement = self.assign_value_at(target, value, value_site)?;
+            let mut body = Vec::with_capacity(1);
+            self.store_value(target, value, value_site, Some(&mut body))?;
             if let Some(sites) = &mut self.fixed_sites
                 && local.is_some()
-                && let Statement::Assign(slot, _) = &statement
+                && let [Statement::Assign(slot, _)] = body.as_slice()
             {
                 sites.statement(assignment.value.range(), FixedNode::Store(*slot));
             }
-            return Ok((vec![statement], true));
+            return Ok((body, true));
         }
         let context = assignment.targets.iter().find_map(|target| {
             self.target_expectation(target, Some(&assignment.value))
@@ -496,34 +497,39 @@ impl Checker<'_> {
         Ok((bind_assignment(self, &assignment.targets, value)?, true))
     }
 
-    /// Receivers and indices are checked after the RHS and preceding targets.
-    /// SetItem/SetField preserve this same RHS-first order in generated code.
-    pub(super) fn assign_value(
-        &mut self,
-        target: &ast::Expr,
-        value: Expr,
-    ) -> Result<Statement, String> {
-        self.assign_value_at(target, value, None)
-    }
-
-    fn assign_value_at(
+    pub(super) fn store_value(
         &mut self,
         target: &ast::Expr,
         value: Expr,
         value_site: Option<&ast::Expr>,
-    ) -> Result<Statement, String> {
-        match target {
-            ast::Expr::Name(_) => self.assign(target, value),
-            ast::Expr::Subscript(subscript) => {
+        output: Option<&mut Vec<Statement>>,
+    ) -> Result<(), String> {
+        if target.is_name_expr() {
+            self.assign(target, value, output)
+        } else {
+            self.store_place(target, value, value_site, output)
+        }
+    }
+
+    /// Receivers and indices are checked after the RHS and preceding targets.
+    fn store_place(
+        &mut self,
+        target: &ast::Expr,
+        value: Expr,
+        value_site: Option<&ast::Expr>,
+        output: Option<&mut Vec<Statement>>,
+    ) -> Result<(), String> {
+        let statement = 'place: {
+            if let ast::Expr::Subscript(subscript) = target {
                 if let Some(ty) = self.environ_item_type(&subscript.value) {
                     let bytes = ty == Type::Bytes;
                     let value = self.coerce(value, ty, target)?;
                     let key = self.expr_expected(&subscript.slice, ty)?;
-                    return Ok(Statement::Expr(builtin(
+                    break 'place Statement::Expr(builtin(
                         Type::None,
                         Builtin::Process(ir::ProcessOperation::EnvironSet { bytes }),
                         vec![value, key],
-                    )));
+                    ));
                 }
                 let receiver = self.expr(&subscript.value)?;
                 self.keep_module_list_layout(&receiver);
@@ -538,18 +544,18 @@ impl Checker<'_> {
                     if self.module_scope && self.is_module_namespace(&receiver) {
                         self.namespace_item_store(&index, &value);
                     }
-                    return Ok(Statement::SetItem(receiver, index, value));
+                    break 'place Statement::SetItem(receiver, index, value);
                 }
                 if let Some((key, element)) = self.types.chainmap_entries(receiver.ty) {
                     let value = self.coerce(value, element, target)?;
                     let key = self.expr_expected(&subscript.slice, key)?;
-                    return Ok(Statement::Expr(Expr {
+                    break 'place Statement::Expr(Expr {
                         ty: Type::None,
                         kind: ExprKind::Builtin(
                             Builtin::ChainMapSetItem,
                             vec![value, receiver, key],
                         ),
-                    }));
+                    });
                 }
                 if let Type::Class(class) = receiver.ty
                     && self.classes.methods[class].contains_key("__setitem__")
@@ -562,7 +568,7 @@ impl Checker<'_> {
                     let key = scope.hold(self, key);
                     let assigned =
                         self.record_primitive(receiver, "__setitem__", &[key, value], target)?;
-                    return Ok(Statement::Expr(scope.finish(assigned)));
+                    break 'place Statement::Expr(scope.finish(assigned));
                 }
                 if matches!(receiver.ty, Type::Document(_)) {
                     if let ast::Expr::Slice(slice) = &*subscript.slice {
@@ -579,19 +585,19 @@ impl Checker<'_> {
                             value
                         };
                         let value = self.coerce(value, self.types.list(documents::ANY), target)?;
-                        return Ok(Statement::Expr(documents::op(
+                        break 'place Statement::Expr(documents::op(
                             ir::DocumentOp::ReplaceItems,
                             Type::None,
                             vec![value, receiver],
-                        )));
+                        ));
                     }
                     let value = self.coerce(value, documents::ANY, target)?;
                     let key = self.expr_expected(&subscript.slice, Type::Str)?;
-                    return Ok(Statement::Expr(documents::op(
+                    break 'place Statement::Expr(documents::op(
                         ir::DocumentOp::SetItem,
                         Type::None,
                         vec![value, receiver, key],
-                    )));
+                    ));
                 }
                 let receiver = self.json_mutation_receiver(receiver, subscript)?;
                 let declaration = self.value_declaration(&receiver);
@@ -625,9 +631,8 @@ impl Checker<'_> {
                 } else {
                     self.expr_expected_from(&subscript.slice, key, declaration)?
                 };
-                Ok(Statement::SetItem(receiver, index, value?))
-            }
-            ast::Expr::Attribute(attribute) => {
+                Statement::SetItem(receiver, index, value?)
+            } else if let ast::Expr::Attribute(attribute) = target {
                 if self.registered.is_some() {
                     let receiver = self.expr(&attribute.value)?;
                     if receiver.ty != Type::PythonObject {
@@ -637,46 +642,46 @@ impl Checker<'_> {
                             "expected a Python object target",
                         ));
                     }
-                    return Ok(registered::attribute_statement(
+                    break 'place registered::attribute_statement(
                         ir::AttributeAction::Store,
                         attribute,
                         vec![value, receiver],
-                    ));
+                    );
                 }
                 if self.resolve(target) == Some(Binding::Intrinsic(Intrinsic::PopenSelector)) {
                     let value = self.coerce(value, Type::ProcessSelectorClass, target)?;
-                    return Ok(Statement::Expr(Expr {
+                    break 'place Statement::Expr(Expr {
                         ty: Type::None,
                         kind: ExprKind::Builtin(
                             Builtin::Process(ir::ProcessOperation::SetSelector),
                             vec![value],
                         ),
-                    }));
+                    });
                 }
                 if self.cache_config(target) == Some(true) {
                     let value = self.coerce(value, self.types.optional(Type::Str), target)?;
-                    return Ok(Statement::Expr(cache_paths::op(
+                    break 'place Statement::Expr(cache_paths::op(
                         ir::CachePathOperation::Set(true),
                         Type::None,
                         vec![value],
-                    )));
+                    ));
                 }
                 if let Some(Binding::Intrinsic(Intrinsic::LogRecordFlag(mask))) =
                     self.resolve(target)
                 {
                     let value = self.coerce(value, Type::Bool, target)?;
-                    return Ok(Statement::Expr(logging_records::op(
+                    break 'place Statement::Expr(logging_records::op(
                         ir::LogRecordOperation::SetFlag,
                         Type::None,
                         vec![Expr::integer(mask), value],
-                    )));
+                    ));
                 }
                 if self.resolve(target) == Some(Binding::Intrinsic(Intrinsic::BuiltinsLen)) {
                     let value = self.coerce(value, self.builtin_len().ty, target)?;
-                    return Ok(Statement::Expr(Expr {
+                    break 'place Statement::Expr(Expr {
                         ty: Type::None,
                         kind: ExprKind::Builtin(Builtin::BuiltinsSetLen, vec![value]),
-                    }));
+                    });
                 }
                 if self.resolve(target) == Some(Binding::Intrinsic(Intrinsic::Stdout)) {
                     if !matches!(
@@ -689,10 +694,10 @@ impl Checker<'_> {
                             "sys.stdout requires None or a native text stream",
                         ));
                     }
-                    return Ok(Statement::Expr(Expr {
+                    break 'place Statement::Expr(Expr {
                         ty: Type::None,
                         kind: ExprKind::Builtin(Builtin::SysStdoutSet, vec![value]),
-                    }));
+                    });
                 }
                 if self.resolve(target) == Some(Binding::Intrinsic(Intrinsic::BuiltinsLast)) {
                     if !sys::displayable(value.ty) {
@@ -702,10 +707,10 @@ impl Checker<'_> {
                             "builtins._ requires a supported display value",
                         ));
                     }
-                    return Ok(Statement::Expr(Expr {
+                    break 'place Statement::Expr(Expr {
                         ty: Type::None,
                         kind: ExprKind::Builtin(Builtin::BuiltinsSetLast, vec![value]),
-                    }));
+                    });
                 }
                 if let Some(class) = self.class_reference(&attribute.value)
                     && matches!(
@@ -715,15 +720,15 @@ impl Checker<'_> {
                         Some(crate::classes::ClassValue::Runtime { .. })
                     )
                 {
-                    return self.store_class_data(class, attribute, value);
+                    break 'place self.store_class_data(class, attribute, value)?;
                 }
                 let receiver = Self::weak_target(self.expr(&attribute.value)?);
                 if self.types.payload(receiver.ty).unwrap_or(receiver.ty) == Type::PythonObject {
-                    return Ok(registered::attribute_statement(
+                    break 'place registered::attribute_statement(
                         ir::AttributeAction::Store,
                         attribute,
                         vec![value, receiver],
-                    ));
+                    );
                 }
                 if attribute.attr.as_str() == "__wrapped__"
                     && (self.types.cache_declaration(receiver.ty).is_some()
@@ -736,36 +741,36 @@ impl Checker<'_> {
                     let mut scope = calls::ArgumentScope::default();
                     let value = scope.hold(self, value);
                     let store = self.attach_wrapped(receiver, value, attribute)?;
-                    return Ok(Statement::Expr(scope.finish(store)));
+                    break 'place Statement::Expr(scope.finish(store));
                 }
                 if matches!(receiver.ty, Type::Callable(_))
                     && attribute.attr.as_str() == "__defaults__"
                 {
                     self.require_registered_operation(attribute)?;
-                    return Ok(registered::attribute_statement(
+                    break 'place registered::attribute_statement(
                         ir::AttributeAction::Store,
                         attribute,
                         vec![value, receiver],
-                    ));
+                    );
                 }
                 if receiver.ty == Type::SysImplementation && attribute.attr.as_str() == "cache_tag"
                 {
                     let value = self.coerce(value, self.types.optional(Type::Str), target)?;
-                    return Ok(Statement::Expr(cache_paths::op(
+                    break 'place Statement::Expr(cache_paths::op(
                         ir::CachePathOperation::Set(false),
                         Type::None,
                         vec![value, receiver],
-                    )));
+                    ));
                 }
                 if matches!(receiver.ty, Type::Popen(..) | Type::ActivePopen)
                     && attribute.attr.as_str() == "returncode"
                 {
                     let value = self.coerce(value, self.types.optional(Type::Int), target)?;
-                    return Ok(Statement::Expr(builtin(
+                    break 'place Statement::Expr(builtin(
                         Type::None,
                         Builtin::Process(ir::ProcessOperation::PopenSetStatus),
                         vec![value, receiver],
-                    )));
+                    ));
                 }
                 if matches!(receiver.ty, Type::Popen(..)) && attribute.attr.as_str() == "poll" {
                     let Some((params, returns)) = self.types.signature(value.ty) else {
@@ -785,31 +790,31 @@ impl Checker<'_> {
                             "Popen.poll needs a zero-argument callable returning int or None",
                         ));
                     }
-                    return Ok(Statement::Expr(builtin(
+                    break 'place Statement::Expr(builtin(
                         Type::None,
                         Builtin::Process(ir::ProcessOperation::PopenSetPoll {
                             returns_none: returns == Type::None,
                         }),
                         vec![value, receiver],
-                    )));
+                    ));
                 }
                 if let Some(class) =
                     self.mutable_instance_data(receiver.ty, attribute.attr.as_str())
                 {
-                    return self.store_instance_data(class, attribute, receiver, value);
+                    break 'place self.store_instance_data(class, attribute, receiver, value)?;
                 }
                 if self.types.has_reflected_functions()
                     && matches!(receiver.ty, Type::FunctionRef | Type::Callable(_))
                     && let Some(index) = typing::attribute_index(attribute.attr.as_str())
                 {
                     let value = self.coerce(value, Type::Str, target)?;
-                    return Ok(Statement::Expr(Expr {
+                    break 'place Statement::Expr(Expr {
                         ty: Type::None,
                         kind: ExprKind::Builtin(
                             Builtin::Typing(ir::TypingOperation::SetAttr(index)),
                             vec![value, receiver],
                         ),
-                    }));
+                    });
                 }
                 if matches!(receiver.ty, Type::CodecWriterClass | Type::CodecWriter) {
                     let op = match (receiver.ty, attribute.attr.as_str()) {
@@ -824,14 +829,14 @@ impl Checker<'_> {
                         }
                     };
                     let value = self.coerce(value, Type::Str, target)?;
-                    return Ok(Statement::Expr(codecs::writer(
+                    break 'place Statement::Expr(codecs::writer(
                         op,
                         Type::None,
                         vec![value, receiver],
-                    )));
+                    ));
                 }
                 if receiver.ty == Type::LogManager && attribute.attr.as_str() == "disable" {
-                    return self.set_manager_disable(receiver, value, target);
+                    break 'place self.set_manager_disable(receiver, value, target)?;
                 }
                 if receiver.ty == Type::Logger
                     && let Some(op) = match attribute.attr.as_str() {
@@ -842,67 +847,67 @@ impl Checker<'_> {
                 {
                     let value = self.coerce(value, Type::Bool, target)?;
                     // The RHS precedes evaluation of the assignment target.
-                    return Ok(Statement::Expr(Expr {
+                    break 'place Statement::Expr(Expr {
                         ty: Type::None,
                         kind: ExprKind::Builtin(Builtin::Logging(op), vec![value, receiver]),
-                    }));
+                    });
                 }
                 if receiver.ty == Type::LogFormatter {
-                    return self.formatter_set(receiver, attribute, value);
+                    break 'place self.formatter_set(receiver, attribute, value)?;
                 }
                 if let Type::CmpKey(frame, true) = receiver.ty
                     && attribute.attr.as_str() == "obj"
                 {
                     let cell = self.cmp_field(receiver, frame, 1);
                     let value = self.coerce(value, self.types.element(cell.ty).unwrap(), target)?;
-                    return Ok(Statement::SetItem(cell, Expr::integer(0), value));
+                    break 'place Statement::SetItem(cell, Expr::integer(0), value);
                 }
                 if let Type::SimpleNamespace(id) = receiver.ty {
                     let name = self.namespace_attr_name(attribute)?;
                     let item = self.types.mapping(Type::Dict(id)).unwrap().1;
                     let value = self.coerce(value, item, target)?;
-                    return Ok(Statement::SetItem(
+                    break 'place Statement::SetItem(
                         super::namespaces::backing(receiver, id),
                         name,
                         value,
-                    ));
+                    );
                 }
                 if matches!(receiver.ty, Type::ModuleSpec(_))
                     && attribute.attr.as_str() == "has_location"
                 {
-                    return self.set_module_spec_location(attribute, receiver, value);
+                    break 'place self.set_module_spec_location(attribute, receiver, value)?;
                 }
                 if receiver.ty == Type::LogRecord {
                     let value = self.check_record_value(value, target)?;
-                    return Ok(Statement::Expr(logging_records::op(
+                    break 'place Statement::Expr(logging_records::op(
                         ir::LogRecordOperation::Put,
                         Type::None,
                         vec![receiver, string(attribute.attr.as_str()), value],
-                    )));
+                    ));
                 }
 
                 if attribute.attr.as_str() == "MIN_READ_SIZE" && receiver.ty == Type::BinaryIO {
                     let value = self.coerce(value, Type::Int, target)?;
                     // Assignment evaluates the RHS before the receiver.
-                    return Ok(Statement::Expr(Expr {
+                    break 'place Statement::Expr(Expr {
                         ty: Type::None,
                         kind: ExprKind::Builtin(Builtin::ZipMinReadSize, vec![value, receiver]),
-                    }));
+                    });
                 }
                 if let Type::ChainMap(id) = receiver.ty
                     && attribute.attr.as_str() == "maps"
                 {
                     let maps = self.coerce(value, self.types.list(Type::Dict(id)), target)?;
-                    return Ok(Statement::Expr(Expr {
+                    break 'place Statement::Expr(Expr {
                         ty: Type::None,
                         kind: ExprKind::Builtin(Builtin::ChainMapSetMaps, vec![maps, receiver]),
-                    }));
+                    });
                 }
                 if let Some(class) = self.writable_property(receiver.ty, attribute) {
-                    return self.set_property(class, attribute, receiver, value);
+                    break 'place self.set_property(class, attribute, receiver, value)?;
                 }
                 if let Some(field) = self.setup_field(receiver.ty, attribute.attr.as_str()) {
-                    return self.store_setup_field(receiver, value, attribute, field);
+                    break 'place self.store_setup_field(receiver, value, attribute, field)?;
                 }
                 if let Type::Class(id) = receiver.ty
                     && let class = &self.classes.declarations.definitions[id]
@@ -919,7 +924,7 @@ impl Checker<'_> {
                         "'{}' object has no attribute '{}' and no __dict__ for setting new attributes",
                         class.name, attribute.attr
                     );
-                    return Ok(Statement::Scope {
+                    break 'place Statement::Scope {
                         body: vec![
                             Statement::Expr(value),
                             Statement::Expr(receiver),
@@ -932,7 +937,7 @@ impl Checker<'_> {
                             }),
                         ],
                         clear: vec![],
-                    });
+                    };
                 }
                 let mock_effect = self.native_mock_instance(receiver.ty)
                     && attribute.attr.as_str() == "side_effect";
@@ -955,10 +960,15 @@ impl Checker<'_> {
                         error
                     }
                 })?;
-                Ok(Statement::SetField(receiver, field, value))
+                Statement::SetField(receiver, field, value)
+            } else {
+                return Err(error(self.source, target, "unsupported assignment target"));
             }
-            _ => Err(error(self.source, target, "unsupported assignment target")),
+        };
+        if let Some(output) = output {
+            output.push(statement);
         }
+        Ok(())
     }
 
     /// Literal context is discovered before any target binding is published.
@@ -1113,16 +1123,13 @@ impl PatternBinder for Checker<'_> {
     fn pattern_local(&self, slot: usize) -> Expr {
         self.local(slot)
     }
-    // Keep the assignment result in the leaf call, outside recursive unpack frames.
-    #[inline(never)]
     fn pattern_store(
         &mut self,
         target: &ast::Expr,
         value: Expr,
         output: &mut Vec<Statement>,
     ) -> StdResult<(), Self::Error> {
-        output.push(self.assign_value(target, value)?);
-        Ok(())
+        self.store_value(target, value, None, Some(output))
     }
     fn multiple_stars(&self, target: &ast::Expr) -> Self::Error {
         error(
