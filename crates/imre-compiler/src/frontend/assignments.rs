@@ -264,6 +264,7 @@ pub(super) struct Assigned {
 pub(super) enum ValueSource {
     Declaration(TypeDeclaration),
     InferredList(DefinitionId),
+    Function(usize),
 }
 
 #[derive(Default, Clone, Copy)]

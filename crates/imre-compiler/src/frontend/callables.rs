@@ -745,6 +745,10 @@ impl Checker<'_> {
             .func
             .as_name_expr()
             .and_then(|name| self.names.get(name.id.as_str()));
+        let saved = match &callable.kind {
+            ExprKind::Local(slot) => self.saved_call_target(*slot),
+            _ => None,
+        };
         let local_callable = matches!(callable.kind, ExprKind::Local(slot)
             if local == Some(&slot) && self.locals[slot] == callable.ty && matches!(callable.ty, Type::Callable(_)));
         let index_callable = self.types.index_callable_signature(callable.ty).is_some();
@@ -796,13 +800,28 @@ impl Checker<'_> {
         if let Type::Coroutine(_) = returns {
             return Ok(self.indirect_coroutine(callable, values, returns));
         }
+        let mut args = ir::CallArgs::positional(values);
+        if let Some(id) = saved {
+            args.site = ir::CallSite::SavedFunction(self.call_origin(call), id);
+        }
         Ok(Expr {
             ty: returns,
             kind: ExprKind::Invoke {
                 callable: Box::new(callable),
-                args: ir::CallArgs::positional(values),
+                args,
             },
         })
+    }
+
+    pub(super) fn saved_call_target(&self, slot: usize) -> Option<usize> {
+        if self.tracks_called_bindings()
+            && self.module_namespace.is_unexposed()
+            && let Some(ValueSource::Function(id)) = self.assigned.value_source(slot)
+        {
+            Some(id)
+        } else {
+            None
+        }
     }
 }
 

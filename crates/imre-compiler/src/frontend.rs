@@ -4701,6 +4701,7 @@ impl<'a> Checker<'a> {
     fn value_source(&self, value: &Expr) -> Option<ValueSource> {
         match &value.kind {
             ExprKind::Local(slot) => self.assigned.value_source(*slot),
+            ExprKind::Builtin(Builtin::StaticFunction(id), _) => Some(ValueSource::Function(*id)),
             ExprKind::Bind(_, inner) | ExprKind::Present(inner) | ExprKind::Unwrap(inner) => {
                 self.value_source(inner)
             }
@@ -4730,7 +4731,7 @@ impl<'a> Checker<'a> {
     fn value_declaration(&self, value: &Expr) -> Option<TypeDeclaration> {
         match self.value_source(value)? {
             ValueSource::Declaration(declaration) => Some(declaration),
-            ValueSource::InferredList(_) => None,
+            ValueSource::InferredList(_) | ValueSource::Function(_) => None,
         }
     }
 
@@ -7780,11 +7781,14 @@ impl<'a> Checker<'a> {
         Some(field)
     }
 
+    fn tracks_called_bindings(&self) -> bool {
+        self.module_scope
+            && (self.globals.registered_initializers || self.module == self.graph.entry)
+    }
+
     fn expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
         // Resolve a closed callee before evaluating arguments that can replace it.
-        let python_call = self.module_scope
-            && (self.globals.registered_initializers
-                || self.inference.is_some() && self.module == self.graph.entry)
+        let python_call = self.tracks_called_bindings()
             && expression
                 .as_call_expr()
                 .is_some_and(|call| !self.closed_passive_call(call));
