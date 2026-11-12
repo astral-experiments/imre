@@ -496,13 +496,12 @@ impl Session {
         )
     }
 
-    /// A known argument call that cannot return never enters the enclosing callee.
-    pub(crate) fn function_may_return(
+    /// A call can complete without executing an explicit return in this function.
+    pub(crate) fn call_may_return_implicitly(
         &self,
         module: usize,
         function: &ruff_python_ast::StmtFunctionDef,
     ) -> bool {
-        use ruff_python_ast::statement_visitor::{StatementVisitor, walk_stmt};
         use ty_python_core::reachability_constraints::ScopedReachabilityConstraintId;
 
         let file = self.db.program_file(self.files[module]);
@@ -512,31 +511,33 @@ impl Session {
         else {
             return true;
         };
-        if function.is_async
+        function.is_async
             || !function.decorator_list.is_empty()
             || scope.is_generator_function(index)
             || index.use_def_map(scope).end_of_scope_reachability()
                 != ScopedReachabilityConstraintId::ALWAYS_FALSE
-        {
-            return true;
-        }
-        struct Returns(Vec<TextRange>);
-        impl<'a> StatementVisitor<'a> for Returns {
-            fn visit_stmt(&mut self, stmt: &'a ruff_python_ast::Stmt) {
-                match stmt {
-                    ruff_python_ast::Stmt::Return(ret) => self.0.push(ret.range()),
-                    ruff_python_ast::Stmt::FunctionDef(_) | ruff_python_ast::Stmt::ClassDef(_) => {}
-                    _ => walk_stmt(self, stmt),
-                }
-            }
-        }
-        let mut returns = Returns(Vec::new());
-        returns.visit_body(&function.body);
+    }
+
+    pub(crate) fn has_reachable_return(
+        &self,
+        module: usize,
+        returns: &[&ruff_python_ast::StmtReturn],
+    ) -> bool {
+        let file = self.db.program_file(self.files[module]);
         let excluded = ty_python_semantic::types::ide_support::unreachable_ranges(&self.db, file);
         returns
-            .0
-            .into_iter()
-            .any(|site| !excluded.iter().any(|r| r.range.contains_range(site)))
+            .iter()
+            .any(|ret| !excluded.iter().any(|r| r.range.contains_range(ret.range())))
+    }
+
+    /// A known argument call that cannot return never enters the enclosing callee.
+    pub(crate) fn function_may_return(
+        &self,
+        module: usize,
+        function: &ruff_python_ast::StmtFunctionDef,
+    ) -> bool {
+        self.call_may_return_implicitly(module, function)
+            || self.has_reachable_return(module, &explicit_returns(function))
     }
 
     pub(crate) fn unconditional_function_operand(
@@ -3148,6 +3149,14 @@ fn primary_range(diagnostic: &Diagnostic, file: File) -> Option<TextRange> {
     (span.file() == &ruff_db::diagnostic::UnifiedFile::Ty(file))
         .then(|| span.range())
         .flatten()
+}
+
+pub(crate) fn explicit_returns(
+    function: &ruff_python_ast::StmtFunctionDef,
+) -> Vec<&ruff_python_ast::StmtReturn> {
+    let mut exits = ruff_python_ast::helpers::ReturnStatementVisitor::default();
+    exits.visit_body(&function.body);
+    exits.returns
 }
 
 /// Resolve an explicit return site to its indexed function. An implicit fallthrough
