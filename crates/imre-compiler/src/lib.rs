@@ -1271,10 +1271,7 @@ fn checked_lower_with(
         };
         // An inapplicable object representation cannot replace a native source or ABI
         // diagnostic. A real registration checks this result before emitting its body.
-        graph.source_contract =
-            Some(analysis::SourceContract::Checked(checked.and_then(|()| {
-                native.map_or(Ok(()), |reason| reason.check_declared_operand(graph))
-            })));
+        graph.source_contract = Some(analysis::SourceContract::Checked(checked));
         lowered
     };
     match result {
