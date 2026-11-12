@@ -12,6 +12,13 @@ fn operation(operation: ProcessOperation, ty: Type, args: Vec<Expr>) -> Expr {
     }
 }
 
+fn command_path(ty: Type, allow_boxed: bool) -> bool {
+    matches!(
+        ty,
+        Type::Str | Type::StrLiteral(_) | Type::Bytes | Type::Path | Type::PurePath(_)
+    ) || (allow_boxed && ty == Type::PythonObject)
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum LaunchApi {
     Popen,
@@ -770,6 +777,16 @@ impl Checker<'_> {
                 }
             })
             .collect::<Vec<_>>();
+        if self.registered.is_none()
+            && kinds.contains(&Type::PythonObject)
+            && kinds.iter().all(|&ty| command_path(ty, true))
+        {
+            self.require_registered_operation(display)?;
+            return Ok(Expr {
+                ty: Type::PythonObject,
+                kind: ExprKind::List(items),
+            });
+        }
         let ty = if kinds.is_empty() {
             Some(Type::Str)
         } else {
@@ -795,12 +812,6 @@ impl Checker<'_> {
 
     /// Keep the caller's argument object; only the OS launch converts each entry to bytes.
     fn command_argument(&mut self, arg: &ast::Expr) -> Result<Expr, String> {
-        let scalar = |ty| {
-            matches!(
-                ty,
-                Type::Str | Type::StrLiteral(_) | Type::Bytes | Type::Path | Type::PurePath(_)
-            )
-        };
         let value = if let ast::Expr::List(display) = arg
             && !display
                 .elts
@@ -811,34 +822,45 @@ impl Checker<'_> {
         } else {
             self.expr(arg)?
         };
-        let element = |ty| {
-            scalar(ty)
+        let accepts = |allow_boxed| {
+            let scalar = |ty| command_path(ty, allow_boxed);
+            let element = |ty| {
+                scalar(ty)
+                    || self
+                        .types
+                        .members(ty)
+                        .is_some_and(|members| members.into_iter().all(scalar))
+            };
+            scalar(value.ty)
+                || self.types.element(value.ty).is_some_and(element)
                 || self
                     .types
-                    .members(ty)
-                    .is_some_and(|members| members.into_iter().all(scalar))
+                    .fields(value.ty)
+                    .is_some_and(|fields| fields.into_iter().all(element))
         };
-        if scalar(value.ty)
-            || self.types.element(value.ty).is_some_and(element)
-            || self
-                .types
-                .fields(value.ty)
-                .is_some_and(|fields| fields.into_iter().all(element))
-        {
-            Ok(value)
-        } else {
-            Err(error(
-                self.source,
-                arg,
-                "command requires str, bytes, Path, or a list or tuple of these",
-            ))
+        if !accepts(false) {
+            if self.registered.is_some() || !accepts(true) {
+                return Err(error(
+                    self.source,
+                    arg,
+                    "command requires str, bytes, Path, or a list or tuple of these",
+                ));
+            }
+            // The registered call owns path validation for a live Python operand.
+            // Keep checking all other supplied arguments in the fixed pass.
+            self.require_registered_operation(arg)?;
         }
+        Ok(value)
     }
 
     /// Keep the original bytes or path owner until the native launch. An absent
     /// path has a null word; every present value has its own exact storage kind.
     fn optional_exec_path(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
         let value = self.expr(expression)?;
+        if self.registered.is_none() && value.ty == Type::PythonObject {
+            self.require_registered_operation(expression)?;
+            return Ok(value);
+        }
         let ty = self.types.payload(value.ty).unwrap_or(value.ty);
         let ty = match ty {
             Type::None | Type::StrLiteral(_) => Type::Str,

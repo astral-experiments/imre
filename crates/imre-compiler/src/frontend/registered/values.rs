@@ -511,11 +511,11 @@ impl Checker<'_> {
         value
     }
 
-    /// Resolve the live imported target before evaluating its already checked operand.
-    pub(in crate::frontend) fn call_import_with_operand(
+    /// Resolve the live imported target before evaluating its already checked operands.
+    pub(in crate::frontend) fn call_import_with_operands(
         &mut self,
         call: &ast::ExprCall,
-        operand: Expr,
+        operands: Vec<Expr>,
     ) -> Result<Expr, String> {
         let source = self
             .registered
@@ -523,7 +523,7 @@ impl Checker<'_> {
             .context(self.source);
         let (selection, receiver) = source.call_target(call);
         let target = registered_value(receiver, source).map_or_else(|| self.expr(receiver), Ok)?;
-        let mut value = bound_call(call, selection, target, vec![operand]);
+        let mut value = bound_call(call, selection, target, operands);
         if let Some(slot) = self.namespace {
             in_namespace(&mut value, self.local(slot));
         }
