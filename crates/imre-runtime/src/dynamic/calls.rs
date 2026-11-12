@@ -935,14 +935,18 @@ impl Context {
             Value::Raised(_) => self.exact_type(value)?,
             _ => return Ok(None),
         };
-        let method = self.find_in_mro(class, |base| match self.heap.get(base) {
-            Value::Native(name) if matches!(name.as_str(), "int" | "float") => Some(None),
-            _ => self.own_class_attr(base, slot).map(Some),
-        });
-        method
-            .flatten()
+        self.numeric_slot_override(class, slot)
             .map(|method| self.bind_attribute(method, value, class))
             .transpose()
+    }
+
+    /// Look up a numeric override up to the first built-in implementation.
+    pub(super) fn numeric_slot_override(&self, class: Id, slot: &str) -> Option<Id> {
+        self.find_in_mro(class, |base| match self.heap.get(base) {
+            Value::Native(name) if matches!(name.as_str(), "int" | "float") => Some(None),
+            _ => self.own_class_attr(base, slot).map(Some),
+        })
+        .flatten()
     }
 
     /// Special methods are looked up on the type, even if the instance shadows them.
