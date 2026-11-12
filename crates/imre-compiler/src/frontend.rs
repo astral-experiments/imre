@@ -12339,27 +12339,6 @@ impl<'a> Checker<'a> {
             {
                 return self.invoke_descriptor(call, inspect::descriptor(method), method);
             }
-            if attribute.attr.as_str() == "count"
-                && let ast::Expr::Attribute(parts) = &*attribute.value
-                && parts.attr.as_str() == "parts"
-                && let Ok(path) = self.expr(&parts.value)
-                && path.ty.is_path()
-            {
-                self.reject_builtin_keywords(call)?;
-                let [component] = call.arguments.args.as_ref() else {
-                    return Err(error(
-                        self.source,
-                        call,
-                        "parts.count expects one component",
-                    ));
-                };
-                let component = self.expr_expected(component, Type::Str)?;
-                return Ok(paths::operation(
-                    ir::PathOperation::CountPart,
-                    Type::Int,
-                    vec![path, component],
-                ));
-            }
             if let Some(class) = self.class_reference(&attribute.value) {
                 if let Some(e) = self.exception_alias_call(call, attribute, class, None)? {
                     return Ok(e);
@@ -12424,6 +12403,25 @@ impl<'a> Checker<'a> {
                 Some(value) => value,
                 None => self.expr(&attribute.value)?,
             };
+            if attribute.attr.as_str() == "count"
+                && let ExprKind::Builtin(Builtin::Path(ir::PathOperation::Parts), mut operands) =
+                    receiver.kind
+            {
+                self.reject_builtin_keywords(call)?;
+                let [component] = call.arguments.args.as_ref() else {
+                    return Err(error(
+                        self.source,
+                        call,
+                        "parts.count expects one component",
+                    ));
+                };
+                operands.push(self.expr_expected(component, Type::Str)?);
+                return Ok(paths::operation(
+                    ir::PathOperation::CountPart,
+                    Type::Int,
+                    operands,
+                ));
+            }
             if receiver.ty == Type::PythonObject {
                 let method = registered::values::loaded_attribute(attribute, receiver);
                 return self.call_with_target(call, method);
