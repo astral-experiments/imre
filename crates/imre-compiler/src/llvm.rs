@@ -8844,17 +8844,13 @@ impl Emitter<'_, '_> {
                         "call i32 @imre_join_buffer_append(ptr {}, ptr {})",
                         args[0].value.operand, args[1].value.operand
                     ));
-                } else if self.try_append_owned(&args[0].value, &args[1]) {
-                    self.release_operand(&args[0]);
-                    return none();
+                    self.release_operand(&args[1]);
                 } else if let Some(window) = self.byte_output_window(&expressions[0]) {
                     self.append_private_bytes(window, &args[0].value, &args[1].value, None);
+                    self.release_operand(&args[1]);
                 } else {
-                    self.append(&args[0].value, &args[1].value);
+                    self.append(&args[0].value, &args[1]);
                 }
-                // The list now owns the item. Drop the argument first so a
-                // temporary receiver destroys its items in reverse insertion order.
-                self.release_operand(&args[1]);
                 self.release_operand(&args[0]);
                 return none();
             }
@@ -9759,37 +9755,33 @@ impl Emitter<'_, '_> {
             }
     }
 
-    /// Transfer a temporary into a compatible sequence only after its append succeeds.
-    fn try_append_owned(&mut self, list: &Value, item: &Operand) -> bool {
-        if !matches!(item.ownership, Ownership::Owned)
-            || !self.append_takes_owner(list.ty, item.value.ty)
-        {
-            return false;
-        }
-        let word = self.word(&item.value);
-        self.checked_status(format!(
-            "call i32 @imre_seq_append_owned(ptr {}, i64 {word}, i32 {})",
-            list.operand,
-            representation_kind(item.value.ty, &self.module.types)
-        ));
-        // The failure branch retains this temporary in its cleanup.
-        self.forget(&item.value);
-        true
-    }
-
-    fn append(&mut self, list: &Value, value: &Value) {
+    /// Append the rooted operand, transferring its owner only after the write succeeds.
+    fn append(&mut self, list: &Value, item: &Operand) {
+        let value = &item.value;
         if list.ty == Type::ByteOutput {
             self.runtime_call(&BYTE_OUTPUT_APPEND, [list, value]);
         } else if list.ty == Type::ListInt {
             self.runtime_call(&LIST_APPEND, [list, value]);
         } else {
+            let take = matches!(item.ownership, Ownership::Owned)
+                && self.append_takes_owner(list.ty, value.ty);
+            let symbol = if take {
+                "imre_seq_append_owned"
+            } else {
+                "imre_seq_append"
+            };
             let word = self.word(value);
             self.checked_status(format!(
-                "call i32 @imre_seq_append(ptr {}, i64 {word}, i32 {})",
+                "call i32 @{symbol}(ptr {}, i64 {word}, i32 {})",
                 list.operand,
                 representation_kind(value.ty, &self.module.types)
             ));
+            if take {
+                self.forget(value);
+                return;
+            }
         }
+        self.release_operand(item);
     }
 
     /// Passes a rooted canonical int/str/bytes key without index decoding. The runtime
