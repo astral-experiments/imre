@@ -990,13 +990,15 @@ pub(crate) struct SplitFieldOrigins {
 pub(crate) enum CallSite {
     None,
     Fixed(FixedOrigin),
+    /// A retained local carries its loaded function identity into this invocation.
+    SavedFunction(FixedOrigin, usize),
     Python(InvokeSite),
 }
 
 impl CallSite {
     pub(crate) fn fixed(&self) -> Option<&FixedOrigin> {
         match self {
-            Self::Fixed(site) => Some(site),
+            Self::Fixed(site) | Self::SavedFunction(site, _) => Some(site),
             _ => None,
         }
     }

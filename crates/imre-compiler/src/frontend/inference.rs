@@ -1359,7 +1359,15 @@ impl Checker<'_> {
     }
 
     pub(super) fn terminating_call(&self, value: &Expr) -> bool {
-        matches!(&value.kind, ExprKind::Call(id, _) if self.nonreturning_functions.contains(id))
+        let id = match &value.kind {
+            ExprKind::Call(id, _) => id,
+            ExprKind::Invoke { args, .. } => match &args.site {
+                ir::CallSite::SavedFunction(_, id) => id,
+                _ => return false,
+            },
+            _ => return false,
+        };
+        self.nonreturning_functions.contains(id)
     }
 
     fn call_operand_returns(&self, value: &Expr) -> bool {
@@ -1510,7 +1518,11 @@ impl Checker<'_> {
                 let node = argument.site();
                 let argument = if direct_input
                     && let Some(inner) = node.as_call_expr()
-                    && matches!(checker.resolve(&inner.func), Some(Binding::Definition(id)) if checker.functions.contains_key(&id))
+                    && (matches!(checker.resolve(&inner.func), Some(Binding::Definition(id)) if checker.functions.contains_key(&id))
+                        || inner.func.as_name_expr()
+                            .and_then(|name| checker.names.get(name.id.as_str()))
+                            .and_then(|&slot| checker.saved_call_target(slot))
+                            .is_some_and(|id| checker.nonreturning_functions.contains(&id)))
                 {
                     let value = argument.value(checker)?;
                     if checker.terminating_call(&value) {
