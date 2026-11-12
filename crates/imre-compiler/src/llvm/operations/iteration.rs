@@ -330,10 +330,10 @@ impl CheckedBody<'_, '_, '_, '_> {
             e.iter_next(iterator, key, value, ready, kind);
             return;
         }
-        self.python().pull(iterator, key, value, ready, kind);
+        self.python().pull(iterator, key, value, ready, kind, false);
     }
 
-    pub(super) fn loop_transfer(&mut self, statement: &Statement) {
+    pub(in crate::llvm) fn loop_transfer(&mut self, statement: &Statement) {
         let target = match &self.0 {
             Entry::Native(e) => e.loops.last().map(|active| &active.target),
             Entry::Registered(f) => f.loops.last(),

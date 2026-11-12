@@ -868,6 +868,33 @@ impl<'f> Frame<'f, '_, '_> {
             "call void @imre_dyn_comprehension_step(ptr %ctx, i64 {mark})"
         ));
     }
+    /// Use the pull's exhaustion edge when its next statement tests that same private flag.
+    pub(crate) fn pull_and_exhaust(&mut self, statements: &[Statement]) -> usize {
+        let [
+            Statement::IterNext {
+                iterator,
+                key,
+                value,
+                ready,
+                kind,
+            },
+            Statement::If(test, yes, no),
+            ..,
+        ] = statements
+        else {
+            return 0;
+        };
+        if let ExprKind::Unary(ruff_python_ast::UnaryOp::Not, flag) = &test.kind
+            && matches!(flag.kind, ExprKind::Local(slot) if slot == *ready)
+            && matches!(yes.as_slice(), [Statement::Exhaust])
+            && no.is_empty()
+        {
+            self.pull(*iterator, *key, *value, *ready, *kind, true);
+            return 2;
+        }
+        0
+    }
+
     pub(crate) fn pull(
         &mut self,
         iterator: usize,
@@ -875,9 +902,12 @@ impl<'f> Frame<'f, '_, '_> {
         second: Option<usize>,
         ready: usize,
         kind: ir::IterNextKind,
+        exhaust: bool,
     ) {
         let cursor = self.load_private(iterator);
         let done = self.code.name("b");
+        let exhausted = exhaust.then(|| self.code.name("b"));
+        let empty = exhausted.as_deref().unwrap_or(&done);
         self.store_private(ready, &permanent::FALSE.to_string());
         let header = self.code.current_range.start();
         let has_else = self
@@ -888,15 +918,19 @@ impl<'f> Frame<'f, '_, '_> {
         if let Some(second) = second {
             let available = self.code.name("b");
             self.code
-                .next_item_pair(&cursor, header, has_else, &available, &done);
+                .next_item_pair(&cursor, header, has_else, &available, empty);
             self.code.label(&available);
             self.code.store_item_pair([key, second]);
         } else {
-            let item = self.code.pull_item(&cursor, kind, header, has_else, &done);
+            let item = self.code.pull_item(&cursor, kind, header, has_else, empty);
             self.store_private(key, &item);
         }
         self.store_private(ready, &permanent::TRUE.to_string());
         self.code.jump(&done);
+        if let Some(label) = exhausted {
+            self.code.label(&label);
+            CheckedBody::registered(self.reborrow()).loop_transfer(&Statement::Exhaust);
+        }
         self.code.label(&done);
     }
     pub(crate) fn integer(&mut self, text: &str, integer: Option<i64>) -> CheckedValue {

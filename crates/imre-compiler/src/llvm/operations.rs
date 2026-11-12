@@ -1092,7 +1092,9 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 Entry::Native(emitter) if !emitter.body.terminated => {
                     emitter.fused_statements(remaining)
                 }
-                Entry::Registered(frame) if !frame.terminated() => 0,
+                Entry::Registered(frame) if !frame.terminated() => {
+                    frame.pull_and_exhaust(remaining)
+                }
                 _ => break,
             };
             if fused == 0 {
