@@ -1,7 +1,8 @@
 //! Evaluate display operands before packing a small prefix, then consume each starred
 //! or streamed operand before evaluating the following expression.
 use crate::llvm::{
-    Emitter, Expr, LIST_APPEND_PAIR, Operand, Type, Value, representation_kind, structs::PackedRow,
+    Emitter, Expr, LIST_APPEND_PAIR, Operand, Ownership, Type, Value, representation_kind,
+    structs::PackedRow,
 };
 
 pub(in crate::llvm) const STACK_USE_GUIDELINE: usize = 30;
@@ -121,9 +122,8 @@ impl Emitter<'_, '_> {
                     self.set_member(container, &value.value, true);
                 } else if tuple {
                     self.set_field(container, index, &value.value);
-                } else if !self.try_append_owned(container, &value) {
-                    self.append(container, &value.value);
                 } else {
+                    self.append(container, &value);
                     return;
                 }
                 self.release_operand(&value);
@@ -165,9 +165,11 @@ impl Emitter<'_, '_> {
                     index
                 },
                 |e, _, index| {
-                    let item = e.get_item(source, &index, element, true);
+                    let item = Operand {
+                        value: e.get_item(source, &index, element, true),
+                        ownership: Ownership::Owned,
+                    };
                     e.append(&result, &item);
-                    e.release(&item);
                     let next = e.instruction(format!("add nuw nsw i64 {}, 2", index.operand));
                     e.line(format!("store i64 {next}, ptr {cursor}"));
                 },
