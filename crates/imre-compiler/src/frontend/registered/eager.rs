@@ -4,6 +4,7 @@ use super::*;
 use crate::frontend::comprehensions::{
     Collector, EagerDisplay, acquire_in_namespace, async_pull, scoped_result,
 };
+use crate::frontend::statements::StatementLowering;
 use imre_ast::comprehension::{Output, Plan};
 
 pub(super) struct Namespace {
@@ -26,11 +27,6 @@ impl SourceScope<'_> {
 
     pub(super) fn eager_comprehension(&mut self, expression: &ast::Expr) -> Option<Expr> {
         let plan = Plan::from_expr(expression)?;
-        if plan.body_suspends()
-            && !matches!(self.kind, RegisteredScope::Function { is_async: true })
-        {
-            return None;
-        }
 
         let first_private = self.locals.len();
         // The first iterable belongs to the creating frame and runs before this cursor exists.
@@ -82,6 +78,9 @@ impl EagerDisplay for SourceScope<'_> {
     type Error = ();
 
     fn input(&mut self, clause: &ast::Comprehension) -> StdResult<pipelines::Prepared, ()> {
+        if clause.is_async && !self.async_iteration() {
+            return Err(());
+        }
         self.iteration_input(&clause.iter, async_pull(clause))
             .ok_or(())
     }
