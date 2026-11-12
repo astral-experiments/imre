@@ -23,21 +23,24 @@ impl MethodContext {
 }
 
 /// Validate the original receiver before preparing the checked method body.
-pub(super) fn executable_method(
-    binding: &crate::classes::ClassMethod,
+pub(super) fn executable_method<'a>(
+    binding: &'a crate::classes::ClassMethod,
     context: MethodContext,
     classes: &Classes,
     graph: &SourceGraph,
     types: &Types,
-) -> std::result::Result<(ast::StmtFunctionDef, bool), String> {
-    let mut method = (*binding.function).clone();
-    method.name.clone_from(&binding.name);
-    method.decorator_list.clear();
+) -> std::result::Result<(Cow<'a, ast::StmtFunctionDef>, bool), String> {
+    let mut method = Cow::Borrowed(binding.function.as_ref());
+    if binding.name != method.name || !method.decorator_list.is_empty() {
+        let method = method.to_mut();
+        method.name.clone_from(&binding.name);
+        method.decorator_list.clear();
+    }
     if classes.definitions[context.class].forwarder.is_some()
         && matches!(method.name.as_str(), "__str__" | "__repr__")
         && method.returns.is_none()
     {
-        method.returns = Some(Box::new(
+        method.to_mut().returns = Some(Box::new(
             ruff_python_parser::parse_expression("str")
                 .expect("static annotation")
                 .expr()
@@ -49,8 +52,10 @@ pub(super) fn executable_method(
         if graph.resolve(origin, &annotation.value) == Some(Binding::Intrinsic(Intrinsic::Iterator)));
     if returns_iterator {
         let Some(ast::Stmt::Expr(stmt)) = method.body.last() else {
-            return Err(graph.modules[origin]
-                .error(&method, "a record iterator requires a final yield from"));
+            return Err(graph.modules[origin].error(
+                method.as_ref(),
+                "a record iterator requires a final yield from",
+            ));
         };
         let ast::Expr::YieldFrom(yielded) = &*stmt.value else {
             return Err(
@@ -94,14 +99,14 @@ pub(super) fn executable_method(
                 },
             }));
         }
-        *method.body.last_mut().unwrap() = ast::Stmt::Return(ast::StmtReturn {
+        *method.to_mut().body.last_mut().unwrap() = ast::Stmt::Return(ast::StmtReturn {
             range,
             node_index: ast::AtomicNodeIndex::NONE,
             value: Some(value),
         });
     } else if method.name.as_str() == "__iter__" {
         return Err(graph.modules[origin].error(
-            &method,
+            method.as_ref(),
             "__iter__ requires an Iterator[T] return annotation",
         ));
     }

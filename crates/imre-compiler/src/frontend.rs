@@ -221,7 +221,7 @@ type InitializerDefaults = HashMap<usize, Vec<(usize, Expr)>>;
 
 struct ClassInfo {
     parsers: argparse::Parsers,
-    declarations: Classes,
+    declarations: Arc<Classes>,
     fields: Vec<Vec<Type>>,
     methods: Vec<HashMap<String, Signature>>,
     setters: Vec<HashMap<String, Signature>>,
@@ -502,7 +502,7 @@ impl ClassInfo {
             generators: HashSet::new(),
             producer_items: HashMap::new(),
             contexts: HashSet::new(),
-            declarations,
+            declarations: Arc::new(declarations),
             fields,
         };
         Ok((classes, initializer_defaults))
@@ -919,7 +919,9 @@ fn lower_graph(
             }
         }
     }
-    for (class_id, class) in classes.declarations.definitions.iter().enumerate() {
+    // Unchanged method definitions can borrow the class declaration through signature inference.
+    let declarations = Arc::clone(&classes.declarations);
+    for (class_id, class) in declarations.definitions.iter().enumerate() {
         let module_id = class.definition.module;
         let module = &graph.modules[module_id];
         for statement in &class.node.body {
@@ -968,6 +970,7 @@ fn lower_graph(
             let keyword_copy =
                 record_inputs::copies_keywords(&class.methods[index], graph, module_id);
             if keyword_copy {
+                let method = method.to_mut();
                 method.parameters.kwarg = None;
                 // The signature and inference see its proved identity of result layout;
                 // final lowering copies the concrete storage and runs its initializer.
@@ -985,7 +988,6 @@ fn lower_graph(
                 })]
                 .into();
             }
-            let mut method = Cow::Owned(method);
             let (defaults, forwarded_base) = keyword_forwarding::prepare_method(
                 graph,
                 module_id,
