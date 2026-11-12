@@ -4866,9 +4866,9 @@ impl Heap {
     }
 
     /// Place restored lexical and operand roots below the frame's evaluation temporaries.
-    pub(super) fn prepend_temporaries(&mut self, roots: &[Id]) {
+    pub(super) fn insert_temporaries(&mut self, mark: usize, roots: &[Id]) {
         let live = &mut self.frames.last_mut().unwrap().live;
-        live.splice(..0, roots.iter().copied());
+        live.splice(mark..mark, roots.iter().copied());
     }
 
     /// Insert a root below newer temporaries so they can be released before it.
@@ -6384,13 +6384,13 @@ impl Heap {
     }
 
     /// Keep the operands needed by later targets after a source assignment releases its old value.
-    pub(super) fn assignment_target(&mut self, live: &[Id], replaced: bool) -> bool {
-        // The private unpack list still owns all items waiting for a target.
+    pub(super) fn assignment_target(&mut self, mark: usize, live: &[Id], replaced: bool) -> bool {
+        // The enclosing expression owns the prefix. Current slots own any pending targets.
         if !replaced || !self.has_unbound_finalizer(NONE) {
             return false;
         }
         let temporaries = &mut self.frames.last_mut().unwrap().live;
-        temporaries.clear();
+        temporaries.truncate(mark);
         temporaries.extend_from_slice(live);
         true
     }

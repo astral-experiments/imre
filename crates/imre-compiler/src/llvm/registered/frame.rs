@@ -449,15 +449,20 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         }
     }
 
-    /// Retain the exception and exit callable while unwinding abandoned evaluation
-    /// operands, then the private values of the lexical scopes being left.
-    pub(super) fn take_context_error(&mut self, label: &str, callable: &str) -> String {
-        let slots = self.start_label(label);
+    pub(super) fn take_unwind_slots(&mut self, slots: IndexSet<usize>) -> Vec<String> {
         let mut retiring = Vec::with_capacity(slots.len());
         for slot in slots {
             retiring.push(self.value(&format!("load i64, ptr %ir_slot{slot}")));
             self.line(&format!("store i64 0, ptr %ir_slot{slot}"));
         }
+        retiring
+    }
+
+    /// Retain the exception and exit callable while unwinding abandoned evaluation
+    /// operands, then the private values of the lexical scopes being left.
+    pub(super) fn take_context_error(&mut self, label: &str, callable: &str) -> String {
+        let slots = self.start_label(label);
+        let retiring = self.take_unwind_slots(slots);
         let exception = self.op("take_error", &[]);
         let (_, retained) = self.live_handles(&[&exception, callable]);
         let (ptr, count) = self.write_handles_at(retained, &retiring);
@@ -947,13 +952,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         self.checked(&format!("call i64 @{function}(ptr %ctx, i64 {callable}, {args}, i64 {mark}, ptr {position}, i64 {scope})"))
     }
 
-    pub(crate) fn assign_owned_name(
-        &mut self,
-        scope: &str,
-        name: &str,
-        value: &str,
-        mark: Option<&str>,
-    ) {
+    pub(crate) fn assign_owned_name(&mut self, scope: &str, name: &str, value: &str) {
         self.output.interned_identifiers.insert(name.to_owned());
         let data = self.output.data(name.as_bytes());
         self.take_matching_check();
@@ -961,22 +960,20 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
             "call i64 @imre_dyn_assign_target(ptr %ctx, i64 {scope}, ptr {data}, i64 {}, i64 {value})",
             name.len()
         ));
-        self.release_replaced(&replaced, mark.map(|mark| (mark, value)));
+        self.release_store(&replaced);
     }
 
-    /// An item/attribute setter can replace an owner without reporting which object it dropped.
-    pub(crate) fn release_target(&mut self, mark: Option<&str>) {
-        self.release_replaced("2", mark.map(|mark| (mark, "0")));
+    /// An item/attribute setter can drop its operand without retaining it.
+    pub(crate) fn release_target(&mut self) {
+        self.release_store("2");
     }
 
-    /// Preserve earlier expression operands when present, or the statement's explicit live handles.
-    pub(crate) fn release_replaced(&mut self, replaced: &str, expression: Option<(&str, &str)>) {
-        if let Some((mark, value)) = expression {
-            self.line(&format!("call void @imre_dyn_named_assignment(ptr %ctx, i64 {mark}, i64 {value}, i64 {replaced})"));
-        } else {
-            let (ptr, count) = self.live_handles(&[]);
-            self.line(&format!("call void @imre_dyn_assignment_target(ptr %ctx, ptr {ptr}, i64 {count}, i64 {replaced})"));
-        }
+    fn release_store(&mut self, replaced: &str) {
+        let (ptr, count) = self.live_handles(&[]);
+        let mark = self.iteration.expression_mark.as_deref().unwrap_or("0");
+        self.line(&format!(
+            "call void @imre_dyn_assignment_target_at(ptr %ctx, i64 {mark}, ptr {ptr}, i64 {count}, i64 {replaced})"
+        ));
     }
 }
 
@@ -1532,7 +1529,9 @@ pub(crate) trait FrameEmitter<'a, 'p>:
         evaluate: impl FnOnce(&mut Self) -> String,
     ) -> String {
         let range = match op {
-            ir::IteratorOp::Loop(_) if !self.native_suspension || self.iteration.in_expression => {
+            ir::IteratorOp::Loop(_)
+                if !self.native_suspension || self.iteration.expression_mark.is_some() =>
+            {
                 None
             }
             ir::IteratorOp::Loop(range)

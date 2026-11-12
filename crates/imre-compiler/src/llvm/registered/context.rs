@@ -204,7 +204,7 @@ impl<'p> Frame<'_, '_, 'p> {
                     }
                     let index = self.live.iter().rposition(|v| v == value).unwrap();
                     discarded.push((index, self.live.remove(index)));
-                    self.release_target(None);
+                    self.release_target();
                     self.jump(&done);
                     self.label(&done);
                 }

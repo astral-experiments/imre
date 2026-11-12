@@ -37,7 +37,7 @@ declare i64 @imre_dyn_keep_operands(ptr, i64, i64, i64)
 declare void @imre_dyn_discard_expression(ptr, i64)
 declare void @imre_dyn_named_assignment(ptr, i64, i64, i64)
 declare void @imre_dyn_unwind_frame(ptr, ptr, i64, i64)
-declare void @imre_dyn_assignment_target(ptr, ptr, i64, i64)
+declare void @imre_dyn_assignment_target_at(ptr, i64, ptr, i64, i64)
 declare i64 @imre_dyn_op_at(ptr, ptr, i64, i64, i64, ptr)
 declare i64 @imre_boxed_named_op(ptr, ptr, i64, ptr, i64, i64)
 declare i64 @imre_boxed_guarded_named_op(ptr, ptr, i64, ptr, i64, i64)
@@ -70,6 +70,7 @@ pub(crate) struct Declarations {
     pub(crate) declared_suspension: bool,
     pub(crate) declared_statement_line: bool,
     pub(crate) declared_definition_position: bool,
+    pub(crate) unwind_slots: bool,
     pub(crate) registered_expression: bool,
     pub(crate) exec_operand: bool,
     pub(super) integers: crate::llvm::body::IntegerFunctions,

@@ -3337,21 +3337,38 @@ pub(super) unsafe extern "C" fn imre_dyn_unwind_frame(
     // SAFETY: the caller owns the context and provides len initialized handles.
     let (ctx, live) = unsafe { (&mut *ctx, live_handles(live, len)) };
     debug_assert!(retained <= len && ctx.pending.is_none());
-    ctx.heap.prepend_temporaries(live);
+    ctx.heap.insert_temporaries(0, live);
     ctx.unwind_operands(retained);
 }
 
-/// Finish one target before the next target can observe a replaced writer.
+/// Unwind a failed expression's operands before its pending lexical targets.
 #[unsafe(no_mangle)]
-pub(super) unsafe extern "C" fn imre_dyn_assignment_target(
+pub(super) unsafe extern "C" fn imre_dyn_unwind_slots(
     ctx: *mut Context,
+    mark: usize,
+    retiring: *const Id,
+    len: usize,
+) {
+    // SAFETY: generated code passes initialized root words and its own operand mark.
+    let (ctx, retiring) = unsafe { (&mut *ctx, live_handles(retiring, len)) };
+    if ctx.heap.observes_released_roots() {
+        ctx.heap.insert_temporaries(mark, retiring);
+    }
+    ctx.unwind_operands(mark);
+}
+
+/// Finish a store while retaining the operands below its mark.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_assignment_target_at(
+    ctx: *mut Context,
+    mark: usize,
     live: *const Id,
     len: usize,
     replaced: Id,
 ) {
     // SAFETY: the caller owns the context and its live handle array.
     let (ctx, live) = unsafe { (&mut *ctx, live_handles(live, len)) };
-    if ctx.heap.assignment_target(live, replaced == TRUE)
+    if ctx.heap.assignment_target(mark, live, replaced == TRUE)
         && !ctx.can_skip_finalizer_sweep(ctx.heap.temporary_mark())
     {
         ctx.collect_after_release();
