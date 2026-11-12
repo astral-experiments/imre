@@ -1827,6 +1827,14 @@ impl Types {
         }
     }
 
+    /// Two set handles need Python's element protocol when either key layout is opaque.
+    pub(crate) fn sets_with_object_keys(&self, left: Type, right: Type) -> bool {
+        matches!(
+            (self.set_element(left), self.set_element(right)),
+            (Some(Type::PythonObject), Some(_)) | (Some(_), Some(Type::PythonObject))
+        )
+    }
+
     /// Element type for membership and iteration, including immutable set views.
     pub(crate) fn readable_set_element(&self, ty: Type) -> Option<Type> {
         match ty {
