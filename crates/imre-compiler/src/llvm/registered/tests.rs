@@ -281,6 +281,31 @@ fn checked_floor_division_can_call_a_python_override() {
 }
 
 #[test]
+fn checked_right_shift_guards_the_count_before_using_the_tagged_helper() {
+    let mut output = emit_captured_body("def shift(a: int, b: int, send):\n    send(a >> b)\n");
+    let operator = output.data(b">>");
+    let body = &output.functions;
+    assert_eq!(
+        body.matches("call i64 @imre_dyn_exact_int_word(").count(),
+        2
+    );
+    assert!(body.contains("icmp sge i64"));
+    assert!(body.contains("call i64 @int_rshift("));
+    assert!(body.contains(&format!(
+        "call i64 @imre_dyn_op_at(ptr %ctx, ptr {operator},"
+    )));
+    output.integer_prelude();
+    assert_eq!(
+        output
+            .functions
+            .matches("define internal i64 @int_rshift(")
+            .count(),
+        1
+    );
+    assert!(!output.functions.contains("@int_lshift("));
+}
+
+#[test]
 fn cached_power_of_two_remainder_needs_no_integer_owner() {
     let mut output = emit_captured_body(concat!(
         "def modulo(a: int) -> int:\n    return a % 8\n",

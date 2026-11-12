@@ -3270,7 +3270,10 @@ impl Emitter<'_, '_> {
 
     fn integer_arithmetic(&mut self, op: Binary, left: &str, right: &str) -> Value {
         let result = self.body.integer_arithmetic(op, left, right, false);
-        if matches!(op, Binary::FloorDivide | Binary::Modulo) {
+        if matches!(
+            op,
+            Binary::FloorDivide | Binary::Modulo | Binary::RightShift
+        ) {
             self.check_error();
         }
         self.owned(result)
@@ -3372,13 +3375,13 @@ impl Emitter<'_, '_> {
             | Binary::Subtract
             | Binary::Multiply
             | Binary::FloorDivide
-            | Binary::Modulo => self.integer_arithmetic(op, &left.operand, &right.operand),
+            | Binary::Modulo
+            | Binary::RightShift => self.integer_arithmetic(op, &left.operand, &right.operand),
             Binary::Divide => self.call("imre_int_true_divide", Type::Float, &[left, right]),
             Binary::BitAnd => self.call("int_and", Type::Int, &[left, right]),
             Binary::BitOr => self.call("int_or", Type::Int, &[left, right]),
             Binary::BitXor => self.call("int_xor", Type::Int, &[left, right]),
             Binary::LeftShift => self.call("int_lshift", Type::Int, &[left, right]),
-            Binary::RightShift => self.call("int_rshift", Type::Int, &[left, right]),
         }
     }
 
@@ -11697,8 +11700,13 @@ slow:
         )
         .unwrap();
     }
-    for (op, number, calculation) in [
-        (
+    write_shift_helper(&mut output, Binary::LeftShift);
+    output
+}
+
+fn write_shift_helper(output: &mut String, shift: Binary) {
+    let (op, number, calculation) = match shift {
+        Binary::LeftShift => (
             "lshift",
             8,
             r#"  %safe_count = icmp ult i64 %y, 63
@@ -11713,7 +11721,7 @@ shift:
   %overflow = or i1 %lost, %outside
   br i1 %overflow, label %slow, label %done"#,
         ),
-        (
+        Binary::RightShift => (
             "rshift",
             9,
             r#"  %within = icmp ult i64 %y, 63
@@ -11721,10 +11729,11 @@ shift:
   %result = ashr i64 %x, %count
   br label %done"#,
         ),
-    ] {
-        writeln!(
-            output,
-            r#"
+        _ => unreachable!("expected an integer shift"),
+    };
+    writeln!(
+        output,
+        r#"
 define internal i64 @int_{op}(i64 %a, i64 %b) alwaysinline {{
 entry:
   %both = and i64 %a, %b
@@ -11745,10 +11754,8 @@ slow:
   %fallback = call i64 @imre_int_binary(i64 %a, i64 %b, i32 {number})
   ret i64 %fallback
 }}"#
-        )
-        .unwrap();
-    }
-    output
+    )
+    .unwrap();
 }
 
 #[cfg(test)]

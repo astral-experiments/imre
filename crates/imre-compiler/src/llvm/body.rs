@@ -40,6 +40,9 @@ impl IntegerFunctions {
                 output.push_str(&super::division_helper(op));
             }
         }
+        if uses(Binary::RightShift) {
+            super::write_shift_helper(output, Binary::RightShift);
+        }
         for op in [Binary::Add, Binary::Subtract, Binary::Multiply] {
             if uses(op) {
                 super::write_integer_arithmetic(output, op, declare_overflow);
@@ -133,10 +136,11 @@ impl FunctionBody {
             super::Binary::Multiply => "int_mul",
             super::Binary::FloorDivide => "int_floordiv",
             super::Binary::Modulo => "int_mod",
+            super::Binary::RightShift => "int_rshift",
             _ => unreachable!("expected checked integer operation"),
         };
         let proof = match op {
-            super::Binary::FloorDivide | super::Binary::Modulo => "",
+            super::Binary::FloorDivide | super::Binary::Modulo | super::Binary::RightShift => "",
             _ if bounded => ", i1 true",
             _ => ", i1 false",
         };
