@@ -550,17 +550,16 @@ fn object_fallback(
                                             .native_inputs(graph, options.entry_profile.as_deref()),
                                     });
                                 }
-                                Err(refusal) => refusal.0,
+                                Err(refusal) => refusal,
                             },
                             Err(refusal) => {
                                 // A callable without a fixed representation can still use the
                                 // verified bodies of its siblings if its source is registered.
                                 fixed.register_definitions(&graph);
-                                refusal.0
+                                refusal
                             }
                         };
-                        LoweringDiagnostic::plain(reason.to_owned())
-                            .classified(LoweringKind::Object)
+                        LoweringDiagnostic::plain(reason.0.to_owned()).classified(reason.1)
                     }
                     CheckedProgram::Runtime(error) => error,
                 };

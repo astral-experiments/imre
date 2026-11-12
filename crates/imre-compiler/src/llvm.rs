@@ -373,7 +373,7 @@ enum Completion<T = Value> {
 
 /// The native representation cannot implement this checked operation.
 #[derive(Debug)]
-pub(crate) struct Unsupported(pub(crate) &'static str);
+pub(crate) struct Unsupported(pub(crate) &'static str, pub(crate) crate::LoweringKind);
 
 #[cfg(test)]
 pub(crate) fn emit(
@@ -430,7 +430,7 @@ pub(crate) fn analyze_program(module: &Module) -> Result<NativeProgram, Unsuppor
                     && !matches!(function.locals[function.params[0]], Type::Class(_))
             })
     }) {
-        return Err(Unsupported(SIGNATURE));
+        return Err(Unsupported(SIGNATURE, crate::LoweringKind::Object));
     }
     let linked_functions = function_link_types
         .iter()
@@ -438,18 +438,45 @@ pub(crate) fn analyze_program(module: &Module) -> Result<NativeProgram, Unsuppor
         .filter(|target| !target.bound)
         .map(|target| target.function)
         .collect::<HashSet<_>>();
-    for (id, mut owners) in link_owners {
+    link_owners.retain(|_, owners| {
         owners.retain(|owner| {
             callable_targets
                 .get(owner.ty)
                 .iter()
                 .any(|target| target.bound && !cached(target.function))
         });
-        if owners.is_empty() {
-            continue;
+        !owners.is_empty()
+    });
+
+    // Direct arguments can establish ownership only for a closed function whose
+    // signature also admits a bound method. Other callables need no caller scan.
+    let mut direct_inputs: HashMap<_, Vec<_>> =
+        link_owners.keys().map(|&id| (id, Vec::new())).collect();
+    if !direct_inputs.is_empty() {
+        for function in module.functions.iter().chain([&module.entry]) {
+            ir::walk_expressions(&function.body, &mut |expr| match &expr.kind {
+                ExprKind::Call(id, args) => {
+                    if let Some(inputs) = direct_inputs.get_mut(id) {
+                        inputs.push(args);
+                    }
+                }
+                ExprKind::Callable { function, .. } => {
+                    direct_inputs.remove(function);
+                    if let Some(raw) = module.types.original_cache_body(*function) {
+                        direct_inputs.remove(&raw);
+                    }
+                }
+                ExprKind::Construct { initializer, .. } => {
+                    direct_inputs.remove(initializer);
+                }
+                _ => {}
+            });
         }
+    }
+    for (id, mut owners) in link_owners {
         let function = module.functions.get(id).unwrap_or(&module.entry);
-        ir::retain_unknown_link_owners(function, &mut owners, |operand| {
+        let inputs = direct_inputs.get(&id).map_or(&[][..], Vec::as_slice);
+        ir::retain_unknown_link_owners(function, &mut owners, inputs, |operand| {
             matches!(operand.kind, ExprKind::Callable { function, receiver: None }
                 if !cached(function)
                     && module.types.constructor_base(operand.ty).is_none()
@@ -458,6 +485,7 @@ pub(crate) fn analyze_program(module: &Module) -> Result<NativeProgram, Unsuppor
         if !owners.is_empty() {
             return Err(Unsupported(
                 "Imre: native wrapper links require a plain function as their owner",
+                crate::LoweringKind::ScopedObject,
             ));
         }
     }
@@ -2667,6 +2695,7 @@ impl Emitter<'_, '_> {
         if self.cleanup_limit_hit {
             return Err(Unsupported(
                 "Imre: finally cleanup expansion exceeds the compiler limit",
+                crate::LoweringKind::Object,
             ));
         }
         Ok(())

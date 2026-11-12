@@ -3998,6 +3998,7 @@ pub(crate) fn propagate_copy_facts(proven: &mut [bool], copies: &[(usize, usize)
 pub(crate) fn retain_unknown_link_owners(
     function: &Function,
     owners: &mut Vec<&Expr>,
+    inputs: &[&CallArgs],
     linked: impl Fn(&Expr) -> bool,
 ) {
     fn origin(value: &Expr) -> &ExprKind {
@@ -4010,8 +4011,16 @@ pub(crate) fn retain_unknown_link_owners(
 
     let plain_function = |kind: &ExprKind| matches!(kind, ExprKind::Builtin(Builtin::StaticFunction(_), args) if linked(&args[0]));
     let mut plain = vec![true; function.locals.len()];
-    for &parameter in &function.params {
-        plain[parameter] = false;
+    for (index, &parameter) in function.params.iter().enumerate() {
+        plain[parameter] = !inputs.is_empty()
+            && inputs
+                .iter()
+                .all(|args| {
+                    args.order
+                        .get(index)
+                        .and_then(|&source| args.values.get(source))
+                        .is_some_and(|value| plain_function(origin(value)))
+                });
     }
     let mut copies = Vec::new();
     walk_nodes(&function.body, &mut |node, _| match node {
