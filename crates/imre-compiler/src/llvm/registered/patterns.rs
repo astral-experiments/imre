@@ -4,86 +4,6 @@ use crate::ir::{Expr, MatchCase, MatchTest};
 use crate::llvm::operations::{CheckedBody, CheckedValue};
 use imre_ast::{SequencePatternItems, SequencePatternPlan};
 
-/// Tests, captures and successor edges for one evaluation of a match subject.
-struct MatchRegions {
-    done: String,
-    cases: Vec<CaseBlock>,
-    index: usize,
-    guard_unwind: Option<String>,
-}
-
-struct CaseBlock {
-    body: String,
-    guard: Option<GuardBlock>,
-}
-
-struct GuardBlock {
-    entry: String,
-    matched: String,
-    failed: String,
-    unwind: String,
-    subject: Option<String>,
-}
-
-enum MatchRegion<'a> {
-    Guard {
-        case: usize,
-        matched: &'a str,
-        failed: &'a str,
-    },
-    Body(usize),
-}
-
-impl MatchRegions {
-    /// Resume on the same live frame after the owner filled the previous operand.
-    fn next(&mut self, frame: &mut RegisteredFrame<'_, '_>) -> Option<MatchRegion<'_>> {
-        let index = self.index;
-        if let Some(outer) = self.guard_unwind.take() {
-            self.cases[index]
-                .guard
-                .as_ref()
-                .unwrap()
-                .leave(frame, outer);
-        } else {
-            if index != 0 {
-                frame.jump(&self.done);
-            }
-            let Some(case) = self.cases.get(index) else {
-                frame.label(&self.done);
-                return None;
-            };
-            if let Some(guard) = &case.guard {
-                self.guard_unwind = Some(guard.enter(frame));
-                return Some(MatchRegion::Guard {
-                    case: index,
-                    matched: &guard.matched,
-                    failed: &guard.failed,
-                });
-            }
-        }
-        frame.label(&self.cases[index].body);
-        self.index += 1;
-        Some(MatchRegion::Body(index))
-    }
-}
-
-impl GuardBlock {
-    fn enter(&self, frame: &mut RegisteredFrame<'_, '_>) -> String {
-        frame.label(&self.entry);
-        if let Some(subject) = &self.subject {
-            frame.live.push(subject.clone());
-        }
-        std::mem::replace(&mut frame.body.error_target, self.unwind.clone())
-    }
-
-    fn leave(&self, frame: &mut RegisteredFrame<'_, '_>, outer: String) {
-        if self.subject.is_some() {
-            frame.live.pop();
-        }
-        frame.body.error_target = outer;
-    }
-}
-
 impl RegisteredFrame<'_, '_> {
     fn pattern_check(&mut self, condition: &str, failed: &str) {
         let matched = self.name("b");
@@ -98,23 +18,71 @@ impl RegisteredFrame<'_, '_> {
 }
 
 impl CheckedBody<'_, '_, '_, '_> {
+    /// Test each pattern, then emit its guard and body while the subject and
+    /// pattern error target still belong to that case.
     pub(crate) fn emit_prepared_match(&mut self, expr: &Expr, cases: &[MatchCase]) {
-        let mark = self.python().temporary_mark();
-        let subject = self.python().pattern_value(expr);
-        let mut regions = self.python().start_match(&subject, &mark, cases);
-        while let Some(region) = regions.next(self.python()) {
-            match region {
-                MatchRegion::Body(case) => self.emit_block(&cases[case].body),
-                MatchRegion::Guard {
-                    case,
-                    matched,
-                    failed,
-                } => {
-                    let test = cases[case].guard.as_ref().expect("match guard");
-                    self.branch_condition(test, matched, failed);
+        let frame = self.python();
+        let mark = frame.temporary_mark();
+        let subject = frame.pattern_value(expr);
+        let done = frame.name("b");
+        let count = cases.len();
+        let default = count > 1 && matches!(cases[count - 1].pattern.test, MatchTest::Always);
+        let tested = count - usize::from(default);
+        for (index, case) in cases.iter().enumerate() {
+            let frame = self.python();
+            let pattern = &case.pattern;
+            let again = index + 1 < tested;
+            let next = frame.name("b");
+            let case_mark = if again {
+                frame.temporary_mark()
+            } else {
+                mark.clone()
+            };
+            let scope = frame.begin_operand_scope();
+            if index < tested {
+                frame.live.push(subject.clone());
+                let captures = if pattern.names.is_empty() {
+                    "0".to_owned()
+                } else {
+                    frame.op("dict", &[])
+                };
+                frame.test_pattern(
+                    &pattern.test,
+                    &subject,
+                    &next,
+                    &captures,
+                    (!again).then_some(mark.as_str()),
+                );
+                for (i, name) in pattern.names.iter().enumerate() {
+                    let key = frame.code_name(name);
+                    let value = frame.op("get", &[&captures, &key]);
+                    frame.assign(case.captures[i], CheckedValue::handle(value));
                 }
+                if !again {
+                    frame.live.pop();
+                }
+                frame.discard_truth(&case_mark);
             }
+            if let Some(guard) = &case.guard {
+                frame.flush_check();
+                let matched = frame.name("b");
+                self.branch_condition(guard, &matched, &next);
+                self.python().label(&matched);
+            }
+            let frame = self.python();
+            if again {
+                frame.live.pop();
+                frame.discard_truth(&mark);
+            }
+            frame.finish_operand_scope(&mark, scope);
+            frame.flush_check();
+            self.emit_block(&case.body);
+            self.python().jump(&done);
+            self.python().label(&next);
+            self.python().discard_truth(&case_mark);
         }
+        self.python().jump(&done);
+        self.python().label(&done);
     }
 }
 
@@ -139,79 +107,6 @@ impl Frame<'_, '_, '_> {
         f.finish_operand_scope(&mark, target);
         f.discard_truth(&mark);
         f.pattern_check(&bit, failed);
-    }
-
-    fn start_match(&mut self, subject: &str, mark: &str, cases: &[MatchCase]) -> MatchRegions {
-        let count = cases.len();
-        let default = count > 1 && matches!(cases[count - 1].pattern.test, MatchTest::Always);
-        let tested = count - usize::from(default);
-        let done = self.name("b");
-        let mut blocks = Vec::with_capacity(count);
-        for (index, case) in cases.iter().enumerate() {
-            let pattern = &case.pattern;
-            let again = index + 1 < tested;
-            let next = self.name("b");
-            let case_mark = if again {
-                self.temporary_mark()
-            } else {
-                mark.to_owned()
-            };
-            let scope = self.begin_operand_scope();
-            if index < tested {
-                self.live.push(subject.to_owned());
-                let captures = if pattern.names.is_empty() {
-                    "0".to_owned()
-                } else {
-                    self.op("dict", &[])
-                };
-                self.test_pattern(
-                    &pattern.test,
-                    subject,
-                    &next,
-                    &captures,
-                    (!again).then_some(mark),
-                );
-                for (i, name) in pattern.names.iter().enumerate() {
-                    let key = self.code_name(name);
-                    let val = self.op("get", &[&captures, &key]);
-                    self.assign(case.captures[i], CheckedValue::handle(val));
-                }
-                if !again {
-                    self.live.pop();
-                }
-                self.discard_truth(&case_mark);
-            }
-            let guard = case.guard.is_some().then(|| {
-                let entry = self.name("b");
-                let matched = self.name("b");
-                self.jump(&entry);
-                self.label(&matched);
-                GuardBlock {
-                    entry,
-                    matched,
-                    failed: next.clone(),
-                    unwind: self.body.error_target.clone(),
-                    subject: again.then(|| subject.to_owned()),
-                }
-            });
-            if again {
-                self.live.pop();
-                self.discard_truth(mark);
-            }
-            self.finish_operand_scope(mark, scope);
-            let body = self.name("b");
-            self.jump(&body);
-            self.label(&next);
-            self.discard_truth(&case_mark);
-            blocks.push(CaseBlock { body, guard });
-        }
-        self.jump(&done);
-        MatchRegions {
-            done,
-            cases: blocks,
-            index: 0,
-            guard_unwind: None,
-        }
     }
 
     fn test_pattern(
