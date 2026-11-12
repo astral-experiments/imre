@@ -487,6 +487,12 @@ impl Checker<'_> {
         if cursor.ty == Type::StringIO {
             return Ok(self.open_string_io(cursor));
         }
+        if let Some(element) = self.types.deque_element(cursor.ty) {
+            return Ok(Expr {
+                ty: self.types.cursor(element),
+                kind: ExprKind::Builtin(Builtin::DequeIter { reverse: false }, vec![cursor]),
+            });
+        }
         if cursor.ty != Type::CsvReader && self.types.cursor_element(cursor.ty).is_none() {
             return Err(error(
                 self.source,

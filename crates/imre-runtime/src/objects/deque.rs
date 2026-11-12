@@ -546,7 +546,7 @@ pub unsafe extern "C" fn imre_deque_maxlen(value: *const Object) -> usize {
 pub(super) struct DequeIterator {
     owner: crate::ObjectOwner,
     state: usize,
-    remaining: usize,
+    pub(super) remaining: usize,
     reverse: bool,
 }
 
