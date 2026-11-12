@@ -174,7 +174,6 @@ class Child(Base):
     "inheritance": CELL + "class Child(Cell):\n    def __init__(self, value: int) -> None:\n        self.value = value\n",
     "metaclass": CELL.replace("class Cell:", "class Cell(metaclass=type):"),
     "unrelated_abc_meta": "class ABCMeta: pass\nclass C(metaclass=ABCMeta): pass\n",
-    "abc_meta_with_keywords": "import abc\nclass C(metaclass=abc.ABCMeta, option=True): pass\n",
     "abc_meta_late_import": "class C(metaclass=ABCMeta): pass\nfrom abc import ABCMeta\n",
     "abc_meta_dataclass_generated": "import abc\nfrom dataclasses import dataclass\nclass A(metaclass=abc.ABCMeta):\n    @abc.abstractmethod\n    def __init__(self): pass\n@dataclass\nclass B(A):\n    n: int\n",
     "abc_meta_eager_default": "import abc\ndef init() -> int: return 42\nclass A(metaclass=abc.ABCMeta):\n    @abc.abstractmethod\n    def f(self, *, n: int = init()): pass\n",
@@ -323,11 +322,11 @@ def main() -> None:
         shutil.copytree(FIXTURES, project, ignore=shutil.ignore_patterns("__pycache__"))
         verify_upstream_definitions()
         class_sources = write_class_data_sources(project, PROJECT / "benchmarks/cpython_stdlib/full")
-        copy_runtime_errors = ("inherited_copy_reduction.py", "copy_custom_getstate.py")
-        for relative in ["ownership.py", "record_reuse.py", "record_reuse_list.py", "imported/main.py", "string_literals.py", "constant_strings.py", "reassigned_class_string.py", "class_namespace.py", "factory_identity.py", "mutable_class_tuple.py", "nested_class_body.py", "class_data_setup.py", "string_enum_members.py", "string_enum_storage.py", "ordinary_enums.py", "enum_exhaustion.py", "conditional_lists.py", "conditional_methods/main.py", "uv_variant.py", "fixed_lineage.py", "object_base.py", "super_subclass.py", "local_super_subclass.py", "instance_layout.py", "subclass_guard_fields.py", "property_setters.py", "initializer_hook.py", "constructor_fields.py", "constructor_locals.py", "direct_base_initializer.py", "weak_proxy.py", "shallow_copy_protocol.py", "implicit_copy.py", "plain_shallow_copy.py", *copy_runtime_errors, "abstract_context_manager.py", "abc_metaclass.py", "mapping_abc.py", "mapping_alias.py", "mapping_class_values.py", "collections_storage_bases.py", "local_collections_storage.py", "nested_class_with_type_params.py", "generic_parameter_tuple.py", *class_sources]:
+        runtime_type_errors = ("inherited_copy_reduction.py", "copy_custom_getstate.py", "abc_meta_with_keywords.py")
+        for relative in ["ownership.py", "record_reuse.py", "record_reuse_list.py", "imported/main.py", "string_literals.py", "constant_strings.py", "reassigned_class_string.py", "class_namespace.py", "factory_identity.py", "mutable_class_tuple.py", "nested_class_body.py", "class_data_setup.py", "string_enum_members.py", "string_enum_storage.py", "ordinary_enums.py", "enum_exhaustion.py", "conditional_lists.py", "conditional_methods/main.py", "uv_variant.py", "fixed_lineage.py", "object_base.py", "super_subclass.py", "local_super_subclass.py", "instance_layout.py", "subclass_guard_fields.py", "property_setters.py", "initializer_hook.py", "constructor_fields.py", "constructor_locals.py", "direct_base_initializer.py", "weak_proxy.py", "shallow_copy_protocol.py", "implicit_copy.py", "plain_shallow_copy.py", *runtime_type_errors, "abstract_context_manager.py", "abc_metaclass.py", "mapping_abc.py", "mapping_alias.py", "mapping_class_values.py", "collections_storage_bases.py", "local_collections_storage.py", "nested_class_with_type_params.py", "generic_parameter_tuple.py", *class_sources]:
             source = project / relative
             reference = run([python, "-E", str(source)], temporary)
-            if relative in copy_runtime_errors:
+            if relative in runtime_type_errors:
                 assert reference.returncode == 1 and not reference.stdout, reference
                 assert reference.stderr and reference.stderr.splitlines()[-1].startswith("TypeError:"), reference
             else:
@@ -340,7 +339,7 @@ def main() -> None:
                 command += build_flags
                 if args.sanitize:
                     command.append("--sanitize")
-                modes = (False, True) if relative == "weak_proxy.py" or relative in copy_runtime_errors else (relative == "implicit_copy.py",)
+                modes = (False, True) if relative == "weak_proxy.py" or relative in runtime_type_errors else (relative == "implicit_copy.py",)
                 for reachable in modes:
                     require_success(run(command + (["--reachable-only"] if reachable else []), temporary))
                     actual = run([str(executable)], temporary)
