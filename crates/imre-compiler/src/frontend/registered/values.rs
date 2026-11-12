@@ -823,7 +823,11 @@ pub(in crate::frontend) fn binary(
     if let Some(types) = types.filter(|_| {
         matches!(
             op,
-            Binary::Add | Binary::Subtract | Binary::FloorDivide | Binary::RightShift
+            Binary::Add
+                | Binary::Subtract
+                | Binary::FloorDivide
+                | Binary::Modulo
+                | Binary::RightShift
         )
     }) {
         let refine = |node: &ast::Expr, value: &mut Expr| {

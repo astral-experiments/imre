@@ -5101,7 +5101,7 @@ exec("print(1)")
             concat!(
                 "import sys\nsys.path = list(sys.path)\nimport prices\n",
                 "print(prices.add(13, 27), prices.join('a', 'b'), prices.sub(27, 13))\n",
-                "print(prices.bump([4]))\n",
+                "print(prices.bump([4]), prices.remainder(7, -3))\n",
             ),
         )
         .unwrap();
@@ -5112,6 +5112,7 @@ exec("print(1)")
                 "def join(n: str, other: str):\n    return n + other\n",
                 "def sub(n: int, other: int):\n    return n - other\n",
                 "def bump(values: list[int]):\n    return values[0] + 1\n",
+                "def remainder(a: int, b: int) -> int:\n    return a % b\n",
             ),
         )
         .unwrap();
@@ -5122,6 +5123,7 @@ exec("print(1)")
             (2, "@int_add(", 2),
             (6, "@int_sub(", 2),
             (8, "@int_add(", 1),
+            (10, "@int_mod(", 2),
         ] {
             let body = registered_body_at(&ir, "prices.py", line);
             assert_eq!(
@@ -5131,6 +5133,12 @@ exec("print(1)")
             assert!(body.contains(native) && body.contains("call i64 @imre_dyn_op_at("));
         }
         assert!(!registered_body_at(&ir, "prices.py", 4).contains("@int_add("));
+        assert!(
+            registered_body_at(&ir, "prices.py", 10)
+                .lines()
+                .any(|line| line.contains("call i64 @imre_dyn_op_at(")
+                    && line.ends_with("ptr null)"))
+        );
     }
 
     #[test]
