@@ -1365,15 +1365,19 @@ impl Checker<'_> {
             matches!(method.attr.as_str(), "join" | "split" | "replace")
                 && graph.session.scalar_type(owner, &method.value) == Some(Type::Str)
         });
-        // A checked list parameter is still the object supplied by the Python caller.
+        // A parameter read in this frame returns the caller's object. Its attribute
+        // must be looked up at the use, even when the signature has a fixed layout.
+        let attribute = node.as_attribute_expr();
         let typed_receiver = string_method
             || method
+                .or(attribute)
                 .and_then(|method| method.value.as_name_expr())
                 .and_then(|name| self.names.get(name.id.as_str()))
                 .is_some_and(|&slot| {
                     self.registered_local_start
                         .is_some_and(|first| slot < first)
-                        && matches!(self.locals[slot], Type::ListInt | Type::List(_))
+                        && (attribute.is_some()
+                            || matches!(self.locals[slot], Type::ListInt | Type::List(_)))
                 });
         // Recovery checks each receiver once. Its Python handle can participate in
         // ordinary lookup or unary dispatch even when inference knows a concrete type.
