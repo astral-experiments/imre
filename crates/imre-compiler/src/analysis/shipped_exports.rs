@@ -33,18 +33,19 @@ impl Session {
         FileRange::new(file, class.name.range())
     }
 
-    pub(crate) fn prepare_shipped_source(&mut self, owner: &str) -> Result<(), String> {
+    pub(crate) fn prepare_shipped_source(&mut self, owner: &str) -> Result<Option<File>, String> {
         let Some((filename, body)) = crate::dynamic::bundled_module_source(owner, false) else {
-            return Ok(());
+            return Ok(None);
         };
         let root = Path::new(crate::dynamic::BUNDLED_SOURCE_ROOT);
         let path = root.join(filename);
-        if system_path_to_file(&self.db, path.to_str().expect("SDK filename")).is_ok() {
-            return Ok(());
+        let origin = path.to_str().expect("SDK filename");
+        if let Ok(file) = system_path_to_file(&self.db, origin) {
+            return Ok(Some(file));
         }
         self.seed(&path, &body)?;
+        let file = system_path_to_file(&self.db, origin).map_err(|error| error.to_string())?;
         if filename.ends_with("/__init__.py") {
-            let (file, _, _) = self.selected_file(&path)?;
             for (_, child) in star_imports(&self.db, file, Name::new(owner)).clone() {
                 // The initializer imports these files. Install their bytes in the same
                 // session; member resolution happens at a from-import or attribute read.
@@ -59,7 +60,7 @@ impl Session {
                 }
             }
         }
-        Ok(())
+        Ok(Some(file))
     }
 
     pub(super) fn final_module_binding(&self, file: File, name: &str) -> Option<Definition<'_>> {
@@ -71,6 +72,15 @@ impl Session {
     pub(crate) fn shipped_declaration(&self, owner: &str, name: &str) -> Option<Binding> {
         let (filename, _) = crate::dynamic::bundled_module_source(owner, false)?;
         let file = shipped_file(&self.db, filename)?;
+        self.shipped_declaration_at(file, owner, name)
+    }
+
+    pub(crate) fn shipped_declaration_at(
+        &self,
+        file: File,
+        owner: &str,
+        name: &str,
+    ) -> Option<Binding> {
         *selected_declaration(&self.db, file, Name::new(owner), Name::new(name))
     }
 }
@@ -226,10 +236,9 @@ fn local_declaration(
 
 #[salsa::tracked(returns(ref), no_eq)]
 fn selected_declaration(db: &dyn Db, file: File, owner: Name, name: Name) -> Option<Binding> {
-    let (filename, _) = crate::dynamic::bundled_module_source(owner.as_str(), false)?;
     let parsed = ruff_db::parsed::parsed_module(db, db.program_file(file).python_file(db)).load(db);
     let (last, mut selected) = local_declaration(db, file, &parsed, name.as_str());
-    if filename.ends_with("/__init__.py") {
+    if file.path(db).as_str().ends_with("/__init__.py") {
         // A subsequent star can replace a local binding. Walk in reverse source
         // order and stop at the last provider that actually exports this name.
         for (_, child) in star_imports(db, file, owner)

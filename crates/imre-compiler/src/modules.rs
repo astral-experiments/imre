@@ -4261,21 +4261,7 @@ impl SourceGraph {
         if let Some(import) = self.local_static_binding(module, expression) {
             return self.local_import_value(module, expression, import);
         }
-        let binding = resolve_binding(&self.modules, module, expression).or_else(|| {
-            let attr = expression.as_attribute_expr()?;
-            let Binding::IntrinsicModule(namespace) =
-                resolve_binding(&self.modules, module, &attr.value)?
-            else {
-                return None;
-            };
-            let owner = self.session.module_name_at(module, &attr.value)?;
-            if IntrinsicModule::named(owner) != Some(namespace) {
-                return None;
-            }
-            stdlib_symbol_or_else(&self.modules, namespace, attr.attr.as_str(), || {
-                self.session.shipped_declaration(owner, attr.attr.as_str())
-            })
-        })?;
+        let binding = resolve_binding_in(&self.modules, module, expression, Some(&self.session))?;
         if let Binding::Definition(id) = binding
             && self.builtin_before_function(module, expression, id)
         {
@@ -4370,6 +4356,7 @@ impl SourceGraph {
                         IntrinsicModule::ImportlibMetadata,
                         attr.attr.as_str(),
                     )
+                    .ok()
                 })?;
         }
         let (root, attribute) = match expression {
@@ -4417,7 +4404,7 @@ impl SourceGraph {
             ast::Expr::Attribute(attribute) => match self.resolve_type(module, &attribute.value)? {
                 Binding::Module(target) => self.modules[target].export(attribute.attr.as_str()),
                 Binding::IntrinsicModule(target) => {
-                    stdlib_attribute(&self.modules, module, target, attribute)
+                    stdlib_attribute(&self.modules, module, target, attribute).ok()
                 }
                 _ => None,
             },
@@ -4530,7 +4517,7 @@ fn stdlib_attribute(
     owner: ModuleId,
     target: IntrinsicModule,
     attr: &ast::ExprAttribute,
-) -> Option<Binding> {
+) -> Result<Binding, StdlibMiss> {
     if target == IntrinsicModule::Importlib
         && modules[owner]
             .importlib_children
@@ -4538,7 +4525,7 @@ fn stdlib_attribute(
             .is_some_and(|at| *at <= attr.start())
         && let Some(child) = importlib_child(attr.attr.as_str())
     {
-        return Some(Binding::IntrinsicModule(child));
+        return Ok(Binding::IntrinsicModule(child));
     }
     stdlib_symbol(modules, target, attr.attr.as_str())
 }
@@ -4548,13 +4535,33 @@ fn resolve_binding(
     module: ModuleId,
     expression: &ast::Expr,
 ) -> Option<Binding> {
+    resolve_binding_in(modules, module, expression, None)
+}
+
+fn resolve_binding_in(
+    modules: &[SourceModule],
+    module: ModuleId,
+    expression: &ast::Expr,
+    session: Option<&Session>,
+) -> Option<Binding> {
     match expression {
         ast::Expr::Name(name) => modules[module].bindings.get(name.id.as_str()).copied(),
         ast::Expr::Attribute(attribute) => {
             match resolve_binding(modules, module, &attribute.value)? {
                 Binding::Module(module) => modules[module].export(attribute.attr.as_str()),
                 Binding::IntrinsicModule(target) => {
-                    stdlib_attribute(modules, module, target, attribute)
+                    match stdlib_attribute(modules, module, target, attribute) {
+                        Ok(binding) => Some(binding),
+                        Err(StdlibMiss::Sealed) => None,
+                        Err(StdlibMiss::Unclaimed) => {
+                            let session = session?;
+                            let owner = session.module_name_at(module, &attribute.value)?;
+                            if IntrinsicModule::named(owner) != Some(target) {
+                                return None;
+                            }
+                            session.shipped_declaration(owner, attribute.attr.as_str())
+                        }
+                    }
                 }
                 Binding::Definition(_)
                 | Binding::RegisteredClass(_)
@@ -4592,25 +4599,24 @@ fn textwrap_implementation(name: &str) -> Option<&'static str> {
     }
 }
 
-/// Resolve the public definitions compiled from Python alongside sealed native operations.
-fn stdlib_symbol(modules: &[SourceModule], module: IntrinsicModule, name: &str) -> Option<Binding> {
-    stdlib_symbol_or_else(modules, module, name, || None)
+enum StdlibMiss {
+    Sealed,
+    Unclaimed,
 }
 
 /// A selected checked interface owns its misses as well as its public definitions.
-fn stdlib_symbol_or_else(
+fn stdlib_symbol(
     modules: &[SourceModule],
     module: IntrinsicModule,
     name: &str,
-    unclaimed: impl FnOnce() -> Option<Binding>,
-) -> Option<Binding> {
+) -> Result<Binding, StdlibMiss> {
     if module == IntrinsicModule::Dataclasses
         && matches!(name, "MISSING" | "_MISSING_TYPE")
         && let Some(source) = modules
             .iter()
             .find(|source| source.is_bundled("dataclasses"))
     {
-        return source.export(name);
+        return source.export(name).ok_or(StdlibMiss::Sealed);
     }
     if module == IntrinsicModule::Selectors
         && matches!(
@@ -4619,27 +4625,36 @@ fn stdlib_symbol_or_else(
         )
         && let Some(source) = modules.iter().find(|source| source.is_bundled("selectors"))
     {
-        return source.export(name);
+        return source.export(name).ok_or(StdlibMiss::Sealed);
     }
-    module.symbol(name).or_else(|| {
-        let implementation = match module {
-            IntrinsicModule::Contextlib if name == "AbstractContextManager" => CONTEXTLIB_ABSTRACT,
-            IntrinsicModule::Contextlib if name == "ExitStack" => CONTEXTLIB_EXIT_STACK,
-            IntrinsicModule::ImportlibMetadata if name == "version" => METADATA_VERSION,
-            IntrinsicModule::Inspect if name == "cleandoc" => INSPECT_FUNCTIONS,
-            IntrinsicModule::Tempfile if name == "SpooledTemporaryFile" => TEMPFILE_SPOOL,
-            IntrinsicModule::Logging => (!name.starts_with('_')).then_some(LOGGING_CLASSES)?,
-            IntrinsicModule::LoggingHandlers => (!name.starts_with('_')).then_some(LOGGING_HANDLER_CLASSES)?,
-            IntrinsicModule::Fractions if name == "Fraction" => FRACTION_CLASS,
-            IntrinsicModule::Calendar if matches!(name, "Calendar" | "TextCalendar") => CALENDAR_CLASSES,
-            IntrinsicModule::Textwrap => textwrap_implementation(name)?,
-            _ => return unclaimed(),
-        };
-        let (id, source) = modules
-            .iter()
-            .enumerate()
-            .find(|(_, m)| m.bundled && m.name == implementation)?;
-        source.export(name).filter(|b| {
+    if let Some(binding) = module.symbol(name) {
+        return Ok(binding);
+    }
+    let implementation = match module {
+        IntrinsicModule::Contextlib if name == "AbstractContextManager" => CONTEXTLIB_ABSTRACT,
+        IntrinsicModule::Contextlib if name == "ExitStack" => CONTEXTLIB_EXIT_STACK,
+        IntrinsicModule::ImportlibMetadata if name == "version" => METADATA_VERSION,
+        IntrinsicModule::Inspect if name == "cleandoc" => INSPECT_FUNCTIONS,
+        IntrinsicModule::Tempfile if name == "SpooledTemporaryFile" => TEMPFILE_SPOOL,
+        IntrinsicModule::Logging => (!name.starts_with('_'))
+            .then_some(LOGGING_CLASSES)
+            .ok_or(StdlibMiss::Sealed)?,
+        IntrinsicModule::LoggingHandlers => (!name.starts_with('_'))
+            .then_some(LOGGING_HANDLER_CLASSES)
+            .ok_or(StdlibMiss::Sealed)?,
+        IntrinsicModule::Fractions if name == "Fraction" => FRACTION_CLASS,
+        IntrinsicModule::Calendar if matches!(name, "Calendar" | "TextCalendar") => {
+            CALENDAR_CLASSES
+        }
+        IntrinsicModule::Textwrap => textwrap_implementation(name).ok_or(StdlibMiss::Sealed)?,
+        _ => return Err(StdlibMiss::Unclaimed),
+    };
+    let (id, source) = modules
+        .iter()
+        .enumerate()
+        .find(|(_, m)| m.bundled && m.name == implementation)
+        .ok_or(StdlibMiss::Sealed)?;
+    source.export(name).filter(|b| {
             matches!(b, Binding::Definition(d) if d.module == id &&
                 matches!((module, &source.parsed.syntax().body[d.statement]),
                     (IntrinsicModule::Calendar | IntrinsicModule::Fractions | IntrinsicModule::Contextlib, ast::Stmt::ClassDef(_))
@@ -4648,8 +4663,7 @@ fn stdlib_symbol_or_else(
                     | (IntrinsicModule::Logging, ast::Stmt::ClassDef(_) | ast::Stmt::FunctionDef(_))
                     | (IntrinsicModule::LoggingHandlers, ast::Stmt::ClassDef(_))
                     | (IntrinsicModule::Textwrap, ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_))))
-        })
-    })
+        }).ok_or(StdlibMiss::Sealed)
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -4994,6 +5008,7 @@ impl<'a> Loader<'a> {
                                     IntrinsicModule::named(&name)?,
                                     alias.name.as_str(),
                                 )
+                                .ok()
                             });
                         if let Some(binding) = binding {
                             let local = alias.asname.as_ref().unwrap_or(&alias.name);
@@ -5607,7 +5622,7 @@ impl<'a> Loader<'a> {
                     let child = format!("{}.{part}", self.modules[parent].name);
                     self.by_name.get(&child).copied().map(Binding::Module)
                 }),
-                Binding::IntrinsicModule(module) => stdlib_symbol(&self.modules, module, part),
+                Binding::IntrinsicModule(module) => stdlib_symbol(&self.modules, module, part).ok(),
                 _ => None,
             }
             .ok_or_else(|| format!("cannot resolve {part:?} in dotted import {name:?}"))?;
@@ -5808,30 +5823,32 @@ impl<'a> Loader<'a> {
                             return Err("from-importing mutable sys.pycache_prefix is unsupported; use qualified access".into());
                         } else {
                             let member = alias.name.as_str();
-                            if let Some(binding) = stdlib_symbol(&self.modules, module, member) {
-                                Some(binding)
-                            } else if bundled_package(&name)
-                                && bundled_runtime_source(&format!("{name}.{member}")).is_some()
-                            {
-                                let parent = self.load_module(&name)?;
-                                let binding = match self.modules[parent].export(member) {
-                                    Some(binding) => binding,
-                                    None => self.package_child(parent, member, true)?,
-                                };
-                                if let Binding::Module(child) = binding {
-                                    self.import_namespace(id, statement.range(), child);
+                            match stdlib_symbol(&self.modules, module, member) {
+                                Ok(binding) => Some(binding),
+                                Err(_) if bundled_package(&name)
+                                    && bundled_runtime_source(&format!("{name}.{member}")).is_some() =>
+                                {
+                                    let parent = self.load_module(&name)?;
+                                    let binding = match self.modules[parent].export(member) {
+                                        Some(binding) => binding,
+                                        None => self.package_child(parent, member, true)?,
+                                    };
+                                    if let Binding::Module(child) = binding {
+                                        self.import_namespace(id, statement.range(), child);
+                                    }
+                                    Some(binding)
                                 }
-                                Some(binding)
-                            } else if sealed_package_child(&name) && bundled_runtime_source(&name).is_some()
-                            {
-                                let provider = self.load_source(&name, true)?;
-                                self.import_namespace(id, statement.range(), provider);
-                                self.modules[provider].export(member)
-                            } else {
-                                self.session.prepare_shipped_source(&name)?;
-                                stdlib_symbol_or_else(&self.modules, module, member, || {
-                                    self.session.shipped_declaration(&name, member)
-                                })
+                                Err(_) if sealed_package_child(&name) && bundled_runtime_source(&name).is_some() => {
+                                    let provider = self.load_source(&name, true)?;
+                                    self.import_namespace(id, statement.range(), provider);
+                                    self.modules[provider].export(member)
+                                }
+                                Err(StdlibMiss::Unclaimed) => {
+                                    self.session.prepare_shipped_source(&name)?.and_then(|file| {
+                                        self.session.shipped_declaration_at(file, &name, member)
+                                    })
+                                }
+                                Err(StdlibMiss::Sealed) => None,
                             }
                         }
                         .filter(|binding| {
