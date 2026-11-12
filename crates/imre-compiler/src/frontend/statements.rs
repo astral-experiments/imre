@@ -244,7 +244,9 @@ impl StatementLowering for Checker<'_> {
         let terminates = self.terminating_call(&value);
         self.explicit_return |= !terminates;
         let value = if let Some(types) = &mut self.inferred_returns {
-            types.push(value.ty);
+            if !terminates {
+                types.push(value.ty);
+            }
             value
         } else {
             let value = self.coerce_return(value, self.returns, ret)?;
