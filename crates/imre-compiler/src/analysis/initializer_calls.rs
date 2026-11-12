@@ -1,6 +1,6 @@
 //! Scalar contracts at module initialization, before either native representation is selected.
 
-use super::{Session, concrete_scalar};
+use super::{ScalarMatch, Session, concrete_scalar};
 use crate::frontend::phase::{Diagnostic, Kind};
 use ruff_python_ast::helpers::Truthiness;
 use ruff_python_ast::{Expr, ExprCall, Stmt};
@@ -590,10 +590,12 @@ impl Session {
         {
             return None;
         }
-        let actual = self.scalar_layout(&env, actual).map_or_else(
-            || actual.display(&self.db, &env).to_string(),
-            |t| t.to_string(),
-        );
+        let actual = self
+            .scalar_layout(&env, actual, ScalarMatch::Assignable)
+            .map_or_else(
+                || actual.display(&self.db, &env).to_string(),
+                |t| t.to_string(),
+            );
         let message = format!(
             "expected {}, got {actual}; annotations are enforced contracts",
             expected.display(&self.db, &env)

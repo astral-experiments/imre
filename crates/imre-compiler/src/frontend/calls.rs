@@ -413,6 +413,26 @@ impl ArgumentScope {
         checker.local(slot)
     }
 
+    /// An eager operand raised before invocation. Root the evaluated prefix
+    /// in call order and release it in stack order when the last operand unwinds.
+    pub(super) fn stopped(
+        checker: &mut Checker<'_>,
+        prefix: Vec<Expr>,
+        stop: Expr,
+        returns: Type,
+    ) -> Expr {
+        let mut scope = Self::default();
+        for value in prefix {
+            scope.hold(checker, value);
+        }
+        scope.clear.reverse();
+        scope.body.push(Statement::Expr(stop));
+        // As for an unbound read, this slot supplies only the unreachable result layout.
+        let unreachable = checker.hidden(returns);
+        scope.clear.push(unreachable);
+        scope.finish(checker.local(unreachable))
+    }
+
     pub(super) fn spread(
         &mut self,
         checker: &mut Checker<'_>,

@@ -13456,8 +13456,9 @@ impl<'a> Checker<'a> {
         {
             return self.ascii_call(call);
         }
-        self.reject_builtin_keywords(call)?;
+        let keywords = self.reject_builtin_keywords(call);
         if name == "bool" {
+            keywords?;
             return match call.arguments.args.as_ref() {
                 [] => Ok(Expr::boolean(false)),
                 [value] => self.condition(value),
@@ -13469,6 +13470,7 @@ impl<'a> Checker<'a> {
             };
         }
         if name == "bytes" {
+            keywords?;
             let value = match call.arguments.args.as_ref() {
                 [] => {
                     return Ok(Expr {
@@ -13529,12 +13531,27 @@ impl<'a> Checker<'a> {
                 return Err(self.object_builtin_error("dir", call));
             }
         }
-        let args = call
-            .arguments
-            .args
-            .iter()
-            .map(|arg| self.expr(arg))
-            .collect::<StdResult<Vec<_>, _>>()?;
+        let mut args = Vec::with_capacity(call.arguments.args.len());
+        for arg in &call.arguments.args {
+            let value = match self.expr(arg) {
+                Ok(value) => value,
+                // Preserve this binder's original refusal on the live path.
+                Err(failure) => return Err(keywords.err().unwrap_or(failure)),
+            };
+            if self.terminating_operand(&value)
+                && (imre_ast::providers::BUILTIN_FUNCTIONS.contains(&name)
+                    || imre_ast::providers::BUILTIN_TYPES.contains(&name))
+                && let Some(returns) = self
+                    .graph
+                    .session
+                    .operand_types(self.module)
+                    .stopped_call_result(call)
+            {
+                return Ok(calls::ArgumentScope::stopped(self, args, value, returns));
+            }
+            args.push(value);
+        }
+        keywords?;
         if name == "str" && args.len() == 1 {
             return self.checked_string(args.into_iter().next().unwrap(), call);
         }

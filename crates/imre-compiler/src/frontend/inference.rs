@@ -1374,6 +1374,17 @@ impl Checker<'_> {
         self.nonreturning_functions.contains(id)
     }
 
+    /// A nested eager call can end its argument scope with the same checked
+    /// transfer. Its result slot is reached only if that last operand returns.
+    pub(super) fn terminating_operand(&self, mut value: &Expr) -> bool {
+        while let ExprKind::Scope { body, .. } = &value.kind
+            && let Some(Statement::Expr(last)) = body.last()
+        {
+            value = last;
+        }
+        self.terminating_call(value)
+    }
+
     fn call_operand_returns(&self, value: &Expr) -> bool {
         if self.terminating_call(value) {
             return false;

@@ -138,6 +138,74 @@ fn imported_operand_refusal_precedes_llvm_emission() {
 }
 
 #[test]
+fn eager_builtin_operands_stop_at_a_nonreturning_call() {
+    let project = tempfile::tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    let source = "\
+def take(value: int) -> int:
+    return value
+
+def text():
+    return 'wrong'
+def earlier() -> str:
+    print('first')
+    raise SystemExit(13)
+print(earlier(), take(text()))
+";
+    for args in [
+        "earlier(), take(text())",
+        "1 + int(earlier(), take(text()))",
+        "1 + int(earlier(), base=take(text()))",
+        "int(earlier(), take(text())), take(text())",
+        "earlier(), end=take(text())",
+        "len(earlier()), 3",
+    ] {
+        std::fs::write(&entry, source.replace("earlier(), take(text())", args)).unwrap();
+        check_file(&entry, None).unwrap();
+        compile_file(&entry, None, &CompileOptions::default()).unwrap();
+    }
+    for (program, column) in [
+        (source.replace("raise SystemExit(13)", "return '10'"), 23),
+        (
+            source.replace("earlier(), take(text())", "take(text()), earlier()"),
+            12,
+        ),
+    ] {
+        std::fs::write(&entry, program).unwrap();
+        let error =
+            format!(":9:{column}: Imre: expected int, got str; annotations are enforced contracts");
+        assert_refusal_before_llvm(&entry, &entry, &error, &[CompileOptions::default()]);
+    }
+}
+
+#[test]
+fn stopped_layout_belongs_to_the_original_call_and_arguments() {
+    use crate::ir::Type;
+
+    let project = tempfile::tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    std::fs::write(
+        &entry,
+        "from builtins import print as emit\nemit('x', end='')\n",
+    )
+    .unwrap();
+    let graph = crate::modules::SourceGraph::load(&entry, None, &[]).unwrap();
+    let types = graph.session.operand_types(graph.entry);
+    let parsed = types.parsed();
+    let value = &parsed.syntax().body[1].as_expr_stmt().unwrap().value;
+    let original = value.as_call_expr().unwrap();
+    assert_eq!(types.stopped_call_result(original), Some(Type::None));
+    assert_eq!(types.scalar_type(value), None);
+
+    let mut forwarded = original.clone();
+    forwarded.func.as_name_expr_mut().unwrap().id = "repr".into();
+    assert_eq!(types.stopped_call_result(&forwarded), None);
+    let mut forwarded = original.clone();
+    forwarded.arguments.keywords[0].arg.as_mut().unwrap().id = "sep".into();
+    assert_eq!(types.stopped_call_result(&forwarded), None);
+}
+
+#[test]
 fn conditional_operands_refuse_only_on_reachable_edges() {
     let project = tempfile::tempdir().unwrap();
     let entry = project.path().join("subject.py");
