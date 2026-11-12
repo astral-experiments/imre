@@ -3378,9 +3378,8 @@ impl Context {
     /// Look up a builtin mapping key before dispatching the original object's missing hook.
     pub(super) fn dictionary_item(&mut self, object: Id, key: Id) -> Result<Id> {
         let storage = self.dict_storage(object).expect("dictionary");
-        let (_, index) = self.find_dictionary_key(storage, key, None)?;
-        if let Some(index) = index {
-            return Ok(self.dict_entries(storage).expect("dictionary")[index].1);
+        if let Some(value) = self.dictionary_value(storage, key)? {
+            return Ok(value);
         }
         if let Some(hook) = self.bound_slot(object, "__missing__")? {
             return self.call(hook, vec![key], Vec::new());

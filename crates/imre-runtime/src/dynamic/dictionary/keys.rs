@@ -1127,6 +1127,20 @@ impl Context {
         Ok(())
     }
 
+    /// Read a stored value, deferring to Python equality with the original key on a collision.
+    pub(in super::super) fn dictionary_value(&mut self, dict: Id, key: Id) -> Result<Option<Id>> {
+        // Let the first general lookup build the index, including for locals() snapshots.
+        if let Value::Str(name) = self.heap.get(key)
+            && let Value::Dict(entries) = self.heap.get(dict)
+            && entries.index.is_some()
+            && let ControlFlow::Continue(found) = entries.lookup_text(&self.heap, name)
+        {
+            return Ok(found);
+        }
+        let (_, index) = self.find_dictionary_key(dict, key, None)?;
+        Ok(index.map(|i| self.stored_entries(dict)[i].1))
+    }
+
     pub(in super::super) fn find_dictionary_key(
         &mut self,
         dict: Id,
