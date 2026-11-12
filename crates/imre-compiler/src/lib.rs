@@ -889,6 +889,37 @@ pub struct CodegenUnit {
 }
 
 impl CodegenUnit {
+    /// Place the startup and each locally emitted source in their program order.
+    /// An inlined initializer or one supplied by an archive has no separate unit.
+    fn place_sources<'a, S, E>(
+        sources: impl IntoIterator<Item = S>,
+        entry: (usize, &str),
+        split: bool,
+        mut emit: impl FnMut(usize, S, bool) -> Result<(&'a str, Option<String>), E>,
+    ) -> Result<(Vec<Self>, usize), E> {
+        let mut units = Vec::new();
+        let mut startup = None;
+        for (id, source) in sources.into_iter().enumerate() {
+            let is_entry = id == entry.0;
+            let separate = split && !is_entry;
+            let (name, body) = emit(id, source, separate)?;
+            let (name, body) = if is_entry {
+                startup = Some(units.len());
+                (entry.1, body.unwrap_or_default())
+            } else if let Some(body) = body {
+                debug_assert!(separate);
+                (name, body)
+            } else {
+                continue;
+            };
+            units.push(Self::new(name, body));
+        }
+        Ok((
+            units,
+            startup.expect("the checked sources include the program entry"),
+        ))
+    }
+
     fn new(name: &str, llvm_ir: String) -> Self {
         Self {
             name: name.to_owned(),
