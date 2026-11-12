@@ -21,6 +21,10 @@ pub(crate) fn write(directory: &Path) -> Result<(), String> {
                         source: &str,
                         pending: Option<&mut VecDeque<String>>|
      -> io::Result<()> {
+        // The launcher already emits empty module entries in its own unit.
+        if source.is_empty() {
+            return Ok(());
+        }
         let path = Path::new("<imre stdlib>").join(file);
         let discovered = pending.and_then(|pending| {
             let (imports, input) =
