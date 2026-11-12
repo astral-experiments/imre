@@ -887,7 +887,7 @@ fn namespace_class(
         static_bindings: Default::default(),
         name: "Namespace".into(),
         definition,
-        node: ast::StmtClassDef {
+        node: std::borrow::Cow::Owned(ast::StmtClassDef {
             node_index: ast::AtomicNodeIndex::NONE,
             range,
             decorator_list: Default::default(),
@@ -895,7 +895,7 @@ fn namespace_class(
             type_params: None,
             arguments: None,
             body: Default::default(),
-        },
+        }),
         fields: fields
             .iter()
             .map(|field| Field {

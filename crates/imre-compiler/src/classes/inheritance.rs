@@ -3,29 +3,30 @@
 use super::*;
 use ruff_text_size::Ranged;
 
-pub(super) fn resolve(
+pub(super) fn resolve<'syntax>(
     graph: &SourceGraph,
-    nodes: &[(DefinitionId, &ast::StmtClassDef)],
+    nodes: &[(DefinitionId, Cow<'syntax, ast::StmtClassDef>)],
     ids: &mut HashMap<DefinitionId, usize>,
     exceptions: &exceptions::Declarations,
-) -> Result<(Vec<Class>, HashSet<DefinitionId>), Diagnostic> {
-    struct Layouts {
-        fixed: Vec<Option<Class>>,
+) -> Result<(Vec<Class<'syntax>>, HashSet<DefinitionId>), Diagnostic> {
+    struct Layouts<'syntax> {
+        fixed: Vec<Option<Class<'syntax>>>,
         registered: HashSet<DefinitionId>,
     }
-    fn build(
+    fn build<'syntax>(
         id: usize,
         graph: &SourceGraph,
-        nodes: &[(DefinitionId, &ast::StmtClassDef)],
+        nodes: &[(DefinitionId, Cow<'syntax, ast::StmtClassDef>)],
         ids: &HashMap<DefinitionId, usize>,
         exceptions: &exceptions::Declarations,
-        layouts: &mut Layouts,
+        layouts: &mut Layouts<'syntax>,
         path: &mut Vec<usize>,
     ) -> Result<(), Diagnostic> {
         if layouts.fixed[id].is_some() || layouts.registered.contains(&nodes[id].0) {
             return Ok(());
         }
-        let (definition, node) = nodes[id];
+        let (definition, ref source) = nodes[id];
+        let node = source.as_ref();
         let module = &graph.modules[definition.module];
         if path.contains(&id) || path.len() >= 64 {
             return Err(module.diagnostic(node, "cyclic or too deeply nested class lineage"));
@@ -196,7 +197,7 @@ pub(super) fn resolve(
             graph,
             module,
             definition,
-            node,
+            source,
             [base, mixin].map(|parent| parent.map(|id| (id, layouts.fixed[id].as_ref().unwrap()))),
             exceptions,
             &mut decorators,

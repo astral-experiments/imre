@@ -221,7 +221,7 @@ type InitializerDefaults = HashMap<usize, Vec<(usize, Expr)>>;
 
 struct ClassInfo<'a> {
     parsers: argparse::Parsers,
-    declarations: &'a Classes,
+    declarations: &'a Classes<'a>,
     fields: Vec<Vec<Type>>,
     methods: Vec<HashMap<String, Signature>>,
     setters: Vec<HashMap<String, Signature>>,
@@ -244,7 +244,7 @@ impl<'a> ClassInfo<'a> {
     fn new(
         graph: &SourceGraph,
         types: &Types,
-        declarations: &'a mut Classes,
+        declarations: &'a mut Classes<'a>,
     ) -> StdResult<(Self, InitializerDefaults), Diagnostic> {
         let mut initializer_defaults = InitializerDefaults::new();
         types.set_exception_declarations(declarations.exception_declarations.clone());
@@ -398,7 +398,7 @@ impl<'a> ClassInfo<'a> {
                 && !fields[id].starts_with(&fields[base])
             {
                 return Err(graph.modules[class.definition.module].diagnostic(
-                    &class.node,
+                    class.node.as_ref(),
                     "inherited fields must keep their exact types and offsets",
                 ));
             }
@@ -409,7 +409,7 @@ impl<'a> ClassInfo<'a> {
         // close a cycle. This concerns storage types, not method signatures.
         if let Some(id) = Self::cyclic_field_root(&fields, types) {
             let class = &declarations.definitions[id];
-            return Err(graph.modules[class.definition.module].diagnostic(&class.node,
+            return Err(graph.modules[class.definition.module].diagnostic(class.node.as_ref(),
                 "cyclic heap types are unsupported; class fields must form an acyclic ownership graph"));
         }
         loop {
@@ -454,7 +454,7 @@ impl<'a> ClassInfo<'a> {
                     .all(|&ty| matches!(ty, Type::JsonObject | documents::MAP))
                 {
                     return Err(graph.modules[class.definition.module].diagnostic(
-                        &class.node,
+                        class.node.as_ref(),
                         "a TOML hash projection requires exact document object fields",
                     ));
                 }
@@ -1131,7 +1131,7 @@ fn lower_graph(
         {
             let class = &classes.declarations.definitions[id];
             return Err(graph.modules[class.definition.module]
-                .diagnostic(&class.node, "__bool__ must return bool"));
+                .diagnostic(class.node.as_ref(), "__bool__ must return bool"));
         }
     }
     for (module, function, signature) in &definitions {

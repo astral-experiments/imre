@@ -165,7 +165,7 @@ impl Checker<'_> {
                     .ok_or_else(|| {
                         error(
                             self.source,
-                            &def.node,
+                            def.node.as_ref(),
                             "inherited class data is not initialized",
                         )
                     })?;
