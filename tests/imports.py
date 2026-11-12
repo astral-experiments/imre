@@ -1821,6 +1821,9 @@ ACCEPTED = {
             "def quote(value): return value + 2\n"
         ),
     },
+    "builtin_flag_release": {
+        "main.py": (FIXTURES.parent / "builtin_flag_release.py").read_text(),
+    },
     "frozen_importer": {
         "main.py": (FIXTURES.parent / "frozen_importer.py").read_text(),
         "frozen_price_plugin.py": "def quote(n): return n * 7\n",
@@ -2298,6 +2301,7 @@ def main() -> None:
                     "sdk_import_after_provider_hint", "source_loader_external_code", "source_loader_namespace_directory",
                     "warn_named_helper",
                     "zip_source_spec",
+                    "builtin_flag_release",
                 }
                 timeout = 300 if slow_optimized and level > 0 else build_timeout
                 require_success(run(command, temporary, timeout=timeout))
