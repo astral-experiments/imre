@@ -616,7 +616,7 @@ fn emit_program(
     } else {
         " align 64"
     };
-    let mut bodies = Vec::with_capacity(module.functions.len() + 1);
+    let mut bodies = Vec::with_capacity(module.functions.len());
     for (id, function) in module.functions.iter().chain([&module.entry]).enumerate() {
         let entry = id == module.functions.len();
         emitter.output.current = if entry {
@@ -633,7 +633,9 @@ fn emit_program(
         emitter
             .output
             .include_integers(std::mem::take(&mut emitter.body.integers));
-        bodies.push(std::mem::take(&mut emitter.body.code));
+        if !entry {
+            bodies.push(std::mem::take(&mut emitter.body.code));
+        }
     }
     emitter
         .output
@@ -780,20 +782,21 @@ fn emit_program(
     }
     emitter.enum_table();
     emitter.literal_pool();
-    write_function_bodies(emitter.output, module, bodies, attrs, emitter.uses_sys_argv);
+    write_function_bodies(emitter.output, module, bodies, attrs);
+    emitter.output.common().push('\n');
+    body::write_main(
+        emitter.output.entry_buffer(),
+        &emitter.body.code,
+        emitter.uses_sys_argv,
+        attrs,
+        "@imre_finish_stdio()",
+    );
     // Layout hints never replace the representation, overflow, or error guards.
     emitter.output.common().push_str(BRANCH_WEIGHTS);
     Ok(())
 }
 
-fn write_function_bodies(
-    output: &mut Output,
-    module: &Module,
-    mut bodies: Vec<String>,
-    attrs: &str,
-    argv: bool,
-) {
-    let main = bodies.pop().expect("program has an entry");
+fn write_function_bodies(output: &mut Output, module: &Module, bodies: Vec<String>, attrs: &str) {
     for (id, (f, body)) in module.functions.iter().zip(bodies).enumerate() {
         let params = f
             .params
@@ -803,24 +806,16 @@ fn write_function_bodies(
             .collect::<Vec<_>>()
             .join(", ");
         output.common().push('\n');
-        let definition = output.function(
+        let name = output.function_name(id);
+        output.define_function(
             output.function_owner(id),
-            &output.function_name(id),
+            &name,
             f.returns.llvm(),
             &params,
             attrs,
+            |unit| unit.push_str(&body),
         );
-        definition.push_str(&body);
-        definition.push_str("}\n");
     }
-    output.common().push('\n');
-    body::write_main(
-        output.entry_buffer(),
-        &main,
-        argv,
-        attrs,
-        "@imre_finish_stdio()",
-    );
 }
 
 #[derive(Default)]

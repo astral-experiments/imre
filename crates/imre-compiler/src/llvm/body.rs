@@ -1,7 +1,18 @@
 //! Instruction output and basic-block state for one LLVM function.
 
 use super::Binary;
-use std::fmt::{Display, Write as _};
+use std::fmt::{Arguments, Display, Write as _};
+
+/// Write a function directly into its owning unit, including both delimiters.
+pub(super) fn write_definition(
+    output: &mut String,
+    signature: Arguments<'_>,
+    write_body: impl FnOnce(&mut String),
+) {
+    writeln!(output, "define {signature} {{").unwrap();
+    write_body(output);
+    output.push_str("}\n");
+}
 
 /// Definitions referenced by the checked instructions written to one LLVM unit.
 #[derive(Clone, Copy, Default)]
@@ -41,10 +52,11 @@ impl IntegerFunctions {
 /// runtime operation that supplies the process exit status.
 pub(super) fn write_main(output: &mut String, body: &str, argv: bool, attrs: &str, finish: &str) {
     let params = if argv { "i32 %argc, ptr %argv" } else { "" };
-    writeln!(output, "define i32 @main({params}){attrs} {{").unwrap();
-    output.push_str(body);
-    writeln!(output, "  %status = call i32 {finish}").unwrap();
-    output.push_str("  ret i32 %status\n}\n");
+    write_definition(output, format_args!("i32 @main({params}){attrs}"), |unit| {
+        unit.push_str(body);
+        writeln!(unit, "  %status = call i32 {finish}").unwrap();
+        unit.push_str("  ret i32 %status\n");
+    });
 }
 
 #[derive(Clone)]

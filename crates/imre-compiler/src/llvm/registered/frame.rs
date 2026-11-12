@@ -10,7 +10,7 @@ use crate::frontend::module_source::SourceFile;
 use crate::frontend::push_codepoints;
 use crate::ir;
 use crate::ir::{Builtin, Constant, DisplayKind, Expr};
-use crate::llvm::body::FunctionBody;
+use crate::llvm::body::{FunctionBody, write_definition};
 use crate::llvm::operations::CheckedValue;
 use indexmap::IndexSet;
 use ruff_python_ast::UnaryOp;
@@ -270,17 +270,30 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
             self.body
                 .line("call void @imre_dyn_suspend_return(ptr %context_slot, i64 0)");
             self.body.jump("complete");
-            writeln!(self.output.functions,
-                "define internal ptr {name}(ptr %context_slot, i64 %scope) presplitcoroutine {{\nentry:\n{}{}{}{} }}",
-                self.body.entry, suspension::PROLOGUE, self.body.code, suspension::EPILOGUE).unwrap();
+            write_definition(
+                &mut self.output.functions,
+                format_args!(
+                    "internal ptr {name}(ptr %context_slot, i64 %scope) presplitcoroutine"
+                ),
+                |unit| {
+                    write!(
+                        unit,
+                        "entry:\n{}{}{}{} ",
+                        self.body.entry,
+                        suspension::PROLOGUE,
+                        self.body.code,
+                        suspension::EPILOGUE
+                    )
+                    .unwrap();
+                },
+            );
         } else {
             self.body.end("ret i64 0");
-            writeln!(
-                self.output.functions,
-                "define internal i64 {name}(ptr %ctx, i64 %scope) {{\nentry:\n{}{}}}",
-                self.body.entry, self.body.code
-            )
-            .unwrap();
+            write_definition(
+                &mut self.output.functions,
+                format_args!("internal i64 {name}(ptr %ctx, i64 %scope)"),
+                |unit| write!(unit, "entry:\n{}{}", self.body.entry, self.body.code).unwrap(),
+            );
         }
         name
     }

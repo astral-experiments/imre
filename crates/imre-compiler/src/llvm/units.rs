@@ -216,14 +216,15 @@ impl Output {
         &mut self.units[owner]
     }
 
-    pub fn function(
+    pub(super) fn define_function(
         &mut self,
         owner: usize,
         name: &str,
         returns: &str,
         params: &str,
         attrs: &str,
-    ) -> &mut String {
+        write_body: impl FnOnce(&mut String),
+    ) {
         let linkage = if let Some(users) = self.users.get(name) {
             for &unit in users {
                 writeln!(
@@ -232,16 +233,15 @@ impl Output {
                 )
                 .unwrap();
             }
-            "hidden "
+            "hidden"
         } else {
-            "internal "
+            "internal"
         };
-        writeln!(
-            self.units[owner],
-            "define {linkage}{returns} @{name}({params}){attrs} {{"
-        )
-        .unwrap();
-        &mut self.units[owner]
+        body::write_definition(
+            &mut self.units[owner],
+            format_args!("{linkage} {returns} @{name}({params}){attrs}"),
+            write_body,
+        );
     }
 
     pub(super) fn emit(
