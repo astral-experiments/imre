@@ -829,8 +829,6 @@ fn lower_graph(
                     } else {
                         keyword_forwarding::prepare(graph, module_id, &mut function)
                     };
-                    let physical_frame =
-                        physical_entry && element.is_none() && defaults.forwarded.is_none();
                     let mut signature = signature(
                         &function,
                         graph,
@@ -841,7 +839,9 @@ fn lower_graph(
                         &inference,
                     )
                     .map_err(|error| format!("{}:{error}", module.path.display()))?;
-                    signature.physical_frame = physical_frame;
+                    // Rewriting a top-level function takes ownership of its declaration.
+                    signature.physical_frame =
+                        physical_entry && matches!(function, Cow::Borrowed(_));
                     if let Some(policy) = cached {
                         if signature.asynchronous
                             || function.returns.is_none()
@@ -1352,12 +1352,8 @@ fn lower_graph(
         if let Some(source) = body.source
             && signature.physical_frame
         {
-            let original = signature.method.is_none()
-                && module.parsed.syntax().body[callable_definitions[signature.id].statement]
-                    .as_function_def_stmt()
-                    == Some(definition);
             let slot = completed.functions.len();
-            if original {
+            if signature.method.is_none() {
                 completed
                     .frames
                     .push((slot, callable_definitions[signature.id], source));
