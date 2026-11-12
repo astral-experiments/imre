@@ -69,6 +69,16 @@ impl Session {
         (defs.next().is_none() && def.file(&self.db) == file).then_some(def)
     }
 
+    pub(crate) fn demanded_shipped_declaration(
+        &mut self,
+        owner: &str,
+        name: &str,
+    ) -> Result<Option<Binding>, String> {
+        Ok(self
+            .prepare_shipped_source(owner)?
+            .and_then(|file| self.shipped_declaration_at(file, owner, name)))
+    }
+
     pub(crate) fn shipped_declaration(&self, owner: &str, name: &str) -> Option<Binding> {
         let (filename, _) = crate::dynamic::bundled_module_source(owner, false)?;
         let file = shipped_file(&self.db, filename)?;
