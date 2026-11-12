@@ -222,6 +222,23 @@ fn integer_literal_handle_is_only_loaded_on_the_protocol_edge() {
 }
 
 #[test]
+fn checked_integer_results_use_the_permanent_cache_before_transferring_ownership() {
+    let output = emit_captured_body("def adjust(value: int, receive):\n    receive(value - 1)\n");
+    let (_, result) = output.functions.split_once("call i64 @int_sub(").unwrap();
+    let (cache, transfer) = result.split_once("call i64 @imre_dyn_take_int(").unwrap();
+    let width = super::permanent::SMALL_INT_MAX - super::permanent::SMALL_INT_MIN;
+    assert!(
+        cache
+            .lines()
+            .any(|line| line.contains("icmp ule i64") && line.ends_with(&format!(", {width}")))
+    );
+    assert!(cache.contains("trunc i64"));
+    assert!(cache.contains("br i1 "));
+    assert!(transfer.contains("phi i64"));
+    assert!(transfer.contains("call i64 @imre_dyn_positional_call_at("));
+}
+
+#[test]
 fn checked_integer_remainder_keeps_its_operation_with_a_registered_sibling() {
     let mut output = emit_captured_body(concat!(
         "def remainder(a: int, b: int) -> int:\n    return a % b\n",
