@@ -19,7 +19,7 @@ use ruff_python_ast::{self as ast, Expr, Stmt};
 use ruff_text_size::{Ranged, TextRange};
 
 use crate::frontend::module_source::{self, CheckedFile, ParsedModule};
-use crate::{CompileOptions, SourceInputs, SourceKind, UnitCompilation};
+use crate::{CompileOptions, SourceInputs, SourceKind};
 
 /// runpy opens the lexical abspath, which can cross a symlink and select a
 /// different file from the loader's spelling. Only register an equivalent origin.
@@ -941,13 +941,13 @@ pub(crate) fn compile(
     object_imports: bool,
     operation: Option<ObjectOperation>,
     project: &mut Option<crate::modules::SourceGraph>,
-    mode: crate::CompilationMode,
+    output: Option<&mut crate::ProgramOutput>,
     check: impl FnOnce(
         Option<&mut crate::modules::SourceGraph>,
         bool,
         Option<RegisteredSources<'_>>,
     ) -> Result<(), String>,
-) -> Result<Option<crate::CompilationResult>, String> {
+) -> Result<Option<SourceInputs>, String> {
     let (path, module_root, source_entry) = match operand {
         crate::ProgramEntry::Source(_) => {
             (Path::new(crate::modules::MEMORY_SOURCE_PATH), None, true)
@@ -1327,7 +1327,7 @@ pub(crate) fn compile(
                                source: &str,
                                kind: SourceKind,
                                getter: Option<&mut Imports>| {
-        if !matches!(mode, crate::CompilationMode::Check) {
+        if output.is_some() {
             return scan_imports(source, kind, getter, None);
         }
         let (imports, scanned) = scan_shipped_imports(source, kind, getter, Some(source))?;
@@ -2358,7 +2358,7 @@ pub(crate) fn compile(
                 declared_open_paths.insert(open.as_os_str().to_owned());
             }
             registration.has_open_exec = literals.open_exec.contains(&id);
-            registration.unit = matches!(mode, crate::CompilationMode::Build(_)).then_some(id);
+            registration.unit = output.is_some().then_some(id);
             registration.declares_signatures = application;
             registration.check_execution |= application;
             registration.main_body = match module_entry {
@@ -2491,8 +2491,7 @@ pub(crate) fn compile(
         if namespace_portions.contains(path) {
             continue;
         }
-        let check_runtime =
-            unit >= first_runtime_unit && matches!(mode, crate::CompilationMode::Check);
+        let check_runtime = unit >= first_runtime_unit && output.is_none();
         if let Some(parsed) = crate::analysis::check_native_syntax(
             &root,
             &mut syntax,
@@ -2555,7 +2554,7 @@ pub(crate) fn compile(
     let providers = options
         .bundled_provider_archive
         .as_deref()
-        .filter(|_| keep_docstrings && matches!(mode, crate::CompilationMode::Build(_)))
+        .filter(|_| keep_docstrings && output.is_some())
         .and_then(provider_archive::Providers::read)
         .unwrap_or_default();
     let mut prepared = prepare::units(
@@ -2577,9 +2576,9 @@ pub(crate) fn compile(
         &registrations,
         layouts,
     );
-    let crate::CompilationMode::Build(layout) = mode else {
+    let Some(output) = output else {
         prepared.try_for_each(|unit| unit.map(drop))?;
-        return Ok(Some(crate::CompilationResult::Checked(inputs)));
+        return Ok(Some(inputs));
     };
     let units = prepared.collect::<Result<Vec<_>, _>>()?;
     // The bundle lives in the launcher. This absolute, non-directory path can neither
@@ -2647,30 +2646,21 @@ pub(crate) fn compile(
         "command_source":command,"path0_bytes":path0_bytes,"packaged_file_module":packaged_file_module,
         "command":in_memory,"module_entry":module_entry,"path_entry":options.path_entry,"paths":paths,
     });
-    let (units, used_archive, whole) = emit::emit(
+    let used_archive = output.emit_registered(
         units,
         &config.to_string(),
         python_optimization,
         &providers.symbols,
-        layout,
     )?;
-    Ok(Some(crate::CompilationResult::Built(
-        UnitCompilation {
-            units,
-            input_paths: inputs
-                .source_files()
-                .map(|(path, _, _)| path.clone())
-                .collect(),
-            source_inputs: inputs,
-            extension_archives: options
-                .bundled_provider_archive
-                .iter()
-                .filter(|_| used_archive)
-                .cloned()
-                .collect(),
-        },
-        whole,
-    )))
+    output.compilation.extension_archives.extend(
+        options
+            .bundled_provider_archive
+            .iter()
+            .filter(|_| used_archive)
+            .cloned(),
+    );
+    output.compilation.input_paths = inputs.protected_paths(None);
+    Ok(Some(inputs))
 }
 
 /// The full threading factory needs these Python dependencies before the startup fallbacks.

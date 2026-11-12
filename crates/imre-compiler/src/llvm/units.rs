@@ -5,10 +5,10 @@ use std::fmt::{Display, Write};
 use super::*;
 use crate::CodegenUnit;
 
-pub(super) struct Output {
+pub(super) struct Output<'units> {
     /// Whether a reference to this named type also needs its destruction descriptor.
     pub(super) record_types: HashMap<Type, bool>,
-    units: Vec<CodegenUnit>,
+    units: &'units mut [CodegenUnit],
     integers: Vec<body::IntegerFunctions>,
     /// Named LLVM layouts must precede instructions that use them.
     common: String,
@@ -22,10 +22,10 @@ pub(super) struct Output {
     local_helpers: HashSet<(usize, &'static str)>,
 }
 
-impl Output {
-    fn new(
+impl<'units> Output<'units> {
+    pub(super) fn new(
         functions: impl IntoIterator<Item = usize>,
-        units: Vec<CodegenUnit>,
+        units: &'units mut [CodegenUnit],
         entry: usize,
         split: bool,
     ) -> Self {
@@ -60,16 +60,6 @@ impl Output {
             users: HashMap::new(),
             local_helpers: HashSet::new(),
         }
-    }
-
-    #[cfg(test)]
-    pub(super) fn whole() -> Self {
-        Self::new(
-            [],
-            vec![CodegenUnit::new("__main__", String::new())],
-            0,
-            false,
-        )
     }
 
     pub(super) fn include_integers(&mut self, function: body::IntegerFunctions) {
@@ -342,41 +332,49 @@ impl Output {
         ranges: &RangeFacts<'_>,
         sanitize: bool,
         program: NativeProgram,
-    ) -> Result<Vec<CodegenUnit>, Unsupported> {
+    ) -> Result<(), Unsupported> {
         emit_program(module, ranges, sanitize, &mut self, program)?;
-        for (integers, unit) in self.integers.into_iter().zip(&mut self.units) {
+        for (integers, unit) in self.integers.into_iter().zip(self.units.iter_mut()) {
             integers.write(&mut unit.llvm_ir, false);
             unit.llvm_ir.insert_str(0, &self.common);
         }
-        Ok(self.units)
+        Ok(())
     }
 }
 
-pub(crate) fn emit_units(
-    graph: &crate::modules::SourceGraph,
-    (module, owners): crate::CheckedIr,
-    program: NativeProgram,
-    layout: &crate::CodegenLayout,
-    sanitize: bool,
-) -> Result<Vec<CodegenUnit>, Unsupported> {
-    let split = matches!(layout, crate::CodegenLayout::Split);
-    let source = &graph.modules[graph.entry];
-    let (sources, entry, owners) = if split {
-        (
-            graph.modules.as_slice(),
-            (graph.entry, source.name.as_str()),
-            owners.as_slice(),
+impl crate::ProgramOutput {
+    pub(crate) fn emit_fixed(
+        &mut self,
+        graph: &crate::modules::SourceGraph,
+        (module, owners): crate::CheckedIr,
+        program: NativeProgram,
+        sanitize: bool,
+    ) -> Result<(), Unsupported> {
+        let split = matches!(self.layout, crate::CodegenLayout::Split);
+        let source = &graph.modules[graph.entry];
+        let (sources, entry, owners) = if split {
+            (
+                graph.modules.as_slice(),
+                (graph.entry, source.name.as_str()),
+                owners.as_slice(),
+            )
+        } else {
+            (std::slice::from_ref(source), (0, "__main__"), &[][..])
+        };
+        self.emit_sources(
+            sources,
+            entry,
+            split,
+            program,
+            |_, _, source, separate| Ok((source.name.as_str(), separate.then(String::new))),
+            |program, units, entry| {
+                let output = Output::new(owners.iter().copied(), units, entry, split);
+                let ranges = crate::ranges::analyze(&module);
+                output.emit(&module, &ranges, sanitize, program)?;
+                Ok(None)
+            },
         )
-    } else {
-        (std::slice::from_ref(source), (0, "__main__"), &[][..])
-    };
-    let (units, entry) =
-        CodegenUnit::place_sources(sources, entry, split, |_, source, separate| {
-            Ok::<_, Unsupported>((source.name.as_str(), separate.then(String::new)))
-        })?;
-    let output = Output::new(owners.iter().copied(), units, entry, split);
-    let ranges = crate::ranges::analyze(&module);
-    output.emit(&module, &ranges, sanitize, program)
+    }
 }
 
 #[cfg(test)]

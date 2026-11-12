@@ -9,7 +9,6 @@ use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange, TextSize};
 
 use super::prepare::{Initializer, PreparedUnit};
-use crate::CodegenUnit;
 use crate::dynamic::literal::LiteralSites;
 use crate::frontend::function_scope::{CallableMetadata, ClassBindings, NamedFunction};
 use crate::frontend::module_source::{self, ParsedModule};
@@ -76,104 +75,110 @@ pub(super) enum ModuleOrigin<'a> {
     Bundled,
 }
 
-/// Emit the checked initializers after preparation of the entire registration succeeds.
-pub(super) fn emit(
-    units_to_emit: Vec<PreparedUnit<'_>>,
-    config: &str,
-    python_optimization: i32,
-    providers: &HashSet<String>,
-    layout: crate::CodegenLayout,
-) -> Result<(Vec<CodegenUnit>, bool, Option<String>), String> {
-    let split = !matches!(layout, crate::CodegenLayout::Whole);
-    let mut used_archive = false;
-    let mut root = ModuleLauncher::new(config, python_optimization < 2);
-    // The requested whole IR and split native root share their exact prefix.
-    // Fork only when the split layout acquires its first independent local unit.
-    let mut whole: Option<ModuleLauncher> = None;
-    let (mut units, entry) = CodegenUnit::place_sources(
-        units_to_emit,
-        (0, "__main__"),
-        split,
-        |unit, prepared, separate| -> Result<_, String> {
-            let (name, path, source) = prepared.module;
-            let initializer = match &prepared.initializer {
-                Ok(initializer) => initializer,
-                Err(error) => {
-                    for state in std::iter::once(&mut root).chain(whole.as_mut()) {
-                        state.register_error(
-                            (name, path, source),
-                            &error.message,
-                            error.position,
-                            error.in_args,
-                            error.parse_error,
-                            prepared.zip.map(|(digest, _)| digest),
-                        );
-                    }
-                    return Ok((name.as_str(), None));
-                }
-            };
-            let (bundled, prompts) = match initializer {
-                Initializer::Checked(body) => (body.source.bundled, body.prompts),
-                Initializer::Archived(_) => (true, &[][..]),
-            };
-            let registration = prepared.registration(bundled);
-            let check_archive = bundled && !providers.is_empty();
-            let mut placed = None;
-            let mut external = None;
-            let mut archived = matches!(initializer, Initializer::Archived(_));
-            if let Initializer::Checked(initializer) = initializer
-                && !source.is_empty()
-                && (check_archive || separate)
-            {
-                let (symbol, body) = initializer.provider_body()?;
-                archived = check_archive && providers.contains(&symbol);
-                if !archived && separate && !root.declares(&symbol) {
-                    if whole.is_none() && matches!(layout, crate::CodegenLayout::SplitWithWhole) {
-                        whole = Some(root.clone());
-                    }
-                    placed = Some(body.llvm_ir(&symbol));
-                }
-                if archived || separate {
-                    external = Some(symbol);
-                }
-            }
-            used_archive |= archived;
-            let register =
-                |launcher: &mut ModuleLauncher, symbol: Option<&str>| -> Result<(), String> {
-                    let module = launcher.module_registration(&registration);
-                    let code = match (symbol, initializer) {
-                        (Some(symbol), _) | (None, &Initializer::Archived(symbol)) => {
-                            launcher.external(symbol)
+impl crate::ProgramOutput {
+    /// Emit the checked initializers after preparation of the entire registration succeeds.
+    pub(super) fn emit_registered(
+        &mut self,
+        units_to_emit: Vec<PreparedUnit<'_>>,
+        config: &str,
+        python_optimization: i32,
+        providers: &HashSet<String>,
+    ) -> Result<bool, String> {
+        let split = !matches!(self.layout, crate::CodegenLayout::Whole);
+        let whole_requested = matches!(self.layout, crate::CodegenLayout::SplitWithWhole);
+        let mut used_archive = false;
+        let root = ModuleLauncher::new(config, python_optimization < 2);
+        // The requested whole IR and split native root share their exact prefix.
+        // Fork only when the split layout acquires its first independent local unit.
+        self.emit_sources(
+            units_to_emit,
+            (0, "__main__"),
+            split,
+            (root, None::<ModuleLauncher>),
+            |(root, whole), unit, prepared, separate| -> Result<_, String> {
+                let (name, path, source) = prepared.module;
+                let initializer = match &prepared.initializer {
+                    Ok(initializer) => initializer,
+                    Err(error) => {
+                        for state in std::iter::once(root).chain(whole.as_mut()) {
+                            state.register_error(
+                                (name, path, source),
+                                &error.message,
+                                error.position,
+                                error.in_args,
+                                error.parse_error,
+                                prepared.zip.map(|(digest, _)| digest),
+                            );
                         }
-                        (None, Initializer::Checked(body)) => {
-                            body.emit(&mut launcher.output, unit, &module.file)?
-                        }
-                    };
-                    module.write_call(launcher, &code);
-                    for Prompt(prompt) in prompts {
-                        let file = launcher
-                            .output
-                            .data(prompt.source.path.as_os_str().as_encoded_bytes());
-                        let code = prompt.emit(&mut launcher.output, unit, &file)?;
-                        launcher.register_single(
-                            &module.name,
-                            &file,
-                            &prompt.source.text,
-                            prompt.source.future_flags,
-                            &code,
-                        );
+                        return Ok((name.as_str(), None));
                     }
-                    Ok(())
                 };
-            register(&mut root, external.as_deref())?;
-            if let Some(whole) = &mut whole {
-                register(whole, external.as_deref().filter(|_| archived))?;
-            }
-            Ok((name.as_str(), placed))
-        },
-    )?;
-    units[entry].llvm_ir = root.finish();
-    Ok((units, used_archive, whole.map(ModuleLauncher::finish)))
+                let (bundled, prompts) = match initializer {
+                    Initializer::Checked(body) => (body.source.bundled, body.prompts),
+                    Initializer::Archived(_) => (true, &[][..]),
+                };
+                let registration = prepared.registration(bundled);
+                let check_archive = bundled && !providers.is_empty();
+                let mut placed = None;
+                let mut external = None;
+                let mut archived = matches!(initializer, Initializer::Archived(_));
+                if let Initializer::Checked(initializer) = initializer
+                    && !source.is_empty()
+                    && (check_archive || separate)
+                {
+                    let (symbol, body) = initializer.provider_body()?;
+                    archived = check_archive && providers.contains(&symbol);
+                    if !archived && separate && !root.declares(&symbol) {
+                        if whole.is_none() && whole_requested {
+                            *whole = Some(root.clone());
+                        }
+                        placed = Some(body.llvm_ir(&symbol));
+                    }
+                    if archived || separate {
+                        external = Some(symbol);
+                    }
+                }
+                used_archive |= archived;
+                let register =
+                    |launcher: &mut ModuleLauncher, symbol: Option<&str>| -> Result<(), String> {
+                        let module = launcher.module_registration(&registration);
+                        let code = match (symbol, initializer) {
+                            (Some(symbol), _) | (None, &Initializer::Archived(symbol)) => {
+                                launcher.external(symbol)
+                            }
+                            (None, Initializer::Checked(body)) => {
+                                body.emit(&mut launcher.output, unit, &module.file)?
+                            }
+                        };
+                        module.write_call(launcher, &code);
+                        for Prompt(prompt) in prompts {
+                            let file = launcher
+                                .output
+                                .data(prompt.source.path.as_os_str().as_encoded_bytes());
+                            let code = prompt.emit(&mut launcher.output, unit, &file)?;
+                            launcher.register_single(
+                                &module.name,
+                                &file,
+                                &prompt.source.text,
+                                prompt.source.future_flags,
+                                &code,
+                            );
+                        }
+                        Ok(())
+                    };
+                register(root, external.as_deref())?;
+                if let Some(whole) = whole {
+                    register(whole, external.as_deref().filter(|_| archived))?;
+                }
+                Ok((name.as_str(), placed))
+            },
+            |(root, whole), units, entry| {
+                units[entry].llvm_ir = root.finish();
+                Ok(whole.map(ModuleLauncher::finish))
+            },
+        )?;
+        Ok(used_archive)
+    }
 }
 
 /// A selected single input owns its exact checked body. An unsupported prompt
@@ -1869,7 +1874,7 @@ mod tests {
             &HashMap<PathBuf, Box<super::super::ModuleSyntaxError>>,
             &RegisteredBodies<'_>,
         ),
-    ) -> Result<(Vec<CodegenUnit>, bool, Option<String>), String> {
+    ) -> Result<(Vec<crate::CodegenUnit>, bool, Option<String>), String> {
         let units = prepare::units(
             (files, builtins),
             prepare::SourceInputs {
@@ -1883,7 +1888,9 @@ mod tests {
             Vec::new(),
         )
         .collect::<Result<Vec<_>, _>>()?;
-        super::emit(units, config, python_optimization, providers, layout)
+        let mut output = crate::ProgramOutput::new(layout);
+        let used_archive = output.emit_registered(units, config, python_optimization, providers)?;
+        Ok((output.compilation.units, used_archive, output.whole))
     }
 
     #[test]

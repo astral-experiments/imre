@@ -3509,11 +3509,7 @@ impl SourceGraph {
                     .any(|(archive, _, _)| path.starts_with(archive))
         });
         inputs.files.append(&mut self.zip_files);
-        let paths = inputs
-            .source_files()
-            .map(|(path, _, _)| path.clone())
-            .chain(profile.map(Path::to_path_buf))
-            .collect();
+        let paths = inputs.protected_paths(profile);
         // The linker receives physical archive paths. A hit must also validate the
         // import spelling in case a wheel symlink was retargeted or removed.
         for archive in self

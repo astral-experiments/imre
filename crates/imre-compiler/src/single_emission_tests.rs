@@ -504,7 +504,7 @@ fn fixed_file_selects_its_product_for_the_requested_startup() {
         };
         let observed = Cell::new(false);
         object_fallback(
-            CompilationMode::Check,
+            None,
             ProgramEntry::File(&path, None),
             &options,
             Default::default(),
