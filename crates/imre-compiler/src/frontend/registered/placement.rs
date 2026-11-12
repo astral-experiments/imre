@@ -80,6 +80,28 @@ mod tests {
     }
 
     #[test]
+    fn earlier_provider_body_keeps_the_checked_scalar_sibling() {
+        let text = concat!(
+            "import traceback\n",
+            "def unused():\n    return traceback.extract_stack()\n",
+            "def scalar(n: int) -> int:\n    return n * 2\n",
+            "print(scalar(4))\n",
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.py");
+        std::fs::write(&path, text).unwrap();
+        let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
+        let (_, lowerings) =
+            caller_cache::observe_lowerings(|| crate::checked_lower(&mut graph).unwrap());
+        assert_eq!(lowerings.iter().filter(|name| *name == "scalar").count(), 1);
+        let scalar = TextSize::try_from(text.find("def scalar").unwrap()).unwrap();
+        let functions = graph.registered_functions();
+        let placed = &functions[&graph.entry][&scalar];
+        assert_eq!(placed.function.returns, Type::Int);
+        assert_eq!(&text[placed.fixed_sites[0]], "return n * 2");
+    }
+
+    #[test]
     fn imported_exception_handler_keeps_the_checked_arithmetic_body() {
         let text = concat!(
             "def scale(n: int) -> int:\n    return n * 3 + 1\n",
