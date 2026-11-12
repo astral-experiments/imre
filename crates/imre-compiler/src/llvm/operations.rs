@@ -291,11 +291,9 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 .as_deref()
                 .map(&mut evaluate)
                 .unwrap_or(enclosing_scope);
-            let (target, mut values) = args.capture_invoke(callable, evaluate);
-            if let Some(child) = frame.exec_literal_at(site.range) {
-                frame.link_exec_operand(&target, &mut values[0], &child);
-            }
-            let (array, count) = frame.handle_array(&values);
+            let (target, values) = args.capture_invoke(callable, evaluate);
+            let exec = frame.exec_literal_at(site.range);
+            let (array, count) = frame.fixed_call_arguments(&target, values, exec);
             let positional = super::registered::CallArguments::Positional {
                 array,
                 count,
