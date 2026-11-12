@@ -5208,7 +5208,7 @@ impl Context {
 }
 
 /// Map an integer operator to the operation implemented by the integer runtime.
-fn integer_binary_code(op: &str) -> Option<u32> {
+pub(super) fn integer_binary_code(op: &str) -> Option<u32> {
     Some(match op {
         "+" => 0,
         "-" => 1,
@@ -5221,6 +5221,14 @@ fn integer_binary_code(op: &str) -> Option<u32> {
         "<<" => 8,
         ">>" => 9,
         _ => return None,
+    })
+}
+
+/// Resolve an integer shift wrapper against the operator's forward and reflected names.
+pub(super) fn int_shift_slot(name: &str) -> Option<(&'static str, bool)> {
+    ["<<", ">>"].into_iter().find_map(|op| {
+        let (forward, reflected, _) = binary_slots(op)?;
+        (name == forward || name == reflected).then_some((op, name == reflected))
     })
 }
 
@@ -5426,6 +5434,14 @@ impl Context {
             return Ok(None);
         };
         self.call_operator_slot(method, other)
+    }
+
+    pub(super) fn inherited_integer_slot(&mut self, a: Id, b: Id, code: u32) -> Result<Option<Id>> {
+        let (Ok(a), Ok(b)) = (self.borrow_int(a), self.borrow_int(b)) else {
+            return Ok(None);
+        };
+        let result = crate::integer_binary(&a, &b, code)?;
+        Ok(Some(self.alloc(Value::Int(result))))
     }
 
     fn call_operator_slot(&mut self, method: Id, other: Id) -> Result<Option<Id>> {
@@ -5997,11 +6013,7 @@ impl Context {
                     return ctx.call_operator_slot(method, other);
                 }
                 // In either direction the inherited int slot uses the original operand order.
-                let (Ok(a), Ok(b)) = (ctx.borrow_int(a), ctx.borrow_int(b)) else {
-                    return Ok(None);
-                };
-                let result = crate::integer_binary(&a, &b, code)?;
-                return Ok(Some(ctx.alloc(Value::Int(result))));
+                return ctx.inherited_integer_slot(a, b, code);
             }
             ctx.operator_slot(receiver, name, other)
         };
