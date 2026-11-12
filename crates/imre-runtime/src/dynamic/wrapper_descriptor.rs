@@ -10,6 +10,16 @@ pub(super) struct BuiltinDescriptor {
 
 impl BuiltinDescriptor {
     pub(super) fn lookup(symbol: &str) -> Option<Self> {
+        if let Some(attr) = symbol.strip_prefix("dict.")
+            && builtins::constructor_owner(symbol).is_none()
+            && let Some(&name) = builtins::DICT_METHODS.iter().find(|&&name| name == attr)
+        {
+            return Some(Self {
+                owner: "dict",
+                name,
+                method: !builtins::dict_slot(symbol),
+            });
+        }
         if let Some(attr) = symbol.strip_prefix("str.")
             && let Some(&name) = builtins::STR_METHODS.iter().find(|&&name| name == attr)
         {
@@ -353,7 +363,6 @@ impl BuiltinDescriptor {
             "object.__format__" => ("object", "__format__"),
             "object.__sizeof__" => ("object", "__sizeof__"),
             "dict.__sizeof__" => ("dict", "__sizeof__"),
-            "dict.fromkeys" => ("dict", "fromkeys"),
             "int.__sizeof__" => ("int", "__sizeof__"),
             "str.__sizeof__" => ("str", "__sizeof__"),
             "bytearray.__sizeof__" => ("bytearray", "__sizeof__"),
@@ -410,13 +419,6 @@ impl BuiltinDescriptor {
             "method_descriptor.__get__" => ("method_descriptor", "__get__"),
             "wrapper_descriptor.__get__" => ("wrapper_descriptor", "__get__"),
             "bytes.__repr__" => ("bytes", "__repr__"),
-            "dict.__or__" => ("dict", "__or__"),
-            "dict.__ror__" => ("dict", "__ror__"),
-            "dict.__ior__" => ("dict", "__ior__"),
-            "dict.__eq__" => ("dict", "__eq__"),
-            "dict.__init__" => ("dict", "__init__"),
-            "dict.__repr__" => ("dict", "__repr__"),
-            "dict.__reversed__" => ("dict", "__reversed__"),
             "tuple.__repr__" => ("tuple", "__repr__"),
             "types.SimpleNamespace.__init__" => (super::namespace::CLASS, "__init__"),
             "types.SimpleNamespace.__repr__" => (super::namespace::CLASS, "__repr__"),
@@ -454,7 +456,6 @@ impl BuiltinDescriptor {
                     | "index"
                     | "fromhex"
                     | "from_bytes"
-                    | "fromkeys"
             ),
         })
     }
