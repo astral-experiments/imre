@@ -8375,7 +8375,7 @@ impl Emitter<'_, '_> {
                 none()
             }
             Builtin::DequeIter { reverse } => Value {
-                ty: Type::Iterator,
+                ty: returns,
                 operand: self.instruction(format!(
                     "call ptr @imre_deque_iter(ptr {}, i32 {})",
                     args[0].value.operand,

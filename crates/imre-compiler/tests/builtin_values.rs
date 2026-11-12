@@ -26,6 +26,34 @@ for function in (sum, print):
 }
 
 #[test]
+fn iter_on_a_checked_deque_uses_its_native_cursor() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("main.py");
+    std::fs::write(
+        &path,
+        "\
+from collections import deque
+
+def take(q: deque[int]) -> int:
+    cursor = iter(q)
+    return next(iter(cursor))
+
+print(take(deque([41])))
+",
+    )
+    .unwrap();
+    let program = imre_compiler::compile_file(&path, None, &Default::default()).unwrap();
+    assert!(!program.source_inputs.boxed_imports);
+    assert_eq!(
+        program
+            .llvm_ir
+            .matches("call ptr @imre_deque_iter(")
+            .count(),
+        1
+    );
+}
+
+#[test]
 fn math_perm_with_computed_none_keeps_imported_calls_checked() {
     let root = tempfile::tempdir().unwrap();
     let scores = root.path().join("scores.py");

@@ -48,6 +48,7 @@ pub unsafe extern "C" fn imre_cursor_length_hint(cursor: *const Object, default:
         }
         let remaining = object(cursor).0.with(|storage| match storage {
             Storage::Repeat(repeat) => repeat.remaining.map(Int::from_usize),
+            Storage::DequeIterator(iterator) => Some(Int::from_usize(iterator.remaining)),
             Storage::IteratorAdapter(state) => match state.as_ref() {
                 Adapter::Progression(progression) => Some(progression.remaining()),
                 _ => None,
