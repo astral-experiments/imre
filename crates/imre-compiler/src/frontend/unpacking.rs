@@ -57,7 +57,8 @@ pub(super) trait PatternBinder {
         &mut self,
         target: &ast::Expr,
         value: Expr,
-    ) -> StdResult<Statement, Self::Error>;
+        output: &mut Vec<Statement>,
+    ) -> StdResult<(), Self::Error>;
     fn multiple_stars(&self, target: &ast::Expr) -> Self::Error;
 
     fn pattern_snapshot(
@@ -154,7 +155,9 @@ pub(super) fn bind_assignment<B: PatternBinder>(
     value: Expr,
 ) -> StdResult<Vec<Statement>, B::Error> {
     if let [target] = targets {
-        return bind_targets(binder, target, value, None);
+        let mut body = Vec::with_capacity(1);
+        bind_input(binder, target, value, None, &mut body)?;
+        return Ok(body);
     }
     let slot = binder.pattern_hidden(value.ty);
     let mut body = vec![Statement::Assign(slot, value)];
@@ -165,23 +168,12 @@ pub(super) fn bind_assignment<B: PatternBinder>(
         } else {
             value
         };
-        body.extend(bind_targets(binder, target, value, None)?);
+        bind_input(binder, target, value, None, &mut body)?;
     }
     Ok(vec![Statement::Scope {
         body,
         clear: vec![slot],
     }])
-}
-
-/// Capture a sequence level before its first store. A nested level is unpacked
-/// when its target is reached, after the preceding sibling's stores and callbacks.
-pub(super) fn bind_targets<B: PatternBinder>(
-    binder: &mut B,
-    target: &ast::Expr,
-    value: Expr,
-    stable: Option<usize>,
-) -> StdResult<Vec<Statement>, B::Error> {
-    bind_input(binder, target, value, stable, false).map(|(body, _)| body)
 }
 
 /// Private slots shared by the ordinary row snapshot and a direct dictionary-items pull.
@@ -190,15 +182,17 @@ pub(crate) struct PairBinding {
     pub(crate) items: [usize; 2],
 }
 
+/// Append one target's store or its scoped unpack to the receiving suite.
 pub(super) fn bind_input<B: PatternBinder>(
     binder: &mut B,
     target: &ast::Expr,
     value: Expr,
-    stable: Option<usize>,
-    pair_pull: bool,
-) -> StdResult<(Vec<Statement>, Option<PairBinding>), B::Error> {
+    projected_row: Option<&usize>,
+    output: &mut Vec<Statement>,
+) -> StdResult<Option<PairBinding>, B::Error> {
     let Some(targets) = pattern_elements(target) else {
-        return Ok((vec![binder.pattern_store(target, value)?], None));
+        binder.pattern_store(target, value, output)?;
+        return Ok(None);
     };
     let mut stars = targets
         .iter()
@@ -208,12 +202,15 @@ pub(super) fn bind_input<B: PatternBinder>(
     if stars.next().is_some() {
         return Err(binder.multiple_stars(target));
     }
+    // A private tuple slot supplies fixed fields. A qualified Python cursor can
+    // supply a pair directly. Other inputs snapshot the ordinary row.
+    let pair_pull = projected_row.is_some() && value.ty == Type::PythonObject;
     let PatternSnapshot {
         root,
         mut body,
         clear,
         items,
-    } = binder.pattern_snapshot(target, targets, star, value, stable)?;
+    } = binder.pattern_snapshot(target, targets, star, value, projected_row.copied())?;
     body.push(Statement::Clear(root));
     let pair = if pair_pull
         && star.is_none()
@@ -244,9 +241,10 @@ pub(super) fn bind_input<B: PatternBinder>(
             target
         };
         let value = take_pattern_temporary(binder.pattern_local(item), item);
-        body.extend(bind_targets(binder, target, value, None)?);
+        bind_input(binder, target, value, None, &mut body)?;
     }
-    Ok((vec![Statement::Scope { body, clear }], pair))
+    output.push(Statement::Scope { body, clear });
+    Ok(pair)
 }
 
 impl Checker<'_> {
@@ -422,7 +420,7 @@ impl Checker<'_> {
         if let [target] = assignment.targets.as_slice() {
             if pattern_elements(target).is_some() {
                 let value = self.unpacking_value(target, &assignment.value)?;
-                return Ok((self.bind_pattern(target, value)?, true));
+                return Ok((bind_assignment(self, &assignment.targets, value)?, true));
             }
             let local = target.as_name_expr().filter(|_| {
                 !self.module_scope && self.block_depth == 1 && self.local_functions.is_empty()
@@ -1104,16 +1102,6 @@ impl Checker<'_> {
         }
         self.expr(value)
     }
-
-    /// Each sequence level is checked and captured before its target stores;
-    /// nested levels are entered only when their target is reached.
-    pub(super) fn bind_pattern(
-        &mut self,
-        target: &ast::Expr,
-        value: Expr,
-    ) -> Result<Vec<Statement>, String> {
-        bind_targets(self, target, value, None)
-    }
 }
 
 impl PatternBinder for Checker<'_> {
@@ -1125,12 +1113,16 @@ impl PatternBinder for Checker<'_> {
     fn pattern_local(&self, slot: usize) -> Expr {
         self.local(slot)
     }
+    // Keep the assignment result in the leaf call, outside recursive unpack frames.
+    #[inline(never)]
     fn pattern_store(
         &mut self,
         target: &ast::Expr,
         value: Expr,
-    ) -> StdResult<Statement, Self::Error> {
-        self.assign_value(target, value)
+        output: &mut Vec<Statement>,
+    ) -> StdResult<(), Self::Error> {
+        output.push(self.assign_value(target, value)?);
+        Ok(())
     }
     fn multiple_stars(&self, target: &ast::Expr) -> Self::Error {
         error(

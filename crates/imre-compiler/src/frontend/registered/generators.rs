@@ -120,7 +120,6 @@ impl RegisteredGenerator {
 /// Emit one lazy clause using the checked iterator scope and the registered unwind edges.
 pub(super) fn clause(
     input: pipelines::Prepared,
-    binding: Vec<Statement>,
     mut body: Vec<Statement>,
     site: TextRange,
     nested: bool,
@@ -129,7 +128,7 @@ pub(super) fn clause(
         // Publish the cursor before each pull, then publish its successful bindings.
         input.next.insert(0, boundary.clone());
         body.insert(0, boundary.clone());
-        input.for_suite(binding, body, Vec::new(), Vec::new())
+        input.for_suite(body, Vec::new(), Vec::new())
     })
 }
 

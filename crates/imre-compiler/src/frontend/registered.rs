@@ -1899,7 +1899,7 @@ impl<'a> SuitePreparation<'a> {
             |ty| scope.hidden(ty),
         );
         let binding = scope
-            .with_binding_operands(|scope| input.bind_loop_target(scope, &loop_.target))
+            .with_binding_operands(|scope| input.bind_loop_target(scope, &loop_.target, true))
             .map_err(|()| {
                 scope.refusal.unwrap_or((
                     loop_.target.range(),
@@ -1908,7 +1908,7 @@ impl<'a> SuitePreparation<'a> {
             })?;
         self.refusal = self
             .refusal
-            .or_else(|| self.literal_refusal(RegionRoot::Suite(&binding)));
+            .or_else(|| self.literal_refusal(RegionRoot::Suite(binding)));
         let mut region = RegisteredSuite::new(scope.finish(Vec::new()), operands);
         let body = region.child(self.physical_suite(&loop_.body, kind, selection, suspended));
         let otherwise = if loop_.orelse.is_empty() {
@@ -1921,7 +1921,7 @@ impl<'a> SuitePreparation<'a> {
             Type::None,
             Vec::new(),
         ))];
-        statements.extend(input.for_suite(binding, body, otherwise, Vec::new()));
+        statements.extend(input.for_suite(body, otherwise, Vec::new()));
         region.checked.function.body = statements;
         Ok(region)
     }
@@ -2533,10 +2533,10 @@ impl statements::StatementLowering for SourceScope<'_> {
         let mut input = self
             .creating_iterable(|scope| scope.iteration_input(&loop_.iter, for_pull(loop_)))
             .ok_or(())?;
-        let binding = input.bind_loop_target(self, &loop_.target)?;
+        input.bind_loop_target(self, &loop_.target, true)?;
         let body = self.in_loop(LoopScope::WithCursor, |scope| scope.suite(&loop_.body))?;
         let otherwise = self.suite(&loop_.orelse)?;
-        Ok((input.for_suite(binding, body, otherwise, Vec::new()), true))
+        Ok((input.for_suite(body, otherwise, Vec::new()), true))
     }
 
     fn raised_value(
@@ -2807,25 +2807,28 @@ impl unpacking::PatternBinder for SourceScope<'_> {
         Expr::local(slot, self.locals[slot])
     }
 
-    fn pattern_store(&mut self, target: &ast::Expr, value: Expr) -> StdResult<Statement, ()> {
-        match target {
-            ast::Expr::Name(name) => Ok(self.store(name.id.as_str(), value)),
+    fn pattern_store(
+        &mut self,
+        target: &ast::Expr,
+        value: Expr,
+        output: &mut Vec<Statement>,
+    ) -> StdResult<(), ()> {
+        let store = match target {
+            ast::Expr::Name(name) => self.store(name.id.as_str(), value),
             ast::Expr::Attribute(attr) => {
                 let receiver = self.ordinary_operand(&attr.value).ok_or(())?;
-                Ok(attribute_statement(
-                    ir::AttributeAction::Store,
-                    attr,
-                    vec![value, receiver],
-                ))
+                attribute_statement(ir::AttributeAction::Store, attr, vec![value, receiver])
             }
             ast::Expr::Subscript(sub) => {
                 let receiver = self.ordinary_operand(&sub.value).ok_or(())?;
                 let key =
                     values::index_key(&sub.slice, &mut |e| self.ordinary_operand(e).ok_or(()))?;
-                Ok(Statement::SetItem(receiver, key, value))
+                Statement::SetItem(receiver, key, value)
             }
-            _ => Err(()),
-        }
+            _ => return Err(()),
+        };
+        output.push(store);
+        Ok(())
     }
 
     fn multiple_stars(&self, _: &ast::Expr) {}
@@ -3103,14 +3106,16 @@ impl SourceScope<'_> {
         } else {
             value
         };
-        let (body, _) = self
-            .with_binding_operands(|scope| unpacking::bind_input(scope, target, value, None, false))
-            .map_err(|()| {
-                self.refusal.unwrap_or((
-                    target.range(),
-                    "cannot compile this assignment target ahead of time",
-                ))
-            })?;
+        let mut body = Vec::with_capacity(1);
+        self.with_binding_operands(|scope| {
+            unpacking::bind_input(scope, target, value, None, &mut body)
+        })
+        .map_err(|()| {
+            self.refusal.unwrap_or((
+                target.range(),
+                "cannot compile this assignment target ahead of time",
+            ))
+        })?;
         Ok(Some(ir::ContextBinding {
             entered: slot,
             body: vec![Statement::Scope {

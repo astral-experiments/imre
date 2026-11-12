@@ -5491,14 +5491,16 @@ impl<'a> Checker<'a> {
         };
         let mut facts = self.narrowed.clone();
         let before = self.assigned.clone();
-        let bindings = if zero_based {
+        if let Some((ready, _, _)) = pull {
+            body.push(pipelines::Prepared::exhaust_if_empty(self.local(ready)));
+        }
+        let start = body.len();
+        if zero_based {
             let [index, target] = pattern_elements(target).unwrap() else {
                 unreachable!()
             };
-            vec![
-                self.assign_value(index, self.local(cursor.unwrap()))?,
-                self.assign_value(target, item)?,
-            ]
+            body.push(self.assign_value(index, self.local(cursor.unwrap()))?);
+            body.push(self.assign_value(target, item)?);
         } else {
             let item = if let Some(counter) = counter {
                 Expr {
@@ -5508,15 +5510,13 @@ impl<'a> Checker<'a> {
             } else {
                 item
             };
-            self.bind_pattern(target, item)?
-        };
-        assignments::forget_binding_writes(&mut facts, &bindings);
-        if let Some((ready, key, value)) = pull {
+            unpacking::bind_input(self, target, item, None, &mut body)?;
+        }
+        assignments::forget_binding_writes(&mut facts, &body[start..]);
+        if let Some((_, key, value)) = pull {
             let slots = std::iter::once(key).chain(value);
             cleanup.extend(slots.clone());
-            pipelines::Prepared::bind_next(&mut body, self.local(ready), slots, bindings);
-        } else {
-            body.extend(bindings);
+            body.extend(slots.map(Statement::Clear));
         }
         // Advance before entering the body so continue and target rebinding do
         // not alter progression. Length is read anew on every loop condition.
