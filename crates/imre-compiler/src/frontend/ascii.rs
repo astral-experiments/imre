@@ -8,12 +8,16 @@ impl Checker<'_> {
             call.arguments.args.as_ref(),
             call.arguments.keywords.as_ref(),
         ) {
-            return self.ascii_expr(value);
+            return self.ascii_expr(value, Some(call));
         }
         self.one_positional_error(call, "ascii", "obj", Type::Str)
     }
 
-    pub(super) fn ascii_expr(&mut self, argument: &ast::Expr) -> Result<Expr, String> {
+    pub(super) fn ascii_expr(
+        &mut self,
+        argument: &ast::Expr,
+        call: Option<&ast::ExprCall>,
+    ) -> Result<Expr, String> {
         // Empty literal containers have no element operations to constrain their layout.
         let value = match argument {
             ast::Expr::List(list) if list.elts.is_empty() => {
@@ -25,6 +29,12 @@ impl Checker<'_> {
             _ => self.expr(argument)?,
         };
         let shown = match value.ty {
+            Type::PythonObject => {
+                return match call {
+                    Some(call) => self.call_import_with_operand(call, value),
+                    None => Ok(fstrings::object_conversion(value, 'a')),
+                };
+            }
             Type::Exception | Type::NamedException(_) | Type::ImportException => Expr {
                 ty: Type::Str,
                 kind: ExprKind::Builtin(Builtin::ExceptionRepr, vec![value]),

@@ -1092,7 +1092,7 @@ impl Checker<'_> {
         }
         if conversion == ast::ConversionFlag::Ascii {
             return if specification.is_empty() {
-                self.ascii_expr(&field.expression).map(Formatted)
+                self.ascii_expr(&field.expression, None).map(Formatted)
             } else {
                 operand(self)
             };
