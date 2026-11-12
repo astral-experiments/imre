@@ -1211,7 +1211,7 @@ impl Checker<'_> {
             return Ok(Some(source.located(node, value)));
         }
         if let ast::Expr::Lambda(lambda) = node {
-            if checked_binding(lambda, source).is_none() {
+            if !has_checked_lambda_body(lambda, source) {
                 return Ok(None);
             }
             let defaults = lambda_defaults(lambda)
