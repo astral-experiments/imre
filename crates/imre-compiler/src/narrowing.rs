@@ -190,20 +190,32 @@ pub(crate) fn guaranteed_assignments(
 /// Callers must invalidate these names' incoming facts before checking a loop:
 /// later iterations can observe a value written on an earlier backedge.
 pub(crate) fn assigned_names(body: &[ast::Stmt]) -> HashSet<String> {
-    let mut visitor = Assignments(HashSet::new());
+    assigned_names_with_updates(body, &mut |_| {})
+}
+
+pub(crate) fn assigned_names_with_updates(
+    body: &[ast::Stmt],
+    updated: &mut dyn FnMut(&str),
+) -> HashSet<String> {
+    let mut visitor = Assignments(HashSet::new(), updated);
     for statement in body {
         visitor.visit_stmt(statement);
     }
     visitor.0
 }
 
-struct Assignments(HashSet<String>);
+struct Assignments<'a>(HashSet<String>, &'a mut dyn FnMut(&str));
 
-impl<'a> Visitor<'a> for Assignments {
+impl<'a> Visitor<'a> for Assignments<'_> {
     fn visit_stmt(&mut self, statement: &'a ast::Stmt) {
         if let ast::Stmt::FunctionDef(function) = statement {
             self.0.insert(function.name.to_string());
         } else {
+            if let ast::Stmt::AugAssign(assign) = statement
+                && let Some(name) = assign.target.as_name_expr()
+            {
+                (self.1)(name.id.as_str());
+            }
             walk_stmt(self, statement);
         }
     }

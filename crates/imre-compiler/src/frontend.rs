@@ -4717,13 +4717,25 @@ impl<'a> Checker<'a> {
         })
     }
 
+    fn registered_in_place_local(&self, name: &str) -> Option<usize> {
+        let slot = *self.names.get(name)?;
+        (slot >= self.registered_local_start? && !self.declared_slots.contains_key(&slot))
+            .then_some(slot)
+    }
+
     /// Loop backedges can observe stores from a previous iteration.
     fn invalidate_loop_facts(
         &mut self,
         body: &[ast::Stmt],
         source: Option<(&pipelines::Prepared, &ast::Expr)>,
     ) -> Result<(), String> {
-        for name in narrowing::assigned_names(body) {
+        let names = narrowing::assigned_names_with_updates(body, &mut |name| {
+            // The next iteration can receive the replacement returned by __iadd__ and its peers.
+            if let Some(slot) = self.registered_in_place_local(name) {
+                self.locals[slot] = Type::PythonObject;
+            }
+        });
+        for name in names {
             if let Some(slot) = self.names.get(&name) {
                 self.narrowed.remove_mut(slot);
                 self.assigned
@@ -5947,6 +5959,11 @@ impl<'a> Checker<'a> {
                             [ast::Expr::Subscript(_) | ast::Expr::Tuple(_) | ast::Expr::List(_)]
                         )
                 }
+                ast::Stmt::AugAssign(assign) => assign
+                    .target
+                    .as_name_expr()
+                    .and_then(|name| self.registered_in_place_local(name.id.as_str()))
+                    .is_some(),
                 ast::Stmt::For(loop_) => !loop_.is_async,
                 ast::Stmt::Assert(_) => self.registered_local_start.is_some(),
                 ast::Stmt::With(scope) => !scope.is_async,
@@ -6304,6 +6321,15 @@ impl<'a> Checker<'a> {
                     Some(Statement::AugmentField(receiver, field, op, value))
                 } else if let ast::Expr::Name(name) = &*assign.target {
                     let left = self.expr(&assign.target)?;
+                    if self.registered_local_start.is_some() {
+                        let right = self.expr(&assign.value)?;
+                        let value = registered::in_place(assign.op, left, right);
+                        let slot = self.names[name.id.as_str()];
+                        // An in-place or reflected method can replace the unannotated local.
+                        self.locals[slot] = Type::PythonObject;
+                        self.assigned_value(slot, &value);
+                        return Ok((vec![Statement::Assign(slot, value)], true));
+                    }
                     if assign.op == ast::Operator::Add
                         && let Some(element) = self.types.deque_element(left.ty)
                     {
