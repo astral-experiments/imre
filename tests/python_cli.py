@@ -3185,6 +3185,7 @@ with zipfile.ZipFile('zip-writer-capability.zip', 'w', zipfile.ZIP_DEFLATED) as 
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_attrgetter.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_itemgetter.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_methodcaller.py")
+        compare("-IB", Path(__file__).with_name("fixtures") / "inspect_symbolic_defaults.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_inspect_signature.py")
         (root / "weather_report.py").write_text("def report(temp):\n    return f'{temp} C'\n")
         compare("-Bm", "inspect", "weather_report:report")

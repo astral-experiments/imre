@@ -1981,20 +1981,35 @@ def _signature_fromstr(cls, obj, s, skip_bound_arg=True):
             raise ValueError("Annotations are not currently supported")
         return node.arg
 
-    def wrap_value(s):
-        try:
-            value = eval(s, module_dict)
-        except NameError:
-            try:
-                value = eval(s, sys_module_dict)
-            except NameError:
-                raise ValueError
-
-        if isinstance(value, (str, int, float, bytes, bool, type(None))):
-            return ast.Constant(value)
-        raise ValueError
-
     class RewriteSymbolics(ast.NodeTransformer):
+        def symbol(self, name, attrs=()):
+            # Clinic defaults may refer to a name or one of its attributes.
+            # Keep the defining globals, builtins and loaded-module fallback.
+            for namespace in (module_dict, sys_module_dict):
+                if '__builtins__' not in namespace:
+                    namespace['__builtins__'] = type(self).symbol.__builtins__
+                try:
+                    if name == '__debug__':
+                        value = __debug__
+                    elif name in namespace:
+                        value = namespace[name]
+                    else:
+                        builtins = namespace['__builtins__']
+                        if isinstance(builtins, types.ModuleType):
+                            builtins = vars(builtins)
+                        try:
+                            value = builtins[name]
+                        except KeyError:
+                            continue
+                    for attr in reversed(attrs):
+                        value = getattr(value, attr)
+                except NameError:
+                    continue
+                if isinstance(value, (str, int, float, bytes, bool, type(None))):
+                    return ast.Constant(value)
+                break
+            raise ValueError
+
         def visit_Attribute(self, node):
             a = []
             n = node
@@ -2003,14 +2018,12 @@ def _signature_fromstr(cls, obj, s, skip_bound_arg=True):
                 n = n.value
             if not isinstance(n, ast.Name):
                 raise ValueError
-            a.append(n.id)
-            value = ".".join(reversed(a))
-            return wrap_value(value)
+            return self.symbol(n.id, a)
 
         def visit_Name(self, node):
             if not isinstance(node.ctx, ast.Load):
                 raise ValueError()
-            return wrap_value(node.id)
+            return self.symbol(node.id)
 
         def visit_BinOp(self, node):
             # Support constant folding of a couple simple binary operations
