@@ -466,8 +466,7 @@ impl Session {
         for (p, value, origin) in operands {
             if p.parameter.annotation.is_some()
                 && let Some(expected) = p.parameter.inferred_type(&owner_model)
-                && let Some(error) =
-                    self.scalar_argument_error(module, model, expected, value, origin)
+                && let Some(error) = self.scalar_argument_error(model, expected, value, origin)
             {
                 return Some(error.with_path(path));
             }
@@ -561,7 +560,6 @@ impl Session {
 
     pub(super) fn scalar_argument_error<'db>(
         &'db self,
-        module: usize,
         model: &SemanticModel<'db>,
         expected: Type<'db>,
         operand: &Expr,
@@ -574,7 +572,7 @@ impl Session {
         {
             return None;
         }
-        let actual = self.scalar_type(module, origin).map_or_else(
+        let actual = self.scalar_layout(&env, actual).map_or_else(
             || actual.display(&self.db, &env).to_string(),
             |t| t.to_string(),
         );
@@ -582,7 +580,7 @@ impl Session {
             "expected {}, got {actual}; annotations are enforced contracts",
             expected.display(&self.db, &env)
         );
-        let text = ruff_db::source::source_text(&self.db, self.files[module]);
+        let text = ruff_db::source::source_text(&self.db, model.file());
         Some(Diagnostic::at(text.as_str(), operand, message).classified(Kind::DeclaredArgument))
     }
 }
