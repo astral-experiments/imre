@@ -1,6 +1,7 @@
 //! Resolve function signatures to native layouts or registered Python argument storage.
 
 use std::cell::{Cell, RefCell};
+use std::ops::ControlFlow;
 
 use ruff_python_ast::visitor::{Visitor, walk_stmt};
 
@@ -1447,7 +1448,7 @@ impl Checker<'_> {
         let entry_site = self.observed_entry_call(call, signature);
         let mut scope = calls::ArgumentScope::default();
         let direct = self.registered.is_none() && receiver.is_none() && skip == 0;
-        let mut args = self.source_arguments(
+        let args = self.source_arguments(
             call,
             signature,
             receiver,
@@ -1458,14 +1459,12 @@ impl Checker<'_> {
                     matches!(p.kind, ParameterKind::Variadic | ParameterKind::KeywordRest)
                 }))
             .then_some(&mut scope),
+            direct,
         )?;
-        if direct
-            && signature.params.len() == 1
-            && let [value] = args.values.as_slice()
-            && self.terminating_operand(value)
-        {
-            return Ok(scope.finish(args.values.pop().expect("one checked argument")));
-        }
+        let args = match args {
+            ControlFlow::Continue(args) => args,
+            ControlFlow::Break(stop) => return Ok(scope.finish(stop)),
+        };
         let ty = self.enter_source_call(call, signature)?;
         let entry_site =
             entry_site.filter(|_| args.values.iter().all(|arg| self.call_operand_returns(arg)));
@@ -1488,7 +1487,10 @@ impl Checker<'_> {
         skip: usize,
         scope: Option<&mut calls::ArgumentScope>,
     ) -> Result<(Type, ir::CallArgs), String> {
-        let args = self.source_arguments(call, signature, receiver, skip, scope)?;
+        let args = self
+            .source_arguments(call, signature, receiver, skip, scope, false)?
+            .continue_value()
+            .expect("this caller owns the loaded receiver");
         Ok((self.enter_source_call(call, signature)?, args))
     }
 
@@ -1514,7 +1516,8 @@ impl Checker<'_> {
         receiver: Option<Expr>,
         skip: usize,
         scope: Option<&mut calls::ArgumentScope>,
-    ) -> Result<ir::CallArgs, String> {
+        direct: bool,
+    ) -> Result<ControlFlow<Expr, ir::CallArgs>, String> {
         // CPython's accelerated stat functions take an unsigned mode_t through
         // the index protocol. A boolean argument must reach their integer body
         // as 0 or 1; ordinary annotated Python functions retain their own types.
@@ -1526,17 +1529,14 @@ impl Checker<'_> {
                 && class.methods[method.index].name.as_str() == "select"
         });
         let inference = self.inference;
-        let direct_input = self.registered.is_none()
-            && receiver.is_none()
-            && skip == 0
-            && scope.is_none()
-            && signature.params.len() == 1;
-        self.bind_supplied(
+        let direct_input = direct && scope.is_none();
+        self.bind_eager_arguments(
             call,
             &signature.params[skip..],
             receiver,
             scope,
             Some((signature, skip)),
+            direct_input.then_some(signature.returns),
             &mut |checker, index, argument| {
                 let index = index + skip;
                 let parameter = &signature.params[index];
@@ -1832,6 +1832,34 @@ mod tests {
         std::fs::write(&file, source.replace("raise SystemExit(13)", "pass")).unwrap();
         let error = crate::check_file(&file, None).unwrap_err();
         assert!(error.contains("expected int, got str"), "{error}");
+    }
+
+    #[test]
+    fn a_terminating_argument_supplies_neither_its_value_nor_a_later_argument() {
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("main.py");
+        let source = concat!(
+            "def first():\n",
+            "    print('first')\n",
+            "    raise SystemExit(13)\n",
+            "def text(): return 'wrong'\n",
+            "def pair(x: int, y: int): return y\n",
+            "print(pair(first(), text()))\n",
+        );
+        std::fs::write(&file, source).unwrap();
+        crate::check_file(&file, None).unwrap();
+        for (returned, diagnostic) in [
+            ("None", ":6:12: Imre: expected int, got None"),
+            ("37", ":6:21: Imre: expected int, got str"),
+        ] {
+            std::fs::write(
+                &file,
+                source.replace("raise SystemExit(13)", &format!("return {returned}")),
+            )
+            .unwrap();
+            let error = crate::check_file(&file, None).unwrap_err();
+            assert!(error.contains(diagnostic), "{error}");
+        }
     }
 
     #[test]
