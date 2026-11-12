@@ -4895,7 +4895,7 @@ print(capture(["echo", "capture"], cwd=Path(".")))
                 let ExprKind::Builtin(Builtin::RegisteredCall(site), operands) = &value.kind else {
                     return;
                 };
-                let name = match &site.target {
+                let name: &str = match &site.target {
                     ir::RegisteredCallTarget::Callable { .. } => {
                         let ExprKind::Builtin(Builtin::RegisteredAttribute { name, .. }, _) =
                             &operands[0].without_location().kind
@@ -4906,7 +4906,7 @@ print(capture(["echo", "capture"], cwd=Path(".")))
                     }
                     ir::RegisteredCallTarget::Method { name, .. } => name,
                 };
-                calls.push(name.clone());
+                calls.push(name.to_owned());
             });
             let expected: &[&str] = if definition.name.as_str() == "run" {
                 &["run"]

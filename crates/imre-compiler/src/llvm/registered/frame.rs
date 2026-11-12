@@ -1743,7 +1743,9 @@ pub(crate) trait FrameEmitter<'a, 'p>:
         };
         let (callable, receiver, callee_end) = match &call.target {
             RegisteredCallTarget::Callable { end, .. } => (evaluate(self, target), None, *end),
-            RegisteredCallTarget::Method { name, attribute } => self.unwind_operands(&mark, |f| {
+            RegisteredCallTarget::Method {
+                name, attribute, ..
+            } => self.unwind_operands(&mark, |f| {
                 let receiver = evaluate(f, target);
                 let direct = matches!(call.arguments, RegisteredArguments::Positional);
                 let (callee, bound) = if let SourcePosition::Expression(active) = f.position {

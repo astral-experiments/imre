@@ -109,8 +109,19 @@ impl RegisteredSource<'_> {
     }
 
     pub(super) fn located(self, node: &ast::Expr, value: Expr) -> Expr {
-        let position = imre_ast::expression_position(node, self.method_imports, self.private_names);
-        located(node.range(), position, value)
+        let range = node.range();
+        let position = match &value.kind {
+            ExprKind::Builtin(
+                Builtin::RegisteredCall(ir::RegisteredCall {
+                    target: ir::RegisteredCallTarget::Method { name_start, .. },
+                    range: selected,
+                    ..
+                }),
+                _,
+            ) if *selected == range => *name_start,
+            _ => imre_ast::expression_position(node, self.method_imports, self.private_names),
+        };
+        located(range, position, value)
     }
 }
 
@@ -321,8 +332,9 @@ pub(in crate::frontend) fn attribute_load(field: &ast::ExprAttribute) -> Builtin
 
 fn method_target(field: &ast::ExprAttribute) -> ir::RegisteredCallTarget {
     ir::RegisteredCallTarget::Method {
-        name: field.attr.to_string(),
+        name: field.attr.id.clone(),
         attribute: field.range(),
+        name_start: field.attr.start(),
     }
 }
 
@@ -1498,7 +1510,12 @@ mod tests {
             .collect();
         let (
             Builtin::RegisteredCall(ir::RegisteredCall {
-                target: ir::RegisteredCallTarget::Method { name, attribute },
+                target:
+                    ir::RegisteredCallTarget::Method {
+                        name,
+                        attribute,
+                        name_start,
+                    },
                 ..
             }),
             args,
@@ -1508,6 +1525,7 @@ mod tests {
             panic!("expected a direct method");
         };
         assert_eq!(name, "method");
+        assert_eq!(*name_start, pos);
         assert_eq!(args.len(), 2);
         assert_eq!(
             &text[attribute.start().to_usize()..pos.to_usize()],

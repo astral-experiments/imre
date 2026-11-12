@@ -70,7 +70,7 @@ mod tests {
         assert_eq!(&text[*range], "events.append(mark)");
         assert!(
             matches!(&*attribute.operation, Builtin::RegisteredCall(call)
-            if matches!(&call.target, ir::RegisteredCallTarget::Method { name, attribute }
+            if matches!(&call.target, ir::RegisteredCallTarget::Method { name, attribute, .. }
                 if name == "append" && &text[*attribute] == "events.append"))
         );
     }

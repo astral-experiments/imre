@@ -1551,8 +1551,9 @@ pub(crate) enum RegisteredCallTarget {
         suspended_name: Option<ruff_text_size::TextRange>,
     },
     Method {
-        name: String,
+        name: ruff_python_ast::name::Name,
         attribute: ruff_text_size::TextRange,
+        name_start: ruff_text_size::TextSize,
     },
 }
 
