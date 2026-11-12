@@ -92,35 +92,13 @@ fn after_docstring(body: &[Stmt]) -> &[Stmt] {
     &body[usize::from(skip)..]
 }
 
-/// A standalone call with no earlier operation in its statement. A literal guard may
-/// make the entire suite unreachable to ty without changing any argument bindings.
+/// A standalone call with no earlier operation in its statement. Dormant
+/// suites under passive guards retain their existing positional contracts.
 fn statement_call<'a>(
-    mut stmt: &'a Stmt,
+    stmt: &'a Stmt,
     bound_name: impl Fn(&Expr) -> bool,
     nested_operand: impl Fn(&'a ExprCall) -> Option<&'a Expr>,
 ) -> Option<&'a ExprCall> {
-    while let Stmt::If(guard) = stmt {
-        let [body] = guard.body.as_slice() else {
-            return None;
-        };
-        let passive_test = guard.test.is_literal_expr()
-            || guard.test.as_compare_expr().is_some_and(|test| {
-                test.operands.iter().all(Expr::is_literal_expr)
-                    && test.ops.iter().all(|op| {
-                        matches!(
-                            op,
-                            ruff_python_ast::CmpOp::Eq
-                                | ruff_python_ast::CmpOp::NotEq
-                                | ruff_python_ast::CmpOp::Is
-                                | ruff_python_ast::CmpOp::IsNot
-                        )
-                    })
-            });
-        if !passive_test || !guard.elif_else_clauses.is_empty() {
-            return None;
-        }
-        stmt = body;
-    }
     let value = match stmt {
         Stmt::Expr(stmt) => &stmt.value,
         Stmt::Assign(stmt) => &stmt.value,
@@ -139,6 +117,46 @@ fn statement_call<'a>(
 }
 
 impl Session {
+    /// Find the guarded statement and the start of its proven normal path.
+    /// Dormant scalar checks can still inspect the statement. Reached checks
+    /// require every intervening guard to be both passive and proven true.
+    pub(crate) fn guarded_call_statement<'a>(
+        &self,
+        module: usize,
+        mut stmt: &'a Stmt,
+    ) -> (&'a Stmt, TextSize) {
+        let model = SemanticModel::new(&self.db, self.db.program_file(self.files[module]));
+        let mut first_conditional = None;
+        while let Stmt::If(guard) = stmt {
+            let [body] = guard.body.as_slice() else {
+                break;
+            };
+            let passive_test = guard.test.is_literal_expr()
+                || guard.test.as_compare_expr().is_some_and(|test| {
+                    test.operands.iter().all(Expr::is_literal_expr)
+                        && test.ops.iter().all(|op| {
+                            matches!(
+                                op,
+                                ruff_python_ast::CmpOp::Eq
+                                    | ruff_python_ast::CmpOp::NotEq
+                                    | ruff_python_ast::CmpOp::Is
+                                    | ruff_python_ast::CmpOp::IsNot
+                            )
+                        })
+                });
+            if !passive_test || !guard.elif_else_clauses.is_empty() {
+                break;
+            }
+            if first_conditional.is_none()
+                && guard.test.inferred_type(&model) != Some(Type::bool_literal(true))
+            {
+                first_conditional = Some(stmt.start());
+            }
+            stmt = body;
+        }
+        (stmt, first_conditional.unwrap_or_else(|| stmt.start()))
+    }
+
     pub(super) fn empty_initializer(&self, module: usize) -> bool {
         after_docstring(self.parsed(self.files[module]).suite())
             .iter()
@@ -407,10 +425,11 @@ impl Session {
             self.assigned_value(file, parsed, value, Expr::is_name_expr)
                 .filter(|origin| origin.is_literal_expr())
         };
+        let (body, start) = self.guarded_call_statement(module, stmt);
         let call = match stmt {
             Stmt::For(loop_) if !loop_.is_async => loop_.iter.as_call_expr()?,
             _ => statement_call(
-                stmt,
+                body,
                 |name| {
                     self.reaching_binding(module, name).is_some()
                         || name.as_name_expr().is_some_and(|n| {
@@ -424,7 +443,17 @@ impl Session {
                         .take_while(|arg| !arg.is_variadic())
                         .map(|arg| arg.value())
                         .find(|arg| literal(arg).is_none())?;
-                    if self.unconditional_module_operand(module, stmt.start(), operand.range()) {
+                    // A partially initialized import can supply a concrete function
+                    // where ordinary source inference still sees an unknown callee.
+                    let required = if start != stmt.start()
+                        && operand.as_call_expr().is_some_and(|nested| {
+                            nested.func.inferred_type(model) == Some(Type::unknown())
+                        }) {
+                        start
+                    } else {
+                        stmt.start()
+                    };
+                    if self.unconditional_module_operand(module, required, operand.range()) {
                         Some(operand)
                     } else {
                         // Dormant source retains its existing positional scalar contracts.

@@ -1321,14 +1321,18 @@ impl Checker<'_> {
         for (index, statement) in module.parsed.syntax().body.iter().enumerate() {
             let checked = executable.next_if_eq(&index).is_some();
             if statement.range().contains_range(call.range()) {
+                let (_, start) = self
+                    .graph
+                    .session
+                    .guarded_call_statement(self.module, statement);
                 return (loaded
                     && checked
                     && self.graph.session.unconditional_module_operand(
                         self.module,
-                        statement.start(),
+                        start,
                         call.range(),
                     ))
-                .then_some((statement.start(), call.range()));
+                .then_some((start, call.range()));
             }
             if crate::analysis::inert_declaration(statement) {
                 continue;
