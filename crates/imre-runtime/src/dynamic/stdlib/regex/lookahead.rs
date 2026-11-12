@@ -32,14 +32,14 @@ pub(super) fn compile(
             {
                 return Err(original);
             }
-            ByteFold::Locale
+            SubjectFold::Locale
         }
         #[cfg(not(target_os = "linux"))]
         return Err(original);
     } else if bytes && flags & IGNORECASE != 0 {
-        ByteFold::Ascii
+        SubjectFold::Ascii
     } else {
-        ByteFold::None
+        SubjectFold::None
     };
     let Ok(pattern) = imre_regex::backtracking_pattern(
         pattern,
@@ -48,6 +48,11 @@ pub(super) fn compile(
         flags & DOTALL != 0,
     ) else {
         return Err(original);
+    };
+    let fold = if pattern.fold_ascii_references {
+        SubjectFold::UnicodeAsciiReferences
+    } else {
+        fold
     };
     let mut source = pattern.source;
     let groups = pattern.groups;
@@ -103,15 +108,61 @@ pub(super) fn compile(
 }
 
 #[derive(Clone, Copy)]
-enum ByteFold {
+enum SubjectFold {
     None,
     Ascii,
+    UnicodeAsciiReferences,
     #[cfg(target_os = "linux")]
     Locale,
 }
 
-impl ByteFold {
-    fn subject(self, input: &[u8]) -> Result<Cow<'_, [u8]>, String> {
+/// End boundaries for the two UTF-8 characters that shorten under projection.
+#[derive(Default)]
+struct FoldOffsets(Vec<(usize, usize)>);
+
+impl FoldOffsets {
+    fn projected(&self, at: usize) -> usize {
+        let count = self.0.partition_point(|&(original, _)| original <= at);
+        self.0[..count]
+            .last()
+            .map_or(at, |&(original, folded)| at - (original - folded))
+    }
+
+    fn original(&self, at: usize) -> usize {
+        let count = self.0.partition_point(|&(_, folded)| folded <= at);
+        self.0[..count]
+            .last()
+            .map_or(at, |&(original, folded)| at + (original - folded))
+    }
+}
+
+impl SubjectFold {
+    fn subject<'a>(
+        self,
+        input: &'a [u8],
+        offsets: &mut FoldOffsets,
+    ) -> Result<Cow<'a, [u8]>, String> {
+        if matches!(self, Self::UnicodeAsciiReferences) && !input.is_ascii() {
+            let text = std::str::from_utf8(input).map_err(|error| error.to_string())?;
+            if text.contains(['İ', 'K']) {
+                let mut folded = String::with_capacity(input.len());
+                for (at, ch) in text.char_indices() {
+                    // The only non-ASCII code points with an ASCII simple lowercase.
+                    // Dotless ı and long ſ match their opening classes but keep
+                    // their own identity when the backreference compares them.
+                    let lower = match ch {
+                        'İ' => 'i',
+                        'K' => 'k',
+                        _ => ch.to_ascii_lowercase(),
+                    };
+                    folded.push(lower);
+                    if lower.len_utf8() != ch.len_utf8() {
+                        offsets.0.push((at + ch.len_utf8(), folded.len()));
+                    }
+                }
+                return Ok(Cow::Owned(folded.into_bytes()));
+            }
+        }
         match self {
             #[cfg(target_os = "linux")]
             Self::Locale => {
@@ -148,7 +199,9 @@ impl ByteFold {
                     Ok(Cow::Borrowed(input))
                 }
             }
-            Self::Ascii if input.iter().any(u8::is_ascii_uppercase) => {
+            Self::Ascii | Self::UnicodeAsciiReferences
+                if input.iter().any(u8::is_ascii_uppercase) =>
+            {
                 Ok(Cow::Owned(input.to_ascii_lowercase()))
             }
             _ => Ok(Cow::Borrowed(input)),
@@ -160,7 +213,7 @@ pub(super) struct Lookahead {
     pub(super) requires_input: bool,
     search: Regex,
     mode: BytesMode,
-    fold: ByteFold,
+    fold: SubjectFold,
     anchored: OnceCell<Result<Regex, Error>>,
     nonempty: OnceCell<Result<Regex, Error>>,
     pub(super) groups: GroupInfo,
@@ -171,7 +224,7 @@ impl Lookahead {
         source: &str,
         groups: GroupInfo,
         mode: BytesMode,
-        fold: ByteFold,
+        fold: SubjectFold,
         requires_input: bool,
     ) -> Result<Self, String> {
         let search = RegexBuilder::new(source)
@@ -247,8 +300,10 @@ impl Lookahead {
         captures: &mut Captures,
     ) -> Result<(), String> {
         captures.clear();
-        // Captures still index the original subject one byte per folded byte.
-        let haystack = self.fold.subject(&input.haystack()[..input.end()])?;
+        let mut offsets = FoldOffsets::default();
+        let haystack = self
+            .fold
+            .subject(&input.haystack()[..input.end()], &mut offsets)?;
         let regex = if nonempty || input.get_anchored() == Anchored::Yes {
             let cache = if nonempty {
                 &self.nonempty
@@ -273,15 +328,15 @@ impl Lookahead {
             &self.search
         };
         if let Some(found) = regex
-            .captures_from_pos(haystack.as_ref(), input.start())
+            .captures_from_pos(haystack.as_ref(), offsets.projected(input.start()))
             .map_err(|e| e.to_string())?
         {
             captures.set_pattern(Some(PatternID::ZERO));
             let (slots, _) = captures.slots_mut().as_chunks_mut::<2>();
             for (slot, group) in slots.iter_mut().zip(found.iter()) {
                 if let Some(m) = group {
-                    slot[0] = NonMaxUsize::new(m.start());
-                    slot[1] = NonMaxUsize::new(m.end());
+                    slot[0] = NonMaxUsize::new(offsets.original(m.start()));
+                    slot[1] = NonMaxUsize::new(offsets.original(m.end()));
                 } else {
                     slot.fill(None);
                 }
