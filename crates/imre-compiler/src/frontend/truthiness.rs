@@ -9,6 +9,14 @@ impl Checker<'_> {
     /// Consumes truth directly so mixed operands such as `items and len(items)`
     /// do not require a general union. Every operand still receives type checks.
     pub(super) fn condition(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+        self.condition_at(expression, Some(expression.into()))
+    }
+
+    pub(super) fn condition_at(
+        &mut self,
+        expression: &ast::Expr,
+        site: Option<ast::ExprRef<'_>>,
+    ) -> Result<Expr, String> {
         if let ast::Expr::If(value) = expression {
             return self.conditional_with(value, false, Self::condition);
         }
@@ -33,7 +41,7 @@ impl Checker<'_> {
             });
         }
         let value = self.expr(expression)?;
-        self.test_truth(value, expression)
+        self.test_truth_at(value, expression, site)
     }
 
     fn needs_truth_dispatch(&self, ty: Type) -> bool {
@@ -60,23 +68,32 @@ impl Checker<'_> {
     }
 
     pub(super) fn test_truth(&mut self, value: Expr, at: &impl Ranged) -> Result<Expr, String> {
+        self.test_truth_at(value, at, None)
+    }
+
+    fn test_truth_at(
+        &mut self,
+        value: Expr,
+        at: &impl Ranged,
+        site: Option<ast::ExprRef<'_>>,
+    ) -> Result<Expr, String> {
         if self.registered.is_some() {
             // A recorded parameter type does not replace the object's live truth protocol.
             return Ok(registered::truth(value));
         }
         let value = Self::weak_target(value);
         if !self.needs_truth_dispatch(value.ty) {
-            return Ok(self.truth_value(value));
+            return Ok(self.truth_value_at(value, site));
         }
         if let Type::Class(class) = value.ty {
-            return self.record_truth(class, value, at);
+            return self.record_truth(class, value, at, site);
         }
         // An optional or tagged value holds the receiver until the chosen arm finishes.
         let (slot, tag, first, second) = self
             .protocol_alternatives(value.ty)
             .ok_or_else(|| error(self.source, at, "unsupported record union in a truth test"))?;
-        let yes = self.test_truth(first, at)?;
-        let no = self.test_truth(second, at)?;
+        let yes = self.test_truth_at(first, at, site)?;
+        let no = self.test_truth_at(second, at, site)?;
         Ok(Expr {
             ty: Type::Bool,
             kind: ExprKind::Scope {
@@ -102,6 +119,18 @@ impl Checker<'_> {
     /// Make record protocols ordinary compiler-visible calls so exceptions,
     /// recursion checks, and cleanup share the usual call path.
     pub(super) fn truth_value(&mut self, value: Expr) -> Expr {
+        self.truth_value_at(value, None)
+    }
+
+    pub(super) fn truth_call_site(&mut self, site: Option<ast::ExprRef<'_>>) -> ir::CallSite {
+        match site {
+            Some(ast::ExprRef::Call(call)) => ir::CallSite::Fixed(self.call_origin(call)),
+            Some(operand) => ir::CallSite::Fixed(self.fixed_origin(operand.range(), None)),
+            None => ir::CallSite::None,
+        }
+    }
+
+    fn truth_value_at(&mut self, value: Expr, site: Option<ast::ExprRef<'_>>) -> Expr {
         if value.ty == Type::Bool {
             return value;
         }
@@ -115,9 +144,10 @@ impl Checker<'_> {
             };
         };
         self.calls.insert(method);
+        let site = self.truth_call_site(site);
         let call = |receiver| Expr {
             ty: Type::Bool,
-            kind: ExprKind::Call(method, ir::CallArgs::positional(vec![receiver])),
+            kind: ExprKind::Call(method, ir::CallArgs::positional_at(vec![receiver], site)),
         };
         let Some(payload) = self.types.payload(value.ty) else {
             return call(value);

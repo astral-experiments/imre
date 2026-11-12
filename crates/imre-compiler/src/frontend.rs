@@ -8944,7 +8944,7 @@ impl<'a> Checker<'a> {
             }
             ast::Expr::UnaryOp(unary) => {
                 let value = if unary.op == ast::UnaryOp::Not {
-                    self.condition(&unary.operand)?
+                    self.condition_at(&unary.operand, None)?
                 } else {
                     self.expr(&unary.operand)?
                 };
@@ -13533,7 +13533,7 @@ impl<'a> Checker<'a> {
             keywords?;
             return match call.arguments.args.as_ref() {
                 [] => Ok(Expr::boolean(false)),
-                [value] => self.condition(value),
+                [value] => self.condition_at(value, Some(call.into())),
                 _ => Err(error(
                     self.source,
                     call,

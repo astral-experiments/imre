@@ -1027,8 +1027,12 @@ pub(crate) struct CallArgs {
 impl CallArgs {
     /// Uses the existing positional order for calls that need no argument binding.
     pub(crate) fn positional(values: Vec<Expr>) -> Self {
+        Self::positional_at(values, CallSite::None)
+    }
+
+    pub(crate) fn positional_at(values: Vec<Expr>, site: CallSite) -> Self {
         Self {
-            site: CallSite::None,
+            site,
             exhaustive_enum_match: false,
             order: (0..values.len()).collect(),
             values,
