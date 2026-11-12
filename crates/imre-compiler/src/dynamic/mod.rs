@@ -979,7 +979,8 @@ pub(crate) fn compile(
     let entry_file = file_entry
         .and_then(|graph| CheckedFile::entry(graph, entry_identity.as_deref().unwrap_or(path)));
     let checked_entry = matches!(operation, Some(ObjectOperation::CheckedEntry));
-    let entry_imports = |text: &str, mut body: ast::Suite| -> Result<Imports, String> {
+    let mut scanned_modules = HashMap::new();
+    let mut entry_imports = |text: &str, mut body: ast::Suite| -> Result<Imports, String> {
         let mut imports = imports_from_body(text, &mut body, None, None)?;
         // Generic functions can admit an unresolved entry. A runtime-class import
         // also needs the entry's own request when checking its first-party callers.
@@ -991,6 +992,15 @@ pub(crate) fn compile(
             imports.runtime_imports = body.iter().any(|stmt| {
                 matches!(stmt, Stmt::FunctionDef(function) if function_type_params(function, imports.private_names.string_annotations, false, Some(&imports.private_names)).is_some())
             });
+        }
+        if entry_file.is_some() && imports.invalid_executable.is_none() {
+            scanned_modules.insert(
+                0,
+                ScannedModule {
+                    parsed: None,
+                    lowered: (body, std::mem::take(&mut imports.private_names)),
+                },
+            );
         }
         Ok(imports)
     };
@@ -1189,7 +1199,6 @@ pub(crate) fn compile(
     let mut inputs = SourceInputs::default();
     let mut archives = HashMap::new();
     let mut registrations = emit::RegisteredBodies::default();
-    let mut scanned_modules = HashMap::new();
     let mut syntax = None;
     for path in options
         .extension_paths
