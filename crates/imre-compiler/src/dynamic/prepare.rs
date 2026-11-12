@@ -28,9 +28,10 @@ pub(super) struct PreparedUnit<'a> {
 /// initializers until every source has passed preparation.
 pub(super) fn units<'a>(
     (files, builtins): (&'a [ModuleSource], &'a [ModuleSource]),
-    (mut entry_source, mut scanned_modules): (
+    (mut entry_source, mut scanned_modules, mut shipped_checks): (
         Option<ParsedModule<'a, 'a>>,
         HashMap<usize, super::ScannedModule>,
+        HashMap<usize, Result<(), String>>,
     ),
     python_optimization: i32,
     (bundled_root, providers): (&'a Path, Option<&'a Providers>),
@@ -49,102 +50,109 @@ pub(super) fn units<'a>(
         .iter()
         .map(|module| (module, false))
         .chain(builtins.iter().map(|module| (module, true)));
-    modules.enumerate().map(move |(unit, (original, builtin))| {
-        let (name, path, source) = original;
-        let checked = checked_units.get(&unit);
-        let discovered = entry_source.take().or_else(|| registrations.parsed(unit));
-        let zip = archive_members.get(path);
-        let physical = physical_files.get(path).filter(|_| !builtin);
-        let types = layouts.iter_mut().find_map(|facts| facts.take(unit));
-        let bundled = path.starts_with(bundled_root);
-        let origin = if bundled {
-            ModuleOrigin::Bundled
-        } else if python_providers.contains(&unit) {
-            ModuleOrigin::Provider
-        } else {
-            ModuleOrigin::Program(checked.and_then(|unit| unit.functions))
-        };
-        let initializer = if !builtin && let Some(error) = module_errors.get(path) {
-            Err(error.as_ref())
-        } else if unit != 0
-            && python_optimization == 0
-            && matches!(origin, ModuleOrigin::Bundled)
-            && physical.is_none()
-            && zip.is_none()
-            && discovered.is_none()
-            && checked.is_none()
-            && types.is_none()
-            && let Some(symbol) = providers.and_then(|archive| archive.sealed(name, path, source))
-        {
-            // The standalone producer checked these exact bytes without application facts.
-            Ok(Initializer::Archived(symbol))
-        } else {
-            // Preserve the loader's digest while compiling its normalized source.
-            let file_digest = physical_files.get(path).and_then(|file| file.digest);
-            let (text, syntax) = if let Some(entry) = discovered {
-                (entry.text, Some(entry.parsed))
+    modules
+        .enumerate()
+        .map(move |(unit, (original, builtin))| {
+            let (name, path, source) = original;
+            let checked = checked_units.get(&unit);
+            let discovered = entry_source.take().or_else(|| registrations.parsed(unit));
+            let zip = archive_members.get(path);
+            let physical = physical_files.get(path).filter(|_| !builtin);
+            let types = layouts.iter_mut().find_map(|facts| facts.take(unit));
+            let bundled = path.starts_with(bundled_root);
+            let origin = if bundled {
+                ModuleOrigin::Bundled
+            } else if python_providers.contains(&unit) {
+                ModuleOrigin::Provider
             } else {
-                let text = if physical.is_some() && file_digest.is_none() {
-                    crate::normalize_source(source, crate::SourceKind::File)?
-                } else if file_digest.is_some() || zip.is_some() {
-                    crate::normalize_source(source, crate::SourceKind::DecodedFile)?
+                ModuleOrigin::Program(checked.and_then(|unit| unit.functions))
+            };
+            let standalone = unit != 0
+                && matches!(origin, ModuleOrigin::Bundled)
+                && physical.is_none()
+                && zip.is_none()
+                && discovered.is_none()
+                && checked.is_none()
+                && types.is_none();
+            let initializer = if !builtin && let Some(error) = module_errors.get(path) {
+                Err(error.as_ref())
+            } else if standalone && let Some(check) = shipped_checks.remove(&unit) {
+                return check.map(|()| None);
+            } else if standalone
+                && python_optimization == 0
+                && let Some(symbol) =
+                    providers.and_then(|archive| archive.sealed(name, path, source))
+            {
+                // The standalone producer checked these exact bytes without application facts.
+                Ok(Initializer::Archived(symbol))
+            } else {
+                // Preserve the loader's digest while compiling its normalized source.
+                let file_digest = physical_files.get(path).and_then(|file| file.digest);
+                let (text, syntax) = if let Some(entry) = discovered {
+                    (entry.text, Some(entry.parsed))
                 } else {
-                    Cow::Borrowed(source.as_str())
+                    let text = if physical.is_some() && file_digest.is_none() {
+                        crate::normalize_source(source, crate::SourceKind::File)?
+                    } else if file_digest.is_some() || zip.is_some() {
+                        crate::normalize_source(source, crate::SourceKind::DecodedFile)?
+                    } else {
+                        Cow::Borrowed(source.as_str())
+                    };
+                    (text, None)
                 };
-                (text, None)
-            };
-            let types = types.filter(|types| types.matches_source(&text));
-            let indexed = types.map(|types| types.parsed());
-            let (syntax, normalized) = if let Some(scanned) = scanned_modules.remove(&unit) {
-                match (scanned.parsed, syntax) {
-                    (Some(parsed), None) => (Some(Cow::Owned(parsed)), Some(scanned.lowered)),
-                    (None, syntax) => (syntax, Some(scanned.lowered)),
-                    (_, syntax) => (syntax, None),
+                let types = types.filter(|types| types.matches_source(&text));
+                let indexed = types.map(|types| types.parsed());
+                let (syntax, normalized) = if let Some(scanned) = scanned_modules.remove(&unit) {
+                    match (scanned.parsed, syntax) {
+                        (Some(parsed), None) => (Some(Cow::Owned(parsed)), Some(scanned.lowered)),
+                        (None, syntax) => (syntax, Some(scanned.lowered)),
+                        (_, syntax) => (syntax, None),
+                    }
+                } else {
+                    (syntax, None)
+                };
+                // A different checker parser owns different expression and statement IDs.
+                let normalized = normalized.filter(|_| {
+                    syntax.as_deref().is_some_and(|original| {
+                        indexed
+                            .as_deref()
+                            .is_none_or(|indexed| std::ptr::eq(indexed, original))
+                    })
+                });
+                let module = match indexed.as_deref().map(Cow::Borrowed).or(syntax) {
+                    Some(parsed) => ParsedModule { text, parsed },
+                    None => ParsedModule::parse(path, text)?,
+                };
+                let mut body = PreparedBody::from_parsed(
+                    name,
+                    path.as_path(),
+                    (module, normalized),
+                    python_optimization,
+                    origin,
+                    checked
+                        .map(|unit| unit.literal_sites.clone())
+                        .unwrap_or_default(),
+                    types,
+                )?;
+                if let Some(module) = checked.and_then(|unit| unit.prompt_module) {
+                    body.prompts = &registrations.modules[module].doctest_prompts;
                 }
-            } else {
-                (syntax, None)
+                Ok(Initializer::Checked(Box::new(body)))
             };
-            // A different checker parser owns different expression and statement IDs.
-            let normalized = normalized.filter(|_| {
-                syntax.as_deref().is_some_and(|original| {
-                    indexed
-                        .as_deref()
-                        .is_none_or(|indexed| std::ptr::eq(indexed, original))
-                })
-            });
-            let module = match indexed.as_deref().map(Cow::Borrowed).or(syntax) {
-                Some(parsed) => ParsedModule { text, parsed },
-                None => ParsedModule::parse(path, text)?,
-            };
-            let mut body = PreparedBody::from_parsed(
-                name,
-                path.as_path(),
-                (module, normalized),
-                python_optimization,
-                origin,
-                checked
-                    .map(|unit| unit.literal_sites.clone())
-                    .unwrap_or_default(),
-                types,
-            )?;
-            if let Some(module) = checked.and_then(|unit| unit.prompt_module) {
-                body.prompts = &registrations.modules[module].doctest_prompts;
-            }
-            Ok(Initializer::Checked(Box::new(body)))
-        };
-        // Release each checker database after its last selected first-party file.
-        layouts.retain(|facts| !facts.is_empty());
-        Ok(PreparedUnit {
-            module: original,
-            builtin,
-            physical: physical.map(|file| {
-                let kind = checked
-                    .and_then(|unit| unit.run_path.as_deref())
-                    .map_or(PhysicalModuleKind::File, PhysicalModuleKind::DeclaredFile);
-                (file, kind)
-            }),
-            zip,
-            initializer,
+            // Release each checker database after its last selected first-party file.
+            layouts.retain(|facts| !facts.is_empty());
+            Ok(Some(PreparedUnit {
+                module: original,
+                builtin,
+                physical: physical.map(|file| {
+                    let kind = checked
+                        .and_then(|unit| unit.run_path.as_deref())
+                        .map_or(PhysicalModuleKind::File, PhysicalModuleKind::DeclaredFile);
+                    (file, kind)
+                }),
+                zip,
+                initializer,
+            }))
         })
-    })
+        .filter_map(Result::transpose)
 }

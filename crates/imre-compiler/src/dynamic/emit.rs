@@ -1869,7 +1869,7 @@ mod tests {
     ) -> Result<(Vec<CodegenUnit>, bool, Option<String>), String> {
         let units = super::super::prepare::units(
             (files, builtins),
-            (entry_source, HashMap::new()),
+            (entry_source, HashMap::new(), HashMap::new()),
             python_optimization,
             (bundled_root, None),
             module_errors,
