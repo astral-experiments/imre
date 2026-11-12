@@ -1,6 +1,7 @@
 """Discover interactive examples and compare their output in native programs."""
 
 from collections.abc import Iterator
+from typing import Callable
 from _imre_doctest import ascii_output, exception_name, execute
 import unittest
 
@@ -291,7 +292,14 @@ def _exception_line(error: BaseException) -> str:
     return name + "\n"
 
 
+def _call_hook(hook: Callable[[DocTest], None] | None, test: DocTest) -> None:
+    if hook is not None:
+        hook(test)
+
+
 class _DocTestCase(unittest.TestCase):
+    _dt_setUp = None
+    _dt_tearDown = None
     _dt_test: DocTest
     _dt_globs: dict[str, object]
 
@@ -303,7 +311,7 @@ class _DocTestCase(unittest.TestCase):
     def setUp(self) -> None:
         test = self._dt_test
         self._dt_globs = test.globs.copy()
-        _call_hook(self, test, True)
+        _call_hook(self._dt_setUp, test)
 
     def tearDown(self) -> None:
         self._tear_down(False)
@@ -312,7 +320,7 @@ class _DocTestCase(unittest.TestCase):
         test = self._dt_test
         restore = restore_on_error
         try:
-            _call_hook(self, test, False)
+            _call_hook(self._dt_tearDown, test)
             restore = True
         finally:
             if restore:
