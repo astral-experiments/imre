@@ -319,7 +319,7 @@ impl Session {
                 .symbol_id("__getattr__")
                 .is_none()
                 && import.names.iter().all(|a| {
-                    self.initialized_function(owner, a.name.as_str(), before)
+                    self.initialized_member(owner, a.name.as_str(), before)
                         .is_some()
                 })
         })
@@ -405,7 +405,7 @@ impl Session {
         let parsed = self.parsed(file);
         let model = SemanticModel::new(&self.db, self.db.program_file(file));
         for alias in &import.names {
-            let Some(binding) = self.initialized_function(owner.0, alias.name.as_str(), before)
+            let Some(binding) = self.initialized_member(owner.0, alias.name.as_str(), before)
             else {
                 continue;
             };
@@ -500,7 +500,7 @@ impl Session {
         let (def, owner_module) = if let Some((import_site, name)) = member {
             let owner = site.imports.iter().find(|(r, _)| *r == import_site)?.1;
             (
-                self.initialized_function(owner, name, site.progress[&owner])?,
+                self.initialized_member(owner, name, site.progress[&owner])?,
                 owner,
             )
         } else {
@@ -581,7 +581,7 @@ impl Session {
         Some(Err(error.classified(Kind::RegisteredExecution)))
     }
 
-    fn initialized_function(
+    fn initialized_member(
         &self,
         module: usize,
         name: &str,
@@ -597,8 +597,14 @@ impl Session {
         }
         let owner = self.files[module];
         let def = self.final_module_binding(owner, name)?;
-        let DefinitionKind::Function(function) = def.kind(&self.db) else {
-            return None;
+        let function = match def.kind(&self.db) {
+            DefinitionKind::Function(function) => function,
+            // A completed initializer published its final assigned value. During a cycle
+            // that store may still be ahead of the import. Special attributes can run descriptors.
+            DefinitionKind::Assignment(_) if before.is_none() && !name.starts_with("__") => {
+                return Some(def);
+            }
+            _ => return None,
         };
         let parsed = self.parsed(owner);
         let range = function.node(&parsed).range();

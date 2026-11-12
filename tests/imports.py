@@ -31,15 +31,21 @@ LOCALE_FORMAT = (
     + "print(format_string('%d', CHAR_MAX))\n"
 )
 
+RETURNED_ARGUMENT = (
+    "def take(value: int) -> int:\n    return value\n\n"
+    "def text():\n    return 'wrong'\n"
+    "print(take(text()))\n"
+    "import opcode\n"
+)
+
 REJECTED = {
     "initializer_receives_returned_argument": ({
-        "main.py": (
-            "def take(value: int) -> int:\n    return value\n\n"
-            "def text():\n    return 'wrong'\n"
-            "print(take(text()))\n"
-            "import opcode\n"
-        ),
+        "main.py": RETURNED_ARGUMENT,
     }, "main.py:6:12: Imre: expected int, got str"),
+    "initializer_imports_completed_value": ({
+        "owner.py": "data = 42\n",
+        "main.py": "from owner import data\n" + RETURNED_ARGUMENT,
+    }, "main.py:7:12: Imre: expected int, got str"),
     "futures_does_not_activate_unused_calendar": ({
         "features.py": "import calendar\nimport concurrent.futures\n",
         "main.py": "import features\ndef scale(x: float) -> float: return 1.5 * x\nprint(scale(2.5))\n",
