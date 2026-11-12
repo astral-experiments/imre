@@ -337,7 +337,12 @@ impl<'a> PreparedBody<'a> {
             module.text,
             python_optimization,
             origin,
-            Input::Module(module.parsed, literal_sites, operand_types, normalized),
+            Input::Module(
+                module.parsed,
+                literal_sites,
+                operand_types,
+                normalized.map(Box::new),
+            ),
         )?;
         if let Some(refusal) = body.initializer().refusal {
             use crate::frontend::PreparedRefusal;
@@ -455,7 +460,7 @@ impl<'a> PreparedBody<'a> {
         };
         let ((body, private_names), exec_literals, operand_types) = match input {
             Input::Module(parsed, sites, types, normalized) => (
-                normalized.unwrap_or_else(|| lower(module_source::into_body(parsed))),
+                normalized.map_or_else(|| lower(module_source::into_body(parsed)), |root| *root),
                 sites,
                 types,
             ),
@@ -823,7 +828,7 @@ enum Input<'a> {
         Cow<'a, ruff_python_parser::Parsed<ast::ModModule>>,
         LiteralSites,
         Option<crate::analysis::OperandTypes<'a>>,
-        Option<super::LoweredRoot>,
+        Option<Box<super::LoweredRoot>>,
     ),
     Expression(ast::ModModule, &'a ast::token::Tokens),
 }
