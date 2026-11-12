@@ -1356,7 +1356,16 @@ impl Checker<'_> {
             typed_receiver,
             // Even a skipped operand participates in static argument and result checking.
             |_| None,
-            |receiver| checked_frame || graph.session.is_dynamic_receiver(owner, receiver),
+            |receiver| {
+                checked_frame
+                    || graph.session.is_dynamic_receiver(owner, receiver)
+                    || node
+                        .as_call_expr()
+                        .and_then(|call| call.func.as_attribute_expr())
+                        .is_some_and(|field| {
+                            graph.session.operand_types(owner).is_bound_method(field)
+                        })
+            },
             |child| self.expr(child),
         )?
         else {
