@@ -2143,7 +2143,9 @@ pub(crate) fn compile(
                 && registrations.physical_files.contains_key(&sources[id].1)
         });
     // Borrow the winners once discovery has finished growing the emitter's source table.
-    let mut function_modules = Vec::new();
+    let functions = checked_graph
+        .map(crate::modules::SourceGraph::take_registered_functions)
+        .unwrap_or_default();
     let mut declared_open_paths = HashSet::new();
     let selected_sources: Vec<_> = selected_sources
         .into_iter()
@@ -2154,7 +2156,16 @@ pub(crate) fn compile(
                 && let (Some(graph), Some(module_id)) = (checked_graph, module)
                 && graph.modules[module_id].original_source() == sources[id].2
             {
-                function_modules.push((id, module_id));
+                if let Some(bodies) = functions.get(&module_id) {
+                    registrations.checked_units.entry(id).or_default().functions = Some(bodies);
+                }
+                if keep_docstrings && !graph.modules[module_id].doctest_prompts.is_empty() {
+                    registrations
+                        .checked_units
+                        .entry(id)
+                        .or_default()
+                        .prompt_module = Some(module_id);
+                }
             }
             // Emit the selected application's signature. Preserve the existing checker
             // scope: owning a declaration does not prove that a call will reach it.
@@ -2166,7 +2177,7 @@ pub(crate) fn compile(
                     .get(&id)
                     .and_then(|unit| unit.run_path.as_deref())
             {
-                declared_open_paths.insert(open.as_os_str());
+                declared_open_paths.insert(open.as_os_str().to_owned());
             }
             registration.has_open_exec = literals.open_exec.contains(&id);
             registration.unit = matches!(mode, crate::CompilationMode::Build(_)).then_some(id);
@@ -2342,25 +2353,12 @@ pub(crate) fn compile(
     inputs.boxed_imports = true;
     // Registration has committed to the selected bodies. Leave the type database
     // and import graph behind before preparing their source initializers.
-    let (modules, functions) = project
+    let modules = project
         .take()
-        .map(crate::modules::SourceGraph::into_registered_files)
+        .map(|graph| graph.modules)
         .unwrap_or_default();
     registrations.modules = &modules;
     let entry_source = file_source.or_else(|| entry_file.map(|file| file.parsed(&modules)));
-    for (unit, module) in function_modules {
-        if let Some(bodies) = functions.get(&module) {
-            registrations
-                .checked_units
-                .entry(unit)
-                .or_default()
-                .functions = Some(bodies);
-        }
-        if keep_docstrings && !modules[module].doctest_prompts.is_empty() {
-            registrations.checked_units.entry(unit).or_default().prompts =
-                &modules[module].doctest_prompts;
-        }
-    }
     let providers = options
         .bundled_provider_archive
         .as_deref()
