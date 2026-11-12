@@ -1276,10 +1276,10 @@ fn lower_graph(
                 .source_checks
                 .accepts(graph, *module_id, definition);
         if accepted || original.is_some() {
-            // A read of the callable establishes a live namespace binding. An
-            // unused, unresolved signature cannot select this calling convention.
+            // A checked Python frame binds its imports when the function runs. A
+            // callable read also establishes this namespace for a recovered signature.
             checker.bound_function_imports =
-                signature.registered_frame() && inference.used_as_value(signature.id);
+                accepted || signature.registered_frame() && inference.used_as_value(signature.id);
             match registered::lower_definition(checker, definition, signature) {
                 Ok(body) if accepted => {
                     graph.register_function(*module_id, definition.start(), body);

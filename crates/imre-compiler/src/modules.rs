@@ -1,6 +1,6 @@
 //! Loads a closed graph of first-party modules and orders their initialization.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
@@ -4437,12 +4437,20 @@ struct LocalStaticImport {
 
 /// An unconditional function-local import dominates the remaining statements in that body.
 /// The semantic model checks the receiver at each use, including local rebindings.
-fn static_import_scopes(f: &ast::StmtFunctionDef, imports: &mut Vec<LocalStaticImport>) {
+/// Collect the type declarations and static bindings of function-local imports.
+fn function_imports(
+    f: &ast::StmtFunctionDef,
+    imports: &mut Vec<LocalStaticImport>,
+    mut declaration: impl FnMut(&str),
+) {
     for stmt in &f.body {
         // These modules have no observable initialization or mutable exports.
         // Other local imports still take their ordinary lowering path.
         let (alias, module_name, symbol, default_name) = match stmt {
             ast::Stmt::Import(import) if !import.is_lazy => {
+                for alias in &import.names {
+                    declaration(alias.name.as_str());
+                }
                 let [alias] = import.names.as_slice() else {
                     continue;
                 };
@@ -4454,6 +4462,9 @@ fn static_import_scopes(f: &ast::StmtFunctionDef, imports: &mut Vec<LocalStaticI
                 }
             }
             ast::Stmt::ImportFrom(import) if !import.is_lazy && import.level == 0 => {
+                if let Some(module) = import.module.as_deref() {
+                    declaration(module);
+                }
                 let [alias] = import.names.as_slice() else {
                     continue;
                 };
@@ -4691,6 +4702,7 @@ impl SiteProbes {
 type ModuleFile = (PathBuf, PathBuf, bool, usize, Option<NativeArchive>);
 
 struct Loader<'a> {
+    local_declarations: BTreeSet<String>,
     python_optimization: i32,
     module_operand: Option<String>,
     fs: FileSystem<'a>,
@@ -4788,6 +4800,7 @@ impl<'a> Loader<'a> {
             python_optimization,
             module_operand: None,
             fs,
+            local_declarations: BTreeSet::new(),
             archive_roots,
             site_probes,
             session: Session::new(&root, &search_roots)?,
@@ -4900,7 +4913,7 @@ impl<'a> Loader<'a> {
         reachable_only: bool,
         profile: Option<&Path>,
     ) -> Result<SourceGraph, String> {
-        let mut annotation_imports = std::collections::BTreeSet::new();
+        let mut declarations = std::mem::take(&mut self.local_declarations);
         // Resolve against the completed graph. Type-only imports neither run a
         // module initializer nor introduce runtime bindings or import cycles.
         for id in 0..self.modules.len() {
@@ -4965,18 +4978,18 @@ impl<'a> Loader<'a> {
                                 .insert(local.to_string(), binding);
                         }
                     }
-                    annotation_imports.insert(name);
+                    declarations.insert(name);
                 }
             }
         }
         let doctest_imports = self.doctest_program()?;
         let guard_search = self.inputs.missing.len();
-        for name in annotation_imports {
+        for name in declarations {
             if !self.by_name.contains_key(&name) {
-                self.add_annotation_module(&name)?;
+                self.add_declaration_module(&name)?;
             }
         }
-        // A guarded child of a regular package can newly resolve when a missing file appears.
+        // A previously absent declaration may appear before the next cached build.
         for path in self.inputs.missing.drain(guard_search..) {
             self.inputs.file_checks.insert(path, false);
         }
@@ -5086,12 +5099,18 @@ impl<'a> Loader<'a> {
         let parsed = self.modules[id].parsed.clone();
         let global_writes = self.session.nested_global_writes(id, parsed.tokens());
         let mut imports = Vec::new();
+        let first_party = self.modules[id].is_program_source();
+        let mut declaration = |name: &str| {
+            if first_party {
+                self.local_declarations.insert(name.to_owned());
+            }
+        };
         for stmt in &parsed.syntax().body {
             match stmt {
-                ast::Stmt::FunctionDef(f) => static_import_scopes(f, &mut imports),
+                ast::Stmt::FunctionDef(f) => function_imports(f, &mut imports, &mut declaration),
                 ast::Stmt::ClassDef(c) => {
                     for f in c.body.iter().filter_map(ast::Stmt::as_function_def_stmt) {
-                        static_import_scopes(f, &mut imports);
+                        function_imports(f, &mut imports, &mut declaration);
                     }
                 }
                 _ => {}
@@ -6585,25 +6604,32 @@ impl<'a> Loader<'a> {
         ))
     }
 
-    fn add_annotation_module(&mut self, name: &str) -> Result<(), String> {
-        // A loaded physical package determines the search roots for its child.
-        let Some((package, _)) = name.rsplit_once('.') else {
-            return Ok(());
-        };
-        let Some(&parent) = self.by_name.get(package) else {
-            return Ok(());
-        };
-        let module = &self.modules[parent];
-        let SearchRoots::Single(index) = module.search_roots else {
-            return Ok(());
+    fn add_declaration_module(&mut self, name: &str) -> Result<(), String> {
+        let index = if let Some((package, _)) = name.rsplit_once('.') {
+            // A loaded physical package owns its child's search path.
+            let Some(&parent) = self.by_name.get(package) else {
+                return Ok(());
+            };
+            let module = &self.modules[parent];
+            let SearchRoots::Single(index) = module.search_roots else {
+                return Ok(());
+            };
+            if !module.is_package || module.bundled || module.archive.is_some() {
+                return Ok(());
+            }
+            index
+        } else {
+            // Shipped declarations already have their own finder and shadowing rules.
+            if ruff_python_stdlib::sys::is_known_standard_library(
+                crate::version::LANGUAGE.minor,
+                name,
+            ) {
+                return Ok(());
+            }
+            0
         };
         let root = Self::root_at(&self.root, &self.search_roots, index);
-        if !module.is_package
-            || module.bundled
-            || module.archive.is_some()
-            || self.zip_sources.contains_key(root)
-            || (index == 0 && self.skip_current_root)
-        {
+        if self.zip_sources.contains_key(root) || (index == 0 && self.skip_current_root) {
             return Ok(());
         }
         let base = root.join(name.replace('.', "/"));

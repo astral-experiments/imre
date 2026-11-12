@@ -4849,6 +4849,58 @@ exec("print(1)")
     }
 
     #[test]
+    fn a_function_local_import_keeps_its_checked_body_and_runtime_binding() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let entry = root.join("app.py");
+        std::fs::write(
+            &entry,
+            r#"def publish(value: int, send):
+    from helper import adjusted
+    send(adjusted(value))
+
+
+def callback(x):
+    print(x)
+
+
+publish(5, callback)
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("helper.py"),
+            "def adjusted(value):\n    return value * 3 + 1\n",
+        )
+        .unwrap();
+
+        let mut graph = SourceGraph::load(&entry, Some(root), &[]).unwrap();
+        assert!(graph.python_file("helper").is_none());
+        crate::checked_lower(&mut graph).unwrap();
+
+        let publish = graph.modules[graph.entry].parsed.syntax().body[0].start();
+        let bodies = graph.registered_functions();
+        let body = &bodies[&graph.entry][&publish].function;
+        let mut imports = 0;
+        let mut calls = 0;
+        ir::walk_expressions(&body.body, &mut |expr| match &expr.kind {
+            ExprKind::Builtin(
+                Builtin::RegisteredImport(ir::NamespaceImport::From { module, names, .. }),
+                _,
+            ) if module == "helper"
+                && names
+                    .iter()
+                    .any(|(name, binding)| name == "adjusted" && binding == name) =>
+            {
+                imports += 1
+            }
+            ExprKind::Invoke { .. } => calls += 1,
+            _ => {}
+        });
+        assert_eq!((imports, calls), (1, 2));
+    }
+
+    #[test]
     fn an_imported_checked_callback_keeps_its_registered_body() {
         let project = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../tests/fixtures/registered_imported_callback");
