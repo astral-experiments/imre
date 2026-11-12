@@ -5685,13 +5685,9 @@ impl<'a> Checker<'a> {
                 self.omitted_assert_free
                     .retain(|name, _| !live.contains(name));
             }
-            self.nullable_assignments = assignments::nullable_assignments(self, statements);
-            let mut names: Vec<_> =
-                unbound_locals::candidates(statements, self.interactive_names, &|name| {
-                    self.mapping_class_import(name)
-                })
-                .into_iter()
-                .collect();
+            let (guarded, nullable) = unbound_locals::local_assignments(self, statements);
+            self.nullable_assignments = nullable;
+            let mut names: Vec<_> = guarded.into_iter().collect();
             names.sort_unstable();
             for name in names {
                 // A later assignment shadows the imported ABC throughout this function.
