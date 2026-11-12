@@ -57,19 +57,11 @@ pub(super) trait StatementLowering {
     fn record_loop_transfer(&mut self, transfer: &Statement) -> bool;
     fn other_statement(&mut self, stmt: &ast::Stmt) -> StdResult<Block, Self::Error>;
 
-    fn attribute_statements(
-        &mut self,
-        stmt: &ast::Stmt,
-    ) -> StdResult<Option<Vec<Statement>>, Self::Error>;
-
     fn source_statement(
         &mut self,
         stmt: &ast::Stmt,
         module: bool,
     ) -> StdResult<Block, Self::Error> {
-        if let Some(effects) = self.attribute_statements(stmt)? {
-            return Ok((effects, true));
-        }
         let (statement, continues) = match stmt {
             ast::Stmt::Assign(assign) => return self.assignment(assign),
             ast::Stmt::If(branch) => return self.branch(branch),
@@ -96,44 +88,6 @@ pub(super) trait StatementLowering {
 
 impl StatementLowering for Checker<'_> {
     type Error = Failure<String>;
-
-    fn attribute_statements(&mut self, stmt: &ast::Stmt) -> Result<Option<Vec<Statement>>, String> {
-        // Known native fields retain their declared layout and assignment contracts.
-        if self.registered.is_none() {
-            return Ok(None);
-        }
-        let Some(effects) = registered::attribute_effects(stmt) else {
-            return Ok(None);
-        };
-        if !effects.iter().all(|effect| {
-            self.graph
-                .session
-                .is_dynamic_receiver(self.module, &effect.field.value)
-        }) {
-            return Ok(None);
-        }
-        let mut statements = Vec::with_capacity(effects.len());
-        for effect in effects {
-            let values = effect
-                .operands()
-                .map(|node| self.expr(node))
-                .collect::<Result<Vec<_>, _>>()?;
-            let receiver = usize::from(effect.action == ir::AttributeAction::Store);
-            if values[receiver].ty != Type::PythonObject {
-                return Err(error(
-                    self.source,
-                    effect.field,
-                    "attribute target requires a Python object",
-                ));
-            }
-            statements.push(registered::attribute_statement(
-                effect.action,
-                effect.field,
-                values,
-            ));
-        }
-        Ok(Some(statements))
-    }
 
     fn branch(&mut self, branch: &ast::StmtIf) -> Result<Block, String> {
         self.if_chain(branch)
