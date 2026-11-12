@@ -74,28 +74,27 @@ impl<'a> RegisteredRegion<'a> {
         }
     }
 
+    #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
     pub(crate) fn private_slots(self) -> std::collections::BTreeSet<usize> {
-        self.frame_slots(|_, _| {})
+        self.frame_slots(|_| {})
     }
 
-    /// Collect private slots and report the iterator kinds needed by this frame.
+    /// Collect storage declared by scopes while visiting the operations that use it.
     pub(crate) fn frame_slots(
         self,
-        mut cursor: impl FnMut(usize, ir::IterNextKind),
+        mut visit: impl FnMut(ir::Node<'a>),
     ) -> std::collections::BTreeSet<usize> {
         let mut slots = std::collections::BTreeSet::new();
-        self.walk(&mut |node, _| match node {
-            ir::Node::Statement(Statement::Scope { clear, .. })
+        self.walk(&mut |node, _| {
+            if let ir::Node::Statement(Statement::Scope { clear, .. })
             | ir::Node::Expression(Expr {
                 kind: ExprKind::Scope { clear, .. },
                 ..
-            }) => {
+            }) = &node
+            {
                 slots.extend(clear);
             }
-            ir::Node::Statement(Statement::IterNext { iterator, kind, .. }) => {
-                cursor(*iterator, *kind);
-            }
-            _ => {}
+            visit(node);
         });
         slots.retain(|slot| !self.local_names.contains_key(slot));
         slots
@@ -4631,6 +4630,27 @@ mod tests {
             crate::verify::registered(body.region()).unwrap();
             assert_eq!(crate::llvm::registered::supports(&body), accepted);
         }
+    }
+
+    #[test]
+    fn admission_requires_private_storage_for_a_clear() {
+        let mut body = RegisteredFunction::expression(TextRange::default(), Expr::none());
+        body.function.locals.push(Type::PythonObject);
+        body.function.body.insert(0, Statement::Clear(0));
+        assert!(!crate::llvm::registered::supports(&body));
+        body.function.body.push(Statement::Scope {
+            body: vec![],
+            clear: vec![0],
+        });
+        assert!(crate::llvm::registered::supports(&body));
+        body.local_names.insert(
+            0,
+            LocalBinding {
+                name: "value".to_owned(),
+                namespace: None,
+            },
+        );
+        assert!(!crate::llvm::registered::supports(&body));
     }
 
     #[test]
