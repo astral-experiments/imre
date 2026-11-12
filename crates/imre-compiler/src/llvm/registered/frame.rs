@@ -267,11 +267,9 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         }
         self.body.start("failed");
         self.release_integer_owners(0..self.integer_owners, false);
+        self.return_value("0");
         let offset = self.output.functions.len();
         if self.native_suspension {
-            self.body
-                .line("call void @imre_dyn_suspend_return(ptr %context_slot, i64 0)");
-            self.body.jump("complete");
             write_definition(
                 &mut self.output.functions,
                 format_args!(
@@ -290,7 +288,6 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
                 },
             );
         } else {
-            self.body.end("ret i64 0");
             write_definition(
                 &mut self.output.functions,
                 format_args!("internal i64 {name}(ptr %ctx, i64 %scope)"),
