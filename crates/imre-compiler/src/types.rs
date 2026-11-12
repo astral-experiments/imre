@@ -1614,11 +1614,14 @@ impl Types {
         }
     }
 
-    /// A cache exposes a replaceable callable independent of its cache policy.
+    /// A mutable link keeps the replacement's call ABI independently of its declaration.
     pub(crate) fn wrapped_link_type(&self, owner: Type) -> Type {
-        if self.cached_function(owner).is_some() || self.cache_declaration(owner).is_some() {
+        if self.cached_function(owner).is_some()
+            || self.cache_declaration(owner).is_some()
+            || self.source_method_site(owner).is_some()
+        {
             self.wrapped_signature(owner)
-                .expect("cache wraps a callable")
+                .expect("a method or cache has a callable signature")
         } else {
             owner
         }

@@ -127,6 +127,15 @@ pub(super) fn targets(
     Ok(targets)
 }
 
+impl Signature {
+    fn has_defaults_after_receiver(&self) -> bool {
+        self.params
+            .iter()
+            .skip(1)
+            .any(|param| param.default.is_some())
+    }
+}
+
 impl Checker<'_> {
     /// Give a native method a positional signature and capture its receiver when present.
     pub(super) fn builtin_callable(
@@ -272,17 +281,16 @@ impl Checker<'_> {
         let class_method = signature.method.is_some_and(|method| {
             method.kind(&self.classes.declarations) == crate::classes::MethodKind::Class
         });
-        let method_site = signature.method.filter(|_| {
-            class_method
-                || (receiver.is_some()
-                    && expected.is_none()
-                    && !signature.asynchronous
-                    && signature.params[skip..].iter().any(|p| p.default.is_some()))
-        });
+        let method_site = signature
+            .method
+            .filter(|_| class_method || (receiver.is_some() && !signature.asynchronous));
         let mut signature = signature.clone();
-        // A later call to the saved method can supply its missing formal types.
+        // A saved method with defaults can infer missing formals at its later source-bound call.
         if let Some(inference) = self.inference
-            && (method_site.is_none() || class_method)
+            && (expected.is_some()
+                || method_site.is_none()
+                || class_method
+                || !signature.has_defaults_after_receiver())
         {
             let asynchronous = signature.asynchronous;
             inference.callable_signature(
@@ -392,14 +400,16 @@ impl Checker<'_> {
                 receiver: receiver.map(Box::new),
             },
         };
-        Ok(if unbound {
-            Expr {
+        if unbound {
+            Ok(Expr {
                 ty,
                 kind: ExprKind::Builtin(Builtin::StaticFunction(function), vec![value]),
-            }
+            })
+        } else if let Some(expected) = expected {
+            self.coerce(value, expected, node)
         } else {
-            value
-        })
+            Ok(value)
+        }
     }
 
     /// An escaping callable has no environment to store enclosing locals.
@@ -708,8 +718,13 @@ impl Checker<'_> {
         }
         if let Some((class, index, receiver)) = self.types.source_method_site(callable.ty) {
             let method = &self.classes.declarations.definitions[class].methods[index];
-            let signature = self.classes.methods[class][method.name.as_str()].clone();
-            if !signature.asynchronous {
+            let signature = &self.classes.methods[class][method.name.as_str()];
+            // A required positional instance call already has its receiver-bound ABI.
+            let bind_declaration = receiver.is_none_or(|ty| ty == Type::BuiltinClass)
+                || !call.arguments.keywords.is_empty()
+                || signature.has_defaults_after_receiver();
+            if !signature.asynchronous && bind_declaration {
+                let signature = signature.clone();
                 let (returns, args) = self.bind_source(
                     call,
                     &signature,
