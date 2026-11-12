@@ -1199,6 +1199,7 @@ fn lower_graph(
                 &types,
                 inference,
                 needs_registered_entry.then_some(&checked_bodies),
+                [],
             );
         }
     };

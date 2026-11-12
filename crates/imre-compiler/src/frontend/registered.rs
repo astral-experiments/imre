@@ -512,6 +512,7 @@ pub(super) fn capture(
     types: &Types,
     inference: &inference::Inference,
     checked_bodies: Option<&HashSet<usize>>,
+    staged_returns: impl IntoIterator<Item = DefinitionId>,
 ) {
     let mut pending = inference.pending_bodies.borrow_mut();
     let owners = pending.get_or_insert_with(|| {
@@ -525,6 +526,7 @@ pub(super) fn capture(
             .map(|(&owner, _)| owner)
             .collect()
     });
+    owners.extend(staged_returns);
     owners.retain(|&owner| {
         let signature = &signatures[&owner];
         let id = owner.module;
