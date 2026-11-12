@@ -100,47 +100,24 @@ struct Calls<'a> {
 
 impl Calls<'_> {
     fn failure(&self, call: &ast::ExprCall) -> Option<Expr> {
-        let flags = call
-            .arguments
-            .args
-            .iter()
-            .map(|arg| {
-                let flag = arg.as_string_literal_expr()?.value.to_str();
-                // Complete the earlier optional spelling and destination checks before
-                // using the action constructor's error.
-                (flag.starts_with(|c| self.prefixes.contains(c))
-                    && !flag
-                        .trim_start_matches(|c| self.prefixes.contains(c))
-                        .is_empty())
-                .then_some(flag)
-            })
-            .collect::<Option<Vec<_>>>()?;
-        if flags.is_empty() {
-            return None;
-        }
         let mut action = None;
-        let mut keywords = Vec::new();
         for kw in &call.arguments.keywords {
             let name = kw.arg.as_ref()?.as_str();
             if name == "action" {
                 action = Some(&kw.value);
-            } else {
-                // A dynamic destination can fail the parser's default lookup before
-                // the constructor is called. Other keywords are evaluated at the call site.
-                if name == "dest"
-                    && !matches!(
-                        kw.value,
-                        ast::Expr::NoneLiteral(_)
-                            | ast::Expr::BooleanLiteral(_)
-                            | ast::Expr::StringLiteral(_)
-                            | ast::Expr::NumberLiteral(_)
-                    )
-                    && builtin_constant(&kw.value, &self.graph.modules[self.module], self.locals)
-                        .is_none()
-                {
-                    return None;
-                }
-                keywords.push(name);
+            } else if name == "dest"
+                && !matches!(
+                    kw.value,
+                    ast::Expr::NoneLiteral(_)
+                        | ast::Expr::BooleanLiteral(_)
+                        | ast::Expr::StringLiteral(_)
+                        | ast::Expr::NumberLiteral(_)
+                )
+                && builtin_constant(&kw.value, &self.graph.modules[self.module], self.locals)
+                    .is_none()
+            {
+                // A dynamic destination can fail lookup before the action constructor runs.
+                return None;
             }
         }
         let action = action?;
@@ -163,10 +140,35 @@ impl Calls<'_> {
                 _ => return None,
             }
         };
-        for name in keywords {
+        let flags = call
+            .arguments
+            .args
+            .iter()
+            .map(|arg| {
+                let flag = arg.as_string_literal_expr()?.value.to_str();
+                // Complete the earlier optional spelling and destination checks before
+                // using the action constructor's error.
+                (flag.starts_with(|c| self.prefixes.contains(c))
+                    && !flag
+                        .trim_start_matches(|c| self.prefixes.contains(c))
+                        .is_empty())
+                .then_some(flag)
+            })
+            .collect::<Option<Vec<_>>>()?;
+        if flags.is_empty() {
+            return None;
+        }
+        for keyword in &call.arguments.keywords {
+            let name = keyword.arg.as_ref()?.as_str();
             if !matches!(
                 name,
-                "dest" | "default" | "help" | "required" | "deprecated" | "option_strings"
+                "action"
+                    | "dest"
+                    | "default"
+                    | "help"
+                    | "required"
+                    | "deprecated"
+                    | "option_strings"
             ) && !(matches!(class, "_StoreConstAction" | "_AppendConstAction")
                 && matches!(name, "const" | "metavar"))
             {
