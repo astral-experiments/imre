@@ -86,8 +86,8 @@ class _patch:
     attribute_name = None
     _active_patches = _active_patches
 
-    def __init__(self, getter, attribute, new, create, *, spec=None, spec_set=None,
-                 autospec=None, new_callable=None, unsafe=False, **kwargs):
+    def __init__(self, getter, attribute, new, spec, create, spec_set, autospec,
+                 new_callable, kwargs, *, unsafe=False):
         if new_callable is not None:
             if new is not DEFAULT:
                 raise ValueError("Cannot use 'new' and 'new_callable' together")
@@ -257,9 +257,8 @@ class _patch:
         return self.__exit__(None, None, None)
 
     def copy(self):
-        patcher = _patch(self.getter, self.attribute, self.new, self.create,
-                         spec=self.spec, spec_set=self.spec_set, autospec=self.autospec,
-                         new_callable=self.new_callable, **self.mock_kwargs)
+        patcher = _patch(self.getter, self.attribute, self.new, self.spec, self.create,
+                         self.spec_set, self.autospec, self.new_callable, self.mock_kwargs)
         patcher.attribute_name = self.attribute_name
         patcher.additional_patchers = [child.copy() for child in self.additional_patchers]
         return patcher
@@ -291,16 +290,16 @@ class _patch:
 def _patch_attribute(self, target, new=DEFAULT, spec=None, create=False, spec_set=None,
                      autospec=None, new_callable=None, *, unsafe=False, **kwargs):
     getter, attribute = _get_target(target)
-    return _patch(getter, attribute, new, create, spec=spec, spec_set=spec_set,
-                  autospec=autospec, new_callable=new_callable, unsafe=unsafe, **kwargs)
+    return _patch(getter, attribute, new, spec, create, spec_set, autospec,
+                  new_callable, kwargs, unsafe=unsafe)
 
 
 def _patch_object(target, attribute, new=DEFAULT, spec=None, create=False, spec_set=None,
                   autospec=None, new_callable=None, *, unsafe=False, **kwargs):
     if type(target) is str:
         raise TypeError(f"{target!r} must be the actual object to be patched, not a str")
-    return _patch(lambda: target, attribute, new, create, spec=spec, spec_set=spec_set,
-                  autospec=autospec, new_callable=new_callable, unsafe=unsafe, **kwargs)
+    return _patch(lambda: target, attribute, new, spec, create, spec_set, autospec,
+                  new_callable, kwargs, unsafe=unsafe)
 
 
 def _patch_multiple(target, spec=None, create=False, spec_set=None,
@@ -310,8 +309,8 @@ def _patch_multiple(target, spec=None, create=False, spec_set=None,
     getter = (lambda: _patch_owner(target)) if type(target) is str else (lambda: target)
     patchers = []
     for name, replacement in kwargs.items():
-        patcher = _patch(getter, name, replacement, create, spec=spec, spec_set=spec_set,
-                         autospec=autospec, new_callable=new_callable)
+        patcher = _patch(getter, name, replacement, spec, create, spec_set, autospec,
+                         new_callable, {})
         patcher.attribute_name = name
         patchers.append(patcher)
     first = patchers[0]
