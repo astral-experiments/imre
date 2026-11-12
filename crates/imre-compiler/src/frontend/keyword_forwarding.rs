@@ -21,7 +21,7 @@ impl Defaults {
 pub(super) fn prepare(
     graph: &SourceGraph,
     module: ModuleId,
-    f: &mut ast::StmtFunctionDef,
+    f: &mut Cow<'_, ast::StmtFunctionDef>,
 ) -> Defaults {
     Defaults {
         module,
@@ -34,12 +34,12 @@ pub(super) fn prepare(
 pub(super) fn prepare_method(
     graph: &SourceGraph,
     module: ModuleId,
-    method: &mut ast::StmtFunctionDef,
+    method: &mut Cow<'_, ast::StmtFunctionDef>,
     context: records::MethodContext,
     classes: &Classes,
 ) -> (Defaults, Option<DefinitionId>) {
     if method.name.as_str() == "__init__"
-        && let Some(origin) = expand_initializer(graph, module, method, context, classes)
+        && let Some(origin) = expand_initializer(graph, module, method.to_mut(), context, classes)
     {
         (
             Defaults {
@@ -213,7 +213,7 @@ impl<'a> Visitor<'a> for Uses<'a> {
 fn expand(
     graph: &SourceGraph,
     module: ModuleId,
-    function: &mut ast::StmtFunctionDef,
+    function: &mut Cow<'_, ast::StmtFunctionDef>,
 ) -> Option<(usize, ModuleId)> {
     let parameters = &function.parameters;
     let keyword = parameters.kwarg.as_ref()?;
@@ -314,6 +314,7 @@ fn expand(
         })
         .collect();
     let first = parameters.iter_non_variadic_params().count();
+    let function = function.to_mut();
     function.parameters.kwarg = None;
     function
         .parameters

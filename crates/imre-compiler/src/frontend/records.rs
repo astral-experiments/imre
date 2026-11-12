@@ -369,7 +369,7 @@ pub(super) fn field_default(
 /// fresh container defaults without expanding a tree of constructors in the IR.
 pub(super) fn record_factories(
     classes: &mut ClassInfo,
-    definitions: &mut [(ModuleId, ast::StmtFunctionDef, Signature)],
+    definitions: &mut [FunctionDefinition<'_>],
     owners: &mut Vec<DefinitionId>,
     inference: &inference::Inference,
     graph: &SourceGraph,

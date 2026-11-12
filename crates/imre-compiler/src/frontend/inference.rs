@@ -752,7 +752,7 @@ impl Inference {
     /// to type-check for its own receiver, including overridden method calls.
     fn infer_inherited_parameters(
         &self,
-        definitions: &[(ModuleId, ast::StmtFunctionDef, Signature)],
+        definitions: &[FunctionDefinition<'_>],
         classes: &ClassInfo,
     ) -> bool {
         let mut copies = HashMap::new();
@@ -798,7 +798,7 @@ impl Inference {
     fn use_registered_arguments(
         &self,
         graph: &SourceGraph,
-        definitions: &[(ModuleId, ast::StmtFunctionDef, Signature)],
+        definitions: &[FunctionDefinition<'_>],
         registered: &mut HashMap<usize, Diagnostic>,
     ) -> bool {
         let mut changed = false;
@@ -830,7 +830,7 @@ impl Inference {
         &self,
         graph: &SourceGraph,
         entry_statements: &[ast::Stmt],
-        definitions: &mut [(ModuleId, ast::StmtFunctionDef, Signature)],
+        definitions: &mut [FunctionDefinition<'_>],
         signatures: &mut HashMap<DefinitionId, Signature>,
         classes: &mut ClassInfo,
         types: &Types,
@@ -894,6 +894,7 @@ impl Inference {
                 }
             }
             for (module, function, signature) in definitions.iter() {
+                let function = function.as_ref();
                 if graph.modules[*module].archive.is_some() {
                     continue; // Native declarations must be fully annotated.
                 }

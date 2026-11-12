@@ -481,10 +481,11 @@ mod tests {
         let graph = SourceGraph::single(fixture).unwrap();
         let module = &graph.modules[graph.entry];
         let text = &module.source;
-        let mut forward = module.parsed.syntax().body[1]
-            .as_function_def_stmt()
-            .unwrap()
-            .clone();
+        let mut forward = std::borrow::Cow::Borrowed(
+            module.parsed.syntax().body[1]
+                .as_function_def_stmt()
+                .unwrap(),
+        );
         assert_eq!(forward.name.as_str(), "forward");
         let defaults = keyword_forwarding::prepare(&graph, graph.entry, &mut forward);
         assert!(defaults.forwarded.is_some());

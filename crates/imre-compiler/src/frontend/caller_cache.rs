@@ -173,7 +173,7 @@ impl CallerCache {
     /// as well, since a saved function can address them by their numeric index.
     pub(super) fn validate_abi(
         &mut self,
-        definitions: &[(ModuleId, ast::StmtFunctionDef, Signature)],
+        definitions: &[FunctionDefinition<'_>],
         globals: &ModuleValues,
     ) {
         let mut defaults = HashMap::new();

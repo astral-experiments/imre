@@ -429,41 +429,48 @@ pub(super) fn intersect(
 /// internal spelling. Builtin fast paths can then match names without ever
 /// interpreting a local `bytes`, `map`, or `len` as the builtin.
 pub(super) fn alias_builtin_parameters(
-    function: &mut ast::StmtFunctionDef,
+    function: &mut Cow<'_, ast::StmtFunctionDef>,
     graph: &SourceGraph,
     module: ModuleId,
 ) -> bool {
-    let mut renamed = false;
+    let needs_alias = |name: &str| {
+        RESERVED.contains(&name)
+            && name.starts_with(|c: char| c.is_ascii_lowercase())
+            && graph.modules[module]
+                .bindings
+                .get(name)
+                .is_none_or(|&binding| {
+                    graph.builtin_function_shadow(name, binding).is_some()
+                        || binding == Binding::Intrinsic(Intrinsic::BuiltinsPrint)
+                })
+    };
+    let Some(first) = function
+        .parameters
+        .iter_non_variadic_params()
+        .position(|param| needs_alias(param.name().as_str()))
+    else {
+        return false;
+    };
+    let function = function.to_mut();
     let params = &mut function.parameters;
     for parameter in params
         .posonlyargs
         .iter_mut()
         .chain(&mut params.args)
         .chain(&mut params.kwonlyargs)
+        .skip(first)
     {
         let name = &mut parameter.parameter.name.id;
-        if RESERVED.contains(&name.as_str())
-            && name.starts_with(|c: char| c.is_ascii_lowercase())
-            && graph.modules[module]
-                .bindings
-                .get(name.as_str())
-                .is_none_or(|&binding| {
-                    graph
-                        .builtin_function_shadow(name.as_str(), binding)
-                        .is_some()
-                        || binding == Binding::Intrinsic(Intrinsic::BuiltinsPrint)
-                })
-        {
+        if needs_alias(name.as_str()) {
             let alias = BuiltinAlias {
                 original: name.clone(),
                 local: format!("$param:{name}").into(),
             };
             *name = alias.local.clone();
             alias.visit_body(&mut function.body);
-            renamed = true;
         }
     }
-    renamed
+    true
 }
 
 struct BuiltinAlias {
