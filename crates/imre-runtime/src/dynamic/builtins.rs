@@ -3176,14 +3176,17 @@ pub(super) fn call(
             if name.is_empty() {
                 return Err(Error::new("ValueError", "Empty module name"));
             }
-            let result = ctx.module_by_key(&name, key)?;
+            let result = ctx.import_by_key(&name, key)?;
             if let Some(list) = fromlist
                 && ctx.truth(list)?
             {
                 return ctx.prepare_fromlist(result, list);
             }
             match name.split_once('.') {
-                Some((top, _)) => ctx.module(top),
+                Some((top, _)) => {
+                    let head = ctx.text(top);
+                    ctx.import_by_key(top, head)
+                }
                 None => Ok(result),
             }
         }

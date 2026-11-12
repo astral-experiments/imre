@@ -2612,11 +2612,11 @@ pub(super) fn call(
                 ctx.warn_import(*globals, &message, line, args.get(3).map(|id| *id == TRUE))?;
                 return Ok(NONE);
             }
-            ("import_module", [key] | [key, _], []) => {
+            ("import_module", [key] | [key, _] | [key, _, _], []) => {
                 let name = ctx.str_value(*key)?.to_owned();
                 let source_globals = args.get(1).copied().unwrap_or(NONE);
                 return ctx
-                    .find_module_from(&name, *key, source_globals)?
+                    .find_module_from(&name, *key, source_globals, args.get(2).copied())?
                     .ok_or_else(|| Context::missing_module(&name, *key));
             }
             ("find_spec", [fullname, original, finder], []) => {
