@@ -214,8 +214,7 @@ impl Checker<'_> {
                 Vec::new(),
             ));
         }
-        let (suffix, suffix_falls) = self.block(&stmts[at..])?;
-        body.extend(suffix);
+        let suffix_falls = self.lower_block(&stmts[at..], Some(&mut body))?;
         self.reachable = reachable;
         Ok((body, prefix_falls && suffix_falls))
     }
