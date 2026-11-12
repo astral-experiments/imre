@@ -1,13 +1,14 @@
-"""Arithmetic mean and median from CPython 3.14.5 Lib/statistics.py."""
+"""Averages from CPython 3.14.5 Lib/statistics.py."""
 # See licenses/CPython.txt for the Python Software Foundation license.
 
 import math
+import numbers
 from decimal import Decimal
 from fractions import Fraction
 from functools import reduce
-from itertools import chain, groupby, islice
+from itertools import chain, groupby, islice, repeat
 
-__all__ = ["StatisticsError", "mean", "median"]
+__all__ = ["StatisticsError", "harmonic_mean", "mean", "median"]
 
 
 class StatisticsError(ValueError):
@@ -51,6 +52,69 @@ def mean(data):
     if n < 1:
         raise StatisticsError('mean requires at least one data point')
     return _convert(total / n, T)
+
+
+def harmonic_mean(data, weights=None):
+    """Return the harmonic mean of data.
+
+    The harmonic mean is the reciprocal of the arithmetic mean of the
+    reciprocals of the data.  It can be used for averaging ratios or
+    rates, for example speeds.
+
+    Suppose a car travels 40 km/hr for 5 km and then speeds-up to
+    60 km/hr for another 5 km. What is the average speed?
+
+        >>> harmonic_mean([40, 60])
+        48.0
+
+    Suppose a car travels 40 km/hr for 5 km, and when traffic clears,
+    speeds-up to 60 km/hr for the remaining 30 km of the journey. What
+    is the average speed?
+
+        >>> harmonic_mean([40, 60], weights=[5, 30])
+        56.0
+
+    If ``data`` is empty, or any element is less than zero,
+    ``harmonic_mean`` will raise ``StatisticsError``.
+
+    """
+    if iter(data) is data:
+        data = list(data)
+
+    errmsg = 'harmonic mean does not support negative values'
+
+    n = len(data)
+    if n < 1:
+        raise StatisticsError('harmonic_mean requires at least one data point')
+    elif n == 1 and weights is None:
+        x = data[0]
+        if isinstance(x, (numbers.Real, Decimal)):
+            if x < 0:
+                raise StatisticsError(errmsg)
+            return x
+        else:
+            raise TypeError('unsupported type')
+
+    if weights is None:
+        weights = repeat(1, n)
+        sum_weights = n
+    else:
+        if iter(weights) is weights:
+            weights = list(weights)
+        if len(weights) != n:
+            raise StatisticsError('Number of weights does not match data size')
+        _, sum_weights, _ = _sum(w for w in _fail_neg(weights, errmsg))
+
+    try:
+        data = _fail_neg(data, errmsg)
+        T, total, count = _sum(w / x if w else 0 for w, x in zip(weights, data))
+    except ZeroDivisionError:
+        return 0
+
+    if total <= 0:
+        raise StatisticsError('Weighted sum must be positive')
+
+    return _convert(sum_weights / total, T)
 
 
 def median(data):
@@ -274,3 +338,11 @@ def _convert(value, T):
             return T(value.numerator) / T(value.denominator)
         else:
             raise
+
+
+def _fail_neg(values, errmsg='negative value'):
+    """Iterate over values, failing if any are less than zero."""
+    for x in values:
+        if x < 0:
+            raise StatisticsError(errmsg)
+        yield x
