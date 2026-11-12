@@ -2,10 +2,6 @@ class DocTestCase(_DocTestCase):
     pass
 
 
-def _call_hook(case: _DocTestCase, test: DocTest, setup: bool) -> None:
-    pass
-
-
 # Checked debug exceptions retain their message. Their native records do not
 # expose a Python traceback or carry the DocTest and Example in exception args.
 def _set_exception_info(failure: UnexpectedException, test: DocTest, example: Example,

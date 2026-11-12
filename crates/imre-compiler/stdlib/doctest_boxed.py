@@ -133,6 +133,10 @@ def DocTestSuite(module=None, globs=None, extraglobs=None, *, optionflags=0, set
     return suite
 
 
+# Object cases store hooks on each instance, including their absence after deletion.
+del _DocTestCase._dt_setUp, _DocTestCase._dt_tearDown
+
+
 class DocTestCase(_DocTestCase):
     def __init__(self, test, optionflags=0, setUp=None, tearDown=None, checker=None):
         super().__init__(test)
@@ -140,12 +144,6 @@ class DocTestCase(_DocTestCase):
         self._dt_checker = checker
         self._dt_setUp = setUp
         self._dt_tearDown = tearDown
-
-
-def _call_hook(case, test, setup):
-    hook = case._dt_setUp if setup else case._dt_tearDown
-    if hook is not None:
-        hook(test)
 
 
 def _set_exception_info(failure, test, example, exc_info):
