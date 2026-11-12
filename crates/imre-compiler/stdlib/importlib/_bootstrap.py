@@ -79,7 +79,7 @@ def _setup(sys_module, _imp_module):
 
 
 def _find_and_load(name, import_):
-    return _native_import(name, None if _is_frozen else globals())
+    return _native_import(name, None if _is_frozen else globals(), import_)
 
 
 def _import_warning(message, line):

@@ -3814,16 +3814,27 @@ impl Context {
 
     fn module(&mut self, name: &str) -> Result<Id> {
         let key = self.text(name);
-        self.module_by_key(name, key)
+        let cached = self.registered_module(key)?;
+        self.module_from_cache(name, key, cached)
     }
 
-    fn module_by_key(&mut self, name: &str, key: Id) -> Result<Id> {
-        if let Some(module) = self.registered_module(key)?
+    /// The original __import__ waits for a cached module's initialization.
+    fn import_by_key(&mut self, name: &str, key: Id) -> Result<Id> {
+        let cached = if self.import_registry_installed {
+            self.initialized_registry_entry(key)?
+        } else {
+            self.registered_module(key)?
+        };
+        self.module_from_cache(name, key, cached)
+    }
+
+    fn module_from_cache(&mut self, name: &str, key: Id, cached: Option<Id>) -> Result<Id> {
+        if let Some(module) = cached
             && module != NONE
         {
             return Ok(module);
         }
-        self.find_module_from(name, key, NONE)
+        self.find_module_from(name, key, NONE, None)
             .map_err(|error| self.trim_import_traceback(error))?
             .ok_or_else(|| Self::missing_module(name, key))
     }
@@ -3831,7 +3842,7 @@ impl Context {
     /// Resolve registered and filesystem modules against the current import path.
     fn find_module(&mut self, name: &str) -> Result<Option<Id>> {
         let key = self.text(name);
-        self.find_module_from(name, key, NONE)
+        self.find_module_from(name, key, NONE, None)
             .map_err(|error| self.trim_import_traceback(error))
     }
 
@@ -3840,6 +3851,7 @@ impl Context {
         mut name: &str,
         mut key: Id,
         source_globals: Id,
+        import: Option<Id>,
     ) -> Result<Option<Id>> {
         let mut parents = Vec::new();
         let mut module = loop {
@@ -3847,8 +3859,21 @@ impl Context {
                 break Some(id);
             }
             let Some((parent, child)) = name.rsplit_once('.') else {
-                break self.load_module(name, key, None, source_globals)?;
+                break self.load_module(name, key, None, source_globals, import)?;
             };
+            let parent_key = self.text(parent);
+            if self.import_registry_installed {
+                let modules = self.public_modules()?;
+                if self.contains(parent_key, modules)? {
+                    break self.load_module(
+                        name,
+                        key,
+                        Some((parent_key, child)),
+                        source_globals,
+                        import,
+                    )?;
+                }
+            }
             // Each unresolved parent consumes three importlib frames.
             self.check_call_depth(3 * (parents.len() + 1))?;
             parents
@@ -3856,12 +3881,13 @@ impl Context {
                 .map_err(|_| crate::Error::allocation())?;
             parents.push((name, key, parent, child));
             name = parent;
-            key = self.text(parent);
+            key = parent_key;
         };
         for (name, child_key, parent, child) in parents.into_iter().rev() {
-            let id = module.ok_or_else(|| Self::missing_module(parent, key))?;
+            module.ok_or_else(|| Self::missing_module(parent, key))?;
+            module =
+                self.load_module(name, child_key, Some((key, child)), source_globals, import)?;
             key = child_key;
-            module = self.load_module(name, key, Some((id, child)), source_globals)?;
         }
         Ok(module)
     }
@@ -3873,16 +3899,40 @@ impl Context {
         key: Id,
         parent: Option<(Id, &str)>,
         source_globals: Id,
+        import: Option<Id>,
     ) -> Result<Option<Id>> {
-        if parent.is_some() {
+        let parent = if let Some((parent_key, child_name)) = parent {
             let child = self.public_module_get(key, false)?;
             if child != NONE {
                 return Ok(Some(child));
             }
-        }
+            let modules = self.public_modules()?;
+            let parent = self.get_item(modules, parent_key)?;
+            self.heap.reserve_temporaries(1)?;
+            self.heap.keep(parent);
+            Some((parent_key, parent, child_name))
+        } else {
+            None
+        };
         if self.import_registry_installed {
             let path = match parent {
-                Some((parent, _)) => self.parent_import_path(name, key, parent)?,
+                Some((parent_key, parent, _)) => {
+                    let path = self.parent_import_path(name, key, parent)?;
+                    self.heap.reserve_temporaries(2)?;
+                    self.heap.keep(path);
+                    let spec = self.lookup_attr(parent, "__spec__")?;
+                    self.heap.keep(spec);
+                    if self.spec_initializing(spec)? {
+                        let import = import.unwrap_or_else(|| self.builtin("__import__"));
+                        self.call(import, vec![parent_key], Vec::new())?;
+                    }
+                    // Either parent attribute can publish the child before the finder runs.
+                    let child = self.public_module_get(key, false)?;
+                    if child != NONE {
+                        return Ok(Some(child));
+                    }
+                    path
+                }
                 None => NONE,
             };
             let spec = self.meta_call(source_globals, "_find_spec", vec![key, path])?;
@@ -3895,7 +3945,12 @@ impl Context {
         }
         // Bootstrap initializers and live sys.modules hooks can reenter Python.
         stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
-            self.load_bootstrap_module(name, key, parent, source_globals)
+            self.load_bootstrap_module(
+                name,
+                key,
+                parent.map(|(_, id, child)| (id, child)),
+                source_globals,
+            )
         })
     }
 
