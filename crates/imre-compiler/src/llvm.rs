@@ -3412,39 +3412,32 @@ impl Emitter<'_, '_> {
         }
     }
 
-    /// Requires immediate operands and result, plus a nonzero divisor for
-    /// division. The optional result says whether Python's floor correction
-    /// can still be necessary. Missing proofs retain checked runtime arithmetic.
-    fn small_binary_proof(
-        &self,
-        expression: &Expr,
-        left: &Expr,
-        right: &Expr,
+    /// Use the evaluated operands when the checked result and both inputs fit
+    /// immediate integers. The same bounds select the instruction and its operands.
+    fn bounded_binary(
+        &mut self,
         op: Binary,
-    ) -> Option<bool> {
+        expression: &Expr,
+        (left, a): (&Expr, &Value),
+        (right, b): (&Expr, &Value),
+    ) -> Option<Value> {
         self.ranges.integer(expression)?;
         let left = self.ranges.integer(left)?;
         let right = self.ranges.integer(right)?;
-        match op {
+        let adjust_floor = match op {
             Binary::Add
             | Binary::Subtract
             | Binary::Multiply
             | Binary::BitAnd
             | Binary::BitOr
-            | Binary::BitXor => Some(false),
-            Binary::LeftShift | Binary::RightShift => {
-                (right.min >= 0 && right.max < 63).then_some(false)
+            | Binary::BitXor => false,
+            Binary::LeftShift | Binary::RightShift if right.min >= 0 && right.max < 63 => false,
+            Binary::FloorDivide | Binary::Modulo if right.min > 0 || right.max < 0 => {
+                !((left.min >= 0 && right.min > 0) || (left.max <= 0 && right.max < 0))
             }
-            Binary::FloorDivide | Binary::Modulo => {
-                if right.min <= 0 && right.max >= 0 {
-                    return None;
-                }
-                let same_sign =
-                    (left.min >= 0 && right.min > 0) || (left.max <= 0 && right.max < 0);
-                Some(!same_sign)
-            }
-            Binary::Power | Binary::MatrixMultiply | Binary::Divide => None,
-        }
+            _ => return None,
+        };
+        Some(self.small_binary(op, a, b, adjust_floor, Some((left, right))))
     }
 
     /// Emits arithmetic only after range analysis proves every value fits the
