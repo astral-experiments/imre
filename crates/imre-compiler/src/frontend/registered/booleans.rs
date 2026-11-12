@@ -241,7 +241,7 @@ impl PhysicalPreparation<'_, '_> {
             let value = values::operation(
                 node,
                 self.source,
-                false,
+                |_, _, _| false,
                 ir::control::boolean_literal,
                 |_| true,
                 |child| Ok::<_, std::convert::Infallible>(self.logical_operation(child, inputs)),
@@ -315,7 +315,7 @@ impl PhysicalPreparation<'_, '_> {
         } else {
             let Ok(value) = source.object_operation(
                 node,
-                true,
+                |_, _, _| true,
                 |_| true,
                 |child| {
                     Ok::<_, std::convert::Infallible>(super::bind_operand(
