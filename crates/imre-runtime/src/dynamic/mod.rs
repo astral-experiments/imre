@@ -3393,7 +3393,10 @@ impl Context {
             }
             "property" => property::METHODS,
             "memoryview" => builtins::MEMORYVIEW_METHODS,
-            "bool" => &["__repr__"],
+            "bool" => {
+                self.builtin("int");
+                &["__repr__"]
+            }
             "int" => &[
                 "__add__",
                 "__index__",

@@ -149,6 +149,9 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
         | Value::Union(_)
         | Value::Dict(_)
         | Value::Int(_)
+        | Value::Bool(_)
+        | Value::Float(_)
+        | Value::Complex(_)
         | Value::MappingProxy(_)
         | Value::Property(_)
         | Value::SlotMember { .. }
@@ -677,11 +680,12 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
             if ctx.native_type_dicts.contains_key(&class)
                 || super::exception_kind(owner).is_some() =>
         {
-            let base = if crate::dynamic::stdlib::datetime::members(owner).is_some() {
-                Context::native_base(owner).unwrap_or("object")
-            } else {
-                "object"
-            };
+            let base =
+                if owner == "bool" || crate::dynamic::stdlib::datetime::members(owner).is_some() {
+                    Context::native_base(owner).unwrap_or("object")
+                } else {
+                    "object"
+                };
             class_names(ctx, ctx.builtins[base], names)?;
             let ancestors = super::exception_kind(owner)
                 .into_iter()

@@ -198,10 +198,18 @@ def callable_directories():
     assert "__name__" not in dir(bound)
     del fn.marker
     assert "marker" not in dir(bound)
-    assert "bit_length" in dir(0) and dir(0) == dir(int)
+
+
+def numeric_directories():
+    for value, member in [(0, "bit_length"), (False, "bit_length"),
+                          (1.0, "as_integer_ratio"), (1j, "__complex__")]:
+        names = dir(value)
+        assert names == dir(type(value)) == sorted(set(names))
+        assert member in names and callable(getattr(value, member))
 
 
 def current():
+    numeric_directories()
     callable_directories()
     weak_proxy_directory()
     import _io
