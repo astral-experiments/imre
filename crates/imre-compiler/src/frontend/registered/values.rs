@@ -1283,6 +1283,27 @@ impl Checker<'_> {
             let mut previous = None;
             for dynamic in opaque {
                 if previous == Some(false) && !dynamic {
+                    if cmp.ops.len() == 1
+                        && ir::Compare::from_operator(cmp.ops[0]).is_some()
+                        && self.registered_local_start.is_some_and(|first| {
+                            cmp.operands
+                                .iter()
+                                .filter_map(ast::Expr::as_name_expr)
+                                .any(|name| {
+                                    self.names.get(name.id.as_str()).is_some_and(|&slot| {
+                                        slot < first
+                                            && self.locals[slot].builtin_scalar_name().is_some()
+                                    })
+                                })
+                        })
+                    {
+                        let checked = self.fixed_expr(node)?;
+                        if checked.ty == Type::PythonObject
+                            && matches!(&checked.kind, ExprKind::Compare(..))
+                        {
+                            return Ok(Some(source.located(node, checked)));
+                        }
+                    }
                     return Ok(None);
                 }
                 previous = Some(dynamic);

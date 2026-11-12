@@ -9116,6 +9116,12 @@ impl<'a> Checker<'a> {
                     }
                 }
                 self.restore_state(exit.expect("comparisons have at least two operands"));
+                // A registered frame compares its caller's original scalar argument. Keep
+                // the ordinary operand checks before choosing the Python result convention.
+                let live_scalar_operands = self.registered_local_start.is_some()
+                    && values
+                        .iter()
+                        .all(|value| value.ty.builtin_scalar_name().is_some());
                 if matches!(compare.ops.as_ref(), [ast::CmpOp::Eq | ast::CmpOp::NotEq])
                     && values
                         .iter()
@@ -9592,7 +9598,13 @@ impl<'a> Checker<'a> {
                     }
                     ops.push(op);
                 }
-                (Type::Bool, ExprKind::Compare(values, ops))
+                let result = if live_scalar_operands {
+                    self.live_protocol_parameters = true;
+                    Type::PythonObject
+                } else {
+                    Type::Bool
+                };
+                (result, ExprKind::Compare(values, ops))
             }
             ast::Expr::Subscript(subscript) => {
                 if let Some(ty) = self.environ_item_type(&subscript.value) {

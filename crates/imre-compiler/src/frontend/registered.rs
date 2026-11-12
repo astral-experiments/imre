@@ -5126,6 +5126,32 @@ exec("print(1)")
     }
 
     #[test]
+    fn named_function_compares_the_original_checked_scalar_argument() {
+        let source = concat!(
+            "def choose(mode: int) -> int:\n",
+            "    if mode == 0:\n",
+            "        return 7\n",
+            "    return 9\n",
+            "print(choose(0), choose(2))\n",
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.py");
+        std::fs::write(&path, source).unwrap();
+        let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
+        graph.registered_startup = true;
+        crate::checked_lower(&mut graph).unwrap();
+        let functions = graph.registered_functions();
+        let body = &functions[&graph.entry][&TextSize::default()].function.body;
+        let mut comparisons = Vec::new();
+        ir::walk_expressions(body, &mut |expr| {
+            if let ExprKind::Compare(values, _) = &expr.kind {
+                comparisons.push((values[0].ty, values[1].ty, expr.ty));
+            }
+        });
+        assert_eq!(comparisons, [(Type::Int, Type::Int, Type::PythonObject)]);
+    }
+
+    #[test]
     fn registered_arguments_share_the_checked_integer_body() {
         let graph = SourceGraph::single(
             "def report(x: int, sink, y: int):\n    answer = x + y\n    pass\n    sink(answer)\n",
