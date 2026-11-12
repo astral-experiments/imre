@@ -4505,6 +4505,11 @@ impl Context {
                                 .and_then(stdlib::warnings_accel::method_metadata)
                                 .or_else(|| {
                                     method
+                                        .strip_prefix("_bisect.")
+                                        .and_then(stdlib::bisect::method_metadata)
+                                })
+                                .or_else(|| {
+                                    method
                                         .strip_prefix("_tracemalloc.")
                                         .and_then(stdlib::tracemalloc::method_metadata)
                                 })

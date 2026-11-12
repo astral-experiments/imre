@@ -871,12 +871,21 @@ ACCEPTED = {
             "print('started')\nraise SystemExit(0)\nprint(item)\n"
         ),
     },
+    "bisect_obeys_the_target_finder": {
+        "_bisect.py": "def bisect_right(a, x): return 1234\n",
+        "main.py": (
+            "import bisect\nimport sys\n"
+            "result = bisect.bisect_right([1, 2, 2], 2)\n"
+            "print(result == (3 if '_bisect' in sys.builtin_module_names else 1234))\n"
+        ),
+    },
     "bisect_from_its_module_initializer": {
         "main.py": (
             "import bisect\nfrom bisect import bisect_left\n"
             "right = bisect.bisect_right\n"
             "values = [1, 2, 2, 4]\n"
             "print(bisect_left(values, 2), right(values, 2), bisect.bisect is right)\n"
+            "print(right(values, 2, hi=-1), right.__module__)\n"
         ),
     },
     "definition_after_execution": {"main.py": ORDERED_DEFINITIONS, "helper.py": HELPER},

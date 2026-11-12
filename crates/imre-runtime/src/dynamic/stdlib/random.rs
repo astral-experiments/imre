@@ -200,36 +200,6 @@ fn weights_type_error(ctx: &mut Context, weights: Id, error: Error) -> Error {
     })
 }
 
-/// Bisect on the original sequence, excluding its last boundary as in Random.choices.
-fn weighted_index(ctx: &mut Context, cumulative: Id, needle: Id, mut hi: i64) -> Result<i64> {
-    if let Some(kind @ ("dict" | "collections.defaultdict" | "mappingproxy")) =
-        ctx.builtin_type_name(cumulative)
-    {
-        // _bisect reads the sequence item slot, which exact native mappings do not supply.
-        return Err(Error::new("TypeError", format!("{kind} is not a sequence")));
-    }
-    if hi == -1 {
-        let length = builtins::call(ctx, "len", &[cumulative], &[])?;
-        hi = ctx.as_integer(length)?;
-    }
-    let mut lo = 0;
-    let mark = ctx.heap.temporary_mark();
-    while lo < hi {
-        let mid = lo + (hi - lo) / 2;
-        let key = ctx.int(mid);
-        let weight = ctx.get_item(cumulative, key)?;
-        ctx.heap.keep(weight);
-        let less = ctx.binary("<", needle, weight)?;
-        if ctx.truth(less)? {
-            hi = mid;
-        } else {
-            lo = mid + 1;
-        }
-        ctx.heap.release_temporaries_since(mark);
-    }
-    Ok(lo)
-}
-
 pub(super) fn choices(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let [_, population, weights, cumulative, k] = super::python_arguments(
         "Random.choices",
@@ -379,7 +349,7 @@ fn select_choices(
                     }
                 };
                 if let Some((cumulative, _)) = weighted {
-                    let index = weighted_index(ctx, cumulative, needle, n - 1)?;
+                    let index = super::bisect::right(ctx, cumulative, needle, n - 1)?;
                     ctx.heap.release_temporaries_since(mark);
                     ctx.int(index)
                 } else {

@@ -130,7 +130,8 @@ macro_rules! provider_groups {
 provider_groups! {
     fn is_eager, EAGER;
     (
-        "_blake2"
+        "_bisect"
+            | "_blake2"
             | "_frozen_importlib"
             | "_frozen_importlib_external"
             | "_functools"
