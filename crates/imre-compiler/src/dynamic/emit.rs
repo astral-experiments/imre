@@ -2549,55 +2549,33 @@ mod tests {
         let pair_header = "def f(rows):\n    for x, y in rows:";
         let suspended_target = "def f(rows):\n    for sink[(yield 'slot')], y in rows:";
         let yielded_rows = "def f():\n    for x, y in (yield 'rows'):";
-        for (header, body, partial_pair) in [
-            (pair_header, deletion, false),
-            (pair_header, manager, false),
-            (pair_header, checked_lambda, false),
-            (pair_header, generic_default, false),
-            (suspended_target, generic_default, true),
-            (yielded_rows, checked, false),
-            (pair_header, annotated, false),
-            (pair_header, checked_raise, false),
-            (pair_header, checked, false),
-            (pair_header, checked_default, false),
-            (
-                "def f(table):\n    for x in table.items():",
-                deletion,
-                false,
-            ),
-            ("def f(table):\n    for x in table.items():", manager, false),
+        for (header, body) in [
+            (pair_header, deletion),
+            (pair_header, manager),
+            (pair_header, checked_lambda),
+            (pair_header, generic_default),
+            (suspended_target, generic_default),
+            (yielded_rows, checked),
+            (pair_header, annotated),
+            (pair_header, checked_raise),
+            (pair_header, checked),
+            (pair_header, checked_default),
+            ("def f(table):\n    for x in table.items():", deletion),
+            ("def f(table):\n    for x in table.items():", manager),
             (
                 "def f(table):\n    for x in table.items():",
                 generic_default,
-                false,
             ),
-            ("def f(rows):\n    for x, *ys in rows:", deletion, false),
-            ("def f(rows):\n    for x, *ys in rows:", manager, false),
-            (
-                "def f(rows):\n    for x, *ys in rows:",
-                generic_default,
-                false,
-            ),
-            (
-                "def f(manager):\n    with manager as (x, y):",
-                deletion,
-                false,
-            ),
-            (
-                "def f(manager):\n    with manager as (x, y):",
-                manager,
-                false,
-            ),
+            ("def f(rows):\n    for x, *ys in rows:", deletion),
+            ("def f(rows):\n    for x, *ys in rows:", manager),
+            ("def f(rows):\n    for x, *ys in rows:", generic_default),
+            ("def f(manager):\n    with manager as (x, y):", deletion),
+            ("def f(manager):\n    with manager as (x, y):", manager),
             (
                 "def f(manager):\n    with manager as (x, y):",
                 generic_default,
-                false,
             ),
-            (
-                "async def f(rows):\n    async for x, y in rows:",
-                checked,
-                false,
-            ),
+            ("async def f(rows):\n    async for x, y in rows:", checked),
         ] {
             let source = format!("{header}\n{body}\n");
             let module = PreparedBody::module(
@@ -2619,13 +2597,11 @@ mod tests {
             if body == annotated {
                 assert!(plan.fully_checked() && module.syntax.is_none(), "{source}");
             }
-            if partial_pair {
-                let [region] = plan.suites.as_slice() else {
-                    panic!("expected a registered loop in {source}");
-                };
-                let owners = region.checked.region().private_slots();
+            if header == suspended_target {
+                assert!(plan.fully_checked(), "{source}");
+                let owners = plan.checked.region().private_slots();
                 let mut projected = 0;
-                crate::ir::walk_statements(&region.checked.function.body, &mut |stmt| {
+                crate::ir::walk_statements(&plan.checked.function.body, &mut |stmt| {
                     if let crate::ir::Statement::IterNext {
                         iterator,
                         key,
@@ -2718,19 +2694,13 @@ mod tests {
     }
 
     #[test]
-    fn mixed_named_entry_uses_its_stored_suite_after_erasing_the_declaration_body() {
-        for (update, checked) in [
-            ("del sink[(yield 1)]", true),
-            ("with manager((yield 1)): pass", true),
-            (
-                "for entry in rows: selected = (lambda value=(yield 1): value)()",
-                true,
-            ),
-            (
-                "for entry in rows:\n            def hold[T](value=(yield entry)):\n                return value",
-                true,
-            ),
-            ("for sink[(yield 'slot')] in rows: pass", false),
+    fn named_entry_keeps_its_checked_body_after_erasing_the_declaration() {
+        for update in [
+            "del sink[(yield 1)]",
+            "with manager((yield 1)): pass",
+            "for entry in rows: selected = (lambda value=(yield 1): value)()",
+            "for entry in rows:\n            def hold[T](value=(yield entry)):\n                return value",
+            "for sink[(yield 'slot')] in rows: pass",
         ] {
             let source = format!(
                 "def make():
@@ -2758,10 +2728,7 @@ mod tests {
                 .as_function_def_stmt_mut()
                 .unwrap();
             let start = def.start();
-            assert_eq!(
-                module.source.function_suites[&start].fully_checked(),
-                checked
-            );
+            assert!(module.source.function_suites[&start].fully_checked());
             def.body.clear();
             assert_eq!(module.standalone().unwrap(), before);
 

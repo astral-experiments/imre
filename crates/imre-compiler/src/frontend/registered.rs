@@ -1898,8 +1898,8 @@ impl<'a> SuitePreparation<'a> {
             for_pull(loop_),
             |ty| scope.hidden(ty),
         );
-        let binding = scope
-            .with_binding_operands(|scope| input.bind_loop_target(scope, &loop_.target, true))
+        let binding = input
+            .bind_loop_target(&mut scope, &loop_.target, true)
             .map_err(|()| {
                 scope.refusal.unwrap_or((
                     loop_.target.range(),
@@ -2218,7 +2218,7 @@ impl<'a> SuitePreparation<'a> {
                     let slots = scope.locals.len();
                     if let Some(values) = inputs
                         .clone()
-                        .map(|input| scope.with_binding_operands(|scope| input.lower(scope)))
+                        .map(|input| input.in_binding(&mut scope))
                         .collect()
                     {
                         body.push(Statement::Expr(operation(op, Type::None, values)));
@@ -2664,7 +2664,7 @@ impl statements::StatementLowering for SourceScope<'_> {
                     .map(|target| {
                         let (op, inputs) = deletion(target);
                         let values = inputs
-                            .map(|input| self.with_binding_operands(|scope| input.lower(scope)))
+                            .map(|input| input.in_binding(self))
                             .collect::<Option<_>>()?;
                         Some(Statement::Expr(operation(op, Type::None, values)))
                     })
@@ -2689,6 +2689,11 @@ enum TargetInput<'a> {
 }
 
 impl TargetInput<'_> {
+    /// Read the receiver or key where its binding will run, including a suspension in that frame.
+    fn in_binding(self, scope: &mut SourceScope<'_>) -> Option<Expr> {
+        scope.with_binding_operands(|scope| self.lower(scope))
+    }
+
     fn lower(self, scope: &mut SourceScope<'_>) -> Option<Expr> {
         match self {
             Self::Receiver(expr) => scope.ordinary_operand(expr),
@@ -2806,13 +2811,16 @@ impl unpacking::PatternBinder for SourceScope<'_> {
         let store = match target {
             ast::Expr::Name(name) => self.store(name.id.as_str(), value),
             ast::Expr::Attribute(attr) => {
-                let receiver = self.ordinary_operand(&attr.value).ok_or(())?;
+                let receiver = TargetInput::Receiver(&attr.value)
+                    .in_binding(self)
+                    .ok_or(())?;
                 attribute_statement(ir::AttributeAction::Store, attr, vec![value, receiver])
             }
             ast::Expr::Subscript(sub) => {
-                let receiver = self.ordinary_operand(&sub.value).ok_or(())?;
-                let key =
-                    values::index_key(&sub.slice, &mut |e| self.ordinary_operand(e).ok_or(()))?;
+                let receiver = TargetInput::Receiver(&sub.value)
+                    .in_binding(self)
+                    .ok_or(())?;
+                let key = TargetInput::Index(&sub.slice).in_binding(self).ok_or(())?;
                 Statement::SetItem(receiver, key, value)
             }
             _ => return Err(()),
@@ -2982,7 +2990,7 @@ impl SourceScope<'_> {
         targets: &[ast::Expr],
         value: Expr,
     ) -> StdResult<Vec<Statement>, ()> {
-        self.with_binding_operands(|scope| unpacking::bind_assignment(scope, targets, value))
+        unpacking::bind_assignment(self, targets, value)
     }
 
     fn with_binding_operands<T>(&mut self, lower: impl FnOnce(&mut Self) -> T) -> T {
@@ -3088,7 +3096,7 @@ impl SourceScope<'_> {
         let Some(target) = item.optional_vars.as_deref() else {
             return Ok(None);
         };
-        self.with_binding_operands(|scope| contexts::python_binding(scope, target))
+        contexts::python_binding(self, target)
             .map(Some)
             .map_err(|()| {
                 self.refusal.unwrap_or((
