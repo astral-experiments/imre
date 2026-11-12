@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 
+use imre_ast::literal_tuple_element as literal;
 use ruff_python_ast as ast;
 use ruff_python_ast::visitor::{Visitor, walk_expr, walk_stmt};
 use ruff_text_size::{Ranged, TextRange, TextSize};
@@ -935,21 +936,6 @@ fn inert_default(expr: &ast::Expr) -> bool {
             .all(|p| p.default.as_deref().is_none_or(inert_default));
     }
     literal(expr)
-}
-
-fn literal(expr: &ast::Expr) -> bool {
-    if let ast::Expr::Tuple(tuple) = expr {
-        return tuple.elts.iter().all(literal);
-    }
-    matches!(
-        expr,
-        ast::Expr::StringLiteral(_)
-            | ast::Expr::NumberLiteral(_)
-            | ast::Expr::BooleanLiteral(_)
-            | ast::Expr::BytesLiteral(_)
-            | ast::Expr::NoneLiteral(_)
-            | ast::Expr::EllipsisLiteral(_)
-    )
 }
 
 /// A bare dataclass with ordinary marker bases can create its fields without
