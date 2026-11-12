@@ -629,7 +629,7 @@ fn emit_program(
             emitter.body.reset_names();
         }
         let frame = function_source_frame(module, &repr_methods, id);
-        emitter.function(function, entry.then_some(attrs), frame, &borrows[id])?;
+        emitter.function(function, entry, frame, &borrows[id])?;
         emitter
             .output
             .include_integers(std::mem::take(&mut emitter.body.integers));
@@ -780,7 +780,7 @@ fn emit_program(
     }
     emitter.enum_table();
     emitter.literal_pool();
-    write_function_bodies(emitter.output, module, bodies, attrs);
+    write_function_bodies(emitter.output, module, bodies, attrs, emitter.uses_sys_argv);
     // Layout hints never replace the representation, overflow, or error guards.
     emitter.output.common().push_str(BRANCH_WEIGHTS);
     Ok(())
@@ -791,6 +791,7 @@ fn write_function_bodies(
     module: &Module,
     mut bodies: Vec<String>,
     attrs: &str,
+    argv: bool,
 ) {
     let main = bodies.pop().expect("program has an entry");
     for (id, (f, body)) in module.functions.iter().zip(bodies).enumerate() {
@@ -813,7 +814,13 @@ fn write_function_bodies(
         definition.push_str("}\n");
     }
     output.common().push('\n');
-    output.entry_buffer().push_str(&main);
+    body::write_main(
+        output.entry_buffer(),
+        &main,
+        argv,
+        attrs,
+        "@imre_finish_stdio()",
+    );
 }
 
 #[derive(Default)]
@@ -2247,11 +2254,10 @@ impl Emitter<'_, '_> {
     fn function(
         &mut self,
         function: &Function,
-        main_attrs: Option<&str>,
+        entry: bool,
         frame: Option<&ir::SourceFrame>,
         borrows: &FunctionBorrows,
     ) -> Result<(), Unsupported> {
-        let entry = main_attrs.is_some();
         self.uses_regex_positions =
             self.module_reads_regex_positions && regex_positions_may_escape(self.module, function);
         self.body.entry.clear();
@@ -2306,11 +2312,7 @@ impl Emitter<'_, '_> {
         self.temporaries.clear();
         self.cleanups.clear();
         self.handler_depth = 0;
-        if let Some(attrs) = main_attrs {
-            self.body.start_main(self.uses_sys_argv, attrs);
-        } else {
-            self.start("entry");
-        }
+        self.start("entry");
         for &slot in &function.params {
             if self.cached_string_lengths.contains(&slot) {
                 self.line(format!("%str_count{slot} = alloca i64"));
@@ -2647,8 +2649,8 @@ impl Emitter<'_, '_> {
             self.start(&error_return);
             let status = self.instruction(format!("call i32 @imre_finish_unhandled(ptr {exit})"));
             self.body.end(format!("ret i32 {status}"));
+            // The program entry returns the stdio status after successful cleanup.
             self.start(&flush);
-            self.body.finish_main("@imre_finish_stdio()");
         } else if function.returns == Type::None {
             self.body.end("ret i8 0");
         } else {

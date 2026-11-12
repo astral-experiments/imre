@@ -37,6 +37,16 @@ impl IntegerFunctions {
     }
 }
 
+/// Complete the C entry with the argument ABI its body uses and the
+/// runtime operation that supplies the process exit status.
+pub(super) fn write_main(output: &mut String, body: &str, argv: bool, attrs: &str, finish: &str) {
+    let params = if argv { "i32 %argc, ptr %argv" } else { "" };
+    writeln!(output, "define i32 @main({params}){attrs} {{").unwrap();
+    output.push_str(body);
+    writeln!(output, "  %status = call i32 {finish}").unwrap();
+    output.push_str("  ret i32 %status\n}\n");
+}
+
 #[derive(Clone)]
 pub(crate) struct FunctionBody {
     pub(crate) code: String,
@@ -63,21 +73,6 @@ impl FunctionBody {
             next_label: 0,
             integers: IntegerFunctions::default(),
         }
-    }
-
-    /// Open the process entry in its owning unit. Only programs that consume
-    /// the process arguments need them in the LLVM signature.
-    pub(super) fn start_main(&mut self, argv: bool, attrs: &str) {
-        let params = if argv { "i32 %argc, ptr %argv" } else { "" };
-        writeln!(self.code, "define i32 @main({params}){attrs} {{").unwrap();
-        self.start("entry");
-    }
-
-    /// The final runtime operation supplies the executable's exit status.
-    pub(super) fn finish_main(&mut self, call: &str) {
-        self.line(format!("%status = call i32 {call}"));
-        self.end("ret i32 %status");
-        self.code.push_str("}\n");
     }
 
     pub(super) fn reset_names(&mut self) {
