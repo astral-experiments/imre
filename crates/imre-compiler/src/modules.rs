@@ -3217,7 +3217,6 @@ pub(crate) enum SetLayoutHint {
 
 /// Resolver facts which native lowering can extend or consume while trying a set layout.
 pub(crate) struct LoweringBaseline {
-    diagnostic_counts: Vec<usize>,
     explicit_check: bool,
     needs_object_runtime: bool,
     deferred_object_error: Option<Diagnostic>,
@@ -3243,6 +3242,8 @@ pub(crate) struct SourceGraph {
     pub(crate) handled_tracebacks: bool,
     pub(crate) traceback_objects: bool,
     pub(crate) empty_keywords: empty_keywords::EmptyKeywords,
+    /// Import proofs belong to source resolution and survive representation changes.
+    checked_builtin_imports: Vec<(ModuleId, TextRange)>,
     checked_diagnostics: std::cell::RefCell<Vec<Vec<CheckedDiagnostic>>>,
     pub(crate) needs_object_runtime: std::cell::Cell<bool>,
     /// A reachable native constructor can use its object implementation if typed lowering fails.
@@ -3281,12 +3282,6 @@ pub(crate) const MEMORY_SOURCE_PATH: &str = "/input.py";
 impl SourceGraph {
     pub(crate) fn lowering_baseline(&self) -> LoweringBaseline {
         LoweringBaseline {
-            diagnostic_counts: self
-                .checked_diagnostics
-                .borrow()
-                .iter()
-                .map(Vec::len)
-                .collect(),
             explicit_check: self.session.explicit_check,
             needs_object_runtime: self.needs_object_runtime.get(),
             deferred_object_error: self.deferred_object_error.borrow().clone(),
@@ -3313,13 +3308,8 @@ impl SourceGraph {
             .clone_from(&baseline.deferred_object_error);
         self.reachable.clone_from(&baseline.reachable);
         self.traceback_objects = baseline.traceback_objects;
-        for (proofs, &count) in self
-            .checked_diagnostics
-            .get_mut()
-            .iter_mut()
-            .zip(&baseline.diagnostic_counts)
-        {
-            proofs.truncate(count);
+        for proofs in self.checked_diagnostics.get_mut() {
+            proofs.clear();
         }
     }
 
@@ -3821,44 +3811,39 @@ impl SourceGraph {
     pub(crate) fn diagnostic_scopes(
         &self,
     ) -> (Option<Vec<Vec<TextRange>>>, Vec<Vec<CheckedDiagnostic>>) {
-        let overloads: Vec<Vec<_>> = self
-            .modules
-            .iter()
-            .enumerate()
-            .map(|(id, module)| {
-                module
-                    .parsed
-                    .syntax()
-                    .body
-                    .iter()
-                    .filter_map(|stmt| {
-                        if let ast::Stmt::ClassDef(c) = stmt {
-                            Some(&c.body)
-                        } else {
-                            None
-                        }
-                    })
-                    .flatten()
-                    .filter_map(|stmt| {
-                        let ast::Stmt::FunctionDef(method) = stmt else {
-                            return None;
-                        };
-                        let [decorator] = method.decorator_list.as_slice() else {
-                            return None;
-                        };
-                        (self.resolve(id, &decorator.expression)
-                            == Some(Binding::Intrinsic(Intrinsic::ContextManager)))
-                        .then_some(CheckedDiagnostic::Decorator(decorator.range()))
-                    })
-                    .chain({
-                        let mut diagnostics = self.checked_diagnostics.borrow()[id].clone();
-                        diagnostics.sort_unstable_by_key(|note| note.sort_key());
-                        diagnostics.dedup();
-                        diagnostics
-                    })
-                    .collect()
-            })
-            .collect();
+        let mut overloads = self.checked_diagnostics.borrow().clone();
+        for &(id, range) in &self.checked_builtin_imports {
+            overloads[id].push(CheckedDiagnostic::BuiltinImport(range));
+        }
+        for (id, diagnostics) in overloads.iter_mut().enumerate() {
+            diagnostics.sort_unstable_by_key(|note| note.sort_key());
+            diagnostics.dedup();
+            let decorators = self.modules[id]
+                .parsed
+                .syntax()
+                .body
+                .iter()
+                .filter_map(|stmt| {
+                    if let ast::Stmt::ClassDef(c) = stmt {
+                        Some(&c.body)
+                    } else {
+                        None
+                    }
+                })
+                .flatten()
+                .filter_map(|stmt| {
+                    let ast::Stmt::FunctionDef(method) = stmt else {
+                        return None;
+                    };
+                    let [decorator] = method.decorator_list.as_slice() else {
+                        return None;
+                    };
+                    (self.resolve(id, &decorator.expression)
+                        == Some(Binding::Intrinsic(Intrinsic::ContextManager)))
+                    .then_some(CheckedDiagnostic::Decorator(decorator.range()))
+                });
+            diagnostics.splice(..0, decorators);
+        }
         let mut skipped = self.reachable.as_ref().map(|r| r.skipped.clone());
         if let Some((library, roots)) = &self.required_library {
             skipped.get_or_insert_with(|| vec![Vec::new(); self.modules.len()])[*library]
@@ -4994,10 +4979,6 @@ impl<'a> Loader<'a> {
         }
         self.inputs.missing.sort_unstable();
         self.inputs.missing.dedup();
-        let mut checked_diagnostics = vec![Vec::new(); self.modules.len()];
-        for (id, name) in self.checked_builtin_imports {
-            checked_diagnostics[id].push(CheckedDiagnostic::BuiltinImport(name));
-        }
         let mut graph = SourceGraph {
             filesystem_roots: std::iter::once(self.root)
                 .skip(usize::from(self.skip_current_root))
@@ -5019,7 +5000,8 @@ impl<'a> Loader<'a> {
                 })
             }),
             empty_keywords: empty_keywords::EmptyKeywords::default(),
-            checked_diagnostics: std::cell::RefCell::new(checked_diagnostics),
+            checked_builtin_imports: self.checked_builtin_imports,
+            checked_diagnostics: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
             float_components: Default::default(),
             missing_repr: Default::default(),
             // An import that cannot be initialized here must not turn an unused
