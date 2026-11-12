@@ -2518,20 +2518,14 @@ impl Emitter<'_, '_> {
                 command_flags.map_or(-1, |flags| i32::from(flags.context_aware_warnings))
             ));
             self.line("call void @imre_record_error_init()");
-            if command_flags.is_some_and(|flags| flags.unbuffered) {
-                self.line("call void @imre_stdio_unbuffered_init()");
-            }
-            if let Some(utf8_mode) = command_flags.and_then(|flags| flags.utf8_mode) {
-                self.line(format!(
-                    "call void @imre_stdio_command_init(i32 {}, i32 {})",
-                    u32::from(ignore_env),
-                    u32::from(utf8_mode)
-                ));
-            } else if ignore_env {
-                self.line("call void @imre_stdio_isolated_init()");
-            } else {
-                self.line("call void @imre_stdio_init()");
-            }
+            self.line(format!(
+                "call void @imre_stdio_start(i32 {}, i32 {}, i32 {})",
+                u32::from(ignore_env),
+                command_flags
+                    .and_then(|flags| flags.utf8_mode)
+                    .map_or(-1, i32::from),
+                u32::from(command_flags.is_some_and(|flags| flags.unbuffered)),
+            ));
             let warnoptions = command_flags.map_or(&[][..], |flags| flags.warnoptions.as_slice());
             let options = if warnoptions.is_empty() {
                 "null".to_owned()
@@ -10831,12 +10825,9 @@ declare void @imre_typed_start(i32, ptr)
 declare void @imre_process_config_init(i32, i32, i32)
 declare i64 @imre_sys_context_aware_warnings()
 declare void @imre_record_error_init()
-declare void @imre_stdio_unbuffered_init()
-declare void @imre_stdio_init()
-declare void @imre_stdio_isolated_init()
+declare void @imre_stdio_start(i32, i32, i32)
 declare void @imre_warning_options_init(i32, ptr)
 declare i64 @imre_tuple_index(i64, i64)
-declare void @imre_stdio_command_init(i32, i32)
 declare ptr @imre_sys_stream_text(i32, i32)
 declare i1 @imre_sys_utf8_mode()
 declare void @imre_sys_init_encoding_names()
