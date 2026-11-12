@@ -84,5 +84,10 @@ pub(in crate::dynamic::stdlib) fn call(
     .map(|n| ctx.int(n))
     .collect();
     let fsid = stat::integer(ctx, s.f_fsid);
-    Ok(stat::wrap(ctx, &stat::VFS, values, vec![fsid]))
+    Ok(super::super::structseq::wrap(
+        ctx,
+        &stat::VFS,
+        values,
+        vec![fsid],
+    ))
 }

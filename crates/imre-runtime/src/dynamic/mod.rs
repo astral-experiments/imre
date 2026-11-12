@@ -523,6 +523,10 @@ impl Context {
 
     /// Slot descriptors require the native layout even when a proxy passes isinstance.
     fn builtin_slot_accepts(&self, object: Id, owner: &str) -> bool {
+        if matches!(self.heap.get(object), Value::NamedTuple { class: Some(class), .. } if *class == owner)
+        {
+            return true;
+        }
         match (owner, self.heap.get(self.scalar_value(object))) {
             #[cfg(target_os = "linux")]
             ("mmap.mmap", Value::Mmap { .. }) => true,
@@ -3233,6 +3237,14 @@ impl Context {
             let dictionary = self.dict(vec![(key, origin)]);
             self.native_type_dicts.insert(value, dictionary);
         }
+        if name == stdlib::time::STRUCT_TIME {
+            stdlib::structseq::install_type(
+                self,
+                value,
+                &stdlib::time::LAYOUT,
+                stdlib::time::STRUCT_TIME_DOC,
+            );
+        }
         if name == "struct.Struct" {
             let mut entries = Vec::new();
             for member in builtins::STRUCT_METHODS.iter().copied().chain(["__new__"]) {
@@ -4945,7 +4957,11 @@ impl Context {
             "_locale" => stdlib::locale::install(self, module, scope)?,
             "_warnings" => stdlib::warnings_accel::install(self, module, scope)?,
             "_tracemalloc" => stdlib::tracemalloc::install(self, module, scope),
-            "time" => stdlib::time::install_timezone(self, scope)?,
+            "time" => {
+                let class = self.builtin(stdlib::time::STRUCT_TIME);
+                self.bind(scope, "struct_time", class);
+                stdlib::time::install_timezone(self, scope)?;
+            }
             "struct" => stdlib::structure::install(self, scope)?,
             "marshal" => {
                 for name in ["dumps", "loads"] {

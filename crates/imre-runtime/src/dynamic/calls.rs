@@ -1748,10 +1748,8 @@ impl Context {
             "collections.abc._CallableGenericAlias" => "types.GenericAlias",
             "datetime.datetime" => "datetime.date",
             "datetime.timezone" => stdlib::datetime::TZINFO,
-            "time.struct_time"
-            | stdlib::flags::TYPE
-            | stdlib::os::stat::CLASS
-            | stdlib::os::stat::VFS_CLASS => "tuple",
+            stdlib::flags::TYPE => "tuple",
+            class if stdlib::structseq::layout(class).is_some() => "tuple",
             class if stdlib::fixed_structseq::fixed_type(class).is_some() => "tuple",
             "typing._LiteralGenericAlias"
             | "typing._UnpackGenericAlias"
@@ -2051,6 +2049,7 @@ impl Context {
                 if HashState::is_provider_class(name)
                     || (cfg!(target_os = "linux")
                         && matches!(name.as_str(), "select.epoll" | "mmap.mmap"))
+                    || stdlib::structseq::layout(name).is_some()
                     || builtins::is_builtin_type(name)
                     || builtins::is_iterator_type(name)
                     || builtins::CORE_RUNTIME_TYPES.contains(&name.as_str())
@@ -2089,8 +2088,6 @@ impl Context {
                             | "_contextvars.Context"
                             | "_contextvars.ContextVar"
                             | "_contextvars.Token"
-                            | stdlib::os::stat::CLASS
-                            | stdlib::os::stat::VFS_CLASS
                             | "array.array"
                             | "selectors.PollSelector"
                             | "selectors.SelectSelector"
@@ -4691,15 +4688,19 @@ impl Context {
             {
                 return Ok(self.builtin("tuple.__getitem__"));
             }
-            Value::Native(ref class) if let Some(layout) = stdlib::os::stat::layout(class) => {
+            Value::Native(ref class) if let Some(layout) = stdlib::structseq::layout(class) => {
+                if let Some(member) = self.own_class_attr(obj, name) {
+                    return Ok(member);
+                }
                 match name {
+                    "__bases__" | "__mro__" => return Ok(self.builtin_hierarchy_tuple(obj, name)),
                     method if layout.methods().contains(&method) => {
                         return Ok(self.builtin(&format!("{class}.{method}")));
                     }
-                    field if let Some(id) = stdlib::os::stat::member(self, layout, field) => {
+                    field if let Some(id) = stdlib::structseq::member(self, layout, field) => {
                         return Ok(id);
                     }
-                    "__module__" => return Ok(self.text("os")),
+                    "__module__" => return Ok(self.text(layout.class.rsplit_once('.').unwrap().0)),
                     "__name__" | "__qualname__" => return Ok(self.text(layout.name())),
                     "__base__" => return Ok(self.builtin("tuple")),
                     "__match_args__" => {
@@ -4710,7 +4711,7 @@ impl Context {
                             .collect();
                         return Ok(self.alloc(Value::Tuple(names)));
                     }
-                    field if let Some(n) = stdlib::os::stat::count_attribute(layout, field) => {
+                    field if let Some(n) = stdlib::structseq::count_attribute(layout, field) => {
                         return Ok(self.int(n));
                     }
                     _ => {}
@@ -5923,8 +5924,8 @@ impl Context {
                 if let Some(i) = names.iter().position(|n| n == name) {
                     return Ok(values[i]);
                 }
-                if let Some(layout) = class.and_then(stdlib::os::stat::layout)
-                    && let Some(n) = stdlib::os::stat::count_attribute(layout, name)
+                if let Some(layout) = class.and_then(stdlib::structseq::layout)
+                    && let Some(n) = stdlib::structseq::count_attribute(layout, name)
                 {
                     return Ok(self.int(n));
                 }
@@ -6677,8 +6678,8 @@ impl Context {
             class: Some(owner), ..
         } = *self.heap.get(obj)
         {
-            let member = if let Some(layout) = stdlib::os::stat::layout(owner) {
-                stdlib::os::stat::member(self, layout, name)
+            let member = if let Some(layout) = stdlib::structseq::layout(owner) {
+                stdlib::structseq::member(self, layout, name)
             } else if let Some(class) = stdlib::fixed_structseq::fixed_type(owner) {
                 stdlib::fixed_structseq::member(self, class, name)
             } else {
@@ -7953,8 +7954,9 @@ impl Context {
                 ));
             }
             Some(
-                name
-                @ (stdlib::fixed_structseq::SCHED_PARAM | stdlib::datetime::isocalendar::CLASS),
+                name @ (stdlib::fixed_structseq::SCHED_PARAM
+                | stdlib::datetime::isocalendar::CLASS
+                | stdlib::time::STRUCT_TIME),
             ) => {
                 return Err(Error::new(
                     "TypeError",

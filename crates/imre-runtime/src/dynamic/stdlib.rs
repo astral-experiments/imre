@@ -84,6 +84,7 @@ pub(super) mod signal;
 pub(super) mod socket;
 #[cfg(unix)]
 pub(super) mod ssl;
+pub(super) mod structseq;
 pub(super) mod structure;
 mod subprocess;
 mod system_size;
@@ -748,7 +749,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         #[cfg(target_os = "linux")]
         ("time", "CLOCK_REALTIME") => ctx.int(i64::from(libc::CLOCK_REALTIME)),
         ("time", "_STRUCT_TM_ITEMS") => ctx.int(11),
-        ("time", "struct_time") => ctx.builtin("time.struct_time"),
         ("time", name) if time::is_function(name) => ctx.builtin(&format!("time.{name}")),
         ("socket", name) => return socket::attribute(ctx, name),
         ("hashlib", name)
@@ -2090,14 +2090,31 @@ pub(super) fn call(
     if let Some(operation) = name.strip_prefix("_imre_metadata.") {
         return metadata::call(ctx, operation, args, kwargs);
     }
+    if let Some(class) = name.strip_suffix(".__new__")
+        && let Some(layout) = structseq::layout(class)
+    {
+        let Some((&ty, rest)) = args.split_first() else {
+            return Err(Error::new(
+                "TypeError",
+                format!("{class}.__new__(): not enough arguments"),
+            ));
+        };
+        if ty != ctx.builtin(class) {
+            return Err(ctx.invalid_new_subtype(class, ty));
+        }
+        return structseq::construct(ctx, layout, rest, kwargs);
+    }
     if let Some((class, method)) = name.rsplit_once('.')
-        && let Some(layout) = os::stat::layout(class)
+        && let Some(layout) = structseq::layout(class)
         && layout.methods().contains(&method)
     {
-        return os::stat::method(ctx, layout, method, args, kwargs);
+        if method == "__repr__" {
+            return builtins::call(ctx, name, args, kwargs);
+        }
+        return structseq::method(ctx, layout, method, args, kwargs);
     }
-    if let Some(layout) = os::stat::layout(name) {
-        return os::stat::construct(ctx, layout, args, kwargs);
+    if let Some(layout) = structseq::layout(name) {
+        return structseq::construct(ctx, layout, args, kwargs);
     }
     #[cfg(target_os = "linux")]
     if let Some(op @ ("pipe2" | "posix_openpt" | "grantpt" | "unlockpt" | "ptsname")) =

@@ -3289,6 +3289,7 @@ impl Context {
             }
             if let Value::Native(name) = self.heap.get(base)
                 && (super::stdlib::fixed_structseq::fixed_type(name).is_some()
+                    || super::stdlib::structseq::layout(name).is_some()
                     || crate::objects::HashState::is_provider_class(name)
                     || (cfg!(target_os = "linux") && name == "select.epoll")
                     || super::builtins::is_final_iterator_type(name)

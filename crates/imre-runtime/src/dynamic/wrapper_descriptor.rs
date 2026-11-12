@@ -287,7 +287,7 @@ impl BuiltinDescriptor {
                 attr,
                 &["__reduce__", "__replace__"][..],
             )),
-            Some((class, attr)) if let Some(layout) = stdlib::os::stat::layout(class) => {
+            Some((class, attr)) if let Some(layout) = stdlib::structseq::layout(class) => {
                 Some((layout.class, attr, layout.methods()))
             }
             Some((namespace::CLASS, attr)) => {
@@ -558,15 +558,12 @@ impl BuiltinDescriptor {
             super::namespace::CLASS => namespace::instance_class(ctx, receiver).is_some(),
             "frame" => matches!(ctx.heap.get(receiver), Value::PythonFrame { .. }),
             owner if builtins::is_exception(owner) => ctx.builtin_slot_accepts(receiver, owner),
-            class @ (stdlib::fixed_structseq::SCHED_PARAM
-            | stdlib::os::stat::CLASS
-            | stdlib::os::stat::VFS_CLASS) => matches!(
-                ctx.heap.get(receiver),
-                Value::NamedTuple {
-                    class: Some(owner),
-                    ..
-                } if *owner == class
-            ),
+            class
+                if class == stdlib::fixed_structseq::SCHED_PARAM
+                    || stdlib::structseq::layout(class).is_some() =>
+            {
+                ctx.builtin_slot_accepts(receiver, class)
+            }
             stdlib::os::scandir::ENTRY => matches!(ctx.heap.get(receiver), Value::DirEntry(_)),
             stdlib::os::scandir::ITER => matches!(ctx.heap.get(receiver), Value::Scandir(_)),
             "range" => matches!(ctx.heap.get(receiver), Value::Range(_)),
@@ -685,7 +682,7 @@ impl BuiltinDescriptor {
                         _ if matches!(self.owner, "builtin_function_or_method" | "method" | "method-wrapper") => self.owner,
                         Value::Deque(_) if self.owner == deque::CLASS => "deque",
                         Value::DefaultDict { .. } if self.owner == defaultdict::CLASS => "defaultdict",
-                        Value::NamedTuple { class: Some(owner), .. } if let Some(layout) = stdlib::os::stat::layout(owner) => layout.name(),
+                        Value::NamedTuple { class: Some(owner), .. } if let Some(layout) = stdlib::structseq::layout(owner) => layout.name(),
                         value if let Some(class) = value.instance_class() => ctx
                             .class_attr(class, "__qualname__")
                             .and_then(|name| ctx.str_value(name).ok())
@@ -857,10 +854,10 @@ impl BuiltinDescriptor {
                     ("__getstate__" | "__reduce__" | "__reduce_ex__", "__doc__") if self.owner == "object" => "Helper for pickle.",
                     ("__getstate__" | "__reduce__", _) if self.owner == "object" => "($self, /)",
                     ("__reduce_ex__", _) if self.owner == "object" => "($self, protocol, /)",
-                    ("__replace__", "__doc__") if self.owner == stdlib::os::stat::CLASS => "Return a copy of the structure with new values for the specified fields.",
-                    ("__replace__", _) if self.owner == stdlib::os::stat::CLASS => "($self, /, **changes)",
-                    ("__reduce__", "__doc__") if stdlib::os::stat::layout(self.owner).is_some() => return Some(NONE),
-                    ("__reduce__", _) if stdlib::os::stat::layout(self.owner).is_some() => "($self, /)",
+                    ("__replace__", "__doc__") if stdlib::structseq::layout(self.owner).is_some() => "Return a copy of the structure with new values for the specified fields.",
+                    ("__replace__", _) if stdlib::structseq::layout(self.owner).is_some() => "($self, /, **changes)",
+                    ("__reduce__", "__doc__") if stdlib::structseq::layout(self.owner).is_some() => return Some(NONE),
+                    ("__reduce__", _) if stdlib::structseq::layout(self.owner).is_some() => "($self, /)",
                     ("__getnewargs__", "__doc__") => return Some(NONE),
                     ("__getnewargs__", _) => "($self, /)",
                     ("count", "__doc__") if self.owner == "tuple" => "Return number of occurrences of value.",

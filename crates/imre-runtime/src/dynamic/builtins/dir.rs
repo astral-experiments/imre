@@ -164,7 +164,7 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
         | Value::SurrogateStr(_) => ctx.exact_type(object)?,
         Value::NamedTuple {
             class: Some(class), ..
-        } if crate::dynamic::stdlib::os::stat::layout(class).is_some()
+        } if crate::dynamic::stdlib::structseq::layout(class).is_some()
             || crate::dynamic::stdlib::fixed_structseq::fixed_type(class).is_some() =>
         {
             ctx.builtin(class)
@@ -707,9 +707,12 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
             }
         }
         Value::Native(name)
-            if let Some(layout) = crate::dynamic::stdlib::os::stat::layout(name) =>
+            if let Some(layout) = crate::dynamic::stdlib::structseq::layout(name) =>
         {
-            struct_sequence_names(names, crate::dynamic::stdlib::os::stat::field_names(layout));
+            struct_sequence_names(
+                names,
+                crate::dynamic::stdlib::structseq::field_names(layout),
+            );
         }
         Value::Native(name)
             if let Some(class) = crate::dynamic::stdlib::fixed_structseq::fixed_type(name) =>
