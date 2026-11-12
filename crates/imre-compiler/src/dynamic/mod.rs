@@ -2550,7 +2550,9 @@ pub(crate) fn compile(
         .map(|graph| graph.modules)
         .unwrap_or_default();
     registrations.modules = &modules;
-    let entry_source = file_source.or_else(|| entry_file.map(|file| file.parsed(&modules)));
+    if let Some(file) = entry_file {
+        registrations.checked_units.entry(0).or_default().source = Some(file);
+    }
     let providers = options
         .bundled_provider_archive
         .as_deref()
@@ -2560,7 +2562,7 @@ pub(crate) fn compile(
     let mut prepared = prepare::units(
         (&sources, &builtins),
         prepare::SourceInputs {
-            entry_source,
+            entry_source: file_source,
             scanned_modules,
             shipped_checks,
         },

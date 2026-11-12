@@ -316,6 +316,7 @@ impl<'a> PreparedBody<'a> {
             Cow::Borrowed(source),
             python_optimization,
             origin,
+            None,
             Input::Module(
                 ParsedModule::parse(path, source.into())?.parsed,
                 LiteralSites::default(),
@@ -342,7 +343,7 @@ impl<'a> PreparedBody<'a> {
             python_optimization,
             ModuleOrigin::Interactive(inherited_flags),
             LiteralSites::default(),
-            None,
+            Default::default(),
         )
         .ok()
     }
@@ -354,7 +355,10 @@ impl<'a> PreparedBody<'a> {
         python_optimization: i32,
         origin: ModuleOrigin<'a>,
         literal_sites: LiteralSites,
-        operand_types: Option<crate::analysis::OperandTypes<'_>>,
+        (operand_types, registered_values): (
+            Option<crate::analysis::OperandTypes<'_>>,
+            Option<&'a crate::frontend::RegisteredModuleSource>,
+        ),
     ) -> Result<Self, String> {
         let (module, normalized) = module.into();
         let (body, _) = Self::prepare(
@@ -363,6 +367,7 @@ impl<'a> PreparedBody<'a> {
             module.text,
             python_optimization,
             origin,
+            registered_values,
             Input::Module(
                 module.parsed,
                 literal_sites,
@@ -399,6 +404,7 @@ impl<'a> PreparedBody<'a> {
         text: Cow<'a, str>,
         python_optimization: i32,
         origin: ModuleOrigin<'a>,
+        registered_values: Option<&'a crate::frontend::RegisteredModuleSource>,
         input: Input<'_>,
     ) -> Result<(Self, Option<crate::frontend::AnnotationCode>), String> {
         #[cfg(test)]
@@ -445,9 +451,14 @@ impl<'a> PreparedBody<'a> {
         } else {
             None
         };
-        let has_templates = tokens
-            .iter()
-            .any(|t| t.kind() == ast::token::TokenKind::TStringStart);
+        let has_templates = registered_values.map_or_else(
+            || {
+                tokens
+                    .iter()
+                    .any(|t| t.kind() == ast::token::TokenKind::TStringStart)
+            },
+            |values| values.has_templates,
+        );
         // CPython starts the module provider at the first statement, excluding its decorators.
         let module_start = syntax
             .body
@@ -475,7 +486,10 @@ impl<'a> PreparedBody<'a> {
             .filter(|token| token.kind() == ast::token::TokenKind::Class)
             .map(Ranged::start)
             .collect::<Vec<_>>();
-        let method_imports = imre_ast::module_imports(&syntax.body);
+        let method_imports = registered_values.map_or_else(
+            || Cow::Owned(imre_ast::module_imports(&syntax.body)),
+            |values| Cow::Borrowed(&values.method_imports),
+        );
         let future_flags = super::literal::future_flags(&syntax.body, inherited_flags);
         let lower = |mut body: ast::Suite| {
             let names = module_source::lower_with_future(
@@ -723,6 +737,7 @@ impl<'a> PreparedBody<'a> {
             Cow::Owned(text.to_owned()),
             python_optimization,
             ModuleOrigin::Program(None),
+            None,
             Input::Expression(syntax, parsed.tokens()),
         )
         .ok()?;
@@ -963,7 +978,7 @@ struct SourceInfo<'a> {
     template_fields: HashMap<TextSize, imre_ast::strings::TemplateFieldText>,
     replacements: HashMap<ruff_text_size::TextRange, Vec<u32>>,
     private_names: imre_ast::Names,
-    method_imports: std::collections::BTreeSet<String>,
+    method_imports: Cow<'a, std::collections::BTreeSet<String>>,
     future_flags: u32,
     text: Cow<'a, str>,
 }
@@ -4012,7 +4027,7 @@ mod tests {
                 0,
                 ModuleOrigin::Program(None),
                 LiteralSites::default(),
-                None,
+                Default::default(),
             );
             if continues {
                 let error = module.err().expect("reachable declaration must be checked");
@@ -4042,7 +4057,7 @@ mod tests {
             0,
             ModuleOrigin::Program(None),
             LiteralSites::default(),
-            None,
+            Default::default(),
         )
         .err()
         .expect("located declaration refusal");

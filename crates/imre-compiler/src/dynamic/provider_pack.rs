@@ -50,7 +50,7 @@ pub(crate) fn write(directory: &Path) -> Result<(), String> {
                     0,
                     emit::ModuleOrigin::Bundled,
                     Default::default(),
-                    None,
+                    Default::default(),
                 )
             })
             .and_then(|body| body.standalone());
