@@ -400,6 +400,8 @@ impl ScopeFacts {
             names,
             scope: Scope::Module,
             suite_scope: None,
+            yields: false,
+            body_yields: false,
             alias_site,
             expression,
         }
@@ -438,6 +440,8 @@ struct Collector<'s, A, G> {
     names: &'s imre_ast::Names,
     scope: Scope,
     suite_scope: Option<Scope>,
+    yields: bool,
+    body_yields: bool,
     alias_site: A,
     expression: G,
 }
@@ -449,14 +453,24 @@ where
 {
     fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
         let strings = self.names.string_annotations;
+        let parent_yields = self.yields;
         match stmt {
             ast::Stmt::FunctionDef(def) => {
+                self.suite_scope = Some(Scope::Function {
+                    is_async: def.is_async,
+                });
+                visitor::walk_stmt(self, stmt);
+                if self.yields && !parent_yields {
+                    // Only decorators and default values execute in the parent.
+                    self.yields = imre_ast::function_definition_expressions(def)
+                        .any(imre_ast::code_flags::yields_in_expression);
+                }
                 let start = def
                     .decorator_list
                     .first()
                     .map_or(def.start(), Ranged::start);
-                use imre_ast::code_flags::{ASYNC_GENERATOR, COROUTINE, GENERATOR, is_generator};
-                let suspension_flags = match (def.is_async, is_generator(&def.body)) {
+                use imre_ast::code_flags::{ASYNC_GENERATOR, COROUTINE, GENERATOR};
+                let suspension_flags = match (def.is_async, self.body_yields) {
                     (false, false) => 0,
                     (false, true) => GENERATOR,
                     (true, false) => COROUTINE,
@@ -465,9 +479,7 @@ where
                 let lexical = FunctionScope::function(def, strings);
                 let header = NamedFunction::prepare(def, self.names, lexical, suspension_flags);
                 self.scopes.functions.insert(start, header);
-                self.suite_scope = Some(Scope::Function {
-                    is_async: def.is_async,
-                });
+                return;
             }
             ast::Stmt::ClassDef(class) => {
                 let start = class
@@ -545,6 +557,10 @@ where
         let suite_scope = self.suite_scope;
         visitor::walk_stmt(self, stmt);
         if let (ast::Stmt::ClassDef(class), Some(Scope::Class(start))) = (stmt, suite_scope) {
+            if self.yields && !parent_yields {
+                self.yields = imre_ast::class_definition_expressions(class)
+                    .any(imre_ast::code_flags::yields_in_expression);
+            }
             let scope = self.scopes.classes.get_mut(&start).unwrap();
             scope
                 .annotations
@@ -554,11 +570,14 @@ where
 
     fn visit_body(&mut self, body: &'a [ast::Stmt]) {
         // Decorators, defaults, and bases are evaluated before entering the declaration's suite.
-        let parent = self.scope;
-        if let Some(scope) = self.suite_scope.take() {
-            self.scope = scope;
-        }
+        let Some(scope) = self.suite_scope.take() else {
+            visitor::walk_body(self, body);
+            return;
+        };
+        let parent = std::mem::replace(&mut self.scope, scope);
+        let parent_yields = std::mem::take(&mut self.yields);
         visitor::walk_body(self, body);
+        self.body_yields = std::mem::replace(&mut self.yields, parent_yields);
         self.scope = parent;
     }
 
@@ -569,7 +588,9 @@ where
                     self.visit_parameters(parameters);
                 }
                 let parent = std::mem::replace(&mut self.scope, Scope::Lambda);
+                let parent_yields = self.yields;
                 self.visit_expr(&lambda.body);
+                self.yields = parent_yields;
                 self.scope = parent;
                 (self.expression)(LexicalSite::Operand(expr, parent.registered()));
             }
@@ -589,6 +610,10 @@ where
                     is_async,
                     &scope,
                 ));
+            }
+            ast::Expr::Yield(_) | ast::Expr::YieldFrom(_) => {
+                self.yields = true;
+                visitor::walk_expr(self, expr);
             }
             ast::Expr::TString(_) => {
                 visitor::walk_expr(self, expr);
