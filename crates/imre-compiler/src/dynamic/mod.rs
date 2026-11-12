@@ -2504,7 +2504,11 @@ pub(crate) fn compile(
         .unwrap_or_default();
     let mut prepared = prepare::units(
         (&sources, &builtins),
-        (entry_source, scanned_modules, shipped_checks),
+        prepare::SourceInputs {
+            entry_source,
+            scanned_modules,
+            shipped_checks,
+        },
         python_optimization,
         (
             Path::new(bundled_root),

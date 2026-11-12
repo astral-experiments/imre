@@ -11,6 +11,13 @@ use crate::ir::PhysicalModuleKind;
 
 pub(crate) type ModuleSource<'a> = (String, PathBuf, Cow<'a, str>);
 
+#[derive(Default)]
+pub(super) struct SourceInputs<'a> {
+    pub(super) entry_source: Option<ParsedModule<'a, 'a>>,
+    pub(super) scanned_modules: HashMap<usize, super::ScannedModule>,
+    pub(super) shipped_checks: HashMap<usize, Result<(), String>>,
+}
+
 pub(super) enum Initializer<'a> {
     Checked(Box<PreparedBody<'a>>),
     Archived(&'a str),
@@ -47,11 +54,11 @@ pub(super) fn check_shipped(
 /// initializers until every source has passed preparation.
 pub(super) fn units<'a>(
     (files, builtins): (&'a [ModuleSource<'a>], &'a [ModuleSource<'a>]),
-    (mut entry_source, mut scanned_modules, mut shipped_checks): (
-        Option<ParsedModule<'a, 'a>>,
-        HashMap<usize, super::ScannedModule>,
-        HashMap<usize, Result<(), String>>,
-    ),
+    SourceInputs {
+        mut entry_source,
+        mut scanned_modules,
+        mut shipped_checks,
+    }: SourceInputs<'a>,
     python_optimization: i32,
     (bundled_root, providers): (&'a Path, Option<&'a Providers>),
     module_errors: &'a HashMap<PathBuf, Box<ModuleSyntaxError>>,

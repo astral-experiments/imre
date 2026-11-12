@@ -1762,7 +1762,7 @@ impl std::ops::DerefMut for Function<'_, '_, '_> {
 #[path = "tests"]
 mod tests {
     mod declaration_sites;
-    use super::super::prepare::ModuleSource;
+    use super::super::prepare::{self, ModuleSource};
     use super::*;
     use crate::llvm::registered::permanent;
 
@@ -1867,9 +1867,12 @@ mod tests {
             &RegisteredBodies<'_>,
         ),
     ) -> Result<(Vec<CodegenUnit>, bool, Option<String>), String> {
-        let units = super::super::prepare::units(
+        let units = prepare::units(
             (files, builtins),
-            (entry_source, HashMap::new(), HashMap::new()),
+            prepare::SourceInputs {
+                entry_source,
+                ..Default::default()
+            },
             python_optimization,
             (bundled_root, None),
             module_errors,
