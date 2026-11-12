@@ -318,7 +318,11 @@ impl FunctionScope {
         }
     }
 
-    pub(crate) fn function(def: &ast::StmtFunctionDef, string_annotations: bool) -> Self {
+    fn function(
+        def: &ast::StmtFunctionDef,
+        string_annotations: bool,
+        enclosing_class: Option<&classes::ClassScope>,
+    ) -> Self {
         let mut names = ClosureNames {
             include_nested_reads: true,
             string_annotations,
@@ -326,11 +330,12 @@ impl FunctionScope {
         };
         names.visit_body(&def.body);
         let parameters = Some(def.parameters.as_ref());
-        Self::new(
-            names,
-            parameters,
-            imre_ast::class_cell::function_needed(&def.body, parameters, string_annotations),
-        )
+        // The enclosing class already checked each method for a free __class__.
+        // Generic methods may capture a type parameter in their own scope.
+        let captures_class = (def.type_params.is_some()
+            || enclosing_class.is_none_or(|class| class.needs_class_cell))
+            && imre_ast::class_cell::function_needed(&def.body, parameters, string_annotations);
+        Self::new(names, parameters, captures_class)
     }
 
     pub(crate) fn lambda(expr: &ast::ExprLambda, string_annotations: bool) -> Self {
@@ -475,7 +480,11 @@ where
                     (true, false) => COROUTINE,
                     (true, true) => ASYNC_GENERATOR,
                 };
-                let lexical = FunctionScope::function(def, strings);
+                let enclosing_class = match self.scope {
+                    Scope::Class(site) => Some(&self.scopes.classes[&site]),
+                    _ => None,
+                };
+                let lexical = FunctionScope::function(def, strings, enclosing_class);
                 let header = NamedFunction::prepare(def, self.names, lexical, suspension_flags);
                 self.scopes.functions.insert(start, header);
                 return;
