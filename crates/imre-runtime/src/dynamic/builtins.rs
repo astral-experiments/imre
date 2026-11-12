@@ -967,7 +967,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::MethodCaller { .. } if attr == "__reduce__" => "operator.methodcaller",
         Value::NamedTuple {
             class: Some(owner), ..
-        } if let Some(layout) = super::stdlib::os::stat::layout(owner)
+        } if let Some(layout) = super::stdlib::structseq::layout(owner)
             && layout.methods().contains(&attr) =>
         {
             owner
@@ -1881,6 +1881,10 @@ pub(super) fn call(
         return exceptions::initialize(ctx, owner, args, kwargs);
     }
     let member = name.split_once('.');
+    let structseq_repr = name
+        .strip_suffix(".__repr__")
+        .and_then(super::stdlib::structseq::layout)
+        .is_some();
     let numeric_op =
         member.and_then(|(owner, method)| super::operators::numeric_binary_slot(owner, method));
     if matches!(
@@ -1911,6 +1915,7 @@ pub(super) fn call(
             | "super.__repr__"
             | "struct.Struct.__repr__"
     ) || numeric_op.is_some()
+        || structseq_repr
     {
         let (owner, method) = name.rsplit_once('.').unwrap();
         let owner = if owner == "struct.Struct" {
@@ -1929,7 +1934,7 @@ pub(super) fn call(
                     ctx.heap.get(ctx.scalar_value(receiver)),
                     Value::Struct { .. }
                 ))
-            || (matches!(owner, "super" | "complex" | "int")
+            || ((structseq_repr || matches!(owner, "super" | "complex" | "int"))
                 && !ctx.builtin_slot_accepts(receiver, owner))
         {
             let actual = if owner == "int" {
@@ -2033,7 +2038,7 @@ pub(super) fn call(
                 rest.len()
             )));
         }
-        if owner == "mappingproxy" {
+        if owner == "mappingproxy" || structseq_repr {
             if method == "__iter__" {
                 return ctx.iterator(receiver);
             }

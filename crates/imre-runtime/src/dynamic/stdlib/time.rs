@@ -1,6 +1,5 @@
 //! Wall time and the civil-time tuples used by HTTP dates and request logging.
 use super::*;
-use crate::dynamic::builtins::bind;
 use crate::objects::Calendar;
 use crate::objects::time::{ClockParts, LocalTime, wall_time, wall_time_ns};
 
@@ -48,17 +47,20 @@ pub(in crate::dynamic) fn install_timezone(ctx: &mut Context, scope: Id) -> Resu
     Ok(())
 }
 
-const FIELDS: [&str; 9] = [
-    "tm_year", "tm_mon", "tm_mday", "tm_hour", "tm_min", "tm_sec", "tm_wday", "tm_yday", "tm_isdst",
-];
+pub(in crate::dynamic) const STRUCT_TIME: &str = "time.struct_time";
+pub(in crate::dynamic) const STRUCT_TIME_DOC: &str = "The time value as returned by gmtime(), localtime(), and strptime(), and\n accepted by asctime(), mktime() and strftime().  May be considered as a\n sequence of 9 integers.\n\n Note that several fields' values are not the same as those defined by\n the C language standard for struct tm.  For example, the value of the\n field tm_year is the actual year, not year - 1900.  See individual\n fields' descriptions for details.";
+pub(in crate::dynamic) static LAYOUT: structseq::Layout = structseq::Layout {
+    class: STRUCT_TIME,
+    fields: &[
+        "tm_year", "tm_mon", "tm_mday", "tm_hour", "tm_min", "tm_sec", "tm_wday", "tm_yday",
+        "tm_isdst",
+    ],
+    extra: &["tm_zone", "tm_gmtoff"],
+    unnamed: 0,
+};
 
 pub(super) fn struct_time(ctx: &mut Context, values: Vec<Id>, zone: Id, offset: Id) -> Id {
-    ctx.alloc(Value::NamedTuple {
-        class: Some("time.struct_time"),
-        names: FIELDS.map(str::to_owned).into(),
-        values,
-        extras: vec![("tm_zone", zone), ("tm_gmtoff", offset)],
-    })
+    structseq::wrap(ctx, &LAYOUT, values, vec![zone, offset])
 }
 
 /// Format local civil fields with fixed English names and the caller's year width.
@@ -111,49 +113,6 @@ pub(in crate::dynamic) fn timeout_ns(ctx: &mut Context, seconds: Id) -> Result<i
         .ok_or_else(overflow)
 }
 
-fn construct(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let [sequence, attributes] = bind("structseq", args, kwargs, ["sequence", "dict"])?;
-    let sequence = sequence.ok_or_else(|| {
-        Error::new(
-            "TypeError",
-            "structseq() missing required argument 'sequence' (pos 1)",
-        )
-    })?;
-    let mut values = ctx.items(sequence)?;
-    let n = values.len();
-    if !(9..=11).contains(&n) {
-        let bound = if n < 9 { "least 9" } else { "most 11" };
-        return Err(Error::new(
-            "TypeError",
-            format!("time.struct_time() takes an at {bound}-sequence ({n}-sequence given)"),
-        ));
-    }
-    let mut zone = values.get(9).copied().unwrap_or(NONE);
-    let mut offset = values.get(10).copied().unwrap_or(NONE);
-    if let Some(dict) = attributes {
-        let entries = ctx.dict_entries(dict).ok_or_else(|| {
-            Error::new(
-                "TypeError",
-                "time.struct_time() takes a dict as second arg, if any",
-            )
-        })?;
-        for &(key, value) in entries {
-            match ctx.str_value(key).ok() {
-                Some("tm_zone") if n == 9 => zone = value,
-                Some("tm_gmtoff") if n < 11 => offset = value,
-                _ => {
-                    return Err(Error::new(
-                        "TypeError",
-                        "time.struct_time() got duplicate or unexpected field name(s)",
-                    ));
-                }
-            }
-        }
-    }
-    values.truncate(9);
-    Ok(struct_time(ctx, values, zone, offset))
-}
-
 pub(super) fn civil(ctx: &mut Context, stamp: Option<Id>, utc: bool) -> Result<ClockParts> {
     let Some(stamp) = stamp else {
         return Ok(ClockParts::from_float(wall_time(), utc)?);
@@ -190,7 +149,7 @@ fn tuple_time(ctx: &mut Context, value: Id, name: &str) -> Result<LocalTime> {
     if matches!(
         ctx.heap.get(value),
         Value::NamedTuple {
-            class: Some("time.struct_time"),
+            class: Some(STRUCT_TIME),
             ..
         }
     ) {
@@ -220,9 +179,6 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    if name == "struct_time" {
-        return construct(ctx, args, kwargs);
-    }
     let function = match name {
         "time" => "time.time",
         "time_ns" => "time.time_ns",
