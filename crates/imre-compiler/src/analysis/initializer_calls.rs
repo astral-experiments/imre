@@ -189,10 +189,9 @@ impl Session {
         mut captures: Option<&mut super::execution::CapturedImports>,
         application_module: impl Fn(&str) -> Option<(usize, &'a Path)>,
     ) -> Option<Diagnostic> {
-        // The startup module is already in sys.modules. Its namespace is visible
-        // to imports before its initializer finishes, including from a child.
-        let mut resident = (entry.0, TextSize::default());
-        let mut completed = HashMap::from([(entry.0, false)]);
+        // A suspended initializer exposes the declarations preceding its import.
+        // Once it completes, all of its final declarations may be read.
+        let mut progress = HashMap::from([(entry.0, Some(TextSize::default()))]);
         let mut pending = vec![(entry, 0, Vec::new(), None::<((usize, &Path), usize)>)];
         'initializers: while let Some(((module, path), mut start, mut imports, binding)) =
             pending.pop()
@@ -204,7 +203,8 @@ impl Session {
             let mut member = 0;
             if let Some((owner, loaded)) = binding {
                 let stmt = &suite[start - 1];
-                if !self.passive_import_binding(stmt, owner.0, resident) {
+                let before = progress[&owner.0];
+                if !self.passive_import_binding(stmt, owner.0, before) {
                     return None;
                 }
                 if let Some(captures) = captures.as_deref_mut()
@@ -213,7 +213,7 @@ impl Session {
                     self.capture_function_sources(
                         import,
                         owner,
-                        resident,
+                        before,
                         captures.entry(module).or_default(),
                     );
                 }
@@ -229,9 +229,7 @@ impl Session {
                 imports.push((site, owner.0));
             }
             for (i, stmt) in suite.iter().enumerate().skip(start) {
-                if module == resident.0 {
-                    resident.1 = stmt.start();
-                }
+                progress.insert(module, Some(stmt.start()));
                 // The builtin namespace is resident when Python starts. Importing it
                 // in a passive prefix cannot execute an application's module body.
                 if let Stmt::Import(import) = stmt
@@ -250,14 +248,10 @@ impl Session {
                     self.initializer_import(stmt, member, &model, entry.0, &application_module)
                 {
                     pending.push(((module, path), i + 1, imports, Some((owner, member))));
-                    match completed.get(&owner.0) {
-                        None => {
-                            completed.insert(owner.0, false);
-                            pending.push((owner, 0, Vec::new(), None));
-                        }
-                        // A non-entry cycle can expose a partially initialized member.
-                        Some(false) if owner.0 != entry.0 => return None,
-                        Some(_) => {}
+                    if let std::collections::hash_map::Entry::Vacant(slot) = progress.entry(owner.0)
+                    {
+                        slot.insert(Some(TextSize::default()));
+                        pending.push((owner, 0, Vec::new(), None));
                     }
                     continue 'initializers;
                 }
@@ -273,7 +267,7 @@ impl Session {
                     &model,
                     stmt,
                     &imports,
-                    resident,
+                    &progress,
                 ) {
                     return Some(error);
                 }
@@ -281,22 +275,12 @@ impl Session {
                     return None;
                 }
             }
-            completed.insert(module, true);
+            progress.insert(module, None);
         }
         None
     }
 
-    fn passive_import_load(&self, stmt: &Stmt, owner: usize, resident: (usize, TextSize)) -> bool {
-        (owner == resident.0 || self.parsed(self.files[owner]).suite().iter().all(passive))
-            && self.passive_import_binding(stmt, owner, resident)
-    }
-
-    fn passive_import_binding(
-        &self,
-        stmt: &Stmt,
-        owner: usize,
-        resident: (usize, TextSize),
-    ) -> bool {
+    fn passive_import_binding(&self, stmt: &Stmt, owner: usize, before: Option<TextSize>) -> bool {
         let file = self.files[owner];
         // A from-import can query __path__ or a missing member during initialization.
         stmt.as_import_from_stmt().is_none_or(|import| {
@@ -306,7 +290,7 @@ impl Session {
                 .symbol_id("__getattr__")
                 .is_none()
                 && import.names.iter().all(|a| {
-                    self.initialized_function(owner, a.name.as_str(), resident)
+                    self.initialized_function(owner, a.name.as_str(), before)
                         .is_some()
                 })
         })
@@ -331,7 +315,12 @@ impl Session {
             (name == module_name).then_some((owner, path))
         })
         .is_some()
-            && self.passive_import_load(statement, owner, (entry, statement.start()))
+            && (owner == entry || self.parsed(self.files[owner]).suite().iter().all(passive))
+            && self.passive_import_binding(
+                statement,
+                owner,
+                (owner == entry).then_some(statement.start()),
+            )
     }
 
     fn initializer_import<'a>(
@@ -380,14 +369,14 @@ impl Session {
         &self,
         import: &ruff_python_ast::StmtImportFrom,
         owner: (usize, &Path),
-        resident: (usize, TextSize),
+        before: Option<TextSize>,
         captures: &mut super::execution::FunctionImports,
     ) {
         let file = self.files[owner.0];
         let parsed = self.parsed(file);
         let model = SemanticModel::new(&self.db, self.db.program_file(file));
         for alias in &import.names {
-            let Some(binding) = self.initialized_function(owner.0, alias.name.as_str(), resident)
+            let Some(binding) = self.initialized_function(owner.0, alias.name.as_str(), before)
             else {
                 continue;
             };
@@ -411,7 +400,7 @@ impl Session {
         model: &SemanticModel<'_>,
         stmt: &Stmt,
         imports: &[(TextRange, usize)],
-        resident: (usize, TextSize),
+        progress: &HashMap<usize, Option<TextSize>>,
     ) -> Option<Diagnostic> {
         let (module, path) = source;
         let file = self.files[module];
@@ -449,7 +438,10 @@ impl Session {
         };
         let (def, owner_module) = if let Some((site, name)) = member {
             let owner = imports.iter().find(|(r, _)| *r == site)?.1;
-            (self.initialized_function(owner, name, resident)?, owner)
+            (
+                self.initialized_function(owner, name, progress[&owner])?,
+                owner,
+            )
         } else {
             (binding, module)
         };
@@ -529,11 +521,11 @@ impl Session {
         &self,
         module: usize,
         name: &str,
-        resident: (usize, TextSize),
+        before: Option<TextSize>,
     ) -> Option<Definition<'_>> {
         // Exact modules return ordinary fields directly. Known ModuleType methods
         // are non-data descriptors; other special attributes need runtime lookup.
-        if module == resident.0
+        if before.is_some()
             && name.starts_with("__")
             && !imre_ast::providers::MODULE_METHODS.contains(&name)
         {
@@ -546,7 +538,7 @@ impl Session {
         };
         let parsed = self.parsed(owner);
         let range = function.node(&parsed).range();
-        if module == resident.0 && range.end() > resident.1 {
+        if before.is_some_and(|at| range.end() > at) {
             return None;
         }
         parsed

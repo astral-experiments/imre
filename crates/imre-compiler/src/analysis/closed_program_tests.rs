@@ -707,6 +707,8 @@ fn a_nested_import_resumes_the_checked_caller_only_on_its_normal_edge() {
     let bridge = "import leaf\ndef take(value: int): return value\n";
     for (leaf, reached) in [
         ("value = 3\n", true),
+        ("import bridge\n", true),
+        ("from bridge import take\n", false),
         ("raise SystemExit(19)\n", false),
         ("import bridge\nbridge.take = replacement\n", false),
     ] {
