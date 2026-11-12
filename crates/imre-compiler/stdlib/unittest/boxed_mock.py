@@ -489,7 +489,14 @@ class NonCallableMock(_FixedMock):
         if name in members:
             if child is None:
                 value, eat_self = members[name]
-                child = _make_autospec(value, self._mock_strict, False, eat_self=eat_self)
+                try:
+                    child = _make_autospec(value, self._mock_strict, False, eat_self=eat_self)
+                except InvalidSpecError:
+                    target_name = self._node._mock_name or self
+                    raise InvalidSpecError(
+                        f"Cannot autospec attr {name!r} from target {target_name!r} "
+                        f"as it has already been mocked out. [target={self!r}, attr={value!r}]"
+                    )
                 self._adopt(child, "." + name)
             object.__setattr__(self, name, child)
             if self._mock_sealed:
@@ -984,7 +991,7 @@ def _make_autospec(spec, strict, as_instance, name=None, *, eat_self=False, wrap
     from inspect import getattr_static, iscoroutinefunction, isdatadescriptor
 
     if _is_instance_mock(spec):
-        raise InvalidSpecError("Cannot autospec a Mock object")
+        raise InvalidSpecError(f"Cannot autospec a Mock object. [object={spec!r}]")
     if type(spec) in (list, tuple):
         spec = type(spec)
     is_class = isinstance(spec, type)
@@ -1150,7 +1157,7 @@ def create_autospec(spec, spec_set=False, instance=False, *, unsafe=False, **kwa
     from types import BuiltinFunctionType
 
     if _is_instance_mock(spec):
-        raise InvalidSpecError("Cannot autospec a Mock object")
+        raise InvalidSpecError(f"Cannot autospec a Mock object. [object={spec!r}]")
     if isinstance(spec, MethodType):
         function = spec.__func__
         wrap_function = isinstance(function, FunctionType)
