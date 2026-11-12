@@ -5513,6 +5513,26 @@ mod tests {
     }
 
     #[test]
+    fn a_registered_function_keeps_its_indexed_comparisons() {
+        let source = concat!(
+            "def improve(best, neighbor, candidate, accept):\n",
+            "    if best[neighbor] == -1 or candidate < best[neighbor]:\n",
+            "        accept(candidate)\n",
+        );
+        let graph = SourceGraph::single(source).unwrap();
+        let _ = super::super::lower_current(&graph, None, &mut HashSet::new());
+        let registered = graph.registered_functions();
+        let checked = &registered[&graph.entry][&TextSize::default()].function;
+        let mut comparisons = Vec::new();
+        ir::walk_expressions(&checked.body, &mut |expr| {
+            if let ExprKind::Compare(_, ops) = &expr.kind {
+                comparisons.extend(ops.iter().copied());
+            }
+        });
+        assert_eq!(comparisons, [ast::CmpOp::Eq, ast::CmpOp::Lt]);
+    }
+
+    #[test]
     fn partial_regions_preserve_specialized_and_unsupported_operands() {
         for source in [
             "s.partition((sep for sep in separators))[1]",

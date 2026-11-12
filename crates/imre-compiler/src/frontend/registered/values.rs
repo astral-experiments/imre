@@ -551,6 +551,23 @@ pub(super) fn number_literal(number: &ast::Number, minus: bool) -> ExprKind {
     }
 }
 
+/// A literal sign cannot dispatch to a Python override.
+fn signed_number(node: &ast::Expr) -> Option<Expr> {
+    let unary = node.as_unary_op_expr()?;
+    if !matches!(unary.op, ast::UnaryOp::UAdd | ast::UnaryOp::USub) {
+        return None;
+    }
+    let literal = unary.operand.as_number_literal_expr()?;
+    Some(Expr {
+        ty: match literal.value {
+            ast::Number::Int(_) => Type::Int,
+            ast::Number::Float(_) => Type::Float,
+            ast::Number::Complex { .. } => Type::PythonObject,
+        },
+        kind: number_literal(&literal.value, unary.op == ast::UnaryOp::USub),
+    })
+}
+
 fn display_elements(node: &ast::Expr) -> Option<(&[ast::Expr], DisplayKind)> {
     match node {
         ast::Expr::List(list) => Some((&list.elts, DisplayKind::List)),
@@ -587,13 +604,10 @@ pub(in crate::frontend) fn index_key<E>(
             (value, constant)
         }
         _ => {
-            let value = if let Some(op) = node.as_unary_op_expr()
-                && matches!(op.op, ast::UnaryOp::UAdd | ast::UnaryOp::USub)
-                && let Some(n) = op.operand.as_number_literal_expr()
-            {
+            let value = if let Some(literal) = signed_number(node) {
                 Expr {
                     ty: Type::PythonObject,
-                    kind: number_literal(&n.value, op.op == ast::UnaryOp::USub),
+                    ..literal
                 }
             } else {
                 operand(node)?
@@ -764,22 +778,8 @@ fn display_operands<E>(
     items
         .iter()
         .map(|item| {
-            if let ast::Expr::UnaryOp(op) = item
-                && matches!(op.op, ast::UnaryOp::UAdd | ast::UnaryOp::USub)
-                && let ast::Expr::NumberLiteral(n) = &*op.operand
-            {
-                // The parser keeps the sign separate. Only an exact literal has no user slot.
-                Ok(source.located(
-                    item,
-                    Expr {
-                        ty: match n.value {
-                            ast::Number::Int(_) => Type::Int,
-                            ast::Number::Float(_) => Type::Float,
-                            ast::Number::Complex { .. } => Type::PythonObject,
-                        },
-                        kind: number_literal(&n.value, op.op == ast::UnaryOp::USub),
-                    },
-                ))
+            if let Some(literal) = signed_number(item) {
+                Ok(source.located(item, literal))
             } else if item.is_slice_expr() {
                 // An extended subscript key can mix a slice with other tuple elements.
                 index_key(item, child)
@@ -839,6 +839,9 @@ pub(super) fn operation<'a, E>(
         }));
     }
     if let ast::Expr::UnaryOp(unary) = node {
+        if let Some(literal) = signed_number(node) {
+            return Ok(Some(literal));
+        }
         if !dynamic_receiver(&unary.operand) {
             return Ok(None);
         }
@@ -1227,7 +1230,11 @@ impl Checker<'_> {
         if let ast::Expr::Compare(cmp) = node {
             // Preserve the existing checker for every link between concrete operands.
             let opaque = cmp.operands.iter().map(|operand| {
-                if let ast::Expr::Name(name) = operand
+                let object = match operand {
+                    ast::Expr::Subscript(subscript) => subscript.value.as_ref(),
+                    _ => operand,
+                };
+                if let ast::Expr::Name(name) = object
                     && let Some(&slot) = self.names.get(name.id.as_str())
                     && self.locals[slot] == Type::PythonObject
                 {
