@@ -4003,23 +4003,6 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Keep an exact return mismatch separate from a TypeError in one of its operands.
-    fn coerce_return(
-        &self,
-        value: Expr,
-        expected: Type,
-        node: &impl Ranged,
-    ) -> Result<Expr, String> {
-        self.coerce_supplied_result(value, expected, node)
-            .map_err(|failure| {
-                if matches!(&failure, Failure::Diagnostic(d) if d.kind == Kind::ExactType) {
-                    failure.classify(Kind::ReturnType)
-                } else {
-                    failure
-                }
-            })
-    }
-
     /// Adapt an evaluated argument to the target's concrete or private representation.
     fn coerce_argument_value(
         &mut self,
