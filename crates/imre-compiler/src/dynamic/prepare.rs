@@ -28,9 +28,9 @@ pub(super) struct PreparedUnit<'a> {
 /// initializers until every source has passed preparation.
 pub(super) fn units<'a>(
     (files, builtins): (&'a [ModuleSource], &'a [ModuleSource]),
-    (mut entry_source, mut normalized_files): (
+    (mut entry_source, mut scanned_modules): (
         Option<ParsedModule<'a, 'a>>,
-        HashMap<usize, super::LoweredRoot>,
+        HashMap<usize, super::ScannedModule>,
     ),
     python_optimization: i32,
     (bundled_root, providers): (&'a Path, Option<&'a Providers>),
@@ -95,8 +95,17 @@ pub(super) fn units<'a>(
             };
             let types = types.filter(|types| types.matches_source(&text));
             let indexed = types.map(|types| types.parsed());
-            // An indexed parser from another check owns different expression and statement IDs.
-            let normalized = normalized_files.remove(&unit).filter(|_| {
+            let (syntax, normalized) = if let Some(scanned) = scanned_modules.remove(&unit) {
+                match (scanned.parsed, syntax) {
+                    (Some(parsed), None) => (Some(Cow::Owned(parsed)), Some(scanned.lowered)),
+                    (None, syntax) => (syntax, Some(scanned.lowered)),
+                    (_, syntax) => (syntax, None),
+                }
+            } else {
+                (syntax, None)
+            };
+            // A different checker parser owns different expression and statement IDs.
+            let normalized = normalized.filter(|_| {
                 syntax.as_deref().is_some_and(|original| {
                     indexed
                         .as_deref()
