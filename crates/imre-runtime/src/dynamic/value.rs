@@ -6424,6 +6424,18 @@ impl Heap {
             .span = span;
     }
 
+    /// Attribute a fault to the operand currently executing in this activation.
+    pub(super) fn use_expression_line(&mut self) {
+        if let Some(frame) = self.frames.last()
+            && let Some(location) = &frame.location
+        {
+            let line = frame.line(location);
+            if line != location.line {
+                self.set_statement_line(line);
+            }
+        }
+    }
+
     /// Update the current source line without crossing a statement boundary.
     pub(super) fn set_statement_line(&mut self, line: u32) {
         let frame = self.frames.last_mut().unwrap();

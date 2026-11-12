@@ -2334,6 +2334,9 @@ pub(super) unsafe extern "C" fn imre_dyn_op_at(
         ));
         return finish(ctx, result);
     }
+    if result.is_err() && span.is_none() && matches!(op, "//" | "%" | "<<" | ">>") {
+        ctx.heap.use_expression_line();
+    }
     finish_at(ctx, result, span)
 }
 
