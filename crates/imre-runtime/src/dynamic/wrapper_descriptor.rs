@@ -1019,7 +1019,9 @@ pub(super) fn descriptor_get(
     };
     let slot = match ctx.heap.get(payload) {
         Value::Function { .. } if class == "function" => None,
-        Value::Method { .. } if class == "method" && ctx.builtin_slot_accepts(descriptor, class) => {
+        Value::Method { .. }
+            if class == "method" && ctx.builtin_slot_accepts(descriptor, class) =>
+        {
             None
         }
         Value::Cached { .. } if class == stdlib::functools::LRU_CACHE_CLASS => None,

@@ -3378,8 +3378,10 @@ impl InstanceType {
                 matches!(ty, Type::Str | Type::StrLiteral(_) | Type::StrEnum(_))
             }
             Self::Exact(Type::BuiltinClass) => {
-                matches!(ty, Type::BuiltinClass | Type::Placeholder(PlaceholderKind::Class))
-                    || types.constructor_base(ty).is_some()
+                matches!(
+                    ty,
+                    Type::BuiltinClass | Type::Placeholder(PlaceholderKind::Class)
+                ) || types.constructor_base(ty).is_some()
             }
             Self::Exact(expected) => {
                 expected == ty
