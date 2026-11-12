@@ -10,7 +10,9 @@ pub(super) struct Output {
     pub(super) record_types: HashMap<Type, bool>,
     units: Vec<CodegenUnit>,
     integers: Vec<body::IntegerFunctions>,
-    common: Option<String>,
+    /// Named LLVM layouts must precede instructions that use them.
+    common: String,
+    split: bool,
     pub entry: usize,
     pub current: usize,
     functions: Vec<(usize, usize)>,
@@ -43,7 +45,13 @@ impl Output {
             record_types: HashMap::new(),
             units,
             integers: vec![body::IntegerFunctions::default(); count],
-            common: split.then(|| "source_filename = \"imre-unit\"\n".to_owned()),
+            common: if split {
+                "source_filename = \"imre-unit\"\n"
+            } else {
+                ""
+            }
+            .to_owned(),
+            split,
             entry,
             current: entry,
             functions,
@@ -68,13 +76,11 @@ impl Output {
     }
 
     pub fn split(&self) -> bool {
-        self.common.is_some()
+        self.split
     }
 
     pub fn common(&mut self) -> &mut String {
-        self.common
-            .as_mut()
-            .unwrap_or(&mut self.units[self.entry].llvm_ir)
+        &mut self.common
     }
 
     pub fn local_helper(&mut self, name: &'static str, definition: &str) {
@@ -118,7 +124,42 @@ impl Output {
     }
 
     pub fn function_name(&self, id: usize) -> String {
-        self.numbered("fn", id, self.function_location(id))
+        let name = self.numbered("fn", id, self.function_location(id));
+        if self.units.len() > 1 {
+            format!("{name}.local")
+        } else {
+            name
+        }
+    }
+
+    /// Finish the checked function in its owning unit as soon as its frame is complete.
+    pub(super) fn finish_function(
+        &mut self,
+        id: usize,
+        function: &Function,
+        attrs: &str,
+        code: &str,
+    ) {
+        let name = self.function_name(id);
+        let owner = self.function_owner(id);
+        let params = function
+            .params
+            .iter()
+            .enumerate()
+            .map(|(i, &slot)| format!("{} %arg{i}", function.locals[slot].llvm()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        self.units[owner].llvm_ir.push('\n');
+        self.define_function(
+            owner,
+            &name,
+            function.returns.llvm(),
+            &params,
+            attrs,
+            |unit| {
+                unit.push_str(code);
+            },
+        );
     }
 
     pub fn adapter_name(&self, id: usize, bound: bool) -> String {
@@ -180,8 +221,38 @@ impl Output {
         self.used(self.string_owner(id), self.string_name(id, "literal"))
     }
 
-    pub fn function_ref(&mut self, id: usize) -> String {
-        self.used(self.function_owner(id), self.function_name(id))
+    /// A foreign use can appear after its body has finished, including a class descriptor.
+    pub fn function_ref(&mut self, module: &Module, id: usize) -> String {
+        let (owner, local) = self.function_location(id);
+        let target = self.function_name(id);
+        if self.current == owner {
+            return target;
+        }
+        let symbol = self.numbered("fn", id, (owner, local));
+        let users = self.users.entry(symbol.clone()).or_default();
+        if users.insert(self.current) {
+            let function = &module.functions[id];
+            let returns = function.returns.llvm();
+            let params = function
+                .params
+                .iter()
+                .map(|&slot| function.locals[slot].llvm())
+                .collect::<Vec<_>>()
+                .join(", ");
+            if users.len() == 1 {
+                writeln!(
+                    self.units[owner].llvm_ir,
+                    "@{symbol} = hidden alias {returns} ({params}), ptr @{target}"
+                )
+                .unwrap();
+            }
+            writeln!(
+                self.units[self.current].llvm_ir,
+                "declare hidden {returns} @{symbol}({params})"
+            )
+            .unwrap();
+        }
+        symbol
     }
 
     pub fn adapter_ref(&mut self, id: usize, bound: bool) -> String {
@@ -274,9 +345,7 @@ impl Output {
         emit_program(module, ranges, sanitize, &mut self, program)?;
         for (integers, unit) in self.integers.into_iter().zip(&mut self.units) {
             integers.write(&mut unit.llvm_ir, false);
-            if let Some(common) = &self.common {
-                unit.llvm_ir.insert_str(0, common);
-            }
+            unit.llvm_ir.insert_str(0, &self.common);
         }
         Ok(self.units)
     }
@@ -438,6 +507,39 @@ mod tests {
                 _ => assert!(!ir.contains("@sequence_layout")),
             }
         }
+    }
+
+    #[test]
+    fn a_missing_key_links_the_foreign_repr_discovered_after_its_body() {
+        let temp = tempfile::tempdir().unwrap();
+        let entry = temp.path().join("main.py");
+        fs::write(
+            &entry,
+            "from leaf import Detail\nrecords = {Detail(1): 0}\nrecords[Detail(2)]\n",
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("leaf.py"),
+            concat!(
+                "from dataclasses import dataclass\n\n",
+                "@dataclass(frozen=True)\n",
+                "class Detail:\n",
+                "    n: int\n",
+                "    def __repr__(self) -> str:\n",
+                "        return f\"detail-{self.n}\"\n",
+            ),
+        )
+        .unwrap();
+        let program =
+            crate::compile_file_units(&entry, None, &crate::CompileOptions::default()).unwrap();
+        assert!(
+            program.units[0]
+                .llvm_ir
+                .contains("declare hidden ptr @fn_m1_0(ptr)")
+        );
+        let owner = &program.units[1].llvm_ir;
+        assert!(owner.contains("@fn_m1_0 = hidden alias ptr (ptr), ptr @fn_m1_0.local"));
+        assert!(owner.contains("define internal ptr @fn_m1_0.local("));
     }
 
     #[test]
