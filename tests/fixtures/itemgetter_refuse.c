@@ -7,7 +7,9 @@
 void *__real_malloc(size_t size);
 void *__real_realloc(void *ptr, size_t size);
 uint64_t __real_imre_dyn_lookup(void *, uint64_t, const unsigned char *, size_t);
+uint64_t __real_imre_dyn_assign_target(void *, uint64_t, const unsigned char *, size_t, uint64_t);
 uint64_t __real_imre_dyn_lit(void *, int, const unsigned char *, size_t);
+uint64_t __real_imre_dyn_linked_string(void *, const void *, int, const unsigned char *, size_t);
 uint64_t __real_imre_dyn_op_at(void *, const char *, uint64_t, uint64_t, uint64_t, const uint32_t (*)[4]);
 uint64_t __real_imre_dyn_scoped_call_at(void *, uint64_t, uint64_t, uint64_t, size_t, const uint32_t (*)[4], uint64_t);
 
@@ -57,6 +59,11 @@ uint64_t __wrap_imre_dyn_lookup(void *ctx, uint64_t scope, const unsigned char *
     return leave("lookup", probe, __real_imre_dyn_lookup(ctx, scope, name, len));
 }
 
+uint64_t __wrap_imre_dyn_assign_target(void *ctx, uint64_t scope, const unsigned char *name, size_t len, uint64_t value) {
+    int probe = enter("assign_target");
+    return leave("assign_target", probe, __real_imre_dyn_assign_target(ctx, scope, name, len, value));
+}
+
 uint64_t __wrap_imre_dyn_op_at(void *ctx, const char *op, uint64_t a, uint64_t b, uint64_t c, const uint32_t (*span)[4]) {
     int probe = enter(op);
     return leave(op, probe, __real_imre_dyn_op_at(ctx, op, a, b, c, span));
@@ -68,9 +75,19 @@ uint64_t __wrap_imre_dyn_scoped_call_at(void *ctx, uint64_t fn, uint64_t args, u
     return leave("call", probe, __real_imre_dyn_scoped_call_at(ctx, fn, args, kwargs, mark, span, scope));
 }
 
-uint64_t __wrap_imre_dyn_lit(void *ctx, int kind, const unsigned char *data, size_t len) {
+static void mark_probe(int kind, const unsigned char *data, size_t len) {
     static const char marker[] = "start formatter allocation probe 2332";
-    uint64_t result = __real_imre_dyn_lit(ctx, kind, data, len);
     if (kind == 1 && len == sizeof(marker) - 1 && !memcmp(data, marker, len)) after_put = 1;
+}
+
+uint64_t __wrap_imre_dyn_lit(void *ctx, int kind, const unsigned char *data, size_t len) {
+    uint64_t result = __real_imre_dyn_lit(ctx, kind, data, len);
+    mark_probe(kind, data, len);
+    return result;
+}
+
+uint64_t __wrap_imre_dyn_linked_string(void *ctx, const void *slot, int kind, const unsigned char *data, size_t len) {
+    uint64_t result = __real_imre_dyn_linked_string(ctx, slot, kind, data, len);
+    if (getenv("IMRE_TEST_CALL_OP")) mark_probe(kind, data, len);
     return result;
 }

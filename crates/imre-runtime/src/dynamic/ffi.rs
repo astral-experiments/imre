@@ -2129,6 +2129,27 @@ pub(super) unsafe extern "C" fn imre_dyn_lookup(
     finish(ctx, result)
 }
 
+/// Store a linked identifier and report whether its previous owner needs releasing.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_assign_target(
+    ctx: *mut Context,
+    scope: Id,
+    name: *const u8,
+    len: usize,
+    value: Id,
+) -> Id {
+    // SAFETY: the compiled frame supplies its active context and the linked identifier bytes.
+    let (ctx, name) = unsafe { (&mut *ctx, slice::from_raw_parts(name, len)) };
+    if ctx.pending.is_some() {
+        return NONE;
+    }
+    let result = std::str::from_utf8(name)
+        .map_err(|error| Error::new("UnicodeError", error.to_string()))
+        .and_then(|name| ctx.store_source_name(scope, name, value))
+        .map(flag);
+    finish(ctx, result)
+}
+
 /// Execute an import statement through the importing frame's builtins.
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_import_name(

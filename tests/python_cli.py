@@ -1048,7 +1048,7 @@ def call_allocation_flags(root):
     subprocess.run(["cc", "-c", fixtures / "itemgetter_refuse.c", "-o", wrapper], check=True)
     return "\x1f".join([
         "-C", f"link-arg={wrapper}",
-        "-C", "link-arg=-Wl,--wrap=imre_dyn_scoped_call_at,--wrap=imre_dyn_op_at,--wrap=imre_dyn_lookup,--wrap=malloc,--wrap=realloc,--wrap=imre_dyn_lit",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_scoped_call_at,--wrap=imre_dyn_op_at,--wrap=imre_dyn_lookup,--wrap=imre_dyn_assign_target,--wrap=malloc,--wrap=realloc,--wrap=imre_dyn_lit,--wrap=imre_dyn_linked_string",
     ])
 
 
@@ -1169,13 +1169,13 @@ def check_boxed_call_allocation(imre, run, flags):
                 "IMRE_TEST_CALL_SIZE": str(size),
                 "IMRE_TEST_GETTER_ALLOCATION": "1",
             })
+            # Both operations borrow the linked identifier without allocating a copy.
             if operation == "lookup":
-                # A compiled lookup reads the identifier directly from the code object.
                 expected = b"value 3\nretry 3\n"
             else:
-                expected = (b"caught () True\n" if size else b"value 7\n") + b"preserved True\nretry 3\n"
+                expected = b"value 7\npreserved True\nretry 3\n"
             assert (result.returncode, result.stdout, result.stderr) == (
-                0, expected, b"refused\n" if size and operation == "assign" else b"",
+                0, expected, b"",
             ), (operation, size, result)
 
     # Refuse the dictionary snapshot and the equally sized sort buffer separately.
