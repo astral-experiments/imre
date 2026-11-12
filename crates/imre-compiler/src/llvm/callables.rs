@@ -267,7 +267,7 @@ impl Emitter<'_, '_> {
         let policy = self.module.types.cache_adapter(function);
         let layout = if policy.is_some() {
             "cache_callable"
-        } else if receiver.is_none() && self.function_link_types.contains(&ty) {
+        } else if receiver.is_none() && self.linked_functions.contains(&function) {
             "python_function"
         } else if scalar {
             "callable_enum"
