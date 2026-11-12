@@ -197,7 +197,7 @@ Ordinary native `-m unittest` discovery stopped before collection for both modul
 
 ### Whole-suite baselines for later additions
 
-These families are tracked separately from the 45-family census above. Each row comes from complete runs of the upstream module. The historical total of 3,194 paired passes among 5,985 originals across these 49 suites includes the earlier 132 for `statistics`. At both native tiers, `compileall` and `enum` stopped during import before any original test ran.
+These families are tracked separately from the 45-family census above. Each row comes from complete runs of the upstream module. Across the 49 rows below, measurements at the listed revisions record **3,189 paired passes among 5,985 originals**. The historical total of 3,194 included 132 `statistics` passes. Its current row records 127. At both native tiers, `compileall` and `enum` stopped during import before any original test ran.
 
 | Module | Paired passes | Upstream tests | Stock CPython | Imre O0 and O3 |
 | --- | ---: | ---: | --- | --- |
