@@ -1,6 +1,6 @@
 //! Link checked module registrations to their native initializers.
 
-use super::body::FunctionBody;
+use super::body::write_main;
 use super::registered::{ABI, Output};
 use crate::CodegenUnit;
 use crate::ir::{ModuleLoader, ModuleRegistration, PhysicalModuleKind};
@@ -15,7 +15,7 @@ const PHYSICAL_ARGS: &str = "ptr, ptr, ptr, ptr, i32, ptr";
 #[derive(Clone)]
 pub(crate) struct ModuleLauncher {
     pub(crate) output: Output,
-    main: FunctionBody,
+    main: String,
     declarations: HashSet<String>,
 }
 
@@ -26,11 +26,9 @@ impl ModuleLauncher {
             ..Output::default()
         };
         let config = output.data(config.as_bytes());
-        let mut main = FunctionBody::new("entry", "");
-        main.start_main(true, "");
-        main.line(format!(
-            "%ctx = call ptr @imre_dyn_new(i32 %argc, ptr %argv, ptr {config})"
-        ));
+        let main = format!(
+            "entry:\n  %ctx = call ptr @imre_dyn_new(i32 %argc, ptr %argv, ptr {config})\n"
+        );
         Self {
             output,
             main,
@@ -78,7 +76,7 @@ impl ModuleLauncher {
             )
             .unwrap();
         }
-        writeln!(self.main.code, "  call void @{function}({arguments})").unwrap();
+        writeln!(self.main, "  call void @{function}({arguments})").unwrap();
     }
 
     /// Attach one checked input to the module registered immediately before its inputs.
@@ -128,13 +126,20 @@ impl ModuleLauncher {
 
     pub(crate) fn finish(mut self) -> CodegenUnit {
         self.output.integer_prelude();
-        self.main.finish_main("@imre_dyn_finish(ptr %ctx)");
+        let mut llvm_ir = format!(
+            "{ABI}\n{}\n{}\n",
+            self.output.constants, self.output.functions
+        );
+        write_main(
+            &mut llvm_ir,
+            &self.main,
+            true,
+            "",
+            "@imre_dyn_finish(ptr %ctx)",
+        );
         CodegenUnit {
             name: "__main__".into(),
-            llvm_ir: format!(
-                "{ABI}\n{}\n{}\n{}",
-                self.output.constants, self.output.functions, self.main.code
-            ),
+            llvm_ir,
         }
     }
 }
