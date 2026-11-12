@@ -1990,7 +1990,7 @@ def _signature_fromstr(cls, obj, s, skip_bound_arg=True):
                     namespace['__builtins__'] = type(self).symbol.__builtins__
                 try:
                     if name == '__debug__':
-                        value = __debug__
+                        value = not sys.flags.optimize
                     elif name in namespace:
                         value = namespace[name]
                     else:
