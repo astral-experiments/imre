@@ -1217,8 +1217,9 @@ fn lower_graph(
     }
     let named = graph.registered_startup && !needs_registered_entry;
     let mut completed = registered::FixedFunctions::default();
-    let finish_named = |completed: &mut registered::FixedFunctions| {
-        if named {
+    let recover_completed = std::cell::Cell::new(named);
+    let place_completed = |completed: &mut registered::FixedFunctions| {
+        if recover_completed.get() {
             completed.place(graph, &inference.source_checks);
             capture();
         }
@@ -1234,9 +1235,11 @@ fn lower_graph(
             &globals,
         )
     };
-    let capture_fixed_refusal = |failure: &Failure| {
-        if !named {
-            capture_on_object(failure);
+    // Other fixed definitions can still complete after a body requests an object
+    // frame. Place those operations before recovery selects a second body.
+    let request_recovery = |failure: &Failure| {
+        if !needs_registered_entry && failure.is_object() {
+            recover_completed.set(true);
         }
     };
     let mut frame_sources = Vec::new();
@@ -1303,7 +1306,7 @@ fn lower_graph(
                 }
                 Err(error) if error.is_object() => {}
                 Err(error) => {
-                    finish_named(&mut completed);
+                    place_completed(&mut completed);
                     let report = error.terminal_in(graph, *module_id);
                     refused_body = Some(called_body(report)?);
                     break;
@@ -1337,12 +1340,12 @@ fn lower_graph(
             graph,
             *module_id,
             &mut unavailable,
-            capture_fixed_refusal,
+            request_recovery,
         ) {
             Ok(Some(body)) => body,
             Ok(None) => continue,
             Err(report) => {
-                finish_named(&mut completed);
+                place_completed(&mut completed);
                 refused_body = Some(called_body(report)?);
                 break;
             }
@@ -1424,9 +1427,9 @@ fn lower_graph(
                 graph,
                 module,
                 &mut unavailable,
-                capture_fixed_refusal,
+                request_recovery,
             )
-            .inspect_err(|_| finish_named(&mut completed))?;
+            .inspect_err(|_| place_completed(&mut completed))?;
             if let Some(helper) = body {
                 factories.push(helper);
             }
@@ -1468,7 +1471,7 @@ fn lower_graph(
                 capture_on_object(failure);
             }
         })
-        .inspect_err(|_| finish_named(&mut completed))?
+        .inspect_err(|_| place_completed(&mut completed))?
         .is_some()
             && let Some(body) = fixed_entry
         {
@@ -1490,7 +1493,7 @@ fn lower_graph(
             .pop_first()
             .map(|(_, reason)| reason)
     }) {
-        finish_named(&mut completed);
+        place_completed(&mut completed);
         return Err(reason);
     }
     if needs_registered_entry {
@@ -1594,7 +1597,7 @@ fn lower_graph(
     validate_calls(functions).inspect_err(|_| {
         // A failed layout trial goes through ordinary lowering before registration.
         if graph.layout_hint.get() != crate::modules::LayoutHint::Applied {
-            finish_named(&mut completed);
+            place_completed(&mut completed);
         }
     })?;
     let functions = &mut completed.functions;
@@ -1622,7 +1625,7 @@ fn lower_graph(
         classes.missing_key_reprs(functions, &entry, graph, &types, key_reprs);
     }
     let json_records = json::schemas(graph, &classes, &types, functions, &entry)
-        .inspect_err(|_| finish_named(&mut completed))?;
+        .inspect_err(|_| place_completed(&mut completed))?;
     let functions = &mut completed.functions;
     // Fusing adjacent sums also inlines their generator bodies and scalar calls.
     if !track_frames {
@@ -1634,7 +1637,7 @@ fn lower_graph(
         cache.finish(&types);
     }
     let selected = registered_entry(graph, functions, &entry);
-    finish_named(&mut completed);
+    place_completed(&mut completed);
     if let Some(registered) = selected? {
         return Ok(registered);
     }
