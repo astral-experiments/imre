@@ -17,6 +17,11 @@ impl Context {
             "enum.StrEnum" => ("str", "enum.Enum.__repr__", "str.__str__"),
             _ => ("object", "enum.Enum.__repr__", "enum.Enum.__str__"),
         };
+        // Enum introduces member dictionaries; a scalar mixin introduces its own getset.
+        if kind == "enum.Enum" || member_type != "object" {
+            let descriptor = self.alloc(Value::LayoutDescriptor(class, "__dict__"));
+            self.bind(scope, "__dict__", descriptor);
+        }
         let base = self.builtin(member_type);
         self.bind(scope, "_member_type_", base);
         let value_repr = if member_type == "object" {

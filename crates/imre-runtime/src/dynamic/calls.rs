@@ -6539,13 +6539,22 @@ impl Context {
 
     /// A native class can publish ordinary Python instance storage in its own namespace.
     pub(super) fn native_owns_layout_descriptor(&self, class: Id, name: &str) -> bool {
-        self.native_type_dicts
-            .get(&class)
-            .and_then(|&dict| self.dict_named_item(dict, name))
-            .is_some_and(|member| {
-                matches!(self.heap.get(member),
+        self.own_class_attr(class, name).is_some_and(|member| {
+            matches!(self.heap.get(member),
                 Value::LayoutDescriptor(owner, field) if *owner == class && *field == name)
-            })
+        })
+    }
+
+    fn native_has_instance_dictionary(&self, class: Id) -> bool {
+        if self.enum_scopes.contains_key(&class) {
+            return self
+                .find_in_mro(class, |base| {
+                    self.native_owns_layout_descriptor(base, "__dict__")
+                        .then_some(())
+                })
+                .is_some();
+        }
+        self.native_owns_layout_descriptor(class, "__dict__")
     }
 
     pub(super) fn class_instances_have_dict(&self, class: Id) -> bool {
@@ -6571,8 +6580,7 @@ impl Context {
                 scope, name: owner, ..
             } = base
             else {
-                layout.dictionary =
-                    layout.dictionary || self.native_owns_layout_descriptor(owner_id, "__dict__");
+                layout.dictionary |= self.native_has_instance_dictionary(owner_id);
                 // These native instances carry their namespace in their own representation.
                 if let Value::Native(kind) = base {
                     layout.dictionary |=
