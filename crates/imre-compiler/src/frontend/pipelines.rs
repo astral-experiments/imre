@@ -224,31 +224,41 @@ impl Prepared {
 
     pub(super) fn loop_suite(
         mut self,
-        mut otherwise: Vec<Statement>,
+        otherwise: Vec<Statement>,
         before_iteration: Vec<Statement>,
     ) -> Vec<Statement> {
-        if !otherwise.is_empty() {
-            otherwise = self
-                .clear
-                .iter()
-                .copied()
-                .map(Statement::Clear)
-                .chain(otherwise)
-                .collect();
-        }
         self.evaluate.append(&mut self.acquire);
         self.evaluate.extend(before_iteration);
-        self.evaluate
-            .push(Statement::While(Expr::boolean(true), self.next, otherwise));
-        vec![Statement::Scope {
-            body: self.evaluate,
-            clear: self.clear,
-        }]
+        scoped_loop(self.evaluate, self.clear, otherwise, |otherwise| {
+            Statement::While(Expr::boolean(true), self.next, otherwise)
+        })
     }
 
     pub(super) fn exhaust_if_empty(ready: Expr) -> Statement {
         Statement::If(not(ready), vec![Statement::Exhaust], Vec::new())
     }
+}
+
+/// The loop owns its private roots on every exit. Release them before a nonempty
+/// else suite so it can observe effects such as the last file reference flushing.
+pub(super) fn scoped_loop(
+    mut setup: Vec<Statement>,
+    clear: Vec<usize>,
+    otherwise: Vec<Statement>,
+    make_loop: impl FnOnce(Vec<Statement>) -> Statement,
+) -> Vec<Statement> {
+    let otherwise = if otherwise.is_empty() {
+        otherwise
+    } else {
+        clear
+            .iter()
+            .copied()
+            .map(Statement::Clear)
+            .chain(otherwise)
+            .collect()
+    };
+    setup.push(make_loop(otherwise));
+    vec![Statement::Scope { body: setup, clear }]
 }
 
 pub(super) struct AccumulateArgs {
