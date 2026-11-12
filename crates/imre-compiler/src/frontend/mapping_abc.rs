@@ -173,10 +173,12 @@ impl Checker<'_> {
         class: usize,
         value: Expr,
         at: &impl Ranged,
+        site: Option<ast::ExprRef<'_>>,
     ) -> Result<Expr, String> {
         let direct = |checker: &mut Self, class: usize, receiver: Expr| {
             if checker.classes.methods[class].contains_key("__bool__") {
-                checker.record_slot(class, receiver, "__bool__", &[], at)
+                let site = checker.truth_call_site(site);
+                checker.record_slot_at(class, receiver, "__bool__", &[], at, site)
             } else if checker.classes.declarations.definitions[class].mapping {
                 let size = checker.record_slot(class, receiver, "__len__", &[], at)?;
                 let origin = checker.fixed_origin(at.range(), None);

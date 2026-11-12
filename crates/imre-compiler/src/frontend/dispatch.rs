@@ -214,6 +214,18 @@ impl Checker<'_> {
         arguments: &[Expr],
         at: &impl Ranged,
     ) -> Result<Expr, String> {
+        self.record_slot_at(class, receiver, name, arguments, at, ir::CallSite::None)
+    }
+
+    pub(super) fn record_slot_at(
+        &mut self,
+        class: usize,
+        receiver: Expr,
+        name: &str,
+        arguments: &[Expr],
+        at: &impl Ranged,
+        site: ir::CallSite,
+    ) -> Result<Expr, String> {
         let method = self.classes.methods[class]
             .get(name)
             .ok_or_else(|| error(self.source, at, "missing record primitive"))?
@@ -240,7 +252,11 @@ impl Checker<'_> {
             inputs.push(self.coerce(argument.clone(), ty, at)?);
         }
         self.calls.insert(method.id);
-        Ok(self.call_value(&method, method.returns, ir::CallArgs::positional(inputs)))
+        Ok(self.call_value(
+            &method,
+            method.returns,
+            ir::CallArgs::positional_at(inputs, site),
+        ))
     }
 
     /// `type(record)()` uses the default constructor of the actual fixed layout.
