@@ -2985,7 +2985,7 @@ pub(super) fn method(
         let storage = ctx.string_storage(receiver).unwrap();
         let mapped = match ctx.heap.get(storage) {
             Value::Str(text) if text.is_empty() => return ctx.heap.string_literal(""),
-            Value::Str(text) => Value::Str(crate::objects::case_map(text, case)?.into()),
+            Value::Str(text) => Value::Str(crate::objects::case_map(text, case)?),
             Value::SurrogateStr(points) => {
                 Value::SurrogateStr(crate::objects::case_map_points(points, case)?)
             }
