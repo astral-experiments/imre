@@ -318,17 +318,53 @@ impl Checker<'_> {
         } else {
             ty
         };
+        // The inherited spelling retains its checked receiver type. Its source
+        // function accepts that instance through the declaring class's native ABI.
+        let function = if unbound
+            && !signature.asynchronous
+            && let Some(method) = signature.method
+            && method.kind(&self.classes.declarations) == crate::classes::MethodKind::Instance
+            && !self.classes.cached.contains_key(&signature.id)
+        {
+            let class = &self.classes.declarations.definitions[method.class];
+            let owner = self.classes.declarations.ids[&class.method_origins[method.index]];
+            self.classes.methods[owner]
+                .get(class.methods[method.index].name.as_str())
+                .filter(|original| {
+                    owner != method.class
+                        && !original.asynchronous
+                        && !self.classes.producer_items.contains_key(&original.id)
+                        && !self.classes.cached.contains_key(&original.id)
+                        && original.returns == signature.returns
+                        && original
+                            .params
+                            .first()
+                            .is_some_and(|p| p.ty == Type::Class(owner))
+                        && signature
+                            .params
+                            .first()
+                            .is_some_and(|p| p.ty == Type::Class(method.class))
+                        && original.params.iter().skip(1).map(|p| p.ty).eq(signature
+                            .params
+                            .iter()
+                            .skip(1)
+                            .map(|p| p.ty))
+                })
+                .map_or(signature.id, |original| original.id)
+        } else {
+            signature.id
+        };
         let value = Expr {
             ty,
             kind: ExprKind::Callable {
-                function: signature.id,
+                function,
                 receiver: receiver.map(Box::new),
             },
         };
         Ok(if unbound {
             Expr {
                 ty,
-                kind: ExprKind::Builtin(Builtin::StaticFunction(signature.id), vec![value]),
+                kind: ExprKind::Builtin(Builtin::StaticFunction(function), vec![value]),
             }
         } else {
             value

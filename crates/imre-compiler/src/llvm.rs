@@ -358,7 +358,7 @@ const BRANCH_WEIGHTS: &str = "\n!0 = !{!\"branch_weights\", i32 1, i32 2000}\n!1
 /// Callable representation selected for the specialized checked module.
 pub(crate) struct NativeProgram {
     callable_targets: crate::callables::Targets,
-    function_link_types: HashSet<Type>,
+    linked_functions: HashSet<usize>,
 }
 
 pub(crate) fn analyze_program(
@@ -414,6 +414,12 @@ pub(crate) fn analyze_program(
     }) {
         return Err(Unsupported(SIGNATURE));
     }
+    let linked_functions = function_link_types
+        .iter()
+        .flat_map(|&ty| callable_targets.get(ty))
+        .filter(|target| !target.bound)
+        .map(|target| target.function)
+        .collect::<HashSet<_>>();
     for (id, mut owners) in link_owners {
         owners.retain(|owner| {
             callable_targets
@@ -429,7 +435,7 @@ pub(crate) fn analyze_program(
             matches!(operand.kind, ExprKind::Callable { function, receiver: None }
                 if !cached(function)
                     && module.types.constructor_base(operand.ty).is_none()
-                    && function_link_types.contains(&operand.ty))
+                    && linked_functions.contains(&function))
         });
         if !owners.is_empty() {
             return Err(Unsupported(
@@ -439,7 +445,7 @@ pub(crate) fn analyze_program(
     }
     Ok(NativeProgram {
         callable_targets,
-        function_link_types,
+        linked_functions,
     })
 }
 
@@ -545,7 +551,7 @@ fn emit_program(
         callable_uses: callables::Uses::default(),
         async_frames: BTreeMap::new(),
         async_invoke_frames: BTreeMap::new(),
-        function_link_types: program.function_link_types,
+        linked_functions: program.linked_functions,
         json_schema_roots: Vec::new(),
         module_reads_regex_positions: uses_regex_positions,
         uses_regex_positions: false,
@@ -845,7 +851,7 @@ struct Emitter<'a, 'module> {
     callable_uses: callables::Uses,
     async_frames: BTreeMap<usize, String>,
     async_invoke_frames: BTreeMap<usize, (String, Type)>,
-    function_link_types: HashSet<Type>,
+    linked_functions: HashSet<usize>,
     json_schema_roots: Vec<Type>,
     module_reads_regex_positions: bool,
     uses_regex_positions: bool,

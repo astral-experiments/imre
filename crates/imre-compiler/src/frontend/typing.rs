@@ -277,7 +277,10 @@ pub(super) fn validate_functions(
                     && types.dispatcher(e.ty).is_none()
                     && types.function_site(*function).is_some()
                     && types.cache_adapter(*function).is_none();
-                *signatures.entry(e.ty).or_insert(true) &= good;
+                let (valid, functions) =
+                    signatures.entry(e.ty).or_insert_with(|| (true, Vec::new()));
+                *valid &= good;
+                functions.push(*function);
             }
             ExprKind::Builtin(
                 Builtin::Typing(
@@ -306,8 +309,8 @@ pub(super) fn validate_functions(
         });
     }
     let safe: HashSet<_> = signatures
-        .into_iter()
-        .filter_map(|(t, v)| v.then_some(t))
+        .iter()
+        .filter_map(|(&ty, (valid, _))| valid.then_some(ty))
         .collect();
     if !indirect.is_subset(&safe) {
         return Err(
@@ -321,6 +324,11 @@ pub(super) fn validate_functions(
     }
     // Leave unrelated callback signatures on the existing representation.
     reflected.retain(|ty| safe.contains(ty));
+    // One definition can have several checked receiver signatures and a single
+    // static function object. Its first materialization must own the metadata.
+    for ty in &reflected {
+        direct.extend(&signatures[ty].1);
+    }
     types.set_reflected_functions(reflected, direct);
     Ok(())
 }
