@@ -721,95 +721,42 @@ impl Session {
     }
 }
 
-/// Validate each native initializer at its own origin. Text retained for a
-/// later file import has no executable body at this stage.
-pub(crate) fn check_native_syntax<'a>(
+/// Validate an initializer at its registration origin. Its checked file can also supply
+/// the parser while the caller prepares a runtime-provided initializer.
+pub(crate) fn check_native_syntax(
     root: &Path,
-    mut scratch: Option<Session>,
+    scratch: &mut Option<Session>,
     checked: Option<&crate::modules::SourceGraph>,
-    modules: impl Iterator<Item = &'a (String, PathBuf, String)>,
+    (name, path, source): &(String, PathBuf, String),
+    keep_parser: bool,
     is_alternative: impl Fn(&Path) -> bool,
     module_errors: &mut HashMap<PathBuf, Box<crate::dynamic::ModuleSyntaxError>>,
-) -> Result<(), String> {
-    for (name, path, source) in modules {
-        let input = imre_ast::indentation::prepare(source);
-        let cached = checked.and_then(|graph| {
-            let id = if name == "__main__" {
-                graph.entry
-            } else {
-                graph.python_file(name)?
-            };
-            let session = &graph.session;
-            let file = session.files[id];
-            (graph.modules[id].path == *path && session.matches_parser_input(id, &input.text))
-                .then_some((session, file))
-        });
-        let (session, file) = if let Some(cached) = cached {
-            cached
+) -> Result<Option<ParsedModuleRef>, String> {
+    let input = imre_ast::indentation::prepare(source);
+    let cached = checked.and_then(|graph| {
+        let id = if name == "__main__" {
+            graph.entry
         } else {
-            let session = Session::registered_syntax(&mut scratch, root, &[])?;
-            let origin = path.to_str().ok_or("module paths must be valid UTF-8")?;
-            let file = session.write_file(origin, &input.text)?;
-            file.sync(&mut session.db);
-            (&*session, file)
+            graph.python_file(name)?
         };
-        if let Some(prior) = module_errors.get_mut(path) {
-            if prior.validate_at_origin && !is_alternative(path) {
-                if let Some(error) = session.semantic_syntax_error(file) {
-                    return Err(Diagnostic::invalid_syntax(file, &error, &error)
-                        .display(
-                            &(&session.db as &dyn ruff_db::Db),
-                            &DisplayDiagnosticConfig::new("imre"),
-                        )
-                        .to_string());
-                }
-                return Err(crate::frontend::phase::Diagnostic::at(
-                    &input.text,
-                    &prior.range,
-                    format!("SyntaxError: {}", prior.message),
-                )
-                .with_path(path)
-                .to_string());
-            }
-            if !prior.parse_error
-                && let Some((range, message)) =
-                    session.module_binding_error(file, prior.range.start())
-            {
-                **prior =
-                    crate::dynamic::ModuleSyntaxError::new(&input.text, range, message, false);
-            }
-            continue;
-        }
-        if let Some(error) = session.semantic_syntax_error(file) {
-            if is_alternative(path) {
-                use ruff_python_parser::semantic_errors::SemanticSyntaxErrorKind;
-                let (range, message) = session
-                    .module_binding_error(file, TextSize::new(u32::MAX))
-                    .filter(|(range, _)| range.start() <= error.range.end())
-                    .unwrap_or_else(|| {
-                        (
-                            error.range,
-                            match &error.kind {
-                                SemanticSyntaxErrorKind::GlobalParameter(name) => {
-                                    format!("name '{name}' is parameter and global")
-                                }
-                                SemanticSyntaxErrorKind::NonlocalParameter(name) => {
-                                    format!("name '{name}' is parameter and nonlocal")
-                                }
-                                _ => error.to_string(),
-                            },
-                        )
-                    });
-                module_errors.insert(
-                    path.clone(),
-                    Box::new(crate::dynamic::ModuleSyntaxError::new(
-                        &input.text,
-                        range,
-                        message,
-                        false,
-                    )),
-                );
-            } else {
+        let session = &graph.session;
+        let file = session.files[id];
+        (graph.modules[id].path == *path && session.matches_parser_input(id, &input.text))
+            .then_some((session, file))
+    });
+    let (session, file) = if let Some(cached) = cached {
+        cached
+    } else {
+        let session = Session::registered_syntax(scratch, root, &[])?;
+        let origin = path.to_str().ok_or("module paths must be valid UTF-8")?;
+        let file = session.write_file(origin, &input.text)?;
+        file.sync(&mut session.db);
+        (&*session, file)
+    };
+    let parsed = keep_parser.then(|| session.parsed(file));
+    if let Some(prior) = module_errors.get_mut(path) {
+        if prior.validate_at_origin && !is_alternative(path) {
+            if let Some(error) = session.semantic_syntax_error(file) {
                 return Err(Diagnostic::invalid_syntax(file, &error, &error)
                     .display(
                         &(&session.db as &dyn ruff_db::Db),
@@ -817,9 +764,61 @@ pub(crate) fn check_native_syntax<'a>(
                     )
                     .to_string());
             }
+            return Err(crate::frontend::phase::Diagnostic::at(
+                &input.text,
+                &prior.range,
+                format!("SyntaxError: {}", prior.message),
+            )
+            .with_path(path)
+            .to_string());
         }
+        if !prior.parse_error
+            && let Some((range, message)) = session.module_binding_error(file, prior.range.start())
+        {
+            **prior = crate::dynamic::ModuleSyntaxError::new(&input.text, range, message, false);
+        }
+        return Ok(None);
     }
-    Ok(())
+    if let Some(error) = session.semantic_syntax_error(file) {
+        if is_alternative(path) {
+            use ruff_python_parser::semantic_errors::SemanticSyntaxErrorKind;
+            let (range, message) = session
+                .module_binding_error(file, TextSize::new(u32::MAX))
+                .filter(|(range, _)| range.start() <= error.range.end())
+                .unwrap_or_else(|| {
+                    (
+                        error.range,
+                        match &error.kind {
+                            SemanticSyntaxErrorKind::GlobalParameter(name) => {
+                                format!("name '{name}' is parameter and global")
+                            }
+                            SemanticSyntaxErrorKind::NonlocalParameter(name) => {
+                                format!("name '{name}' is parameter and nonlocal")
+                            }
+                            _ => error.to_string(),
+                        },
+                    )
+                });
+            module_errors.insert(
+                path.clone(),
+                Box::new(crate::dynamic::ModuleSyntaxError::new(
+                    &input.text,
+                    range,
+                    message,
+                    false,
+                )),
+            );
+        } else {
+            return Err(Diagnostic::invalid_syntax(file, &error, &error)
+                .display(
+                    &(&session.db as &dyn ruff_db::Db),
+                    &DisplayDiagnosticConfig::new("imre"),
+                )
+                .to_string());
+        }
+        return Ok(None);
+    }
+    Ok(parsed.filter(|parsed| parsed.has_no_syntax_errors() && input.first_issue(None).is_none()))
 }
 
 impl Session {
