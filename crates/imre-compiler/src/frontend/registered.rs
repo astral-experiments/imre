@@ -4897,6 +4897,29 @@ mod tests {
     }
 
     #[test]
+    fn checked_frame_assigns_joined_fields_to_a_string_local() {
+        let graph = checked_named_source(
+            "def message(value: str) -> str:
+    text = 'empty'
+    if value == 'x':
+        text = f'<{value}>'
+    return text
+print(message('x'))
+",
+        );
+        let functions = graph.registered_functions();
+        let frame = &functions[&graph.entry][&TextSize::default()];
+        assert!(matches!(frame.inputs, FrameInputs::Protocol { .. }));
+        let mut join_type = None;
+        ir::walk_expressions(&frame.function.body, &mut |value| {
+            if matches!(value.kind, ExprKind::Builtin(Builtin::FormatJoin, _)) {
+                join_type = Some(value.ty);
+            }
+        });
+        assert_eq!(join_type, Some(Type::Str));
+    }
+
+    #[test]
     fn checked_function_asserts_against_the_live_global() {
         let text =
             "events = ['truth']\ndef current():\n    assert events == ['truth']\ncurrent()\n";

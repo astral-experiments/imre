@@ -61,7 +61,11 @@ impl<C, E> Fields<C, E> {
         match parts.values.len() {
             0 => (self.literal)(&mut self.context, &[]),
             1 => Ok(parts.values.pop().unwrap()),
-            _ => Ok(self.operation(Builtin::FormatJoin, parts.values)),
+            // Joining multiple pieces produces an exact str even when a field returned a subclass.
+            _ => Ok(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(Builtin::FormatJoin, parts.values),
+            }),
         }
     }
 
