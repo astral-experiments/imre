@@ -128,14 +128,19 @@ pub fn function_definition_expressions(
 }
 
 /// Positional and starred operands are evaluated before keyword operands.
-pub fn argument_values(args: &ast::Arguments) -> impl Iterator<Item = &ast::Expr> {
+pub fn evaluated_arguments(args: &ast::Arguments) -> impl Iterator<Item = ast::ArgOrKeyword<'_>> {
     args.args
         .iter()
-        .map(|arg| match arg {
-            ast::Expr::Starred(star) => star.value.as_ref(),
-            value => value,
-        })
-        .chain(args.keywords.iter().map(|keyword| &keyword.value))
+        .map(ast::ArgOrKeyword::Arg)
+        .chain(args.keywords.iter().map(ast::ArgOrKeyword::Keyword))
+}
+
+/// Values supplied to the call, including the operands of argument expansion.
+pub fn argument_values(args: &ast::Arguments) -> impl Iterator<Item = &ast::Expr> {
+    evaluated_arguments(args).map(|arg| match arg {
+        ast::ArgOrKeyword::Arg(ast::Expr::Starred(star)) => star.value.as_ref(),
+        _ => arg.value(),
+    })
 }
 
 /// Generic class arguments run in the type-parameter scope. Decorators always run outside it.

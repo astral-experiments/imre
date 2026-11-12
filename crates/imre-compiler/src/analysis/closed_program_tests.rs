@@ -844,9 +844,25 @@ fn initializer_calls_use_original_bindings_and_all_arguments() {
             "{expr}"
         );
     }
+    let heading = "import scores\nheading = 'value'\n";
+    for call in [
+        "print(heading, scores.take('x'))",
+        "print(end=scores.take('x'))",
+    ] {
+        assert!(
+            check(&format!("{heading}{call}\n"), number).is_some(),
+            "{call}"
+        );
+        assert!(
+            check(&format!("{heading}if False: {call}\n"), number).is_none(),
+            "{call}"
+        );
+    }
     for expr in [
         "missing(scores.take('x'))",
         "print(observe(), scores.take('x'))",
+        "print(end=scores.take('x'), *stop())",
+        "print(**'not a mapping', end=scores.take('x'))",
     ] {
         assert!(
             check(&format!("import scores\nif False:\n    {expr}\n"), number).is_none(),

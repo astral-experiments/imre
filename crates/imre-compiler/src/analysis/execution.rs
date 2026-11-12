@@ -940,7 +940,7 @@ impl Session {
             .unwrap_or(false)
     }
 
-    fn assigned_value<'a>(
+    pub(super) fn assigned_value<'a>(
         &self,
         file: File,
         parsed: &'a ParsedModuleRef,
