@@ -213,14 +213,26 @@ impl OperandTypes<'_> {
 
     fn checked_scalar(self, operand: ExprRef<'_>, rule: ScalarMatch) -> Option<crate::ir::Type> {
         let parsed = self.parsed();
-        let original = self.original_operand(&parsed, operand)?;
+        let (original, _) = self.original_operand(&parsed, operand)?;
         self.session
             .inferred_scalar_layout(self.module, original, rule)
     }
 
+    /// Resolve a deferred physical name read to the binding in its module frame.
+    pub(crate) fn reads_deferred_global(self, expression: &Expr) -> bool {
+        let parsed = self.parsed();
+        let Some((Expr::Name(name), scope)) = self.original_operand(&parsed, expression.into())
+        else {
+            return false;
+        };
+        let session = self.session;
+        let file = session.files[self.module];
+        *deferred_global(&session.db, file, scope, name.id.clone())
+    }
+
     pub(crate) fn is_bound_method(self, method: &ruff_python_ast::ExprAttribute) -> bool {
         let parsed = self.parsed();
-        let Some(original) = self.original_operand(&parsed, method.into()) else {
+        let Some((original, _)) = self.original_operand(&parsed, method.into()) else {
             return false;
         };
         let session = self.session;
@@ -236,7 +248,7 @@ impl OperandTypes<'_> {
         self,
         parsed: &'p ParsedModuleRef,
         operand: ExprRef<'_>,
-    ) -> Option<&'p Expr> {
+    ) -> Option<(&'p Expr, FileScopeId)> {
         use ruff_python_ast::{AnyRootNodeRef, ExprContext, HasNodeIndex};
         let session = self.session;
         let index = ty_python_core::semantic_index(
@@ -244,7 +256,7 @@ impl OperandTypes<'_> {
             session.db.program_file(session.files[self.module]),
         );
         // Forwarding may preserve a node index while changing the expression it evaluates.
-        index.try_expression_scope_id(&operand)?;
+        let scope = index.try_expression_scope_id(&operand)?;
         let AnyRootNodeRef::Expr(original) = parsed.get_by_index(operand.node_index().load())
         else {
             return None;
@@ -256,7 +268,7 @@ impl OperandTypes<'_> {
         {
             return None;
         }
-        Some(original)
+        Some((original, scope))
     }
 }
 
@@ -421,6 +433,27 @@ pub(crate) fn check_registered_project<'a>(
         None,
     )?;
     Ok(RegisteredLayouts::from_winners(|| session, winners))
+}
+
+#[salsa::tracked]
+fn deferred_global(
+    db: &dyn Db,
+    file: File,
+    scope: FileScopeId,
+    name: ruff_python_ast::name::Name,
+) -> bool {
+    let index = ty_python_core::semantic_index(db, db.program_file(file));
+    let Some(symbol) = index.place_table(scope).symbol_id(name.as_str()) else {
+        return false;
+    };
+    index.symbol_resolves_to_global_scope(symbol, scope)
+        && index
+            .place_table(FileScopeId::global())
+            .symbol_by_name(name.as_str())
+            .is_some_and(|symbol| symbol.is_bound())
+        && index
+            .ancestor_scopes(scope)
+            .any(|(_, scope)| !scope.is_eager())
 }
 
 impl Session {
@@ -4257,6 +4290,32 @@ impl Db for Database {
 #[cfg(test)]
 mod diagnostic_mode_tests {
     use super::*;
+
+    #[test]
+    fn deferred_global_checks_physical_reads_and_refreshes_after_edits() {
+        let root = Path::new("/project");
+        let mut session = Session::new(root, &[]).unwrap();
+        let source = "def read():\n    left\n    right\nleft = 1\nright = 2\n";
+        let path = root.join("main.py");
+        let parsed = session.add(&path, source, crate::SourceKind::File).unwrap();
+        let body = &parsed.suite()[0].as_function_def_stmt().unwrap().body;
+        let left = body[0].as_expr_stmt().unwrap().value.as_ref();
+        let right = body[1].as_expr_stmt().unwrap().value.as_ref();
+        let reads = session.operand_types(0);
+        assert!(reads.reads_deferred_global(left));
+        assert!(reads.reads_deferred_global(right));
+
+        let mut forwarded = left.as_name_expr().unwrap().clone();
+        forwarded.id = right.as_name_expr().unwrap().id.clone();
+        assert!(!reads.reads_deferred_global(&Expr::Name(forwarded)));
+
+        session
+            .write_file(path.to_str().unwrap(), &source.replace("left = 1\n", ""))
+            .unwrap();
+        let reads = session.operand_types(0);
+        assert!(!reads.reads_deferred_global(left));
+        assert!(reads.reads_deferred_global(right));
+    }
 
     #[test]
     fn adding_a_package_child_refreshes_an_earlier_import_lookup() {

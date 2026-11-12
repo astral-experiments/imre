@@ -8895,11 +8895,20 @@ impl<'a> Checker<'a> {
                 (Type::Str, ExprKind::Str(name.to_owned()))
             }
             ast::Expr::Name(name) => {
-                if !self.names.contains_key(name.id.as_str())
-                    && self.resolve(expression).is_none()
-                    && let Some(value) = annotations::builtin_type(name.id.as_str())
+                if !self.names.contains_key(name.id.as_str()) && self.resolve(expression).is_none()
                 {
-                    return Ok(value);
+                    if self
+                        .graph
+                        .session
+                        .operand_types(self.module)
+                        .reads_deferred_global(expression)
+                    {
+                        self.require_registered_operation(expression)?;
+                        return Ok(registered::values::name_binding(name.id.as_str()));
+                    }
+                    if let Some(value) = annotations::builtin_type(name.id.as_str()) {
+                        return Ok(value);
+                    }
                 }
                 if self.comprehension_targets.contains(name.id.as_str())
                     && !self.names.contains_key(name.id.as_str())
