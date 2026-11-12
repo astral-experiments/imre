@@ -703,6 +703,37 @@ fn initializer_checks_record_the_startup_namespace_lookup() {
 }
 
 #[test]
+fn a_nested_import_resumes_the_checked_caller_only_on_its_normal_edge() {
+    let root = tempdir().unwrap();
+    let paths = ["app.py", "bridge.py", "leaf.py"].map(|name| root.path().join(name));
+    let caller = "from bridge import take\ntake('wrong')\n";
+    let bridge = "import leaf\ndef take(value: int): return value\n";
+    for (leaf, reached) in [
+        ("value = 3\n", true),
+        ("raise SystemExit(19)\n", false),
+        ("import bridge\nbridge.take = replacement\n", false),
+    ] {
+        let mut session = super::Session::new(root.path(), &[]).unwrap();
+        for (path, source) in paths.iter().zip([caller, bridge, leaf]) {
+            session.add(path, source, crate::SourceKind::File).unwrap();
+        }
+        let result = session.initializer_call_error((0, &paths[0]), true, |name| match name {
+            "bridge" => Some((1, &paths[1])),
+            "leaf" => Some((2, &paths[2])),
+            _ => None,
+        });
+        assert_eq!(result.error.is_some(), reached, "{leaf}");
+        if let Some(error) = result.error {
+            assert!(
+                error
+                    .to_string()
+                    .contains("app.py:2:6: Imre: expected int, got str")
+            );
+        }
+    }
+}
+
+#[test]
 fn initializer_calls_use_original_bindings_and_all_arguments() {
     let root = tempdir().unwrap();
     let paths = [
