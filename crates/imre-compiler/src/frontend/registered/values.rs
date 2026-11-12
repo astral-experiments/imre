@@ -1356,6 +1356,7 @@ impl Checker<'_> {
             }
         }
         let first_local = self.registered_local_start;
+        let declarations = &self.classes.declarations.definitions;
         let is_bound_method =
             |callee: &ast::Expr| graph.session.operand_types(owner).is_bound_method(callee);
         let mut live_method = false;
@@ -1379,7 +1380,11 @@ impl Checker<'_> {
                         && is_bound_method(callee);
                     list_parameter || live_method
                 } else {
-                    node.is_attribute_expr() && parameter
+                    node.as_attribute_expr().is_some_and(|attribute| {
+                        parameter
+                            || matches!((local, operand.ty), (Some(_), Type::Class(class))
+                                if declarations[class].fields.iter().any(|field| field.name == attribute.attr.as_str()))
+                    })
                 }
             },
             // Even a skipped operand participates in static argument and result checking.
