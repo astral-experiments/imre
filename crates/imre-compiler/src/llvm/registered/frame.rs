@@ -1,6 +1,6 @@
 //! Object-frame ABI operations used by registered LLVM code.
 
-use super::sequences::{permanent_handle, spread};
+use super::sequences::permanent_handle;
 use super::suspension::Suspension;
 use super::{CallArguments, Output, permanent, suspension};
 use crate::frontend::function_scope::ClassBindings;
@@ -1888,7 +1888,7 @@ pub(crate) trait FrameEmitter<'a, 'p>:
     ) -> String {
         let tuple = display == DisplayKind::Tuple;
         if display == DisplayKind::Set {
-            return self.sequence_display(values, display, None, spread, evaluate);
+            return self.sequence_display(values, display, None, evaluate);
         }
         if values.is_empty() {
             return if tuple {
@@ -1921,9 +1921,8 @@ pub(crate) trait FrameEmitter<'a, 'p>:
             let count = handles.len();
             return self.checked(&format!("call i64 @imre_dyn_build_sequence(ptr %ctx, ptr {data}, i64 {count}, i1 true, i1 {tuple}, ptr {slot})"));
         }
-        let build = |code: &mut Self| {
-            code.sequence_display(values, display, slot.as_deref(), spread, evaluate)
-        };
+        let build =
+            |code: &mut Self| code.sequence_display(values, display, slot.as_deref(), evaluate);
         let Some(slot) = slot.as_deref() else {
             return build(self);
         };
@@ -1961,13 +1960,12 @@ pub(crate) trait FrameEmitter<'a, 'p>:
     }
 
     /// Evaluate small prefixes before allocating. Once built, the list owns every consumed operand.
-    fn sequence_display<T>(
+    fn sequence_display(
         &mut self,
-        items: &[T],
+        items: &[Expr],
         display: DisplayKind,
         slot: Option<&str>,
-        spread: impl Fn(&T) -> Option<&T>,
-        mut evaluate: impl FnMut(&mut Self, &T) -> String,
+        mut evaluate: impl FnMut(&mut Self, &Expr) -> String,
     ) -> String {
         let tuple = display == DisplayKind::Tuple;
         let mark = self.temporary_mark();
@@ -1995,7 +1993,7 @@ pub(crate) trait FrameEmitter<'a, 'p>:
                 code.checked(&format!("call i64 @imre_dyn_display_item(ptr %ctx, i64 {list}, i64 {value}, i64 {mark}, i1 {extend})"));
             };
             let (mut result, complete) = crate::llvm::operations::sequences::build(
-                code, items, crate::llvm::operations::sequences::STACK_USE_GUIDELINE, spread, &mut evaluate, initial, append,
+                code, items, crate::llvm::operations::sequences::STACK_USE_GUIDELINE, Expr::spread_operand, &mut evaluate, initial, append,
             );
             if !complete && tuple {
                 let operation = if slot.is_some() { "constant_tuple" } else { "tuple" };

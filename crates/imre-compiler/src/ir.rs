@@ -662,6 +662,14 @@ pub(crate) struct Expr {
 }
 
 impl Expr {
+    /// A starred display or insertion evaluates the iterable inside its spread marker.
+    pub(crate) fn spread_operand(&self) -> Option<&Self> {
+        match &self.kind {
+            ExprKind::Builtin(Builtin::RegisteredSpread, operands) => Some(&operands[0]),
+            _ => None,
+        }
+    }
+
     /// The checker's type at this use can refine a live Python handle.
     pub(crate) fn checked_operand_type(&self) -> Type {
         match self.kind {

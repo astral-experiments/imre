@@ -9,13 +9,6 @@ fn literal(value: &Expr) -> &ExprKind {
     }
 }
 
-pub(super) fn spread(item: &Expr) -> Option<&Expr> {
-    match &item.kind {
-        ExprKind::Builtin(Builtin::RegisteredSpread, operands) => Some(&operands[0]),
-        _ => None,
-    }
-}
-
 pub(super) fn permanent_handle(value: &Expr) -> Option<u16> {
     let handle = match literal(value) {
         ExprKind::None => permanent::NONE,
