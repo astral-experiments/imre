@@ -1138,10 +1138,7 @@ pub(super) fn method(
             if name == "dict.setdefault" {
                 return ctx.set_dictionary_key(receiver, args[0], default, None, false);
             }
-            let (_, index) = ctx.find_dictionary_key(receiver, args[0], None)?;
-            Ok(index.map_or(default, |i| {
-                ctx.dict_entries(receiver).expect("dictionary")[i].1
-            }))
+            Ok(ctx.dictionary_value(receiver, args[0])?.unwrap_or(default))
         }
         "dict.__len__" => {
             arity(name, args, 0, 0)?;
