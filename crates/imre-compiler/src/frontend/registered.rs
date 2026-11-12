@@ -1895,7 +1895,7 @@ impl<'a> SuitePreparation<'a> {
             ),
         };
         // A dead body has no resume entry, even when its syntax declares a generator.
-        let disabled = matches!(test.kind, ExprKind::Bool(false));
+        let disabled = ir::control::boolean_literal(&test) == Some(false);
         let body = if disabled {
             Vec::new()
         } else {
@@ -2666,14 +2666,17 @@ impl statements::StatementLowering for SourceScope<'_> {
             )),
             ast::Stmt::While(loop_) => {
                 let condition = self.condition_operand(&loop_.test).ok_or(())?;
-                let body = if matches!(&*loop_.test, ast::Expr::BooleanLiteral(value) if !value.value)
-                {
+                let disabled = ir::control::boolean_literal(&condition) == Some(false);
+                let body = if disabled {
                     Vec::new()
                 } else {
                     self.in_loop(LoopScope::While, |scope| scope.suite(&loop_.body))?
                 };
-                let otherwise = self.suite(&loop_.orelse)?;
-                Ok((vec![Statement::While(condition, body, otherwise)], true))
+                let (otherwise, falls_through) = self.block(&loop_.orelse)?;
+                Ok((
+                    vec![Statement::While(condition, body, otherwise)],
+                    !disabled || falls_through,
+                ))
             }
             ast::Stmt::Global(_) | ast::Stmt::Nonlocal(_) => Ok((Vec::new(), true)),
             ast::Stmt::AnnAssign(ann) => {
@@ -3619,6 +3622,33 @@ mod tests {
             ["take", "text"]
         );
         assert_eq!(calls, stores);
+    }
+
+    #[test]
+    fn a_false_loop_leaves_through_its_else_suite() {
+        for (ending, falls_through) in [
+            ("return 1", false),
+            ("raise KeyError()", false),
+            ("pass", true),
+        ] {
+            let text = format!(
+                "async def f():\n    while False:\n        pass\n    else:\n        {ending}\n"
+            );
+            let graph = SourceGraph::single(&text).unwrap();
+            let module = &graph.modules[graph.entry];
+            let function = module.parsed.syntax().body[0]
+                .as_function_def_stmt()
+                .unwrap();
+            let source = module.registered_values().context(&text);
+            let operations = HashMap::new();
+            let mut prepare = SuitePreparation::new(&operations, source, true);
+            let suite = prepare.function_suite(
+                &function.body,
+                RegisteredScope::Function { is_async: true },
+                true,
+            );
+            assert_eq!(suite.falls_through, falls_through, "{ending}");
+        }
     }
 
     #[test]
