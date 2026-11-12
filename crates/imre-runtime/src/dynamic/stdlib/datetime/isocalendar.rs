@@ -40,7 +40,11 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, module: Id) -> Result<()> {
         "week",
         "weekday",
     ] {
-        let method = ctx.alloc(Value::HeapTypeMethod { owner, name });
+        let method = ctx.alloc(Value::HeapTypeMethod {
+            owner,
+            name,
+            slot_wrapper: name == "__repr__",
+        });
         let member = if name == "__new__" {
             ctx.alloc(Value::Method {
                 callable: method,

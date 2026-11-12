@@ -51,10 +51,12 @@ fn install_ssl_error(ctx: &mut Context, module: Id, scope: Id) -> Result<()> {
     };
     let namespace = frame.class_namespace.as_mut().unwrap();
     namespace.immutable_type = true;
+    namespace.subclassable_heap_type = true;
     namespace.defining_module = Some(module);
     let slot = ctx.alloc(Value::HeapTypeMethod {
         owner: class,
         name: "__str__",
+        slot_wrapper: true,
     });
     ctx.bind(fields, "__str__", slot);
     let Value::Module { module_state, .. } = ctx.heap.get_mut(module) else {

@@ -3104,9 +3104,13 @@ impl Context {
             {
                 format!("<built-in function {leaf}>")
             }
-            Value::HeapTypeMethod { name, owner } => {
+            Value::HeapTypeMethod {
+                name,
+                owner,
+                slot_wrapper,
+            } => {
                 let class = self.heap.get(*owner).heap_type().unwrap();
-                let kind = if matches!(*name, "__repr__" | "__str__") {
+                let kind = if *slot_wrapper {
                     "slot wrapper"
                 } else {
                     "method"
@@ -3115,13 +3119,18 @@ impl Context {
             }
             Value::Method {
                 callable, receiver, ..
-            } if let Value::HeapTypeMethod { name, owner } = self.heap.get(*callable) => {
+            } if let Value::HeapTypeMethod {
+                name,
+                owner,
+                slot_wrapper,
+            } = self.heap.get(*callable) =>
+            {
                 let class = self.heap.get(*owner).heap_type().unwrap();
                 if matches!(self.heap.get(*receiver), Value::Module { .. }) {
                     format!("<built-in function {name}>")
                 } else if *name == "__new__" {
                     format!("<built-in method __new__ of type object at {receiver:#x}>")
-                } else if matches!(*name, "__repr__" | "__str__") {
+                } else if *slot_wrapper {
                     format!("<method-wrapper '{name}' of {class} object at {receiver:#x}>")
                 } else {
                     format!("<built-in method {name} of {class} object at {receiver:#x}>")
@@ -3180,7 +3189,7 @@ impl Context {
                 self.format_elements(self.itemgetter_keys(*keys), active)
             ),
             Value::Instance { class, .. } => self.default_object_repr(id, *class),
-            Value::Socket(socket) => {
+            Value::Socket { handle: socket, .. } => {
                 use crate::objects::socket::{family, fd, kind, proto};
                 format!(
                     "<socket object, fd={}, family={}, type={}, proto={}>",

@@ -171,8 +171,8 @@ pub(in crate::dynamic) fn unsupported_reducer(ctx: &Context, obj: Id) -> Error {
 
 /// Identify native layouts whose default object state cannot reconstruct their payload.
 fn stateful_native_layout(ctx: &Context, base: Id) -> Option<&'static str> {
-    if ctx.builtins.get("socket.socket") == Some(&base) {
-        Some("_socket.socket")
+    if ctx.heap.get(base).heap_type() == Some(super::socket::CLASS) {
+        Some(super::socket::CLASS)
     } else {
         ctx.itertools_layout(base)
     }
@@ -329,14 +329,14 @@ fn default_reduction(ctx: &mut Context, obj: Id, protocol: i32) -> Result<Id> {
     match value {
         Value::ClassMethod { .. }
         | Value::StaticMethod { .. }
-        | Value::Socket(_)
+        | Value::Socket { .. }
         | Value::ZstdCompressor(_)
         | Value::ZstdDecompressor(_)
         | Value::Bz2Compressor(_)
         | Value::Bz2Decompressor(_)
         | Value::LzmaCompressor(_)
         | Value::LzmaDecompressor(_) => {
-            let name = if matches!(value, Value::Socket(_)) {
+            let name = if matches!(value, Value::Socket { .. }) {
                 "_socket.socket"
             } else {
                 ctx.type_name(obj)

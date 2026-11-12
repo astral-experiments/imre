@@ -743,7 +743,7 @@ pub(super) fn call(
                     .borrow()
                     .as_ref()
                     .and_then(|s| s.selected_alpn_protocol()),
-                Value::None | Value::TlsTransport(_) | Value::Socket(_) => None,
+                Value::None | Value::TlsTransport(_) | Value::Socket { .. } => None,
                 _ => return Err(Error::new("TypeError", "expected a TLS connection")),
             };
             let Some(bytes) = selected else {

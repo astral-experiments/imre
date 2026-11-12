@@ -741,6 +741,7 @@ fn worker_target(ctx: &Context, target: Id, args: Id, kwargs: Id) -> Result<(Ope
             Value::HeapTypeMethod {
                 owner,
                 name: "update",
+                ..
             } if ctx.heap.get(receiver).instance_class() == Some(*owner) => {
                 ("hash.update", ctx.scalar_value(receiver))
             }

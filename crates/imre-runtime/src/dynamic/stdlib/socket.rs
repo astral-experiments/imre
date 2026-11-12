@@ -2,6 +2,7 @@
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod message;
 use super::{Context, Error, Id, NONE, Result, Value, argument, option};
+use crate::dynamic::value::NativeModuleState;
 use crate::objects::socket as native;
 use std::time::Duration;
 
@@ -46,46 +47,83 @@ pub(in super::super) const CLASS_METHODS: &[&str] = &[
     "recvmsg_into",
 ];
 
-pub(in super::super) fn install_socket_layout(ctx: &mut Context, class: Id) {
-    let mut entries = Vec::new();
-    for &name in CLASS_METHODS.iter().chain(["__new__"].iter()) {
-        let member = ctx.builtin(&format!("socket.socket.{name}"));
-        entries.push((ctx.heap.code_name(name), member));
-    }
-    for name in ["family", "type", "proto", "timeout"] {
-        let get = ctx.builtin(&format!("socket.socket.{name}"));
-        let member = ctx.alloc(Value::GetSetDescriptor {
-            owner: "socket.socket",
-            name,
-            get,
-            set: None,
-        });
-        entries.push((ctx.heap.code_name(name), member));
-    }
-    let dict = ctx.dict(entries);
-    ctx.native_type_dicts.insert(class, dict);
-}
+pub(in crate::dynamic) const CLASS: &str = "_socket.socket";
 
-fn allocate(ctx: &mut Context, class: Id) -> Result<Id> {
-    let base = ctx.builtin("socket.socket");
-    if class == base {
-        return Ok(ctx.alloc(Value::Socket(native::uninitialized()?)));
-    }
-    if !matches!(ctx.heap.get(class), Value::Class { .. })
-        || ctx.allocation_base(class) != Some(base)
-    {
-        return Err(Error::new(
-            "TypeError",
-            "_socket.socket.__new__ requires a socket subtype",
-        ));
-    }
-    let handle = native::uninitialized()?;
-    let obj = ctx.instance(class, None);
-    let Value::Instance { socket, .. } = ctx.heap.get_mut(obj) else {
+/// Each extension module owns its type, whose descriptors keep their declaring class.
+fn socket_class(ctx: &mut Context, module: Id, scope: Id) -> Result<Id> {
+    let fields = ctx.scope("_socket", Some(scope));
+    let module_name = ctx.text("_socket");
+    let qualname = ctx.text("socket");
+    ctx.bind(fields, "__module__", module_name);
+    ctx.bind(fields, "__qualname__", qualname);
+    let object = ctx.builtin("object");
+    let owner = ctx.allocate_class("socket".into(), fields, vec![object])?;
+    let Value::Class { heap_type, .. } = ctx.heap.get_mut(owner) else {
         unreachable!()
     };
-    *socket = Some(handle);
-    Ok(obj)
+    *heap_type = Some(CLASS);
+    let Value::Scope(frame) = ctx.heap.get_mut(fields) else {
+        unreachable!()
+    };
+    let namespace = frame.class_namespace.as_mut().unwrap();
+    namespace.slot_names = Some([].into());
+    namespace.immutable_type = true;
+    namespace.subclassable_heap_type = true;
+    namespace.defining_module = Some(module);
+    for &name in CLASS_METHODS
+        .iter()
+        .chain(["__new__", "family", "type", "proto", "timeout"].iter())
+    {
+        let method = ctx.alloc(Value::HeapTypeMethod {
+            owner,
+            name,
+            slot_wrapper: matches!(name, "__init__" | "__del__"),
+        });
+        let member = match name {
+            "__new__" => ctx.alloc(Value::Method {
+                callable: method,
+                receiver: owner,
+                explicit: false,
+            }),
+            "family" | "type" | "proto" | "timeout" => ctx.alloc(Value::GetSetDescriptor {
+                owner: CLASS,
+                name,
+                get: method,
+                set: None,
+            }),
+            _ => method,
+        };
+        ctx.bind(fields, name, member);
+    }
+    Ok(owner)
+}
+
+pub(in crate::dynamic) fn descriptor_call(
+    ctx: &mut Context,
+    owner: Id,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let receiver = argument(args, 0)?;
+    if name == "__new__" {
+        let class = argument(args, 1)?;
+        if receiver != owner || !ctx.direct_subclass(class, owner) {
+            return Err(ctx.invalid_new_subtype(CLASS, class));
+        }
+        let handle = native::uninitialized()?;
+        if class == owner {
+            return Ok(ctx.alloc(Value::Socket { class, handle }));
+        }
+        let instance = ctx.instance(class, None);
+        let Value::Instance { socket, .. } = ctx.heap.get_mut(instance) else {
+            unreachable!()
+        };
+        *socket = Some(handle);
+        return Ok(instance);
+    }
+    ctx.check_heap_method_receiver(owner, name, receiver)?;
+    call_method(ctx, name, args, kwargs)
 }
 
 const CONSTANTS: &[(&str, i32)] = &[
@@ -211,7 +249,11 @@ pub(in super::super) const IMPORTED_FUNCTIONS: &[&str] = &[
 ];
 
 /// Seed the low-level module once so normal module assignment and deletion remain observable.
-pub(in super::super) fn install_lowlevel_socket(ctx: &mut Context, scope: Id) -> Result<()> {
+pub(in super::super) fn install_lowlevel_socket(
+    ctx: &mut Context,
+    module: Id,
+    scope: Id,
+) -> Result<()> {
     for &(name, value) in CONSTANTS.iter().chain(IMPORTED_CONSTANTS) {
         let value = ctx.int(i64::from(value));
         ctx.bind(scope, name, value);
@@ -224,15 +266,25 @@ pub(in super::super) fn install_lowlevel_socket(ctx: &mut Context, scope: Id) ->
         let function = ctx.builtin(&format!("_socket.{name}"));
         ctx.bind(scope, name, function);
     }
-    let pair = ctx.builtin("_socket.socketpair");
-    ctx.bind(scope, "socketpair", pair);
     let resolver = ctx.builtin("_socket.getaddrinfo");
     ctx.bind(scope, "getaddrinfo", resolver);
-    let socket_type = attribute(ctx, "socket")?;
+    let socket_type = socket_class(ctx, module, scope)?;
+    ctx.bind(scope, "socket", socket_type);
     ctx.bind(scope, "SocketType", socket_type);
+    let Value::Module { module_state, .. } = ctx.heap.get_mut(module) else {
+        unreachable!()
+    };
+    *module_state = Some(NativeModuleState::SocketType(socket_type));
+    let callable = ctx.builtin("_socket.socketpair");
+    let pair = ctx.alloc(Value::Method {
+        callable,
+        receiver: module,
+        explicit: false,
+    });
+    ctx.bind(scope, "socketpair", pair);
     let timeout = ctx.builtin("TimeoutError");
     ctx.bind(scope, "timeout", timeout);
-    for name in ["has_ipv6", "socket", "close", "error"] {
+    for name in ["has_ipv6", "close", "error"] {
         let value = attribute(ctx, name)?;
         ctx.bind(scope, name, value);
     }
@@ -321,7 +373,10 @@ pub(super) fn attribute(ctx: &mut Context, name: &str) -> Result<Id> {
         // IPv6 is compiled in on the supported Linux and macOS targets, independently of
         // whether a particular process can create or bind an IPv6 socket.
         "has_ipv6" => Ok(super::TRUE),
-        "socket" => Ok(ctx.builtin("socket.socket")),
+        "socket" => {
+            let module = ctx.module("_socket")?;
+            ctx.lookup_attr(module, "socket")
+        }
         "close" => Ok(ctx.builtin("_socket.close")),
         "getfqdn" => Ok(ctx.alloc(Value::Native("socket.getfqdn".into()))),
         "error" => Ok(ctx.builtin("OSError")),
@@ -1342,9 +1397,12 @@ fn apply_default_timeout(ctx: &Context, socket: &crate::objects::Object) -> Resu
     Ok(())
 }
 
-fn new_socket(ctx: &mut Context, socket: crate::ObjectOwner) -> Result<Id> {
+fn new_socket(ctx: &mut Context, class: Id, socket: crate::ObjectOwner) -> Result<Id> {
     apply_default_timeout(ctx, &socket)?;
-    ctx.heap.alloc_descriptor_owner(Value::Socket(socket))
+    ctx.heap.alloc_descriptor_owner(Value::Socket {
+        class,
+        handle: socket,
+    })
 }
 
 pub(super) fn close(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
@@ -1356,6 +1414,16 @@ pub(super) fn close(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
 }
 
 pub(super) fn socketpair(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let Some((&module, args)) = args.split_first() else {
+        return Err(Error::new("TypeError", "socketpair requires its module"));
+    };
+    let Value::Module {
+        module_state: Some(NativeModuleState::SocketType(class)),
+        ..
+    } = *ctx.heap.get(module)
+    else {
+        return Err(Error::new("TypeError", "socketpair requires its module"));
+    };
     check_args("socketpair", args, kwargs, 3, &[])?;
     let mut values = [libc::AF_UNIX, libc::SOCK_STREAM, 0];
     for (value, &arg) in values.iter_mut().zip(args) {
@@ -1363,8 +1431,8 @@ pub(super) fn socketpair(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]
     }
     let [family, kind, proto] = values;
     let (left, right) = native::socketpair(family, kind, proto)?;
-    let left = new_socket(ctx, left)?;
-    let right = new_socket(ctx, right)?;
+    let left = new_socket(ctx, class, left)?;
+    let right = new_socket(ctx, class, right)?;
     Ok(ctx.alloc(Value::Tuple(vec![left, right])))
 }
 
@@ -1402,12 +1470,6 @@ pub(super) fn endpoint_method(
             };
             native::listen(socket, backlog)?;
             Ok(NONE)
-        }
-        "accept" => {
-            let (child, peer) = native::accept(socket, || ctx.dispatch_signals())?;
-            let peer = pack_socket_name(ctx, peer)?;
-            let child = new_socket(ctx, child)?;
-            Ok(ctx.alloc(Value::Tuple(vec![child, peer])))
         }
         "getsockname" | "getpeername" => {
             pack_socket_name(ctx, native::socket_name(socket, method == "getpeername")?)
@@ -1470,62 +1532,6 @@ pub(super) fn call(
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     match name {
-        "socket.__new__" => return allocate(ctx, argument(args, 0)?),
-        "socket" | "socket.__init__" => {
-            let (obj, socket, args) = if name == "socket" {
-                let socket = native::uninitialized()?;
-                (ctx.alloc(Value::Socket(socket.clone())), socket, args)
-            } else {
-                let (&obj, args) = args
-                    .split_first()
-                    .ok_or_else(|| Error::new("TypeError", "missing socket receiver"))?;
-                let socket = ctx
-                    .heap
-                    .get(obj)
-                    .socket_handle()
-                    .cloned()
-                    .ok_or_else(|| Error::new("TypeError", "expected a socket"))?;
-                (obj, socket, args)
-            };
-            let keys = ["family", "type", "proto", "fileno"];
-            check_args(name, args, kwargs, keys.len(), &keys)?;
-            // Bind like the public Python constructor before invoking any __index__ methods.
-            let mut values = [None; 4];
-            for (i, key) in keys.iter().enumerate() {
-                values[i] = option(args, i, kwargs, key).map_err(|_| {
-                    Error::new(
-                        "TypeError",
-                        format!("socket.__init__() got multiple values for argument '{key}'"),
-                    )
-                })?;
-            }
-            let [family, kind, proto, fileno] = values;
-            let mut number = |value: Option<Id>| {
-                value
-                    .map(|v| ctx.index_c_int(v))
-                    .transpose()
-                    .map(|v| v.unwrap_or(-1))
-            };
-            let (family, kind, proto) = (number(family)?, number(kind)?, number(proto)?);
-            let event = [
-                obj,
-                ctx.int(i64::from(family)),
-                ctx.int(i64::from(kind)),
-                ctx.int(i64::from(proto)),
-            ];
-            super::audit::event(ctx, "socket.__new__", &event)?;
-            let raw = match fileno {
-                None | Some(NONE) => None,
-                Some(value) => Some(ctx.index_c_long(value)? as i32),
-            };
-            ctx.heap.track_initialized_descriptor(obj)?;
-            match raw {
-                Some(raw) => native::adopt_into(&socket, raw, family, kind, proto)?,
-                None => native::open_into(&socket, family, kind, proto)?,
-            }
-            apply_default_timeout(ctx, &socket)?;
-            return Ok(if name == "socket" { obj } else { NONE });
-        }
         "if_nameindex" => {
             check_args(name, args, kwargs, 0, &[])?;
             return if_nameindex(ctx);
@@ -1587,14 +1593,73 @@ pub(super) fn call(
                 Err(error) => Err(error),
             };
         }
-        _ => {}
-    }
-    let Some(method) = name.strip_prefix("socket.") else {
-        return Err(Error::new(
+        _ => Err(Error::new(
             "TypeError",
             format!("'{name}' is not a socket operation"),
-        ));
+        )),
+    }
+}
+
+/// Initialize the native endpoint selected by the class call or explicit __init__.
+fn initialize(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let (&obj, args) = args
+        .split_first()
+        .ok_or_else(|| Error::new("TypeError", "missing socket receiver"))?;
+    let socket = ctx
+        .heap
+        .get(obj)
+        .socket_handle()
+        .cloned()
+        .ok_or_else(|| Error::new("TypeError", "expected a socket"))?;
+    let keys = ["family", "type", "proto", "fileno"];
+    check_args("socket.__init__", args, kwargs, keys.len(), &keys)?;
+    // Bind like the public Python constructor before invoking any __index__ methods.
+    let mut values = [None; 4];
+    for (i, key) in keys.iter().enumerate() {
+        values[i] = option(args, i, kwargs, key).map_err(|_| {
+            Error::new(
+                "TypeError",
+                format!("socket.__init__() got multiple values for argument '{key}'"),
+            )
+        })?;
+    }
+    let [family, kind, proto, fileno] = values;
+    let mut number = |value: Option<Id>| {
+        value
+            .map(|v| ctx.index_c_int(v))
+            .transpose()
+            .map(|v| v.unwrap_or(-1))
     };
+    let (family, kind, proto) = (number(family)?, number(kind)?, number(proto)?);
+    let event = [
+        obj,
+        ctx.int(i64::from(family)),
+        ctx.int(i64::from(kind)),
+        ctx.int(i64::from(proto)),
+    ];
+    super::audit::event(ctx, "socket.__new__", &event)?;
+    let raw = match fileno {
+        None | Some(NONE) => None,
+        Some(value) => Some(ctx.index_c_long(value)? as i32),
+    };
+    ctx.heap.track_initialized_descriptor(obj)?;
+    match raw {
+        Some(raw) => native::adopt_into(&socket, raw, family, kind, proto)?,
+        None => native::open_into(&socket, family, kind, proto)?,
+    }
+    apply_default_timeout(ctx, &socket)?;
+    Ok(NONE)
+}
+
+fn call_method(
+    ctx: &mut Context,
+    method: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    if method == "__init__" {
+        return initialize(ctx, args, kwargs);
+    }
     let is_message = matches!(method, "sendmsg" | "recvmsg" | "recvmsg_into");
     let descriptor = CLASS_METHODS.contains(&method);
     let (receiver, args) = args.split_first().ok_or_else(|| {
@@ -1677,7 +1742,7 @@ pub(super) fn call(
         return result;
     }
     if method == "_check_sendfile_owner" {
-        let owner = super::super::builtins::one_positional_arg(name, args, kwargs)?;
+        let owner = super::super::builtins::one_positional_arg(method, args, kwargs)?;
         let identity = sendfile_identity(ctx, owner)?;
         native::check_sendfile_owner(&s, native::fd(&s), &identity)?;
         return Ok(NONE);
@@ -1724,7 +1789,7 @@ pub(super) fn call(
         return Ok(result);
     }
     if matches!(method, "connect" | "connect_ex") {
-        let peer = super::super::builtins::one_positional_arg(name, args, kwargs)?;
+        let peer = super::super::builtins::one_positional_arg(method, args, kwargs)?;
         let addr = address(ctx, native::family(&s), peer, method)?;
         super::audit::event(ctx, "socket.connect", &[*receiver, peer])?;
         let result = native::connect(&s, &addr, || ctx.dispatch_signals())?;

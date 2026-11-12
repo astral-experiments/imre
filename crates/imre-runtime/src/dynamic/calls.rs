@@ -339,7 +339,6 @@ impl Context {
             && matches!(
                 kind.as_str(),
                 stdlib::datetime::TZINFO
-                    | "socket.socket"
                     | super::thread_handle::CLASS
                     | "datetime.timezone"
                     | value::ZSTD_COMPRESS_TYPE
@@ -1373,11 +1372,11 @@ impl Context {
             .get(owner)
             .heap_type()
             .expect("native heap type method");
-        if self.heap.get(receiver).instance_class() == Some(owner)
-            || (matches!(
-                declaring,
-                value::SSL_ERROR_TYPE | stdlib::random::instance::CLASS
-            ) && self.instance_of(receiver, owner))
+        if self
+            .heap
+            .get(receiver)
+            .instance_class()
+            .is_some_and(|actual| self.direct_subclass(actual, owner))
         {
             return Ok(());
         }
@@ -1464,7 +1463,7 @@ impl Context {
                     return Ok(self.bind_python_method(value, receiver));
                 }
                 Value::IoMethod { .. } => true,
-                Value::HeapTypeMethod { owner, name } => {
+                Value::HeapTypeMethod { owner, name, .. } => {
                     self.check_heap_method_receiver(*owner, name, receiver)?;
                     true
                 }
@@ -2002,7 +2001,8 @@ impl Context {
                 ..
             }
             | Value::HeapTypeMethod {
-                name: name @ ("__repr__" | "__str__"),
+                name,
+                slot_wrapper: true,
                 ..
             } => Some(*name),
             _ => None,
@@ -2027,7 +2027,7 @@ impl Context {
             Value::ConstEvaluator(_) => "constevaluator",
             Value::TypeVarTuple { .. } => "typing.TypeVarTuple",
             Value::GenericAlias(alias) => alias.kind.class(),
-            Value::Socket(_) => "socket.socket",
+            Value::Socket { .. } => "_socket.socket",
             Value::Union(_) => "typing.Union",
             Value::Method { explicit: true, .. } => "method",
             Value::Method { callable, .. } => match self.heap.get(*callable) {
@@ -2082,7 +2082,6 @@ impl Context {
                             | value::LZMA_COMPRESS_TYPE
                             | value::LZMA_DECOMPRESS_TYPE
                             | value::ZLIB_COMPRESS_TYPE
-                            | "socket.socket"
                             | "struct.Struct"
                             | value::ZLIB_DECOMPRESS_TYPE
                             | "hmac.HMAC"
@@ -2166,7 +2165,8 @@ impl Context {
         match self.heap.get(obj) {
             Value::Union(_) => Ok(super::union::class(self)),
             Value::FrameLocalsProxy { class, .. } => Ok(*class),
-            Value::Instance { class, .. }
+            Value::Socket { class, .. }
+            | Value::Instance { class, .. }
             | Value::Class {
                 metaclass: Some(class),
                 ..
@@ -2282,7 +2282,6 @@ impl Context {
             | (value::ZLIB_DECOMPRESS_TYPE, Value::ZlibDecompressor { .. })
             | ("struct.Struct", Value::Struct { .. })
             | ("hmac.HMAC", Value::Hmac(_))
-            | ("socket.socket", Value::Socket(_))
             | ("list", Value::List(_))
             | ("dict", Value::Dict(_) | Value::DefaultDict { .. })
             | ("collections.defaultdict", Value::DefaultDict { .. })
@@ -2967,6 +2966,11 @@ impl Context {
     ) -> Result<Id> {
         let spelling = attr.text(self)?;
         let name = spelling.as_ref();
+        if let Value::Socket { class, .. } = *self.heap.get(obj)
+            && let Some(member) = self.class_attr(class, name)
+        {
+            return self.bind_attribute(member, obj, class);
+        }
         let native_key = match (attr.nonexact_key(self), self.heap.get(obj)) {
             (Some(key), Value::Native(owner))
                 if matches!(owner.as_str(), "str" | "tuple" | "list") =>
@@ -3338,15 +3342,11 @@ impl Context {
                 Value::Native(kind)
                     if matches!(
                         kind.as_str(),
-                        "method"
-                            | "builtin_function_or_method"
-                            | "method-wrapper"
-                            | "socket.socket"
+                        "method" | "builtin_function_or_method" | "method-wrapper"
                     ) =>
                 {
                     Some(obj)
                 }
-                Value::Socket(_) => Some(self.exact_type(obj)?),
                 Value::Method { .. } | Value::Native(_)
                     if matches!(
                         self.builtin_type_name(obj),
@@ -4450,6 +4450,7 @@ impl Context {
                 _ if let Value::HeapTypeMethod {
                     owner,
                     name: method,
+                    slot_wrapper,
                 } = *self.heap.get(callable) =>
                 {
                     if self.heap.get(owner).heap_type() == Some(stdlib::unicodedata::CLASS)
@@ -4476,7 +4477,7 @@ impl Context {
                         "__text_signature__" if method == "__str__" => {
                             return Ok(self.text("($self, /)"));
                         }
-                        "__objclass__" if method == "__str__" => return Ok(owner),
+                        "__objclass__" if slot_wrapper => return Ok(owner),
                         "__name__" => return Ok(self.text(method)),
                         "__qualname__" if method == "md5" => return Ok(self.text(method)),
                         "__qualname__" => {
@@ -4718,6 +4719,7 @@ impl Context {
             Value::HeapTypeMethod {
                 owner,
                 name: member,
+                slot_wrapper,
             } => match name {
                 _ if self.heap.get(owner).heap_type() == Some(stdlib::unicodedata::CLASS)
                     && let Some(metadata) = stdlib::unicodedata::method_metadata(member, name) =>
@@ -4739,7 +4741,7 @@ impl Context {
                     return Ok(self.text(format!("{}.{member}", self.class_name(owner))));
                 }
                 "__get__" => {
-                    let callable = self.builtin(if matches!(member, "__repr__" | "__str__") {
+                    let callable = self.builtin(if slot_wrapper {
                         "wrapper_descriptor.__get__"
                     } else {
                         "method_descriptor.__get__"
@@ -4771,8 +4773,10 @@ impl Context {
                     | "_ssl.MemoryBIO"
                     | stdlib::hashlib::md5::CLASS
                     | stdlib::datetime::isocalendar::CLASS
-            ) || matches!(self.heap.get(get), Value::IoMethod { .. })
-                || HashState::is_provider_class(owner)
+            ) || matches!(
+                self.heap.get(get),
+                Value::HeapTypeMethod { .. } | Value::IoMethod { .. }
+            ) || HashState::is_provider_class(owner)
                 || Self::dict_view_owner(owner).is_some()
                 || owner == value::TEMPLATE_TYPE
                 || stdlib::datetime::members(owner).is_some() =>
@@ -4808,7 +4812,10 @@ impl Context {
                                     | stdlib::hashlib::md5::CLASS
                                     | stdlib::datetime::isocalendar::CLASS
                             )
-                            || matches!(self.heap.get(get), Value::IoMethod { .. })
+                            || matches!(
+                                self.heap.get(get),
+                                Value::HeapTypeMethod { .. } | Value::IoMethod { .. }
+                            )
                             || HashState::is_provider_class(owner)
                             || Self::dict_view_owner(owner).is_some() =>
                     {
@@ -5292,14 +5299,6 @@ impl Context {
             }
             #[cfg(target_os = "linux")]
             Value::Epoll(_) if name == "fromfd" => return Ok(self.builtin("select.epoll.fromfd")),
-            Value::Native(ref class) if class == "socket.socket" => {
-                if name == "__name__" {
-                    return Ok(self.text("socket"));
-                }
-                if let Some(member) = self.own_class_attr(obj, name) {
-                    return self.bind_attribute(member, NONE, obj);
-                }
-            }
             #[cfg(unix)]
             Value::TlsBioSession { .. } if name == "do_handshake" => {
                 let module = self.module("ssl")?;
@@ -5309,15 +5308,6 @@ impl Context {
                     receiver: obj,
                     explicit: false,
                 }));
-            }
-            Value::Socket(ref socket) if name == "family" => {
-                return Ok(self.int(i64::from(crate::objects::socket::family(socket))));
-            }
-            Value::Socket(ref socket) if name == "proto" => {
-                return Ok(self.int(i64::from(crate::objects::socket::proto(socket))));
-            }
-            Value::Socket(ref socket) if name == "type" => {
-                return Ok(self.int(i64::from(crate::objects::socket::kind(socket))));
             }
             Value::DefaultDict { factory, .. } if name == "default_factory" => return Ok(factory),
             Value::Int(_) | Value::Bool(_) if name == "from_bytes" => {
@@ -8619,7 +8609,10 @@ impl Context {
             }
             Value::CodecEncoder(codec) => stdlib::codecs::entry_encode(self, codec, &args, &kwargs),
             Value::CodecDecoder(codec) => stdlib::codecs::decode(self, codec, &args, &kwargs),
-            Value::HeapTypeMethod { owner, name } => {
+            Value::HeapTypeMethod { owner, name, .. } => {
+                if self.heap.get(owner).heap_type() == Some(stdlib::socket::CLASS) {
+                    return stdlib::socket::descriptor_call(self, owner, name, &args, &kwargs);
+                }
                 if self.heap.get(owner).heap_type() == Some(stdlib::unicodedata::CLASS) {
                     return stdlib::unicodedata::legacy_method(self, owner, name, &args, &kwargs);
                 }
@@ -10221,12 +10214,12 @@ impl Context {
             .and_then(|_| self.float_enum_type(&bases));
         let object = self.builtin("object");
         // Socket subtypes store their native endpoint separately from Python member slots.
-        let socket = self.builtin("socket.socket");
         let ordinary_slots = typed_dict_meta.is_none()
             && enum_kind.is_none()
             && bases.iter().all(|&base| {
                 let storage = self.allocation_base(base).unwrap_or(base);
-                storage == object || storage == socket
+                storage == object
+                    || self.heap.get(storage).heap_type() == Some(stdlib::socket::CLASS)
             });
         let layout = if ordinary_slots {
             super::typing::ClassLayout::OrdinarySlots
