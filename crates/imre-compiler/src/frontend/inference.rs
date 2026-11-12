@@ -1752,6 +1752,18 @@ mod tests {
         );
         std::fs::write(&file, typed).unwrap();
         crate::check_file(&file, None).unwrap();
+        let mixed = source.replace(
+            "def relay(arg): return take(arg)\nprint(relay(choose()))",
+            "def select(flag: bool):\n    if flag: return choose()\n    return 7\nprint(select(False))",
+        );
+        std::fs::write(&file, &mixed).unwrap();
+        crate::check_file(&file, None).unwrap();
+        std::fs::write(&file, mixed.replace("raise SystemExit(13)", "pass")).unwrap();
+        let error = crate::check_file(&file, None).unwrap_err();
+        assert!(
+            error.contains("inferred returns require one supported exact or nullable type"),
+            "{error}"
+        );
         std::fs::write(&file, source.replace("raise SystemExit(13)", "pass")).unwrap();
         let error = crate::check_file(&file, None).unwrap_err();
         assert!(error.contains("expected int, got str"), "{error}");
