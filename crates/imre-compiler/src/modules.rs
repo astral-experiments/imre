@@ -3359,6 +3359,15 @@ impl SourceGraph {
             .insert(start, body);
     }
 
+    pub(crate) fn remove_registered_function(&self, module: ModuleId, start: TextSize) {
+        let mut functions = self.registered_functions.borrow_mut();
+        let entries = functions.get_mut(&module).expect("captured module");
+        entries.remove(&start);
+        if entries.is_empty() {
+            functions.remove(&module);
+        }
+    }
+
     pub(crate) fn registered_functions(
         &self,
     ) -> std::cell::Ref<'_, HashMap<ModuleId, crate::dynamic::CheckedFunctions>> {

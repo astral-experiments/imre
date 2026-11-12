@@ -275,26 +275,48 @@ pub(super) fn retain_generator(
 
 /// Inference has released its shared graph borrow, so check the remaining declarations
 /// on their own parser and restore its diagnostic rules before selecting operand layouts.
-pub(super) fn retain_unresolved_generators(
+pub(super) fn finish_source_checks(
     graph: &mut SourceGraph,
     owners: Vec<DefinitionId>,
+    checks: SourceChecks,
     mut source_checks: Option<&mut crate::analysis::Session>,
 ) {
+    let mut accepted = |module,
+                        range,
+                        session: &mut crate::analysis::Session,
+                        errors: &mut HashMap<ModuleId, Vec<TextRange>>| {
+        let errors = errors.entry(module).or_insert_with(|| {
+            source_checks
+                .as_deref_mut()
+                .unwrap_or(session)
+                .registered_source_error_ranges(module)
+        });
+        SourceChecks::accepts_range(errors, range)
+    };
+    for (module, range) in checks
+        .solved
+        .into_iter()
+        .flat_map(std::cell::RefCell::into_inner)
+    {
+        if !accepted(
+            module,
+            range,
+            &mut graph.session,
+            graph.registered_source_errors.get_mut(),
+        ) {
+            graph.remove_registered_function(module, range.start());
+        }
+    }
     for owner in owners {
         let Some(definition) = generator_definition(&graph.modules, &graph.session, owner) else {
             continue;
         };
-        let errors = graph
-            .registered_source_errors
-            .get_mut()
-            .entry(owner.module)
-            .or_insert_with(|| {
-                source_checks
-                    .as_deref_mut()
-                    .unwrap_or(&mut graph.session)
-                    .registered_source_error_ranges(owner.module)
-            });
-        if SourceChecks::accepts_range(errors, definition.range()) {
+        if accepted(
+            owner.module,
+            definition.range(),
+            &mut graph.session,
+            graph.registered_source_errors.get_mut(),
+        ) {
             retain_generator_body(graph, owner.module, definition);
         }
     }
@@ -369,6 +391,7 @@ pub(super) fn lower_definition(
 #[derive(Default)]
 pub(super) struct SourceChecks {
     session: std::cell::OnceCell<Option<crate::analysis::Session>>,
+    pub(super) solved: Option<std::cell::RefCell<Vec<(ModuleId, TextRange)>>>,
 }
 
 impl SourceChecks {
@@ -537,7 +560,19 @@ pub(super) fn capture(
         let body =
             graph.try_registered_body(id, || lower_definition(checker, function, &signature).ok());
         if let Some(body) = body
-            && contract.unwrap_or_else(|| inference.source_checks.accepts(graph, id, function))
+            && contract.unwrap_or_else(|| {
+                let checks = &inference.source_checks;
+                // No unresolved caller can depend on a solved frame's ABI. The fixed sibling
+                // placement only checks occupancy for the same physical source range.
+                if checked_bodies.is_none()
+                    && let Some(solved) = &checks.solved
+                {
+                    solved.borrow_mut().push((id, function.range()));
+                    true
+                } else {
+                    checks.accepts(graph, id, function)
+                }
+            })
         {
             graph.register_function(id, function.start(), body);
             return false;
@@ -5320,6 +5355,28 @@ publish(5, callback)
                 .any(|line| line.contains("call i64 @imre_dyn_op_at(")
                     && line.ends_with("ptr null)"))
         );
+    }
+
+    #[test]
+    fn a_python_invocation_forwards_the_checked_argument_handle() {
+        for (read, argument, retained) in [
+            ("value", "value", true),
+            ("abs('bad')", "value", false),
+            ("value", "value + 1", false),
+        ] {
+            let graph = checked_named_source(&format!(
+                "def run(value: int) -> int:\n    return sum((item for item in [1]), origin(lambda: {read}, {argument}))\n\n\
+                 def origin(read: object, value: int) -> int:\n    return 0\n\nprint(run(1))\n"
+            ));
+            let bodies = graph.registered_functions();
+            assert_eq!(
+                bodies
+                    .get(&graph.entry)
+                    .is_some_and(|functions| functions.contains_key(&TextSize::default())),
+                retained,
+                "{read}, {argument}",
+            );
+        }
     }
 
     #[test]
