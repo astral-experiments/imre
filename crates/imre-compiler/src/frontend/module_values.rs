@@ -301,7 +301,7 @@ impl Checker<'_> {
             if !self.unittest_case(class_id) {
                 return Err(error(
                     self.source,
-                    &class.node,
+                    class.node.as_ref(),
                     "native unittest class skip decorators require TestCase",
                 ));
             }

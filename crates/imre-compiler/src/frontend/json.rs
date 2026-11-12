@@ -795,7 +795,7 @@ pub(super) fn schemas(
         if declaration.generated_initializer && classes.methods[class].contains_key("__post_init__")
         {
             return Err(module.error(
-                &declaration.node,
+                declaration.node.as_ref(),
                 "typed record decoding requires an initializer without __post_init__",
             ));
         }

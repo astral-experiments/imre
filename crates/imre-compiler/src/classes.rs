@@ -1,5 +1,6 @@
 //! Collects fixed class shapes before nominal type resolution and executable lowering.
 
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -68,8 +69,8 @@ impl std::ops::Deref for ClassMethod {
     }
 }
 
-pub(crate) struct Classes {
-    pub(crate) definitions: Vec<Class>,
+pub(crate) struct Classes<'syntax> {
+    pub(crate) definitions: Vec<Class<'syntax>>,
     /// Data members only need rebindable storage when some source writes that attribute.
     pub(crate) attribute_writes: HashMap<String, HashSet<Type>>,
     pub(crate) exceptions: HashMap<DefinitionId, u32>,
@@ -91,11 +92,11 @@ pub(crate) struct SkipDecorator {
     pub(crate) reason: ast::Expr,
 }
 
-pub(crate) struct Class {
+pub(crate) struct Class<'syntax> {
     pub(crate) skip_decorators: Vec<SkipDecorator>,
     pub(crate) definition: DefinitionId,
     pub(crate) name: String,
-    pub(crate) node: ast::StmtClassDef,
+    pub(crate) node: Cow<'syntax, ast::StmtClassDef>,
     pub(crate) fields: Vec<Field>,
     pub(crate) methods: Vec<ClassMethod>,
     /// Field writes required of every override called during construction.
@@ -124,7 +125,7 @@ pub(crate) struct Class {
     pub(crate) initializer: Option<usize>,
 }
 
-impl Class {
+impl Class<'_> {
     pub(crate) fn is_uuid(&self, graph: &SourceGraph) -> bool {
         self.name == "UUID" && graph.modules[self.definition.module].is_bundled("uuid")
     }
@@ -169,7 +170,7 @@ fn empty_slots(name: &str, value: &ast::Expr) -> bool {
     name == "__slots__" && matches!(value, ast::Expr::Tuple(t) if t.elts.is_empty())
 }
 
-impl Classes {
+impl<'syntax> Classes<'syntax> {
     pub(crate) fn has_empty_slots(&self, child: usize) -> bool {
         std::iter::once(&child)
             .chain(&self.definitions[child].bases)
@@ -234,7 +235,7 @@ impl Classes {
     }
 
     /// Assigns nominal identities in module and source order, independently of imports' aliases.
-    pub(crate) fn collect(graph: &SourceGraph) -> Result<Self, Diagnostic> {
+    pub(crate) fn collect(graph: &'syntax SourceGraph) -> Result<Self, Diagnostic> {
         let resolved = exceptions::collect(graph)?;
         let mut source_nodes = Vec::new();
         let mut ids = HashMap::new();
@@ -276,7 +277,7 @@ impl Classes {
                             .classified(Kind::ScopedClassLayout));
                     }
                     ids.insert(definition, source_nodes.len());
-                    let mut record = std::borrow::Cow::Borrowed(node);
+                    let mut record = Cow::Borrowed(node);
                     if resolved.layouts.contains(&definition) {
                         // Exception inheritance is resolved above; only the additional fixed
                         // fields and methods take part in record layout and initialization.
@@ -314,12 +315,8 @@ impl Classes {
                 }
             }
         }
-        let nodes = source_nodes
-            .iter()
-            .map(|(def, node)| (*def, node.as_ref()))
-            .collect::<Vec<_>>();
         let (definitions, mut registered_classes) =
-            inheritance::resolve(graph, &nodes, &mut ids, &resolved)?;
+            inheritance::resolve(graph, &source_nodes, &mut ids, &resolved)?;
         registered_classes.extend(resolved.registered);
         // An inner class uses the object runtime, but every fixed class must validate first.
         if let Some(error) = graph.class_layout_error.borrow().as_ref() {
@@ -524,15 +521,16 @@ struct DeferredMethodDecorators {
     unsupported: Option<Diagnostic>,
 }
 
-fn collect_class(
+fn collect_class<'syntax>(
     graph: &SourceGraph,
     module: &SourceModule,
     definition: DefinitionId,
-    node: &ast::StmtClassDef,
+    source: &Cow<'syntax, ast::StmtClassDef>,
     parents: [Option<(usize, &Class)>; 2],
     declarations: &exceptions::Declarations,
     decorators: &mut DeferredMethodDecorators,
-) -> Result<Option<Class>, Diagnostic> {
+) -> Result<Option<Class<'syntax>>, Diagnostic> {
+    let node = source.as_ref();
     let exception_layout = declarations.layouts.contains(&definition);
     let exceptions = &declarations.ids;
     let base = parents[0];
@@ -1534,7 +1532,7 @@ fn collect_class(
         name: node.name.as_str().to_owned(),
         init_hooks,
         init_exposes_self,
-        node: node.clone(),
+        node: source.clone(),
         fields,
         toml_hash: hash.is_some(),
         methods,
