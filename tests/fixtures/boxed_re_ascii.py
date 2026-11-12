@@ -279,6 +279,19 @@ def current():
         assert doubled.fullmatch(other + other).group(1) == other
         assert doubled.fullmatch(letter + other) is None
 
+    tag = re.compile(r'<([a-zA-Z][a-zA-Z0-9._:-]*)(\s[^>]*)?>.*?</\1\s*>',
+                     re.I | re.S | re.M)
+    text = "🌿K <İ a=z>\n</x></i>!"
+    match = tag.search(text, 3, len(text) - 1)
+    assert match.regs == ((3, 19), (4, 5), (5, 9))
+    assert match.groups() == ("İ", " a=z") and match.lastindex == 2
+    assert tag.search(text, 4) is None and tag.search(text, 3, 18) is None
+    for name, close in (("K", "K"), ("K", "k"), ("İ", "i"), ("ſ", "ſ")):
+        match = tag.fullmatch("<" + name + "></" + close + ">")
+        assert match.groups() == (name, None) and match.lastindex == 1
+    for name, close in (("ı", "I"), ("ſ", "s"), ("sſ", "ſs")):
+        assert tag.search("<" + name + "></" + close + ">") is None
+
     delimiter = re.compile(r"(?s)\[(=*)\[.*?\]\1\]")
     text = "[=[invoice]=]"
     assert delimiter.match(text).group(1) == "="

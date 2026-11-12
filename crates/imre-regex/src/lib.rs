@@ -673,7 +673,11 @@ pub fn backtracking_source(
     alphabet: Alphabet,
     dotall: bool,
 ) -> Result<(String, Vec<Option<String>>), String> {
-    backtracking_pattern(pattern, verbose, alphabet, dotall).map(TokenizedPattern::into_parts)
+    let pattern = backtracking_pattern(pattern, verbose, alphabet, dotall)?;
+    if pattern.fold_ascii_references {
+        return Err("case-insensitive group reference requires a folded subject".into());
+    }
+    Ok(pattern.into_parts())
 }
 
 /// Lower a backtracking pattern and retain its minimum width in Python characters.
@@ -1085,6 +1089,8 @@ pub struct TokenizedPattern {
     verbose: bool,
     pub groups: Vec<Option<String>>,
     pub minimum_width: u64,
+    /// Match exact references on a subject with ASCII-valued simple lowercases.
+    pub fold_ascii_references: bool,
 }
 
 impl TokenizedPattern {
@@ -1741,14 +1747,16 @@ fn tokenize(
         }
         _ => {}
     }
+    let mut fold_ascii_references = false;
     if casefold {
-        output = if grammar == Grammar::Backtracking && has_reference {
-            casefold::backrefs(&output, &modes)?
+        if grammar == Grammar::Backtracking && has_reference {
+            (output, fold_ascii_references) = casefold::backrefs(&output, &modes)?;
         } else {
-            casefold::scoped(&output, &modes, lookahead)?
-        };
+            output = casefold::scoped(&output, &modes, lookahead)?;
+        }
     }
     Ok(TokenizedPattern {
+        fold_ascii_references,
         verbose,
         source: output,
         groups,
@@ -2684,6 +2692,21 @@ mod tests {
             .unwrap();
         assert!(compiled.is_match("aI"));
         assert!(!compiled.is_match("aİ"));
+    }
+
+    #[test]
+    fn unicode_ascii_capture_projection_is_explicit() {
+        use super::Alphabet::UnicodeIgnoreCase;
+        let pattern = r"([a-z]+):\1";
+        let parsed = super::backtracking_pattern(pattern, false, UnicodeIgnoreCase, false).unwrap();
+        assert!(parsed.fold_ascii_references);
+        assert!(parsed.source.contains(r"(?-i:\k<1>)"));
+        assert!(super::backtracking_source(pattern, false, UnicodeIgnoreCase, false).is_err());
+        for rejected in [r"(.)\1", r"(?-i:([a-z]+))\1", r"([a-z]*)*\1"] {
+            assert!(
+                super::backtracking_pattern(rejected, false, UnicodeIgnoreCase, false).is_err()
+            );
+        }
     }
 
     #[test]
