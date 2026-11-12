@@ -9221,11 +9221,13 @@ impl<'a> Checker<'a> {
                 let mut exit = None;
                 for (index, value) in compare.operands.iter().enumerate() {
                     values.push(self.expr(value)?);
-                    if index != 0 {
+                    if compare.ops.len() > 1 && index != 0 {
                         self.merge_exit(&mut exit);
                     }
                 }
-                self.restore_state(exit.expect("comparisons have at least two operands"));
+                if let Some(exit) = exit {
+                    self.restore_state(exit);
+                }
                 if let Some(first) = self.registered_local_start
                     && let [op] = compare.ops.as_ref()
                     && ir::Compare::from_operator(*op).is_some()
