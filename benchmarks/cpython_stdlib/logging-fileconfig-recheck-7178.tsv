@@ -1,0 +1,13 @@
+original_test	occurrence	original_qualifying_group	stock_file	stock_declared	file_O0	file_O3	declared_module_O0	declared_module_O3	first_fileConfig_eval	live_local	configuration_operand	credit_6837	credit_7178	delta
+test.test_logging.ConfigFileTest.test_config0_ok	1	declared-ids-from-065	ok	ok	ERROR	ERROR	ERROR	ERROR	logging/config.py:154	klass	StreamHandler	0	0	0
+test.test_logging.ConfigFileTest.test_config0_using_cp_ok	1	declared-ids-from-065	ok	ok	ERROR	ERROR	ERROR	ERROR	logging/config.py:154	klass	StreamHandler	0	0	0
+test.test_logging.ConfigFileTest.test_config1_ok	1	declared-ids-from-065	ok	ok	ERROR	ERROR	ERROR	ERROR	logging/config.py:154	klass	StreamHandler	0	0	0
+test.test_logging.ConfigFileTest.test_config4_ok	1	declared-ids-from-065	ok	ok	ERROR	ERROR	ERROR	ERROR	logging/config.py:154	klass	StreamHandler	0	0	0
+test.test_logging.ConfigFileTest.test_config5_ok	1	declared-ids-from-065	ok	ok	ERROR	ERROR	ERROR	ERROR	logging/config.py:154	klass	logging.StreamHandler	0	0	0
+test.test_logging.ConfigFileTest.test_config6_ok	1	declared-ids-from-065	ok	ok	ERROR	ERROR	ERROR	ERROR	logging/config.py:154	klass	StreamHandler	0	0	0
+test.test_logging.ConfigFileTest.test_config7_ok	1	declared-ids-from-097	ok	ok	ERROR	ERROR	ERROR	ERROR	logging/config.py:154	klass	StreamHandler	0	0	0
+test.test_logging.ConfigFileTest.test_config8_ok	1	declared-ids-from-097	ok	ok	ERROR	ERROR	ERROR	ERROR	logging/config.py:154	klass	FileHandler	0	0	0
+test.test_logging.ConfigFileTest.test_config9_ok	1	declared-ids-from-097	ok	ok	ERROR	ERROR	ERROR	ERROR	logging/config.py:132	defaults	"{""customfield"": ""defaultvalue""}"	0	0	0
+test.test_logging.ConfigFileTest.test_config_set_handler_names	1	declared-ids-from-097	ok	ok	ERROR	ERROR	ERROR	ERROR	logging/config.py:154	klass	StreamHandler	0	0	0
+test.test_logging.ConfigFileTest.test_defaults_do_no_interpolation	1	declared-ids-from-097	ok	ok	ERROR	ERROR	ERROR	ERROR	logging/config.py:154	klass	logging.StreamHandler	0	0	0
+test.test_logging.ConfigFileTest.test_logger_disabling	1	declared-ids-from-097	ok	ok	ERROR	ERROR	ERROR	ERROR	logging/config.py:154	klass	StreamHandler	0	0	0
