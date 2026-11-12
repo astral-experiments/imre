@@ -3383,10 +3383,14 @@ impl SourceGraph {
 
     /// The fixed adapter displaced when this source supplies the import.
     pub(crate) fn replaced_adapter(&self, name: &str, body: &str) -> Option<ModuleId> {
+        self.bundled_module(name)
+            .filter(|&id| self.modules[id].original_source() != body)
+    }
+
+    pub(crate) fn bundled_module(&self, name: &str) -> Option<ModuleId> {
         let id = *self.by_name.get(name)?;
         let module = &self.modules[id];
-        (module.bundled && !module.source.is_empty() && module.original_source() != body)
-            .then_some(id)
+        (module.bundled && !module.source.is_empty()).then_some(id)
     }
 
     /// A concrete Python file registered by the checked resolver, before object lowering.

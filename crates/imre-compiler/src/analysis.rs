@@ -1601,14 +1601,9 @@ impl Session {
         script_entry: Option<File>,
         registrations: Option<&crate::dynamic::RegisteredSources<'_>>,
     ) -> Result<Self, String> {
-        let provider_roots = registrations.map(|registrations| {
-            let mut roots = registrations.roots.to_vec();
-            roots.push(crate::dynamic::BUNDLED_SOURCE_ROOT.into());
-            roots
-        });
         let mut copy = Self::with_storage(
             &self.root,
-            provider_roots.as_deref().unwrap_or(&self.extension_roots),
+            registrations.map_or(&self.extension_roots, |sources| sources.roots),
             salsa::Storage::default(),
             script_entry.is_some(),
         )?;

@@ -1745,6 +1745,7 @@ pub(crate) fn compile(
                     Some(imre_ast::providers::Provider::Builtin)
                 );
                 let filesystem_import = inspect_file && !builtin;
+                let mut bundled_winner = None;
                 if let Some((filename, source)) = bundled
                     && new_module
                 {
@@ -1790,11 +1791,19 @@ pub(crate) fn compile(
                     if on_sdk_path && let Some(name) = options.include_modules.get(&prefix) {
                         bundled_includes.insert(name, frozen);
                     }
+                    let mut checked = None;
                     if on_sdk_path
-                        && let Some(id) =
-                            checked_graph.and_then(|g| g.replaced_adapter(&prefix, &source))
+                        && let Some(graph) = checked_graph
+                        && let Some(id) = graph.bundled_module(&prefix)
                     {
-                        checked_sdk_providers.push((id, sources.len()));
+                        if graph.modules[id].original_source() == source.as_ref() {
+                            checked = Some(id);
+                        } else {
+                            checked_sdk_providers.push((id, sources.len()));
+                        }
+                    }
+                    if select_member && on_sdk_path && !project_parent && !builtin {
+                        bundled_winner = Some((sources.len(), checked));
                     }
                     sources.push((prefix.clone(), path, source));
                 }
@@ -2216,6 +2225,13 @@ pub(crate) fn compile(
                         sources.push(registration);
                     }
                 }
+                // Physical search roots have now had their chance to supply this import.
+                if let Some((unit, checked)) = bundled_winner
+                    && !entry_sources.contains_key(&prefix)
+                {
+                    registrations.python_providers.insert(unit);
+                    selected_sources.push((unit, false, checked));
+                }
                 if let Some(member) = installed {
                     // Removing an earlier path can expose this SDK member to its ordinary ZIP loader.
                     let winner = selected_member.is_some() && !entry_sources.contains_key(&prefix);
@@ -2524,6 +2540,8 @@ pub(crate) fn compile(
             })
     };
     let mut layouts = Vec::new();
+    // Resolve the registered SDK files after the physical search roots in both checkers.
+    roots.push(bundled_root.into());
     check(
         project.as_mut(),
         entry_requests_objects || startup_provider,

@@ -2479,6 +2479,11 @@ def main() -> None:
                 assert result.returncode != 0 and diagnostic in result.stderr, result.stderr
             checks += 1
 
+        write_files(app, {"main.py": "import _imre_decimal_ratio\n" + call + "import opcode\n"})
+        result = run([compiler, "check", str(app / "main.py")], temporary)
+        assert result.returncode != 0 and "main.py:4:12: Imre: expected int, got str" in result.stderr, result.stderr
+        checks += 1
+
         # Check even uncalled functions when a different function requires boxed operations.
         mock_setup = "from unittest.mock import patch\nclass Owner:\n    value = 0\n"
         invalid = "def uncalled() -> int:\n    return f('wrong')\n"
