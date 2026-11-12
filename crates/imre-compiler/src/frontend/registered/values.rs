@@ -887,6 +887,10 @@ pub(super) fn operation<E>(
         if let Some(literal) = signed_number(node) {
             return Ok(Some(literal));
         }
+        if unary.op == ast::UnaryOp::Not {
+            let value = child(&unary.operand)?;
+            return Ok(Some(Expr::unary(unary.op, value, Type::Bool)));
+        }
         if !dynamic_receiver(&unary.operand) {
             return Ok(None);
         }

@@ -4904,7 +4904,8 @@ main()
                     registered |= matches!(&site.target, ir::RegisteredCallTarget::Method { name, .. } if name == "add_argument");
                 }
                 ExprKind::Unary(ast::UnaryOp::Not, operand) => {
-                    negated |= operand.ty == Type::PythonObject;
+                    negated |= matches!(&operand.kind, ExprKind::Builtin(Builtin::Bool, args)
+                        if matches!(args.as_slice(), [value] if value.ty == Type::PythonObject));
                 }
                 _ => {}
             },
