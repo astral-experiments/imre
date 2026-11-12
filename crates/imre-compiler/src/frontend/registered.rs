@@ -2454,25 +2454,6 @@ pub(super) fn raised_value<E>(
 impl statements::StatementLowering for SourceScope<'_> {
     type Error = ();
 
-    fn attribute_statements(&mut self, stmt: &ast::Stmt) -> StdResult<Option<Vec<Statement>>, ()> {
-        if !stmt.is_aug_assign_stmt() {
-            return Ok(None);
-        }
-        let Some(effect) = attribute_write(stmt) else {
-            return Ok(None);
-        };
-        let values = effect
-            .operands()
-            .map(|node| self.ordinary_operand(node))
-            .collect::<Option<_>>()
-            .ok_or(())?;
-        Ok(Some(vec![attribute_statement(
-            effect.action,
-            effect.field,
-            values,
-        )]))
-    }
-
     fn assignment(&mut self, assign: &ast::StmtAssign) -> StdResult<statements::Block, ()> {
         let value = self.frame_value(&assign.value).ok_or(())?;
         Ok((self.assignment_targets(&assign.targets, value)?, true))
@@ -2554,6 +2535,15 @@ impl statements::StatementLowering for SourceScope<'_> {
     fn other_statement(&mut self, stmt: &ast::Stmt) -> StdResult<statements::Block, ()> {
         match stmt {
             ast::Stmt::AugAssign(assign) => {
+                if let Some(effect) = attribute_write(stmt) {
+                    let values = effect
+                        .operands()
+                        .map(|node| self.ordinary_operand(node))
+                        .collect::<Option<_>>()
+                        .ok_or(())?;
+                    let statement = attribute_statement(effect.action, effect.field, values);
+                    return Ok((vec![statement], true));
+                }
                 if let Some(name) = assign.target.as_name_expr() {
                     let left = self.ordinary_operand(&assign.target).ok_or(())?;
                     let right = self.ordinary_operand(&assign.value).ok_or(())?;

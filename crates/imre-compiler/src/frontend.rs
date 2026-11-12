@@ -5996,6 +5996,36 @@ impl<'a> Checker<'a> {
         {
             return Ok((vec![self.replace_global(first, statement)?], true));
         }
+        // A refused representation still contributes argument and receiver facts to inference.
+        // finish_region discards its body after the remaining operands have been checked.
+        if self.registered.is_some()
+            && self.unrepresented.borrow().is_some()
+            && let Some(targets) = registered::attribute_effects(statement)
+            && targets.iter().all(|effect| {
+                self.graph
+                    .session
+                    .is_dynamic_receiver(self.module, &effect.field.value)
+            })
+        {
+            for effect in targets {
+                let receiver = usize::from(effect.action == ir::AttributeAction::Store);
+                let mut python_receiver = false;
+                for (index, operand) in effect.operands().enumerate() {
+                    let value = self.expr(operand)?;
+                    if index == receiver {
+                        python_receiver = value.ty == Type::PythonObject;
+                    }
+                }
+                if !python_receiver {
+                    return Err(error(
+                        self.source,
+                        effect.field,
+                        "attribute target requires a Python object",
+                    ));
+                }
+            }
+            return Ok((Vec::new(), true));
+        }
         statements::StatementLowering::source_statement(self, statement, self.module_scope)
     }
 
