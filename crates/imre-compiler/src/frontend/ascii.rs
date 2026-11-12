@@ -31,7 +31,7 @@ impl Checker<'_> {
         let shown = match value.ty {
             Type::PythonObject => {
                 return match call {
-                    Some(call) => self.call_import_with_operand(call, value),
+                    Some(call) => self.call_import_with_operands(call, vec![value]),
                     None => Ok(fstrings::object_conversion(value, 'a')),
                 };
             }
