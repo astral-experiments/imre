@@ -655,6 +655,23 @@ pub(super) fn is_enum_base(name: &str) -> bool {
     )
 }
 
+/// Dictionary slots use wrapper binding and slot receiver diagnostics.
+pub(super) fn dict_slot(name: &str) -> bool {
+    matches!(
+        name,
+        "dict.__init__"
+            | "dict.__or__"
+            | "dict.__ror__"
+            | "dict.__ior__"
+            | "dict.__eq__"
+            | "dict.__repr__"
+            | "dict.__len__"
+            | "dict.__iter__"
+            | "dict.__setitem__"
+            | "dict.__delitem__"
+    )
+}
+
 pub(super) const DICT_METHODS: &[&str] = &[
     "__reversed__",
     "__or__",

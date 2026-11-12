@@ -9,6 +9,29 @@ class Mapping(dict):
 def current():
     value = [7]
     data = Mapping(a=value, b=2)
+
+    import types
+
+    for name, descriptor_type, bound_type in (
+        ("get", types.MethodDescriptorType, types.BuiltinFunctionType),
+        ("__contains__", types.MethodDescriptorType, types.BuiltinFunctionType),
+        ("__getitem__", types.MethodDescriptorType, types.BuiltinFunctionType),
+        ("__len__", types.WrapperDescriptorType, types.MethodWrapperType),
+    ):
+        descriptor = dict.__dict__[name]
+        assert descriptor is getattr(dict, name) and descriptor.__objclass__ is dict
+        assert type(descriptor) is descriptor_type
+        bound = descriptor.__get__(data, dict)
+        assert type(bound) is bound_type and bound.__self__ is data
+        try:
+            descriptor.__get__([], list)
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("dictionary descriptor accepted a list")
+    assert dict.__contains__.__get__(data)("a")
+    assert dict.__getitem__.__get__(data)("a") is value
+
     keys = data.keys()
     print(data.pop("a") is value, list(keys))
     print(dict.pop(data, "missing", value) is value, list(keys))

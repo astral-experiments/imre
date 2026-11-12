@@ -938,19 +938,7 @@ pub(super) fn method(
             }
         };
     }
-    let slot = matches!(
-        name,
-        "dict.__init__"
-            | "dict.__or__"
-            | "dict.__ror__"
-            | "dict.__ior__"
-            | "dict.__eq__"
-            | "dict.__repr__"
-            | "dict.__len__"
-            | "dict.__iter__"
-            | "dict.__setitem__"
-            | "dict.__delitem__"
-    );
+    let slot = super::dict_slot(name);
     let set_method = name.split_once('.').filter(|(owner, method)| {
         *method != "__reduce__" && super::set_methods(owner).contains(method)
     });
