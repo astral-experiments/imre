@@ -267,6 +267,38 @@ fn indirect_literal_operand_refusal_precedes_llvm_emission() {
 }
 
 #[test]
+fn suspended_try_checks_a_literal_only_in_an_entered_else() {
+    let project = tempfile::tempdir().unwrap();
+    let entry = project.path().join("app.py");
+    let source = r#"class Owner:
+    def run[T](self):
+        try:
+            yield 1
+            return
+        except ValueError:
+            pass
+        else:
+            exec("unfinished = [")
+print(next(Owner().run()))
+"#;
+    let options = CompileOptions {
+        module_entry: Some("app".into()),
+        extension_paths: vec![project.path().to_owned()],
+        ..Default::default()
+    };
+    std::fs::write(&entry, source).unwrap();
+    compile_file(&entry, None, &options).unwrap();
+
+    std::fs::write(&entry, source.replace("            return\n", "")).unwrap();
+    let diagnostic = compile_file(&entry, None, &options).err().unwrap();
+    assert_source_diagnostic(
+        &diagnostic,
+        &entry,
+        ":8:18: Imre: <string>: unexpected EOF while parsing at byte range 14..14",
+    );
+}
+
+#[test]
 fn imported_checked_function_retains_its_literal_call_site() {
     let project = tempfile::tempdir().unwrap();
     let entry = project.path().join("entry.py");
