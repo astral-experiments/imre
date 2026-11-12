@@ -3102,7 +3102,7 @@ impl SourceScope<'_> {
             ast::Stmt::Match(_) => return self.statement(stmt, body),
             ast::Stmt::If(_) => PhysicalRegion::Fallthrough,
             ast::Stmt::While(_) => PhysicalRegion::Loop,
-            ast::Stmt::For(loop_) if !loop_.is_async => PhysicalRegion::Loop,
+            ast::Stmt::For(loop_) if !loop_.is_async => return self.statement(stmt, body),
             ast::Stmt::Try(region) if !region.is_star => PhysicalRegion::Protected,
             _ => return Err(()),
         };
