@@ -7684,6 +7684,17 @@ impl<'a> Checker<'a> {
             let (left, left_key) = self.union_operand(&binary.left)?;
             let (right, right_key) = self.union_operand(&binary.right)?;
             if let (Some(left_key), Some(right_key)) = (left_key, right_key) {
+                if self.registered_local_start.is_some()
+                    && self.types.sets_with_object_keys(left.ty, right.ty)
+                {
+                    return Ok(registered::values::binary(
+                        binary,
+                        Type::PythonObject,
+                        left,
+                        right,
+                        None,
+                    ));
+                }
                 self.expect(left_key, right_key, binary)?;
                 return Ok(Expr {
                     ty: self.types.set(left_key),
@@ -9233,11 +9244,17 @@ impl<'a> Checker<'a> {
                 if let Some(first) = self.registered_local_start
                     && let [op] = compare.ops.as_ref()
                     && ir::Compare::from_operator(*op).is_some()
+                    && let [left, right] = values.as_slice()
                 {
-                    if values.iter().all(|value| value.ty == Type::PythonObject)
-                        || matches!(op, ast::CmpOp::Eq | ast::CmpOp::NotEq)
-                            && values.iter().any(|value| value.ty == Type::PythonObject)
-                    {
+                    let python_comparison = match op {
+                        ast::CmpOp::Eq | ast::CmpOp::NotEq => {
+                            left.ty == Type::PythonObject
+                                || right.ty == Type::PythonObject
+                                || self.types.sets_with_object_keys(left.ty, right.ty)
+                        }
+                        _ => left.ty == Type::PythonObject && right.ty == Type::PythonObject,
+                    };
+                    if python_comparison {
                         return Ok(Expr {
                             ty: Type::PythonObject,
                             kind: ExprKind::Compare(values, vec![*op]),
