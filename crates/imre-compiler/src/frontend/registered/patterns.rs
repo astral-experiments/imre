@@ -80,55 +80,14 @@ fn prepare_pattern(
 
         fn operand(&self, node: &ast::Expr, reason: &'static str) -> PatternResult<Expr> {
             let invalid = (node.range(), reason);
-            let kind = match node {
-                ast::Expr::Name(name) => {
-                    return Ok(self.source.located(node, values::name_binding(&name.id)));
-                }
-                ast::Expr::Attribute(field) => {
-                    return Ok(values::loaded_attribute(
-                        field,
-                        self.operand(&field.value, reason)?,
-                    ));
-                }
-                ast::Expr::StringLiteral(lit) => {
-                    let value = self
-                        .source
-                        .string(lit.value.iter().map(FStringLiteral::Adjacent));
-                    return Ok(self.source.located(node, value));
-                }
-                ast::Expr::BytesLiteral(lit) => ExprKind::Bytes(lit.value.bytes().collect()),
-                ast::Expr::NoneLiteral(_) => ExprKind::None,
-                ast::Expr::BooleanLiteral(lit) => ExprKind::Bool(lit.value),
-                ast::Expr::NumberLiteral(lit) => values::number_literal(&lit.value, false),
-                ast::Expr::UnaryOp(op)
-                    if matches!(op.op, ast::UnaryOp::UAdd | ast::UnaryOp::USub) =>
-                {
-                    let number = op.operand.as_number_literal_expr().ok_or(invalid)?;
-                    values::number_literal(&number.value, op.op == ast::UnaryOp::USub)
-                }
-                ast::Expr::BinOp(bin)
-                    if matches!(bin.op, ast::Operator::Add | ast::Operator::Sub) =>
-                {
-                    let left = self.operand(&bin.left, reason)?;
-                    let imag = bin.right.as_number_literal_expr().ok_or(invalid)?;
-                    let right = self.source.located(
-                        &bin.right,
-                        Expr {
-                            ty: Type::PythonObject,
-                            kind: values::number_literal(&imag.value, bin.op == ast::Operator::Sub),
-                        },
-                    );
-                    ExprKind::Binary(Binary::Add, Box::new(left), Box::new(right))
-                }
-                _ => return Err(invalid),
-            };
-            Ok(self.source.located(
+            if !matches!(
                 node,
-                Expr {
-                    ty: Type::PythonObject,
-                    kind,
-                },
-            ))
+                ast::Expr::Name(_) | ast::Expr::NoneLiteral(_) | ast::Expr::BooleanLiteral(_)
+            ) && imre_ast::executable::value_pattern_error(node, self.source.text).is_some()
+            {
+                return Err(invalid);
+            }
+            values::registered_value(node, self.source).ok_or(invalid)
         }
 
         fn lower(&mut self, node: &ast::Pattern) -> PatternResult<MatchTest> {
