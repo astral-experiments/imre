@@ -5981,7 +5981,11 @@ impl<'a> Checker<'a> {
         if self.module_scope && local_functions::type_variable(self.graph, self.module, statement) {
             return Ok((Vec::new(), true));
         }
-        if self.classes.parsers.declaration(self.module, statement) {
+        // Fixed parser schemas absorb their declarations. A recovered Python frame needs
+        // the live parser binding and each registration in source order.
+        if self.registered_local_start.is_none()
+            && self.classes.parsers.declaration(self.module, statement)
+        {
             return Ok((Vec::new(), true));
         }
         let module = &self.graph.modules[self.module];

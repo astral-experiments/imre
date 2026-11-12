@@ -1308,29 +1308,16 @@ impl Checker<'_> {
                         .is_some_and(|first| slot < first)
                         && matches!(self.locals[slot], Type::ListInt | Type::List(_))
                 });
-        // A bound local holds the actual result of its checked initializer. A frame
-        // resolves the method on that object even when inference knows a concrete type.
-        let bound_method = method.is_some_and(|method| {
-            matches!(
-                self.resolve(&method.value),
-                Some(Binding::Value(_) | Binding::ImportedValue(..))
-            ) || method.value.as_name_expr().is_some_and(|name| {
-                self.names.get(name.id.as_str()).is_some_and(|&slot| {
-                    self.registered_local_start
-                        .is_some_and(|first| slot >= first)
-                        && self.locals[slot] == Type::PythonObject
-                })
-            })
-        });
+        // Recovery checks each receiver once. Its Python handle can participate in
+        // ordinary lookup or unary dispatch even when inference knows a concrete type.
+        let checked_frame = self.registered_local_start.is_some();
         let Some(mut value) = operation(
             node,
             source,
             typed_receiver,
             // Even a skipped operand participates in static argument and result checking.
             |_| None,
-            |receiver| {
-                typed_receiver || bound_method || graph.session.is_dynamic_receiver(owner, receiver)
-            },
+            |receiver| checked_frame || graph.session.is_dynamic_receiver(owner, receiver),
             |child| self.expr(child),
         )?
         else {
