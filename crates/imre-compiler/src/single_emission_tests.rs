@@ -389,6 +389,47 @@ run()
 }
 
 #[test]
+fn an_escaping_bound_method_keeps_its_default_and_fixed_callable() {
+    let project = tempfile::tempdir().unwrap();
+    let path = project.path().join("capture.py");
+    let source = include_str!("../../../tests/fixtures/callables/escaping_bound_method.py");
+    for source in [source.to_owned(), source.replace("saved()", "saved(3)")] {
+        std::fs::write(&path, source).unwrap();
+        let program = compile_file(&path, None, &CompileOptions::default()).unwrap();
+        assert!(!program.source_inputs.boxed_imports);
+        assert!(
+            !program
+                .llvm_ir
+                .lines()
+                .any(|line| line.starts_with("define ") && line.contains(" @code0("))
+        );
+    }
+}
+
+#[test]
+fn an_escaping_bound_method_preserves_registered_callers() {
+    let project = tempfile::tempdir().unwrap();
+    let path = project.path().join("capture.py");
+    let source = include_str!("../../../tests/fixtures/callables/escaping_bound_method.py")
+        .replace("saved()", "saved(3)");
+    for caller in [
+        "def pair() -> tuple[Callable[[], int], Callable[[], int]]:
+    a = outer()
+    return a, a
+a, b = pair()
+print(a is b, a(), b())",
+        "def down(n: int) -> int:
+    if n == 0:
+        return 1
+    return down(n - 1)
+print(down(2))",
+    ] {
+        std::fs::write(&path, format!("{source}\n{caller}\n")).unwrap();
+        check_file(&path, None).unwrap();
+    }
+}
+
+#[test]
 fn bound_wrapper_emits_once_with_its_fixed_callable_layout() {
     let project = tempfile::tempdir().unwrap();
     let path = project.path().join("wrapper.py");

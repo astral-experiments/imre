@@ -3198,15 +3198,15 @@ pub(crate) enum FloatComponents {
     Boxed,
 }
 
-/// Whether native lowering can speculate about an unannotated set's element layout.
+/// Whether native lowering may try an inferred layout and recover the ordinary checked path.
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SetLayoutHint {
+pub(crate) enum LayoutHint {
     Available,
     Applied,
     Disabled,
 }
 
-/// Resolver facts which native lowering can extend or consume while trying a set layout.
+/// Resolver facts which native lowering can extend or consume while trying an inferred layout.
 pub(crate) struct LoweringBaseline {
     explicit_check: bool,
     needs_object_runtime: bool,
@@ -3225,7 +3225,7 @@ pub(crate) struct SourceGraph {
     pub(crate) source_contract: Option<crate::analysis::SourceContract>,
     /// The original entry's reached call check when it consulted no import bindings.
     pub(crate) closed_initializer: Option<crate::analysis::InitializerCheck>,
-    pub(crate) set_layout_hint: std::cell::Cell<SetLayoutHint>,
+    pub(crate) layout_hint: std::cell::Cell<LayoutHint>,
     pub(crate) float_components: std::cell::Cell<FloatComponents>,
     pub(crate) missing_repr: std::cell::Cell<Option<DefinitionId>>,
     pub(crate) command_startup: Option<(crate::CommandFlags, String)>,
@@ -3282,11 +3282,11 @@ impl SourceGraph {
     }
 
     /// Start ordinary lowering with the original import decisions and proof scopes.
-    pub(crate) fn retry_without_set_layout(&mut self, baseline: &LoweringBaseline) {
+    pub(crate) fn retry_without_layout_hints(&mut self, baseline: &LoweringBaseline) {
         self.source_contract = None;
         self.session.resume_layout_queries();
         self.session.explicit_check = baseline.explicit_check;
-        self.set_layout_hint.set(SetLayoutHint::Disabled);
+        self.layout_hint.set(LayoutHint::Disabled);
         self.float_components.set(FloatComponents::Native);
         self.missing_repr.set(None);
         *self.class_layout_error.get_mut() = None;
@@ -3317,7 +3317,7 @@ impl SourceGraph {
         let calls = self.check_fallback_calls.get();
         let constructor = self.has_object_constructor_fallback.replace(false);
         let floats = self.float_components.get();
-        let set = self.set_layout_hint.get();
+        let set = self.layout_hint.get();
         let repr = self.missing_repr.get();
         let result = lower();
         let deferred_here = self.deferred_object_error.replace(deferred).is_some();
@@ -3326,7 +3326,7 @@ impl SourceGraph {
         let result = result.filter(|_| !deferred_here && !needed_here && !used_constructor);
         self.check_fallback_calls.set(calls);
         self.float_components.set(floats);
-        self.set_layout_hint.set(set);
+        self.layout_hint.set(set);
         self.missing_repr.set(repr);
         self.checked_diagnostics.borrow_mut()[module].truncate(diagnostics);
         result
@@ -5005,7 +5005,7 @@ impl<'a> Loader<'a> {
             registered_startup: false,
             source_contract: None,
             closed_initializer: None,
-            set_layout_hint: std::cell::Cell::new(SetLayoutHint::Available),
+            layout_hint: std::cell::Cell::new(LayoutHint::Available),
             check_fallback_calls: Default::default(),
             imports_runtime_class: self.imports_runtime_class,
             check_method_factories: Default::default(),

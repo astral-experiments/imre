@@ -425,6 +425,45 @@ impl Session {
             .any(|item| item.declaration.definition().is_some())
     }
 
+    /// A single definition in the enclosing scope can be captured by value
+    /// when no nested function can write the binding through a nonlocal cell.
+    pub(crate) fn stable_enclosing_binding(
+        &self,
+        module: usize,
+        function: &ruff_python_ast::StmtFunctionDef,
+        name: &str,
+    ) -> bool {
+        use ty_python_core::scope::NodeWithScopeRef;
+
+        let index =
+            ty_python_core::semantic_index(&self.db, self.db.program_file(self.files[module]));
+        let Some(inner) = index.try_node_scope(NodeWithScopeRef::Function(function)) else {
+            return false;
+        };
+        let Some((outer, _)) = index.ancestor_scopes(inner).nth(1) else {
+            return false;
+        };
+        let places = index.place_table(outer);
+        let Some(symbol) = places.symbol_id(name) else {
+            return false;
+        };
+        places.symbol(symbol).is_local()
+            && index
+                .use_def_map(outer)
+                .definitions_with_usage()
+                .filter(|(_, def, _)| def.place(&self.db).as_symbol() == Some(symbol))
+                .count()
+                == 1
+            && !index.scope_ids().any(|scope| {
+                let scope = scope.file_scope_id(&self.db);
+                index
+                    .place_table(scope)
+                    .symbol_by_name(name)
+                    .is_some_and(|s| s.is_nonlocal() && s.is_bound())
+                    && index.ancestor_scopes(scope).any(|(id, _)| id == outer)
+            })
+    }
+
     /// This scope has only local values and the supplied fixed globals, with no member or import bindings.
     pub(crate) fn function_uses_fixed_names(
         &self,

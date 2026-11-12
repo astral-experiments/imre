@@ -534,7 +534,7 @@ fn object_fallback(
             if call_error.is_some() {
                 // Both representations reject this initializer. Check it in the ordinary
                 // layout once so an earlier annotated failure keeps its original priority.
-                graph.set_layout_hint.set(modules::SetLayoutHint::Disabled);
+                graph.layout_hint.set(modules::LayoutHint::Disabled);
             }
             let baseline = graph.lowering_baseline();
             let refusal = loop {
@@ -575,10 +575,10 @@ fn object_fallback(
                 };
                 // A guessed layout must not turn a working object program into a type error,
                 // or mask a diagnostic that the ordinary checked-file path would have issued.
-                if graph.set_layout_hint.get() != modules::SetLayoutHint::Applied {
+                if graph.layout_hint.get() != modules::LayoutHint::Applied {
                     break Some(error);
                 }
-                graph.retry_without_set_layout(&baseline);
+                graph.retry_without_layout_hints(&baseline);
             };
             // Incremental lowering can replace the entry's type database with a cached session.
             graph.closed_initializer =
@@ -1141,7 +1141,7 @@ fn checked_lower_with(
     call_error: Option<&LoweringDiagnostic>,
 ) -> Result<CheckedProgram, String> {
     let retry_with_cached_hints =
-        cache.is_some() && graph.set_layout_hint.get() == modules::SetLayoutHint::Disabled;
+        cache.is_some() && graph.layout_hint.get() == modules::LayoutHint::Disabled;
     let mut cache = cache.filter(|_| !retry_with_cached_hints);
     let lowered = if let Some(compiler) = cache.as_deref_mut() {
         compiler.cache.restore_hints(graph)?;
@@ -1167,7 +1167,7 @@ fn checked_lower_with(
     }
     // The file driver discards a failed speculative lowering before admission.
     // Only the ordinary attempt needs its closed-program diagnostic checks.
-    if graph.set_layout_hint.get() == modules::SetLayoutHint::Applied
+    if graph.layout_hint.get() == modules::LayoutHint::Applied
         && let Err(reason) = lowered
     {
         if let Some(compiler) = cache {
@@ -1820,9 +1820,7 @@ print("result", call(b=2, a=1))
                 Default::default(),
                 false,
                 |graph, call_error| {
-                    graph
-                        .set_layout_hint
-                        .set(super::modules::SetLayoutHint::Disabled);
+                    graph.layout_hint.set(super::modules::LayoutHint::Disabled);
                     super::checked_lower_with(graph, None, call_error)
                 },
             )
@@ -1857,7 +1855,7 @@ print("result", call(b=2, a=1))
             false,
             |graph, call_error| {
                 passes += 1;
-                assert!(graph.set_layout_hint.get() == super::modules::SetLayoutHint::Disabled);
+                assert!(graph.layout_hint.get() == super::modules::LayoutHint::Disabled);
                 super::checked_lower_with(graph, None, call_error)
             },
         )
@@ -1874,7 +1872,7 @@ print("result", call(b=2, a=1))
 
     #[test]
     fn set_layout_retry_uses_the_resolved_source() {
-        use super::modules::SetLayoutHint;
+        use super::modules::LayoutHint;
 
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("main.py");
@@ -1895,7 +1893,7 @@ print("result", call(b=2, a=1))
                 assert_eq!(graph.modules[graph.entry].original_source(), source);
                 graph.session.explicit_check = true;
                 let result = super::checked_lower_with(graph, None, call_error)?;
-                let applied = graph.set_layout_hint.get() == SetLayoutHint::Applied;
+                let applied = graph.layout_hint.get() == LayoutHint::Applied;
                 passes.push(applied);
                 if applied {
                     std::fs::write(&path, "invalid syntax!").unwrap();
