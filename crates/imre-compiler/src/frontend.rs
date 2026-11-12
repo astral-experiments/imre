@@ -626,7 +626,7 @@ fn fault_frame_statement(file: String, name: &str, line: u32) -> Statement {
 /// Resolves the project-wide call graph without changing source-level namespaces.
 #[cfg(test)]
 pub(crate) fn lower(graph: &SourceGraph) -> StdResult<ir::Module, String> {
-    lower_current(graph, None, &mut HashSet::new())
+    lower_current(graph, None, &mut HashSet::new(), &mut Vec::new())
         .map_err(|report| report.to_string())?
         .into_native(graph)
         .map(|(module, _)| module)
@@ -636,7 +636,7 @@ pub(crate) fn lower(graph: &SourceGraph) -> StdResult<ir::Module, String> {
 pub(crate) fn lower_with_owners(
     graph: &mut SourceGraph,
 ) -> StdResult<crate::CheckedIr, Diagnostic> {
-    lower_with_caller_cache(graph, None)?
+    lower_with_caller_cache(graph, None, None)?
         .into_native(graph)
         .map_err(Into::into)
 }
@@ -644,14 +644,17 @@ pub(crate) fn lower_with_owners(
 pub(crate) fn lower_with_caller_cache(
     graph: &mut SourceGraph,
     mut cache: Option<&mut CallerCache>,
+    source_checks: Option<&mut crate::analysis::Session>,
 ) -> StdResult<crate::CheckedProgram, Diagnostic> {
     let mut key_reprs = HashSet::new();
     loop {
         let before = key_reprs.len();
         graph.missing_repr.set(None);
-        let lowered = lower_current(graph, cache.take(), &mut key_reprs);
+        let mut unresolved = Vec::new();
+        let lowered = lower_current(graph, cache.take(), &mut key_reprs, &mut unresolved);
         key_reprs.extend(graph.missing_repr.take());
         if key_reprs.len() == before {
+            registered::retain_unresolved_generators(graph, unresolved, source_checks);
             return lowered;
         }
         // Only the typed subscript knows the key's class. Include its missing
@@ -664,14 +667,15 @@ fn lower_current(
     graph: &SourceGraph,
     cache: Option<&mut CallerCache>,
     key_reprs: &mut HashSet<DefinitionId>,
+    unresolved: &mut Vec<DefinitionId>,
 ) -> StdResult<crate::CheckedProgram, Diagnostic> {
     use crate::modules::FloatComponents;
     graph.float_components.set(FloatComponents::Native);
-    let result = lower_graph(graph, cache, key_reprs);
+    let result = lower_graph(graph, cache, key_reprs, unresolved);
     if result.is_err() && graph.float_components.get() == FloatComponents::Used {
         // Recover the original descriptor diagnostic when a later use needs object semantics.
         graph.float_components.set(FloatComponents::Boxed);
-        return lower_graph(graph, None, key_reprs);
+        return lower_graph(graph, None, key_reprs, unresolved);
     }
     result
 }
@@ -727,8 +731,10 @@ fn lower_graph(
     graph: &SourceGraph,
     mut cache: Option<&mut CallerCache>,
     key_reprs: &mut HashSet<DefinitionId>,
+    unresolved: &mut Vec<DefinitionId>,
 ) -> StdResult<crate::CheckedProgram, Diagnostic> {
     graph.clear_registered_functions();
+    unresolved.clear();
     let types = Types::default();
     typing::collect_sites(graph, &types);
     namedtuples::collect(graph, &types)?;
@@ -1078,6 +1084,8 @@ fn lower_graph(
     } = inference.solve(
         graph,
         &entry_statements,
+        &callable_definitions,
+        unresolved,
         &mut definitions,
         &mut signatures,
         &mut classes,
@@ -14740,7 +14748,7 @@ mod tests {
                 "def check(manager):\n    earlier = {earlier}\n    items: list[int] = [3]\n    items.append(True)\ndef produce():\n    return set()\ncheck(produce())\n"
             );
             let mut graph = crate::modules::SourceGraph::single(&source).unwrap();
-            let Err(error) = super::lower_with_caller_cache(&mut graph, None) else {
+            let Err(error) = super::lower_with_caller_cache(&mut graph, None, None) else {
                 panic!("expected to reject the bad write after {earlier}");
             };
             assert_eq!(error.kind, super::Kind::ExactType);
@@ -14764,7 +14772,7 @@ mod tests {
                 "def check(manager):\n    with manager as stream:\n{body}def get_context():\n    return set()\ncheck(get_context())\n"
             );
             let mut graph = crate::modules::SourceGraph::single(&source).unwrap();
-            let Err(error) = super::lower_with_caller_cache(&mut graph, None) else {
+            let Err(error) = super::lower_with_caller_cache(&mut graph, None, None) else {
                 panic!("expected the independent list operand to fail");
             };
             assert_eq!(error.kind, super::Kind::ExactType);

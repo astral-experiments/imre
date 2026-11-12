@@ -3137,6 +3137,39 @@ mod tests {
     }
 
     #[test]
+    fn unresolved_generator_retains_the_typed_operands_after_yield() {
+        let source = concat!(
+            "def raised(error, cause, n: int):\n",
+            "    yield None\n",
+            "    yield n + n\n",
+            "    raise error from cause\n",
+            "cause = StopIteration('explicit')\n",
+            "for error, explicit in ((ValueError('row'), cause), (cause, None)):\n",
+            "    next(raised(error, explicit, 11))\n",
+        );
+        let mut graph = crate::modules::SourceGraph::single(source).unwrap();
+        graph.registered_startup = true;
+        let diagnostic = crate::frontend::lower_with_owners(&mut graph)
+            .err()
+            .unwrap();
+        assert!(
+            diagnostic
+                .to_string()
+                .contains("iteration requires a concrete container")
+        );
+        let table = graph.registered_functions();
+        let body = &table[&graph.entry][&TextSize::default()];
+        crate::verify::registered(body.region()).unwrap();
+        let mut adds = Vec::new();
+        crate::ir::walk_expressions(&body.function.body, &mut |expr| {
+            if let crate::ir::ExprKind::Binary(crate::ir::Binary::Add, left, right) = &expr.kind {
+                adds.push((left.checked_operand_type(), right.checked_operand_type()));
+            }
+        });
+        assert_eq!(adds, [(crate::ir::Type::Int, crate::ir::Type::Int)]);
+    }
+
+    #[test]
     fn retained_program_generator_emits_after_erasing_its_suspensions() {
         let source = concat!(
             "def values():\n",

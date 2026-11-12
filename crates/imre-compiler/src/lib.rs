@@ -1178,14 +1178,19 @@ fn checked_lower_with(
     let retry_with_cached_hints =
         cache.is_some() && graph.layout_hint.get() == modules::LayoutHint::Disabled;
     let mut cache = cache.filter(|_| !retry_with_cached_hints);
+    // A retry shares the quiet hint snapshot. Use its independent diagnostic session for
+    // both the pending generator declarations and the subsequent closed-program check.
+    let mut retry_checks = (retry_with_cached_hints && call_error.is_none())
+        .then(|| graph.session.diagnostic_copy())
+        .transpose()?;
     let lowered = if let Some(compiler) = cache.as_deref_mut() {
-        compiler.cache.restore_hints(graph)?;
+        let mut fresh = compiler.cache.restore_hints(graph)?;
         let callers = compiler.callers.prepare(graph);
-        let result = frontend::lower_with_caller_cache(graph, callers);
+        let result = frontend::lower_with_caller_cache(graph, callers, fresh.as_mut());
         compiler.cache.retain_hints(graph, result.is_ok());
         result
     } else {
-        frontend::lower_with_caller_cache(graph, None)
+        frontend::lower_with_caller_cache(graph, None, retry_checks.as_mut())
     };
     // Registered-body admission runs after checking the application's source contracts.
     if let Some(error) = call_error {
@@ -1226,15 +1231,7 @@ fn checked_lower_with(
     // A fully lowered graph has already checked the actual first-party definitions.
     // Keep its existing diagnostics and proof scopes. When a representation is
     // unavailable, the declared Python call contracts still apply to the graph.
-    // A warm retry can share its quiet database with the caller's hint cache.
-    // Keep that handle usable on the next revision when enabling diagnostic rules.
-    let mut diagnostics;
-    let session = if retry_with_cached_hints {
-        diagnostics = graph.session.diagnostic_copy()?;
-        &mut diagnostics
-    } else {
-        &mut graph.session
-    };
+    let session = retry_checks.as_mut().unwrap_or(&mut graph.session);
     let result = if lowered.is_ok() {
         lowered.and_then(|ir| {
             if let Some(compiler) = cache.as_deref_mut() {

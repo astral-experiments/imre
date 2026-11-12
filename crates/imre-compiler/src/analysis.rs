@@ -1443,12 +1443,23 @@ impl Session {
     /// unresolved signature can acquire a new registered entry.
     pub(crate) fn registered_body_checks(&self) -> Result<Self, String> {
         let mut session = self.diagnostic_copy()?;
-        DiagnosticRules::get(&session.db)
-            .set_rules(&mut session.db)
+        session.set_registered_body_rules();
+        Ok(session)
+    }
+
+    fn set_registered_body_rules(&mut self) {
+        DiagnosticRules::get(&self.db)
+            .set_rules(&mut self.db)
             .to(Arc::new(RuleSelection::from_registry(
                 default_lint_registry(),
             )));
-        Ok(session)
+    }
+
+    pub(crate) fn registered_source_error_ranges(&mut self, module: usize) -> Vec<TextRange> {
+        self.with_diagnostic_rules(|session| {
+            session.set_registered_body_rules();
+            session.source_error_ranges(module)
+        })
     }
 
     pub(crate) fn source_error_ranges(&self, module: usize) -> Vec<TextRange> {
@@ -1519,6 +1530,18 @@ impl Session {
             copy.add_declaration_source(path.as_std_path(), source.as_str())?;
         }
         Ok(copy)
+    }
+
+    pub(crate) fn is_generator_definition(
+        &self,
+        module: usize,
+        function: &ruff_python_ast::StmtFunctionDef,
+    ) -> bool {
+        let index =
+            ty_python_core::semantic_index(&self.db, self.db.program_file(self.files[module]));
+        index
+            .try_node_scope(ty_python_core::scope::NodeWithScopeRef::Function(function))
+            .is_some_and(|scope| scope.is_generator_function(index))
     }
 
     /// Whether this definition needs Python argument binding in a suspended generator frame.
@@ -3670,7 +3693,7 @@ impl AnalysisCache {
     pub(crate) fn restore_hints(
         &mut self,
         graph: &mut crate::modules::SourceGraph,
-    ) -> Result<(), String> {
+    ) -> Result<Option<Session>, String> {
         if let Some(mut hints) = self.hints.take()
             && hints.same_files(&graph.session, &graph.inputs)
         {
@@ -3680,10 +3703,12 @@ impl AnalysisCache {
             for (module, &file) in graph.modules.iter_mut().zip(&hints.session.files) {
                 module.parsed = hints.session.parsed(file);
             }
-            graph.session = hints.session.clone();
+            // The discarded fresh session can check source rules without writing to a cached snapshot.
+            let fresh = std::mem::replace(&mut graph.session, hints.session.clone());
             self.hints = Some(hints);
+            return Ok(Some(fresh));
         }
-        Ok(())
+        Ok(None)
     }
 
     pub(crate) fn retain_hints(
