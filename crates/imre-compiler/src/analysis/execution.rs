@@ -798,7 +798,9 @@ impl<'a> Visitor<'a> for Escape<'a, '_> {
         };
         // Python selects the callable before its argument expressions can rebind that name.
         let live_import = self.has_live_import(expression);
-        let capture = live_import.then(|| self.captured_target(&call.func)).flatten();
+        let capture = live_import
+            .then(|| self.captured_target(&call.func))
+            .flatten();
         let intrinsic = ExecutionIntrinsic::possible(self.model, &call.func);
         let source_callable = intrinsic
             .map(SourceCallable::Builtin)

@@ -4014,14 +4014,12 @@ pub(crate) fn retain_unknown_link_owners(
     let mut plain = vec![true; function.locals.len()];
     for (index, &parameter) in function.params.iter().enumerate() {
         plain[parameter] = !inputs.is_empty()
-            && inputs
-                .iter()
-                .all(|args| {
-                    args.order
-                        .get(index)
-                        .and_then(|&source| args.values.get(source))
-                        .is_some_and(|value| plain_function(origin(value)))
-                });
+            && inputs.iter().all(|args| {
+                args.order
+                    .get(index)
+                    .and_then(|&source| args.values.get(source))
+                    .is_some_and(|value| plain_function(origin(value)))
+            });
     }
     let mut copies = Vec::new();
     walk_nodes(&function.body, &mut |node, _| match node {
