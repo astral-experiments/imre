@@ -4743,6 +4743,28 @@ impl Heap {
         result
     }
 
+    /// A forwarded yield keeps its delegate in the parked frame and its value in the resumer.
+    /// Dropping duplicate operand handles cannot make a finalizer or weak callback runnable.
+    pub(super) fn forwarded_roots_survive(&self, delegate: usize, mark: usize, value: Id) -> bool {
+        if mark.checked_sub(1) != Some(delegate)
+            || self.full_collection_active()
+            || self.collection_requested()
+            || self.scheduled_unawaited
+        {
+            return false;
+        }
+        let [.., caller, frame] = self.frames.as_slice() else {
+            return false;
+        };
+        let Some(delegate) = frame.operand(delegate) else {
+            return false;
+        };
+        caller.live.last() == Some(&value)
+            && frame.live[mark..]
+                .iter()
+                .all(|&id| id == NONE || id == delegate || id == value)
+    }
+
     pub(super) fn suspend_native_frame(&mut self) -> Frame {
         let mut frame = self.pop_native_frame();
         if !frame.has_local_exception {
@@ -6457,7 +6479,6 @@ impl Heap {
     }
 
     /// A discarded owner or the allocation threshold has requested a sweep.
-    #[cfg(test)]
     pub(super) fn collection_requested(&self) -> bool {
         self.collect_next_statement
             || self.check_finalizers_next_statement
@@ -7341,6 +7362,70 @@ impl Heap {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn forwarded_yield_releases_only_published_or_retained_handles() {
+        let mut heap = Heap::new();
+        let delegate = heap.alloc(Value::List(Vec::new()));
+        let yielded = heap.alloc(Value::List(Vec::new()));
+        let finalizer = heap.alloc(Value::List(Vec::new()));
+        let weak_target = heap.alloc(Value::List(Vec::new()));
+        heap.register_finalizer(finalizer);
+        let reference = heap.native_weak_reference(weak_target).unwrap();
+        assert!(heap.take_sweep_request());
+        heap.release_temporaries_since(0);
+        heap.keep(reference);
+        heap.frames
+            .push(Frame::new(NONE, NONE, FrameOwner::Module(NONE), NONE));
+
+        heap.keep(delegate);
+        let mark = heap.temporary_mark();
+        heap.keep(delegate);
+        heap.keep(NONE);
+        heap.keep(yielded);
+        assert!(!heap.forwarded_roots_survive(0, mark, yielded));
+        heap.publish_to_resumer(Ok(yielded)).unwrap();
+        assert!(heap.forwarded_roots_survive(0, mark, yielded));
+        assert!(!heap.forwarded_roots_survive(0, 0, yielded));
+        assert!(!heap.forwarded_roots_survive(100, 101, yielded));
+
+        for other in [finalizer, weak_target] {
+            let before = heap.temporary_mark();
+            heap.keep(other);
+            assert!(!heap.forwarded_roots_survive(0, mark, yielded));
+            assert_eq!(heap.frames.last().unwrap().live.last(), Some(&other));
+            heap.release_temporaries_since(before);
+        }
+
+        heap.check_finalizers_next_statement = true;
+        assert!(!heap.forwarded_roots_survive(0, mark, yielded));
+        assert!(heap.take_finalizer_check());
+        heap.collect_next_statement = true;
+        assert!(!heap.forwarded_roots_survive(0, mark, yielded));
+        assert!(heap.take_sweep_request());
+        let next_collection = heap.next_collection;
+        heap.next_collection = heap.slots.len();
+        assert!(!heap.forwarded_roots_survive(0, mark, yielded));
+        heap.next_collection = next_collection;
+        heap.gc_settings.set_thresholds(&[1]);
+        heap.gc_schedule.allocated(&heap.gc_settings, false);
+        heap.gc_schedule.allocated(&heap.gc_settings, false);
+        assert!(heap.gc_schedule.requested());
+        assert!(!heap.forwarded_roots_survive(0, mark, yielded));
+        heap.gc_schedule.start_collection(0);
+        heap.scheduled_unawaited = true;
+        assert!(!heap.forwarded_roots_survive(0, mark, yielded));
+        heap.scheduled_unawaited = false;
+        heap.full_collection = Some(CycleSet::default());
+        assert!(!heap.forwarded_roots_survive(0, mark, yielded));
+        heap.end_full_collection();
+        assert!(heap.forwarded_roots_survive(0, mark, yielded));
+        heap.release_temporaries_since(mark);
+        assert_eq!(heap.frames[1].live.as_slice(), &[delegate]);
+        assert_eq!(heap.frames[0].live.as_slice(), &[reference, yielded]);
+        assert!(heap.is_pending_finalizer(finalizer));
+        assert_eq!(heap.weak_references(weak_target), &[reference]);
+    }
 
     #[test]
     fn mutable_container_access_invalidates_an_older_generator_owner_check() {

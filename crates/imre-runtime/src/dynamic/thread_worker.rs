@@ -437,6 +437,11 @@ impl Registry {
         self.reap_where(heap, |_| true);
     }
 
+    /// Reaping an entry can release creator-heap roots independently of the current operands.
+    pub(super) fn has_unreaped_workers(&self) -> bool {
+        !self.entries.is_empty()
+    }
+
     pub(super) fn detached_active(&self) -> bool {
         self.entries
             .iter()
