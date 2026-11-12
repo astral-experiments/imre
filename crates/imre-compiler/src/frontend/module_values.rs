@@ -292,7 +292,7 @@ impl Checker<'_> {
         definition: DefinitionId,
         class_id: usize,
         available: &HashSet<DefinitionId>,
-        body: &mut Vec<Statement>,
+        mut body: Option<&mut Vec<Statement>>,
         mut checkpoints: Option<&mut Vec<Checkpoint>>,
     ) -> Result<(), String> {
         use crate::classes::ClassValue;
@@ -305,15 +305,10 @@ impl Checker<'_> {
                     "native unittest class skip decorators require TestCase",
                 ));
             }
-            let start = body.len();
+            let start = body.as_deref().map_or(0, Vec::len);
             let initialized = self.globals.types.borrow().len();
             let condition = self.class_skip_condition(&skip.condition)?;
             self.expect(Type::Bool, condition.ty, &skip.condition)?;
-            let flag = if skip.unless {
-                Expr::not(condition)
-            } else {
-                condition
-            };
             let reason = self.expr(&skip.reason)?;
             self.expect(Type::Str, reason.ty, &skip.reason)?;
             let flag_slot = self.globals.reserve(Type::Bool);
@@ -322,16 +317,19 @@ impl Checker<'_> {
                 .unittest_skips
                 .borrow_mut()
                 .insert((definition, index), (flag_slot, reason_slot));
-            for (slot, value) in [(flag_slot, flag), (reason_slot, reason)] {
-                body.push(Statement::Expr(Expr {
-                    ty: Type::None,
-                    kind: ExprKind::Builtin(Builtin::GlobalSet(slot), vec![value]),
-                }));
+            if let Some(body) = body.as_deref_mut() {
+                let flag = if skip.unless {
+                    Expr::not(condition)
+                } else {
+                    condition
+                };
+                body.push(Statement::store_global(flag_slot, flag));
+                body.push(Statement::store_global(reason_slot, reason));
             }
             Checkpoint::record(
                 checkpoints.as_deref_mut(),
                 definition.statement,
-                start..body.len(),
+                start..body.as_deref().map_or(0, Vec::len),
                 initialized,
                 available,
                 self.class_reads.get_mut(),
@@ -353,7 +351,7 @@ impl Checker<'_> {
                 continue;
             };
             let name = target.id.as_str();
-            let start = body.len();
+            let start = body.as_deref().map_or(0, Vec::len);
             let initialized = self.globals.types.borrow().len();
             let binding = class.static_bindings.get(name);
             let value = match binding {
@@ -392,7 +390,9 @@ impl Checker<'_> {
                 _ => continue,
             };
             let temporary = self.hidden(value.ty);
-            body.push(Statement::Assign(temporary, value));
+            if let Some(body) = body.as_deref_mut() {
+                body.push(Statement::Assign(temporary, value));
+            }
             if matches!(binding, Some(ClassValue::Runtime { .. })) {
                 let value =
                     self.class_storage_value(class_id, name, self.local(temporary), assign)?;
@@ -402,10 +402,9 @@ impl Checker<'_> {
                     .borrow_mut()
                     .insert((definition, ordinal), slot);
                 self.record_class_cell(class_id, name, slot, value.ty);
-                body.push(Statement::Expr(Expr {
-                    ty: Type::None,
-                    kind: ExprKind::Builtin(Builtin::GlobalSet(slot), vec![value]),
-                }));
+                if let Some(body) = body.as_deref_mut() {
+                    body.push(Statement::store_global(slot, value));
+                }
             }
             let previous = self.names.insert(name.to_owned(), temporary);
             self.class_lexical.insert(name.to_owned());
@@ -414,7 +413,7 @@ impl Checker<'_> {
             Checkpoint::record(
                 checkpoints.as_deref_mut(),
                 definition.statement,
-                start..body.len(),
+                start..body.as_deref().map_or(0, Vec::len),
                 initialized,
                 available,
                 self.class_reads.get_mut(),
@@ -428,7 +427,9 @@ impl Checker<'_> {
                 self.names.remove(&name);
             }
             self.assigned.remove(&slot);
-            body.push(Statement::Clear(slot));
+            if let Some(body) = body.as_deref_mut() {
+                body.push(Statement::Clear(slot));
+            }
         }
         self.inherit_class_data(class_id, body)
     }
@@ -760,7 +761,7 @@ impl Initialization {
                             definition,
                             class,
                             available,
-                            &mut body,
+                            output.is_some().then_some(&mut body),
                             checkpoints.as_mut(),
                         )?;
                     }

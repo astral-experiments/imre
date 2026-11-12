@@ -138,7 +138,7 @@ impl Checker<'_> {
     pub(super) fn inherit_class_data(
         &self,
         class: usize,
-        body: &mut Vec<Statement>,
+        mut body: Option<&mut Vec<Statement>>,
     ) -> Result<(), String> {
         let def = &self.classes.declarations.definitions[class];
         let mut names: Vec<_> = def
@@ -175,16 +175,15 @@ impl Checker<'_> {
                     ty,
                     inherited: true,
                 };
-                body.push(Statement::Expr(Expr {
-                    ty: Type::None,
-                    kind: ExprKind::Builtin(
-                        Builtin::GlobalSet(c.slot),
-                        vec![Expr {
+                if let Some(body) = body.as_deref_mut() {
+                    body.push(Statement::store_global(
+                        c.slot,
+                        Expr {
                             ty: st,
                             kind: ExprKind::List(vec![]),
-                        }],
-                    ),
-                }));
+                        },
+                    ));
+                }
                 data.cells.insert(key.clone(), c);
                 c
             };
