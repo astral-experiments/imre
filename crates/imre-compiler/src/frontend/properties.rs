@@ -2,29 +2,34 @@
 
 use super::*;
 
-impl Checker<'_> {
+impl<'a> Checker<'a> {
     /// Frozen instances retain their existing assignment diagnostic.
-    pub(super) fn writable_property(&self, ty: Type, attr: &ast::ExprAttribute) -> Option<usize> {
+    pub(super) fn writable_property(
+        &self,
+        ty: Type,
+        attr: &ast::ExprAttribute,
+    ) -> Option<(usize, &'a Signature)> {
         let (Type::Class(class) | Type::NamedException(class)) = ty else {
             return None;
         };
         let declaration = &self.classes.declarations.definitions[class];
-        (self.classes.setters[class].contains_key(attr.attr.as_str())
-            && !declaration.dataclass.as_ref().is_some_and(|d| d.frozen))
-        .then_some(class)
+        if declaration.dataclass.as_ref().is_some_and(|d| d.frozen) {
+            return None;
+        }
+        Some((class, self.classes.setters[class].get(attr.attr.as_str())?))
     }
 
     /// Evaluate the RHS before the receiver, then call the concrete setter.
     pub(super) fn set_property(
         &mut self,
-        class: usize,
+        (class, setter): (usize, &Signature),
         attr: &ast::ExprAttribute,
         receiver: Expr,
         value: Expr,
     ) -> Result<Statement, String> {
         let receiver = Self::exception_record(receiver);
         if !self.classes.has_concrete_subclasses(class) {
-            return self.direct_setter(class, attr, receiver, value);
+            return self.direct_setter(class, Some(setter), attr, receiver, value);
         }
         let (rhs, object) = (self.hidden(value.ty), self.hidden(receiver.ty));
         let mut branches = None;
@@ -33,7 +38,8 @@ impl Checker<'_> {
                 ty: Type::Class(layout),
                 kind: ExprKind::Builtin(Builtin::RecordView, vec![self.local(object)]),
             };
-            let put = self.direct_setter(layout, attr, view, self.local(rhs))?;
+            let setter = self.classes.setters[layout].get(attr.attr.as_str());
+            let put = self.direct_setter(layout, setter, attr, view, self.local(rhs))?;
             branches = Some(match branches {
                 None => put,
                 Some(other) => Statement::If(
@@ -63,12 +69,13 @@ impl Checker<'_> {
     fn direct_setter(
         &mut self,
         class: usize,
+        setter: Option<&Signature>,
         attr: &ast::ExprAttribute,
         receiver: Expr,
         value: Expr,
     ) -> Result<Statement, String> {
         let name = attr.attr.as_str();
-        let Some(setter) = self.classes.setters[class].get(name) else {
+        let Some(setter) = setter else {
             if self.classes.methods[class].get(name).is_some_and(|s| {
                 s.method.unwrap().kind(self.classes.declarations)
                     == crate::classes::MethodKind::Property

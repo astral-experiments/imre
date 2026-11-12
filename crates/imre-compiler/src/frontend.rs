@@ -6250,7 +6250,8 @@ impl<'a> Checker<'a> {
                     ))
                 } else if let ast::Expr::Attribute(target) = &*assign.target {
                     let receiver = Self::weak_target(self.expr(&target.value)?);
-                    if let Some(class) = self.writable_property(receiver.ty, target) {
+                    if let Some(property @ (class, _)) = self.writable_property(receiver.ty, target)
+                    {
                         let slot = self.hidden(receiver.ty);
                         let record = Self::exception_record(self.local(slot));
                         let old = self.class_attribute(target, class, Some(record), None)?;
@@ -6263,7 +6264,8 @@ impl<'a> Checker<'a> {
                                 "in-place list operations are unsupported",
                             ));
                         }
-                        let put = self.set_property(class, target, self.local(slot), combined)?;
+                        let put =
+                            self.set_property(property, target, self.local(slot), combined)?;
                         return Ok((
                             vec![Statement::Scope {
                                 body: vec![Statement::Assign(slot, receiver), put],

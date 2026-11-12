@@ -948,8 +948,8 @@ impl Checker<'_> {
                         kind: ExprKind::Builtin(Builtin::ChainMapSetMaps, vec![maps, receiver]),
                     });
                 }
-                if let Some(class) = self.writable_property(receiver.ty, attribute) {
-                    break 'place self.set_property(class, attribute, receiver, value)?;
+                if let Some(property) = self.writable_property(receiver.ty, attribute) {
+                    break 'place self.set_property(property, attribute, receiver, value)?;
                 }
                 if let Some(field) = self.setup_field(receiver.ty, attribute.attr.as_str()) {
                     break 'place self.store_setup_field(receiver, value, attribute, field)?;

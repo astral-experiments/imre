@@ -942,8 +942,7 @@ impl Checker<'_> {
                 {
                     return Some((self.types.list(Type::Dict(id)), None));
                 }
-                if let Some(class) = self.writable_property(receiver.ty, attribute) {
-                    let setter = &self.classes.setters[class][attribute.attr.as_str()];
+                if let Some((_, setter)) = self.writable_property(receiver.ty, attribute) {
                     return match self.inference {
                         Some(inference) => inference.parameter(setter.id, 1).map(|ty| (ty, None)),
                         None => Some((setter.params[1].ty, None)),
