@@ -1228,6 +1228,7 @@ fn lower_graph(
     let mut frame_sources = HashMap::new();
     let mut has_wrapper_link = false;
     let mut refused_body = None;
+    let mut completed_calls = HashSet::new();
     let mut zip_sums = Vec::new();
     let mut owners = Vec::new();
     let mut call_graph = Vec::new();
@@ -1330,6 +1331,9 @@ fn lower_graph(
                 break;
             }
         };
+        if body.cannot_return {
+            completed_calls.insert(signature.id);
+        }
         if needs_registered_entry {
             // The fixed-layout checks have supplied their diagnostics. Registered
             // definitions and the registered initializer already own this program.
@@ -1416,6 +1420,7 @@ fn lower_graph(
         let module_id = graph.entry;
         let mut checker = checker_for(module_id);
         checker.module_scope = true;
+        checker.include_completed_declarations(&mut completed_calls);
         if let Some((definition, mut report)) = refused_body.take() {
             // The normal entry binder can establish that this physical definition
             // is called. Its diagnostic remains the ordinary result on every exit.
@@ -1782,6 +1787,7 @@ fn registered_entry(
 
 #[derive(Clone)]
 struct LoweredBody {
+    cannot_return: bool,
     live_protocol_parameters: bool,
     wrapper_link: bool,
     function: ir::Function,
@@ -1827,6 +1833,7 @@ fn lower_function(
     checker.consuming_lists = consuming_lists::find(&definition.body, |func| {
         checker.unshadowed_builtin(func, "sorted")
     });
+    let mut cannot_return = false;
     let (mut body, falls_through) = if module.archive.is_some() {
         let args = params.iter().map(|&slot| checker.local(slot)).collect();
         let kind = |ty| match ty {
@@ -1875,7 +1882,10 @@ fn lower_function(
         (vec![], true)
     } else {
         match checker.function_body(&definition.body) {
-            Ok(body) => body,
+            Ok((body, falls)) => {
+                cannot_return = checker.declared_call_cannot_return(definition, falls);
+                (body, falls)
+            }
             Err(failure) => return checker.finish_region(Err(failure)),
         }
     };
@@ -1939,6 +1949,7 @@ fn lower_function(
     }
     Ok((
         LoweredBody {
+            cannot_return,
             live_protocol_parameters: checker.live_protocol_parameters,
             wrapper_link: checker.wrapper_link.get(),
             source,
@@ -3110,6 +3121,7 @@ struct Checker<'a> {
     wrapper_link: std::cell::Cell<bool>,
     fixed_sites: Option<fixed_body_source::SourceSites>,
     observed_definition: Option<Box<CalledDefinition>>,
+    nonreturning_functions: &'a HashSet<usize>,
     /// Locals in this body are bound in an existing Python activation.
     registered: Option<&'a registered::values::ModuleSource>,
     bound_function_imports: bool,
@@ -3200,6 +3212,14 @@ struct Checker<'a> {
 }
 
 impl<'a> Checker<'a> {
+    /// Check entry calls against all successfully lowered declarations in this pass.
+    fn include_completed_declarations(&mut self, completed: &'a mut HashSet<usize>) {
+        if !completed.is_empty() {
+            completed.extend(self.nonreturning_functions);
+            self.nonreturning_functions = completed;
+        }
+    }
+
     fn new(
         graph: &'a SourceGraph,
         module: ModuleId,
@@ -3215,6 +3235,7 @@ impl<'a> Checker<'a> {
             wrapper_link: Default::default(),
             fixed_sites: None,
             observed_definition: None,
+            nonreturning_functions: &classes.nonreturning_functions,
             registered: None,
             bound_function_imports: false,
             checked_callback_effects: false,

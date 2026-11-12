@@ -886,6 +886,7 @@ impl Inference {
             let globals = ModuleValues::for_initializers(!registered.is_empty());
             let mut available = HashSet::new();
             let mut errors = Vec::new();
+            let mut completed_calls = HashSet::new();
             let mut conflicting_returns = None;
             let mut opaque_returns = Vec::new();
             for (module, range) in graph.initializers(class_globals) {
@@ -968,6 +969,7 @@ impl Inference {
                 checker.inferred_returns = discover_returns.then(Vec::new);
                 let mut checked_return = false;
                 let mut superseded_returns = false;
+                let mut declared_call_cannot_return = false;
                 let result = (|| {
                     checker.bind_function_signature(function, &signature, |_| {})?;
                     checker.collect_local_definitions(&function.body)?;
@@ -980,6 +982,8 @@ impl Inference {
                     ) {
                         return Ok(());
                     }
+                    declared_call_cannot_return =
+                        checker.declared_call_cannot_return(function, falls_through);
                     if let Some(document) = checker.discover_document_return {
                         let returns = checker.inferred_returns.take().unwrap();
                         if !falls_through
@@ -1083,6 +1087,9 @@ impl Inference {
                     }
                     errors.push((*module, diagnostic));
                 } else {
+                    if declared_call_cannot_return {
+                        completed_calls.insert(signature.id);
+                    }
                     if checked_return {
                         checked_bodies.insert(signature.id);
                     }
@@ -1123,6 +1130,7 @@ impl Inference {
             );
             checker.inference = Some(self);
             checker.module_scope = true;
+            checker.include_completed_declarations(&mut completed_calls);
             let result = checker.lower_block(entry_statements, None);
             let entry_callable = match checker.finish_region(result) {
                 Err(Failure::PendingSignature {
@@ -1335,8 +1343,23 @@ impl Checker<'_> {
         None
     }
 
+    /// A declared result is observable only if a return escapes the checked body.
+    pub(super) fn declared_call_cannot_return(
+        &self,
+        function: &ast::StmtFunctionDef,
+        falls: bool,
+    ) -> bool {
+        !falls
+            && !self.explicit_return
+            && function.returns.is_some()
+            && !self
+                .graph
+                .session
+                .call_may_return_implicitly(self.module, function)
+    }
+
     pub(super) fn terminating_call(&self, value: &Expr) -> bool {
-        matches!(&value.kind, ExprKind::Call(id, _) if self.classes.nonreturning_functions.contains(id))
+        matches!(&value.kind, ExprKind::Call(id, _) if self.nonreturning_functions.contains(id))
     }
 
     fn call_operand_returns(&self, value: &Expr) -> bool {
