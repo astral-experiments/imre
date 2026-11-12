@@ -120,17 +120,28 @@ impl crate::ProgramOutput {
                 let registration = prepared.registration(bundled);
                 let check_archive = bundled && !providers.is_empty();
                 let mut placed = None;
+                let mut whole_entry = None;
                 let mut external = None;
                 let mut archived = matches!(initializer, Initializer::Archived(_));
                 if let Initializer::Checked(initializer) = initializer
                     && !source.is_empty()
                     && (check_archive || separate)
                 {
-                    let (symbol, body) = initializer.provider_body()?;
+                    // Commit the fork only if the provider gets an independent native unit.
+                    let mut fork = None;
+                    let target = if separate && !check_archive && whole_requested {
+                        let launcher = whole.as_mut().unwrap_or_else(|| fork.insert(root.clone()));
+                        let module = launcher.module_registration(&registration);
+                        let (_, entry) = whole_entry.insert((module, String::new()));
+                        Some((&mut launcher.output, unit, entry))
+                    } else {
+                        None
+                    };
+                    let (symbol, body) = initializer.provider_body(target)?;
                     archived = check_archive && providers.contains(&symbol);
                     if !archived && separate && !root.declares(&symbol) {
                         if whole.is_none() && whole_requested {
-                            *whole = Some(root.clone());
+                            *whole = Some(fork.unwrap_or_else(|| root.clone()));
                         }
                         placed = Some(body.llvm_ir(&symbol));
                     }
@@ -139,8 +150,13 @@ impl crate::ProgramOutput {
                     }
                 }
                 used_archive |= archived;
-                let register =
-                    |launcher: &mut ModuleLauncher, symbol: Option<&str>| -> Result<(), String> {
+                let register = |launcher: &mut ModuleLauncher,
+                                symbol: Option<&str>,
+                                entry|
+                 -> Result<(), String> {
+                    let (module, code) = if let Some(entry) = entry {
+                        entry
+                    } else {
                         let module = launcher.module_registration(&registration);
                         let code = match (symbol, initializer) {
                             (Some(symbol), _) | (None, &Initializer::Archived(symbol)) => {
@@ -150,25 +166,27 @@ impl crate::ProgramOutput {
                                 body.emit(&mut launcher.output, unit, &module.file)?
                             }
                         };
-                        module.write_call(launcher, &code);
-                        for Prompt(prompt) in prompts {
-                            let file = launcher
-                                .output
-                                .data(prompt.source.path.as_os_str().as_encoded_bytes());
-                            let code = prompt.emit(&mut launcher.output, unit, &file)?;
-                            launcher.register_single(
-                                &module.name,
-                                &file,
-                                &prompt.source.text,
-                                prompt.source.future_flags,
-                                &code,
-                            );
-                        }
-                        Ok(())
+                        (module, code)
                     };
-                register(root, external.as_deref())?;
+                    module.write_call(launcher, &code);
+                    for Prompt(prompt) in prompts {
+                        let file = launcher
+                            .output
+                            .data(prompt.source.path.as_os_str().as_encoded_bytes());
+                        let code = prompt.emit(&mut launcher.output, unit, &file)?;
+                        launcher.register_single(
+                            &module.name,
+                            &file,
+                            &prompt.source.text,
+                            prompt.source.future_flags,
+                            &code,
+                        );
+                    }
+                    Ok(())
+                };
+                register(root, external.as_deref(), None)?;
                 if let Some(whole) = whole {
-                    register(whole, external.as_deref().filter(|_| archived))?;
+                    register(whole, external.as_deref().filter(|_| archived), whole_entry)?;
                 }
                 Ok((name.as_str(), placed))
             },
@@ -771,20 +789,30 @@ impl<'a> PreparedBody<'a> {
     }
 
     pub(super) fn standalone(&self) -> Result<(String, String), String> {
-        let (symbol, body) = self.provider_body()?;
+        let (symbol, body) = self.provider_body(None)?;
         let ir = body.llvm_ir(&symbol);
         Ok((symbol, ir))
     }
 
     /// Hash the emitted module before deciding whether its native object is already available.
-    fn provider_body(&self) -> Result<(String, ProviderBody), String> {
+    fn provider_body(
+        &self,
+        mut placement: Option<(&mut Output, usize, &mut String)>,
+    ) -> Result<(String, ProviderBody), String> {
         let mut output = Output {
             keep_docstrings: self.source.python_optimization < 2,
             ..Output::default()
         };
+        if let Some((target, unit, _)) = &mut placement {
+            output.whole = Some(Box::new(std::mem::take(target)));
+            output.whole_unit = *unit;
+        }
         let filename = self.source.path.as_os_str().as_encoded_bytes();
         let file = output.data(filename);
-        let entry = self.emit(&mut output, 0, &file)?;
+        let mut entry = self.emit(&mut output, 0, &file)?;
+        if let Some((target, _, whole_entry)) = placement {
+            output.finish_placement(target, &mut entry, whole_entry);
+        }
         output.integer_prelude();
         let body = ProviderBody {
             constants: output.constants,
