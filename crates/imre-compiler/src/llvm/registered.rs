@@ -660,7 +660,8 @@ impl<'f> Frame<'f, '_, '_> {
         let binding = &self.names.expect("registered local names")[&slot];
         if let Some(slot) = binding.namespace {
             let scope = self.load_private(slot);
-            self.code.named_op("lookup", &scope, &binding.name, "0")
+            self.code
+                .named_op("lookup_local", &scope, &binding.name, "0")
         } else {
             self.code.lookup(&binding.name)
         }

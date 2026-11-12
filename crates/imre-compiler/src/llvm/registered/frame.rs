@@ -611,12 +611,12 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
     /// Load a code name and use it as the second operand of a boxed operation.
     pub(crate) fn named_op(&mut self, op: &str, receiver: &str, name: &str, value: &str) -> String {
         self.output.interned_identifiers.insert(name.to_owned());
-        if op == "lookup" {
+        if matches!(op, "lookup" | "lookup_local") {
             // The runtime lookup propagates a pending exception before reading the scope.
             self.take_matching_check();
             let data = self.output.data(name.as_bytes());
             return self.checked(&format!(
-                "call i64 @imre_dyn_lookup(ptr %ctx, i64 {receiver}, ptr {data}, i64 {})",
+                "call i64 @imre_dyn_{op}(ptr %ctx, i64 {receiver}, ptr {data}, i64 {})",
                 name.len()
             ));
         }
