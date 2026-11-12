@@ -62,6 +62,7 @@ impl Output {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn whole() -> Self {
         Self::new(
             [],
@@ -358,16 +359,22 @@ pub(crate) fn emit_units(
     layout: &crate::CodegenLayout,
     sanitize: bool,
 ) -> Result<Vec<CodegenUnit>, Unsupported> {
-    let output = if matches!(layout, crate::CodegenLayout::Split) {
-        let units = graph
-            .modules
-            .iter()
-            .map(|source| CodegenUnit::new(&source.name, String::new()))
-            .collect();
-        Output::new(owners, units, graph.entry, true)
+    let split = matches!(layout, crate::CodegenLayout::Split);
+    let source = &graph.modules[graph.entry];
+    let (sources, entry, owners) = if split {
+        (
+            graph.modules.as_slice(),
+            (graph.entry, source.name.as_str()),
+            owners.as_slice(),
+        )
     } else {
-        Output::whole()
+        (std::slice::from_ref(source), (0, "__main__"), &[][..])
     };
+    let (units, entry) =
+        CodegenUnit::place_sources(sources, entry, split, |_, source, separate| {
+            Ok::<_, Unsupported>((source.name.as_str(), separate.then(String::new)))
+        })?;
+    let output = Output::new(owners.iter().copied(), units, entry, split);
     let ranges = crate::ranges::analyze(&module);
     output.emit(&module, &ranges, sanitize, program)
 }
