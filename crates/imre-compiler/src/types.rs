@@ -46,7 +46,7 @@ enum Shape {
     DeferredCmpFrame((usize, u32), Vec<Type>),
     Callable(Vec<Type>, Type),
     IndexCallable(Type),
-    BoundSourceMethod(Type, usize, usize),
+    SourceMethod(Type, usize, usize, Option<Type>),
     RecordConstructor(usize, Vec<Type>),
     PartialCallable(PartialFunction),
     DeclaredCache(Type, usize),
@@ -321,7 +321,7 @@ impl Types {
                     Shape::Callable(..)
                         | Shape::RecordConstructor(..)
                         | Shape::IndexCallable(_)
-                        | Shape::BoundSourceMethod(..)
+                        | Shape::SourceMethod(..)
                         | Shape::DeclaredCache(..)
                         | Shape::CachedCallable(_)
                         | Shape::DispatchCallable(_)
@@ -464,7 +464,7 @@ impl Types {
                 | Shape::DeferredCmpFrame(_, fields)
                 | Shape::Union(fields) => fields.clone(),
                 Shape::IndexCallable(callable)
-                | Shape::BoundSourceMethod(callable, ..)
+                | Shape::SourceMethod(callable, ..)
                 | Shape::DeclaredCache(callable, _) => {
                     vec![*callable]
                 }
@@ -1477,15 +1477,23 @@ impl Types {
         }
     }
 
-    /// A bound source method retains its declaration for keyword and default binding.
-    pub(crate) fn bound_source_method(&self, callable: Type, class: usize, method: usize) -> Type {
-        Type::Callable(self.intern(Shape::BoundSourceMethod(callable, class, method)))
+    /// Keep the declaration for argument binding and the type of any retained receiver.
+    pub(crate) fn source_method(
+        &self,
+        callable: Type,
+        class: usize,
+        method: usize,
+        receiver: Option<Type>,
+    ) -> Type {
+        Type::Callable(self.intern(Shape::SourceMethod(callable, class, method, receiver)))
     }
 
-    pub(crate) fn bound_method_site(&self, ty: Type) -> Option<(usize, usize)> {
+    pub(crate) fn source_method_site(&self, ty: Type) -> Option<(usize, usize, Option<Type>)> {
         let Type::Callable(id) = ty else { return None };
         match self.0.borrow().shapes.get(id) {
-            Some(Shape::BoundSourceMethod(_, class, method)) => Some((*class, *method)),
+            Some(Shape::SourceMethod(_, class, method, receiver)) => {
+                Some((*class, *method, *receiver))
+            }
             _ => None,
         }
     }
@@ -1494,7 +1502,7 @@ impl Types {
     pub(crate) fn method_signature(&self, ty: Type) -> Option<Type> {
         let Type::Callable(id) = ty else { return None };
         match self.0.borrow().shapes.get(id) {
-            Some(Shape::IndexCallable(signature) | Shape::BoundSourceMethod(signature, ..)) => {
+            Some(Shape::IndexCallable(signature) | Shape::SourceMethod(signature, ..)) => {
                 Some(*signature)
             }
             _ => None,
@@ -1623,7 +1631,7 @@ impl Types {
         while let Type::Callable(id) = current {
             current = match shapes.shapes.get(id)? {
                 Shape::IndexCallable(underlying)
-                | Shape::BoundSourceMethod(underlying, ..)
+                | Shape::SourceMethod(underlying, ..)
                 | Shape::DeclaredCache(underlying, _) => *underlying,
                 Shape::CachedCallable(cache) => cache.callable,
                 Shape::DispatchCallable(dispatcher) => dispatcher.callable,
@@ -1699,7 +1707,7 @@ impl Types {
             Shape::Callable(params, returns) => Some((params.clone(), *returns)),
             Shape::RecordConstructor(base, params) => Some((params.clone(), Type::Class(*base))),
             Shape::IndexCallable(callable)
-            | Shape::BoundSourceMethod(callable, ..)
+            | Shape::SourceMethod(callable, ..)
             | Shape::DeclaredCache(callable, _) => self.signature(*callable),
             Shape::CachedCallable(c) => self.signature(c.callable),
             Shape::DispatchCallable(d) => self.signature(d.callable),
@@ -2128,7 +2136,7 @@ impl TypeDescription<'_> {
             Shape::CallbackPositional => return self.write_str("callback positional arguments"),
             Shape::ModuleSpec(_) => return self.write_str("importlib.machinery.ModuleSpec"),
             Shape::IndexCallable(callable)
-            | Shape::BoundSourceMethod(callable, ..)
+            | Shape::SourceMethod(callable, ..)
             | Shape::DeclaredCache(callable, _) => {
                 return self.write_type(*callable);
             }

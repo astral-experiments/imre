@@ -1180,10 +1180,13 @@ impl Builtin {
                     .or_else(|| types.partial_function(callable.ty).map(|p| p.frame))
                     .or_else(|| types.dispatcher(callable.ty).map(|d| d.frame))
                     .or_else(|| {
-                        let (class, _) = types.bound_method_site(callable.ty)?;
+                        let (class, _, receiver) = types.source_method_site(callable.ty)?;
                         let owner = module.class_metadata.get(class)?;
-                        // Only record methods expose a Class receiver through __self__.
-                        owner.enum_members.is_empty().then_some(Type::Class(class))
+                        match receiver? {
+                            Type::BuiltinClass => Some(Type::BuiltinClass),
+                            Type::Class(id) if id == class && owner.enum_members.is_empty() => Some(Type::Class(id)),
+                            _ => None,
+                        }
                     }) == Some(result))
             }
             Self::EmptyPartial => {

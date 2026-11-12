@@ -277,6 +277,11 @@ impl Emitter<'_, '_> {
             "cache_callable"
         } else if receiver.is_none() && self.linked_functions.contains(&function) {
             "python_function"
+        } else if receiver
+            .as_ref()
+            .is_some_and(|r| r.ty == Type::BuiltinClass)
+        {
+            "class_factory"
         } else if scalar {
             "callable_enum"
         } else if receiver
