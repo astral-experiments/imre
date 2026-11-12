@@ -742,40 +742,28 @@ fn stdio_settings() -> &'static StdioSettings {
     })
 }
 
-/// Use raw output fds and write-through text streams from the first output operation.
+/// Capture a fixed entry's streams from its startup descriptors. A negative
+/// `utf8_mode` uses the runtime's environment and locale settings.
 #[unsafe(no_mangle)]
-pub extern "C" fn imre_stdio_unbuffered_init() {
-    STDIO_SETTINGS.get_or_init(|| StdioSettings {
-        stdout_capacity: 0,
-        stderr_capacity: 0,
-        stdout_line_buffered: false,
-    });
-}
-
-/// Capture buffering from the startup descriptors before user code can replace them.
-#[unsafe(no_mangle)]
-pub extern "C" fn imre_stdio_init() {
-    prepare_stdio(false, None);
-}
-
-/// Isolated and environment-ignoring commands still select UTF-8 mode from their startup locale.
-#[unsafe(no_mangle)]
-pub extern "C" fn imre_stdio_isolated_init() {
-    prepare_stdio(true, None);
-}
-
-/// Initialize streams with the effective flags of a native Python command.
-#[unsafe(no_mangle)]
-pub extern "C" fn imre_stdio_command_init(isolated: u32, utf8: u32) {
-    prepare_stdio(isolated != 0, Some(utf8 != 0));
-}
-
-fn prepare_stdio(isolated: bool, utf8: Option<bool>) {
-    python_hash::initialize(isolated);
-    initialize_io();
+pub extern "C" fn imre_stdio_start(ignore_environment: u32, utf8_mode: i32, unbuffered: u32) {
     signals::initialize_interrupt();
-    sys::initialize_encoding(isolated, utf8);
+    prepare_stdio(
+        ignore_environment != 0,
+        (utf8_mode >= 0).then_some(utf8_mode != 0),
+        unbuffered != 0,
+    );
     stdio_settings();
+}
+
+fn prepare_stdio(ignore_environment: bool, utf8: Option<bool>, unbuffered: bool) {
+    if unbuffered {
+        STDIO_SETTINGS.get_or_init(|| StdioSettings {
+            stdout_capacity: 0,
+            stderr_capacity: 0,
+            stdout_line_buffered: false,
+        });
+    }
+    sys::initialize_encoding(ignore_environment, utf8);
 }
 
 impl<W: Write> Output<W> {
