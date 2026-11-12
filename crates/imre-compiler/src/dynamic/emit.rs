@@ -115,10 +115,11 @@ pub(super) fn emit(
         };
         let registration = prepared.registration(bundled);
         let check_archive = bundled && !providers.is_empty();
-        let separate = split && unit != 0 && !source.is_empty();
+        let separate = split && unit != 0;
         let mut external = None;
         let mut archived = matches!(initializer, Initializer::Archived(_));
         if let Initializer::Checked(initializer) = initializer
+            && !source.is_empty()
             && (check_archive || separate)
         {
             let (symbol, body) = initializer.provider_body()?;
