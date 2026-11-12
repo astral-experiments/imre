@@ -546,25 +546,12 @@ impl<'f> Frame<'f, '_, '_> {
         }
     }
 
-    pub(super) fn fixed_field(&self, range: TextRange) -> Option<&'f crate::frontend::FixedField> {
-        let (function, _) = self.fixed_sites?;
-        function.fixed_fields.as_ref()?.get(&range)
-    }
-
-    pub(super) fn load_fixed_field(
-        &mut self,
-        receiver: &Expr,
+    pub(super) fn fixed_attribute(
+        &self,
         range: TextRange,
-        name: &str,
-    ) -> CheckedValue {
-        let value = self.attribute_operation(
-            ir::AttributeAction::Load,
-            name,
-            range,
-            std::iter::once(receiver),
-            Self::evaluate_handle,
-        );
-        CheckedValue::handle(value)
+    ) -> Option<&'f crate::frontend::FixedAttribute> {
+        let (function, _) = self.fixed_sites?;
+        function.fixed_attributes.as_ref()?.get(&range)
     }
 
     pub(super) fn statement_site(&mut self, range: TextRange, simple: Option<TextRange>) {

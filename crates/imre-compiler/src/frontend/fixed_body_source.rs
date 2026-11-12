@@ -4,7 +4,7 @@ use super::*;
 
 #[derive(Clone)]
 pub(crate) struct FixedBodySource {
-    pub(crate) fields: HashMap<TextRange, FixedField>,
+    pub(crate) attributes: HashMap<TextRange, FixedAttribute>,
     pub(crate) positions: Vec<TextRange>,
     pub(crate) operations: Vec<Option<FixedNode>>,
     pub(crate) local_names: HashMap<usize, registered::LocalBinding>,
@@ -23,9 +23,9 @@ impl FixedBodySource {
     }
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct FixedField {
-    pub(crate) name: String,
+#[derive(Clone)]
+pub(crate) struct FixedAttribute {
+    pub(crate) operation: Box<Builtin>,
     pub(crate) position: TextSize,
 }
 
@@ -38,6 +38,7 @@ pub(crate) enum FixedNode {
     Integer(i64),
     Field(usize, Type),
     Binary(Binary, Type),
+    Builtin(std::mem::Discriminant<Builtin>, Type),
 }
 
 impl FixedNode {
@@ -59,6 +60,7 @@ impl FixedNode {
                 ExprKind::Local(slot) => Self::Read(slot, expr.ty),
                 ExprKind::Field(_, slot) => Self::Field(slot, expr.ty),
                 ExprKind::Binary(op, _, _) => Self::Binary(op, expr.ty),
+                ExprKind::Builtin(ref op, _) => Self::Builtin(std::mem::discriminant(op), expr.ty),
                 _ => return None,
             },
             _ => return None,
@@ -74,7 +76,8 @@ pub(super) struct PendingSite {
 
 #[derive(Default)]
 pub(super) struct SourceSites {
-    fields: Option<HashMap<TextRange, FixedField>>,
+    attributes: HashMap<TextRange, FixedAttribute>,
+    wrapper_fields: bool,
     positions: Vec<TextRange>,
     operations: Vec<Option<FixedNode>>,
     current: Option<PendingSite>,
@@ -85,7 +88,7 @@ pub(super) struct SourceSites {
 impl SourceSites {
     pub(super) fn new(has_wrapper_link: bool) -> Self {
         Self {
-            fields: has_wrapper_link.then(HashMap::new),
+            wrapper_fields: has_wrapper_link,
             ..Self::default()
         }
     }
@@ -122,27 +125,55 @@ impl SourceSites {
         }
     }
 
-    pub(super) fn field(
+    pub(super) fn field(&mut self, field: &ast::ExprAttribute, slot: usize, result: Type) {
+        // Private names require the registered class's lexical mangling.
+        if self.wrapper_fields
+            && !ruff_python_stdlib::identifiers::is_mangled_private(field.attr.as_str())
+            && let Some(site) = self.site_at(field.range())
+        {
+            self.attribute(
+                site,
+                field,
+                registered::values::attribute_load(field),
+                FixedNode::Field(slot, result),
+            );
+        }
+    }
+
+    /// A source method binds a Python callable before its arguments even when
+    /// the fixed entry can use a collection operation directly.
+    pub(super) fn method(
         &mut self,
-        range: TextRange,
-        member: &ast::Identifier,
-        slot: usize,
+        call: &ast::ExprCall,
+        field: &ast::ExprAttribute,
+        op: &Builtin,
         result: Type,
     ) {
-        // Private names require the registered class's lexical mangling.
-        if let Some(site) = self.site_at(range)
-            && let Some(fields) = &mut self.fields
-            && !ruff_python_stdlib::identifiers::is_mangled_private(member.as_str())
-        {
-            fields.insert(
-                range,
-                FixedField {
-                    name: member.to_string(),
-                    position: member.start(),
-                },
+        if let Some(site) = self.site_at(call.range()) {
+            self.attribute(
+                site,
+                field,
+                registered::values::bound_method_operation(call, field),
+                FixedNode::Builtin(std::mem::discriminant(op), result),
             );
-            self.commit(site, FixedNode::Field(slot, result));
         }
+    }
+
+    fn attribute(
+        &mut self,
+        site: PendingSite,
+        field: &ast::ExprAttribute,
+        operation: Builtin,
+        native: FixedNode,
+    ) {
+        self.attributes.insert(
+            site.range,
+            FixedAttribute {
+                operation: Box::new(operation),
+                position: field.attr.start(),
+            },
+        );
+        self.commit(site, native);
     }
 
     pub(super) fn statement(&mut self, operand: TextRange, node: FixedNode) {
@@ -190,7 +221,7 @@ impl SourceSites {
             return None;
         }
         Some(FixedBodySource {
-            fields: self.fields.unwrap_or_default(),
+            attributes: self.attributes,
             positions: self.positions,
             operations: self.operations,
             local_names,
@@ -278,9 +309,11 @@ mod tests {
             .find(|(_, start, _)| usize::from(*start) == both)
             .unwrap();
         assert!(source.matches(&module.functions[id]));
-        assert_eq!(source.fields.len(), 2);
-        for (range, field) in &source.fields {
-            assert_eq!(field.name, "text");
+        assert_eq!(source.attributes.len(), 2);
+        for (range, field) in &source.attributes {
+            assert!(
+                matches!(&*field.operation, Builtin::RegisteredAttribute { action: ir::AttributeAction::Load, name, range: target } if name == "text" && target == range)
+            );
             assert_eq!(&text[TextRange::new(field.position, range.end())], "text");
             assert!(text[*range].starts_with("self."));
         }

@@ -12,7 +12,7 @@ pub(crate) fn place_fixed_function(
         function,
         local_names: source.local_names,
         fixed_sites: source.positions,
-        fixed_fields: (!source.fields.is_empty()).then(|| Box::new(source.fields)),
+        fixed_attributes: (!source.attributes.is_empty()).then(|| Box::new(source.attributes)),
     }
 }
 
@@ -46,6 +46,32 @@ mod tests {
                 "31415927",
                 "17"
             ]
+        );
+    }
+
+    #[test]
+    fn named_list_method_uses_the_checked_receiver_and_argument() {
+        let text = include_str!("../../../../../tests/fixtures/truthiness/conditional_contexts.py");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.py");
+        std::fs::write(&path, text).unwrap();
+        let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
+        graph.registered_startup = true;
+        let (_, lowered) =
+            caller_cache::observe_lowerings(|| crate::checked_lower(&mut graph).unwrap());
+        assert_eq!(lowered.iter().filter(|name| *name == "right").count(), 1);
+
+        let start = TextSize::try_from(text.find("def right").unwrap()).unwrap();
+        let functions = graph.registered_functions();
+        let placed = &functions[&graph.entry][&start];
+        let attributes = placed.fixed_attributes.as_ref().unwrap();
+        assert_eq!(attributes.len(), 1);
+        let (range, attribute) = attributes.iter().next().unwrap();
+        assert_eq!(&text[*range], "events.append(mark)");
+        assert!(
+            matches!(&*attribute.operation, Builtin::RegisteredCall(call)
+            if matches!(&call.target, ir::RegisteredCallTarget::Method { name, attribute }
+                if name == "append" && &text[*attribute] == "events.append"))
         );
     }
 

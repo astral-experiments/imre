@@ -68,13 +68,7 @@ impl RegisteredSource<'_> {
 
     fn call_target(self, call: &ast::ExprCall) -> (ir::RegisteredCallTarget, &ast::Expr) {
         if let Some(field) = self.direct_method(call) {
-            (
-                ir::RegisteredCallTarget::Method {
-                    name: field.attr.to_string(),
-                    attribute: field.range(),
-                },
-                field.value.as_ref(),
-            )
+            (method_target(field), field.value.as_ref())
         } else {
             (callable_target(call), call.func.as_ref())
         }
@@ -317,12 +311,30 @@ pub(in crate::frontend) fn subscript(
     )
 }
 
-fn attribute_load(field: &ast::ExprAttribute) -> Builtin {
+pub(in crate::frontend) fn attribute_load(field: &ast::ExprAttribute) -> Builtin {
     Builtin::RegisteredAttribute {
         action: ir::AttributeAction::Load,
         name: field.attr.to_string(),
         range: field.range(),
     }
+}
+
+fn method_target(field: &ast::ExprAttribute) -> ir::RegisteredCallTarget {
+    ir::RegisteredCallTarget::Method {
+        name: field.attr.to_string(),
+        attribute: field.range(),
+    }
+}
+
+pub(in crate::frontend) fn bound_method_operation(
+    call: &ast::ExprCall,
+    field: &ast::ExprAttribute,
+) -> Builtin {
+    call_operation(
+        call,
+        method_target(field),
+        registered_argument_layout(&call.arguments),
+    )
 }
 
 fn callable_target(call: &ast::ExprCall) -> ir::RegisteredCallTarget {
@@ -405,14 +417,25 @@ fn bound_call(
         return positional_invoke(call.range(), end, suspended_name, target, arguments);
     }
     arguments.insert(0, target);
-    let site = ir::RegisteredCall {
+    super::operation(
+        call_operation(call, selection, layout),
+        Type::PythonObject,
+        arguments,
+    )
+}
+
+fn call_operation(
+    call: &ast::ExprCall,
+    target: ir::RegisteredCallTarget,
+    arguments: ir::RegisteredArguments,
+) -> Builtin {
+    Builtin::RegisteredCall(ir::RegisteredCall {
         range: call.range(),
-        target: selection,
-        arguments: layout,
+        target,
+        arguments,
         partition_field: None,
         explicit_scope: false,
-    };
-    super::operation(Builtin::RegisteredCall(site), Type::PythonObject, arguments)
+    })
 }
 
 fn positional_invoke(
