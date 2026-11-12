@@ -451,6 +451,7 @@ fn repeated_writes(plan: &Plan<'_>, depth: usize) -> HashSet<String> {
 
 /// Free reads respect nested comprehension scopes: only their leftmost iterable
 /// belongs to the surrounding scope; all target names shadow throughout the rest.
+#[derive(Default)]
 struct Reads {
     names: HashSet<String>,
     bound: Vec<HashSet<String>>,
@@ -468,10 +469,7 @@ pub(super) fn free_reads(expression: &ast::Expr, bound: HashSet<String>) -> Hash
 }
 
 pub(super) fn function_reads(function: &ast::StmtFunctionDef) -> HashSet<String> {
-    let mut reads = Reads {
-        names: HashSet::new(),
-        bound: Vec::new(),
-    };
+    let mut reads = Reads::default();
     reads.visit_function(function);
     reads.names
 }
@@ -710,12 +708,9 @@ impl Checker<'_> {
         {
             return self.inline_comprehension(display, collector, input, writes);
         }
-        let targets = display.target_names();
-        let mut reads = Reads {
-            names: HashSet::new(),
-            bound: vec![targets.clone()],
-        };
-        display.visit_body(|expr| reads.visit_expr(expr));
+        let mut reads = Reads::default();
+        let targets: HashSet<String> = display.scope_bindings(|expr| reads.visit_expr(expr));
+        reads.names.retain(|name| !targets.contains(name));
         let mut captures = reads.names.into_iter().collect::<Vec<_>>();
         captures.sort();
         let id = self.helpers.reserve();
