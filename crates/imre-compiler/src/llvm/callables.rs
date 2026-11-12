@@ -9,11 +9,25 @@ pub(super) enum NativeCallTarget {
     Callable(Operand),
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Entry {
+    Function,
+    Adapter { bound: bool, cold: bool },
+}
+
+impl Entry {
+    fn reference(self, output: &mut Output<'_>, module: &Module, id: usize) -> String {
+        match self {
+            Self::Function => output.function_ref(module, id),
+            Self::Adapter { bound, .. } => output.adapter_ref(id, bound),
+        }
+    }
+}
+
 /// Definitions referenced while lowering callable construction, invocation and inspection.
 #[derive(Default)]
 pub(super) struct Uses {
-    /// Function index, bound receiver, and cold coroutine calling convention.
-    targets: BTreeSet<(usize, bool, bool)>,
+    targets: BTreeSet<(usize, Entry)>,
     layouts: BTreeSet<&'static str>,
     context: bool,
     pub(super) inspected: bool,
@@ -84,7 +98,10 @@ pub(super) fn adapters(emitter: &mut Emitter<'_, '_>) {
         )
         .unwrap();
     }
-    for &(id, bound, cold) in &uses.targets {
+    for &(id, entry) in &uses.targets {
+        let Entry::Adapter { bound, cold } = entry else {
+            continue;
+        };
         let function = &module.functions[id];
         let params = &function.params[usize::from(bound)..];
         let arguments = params
@@ -167,7 +184,7 @@ pub(super) fn adapters(emitter: &mut Emitter<'_, '_>) {
 /// callback emit this table of async definitions, partial frames and markers.
 fn coroutine_table(
     module: &Module,
-    targets: &BTreeSet<(usize, bool, bool)>,
+    targets: &BTreeSet<(usize, Entry)>,
     marked: &BTreeSet<usize>,
     output: &mut Output,
 ) {
@@ -176,14 +193,14 @@ fn coroutine_table(
     output.current = output.entry;
     let entry = "{ ptr, i64, ptr }";
     let mut rows = Vec::new();
-    for &(id, bound, _) in targets {
+    for &(id, callable) in targets {
         let slot = match module.types.coroutine_target(id) {
             Some(CoroutineTarget::Coroutine) => "-1".to_owned(),
             Some(CoroutineTarget::Partial(slot)) => slot.to_string(),
             None if marked.contains(&id) => "-2".to_owned(),
             None => continue,
         };
-        let adapter = output.adapter_ref(id, bound);
+        let adapter = callable.reference(output, module, id);
         let mark = if marked.contains(&id) {
             format!("@coroutine_mark_{id}")
         } else {
@@ -210,12 +227,26 @@ impl Emitter<'_, '_> {
         self.output.global_ref(format!("layout_{name}"))
     }
 
-    fn callable_adapter(&mut self, function: usize, bound: bool, ty: Type) -> String {
+    fn callable_entry(&mut self, function: usize, bound: bool, ty: Type) -> String {
         let (_, returns) = self.module.types.signature(ty).unwrap();
-        self.callable_uses
-            .targets
-            .insert((function, bound, matches!(returns, Type::Coroutine(_))));
-        self.output.adapter_ref(function, bound)
+        let cold = matches!(returns, Type::Coroutine(_));
+        let body = &self.module.functions[function];
+        // The callable roots its receiver. A borrowed pointer is already the
+        // source method's first native parameter and needs no forwarding body.
+        let borrowed_receiver = bound
+            && !cold
+            && body.params.first().is_some_and(|&slot| {
+                let receiver = body.locals[slot];
+                matches!(receiver.llvm_type(), LlvmType::Ptr)
+                    && !self.resource_types.contains(&receiver)
+            });
+        let entry = if borrowed_receiver {
+            Entry::Function
+        } else {
+            Entry::Adapter { bound, cold }
+        };
+        self.callable_uses.targets.insert((function, entry));
+        entry.reference(self.output, self.module, function)
     }
 
     /// Locate the receiver in the two-word prefix shared by native callable records.
@@ -254,7 +285,7 @@ impl Emitter<'_, '_> {
                 Type::Str,
             );
             let layout = self.callable_layout("class_factory");
-            let target = self.callable_adapter(function, false, ty);
+            let target = self.callable_entry(function, false, ty);
             let operand = self.checked_pointer(format!(
                 "call ptr @imre_record_class_value(ptr @{slot}, ptr @{layout}, ptr @{target}, ptr {})",
                 name.operand
@@ -296,7 +327,7 @@ impl Emitter<'_, '_> {
         };
         let layout = self.callable_layout(layout);
         let result = self.record_with_layout(ty, layout);
-        let target = self.callable_adapter(function, bound, ty);
+        let target = self.callable_entry(function, bound, ty);
         self.line(format!("store ptr @{target}, ptr {}", result.operand));
         let context = self.callable_context_slot(&result);
         if let Some(policy) = policy {
@@ -380,7 +411,7 @@ impl Emitter<'_, '_> {
                 let entry = if let [target] = targets.as_slice() {
                     format!(
                         "@{}",
-                        self.callable_adapter(target.function, target.bound, callable.value.ty)
+                        self.callable_entry(target.function, target.bound, callable.value.ty)
                     )
                 } else {
                     self.instruction(format!("load ptr, ptr {}", callable.value.operand))
