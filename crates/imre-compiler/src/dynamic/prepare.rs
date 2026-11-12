@@ -134,9 +134,16 @@ pub(super) fn units<'a>(
                 };
                 let types = types.filter(|types| types.matches_source(&text));
                 let indexed = types.map(|types| types.parsed());
+                let declaration;
                 let (syntax, normalized) = if let Some(scanned) = scanned_modules.remove(&unit) {
                     match (scanned.parsed, syntax) {
-                        (Some(parsed), None) => (Some(Cow::Owned(parsed)), Some(scanned.lowered)),
+                        (Some(super::ScannedParser::Owned(parsed)), None) => {
+                            (Some(Cow::Owned(parsed)), Some(scanned.lowered))
+                        }
+                        (Some(super::ScannedParser::Declaration(parser)), None) => {
+                            declaration = parser;
+                            (Some(Cow::Borrowed(&*declaration)), Some(scanned.lowered))
+                        }
                         (None, syntax) => (syntax, Some(scanned.lowered)),
                         (_, syntax) => (syntax, None),
                     }
