@@ -78,9 +78,13 @@ pub unsafe extern "C" fn imre_bind_source_keywords(
                 keys.push(key.as_str());
             }
             let bound = shape
-                .bind(name, given, &keys, positional_defaults, |k| {
-                    kwdefaults.contains(&k)
-                })
+                .bind(
+                    name,
+                    given,
+                    keys.iter().copied(),
+                    positional_defaults,
+                    |k| kwdefaults.contains(&k),
+                )
                 .map_err(|err| match err {
                     source_arguments::Error::Type(msg) => Error::new(Kind::TypeError, msg),
                     source_arguments::Error::Memory => Error::memory_error(),
