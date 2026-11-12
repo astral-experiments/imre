@@ -153,25 +153,33 @@ pub(super) trait EagerDisplay: Sized {
         input: Self::Input,
         collector: Collector,
         result: usize,
+        mut body: Option<&mut Vec<Statement>>,
         mut checked_leaf: impl FnMut(&Self, &[Statement]),
-    ) -> StdResult<(Type, Vec<Statement>), Self::Error> {
-        let mut body = Vec::new();
+    ) -> StdResult<Type, Self::Error> {
         let loops = self.comprehension_loop(plan, 0, input, &mut |scope, output, conditions| {
             let guarded = Self::collection_guard(conditions);
-            let value = |scope: &mut Self, key: Option<&Expr>| {
-                scope.collection_value(output, collector, result, key, guarded)
-            };
-            let (empty, store) = match (collector, output) {
+            let key = match (collector, output) {
                 (Collector::Display(expected), Output::Dict(key, _)) => {
-                    let (captured, key) = scope.collection_key(key, expected, guarded)?;
-                    let value = value(scope, Some(&key))?;
-                    (
-                        ExprKind::Dict(Vec::new()),
-                        dict_entry(scope.collection_locals(), result, captured, key, value),
-                    )
+                    Some(scope.collection_key(key, expected, guarded)?)
                 }
-                (Collector::Display(_), Output::List(_) | Output::Set(_)) => {
-                    let item = value(scope, None)?;
+                _ => None,
+            };
+            let item = scope.collection_value(
+                output,
+                collector,
+                result,
+                key.as_ref().map(|(_, key)| key),
+                guarded,
+            )?;
+            let Some(body) = body.as_deref_mut() else {
+                return Ok(Vec::new());
+            };
+            let (empty, store) = match (collector, output, key) {
+                (Collector::Display(_), Output::Dict(..), Some((captured, key))) => (
+                    ExprKind::Dict(Vec::new()),
+                    dict_entry(scope.collection_locals(), result, captured, key, item),
+                ),
+                (Collector::Display(_), Output::List(_) | Output::Set(_), None) => {
                     let ty = scope.collection_locals()[result];
                     let (empty, operation) = if matches!(output, Output::Set(_)) {
                         let element = if ty == Type::PythonObject {
@@ -197,23 +205,20 @@ pub(super) trait EagerDisplay: Sized {
                         }),
                     )
                 }
-                (Collector::IntegerSum, Output::List(_)) => {
-                    let item = value(scope, None)?;
-                    (
-                        ExprKind::Int("0".into()),
-                        Statement::Assign(
-                            result,
-                            Expr {
-                                ty: Type::Int,
-                                kind: ExprKind::Binary(
-                                    Binary::Add,
-                                    Box::new(Expr::local(result, Type::Int)),
-                                    Box::new(item),
-                                ),
-                            },
-                        ),
-                    )
-                }
+                (Collector::IntegerSum, Output::List(_), None) => (
+                    ExprKind::Int("0".into()),
+                    Statement::Assign(
+                        result,
+                        Expr {
+                            ty: Type::Int,
+                            kind: ExprKind::Binary(
+                                Binary::Add,
+                                Box::new(Expr::local(result, Type::Int)),
+                                Box::new(item),
+                            ),
+                        },
+                    ),
+                ),
                 _ => unreachable!("invalid eager comprehension collector"),
             };
             let ty = scope.collection_locals()[result];
@@ -222,8 +227,10 @@ pub(super) trait EagerDisplay: Sized {
             checked_leaf(scope, &leaf);
             Ok(leaf)
         })?;
-        body.extend(loops);
-        Ok((self.collection_locals()[result], body))
+        if let Some(body) = body {
+            body.extend(loops);
+        }
+        Ok(self.collection_locals()[result])
     }
 
     fn comprehension_loop<'p>(
@@ -813,7 +820,8 @@ impl Checker<'_> {
             .filter(|value| value.ty == Type::Str)
             .cloned();
         let result = helper.hidden(Type::None);
-        let list_binding = if matches!(collector, Collector::Display(_))
+        let list_binding = if self.inference.is_none()
+            && matches!(collector, Collector::Display(_))
             && matches!(display.output, Output::List(_))
             && let [clause] = display.clauses
             && clause.ifs.is_empty()
@@ -828,13 +836,29 @@ impl Checker<'_> {
         } else {
             None
         };
+        let slice = matches!(collector, Collector::IntegerSum)
+            && display.clauses.len() == 1
+            && args
+                .first()
+                .is_some_and(|arg| matches!(arg.kind, ExprKind::Builtin(Builtin::Slice, _)));
+        // The solver consumes the checked operand, while gather and slice fusion
+        // inspect operations and can rewrite the argument in the enclosing call.
+        let mut body = Vec::new();
+        let mut output =
+            (self.inference.is_none() || gather_input.is_some() || slice).then_some(&mut body);
         let mut mapping = None;
-        let (ty, mut body) =
-            helper.comprehension_body(display, input, collector, result, |checker, leaf| {
+        let ty = helper.comprehension_body(
+            display,
+            input,
+            collector,
+            result,
+            output.as_deref_mut(),
+            |checker, leaf| {
                 if gather_input.is_some() {
                     mapping = checker.dictionary_gather_mapping(display, leaf);
                 }
-            })?;
+            },
+        )?;
         if let Some((iterable, target)) = list_binding {
             self.helpers.list_builds.borrow_mut().insert(
                 id,
@@ -845,7 +869,9 @@ impl Checker<'_> {
                 },
             );
         }
-        body.push(Statement::Return(helper.local(result)));
+        if let Some(output) = output {
+            output.push(Statement::Return(helper.local(result)));
+        }
         if ty == Type::ListInt
             && let Some(mut input) = gather_input
             && let Some(mapping) = mapping
@@ -889,29 +915,31 @@ impl Checker<'_> {
             };
             body = vec![Statement::Return(gather)];
         }
-        if matches!(collector, Collector::IntegerSum) && display.clauses.len() == 1 {
+        if slice {
             slices::fuse(&mut body, &params, &mut args);
         }
         helper.finish_region(Ok(()))?;
-        self.helpers.finish(
-            id,
-            Helper {
-                module: self.module,
-                function: ir::Function {
-                    params,
-                    returns: ty,
-                    locals: helper.locals,
-                    body,
+        if self.inference.is_none() {
+            self.helpers.finish(
+                id,
+                Helper {
+                    module: self.module,
+                    function: ir::Function {
+                        params,
+                        returns: ty,
+                        locals: helper.locals,
+                        body,
+                    },
+                    calls: helper.calls,
+                    class_reads: helper.class_reads.into_inner(),
+                    source_frame: false,
+                    recursion_error: self.graph.modules[self.module].error(
+                        expression,
+                        "recursive calls are unsupported in this prototype",
+                    ),
                 },
-                calls: helper.calls,
-                class_reads: helper.class_reads.into_inner(),
-                source_frame: false,
-                recursion_error: self.graph.modules[self.module].error(
-                    expression,
-                    "recursive calls are unsupported in this prototype",
-                ),
-            },
-        );
+            );
+        }
         self.calls.insert(id);
         Ok(Expr {
             ty,
@@ -1035,7 +1063,14 @@ impl Checker<'_> {
         }
         let scope = self.enter_comprehension(targets.clone());
         let result = self.hidden(Type::None);
-        let body = self.comprehension_body(display, input, collector, result, |_, _| {});
+        let checked = self.comprehension_body(
+            display,
+            input,
+            collector,
+            result,
+            Some(&mut prefix),
+            |_, _| {},
+        );
         if let Some(namespace) = self.namespace {
             for name in &targets {
                 if let Some(&slot) = self.names.get(name) {
@@ -1051,11 +1086,7 @@ impl Checker<'_> {
         }
         self.namespace = enclosing;
         let exports = self.leave_comprehension(scope);
-        let (ty, mut body) = body?;
-        if !prefix.is_empty() {
-            prefix.append(&mut body);
-            body = prefix;
-        }
+        let ty = checked?;
         if first_pull && !writes.is_empty() {
             // A filter runs before it can suppress the output or the next clause.
             let mut bind = |expression| {
@@ -1085,7 +1116,7 @@ impl Checker<'_> {
         Ok(Expr {
             ty,
             kind: ExprKind::Scope {
-                body,
+                body: prefix,
                 value: Box::new(self.local(result)),
                 clear,
             },
@@ -1128,6 +1159,58 @@ impl Checker<'_> {
 mod tests {
     use crate::ir::{Builtin, ExprKind, Statement, Type, walk_expressions};
     use crate::{CompileOptions, check, compile};
+
+    #[test]
+    fn provisional_displays_keep_call_edges_and_slice_rewrites_without_filling_helpers() {
+        use super::{
+            Checker, ClassInfo, HashMap, Helpers, ModuleValues, SourceGraph, Types, ast, inference,
+        };
+
+        let graph = SourceGraph::single(concat!(
+            "sum([n + 1 for n in [1, 5] if n])\n",
+            "sum([n + 1 for n in [1, 5][::-1]])\n",
+            "[n + 1 for n in [1, 5]]\n",
+        ))
+        .unwrap();
+        let module = graph.entry;
+        let types = Types::default();
+        let (classes, _) = ClassInfo::new(&graph, &types).unwrap();
+        let signatures = HashMap::new();
+        let globals = ModuleValues::default();
+        let helpers = Helpers::new(0);
+        let inference = inference::Inference::default();
+        let mut checker = Checker::new(
+            &graph,
+            module,
+            &signatures,
+            &classes,
+            &types,
+            &helpers,
+            &globals,
+        );
+        checker.inference = Some(&inference);
+        for (id, stmt) in graph.modules[module]
+            .parsed
+            .syntax()
+            .body
+            .iter()
+            .enumerate()
+        {
+            let ast::Stmt::Expr(stmt) = stmt else {
+                unreachable!()
+            };
+            let value = checker.expr(&stmt.value).unwrap();
+            assert_eq!(value.ty, [Type::Int, Type::Int, Type::ListInt][id]);
+            let ExprKind::Call(callee, args) = value.kind else {
+                panic!("expected a helper call")
+            };
+            assert_eq!(callee, id);
+            assert!(matches!(args.values[0].kind, ExprKind::List(_)));
+            assert!(checker.calls.contains(&id));
+        }
+        let bodies = helpers.functions.borrow();
+        assert!(matches!(&bodies[..], [None, None, None]));
+    }
 
     #[test]
     fn outer_await_acquires_a_synchronous_generator_iterator_in_its_caller() {

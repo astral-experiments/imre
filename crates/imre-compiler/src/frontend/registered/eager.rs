@@ -68,10 +68,16 @@ impl SourceScope<'_> {
             slot: namespace,
             targets,
         });
-        let body =
-            self.comprehension_body(&plan, input, Collector::Display(None), result, |_, _| {});
+        let checked = self.comprehension_body(
+            &plan,
+            input,
+            Collector::Display(None),
+            result,
+            Some(&mut prefix),
+            |_, _| {},
+        );
         self.comprehension = outer;
-        prefix.extend(body.ok()?.1);
+        checked.ok()?;
         // A walrus writes into the enclosing activation. Release only the display's private slots.
         let exported: HashSet<_> = self.names.values().copied().collect();
         let clear = (first_private..self.locals.len())
