@@ -972,6 +972,12 @@ pub(crate) struct FixedOrigin {
     pub span: Option<[u32; 3]>,
 }
 
+#[derive(Clone, Default)]
+pub(crate) struct FieldFormat {
+    pub repr_methods: Box<[usize]>,
+    pub origin: Option<Box<FixedOrigin>>,
+}
+
 /// A fused split-field conversion retains the origins of both checked operations.
 #[derive(Clone)]
 pub(crate) struct SplitFieldOrigins {
@@ -1962,7 +1968,7 @@ pub(crate) enum Builtin {
     FormatConversion(char),
     /// Format an already converted value with its checked specification. The
     /// targets are native repr methods that displaying this value can call.
-    FormatField(Box<[usize]>),
+    FormatField(FieldFormat),
     /// Join formatted operands in order, without invoking a str subclass's addition.
     FormatJoin,
     StringReplace,

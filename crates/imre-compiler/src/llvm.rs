@@ -1258,6 +1258,7 @@ impl Emitter<'_, '_> {
             | Builtin::ListGetStable(origin)
             | Builtin::ListGetBounded { origin, .. }
             | Builtin::GetInAppendWindow(_, origin)
+            | Builtin::FormatField(ir::FieldFormat { origin, .. })
             | Builtin::SplitTextField(_, origin)
             | Builtin::GetBoundedInAppendWindow { origin, .. } => {
                 origin.as_deref().cloned().map(CheckedFaultOrigin::Single)

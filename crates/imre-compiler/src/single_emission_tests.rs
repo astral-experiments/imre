@@ -422,7 +422,7 @@ fn required_object_call_keeps_its_admission_reason() {
     let path = project.path().join("app.py");
     std::fs::write(
         &path,
-        "def render(data: list[int] | None, spec: str) -> str:\n    return f'{data:{spec}}'\n\nprint(render([17, 19], input()))\n",
+        "def render(data: int | None, spec: str) -> str:\n    return f'{data:{spec}}'\n\nprint(render(17, input()))\n",
     )
     .unwrap();
     let mut graph = modules::SourceGraph::load(&path, None, &[]).unwrap();

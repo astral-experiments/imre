@@ -166,7 +166,8 @@ pub unsafe extern "C" fn imre_format_object(
     word: usize,
     spec: *const Str,
 ) -> *const Str {
-    let kind = WordKind::new(kind);
+    // SAFETY: the caller roots the word, including its payload when nullable.
+    let (kind, word) = unsafe { super::boxed_values::concrete(WordKind::new(kind), word) };
     // SAFETY: the caller roots both the native string and its concrete operand.
     let (spec, name) = unsafe {
         (
