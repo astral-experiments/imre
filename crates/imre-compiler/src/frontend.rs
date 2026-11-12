@@ -5901,7 +5901,7 @@ impl<'a> Checker<'a> {
                 }
                 ast::Stmt::For(loop_) => !loop_.is_async,
                 ast::Stmt::Assert(_) => self.registered_local_start.is_some(),
-                ast::Stmt::With(scope) => self.registered_local_start.is_some() && !scope.is_async,
+                ast::Stmt::With(scope) => !scope.is_async,
                 ast::Stmt::While(_) => true,
                 ast::Stmt::If(_) => true,
                 ast::Stmt::Try(protected) => !protected.is_star,
@@ -6522,7 +6522,7 @@ impl<'a> Checker<'a> {
                 return Ok((result, true));
             }
             ast::Stmt::With(with_) if !with_.is_async => {
-                if self.registered_local_start.is_some() {
+                if self.registered.is_some() {
                     return self.checked_python_with(with_);
                 }
                 if !with_.body.iter().any(ast::Stmt::is_function_def_stmt) {

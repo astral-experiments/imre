@@ -212,6 +212,31 @@ impl OperandTypes<'_> {
     }
 
     fn checked_scalar(self, operand: ExprRef<'_>, rule: ScalarMatch) -> Option<crate::ir::Type> {
+        let parsed = self.parsed();
+        let original = self.original_operand(&parsed, operand)?;
+        self.session
+            .inferred_scalar_layout(self.module, original, rule)
+    }
+
+    pub(crate) fn is_bound_method(self, method: &ruff_python_ast::ExprAttribute) -> bool {
+        let parsed = self.parsed();
+        let Some(original) = self.original_operand(&parsed, method.into()) else {
+            return false;
+        };
+        let session = self.session;
+        let file = session.db.program_file(session.files[self.module]);
+        let model = SemanticModel::new(&session.db, file);
+        matches!(
+            original.inferred_type(&model),
+            Some(ty_python_semantic::types::Type::BoundMethod(_))
+        )
+    }
+
+    fn original_operand<'p>(
+        self,
+        parsed: &'p ParsedModuleRef,
+        operand: ExprRef<'_>,
+    ) -> Option<&'p Expr> {
         use ruff_python_ast::{AnyRootNodeRef, ExprContext, HasNodeIndex};
         let session = self.session;
         let index = ty_python_core::semantic_index(
@@ -220,7 +245,6 @@ impl OperandTypes<'_> {
         );
         // Forwarding may preserve a node index while changing the expression it evaluates.
         index.try_expression_scope_id(&operand)?;
-        let parsed = self.parsed();
         let AnyRootNodeRef::Expr(original) = parsed.get_by_index(operand.node_index().load())
         else {
             return None;
@@ -232,7 +256,7 @@ impl OperandTypes<'_> {
         {
             return None;
         }
-        session.inferred_scalar_layout(self.module, original, rule)
+        Some(original)
     }
 }
 
