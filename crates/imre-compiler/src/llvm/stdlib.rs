@@ -98,7 +98,7 @@ impl Emitter<'_, '_> {
                 } else {
                     "imre_format_object"
                 };
-                let kind = value.ty.word_kind() as u32;
+                let kind = representation_kind(value.ty, &self.module.types);
                 let word = self.word(value);
                 Value {
                     ty: Type::Str,

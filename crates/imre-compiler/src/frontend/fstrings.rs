@@ -151,7 +151,7 @@ pub(super) fn registered_fstring<E>(
         literal: |(source, _), pieces| Ok(source.string(pieces.iter().copied())),
         prepare: |(_, child), field, _| child(&field.expression).map(FieldValue::Operand),
         conversion: |_, value, flag| object_conversion(value, flag),
-        format: |_, _, _, _| Builtin::FormatField(Box::default()),
+        format: |_, _, _, _| Builtin::FormatField(Default::default()),
     }
     .lower(value)
 }
@@ -172,19 +172,26 @@ impl Checker<'_> {
     ) -> Builtin {
         if spec == Type::Str {
             if value.is_format_scalar() {
-                return Builtin::FormatField(Box::default());
+                return Builtin::FormatField(Default::default());
             }
             if self.inherits_object_format(value)
                 && let Some(methods) = self.field_repr_methods(value)
             {
                 self.calls.extend(&methods);
-                return Builtin::FormatField(methods);
+                return Builtin::FormatField(ir::FieldFormat {
+                    repr_methods: methods,
+                    origin: matches!(value, Type::Optional(_))
+                        .then(|| Box::new(self.fixed_origin(field.range(), None))),
+                });
             }
         }
         Builtin::ObjectCall(ir::ObjectCall::FormatField, self.module, field.range())
     }
 
     fn inherits_object_format(&self, ty: Type) -> bool {
+        // None also inherits object.__format__, so a nullable operand is eligible
+        // when its present value inherits the same method.
+        let ty = self.types.payload(ty).unwrap_or(ty);
         matches!(ty, Type::None | Type::ListInt | Type::List(_)) || self.types.is_plain_tuple(ty)
     }
 
@@ -389,6 +396,16 @@ print(fixed(2.75), render('é', input()))
             ("bytes", "b'ok'", "call ptr @imre_format_scalar(i32 8,"),
             ("list[int]", "[7]", "call ptr @imre_format_object("),
             (
+                "list[int] | None",
+                "None",
+                "call ptr @imre_format_object(i32 260,",
+            ),
+            (
+                "list[int] | None",
+                "[17, 19]",
+                "call ptr @imre_format_object(i32 260,",
+            ),
+            (
                 "tuple[int, str]",
                 "(7, 'word')",
                 "call ptr @imre_format_object(",
@@ -405,6 +422,11 @@ print(fixed(2.75), render('é', input()))
                 crate::compile_file(&app, None, &options).unwrap().llvm_ir,
             ] {
                 assert_eq!(llvm.matches(operation).count(), 1);
+                let field_frame = llvm.lines().any(|line| {
+                    line.contains("call ptr @imre_exception_at_frame(ptr null,")
+                        && line.ends_with("i32 2, i32 13, i32 13, i32 26)")
+                });
+                assert_eq!(field_frame, ty == "list[int] | None");
                 assert!(
                     !llvm
                         .lines()
@@ -413,7 +435,7 @@ print(fixed(2.75), render('é', input()))
             }
         }
 
-        let unsupported = "def render(data: list[int] | None, spec: str) -> str:
+        let unsupported = "def render(data: int | None, spec: str) -> str:
     return f'{data:{spec}}'
 
 print(render(None, input()))
