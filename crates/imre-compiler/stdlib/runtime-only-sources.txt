@@ -1,6 +1,7 @@
 _markupbase.py
 standalone _pyrepl/__init__.py
 standalone _pyrepl/pager.py
+standalone bdb.py
 compileall.py
 filecmp.py
 http/cookies.py
