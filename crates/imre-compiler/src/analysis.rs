@@ -255,7 +255,7 @@ impl OperandTypes<'_> {
         *deferred_global(&session.db, file, scope, name.id.clone())
     }
 
-    pub(crate) fn is_bound_method(self, method: &ruff_python_ast::ExprAttribute) -> bool {
+    pub(crate) fn is_bound_method(self, method: &Expr) -> bool {
         let parsed = self.parsed();
         let Some((original, _)) = self.original_operand(&parsed, method.into()) else {
             return false;

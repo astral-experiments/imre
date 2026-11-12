@@ -78,7 +78,7 @@ impl RegisteredSource<'_> {
     pub(super) fn object_operation<E>(
         self,
         node: &ast::Expr,
-        allow_typed_receiver: impl FnOnce(Option<&str>, &ast::Expr, &Expr) -> bool,
+        allow_typed_receiver: impl FnOnce(Option<(&str, &ast::Expr)>, &ast::Expr, &Expr) -> bool,
         dynamic_receiver: impl FnOnce(&ast::Expr) -> bool,
         mut child: impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
     ) -> StdResult<Option<Expr>, E> {
@@ -96,7 +96,9 @@ impl RegisteredSource<'_> {
             ast::Expr::Call(call) => {
                 let (selection, target) = self.call_target(call);
                 let method = match &selection {
-                    ir::RegisteredCallTarget::Method { name, .. } => Some(name.as_str()),
+                    ir::RegisteredCallTarget::Method { name, .. } => {
+                        Some((name.as_str(), call.func.as_ref()))
+                    }
                     ir::RegisteredCallTarget::Callable { .. } => None,
                 };
                 let Some(target) = receiver(target, method.is_some(), method)? else {
@@ -896,7 +898,7 @@ pub(in crate::frontend) fn binary(
 pub(super) fn operation<E>(
     node: &ast::Expr,
     source: RegisteredSource<'_>,
-    allow_typed_receiver: impl FnOnce(Option<&str>, &ast::Expr, &Expr) -> bool,
+    allow_typed_receiver: impl FnOnce(Option<(&str, &ast::Expr)>, &ast::Expr, &Expr) -> bool,
     literal: impl Fn(&Expr) -> Option<bool>,
     dynamic_receiver: impl FnOnce(&ast::Expr) -> bool,
     mut child: impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
@@ -1314,6 +1316,7 @@ impl Checker<'_> {
         }
         let graph = self.graph;
         let owner = self.module;
+        let mut needs_object_operand = false;
         if let ast::Expr::Compare(cmp) = node {
             let frame_equality = self.registered_local_start.is_some()
                 && matches!(cmp.ops.as_ref(), [ast::CmpOp::Eq | ast::CmpOp::NotEq]);
@@ -1368,6 +1371,21 @@ impl Checker<'_> {
                         {
                             return Ok(Some(source.located(node, checked)));
                         }
+                        return Ok(None);
+                    }
+                    if self.registered_local_start.is_some()
+                        && matches!(
+                            cmp.ops.as_ref(),
+                            [ast::CmpOp::Eq
+                                | ast::CmpOp::NotEq
+                                | ast::CmpOp::Is
+                                | ast::CmpOp::IsNot]
+                        )
+                    {
+                        // A prepared call can return a live Python handle even when its
+                        // inferred result is concrete. Its comparison uses that handle.
+                        needs_object_operand = true;
+                        break;
                     }
                     return Ok(None);
                 }
@@ -1375,7 +1393,9 @@ impl Checker<'_> {
             }
         }
         let first_local = self.registered_local_start;
-        let mut string_method = false;
+        let is_bound_method =
+            |callee: &ast::Expr| graph.session.operand_types(owner).is_bound_method(callee);
+        let mut live_method = false;
         let Some(mut value) = operation(
             node,
             source,
@@ -1386,11 +1406,14 @@ impl Checker<'_> {
                 // A parameter read in this frame is the object supplied by the caller.
                 let parameter = receiver.is_name_expr()
                     && matches!(operand.without_location().kind, ExprKind::Local(slot) if slot < first);
-                if let Some(name) = method {
-                    string_method = matches!(name, "join" | "split" | "replace")
+                if let Some((name, callee)) = method {
+                    let list_parameter =
+                        parameter && matches!(operand.ty, Type::ListInt | Type::List(_));
+                    let string_method = matches!(name, "join" | "split" | "replace")
                         && graph.session.scalar_type(owner, receiver) == Some(Type::Str);
-                    string_method
-                        || parameter && matches!(operand.ty, Type::ListInt | Type::List(_))
+                    live_method =
+                        string_method || parameter && !list_parameter && is_bound_method(callee);
+                    list_parameter || live_method
                 } else {
                     node.is_attribute_expr() && parameter
                 }
@@ -1402,20 +1425,25 @@ impl Checker<'_> {
                     || graph.session.is_dynamic_receiver(owner, receiver)
                     || node
                         .as_call_expr()
-                        .and_then(|call| call.func.as_attribute_expr())
-                        .is_some_and(|field| {
-                            graph.session.operand_types(owner).is_bound_method(field)
-                        })
+                        .is_some_and(|call| is_bound_method(&call.func))
             },
             |child| self.expr(child),
         )?
         else {
             return Ok(None);
         };
+        if needs_object_operand
+            && let ExprKind::Compare(values, _) = &value.kind
+            && !values
+                .iter()
+                .any(|operand| operand.ty == Type::PythonObject)
+        {
+            return Ok(None);
+        }
         if let Some(slot) = self.namespace {
             in_namespace(&mut value, self.local(slot));
         }
-        self.live_protocol_parameters |= string_method;
+        self.live_protocol_parameters |= live_method;
         // Checked locals and exact literals keep their known types in the registered frame.
         value.ty = match &value.kind {
             ExprKind::Int(_) => Type::Int,
