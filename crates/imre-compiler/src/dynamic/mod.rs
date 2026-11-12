@@ -722,11 +722,24 @@ pub(super) struct ScannedModule {
     lowered: LoweredRoot,
 }
 
-fn retained_imports(
-    module: ParsedModule<'_, '_>,
+impl ScannedModule {
+    fn from_input((module, lowered): emit::ParsedInput<'_, '_>) -> Option<Self> {
+        let lowered = lowered?;
+        Some(Self {
+            parsed: match module.parsed {
+                Cow::Owned(parser) => Some(parser),
+                Cow::Borrowed(_) => None,
+            },
+            lowered,
+        })
+    }
+}
+
+fn retained_imports<'a, 'p>(
+    module: ParsedModule<'a, 'p>,
     getter: Option<&mut Imports>,
     prepared_text: Option<&str>,
-) -> Result<(Imports, Option<ScannedModule>), String> {
+) -> Result<(Imports, Option<emit::ParsedInput<'a, 'p>>), String> {
     // File discovery normalizes newlines. A caller preparing the original bytes
     // needs its own parser so diagnostics keep the executable source offsets.
     if prepared_text.is_some_and(|text| {
@@ -742,22 +755,19 @@ fn retained_imports(
     }
     let mut body = module.parsed.syntax().body.clone();
     let mut imports = imports_from_body(&module.text, &mut body, getter, None)?;
-    let scanned = imports.invalid_executable.is_none().then(|| ScannedModule {
-        parsed: match module.parsed {
-            Cow::Owned(parser) => Some(parser),
-            Cow::Borrowed(_) => None,
-        },
-        lowered: (body, std::mem::take(&mut imports.private_names)),
-    });
-    Ok((imports, scanned))
+    let lowered = imports
+        .invalid_executable
+        .is_none()
+        .then(|| (body, std::mem::take(&mut imports.private_names)));
+    Ok((imports, Some((module, lowered))))
 }
 
-fn scan_shipped_imports(
-    source: &str,
+fn scan_shipped_imports<'a>(
+    source: &'a str,
     kind: SourceKind,
     getter: Option<&mut Imports>,
     prepared_text: Option<&str>,
-) -> Result<(Imports, Option<ScannedModule>), String> {
+) -> Result<(Imports, Option<emit::ParsedInput<'a, 'a>>), String> {
     match read_import_source(source, kind)? {
         ImportSource::Module(module) => retained_imports(module, getter, prepared_text),
         ImportSource::Invalid(error) => Ok((
@@ -1304,19 +1314,13 @@ pub(crate) fn compile(
             return scan_imports(source, kind, getter, None);
         }
         let (imports, scanned) = scan_shipped_imports(source, kind, getter, Some(source))?;
-        if let Some(ScannedModule {
-            parsed: Some(parser),
-            lowered,
-        }) = scanned
+        if let Some(input) = scanned
+            && imports.invalid_executable.is_none()
         {
-            let module = ParsedModule {
-                text: Cow::Borrowed(source),
-                parsed: Cow::Owned(parser),
-            };
             let checked = emit::PreparedBody::from_parsed(
                 name,
                 path,
-                (module, Some(lowered)),
+                input,
                 python_optimization,
                 emit::ModuleOrigin::Bundled,
                 Default::default(),
@@ -1779,7 +1783,7 @@ pub(crate) fn compile(
                                     None,
                                 )
                             {
-                                if let Some(module) = scanned {
+                                if let Some(module) = scanned.and_then(ScannedModule::from_input) {
                                     scanned_modules.insert(sources.len(), module);
                                 }
                                 if !initial[..path0_len].contains(root) {
@@ -2085,7 +2089,7 @@ pub(crate) fn compile(
                             } else {
                                 &mut work
                             };
-                            if let Some(module) = scanned {
+                            if let Some(module) = scanned.and_then(ScannedModule::from_input) {
                                 scanned_modules.insert(sources.len(), module);
                             }
                             queue.push_back((
@@ -2169,7 +2173,7 @@ pub(crate) fn compile(
                     let Ok((imports, scanned)) = imports else {
                         continue;
                     };
-                    if let Some(module) = scanned {
+                    if let Some(module) = scanned.and_then(ScannedModule::from_input) {
                         scanned_modules.insert(sources.len(), module);
                     }
                     registrations.python_providers.insert(sources.len());
@@ -2882,7 +2886,8 @@ fn a_shipped_getter_keeps_its_body_and_executable_source_offsets() {
         scan_shipped_imports(crlf, SourceKind::File, Some(&mut getter), Some(&normalized)).unwrap();
     assert!(imports.names.is_empty());
     assert_eq!(getter.names, [(0, "fractions".to_owned())]);
-    let (body, _) = module.unwrap().lowered;
+    let (_, lower) = module.unwrap();
+    let (body, _) = lower.unwrap();
     let [Stmt::FunctionDef(function)] = body.as_slice() else {
         panic!("expected the module's lazy getter");
     };

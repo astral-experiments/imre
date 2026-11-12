@@ -5,8 +5,8 @@ use std::path::Path;
 use std::{fs, io};
 
 use super::{
-    ImportSource, Imports, add_late_bundled_imports, bundled_module_source, emit,
-    imports_from_body, read_import_source, runtime_sources,
+    Imports, add_late_bundled_imports, bundled_module_source, emit, runtime_sources,
+    scan_shipped_imports,
 };
 use crate::SourceKind;
 
@@ -23,24 +23,15 @@ pub(crate) fn write(directory: &Path) -> Result<(), String> {
      -> io::Result<()> {
         let path = Path::new("<imre stdlib>").join(file);
         let discovered = pending.and_then(|pending| {
-            let ImportSource::Module(module) = read_import_source(source, SourceKind::File).ok()?
-            else {
-                return None;
-            };
-            let mut body = module.parsed.syntax().body.clone();
-            let imports = imports_from_body(&module.text, &mut body, None, None).ok()?;
+            let (imports, input) =
+                scan_shipped_imports(source, SourceKind::File, None, Some(source)).ok()?;
             let package = crate::modules::import_package(name, path.ends_with("__init__.py"));
             for (level, imported) in imports.names {
                 if let Some(resolved) = crate::modules::resolve_import(package, level, &imported) {
                     enqueue(pending, resolved);
                 }
             }
-            // Source seals and instruction positions refer to the packer's original text.
-            let lowered = imports
-                .invalid_executable
-                .is_none()
-                .then_some((body, imports.private_names));
-            (module.text == source).then_some((module, lowered))
+            input
         });
         let compiled = discovered
             .map_or_else(
