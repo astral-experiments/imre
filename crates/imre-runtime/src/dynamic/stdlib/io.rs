@@ -458,6 +458,7 @@ pub(in super::super) fn install_native(ctx: &mut Context, module: Id, module_obj
             "seekable",
             "seek",
             "tell",
+            "truncate",
             "__enter__",
             "__exit__",
         ],
@@ -943,29 +944,31 @@ pub(in super::super) fn call(
     let text = owner_kind == Some("TextIOBase");
     let bytes_io = owner_kind == Some("BytesIO");
     let base = owner_kind == Some("IOBase");
-    let descriptor =
-        if base && matches!(name, "fileno" | "__enter__" | "seek" | "tell") || name == "__dict__" {
-            Some("_IOBase")
-        } else if raw {
-            Some("_RawIOBase")
-        } else if buffered {
-            Some("_BufferedIOBase")
-        } else if text {
-            Some("_TextIOBase")
-        } else if matches!(
-            owner_kind,
-            Some("BufferedReader" | "BufferedWriter" | "BufferedRWPair" | "BufferedRandom")
-        ) {
-            owner_kind
-        } else if owner_kind == Some("TextIOWrapper")
-            && matches!(name, "__next__" | "__repr__" | "truncate")
-        {
-            Some("TextIOWrapper")
-        } else if bytes_io {
-            Some("BytesIO")
-        } else {
-            None
-        };
+    let descriptor = if base
+        && matches!(name, "fileno" | "__enter__" | "seek" | "tell" | "truncate")
+        || name == "__dict__"
+    {
+        Some("_IOBase")
+    } else if raw {
+        Some("_RawIOBase")
+    } else if buffered {
+        Some("_BufferedIOBase")
+    } else if text {
+        Some("_TextIOBase")
+    } else if matches!(
+        owner_kind,
+        Some("BufferedReader" | "BufferedWriter" | "BufferedRWPair" | "BufferedRandom")
+    ) {
+        owner_kind
+    } else if owner_kind == Some("TextIOWrapper")
+        && matches!(name, "__next__" | "__repr__" | "truncate")
+    {
+        Some("TextIOWrapper")
+    } else if bytes_io {
+        Some("BytesIO")
+    } else {
+        None
+    };
     let Some((&receiver, rest)) = args.split_first() else {
         let message = match (descriptor, name) {
             (
@@ -1030,6 +1033,10 @@ pub(in super::super) fn call(
         };
         return Err(Error::new("TypeError", message));
     };
+    if base && name == "truncate" {
+        super::super::builtins::bind_method_arguments(name, rest, kwargs, [""], 1)?;
+        return Err(Error::new("UnsupportedOperation", name));
+    }
     if base && name == "seek" {
         if rest.is_empty() && kwargs.len() <= 2 {
             return Err(Error::new(
