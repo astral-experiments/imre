@@ -692,6 +692,14 @@ def check_script_sitecustomize(imre, root, run):
     result = run(imre, "-B", invalid, extra=env)
     assert result.returncode > 0 and not result.stdout and b"expected int, got str" in result.stderr, result
 
+    # The hook fails during site initialization, before application shutdown is available.
+    (hooks / "sitecustomize.py").write_text("print('starting')\nraise SystemExit(19)\n")
+    script.write_text("import sitecustomize\nprint('application')\n")
+    fatal = run(imre, "-B", script, extra=env)
+    assert fatal.returncode == 1 and fatal.stdout == b"starting\n", fatal
+    assert b"Fatal Python error: init_import_site:" in fatal.stderr, fatal
+    assert fatal.stderr.endswith(b"SystemExit: 19\n"), fatal
+
 
 def check_explicit_site_directory(imre, root, run):
     site_dir = root / "extra-site"

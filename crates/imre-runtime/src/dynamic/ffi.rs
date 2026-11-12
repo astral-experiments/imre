@@ -1400,6 +1400,7 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
         eprintln!("Fatal Python error: init_import_site: Failed to import the site module");
         eprintln!("Python runtime state: initialized");
         stdlib::traceback::report_chain(&mut ctx, error);
+        stdlib::io::flush_standard_outputs(&mut ctx);
         crate::fault_handler::unregister_all();
         #[cfg(unix)]
         crate::signals::finalize();
