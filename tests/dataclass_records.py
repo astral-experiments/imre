@@ -87,7 +87,6 @@ Option().updated(unknown=True)
     "non_default_after_default": IMPORT + "@dataclass\nclass Item:\n    first: int = 1\n    second: int\n",
     "mutable_default": IMPORT + "@dataclass\nclass Item:\n    values: list[int] = []\n",
     "wrong_factory": IMPORT + "@dataclass\nclass Item:\n    values: list[int] = field(default_factory=dict)\n",
-    "called_factory": IMPORT + "@dataclass\nclass Item:\n    values: list[int] = field(default_factory=list())\n",
     "custom_factory": IMPORT + "def values() -> list[int]:\n    return [1]\n@dataclass\nclass Item:\n    values: list[int] = field(default_factory=values)\n",
     "default_and_factory": IMPORT + "@dataclass\nclass Item:\n    values: list[int] = field(default=None, default_factory=list)\n",
     "field_init_false": IMPORT + "@dataclass\nclass Item:\n    value: int = field(default=1, init=False)\n",

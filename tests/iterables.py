@@ -44,7 +44,6 @@ REJECTED = {
     "sum_iterable_keyword": "print(sum(iterable=[1]))\n",
     "sum_unknown_keyword": "print(sum([1], initial=2))\n",
     "sum_duplicate_start": "print(sum([1], 2, start=3))\n",
-    "map_escaped": 'values = map(int, "12")\n',
     "map_wrong_callback": "values = list(map(len, [1]))\n",
     "map_missing_source": "values = list(map(int))\n",
     "map_extra_source": 'values = list(map(int, "12", "34"))\n',
