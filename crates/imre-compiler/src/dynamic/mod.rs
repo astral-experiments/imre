@@ -1956,8 +1956,10 @@ pub(crate) fn compile(
                     if ordered_only {
                         return Ok(None);
                     }
-                    // Bundled providers cannot stand in for earlier project modules.
-                    if initial.contains(root)
+                    // Only an unchecked winner can displace the requested bundled provider.
+                    if winner
+                        && checked_slot.is_none()
+                        && initial.contains(root)
                         && ((request_script && prefix == "urllib")
                             || (ftp_script && prefix == "ftplib")
                             || (argparse_script && prefix == "argparse")
