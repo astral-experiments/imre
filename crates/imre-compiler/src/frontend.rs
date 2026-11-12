@@ -14039,10 +14039,9 @@ impl<'a> Checker<'a> {
                     && self.unshadowed_builtin(&call.func, "type")
                     && registered::values::fixed_positional_arguments(call) =>
             {
-                return Ok(self.evaluated_receiver(
-                    Some(value.clone()),
-                    annotations::class_value("type"),
-                ));
+                return Ok(
+                    self.evaluated_receiver(Some(value.clone()), annotations::class_value("type"))
+                );
             }
             "type"
                 if let [exception] = args.as_slice()
