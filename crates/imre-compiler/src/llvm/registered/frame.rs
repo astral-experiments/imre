@@ -2,9 +2,7 @@
 
 use super::sequences::{permanent_handle, spread};
 use super::suspension::Suspension;
-use super::{
-    CallArguments, GUARDED_LIT, GUARDED_NAMED_OP, NAMED_OP, Output, permanent, suspension,
-};
+use super::{CallArguments, Output, permanent, suspension};
 use crate::frontend::function_scope::ClassBindings;
 use crate::frontend::module_source::SourceFile;
 use crate::frontend::push_codepoints;
@@ -581,10 +579,6 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
 
     pub(crate) fn lit(&mut self, kind: i32, bytes: &[u8]) -> String {
         let loader = if self.take_matching_check() {
-            if !self.output.declarations.emitted_guarded_lit {
-                self.output.functions.push_str(GUARDED_LIT);
-                self.output.declarations.emitted_guarded_lit = true;
-            }
             "@imre_boxed_guarded_lit"
         } else {
             "@imre_dyn_lit"
@@ -623,15 +617,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
                 name.len()
             ));
         }
-        if !self.output.declarations.emitted_named_op {
-            self.output.functions.push_str(NAMED_OP);
-            self.output.declarations.emitted_named_op = true;
-        }
         let operation = if self.take_matching_check() {
-            if !self.output.declarations.emitted_guarded_named_op {
-                self.output.functions.push_str(GUARDED_NAMED_OP);
-                self.output.declarations.emitted_guarded_named_op = true;
-            }
             "@imre_boxed_guarded_named_op"
         } else {
             "@imre_boxed_named_op"

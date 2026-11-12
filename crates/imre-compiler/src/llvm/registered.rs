@@ -17,7 +17,6 @@ use crate::ir::{self, Builtin, Expr, ExprKind, Statement, Type};
 use crate::llvm::LoopTarget;
 use crate::llvm::body::FunctionBody;
 pub(crate) use abi::{ABI, CallArguments, Output, permanent};
-use abi::{GUARDED_LIT, GUARDED_NAMED_OP, NAMED_OP};
 pub(crate) use frame::{AnnotationScope, FrameEmitter, RegisteredFrame, SourcePositions};
 use ruff_python_ast::CmpOp;
 use ruff_python_ast::UnaryOp;
