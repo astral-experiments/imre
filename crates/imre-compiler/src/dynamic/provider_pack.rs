@@ -6,7 +6,7 @@ use std::{fs, io};
 
 use super::{
     Imports, add_late_bundled_imports, bundled_module_source, emit, runtime_sources,
-    scan_shipped_imports,
+    scan_imports_for_preparation,
 };
 use crate::SourceKind;
 
@@ -28,7 +28,7 @@ pub(crate) fn write(directory: &Path) -> Result<(), String> {
         let path = Path::new("<imre stdlib>").join(file);
         let discovered = pending.and_then(|pending| {
             let (imports, input) =
-                scan_shipped_imports(source, SourceKind::File, None, Some(source)).ok()?;
+                scan_imports_for_preparation(source, SourceKind::File, None, Some(source)).ok()?;
             let package = crate::modules::import_package(name, path.ends_with("__init__.py"));
             for (level, imported) in imports.names {
                 if let Some(resolved) = crate::modules::resolve_import(package, level, &imported) {
