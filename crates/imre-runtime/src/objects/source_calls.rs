@@ -11,6 +11,19 @@ use crate::{
 };
 use smallvec::SmallVec;
 
+/// # Safety
+/// Fields from `start` to the end of the rooted tuple must be initialized,
+/// nonnull native strings. The tuple and strings must outlive the returned slice.
+unsafe fn tuple_names<'a>(tuple: *const usize, start: usize) -> &'a [&'a Str] {
+    // SAFETY: each field in this suffix stores one pointer to its owned Str.
+    unsafe {
+        std::slice::from_raw_parts(
+            tuple.add(start).cast(),
+            records::descriptor(tuple).length - start,
+        )
+    }
+}
+
 /// Bind an exact evaluated mapping into formal-number and remaining keyword dictionaries.
 ///
 /// # Safety
@@ -31,21 +44,13 @@ pub unsafe extern "C" fn imre_bind_source_keywords(
     let bind = || unsafe {
         let item = |t, i| tuple_item(t as usize, i).1;
         let number = |i| Int::borrow(item(signature, i)).as_small().unwrap() as usize;
-        let names = |t: *const usize, from| {
-            (from..records::descriptor(t).length)
-                .map(move |i| (&*(tuple_item(t as usize, i).1 as *const Str)).as_str())
-        };
         let positional_only = number(0);
         let positional_count = number(1);
         let fixed_count = number(2);
         let positional_defaults = number(3);
         let varargs = item(signature, 4) != 0;
         let kwargs = item(signature, 5) != 0;
-        let mut fields = SmallVec::<[&str; 8]>::new();
-        fields
-            .try_reserve(records::descriptor(signature).length - 6)
-            .map_err(|_| Error::memory_error())?;
-        fields.extend(names(signature, 6));
+        let fields = tuple_names(signature, 6);
         let (fixed, kwdefaults) = fields.split_at(fixed_count);
         let (pos, kw) = fixed.split_at(positional_count);
         let shape = Shape {
@@ -63,9 +68,7 @@ pub unsafe extern "C" fn imre_bind_source_keywords(
             let mut keys = SmallVec::<[&str; 8]>::new();
             keys.try_reserve(records::descriptor(explicit).length)
                 .map_err(|_| Error::memory_error())?;
-            for key in names(explicit, 0) {
-                keys.push(key);
-            }
+            keys.extend(tuple_names(explicit, 0).iter().map(|key| key.as_str()));
             let prefix = keys.len();
             for (key, _) in dict.string_entries() {
                 if keys[..prefix].contains(&key.as_str()) {
@@ -83,7 +86,7 @@ pub unsafe extern "C" fn imre_bind_source_keywords(
                     given,
                     keys.iter().copied(),
                     positional_defaults,
-                    |k| kwdefaults.contains(&k),
+                    |k| kwdefaults.iter().any(|key| key.as_str() == k),
                 )
                 .map_err(|err| match err {
                     source_arguments::Error::Type(msg) => Error::new(Kind::TypeError, msg),
