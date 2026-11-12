@@ -858,11 +858,7 @@ pub(crate) fn check_native_syntax(
         let file = if let Some(id) = module {
             (graph.modules[id].path == *path).then_some(session.files[id])?
         } else {
-            *session.declarations.iter().find(|file| {
-                file.path(&session.db)
-                    .as_system_path()
-                    .is_some_and(|origin| origin.as_std_path() == path)
-            })?
+            session.declaration_file(path)?
         };
         session
             .file_matches_parser_input(file, &input.text)
@@ -1416,6 +1412,24 @@ impl Session {
     }
 
     /// Match the parser input of a selected physical file, including a declaration-only module.
+    fn declaration_file(&self, path: &Path) -> Option<File> {
+        self.declarations.iter().copied().find(|file| {
+            file.path(&self.db)
+                .as_system_path()
+                .is_some_and(|origin| origin.as_std_path() == path)
+        })
+    }
+
+    /// Borrow the declaration's indexed syntax while its physical parser input still matches.
+    pub(crate) fn declaration_parser(&self, path: &Path, source: &str) -> Option<ParsedModuleRef> {
+        let file = self.declaration_file(path)?;
+        let text = crate::normalize_source(source, crate::SourceKind::DiskFile).ok()?;
+        let input = imre_ast::indentation::prepare(&text);
+        self.file_matches_parser_input(file, &input.text)
+            .then(|| self.parsed(file))
+            .filter(|parsed| parsed.has_no_syntax_errors())
+    }
+
     fn file_matches_parser_input(&self, file: File, text: &str) -> bool {
         ruff_db::source::source_text(&self.db, file).as_str() == text
     }

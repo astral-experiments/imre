@@ -28,7 +28,8 @@ pub(crate) fn write(directory: &Path) -> Result<(), String> {
         let path = Path::new("<imre stdlib>").join(file);
         let discovered = pending.and_then(|pending| {
             let (imports, input) =
-                scan_imports_for_preparation(source, SourceKind::File, None, Some(source)).ok()?;
+                scan_imports_for_preparation(source, SourceKind::File, None, None, Some(source))
+                    .ok()?;
             let package = crate::modules::import_package(name, path.ends_with("__init__.py"));
             for (level, imported) in imports.names {
                 if let Some(resolved) = crate::modules::resolve_import(package, level, &imported) {
