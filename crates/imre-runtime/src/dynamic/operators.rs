@@ -5071,81 +5071,82 @@ impl Context {
         let float_operand = matches!(self.heap.get(left), Value::Float(_))
             || matches!(self.heap.get(right), Value::Float(_));
         // After a float subtype declines division, its underlying value cannot retry it.
-        if float_operand && (op != "/" || (a == left && b == right)) {
-            if let (Some(x), Some(y)) = (self.real_component(left)?, self.real_component(right)?) {
-                let result = match op {
-                    "+" => Some(x + y),
-                    "-" => Some(x - y),
-                    "*" => Some(x * y),
-                    "**" => {
-                        if y == 0.0 {
-                            Some(1.0)
-                        } else if x.is_nan() {
-                            Some(x)
-                        } else if y.is_nan() {
-                            Some(if x == 1.0 { 1.0 } else { y })
-                        } else if y.is_infinite() {
-                            let magnitude = x.abs();
-                            Some(if magnitude == 1.0 {
-                                1.0
-                            } else if (y > 0.0) == (magnitude > 1.0) {
-                                f64::INFINITY
+        if float_operand
+            && (op != "/" || (a == left && b == right))
+            && let (Some(x), Some(y)) = (self.real_component(left)?, self.real_component(right)?)
+        {
+            let result = match op {
+                "+" => Some(x + y),
+                "-" => Some(x - y),
+                "*" => Some(x * y),
+                "**" => {
+                    if y == 0.0 {
+                        Some(1.0)
+                    } else if x.is_nan() {
+                        Some(x)
+                    } else if y.is_nan() {
+                        Some(if x == 1.0 { 1.0 } else { y })
+                    } else if y.is_infinite() {
+                        let magnitude = x.abs();
+                        Some(if magnitude == 1.0 {
+                            1.0
+                        } else if (y > 0.0) == (magnitude > 1.0) {
+                            f64::INFINITY
+                        } else {
+                            0.0
+                        })
+                    } else {
+                        let odd = y.fract() == 0.0 && (y % 2.0).abs() == 1.0;
+                        if x.is_infinite() {
+                            Some(if y > 0.0 {
+                                if odd { x } else { x.abs() }
+                            } else if odd {
+                                0.0_f64.copysign(x)
                             } else {
                                 0.0
                             })
-                        } else {
-                            let odd = y.fract() == 0.0 && (y % 2.0).abs() == 1.0;
-                            if x.is_infinite() {
-                                Some(if y > 0.0 {
-                                    if odd { x } else { x.abs() }
-                                } else if odd {
-                                    0.0_f64.copysign(x)
-                                } else {
-                                    0.0
-                                })
-                            } else if x == 0.0 {
-                                if y < 0.0 {
-                                    return Err(Error::new(
-                                        "ZeroDivisionError",
-                                        "zero to a negative power",
-                                    ));
-                                }
-                                Some(if odd { x } else { 0.0 })
-                            } else if x < 0.0 && y.fract() != 0.0 {
-                                let base = super::complex::Complex::from(x);
-                                return Ok(self.alloc(Value::Complex(base.power(y.into())?)));
-                            } else {
-                                let magnitude = x.abs().powf(y);
-                                if magnitude.is_infinite() {
-                                    return Err(Error::new(
-                                        "OverflowError",
-                                        "(34, 'Numerical result out of range')",
-                                    ));
-                                }
-                                Some(if x < 0.0 && odd {
-                                    -magnitude
-                                } else {
-                                    magnitude
-                                })
+                        } else if x == 0.0 {
+                            if y < 0.0 {
+                                return Err(Error::new(
+                                    "ZeroDivisionError",
+                                    "zero to a negative power",
+                                ));
                             }
+                            Some(if odd { x } else { 0.0 })
+                        } else if x < 0.0 && y.fract() != 0.0 {
+                            let base = super::complex::Complex::from(x);
+                            return Ok(self.alloc(Value::Complex(base.power(y.into())?)));
+                        } else {
+                            let magnitude = x.abs().powf(y);
+                            if magnitude.is_infinite() {
+                                return Err(Error::new(
+                                    "OverflowError",
+                                    "(34, 'Numerical result out of range')",
+                                ));
+                            }
+                            Some(if x < 0.0 && odd {
+                                -magnitude
+                            } else {
+                                magnitude
+                            })
                         }
                     }
-                    "/" | "//" | "%" => {
-                        if y == 0.0 {
-                            return Err(Error::new("ZeroDivisionError", "division by zero"));
-                        }
-                        let operation = match op {
-                            "/" => 0,
-                            "//" => 1,
-                            _ => 2,
-                        };
-                        Some(crate::floats::imre_float_divide(x, y, operation))
-                    }
-                    _ => None,
-                };
-                if let Some(result) = result {
-                    return Ok(self.alloc(Value::Float(result)));
                 }
+                "/" | "//" | "%" => {
+                    if y == 0.0 {
+                        return Err(Error::new("ZeroDivisionError", "division by zero"));
+                    }
+                    let operation = match op {
+                        "/" => 0,
+                        "//" => 1,
+                        _ => 2,
+                    };
+                    Some(crate::floats::imre_float_divide(x, y, operation))
+                }
+                _ => None,
+            };
+            if let Some(result) = result {
+                return Ok(self.alloc(Value::Float(result)));
             }
         }
         if op == "%"
