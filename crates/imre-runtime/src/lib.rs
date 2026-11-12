@@ -1104,20 +1104,7 @@ fn integer_binary(a: &Int, b: &Int, op: u32) -> Result<Int> {
             5 => Some(x & y),
             6 => Some(x | y),
             7 => Some(x ^ y),
-            3 | 4 => {
-                if y == 0 {
-                    return Err(Error::new(Kind::ZeroDivisionError, "division by zero"));
-                }
-                let (q, r) = (x / y, x % y);
-                let adjust = r != 0 && (r < 0) != (y < 0);
-                Some(if op == 3 {
-                    q - i64::from(adjust)
-                } else if adjust {
-                    r + y
-                } else {
-                    r
-                })
-            }
+            3 | 4 => return floor_division_result(&x, &y, op).map(Int::from),
             _ => fail("SystemError", "invalid integer operation"),
         };
         if let Some(value) = result.and_then(Int::small) {
@@ -1131,23 +1118,34 @@ fn integer_binary(a: &Int, b: &Int, op: u32) -> Result<Int> {
         5 => a.as_ref() & b.as_ref(),
         6 => a.as_ref() | b.as_ref(),
         7 => a.as_ref() ^ b.as_ref(),
-        3 | 4 => {
-            if b.is_zero() {
-                return Err(Error::new(Kind::ZeroDivisionError, "division by zero"));
-            }
-            let (q, r) = (a.as_ref() / b.as_ref(), a.as_ref() % b.as_ref());
-            let adjust = !r.is_zero() && r.is_negative() != b.is_negative();
-            if op == 3 {
-                q - BigInt::from(u8::from(adjust))
-            } else if adjust {
-                r + b.as_ref()
-            } else {
-                r
-            }
-        }
+        3 | 4 => floor_division_result(a.as_ref(), b.as_ref(), op)?,
         _ => fail("SystemError", "invalid integer operation"),
     };
     Ok(Int::new(result))
+}
+
+/// Python's remainder has the divisor's sign for both tagged and wide integers.
+fn floor_divmod<T: num_integer::Integer>(a: &T, b: &T) -> Result<(T, T)> {
+    if b.is_zero() {
+        return Err(Error::new(Kind::ZeroDivisionError, "division by zero"));
+    }
+    Ok(a.div_mod_floor(b))
+}
+
+fn floor_division_result<T: num_integer::Integer>(a: &T, b: &T, op: u32) -> Result<T> {
+    let (quotient, remainder) = floor_divmod(a, b)?;
+    Ok(if op == 3 { quotient } else { remainder })
+}
+
+impl Int {
+    fn divmod(&self, divisor: &Self) -> Result<(Self, Self)> {
+        if let (Some(a), Some(b)) = (self.as_small(), divisor.as_small()) {
+            let (q, r) = floor_divmod(&a, &b)?;
+            return Ok((Self::from(q), Self::from(r)));
+        }
+        let (q, r) = floor_divmod(self.big().as_ref(), divisor.big().as_ref())?;
+        Ok((Self::new(q), Self::new(r)))
+    }
 }
 
 /// Validate indexed selection arguments before narrowing the requested count.

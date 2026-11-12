@@ -5489,8 +5489,9 @@ impl Context {
                 let remainder = self.alloc(Value::Float(remainder));
                 return Ok(self.alloc(Value::Tuple(vec![quotient, remainder])));
             } else if let (Ok(x), Ok(y)) = (self.as_int(a), self.as_int(b)) {
-                let quotient = self.alloc(Value::Int(crate::integer_binary(&x, &y, 3)?));
-                let remainder = self.alloc(Value::Int(crate::integer_binary(&x, &y, 4)?));
+                let (quotient, remainder) = x.divmod(&y)?;
+                let quotient = self.alloc(Value::Int(quotient));
+                let remainder = self.alloc(Value::Int(remainder));
                 return Ok(self.alloc(Value::Tuple(vec![quotient, remainder])));
             }
         }
