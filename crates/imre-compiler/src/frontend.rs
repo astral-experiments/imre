@@ -1145,12 +1145,7 @@ fn lower_graph(
                 &classes,
                 &types,
                 &inference,
-                &globals,
-                if needs_registered_entry {
-                    registered::Capture::Entry(&checked_bodies)
-                } else {
-                    registered::Capture::Solved
-                },
+                needs_registered_entry.then_some(&checked_bodies),
             );
         }
     };
