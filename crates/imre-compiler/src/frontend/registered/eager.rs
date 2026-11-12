@@ -60,7 +60,7 @@ impl SourceScope<'_> {
             Collector::Display(None),
             result,
             Some(&mut prefix),
-            |_, _| {},
+            |_, _| false,
         );
         self.comprehension = outer;
         checked.ok()?;

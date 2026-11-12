@@ -198,7 +198,7 @@ pub(super) trait EagerDisplay: Sized {
         collector: Collector,
         result: usize,
         mut body: Option<&mut Vec<Statement>>,
-        mut checked_leaf: impl FnMut(&Self, &[Statement]),
+        mut replaces_loop: impl FnMut(&Self, &Expr) -> bool,
     ) -> StdResult<Type, Self::Error> {
         let loops = self.comprehension_loop(plan, 0, input, &mut |scope, output, conditions| {
             let guarded = Self::collection_guard(conditions);
@@ -215,6 +215,9 @@ pub(super) trait EagerDisplay: Sized {
                 key.as_ref().map(|(_, key)| key),
                 guarded,
             )?;
+            if replaces_loop(scope, &item) {
+                body = None;
+            }
             let Some(body) = body.as_deref_mut() else {
                 return Ok(Vec::new());
             };
@@ -267,9 +270,7 @@ pub(super) trait EagerDisplay: Sized {
             };
             let ty = scope.collection_locals()[result];
             body.push(Statement::Assign(result, Expr { ty, kind: empty }));
-            let leaf = vec![store];
-            checked_leaf(scope, &leaf);
-            Ok(leaf)
+            Ok(vec![store])
         })?;
         if let Some(body) = body {
             body.extend(loops);
@@ -828,22 +829,20 @@ impl Checker<'_> {
             && args
                 .first()
                 .is_some_and(|arg| matches!(arg.kind, ExprKind::Builtin(Builtin::Slice, _)));
-        // The solver consumes the checked operand, while gather and slice fusion
-        // inspect operations and can rewrite the argument in the enclosing call.
         let mut body = Vec::new();
-        let mut output =
-            (self.inference.is_none() || gather_input.is_some() || slice).then_some(&mut body);
+        let emit_loop = self.inference.is_none() || slice;
         let mut mapping = None;
         let ty = helper.comprehension_body(
             display,
             input,
             collector,
             result,
-            output.as_deref_mut(),
-            |checker, leaf| {
-                if gather_input.is_some() {
-                    mapping = checker.dictionary_gather_mapping(display, leaf);
+            emit_loop.then_some(&mut body),
+            |checker, item| {
+                if gather_input.is_some() && checker.locals[result] == Type::ListInt {
+                    mapping = checker.dictionary_gather_mapping(display, item);
                 }
+                mapping.is_some()
             },
         )?;
         if let Some((iterable, target)) = list_binding {
@@ -856,11 +855,7 @@ impl Checker<'_> {
                 },
             );
         }
-        if let Some(output) = output {
-            output.push(Statement::Return(helper.local(result)));
-        }
-        if ty == Type::ListInt
-            && let Some(mut input) = gather_input
+        if let Some(mut input) = gather_input
             && let Some(mapping) = mapping
         {
             // Validate at exactly the original decode's evaluation point, before
@@ -900,7 +895,11 @@ impl Checker<'_> {
                     }),
                 ),
             };
-            body = vec![Statement::Return(gather)];
+            // The gather uses only the incoming iterable and a captured or global mapping.
+            helper.locals.truncate(result);
+            body.push(Statement::Return(gather));
+        } else if emit_loop {
+            body.push(Statement::Return(helper.local(result)));
         }
         if slice {
             slices::fuse(&mut body, &params, &mut args);
@@ -935,17 +934,11 @@ impl Checker<'_> {
     }
 
     /// The fused helper reads the same mapping as the accepted character lookup.
-    fn dictionary_gather_mapping(&self, display: &Plan<'_>, leaf: &[Statement]) -> Option<Expr> {
+    fn dictionary_gather_mapping(&self, display: &Plan<'_>, item: &Expr) -> Option<Expr> {
         let [clause] = display.clauses else {
             return None;
         };
-        let [Statement::Expr(append)] = leaf else {
-            return None;
-        };
-        let ExprKind::Builtin(Builtin::Append, append) = &append.kind else {
-            return None;
-        };
-        let ExprKind::Builtin(Builtin::DictGet, operands) = &append.last()?.kind else {
+        let ExprKind::Builtin(Builtin::DictGet, operands) = &item.kind else {
             return None;
         };
         let [mapping, key] = operands.as_slice() else {
@@ -1042,7 +1035,7 @@ impl Checker<'_> {
             collector,
             result,
             Some(&mut prefix),
-            |_, _| {},
+            |_, _| false,
         );
         if let Some(namespace) = self.namespace {
             for name in &targets {
@@ -1315,6 +1308,7 @@ async def invalid(values: list[int]) -> int:
             }
         });
         let helper = &module.functions[helper.unwrap()];
+        assert_eq!(helper.locals.len(), helper.params.len());
         assert_eq!(helper.locals[helper.params[0]], Type::Bytes);
         let [Statement::Return(value)] = helper.body.as_slice() else {
             panic!("the fused helper must contain only its conditional gather")
