@@ -1347,6 +1347,14 @@ fn lower_graph(
             // definitions and the registered initializer already own this program.
             continue;
         }
+        let recursion_error = module.error(
+            definition,
+            "recursive calls are unsupported in this prototype",
+        );
+        // This completed call edge already prevents the trial from producing an acyclic program.
+        if retries_failed_layout(graph) && body.calls.contains(&signature.id) {
+            return Err(recursion_error.into());
+        }
         has_wrapper_link |= body.wrapper_link;
         let LoweredBody {
             function,
@@ -1396,10 +1404,7 @@ fn lower_graph(
         completed.functions.push(function);
         call_graph.push(calls);
         class_reads.push(reads);
-        recursion_errors.push(module.error(
-            definition,
-            "recursive calls are unsupported in this prototype",
-        ));
+        recursion_errors.push(recursion_error);
     }
     let mut factories = Vec::with_capacity(record_factories.len());
     if refused_body.is_none() {
