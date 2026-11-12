@@ -181,6 +181,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         if self.output.keep_docstrings
             && let Some(doc) = docstring
         {
+            self.checkpoint(self.current_range);
             let value = self.text(doc);
             self.bind("__doc__", &value);
         }
