@@ -68,7 +68,7 @@ mod exception_forwarders;
 mod expandtabs;
 mod expansions;
 mod fixed_body_source;
-pub(crate) use fixed_body_source::{FixedBodySource, FixedField, FixedNode};
+pub(crate) use fixed_body_source::{FixedAttribute, FixedBodySource, FixedNode};
 mod fixed_tuples;
 mod fnmatch;
 mod format_cursors;
@@ -10694,7 +10694,7 @@ impl<'a> Checker<'a> {
                     });
                 }
                 if let Some(sites) = &mut self.fixed_sites {
-                    sites.field(attribute.range(), &attribute.attr, field, ty);
+                    sites.field(attribute, field, ty);
                 }
                 (ty, ExprKind::Field(Box::new(receiver), field))
             }
@@ -13507,6 +13507,11 @@ impl<'a> Checker<'a> {
                     ));
                 }
             };
+            if matches!(builtin, Builtin::Append)
+                && let Some(sites) = &mut self.fixed_sites
+            {
+                sites.method(call, attribute, &builtin, ty);
+            }
             return Ok(Expr {
                 ty,
                 kind: ExprKind::Builtin(builtin, args),

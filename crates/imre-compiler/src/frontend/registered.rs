@@ -198,7 +198,7 @@ pub(crate) struct RegisteredFunction {
         clippy::box_collection,
         reason = "keep the optional field map one word per registered function"
     )]
-    pub(crate) fixed_fields: Option<Box<HashMap<TextRange, FixedField>>>,
+    pub(crate) fixed_attributes: Option<Box<HashMap<TextRange, FixedAttribute>>>,
     pub(crate) function: ir::Function,
     pub(crate) local_names: HashMap<usize, LocalBinding>,
 }
@@ -209,7 +209,7 @@ impl RegisteredFunction {
         Self {
             inputs: FrameInputs::Checked,
             fixed_sites: Vec::new(),
-            fixed_fields: None,
+            fixed_attributes: None,
             function: ir::Function {
                 params: vec![],
                 returns: Type::PythonObject,
@@ -369,7 +369,7 @@ pub(super) fn lower_definition(
     let mut function = RegisteredFunction {
         inputs: FrameInputs::Checked,
         fixed_sites: Vec::new(),
-        fixed_fields: None,
+        fixed_attributes: None,
         function: body.function,
         local_names,
     };
@@ -905,7 +905,7 @@ impl DeferredAnnotation {
         Ok(RegisteredFunction {
             inputs: FrameInputs::Checked,
             fixed_sites: Vec::new(),
-            fixed_fields: None,
+            fixed_attributes: None,
             function: ir::Function {
                 params: vec![],
                 returns: Type::PythonObject,
@@ -2988,7 +2988,7 @@ impl<'a> SourceScope<'a> {
         RegisteredFunction {
             inputs: FrameInputs::Checked,
             fixed_sites: Vec::new(),
-            fixed_fields: None,
+            fixed_attributes: None,
             function: ir::Function {
                 params: Vec::new(),
                 returns: Type::PythonObject,

@@ -55,8 +55,8 @@ impl ValueUse {
 /// Only the checked operation that owns a physical location may pass it to a
 /// failing protocol call. Synthesized operations have no site of their own.
 #[derive(Clone, Copy)]
-enum OperationSite<'s> {
-    Placed(TextRange, Option<&'s crate::frontend::FixedField>),
+enum OperationSite {
+    Placed(TextRange),
     Registered(TextRange),
     Unlocated,
 }
@@ -631,7 +631,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         left: &Expr,
         right: &Expr,
         expr: &Expr,
-        site: OperationSite<'_>,
+        site: OperationSite,
         usage: ValueUse,
     ) -> CheckedValue {
         if let Entry::Native(emitter) = &mut self.0
@@ -677,7 +677,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         let span = match (&self.0, site, lhs, rhs) {
             (
                 Entry::Registered(frame),
-                OperationSite::Placed(range, _) | OperationSite::Registered(range),
+                OperationSite::Placed(range) | OperationSite::Registered(range),
                 Some(lhs),
                 Some(rhs),
             ) if positioned => frame.binary_span(range, lhs, rhs, op),
@@ -721,11 +721,22 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         if let Entry::Registered(frame) = &mut self.0
             && let Some(range) = frame.next_fixed_site()
         {
-            let field = frame.fixed_field(range);
-            let position = field.map_or(range.start(), |field| field.position);
-            let site = OperationSite::Placed(range, field);
+            let attribute = frame.fixed_attribute(range);
+            let position = attribute.map_or(range.start(), |field| field.position);
             return frame.located_value(range, position, |frame| {
-                CheckedBody::registered(frame.reborrow()).emit_operation(expr, site, usage)
+                if let Some(field) = attribute {
+                    let operands = match &expr.kind {
+                        ExprKind::Field(receiver, _) => std::slice::from_ref(receiver.as_ref()),
+                        ExprKind::Builtin(_, args) => args,
+                        _ => unreachable!("placed attribute has its checked operands"),
+                    };
+                    return frame.object_operation(&field.operation, operands);
+                }
+                CheckedBody::registered(frame.reborrow()).emit_operation(
+                    expr,
+                    OperationSite::Placed(range),
+                    usage,
+                )
             });
         }
         self.emit_operation(expr, OperationSite::Unlocated, usage)
@@ -734,7 +745,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
     fn emit_operation(
         &mut self,
         expr: &Expr,
-        site: OperationSite<'_>,
+        site: OperationSite,
         usage: ValueUse,
     ) -> CheckedValue {
         match &expr.kind {
@@ -940,10 +951,6 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 CheckedValue::owned(self.fixed().exception_value(*kind, message.as_deref()))
             }
             ExprKind::Field(receiver, index) => {
-                if let OperationSite::Placed(range, field) = site {
-                    let field = field.expect("placed field has a physical attribute");
-                    return self.python().load_fixed_field(receiver, range, &field.name);
-                }
                 let emitter = self.fixed();
                 let value = if let Some(snapshot) = emitter.struct_snapshot(receiver) {
                     let ptr = emitter.field_pointer(&snapshot, *index);
