@@ -24,6 +24,25 @@ pub(super) struct PreparedUnit<'a> {
     pub(super) initializer: Result<Initializer<'a>, &'a ModuleSyntaxError>,
 }
 
+/// Check a self-contained initializer without retaining its prepared body.
+pub(super) fn check_shipped(
+    name: &str,
+    path: &Path,
+    input: super::emit::ParsedInput<'_, '_>,
+    python_optimization: i32,
+) -> Result<(), String> {
+    PreparedBody::from_parsed(
+        name,
+        path,
+        input,
+        python_optimization,
+        ModuleOrigin::Bundled,
+        Default::default(),
+        None,
+    )
+    .map(drop)
+}
+
 /// Check consumes this iterator one unit at a time. A build retains the same
 /// initializers until every source has passed preparation.
 pub(super) fn units<'a>(

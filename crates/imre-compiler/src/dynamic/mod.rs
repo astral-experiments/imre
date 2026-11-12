@@ -1317,16 +1317,7 @@ pub(crate) fn compile(
         if let Some(input) = scanned
             && imports.invalid_executable.is_none()
         {
-            let checked = emit::PreparedBody::from_parsed(
-                name,
-                path,
-                input,
-                python_optimization,
-                emit::ModuleOrigin::Bundled,
-                Default::default(),
-                None,
-            )
-            .map(drop);
+            let checked = prepare::check_shipped(name, path, input, python_optimization);
             shipped_checks.insert(unit, checked);
         }
         Ok(imports)
@@ -2203,6 +2194,7 @@ pub(crate) fn compile(
             .iter()
             .any(|(name, path, _)| name == required && path.starts_with(bundled_root))
     });
+    let first_runtime_unit = sources.len();
     for (name, file, body) in runtime_sources(|name| seen.contains(name), threading) {
         sources.push((name.into(), Path::new(bundled_root).join(file), body.into()));
     }
@@ -2432,21 +2424,36 @@ pub(crate) fn compile(
     // A namespace portion has no initializer. Its registered origin is a directory
     // that must remain available for the scratch session to add its child modules.
     let namespace_portions: HashSet<_> = inputs.directories.iter().map(|(path, _)| path).collect();
-    crate::analysis::check_native_syntax(
-        &root,
-        syntax,
-        project.as_ref(),
-        sources
-            .iter()
-            .chain(&builtins)
-            .filter(|(_, path, _)| !namespace_portions.contains(path)),
-        |path| {
-            registrations.archive_members.contains_key(path)
-                || registrations.physical_files.contains_key(path)
-                    && !winners.iter().any(|source| source.path == path)
-        },
-        &mut module_errors,
-    )?;
+    let is_alternative = |path: &Path| {
+        registrations.archive_members.contains_key(path)
+            || registrations.physical_files.contains_key(path)
+                && !winners.iter().any(|source| source.path == path)
+    };
+    for (unit, module) in sources.iter().chain(&builtins).enumerate() {
+        let (name, path, source) = module;
+        if namespace_portions.contains(path) {
+            continue;
+        }
+        let check_runtime =
+            unit >= first_runtime_unit && matches!(mode, crate::CompilationMode::Check);
+        if let Some(parsed) = crate::analysis::check_native_syntax(
+            &root,
+            &mut syntax,
+            project.as_ref(),
+            module,
+            check_runtime,
+            is_alternative,
+            &mut module_errors,
+        )? {
+            let input = ParsedModule {
+                text: Cow::Borrowed(source),
+                parsed: Cow::Borrowed(&parsed),
+            };
+            let check = prepare::check_shipped(name, path, input.into(), python_optimization);
+            shipped_checks.insert(unit, check);
+        }
+    }
+    drop(syntax);
     for name in &options.include_modules {
         // A finder can resolve a namespace or ZIP member without emitting a body.
         let file = winners
