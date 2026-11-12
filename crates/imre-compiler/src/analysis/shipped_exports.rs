@@ -208,10 +208,8 @@ fn local_declaration(
             DefinitionKind::Class(_) => {
                 Some(Binding::RegisteredClass(source.focus_range(db, parsed)))
             }
-            DefinitionKind::Function(function)
-                if function.node(parsed).decorator_list.is_empty() =>
-            {
-                Some(Binding::RegisteredFunction(source.focus_range(db, parsed)))
+            DefinitionKind::Function(_) => {
+                Some(Binding::RegisteredValue(source.focus_range(db, parsed)))
             }
             _ => None,
         });
