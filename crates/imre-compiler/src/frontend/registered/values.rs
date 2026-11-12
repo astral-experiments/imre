@@ -20,7 +20,7 @@ impl ModuleSource {
                 .any(|token| token.kind() == ast::token::TokenKind::TStringStart),
         }
     }
-    pub(super) fn context<'a>(&'a self, text: &'a str) -> RegisteredSource<'a> {
+    pub(in crate::frontend) fn context<'a>(&'a self, text: &'a str) -> RegisteredSource<'a> {
         RegisteredSource {
             operand_types: None,
             template_fields: None,
