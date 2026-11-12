@@ -663,7 +663,12 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             ) if positioned => frame.binary_span(range, lhs, rhs, op),
             _ => None,
         };
-        let result = if op == Binary::Modulo
+        let result = if let Entry::Native(emitter) = &mut self.0
+            && let Some(value) =
+                emitter.bounded_binary(op, expr, (left, a.fixed_value()), (right, b.fixed_value()))
+        {
+            CheckedValue::owned(value)
+        } else if op == Binary::Modulo
             && checked_ints
             && matches!(self.0, Entry::Registered(_))
             && let Some(value) = self.cached_remainder(&a, &b, span, right)
@@ -1272,19 +1277,7 @@ impl Emitter<'_, '_> {
             self.line(format!("store i64 {updated}, ptr {slot}"));
             return Some(CheckedValue::owned(self.tag_small(&updated)));
         }
-        let adjust_floor = self.small_binary_proof(expression, left, right, op)?;
-        let (left_value, right_value) = (self.operand(left), self.operand(right));
-        let bounds = self.ranges.integer(left).zip(self.ranges.integer(right));
-        let result = self.small_binary(
-            op,
-            &left_value.value,
-            &right_value.value,
-            adjust_floor,
-            bounds,
-        );
-        self.release_operand(&left_value);
-        self.release_operand(&right_value);
-        Some(CheckedValue::owned(result))
+        None
     }
 
     fn fused_statements(&mut self, remaining: &[Statement]) -> usize {
