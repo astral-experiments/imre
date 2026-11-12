@@ -7487,11 +7487,12 @@ impl Emitter<'_, '_> {
                 },
                 _ => unreachable!("float conversion was checked"),
             },
-            Builtin::LengthResult => {
-                let value = self.checked_instruction(format!(
+            Builtin::LengthResult(origin) => {
+                let value = self.instruction(format!(
                     "call i64 @imre_length_result(i64 {})",
                     args[0].value.operand
                 ));
+                self.check_error_at(Some(origin));
                 Value {
                     ty: Type::Int,
                     operand: value,

@@ -807,7 +807,7 @@ impl Builtin {
             | Self::Input
             | Self::InputSelectStdout
             | Self::InputFinish
-            | Self::LengthResult
+            | Self::LengthResult(_)
             | Self::ParseArgs { .. }
             | Self::ArgparseText { .. }
             | Self::ArgparseChoiceDigits(_)
