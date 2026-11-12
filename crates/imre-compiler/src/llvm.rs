@@ -450,8 +450,13 @@ pub(crate) fn analyze_program(module: &Module) -> Result<NativeProgram, Unsuppor
 
     // Direct arguments can establish ownership only for a closed function whose
     // signature also admits a bound method. Other callables need no caller scan.
-    let mut direct_inputs: HashMap<_, Vec<_>> =
-        link_owners.keys().map(|&id| (id, Vec::new())).collect();
+    let mut direct_inputs: HashMap<_, Vec<_>> = link_owners
+        .keys()
+        .filter_map(|&id| {
+            let function = module.functions.get(id)?;
+            (!function.params.is_empty()).then(|| (id, Vec::new()))
+        })
+        .collect();
     if !direct_inputs.is_empty() {
         for function in module.functions.iter().chain([&module.entry]) {
             ir::walk_expressions(&function.body, &mut |expr| match &expr.kind {
