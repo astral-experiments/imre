@@ -713,6 +713,8 @@ fn scan_imports(
     )
 }
 
+pub(super) type LoweredRoot = (ast::Suite, imre_ast::Names);
+
 fn imports_from_body(
     normalized: &str,
     body: &mut [Stmt],
@@ -1125,6 +1127,7 @@ pub(crate) fn compile(
     let mut inputs = SourceInputs::default();
     let mut archives = HashMap::new();
     let mut registrations = emit::RegisteredBodies::default();
+    let mut normalized_files = HashMap::new();
     let mut syntax = None;
     for path in options
         .extension_paths
@@ -1909,14 +1912,13 @@ pub(crate) fn compile(
                     let parsed = checked_package
                         .filter(|_| winner && kind == SourceKind::File)
                         .and_then(|(graph, id)| CheckedFile::select(graph, id));
-                    let imports = match parsed.map(|file| file.parsed(modules)) {
-                        Some(module) => imports_from_body(
-                            &module.text,
-                            &mut module_source::into_body(module.parsed),
-                            None,
-                            None,
-                        ),
-                        None => scan_imports(&src, kind, None, alternative),
+                    let (imports, normalized_file) = if let Some(file) = parsed {
+                        let module = file.parsed(modules);
+                        let mut body = module_source::into_body(module.parsed);
+                        let imports = imports_from_body(&module.text, &mut body, None, None);
+                        (imports, Some(body))
+                    } else {
+                        (scan_imports(&src, kind, None, alternative), None)
                     };
                     let mut imports = match imports {
                         Ok(imports) => imports,
@@ -1970,6 +1972,12 @@ pub(crate) fn compile(
                             } else {
                                 &mut work
                             };
+                            if let Some(body) = normalized_file {
+                                normalized_files.insert(
+                                    sources.len(),
+                                    (body, std::mem::take(&mut imports.private_names)),
+                                );
+                            }
                             queue.push_back((
                                 (prefix.clone(), package, imports),
                                 ImportOrigin::file(winner && filesystem_import),
@@ -2361,7 +2369,7 @@ pub(crate) fn compile(
         .unwrap_or_default();
     let mut prepared = prepare::units(
         (&sources, &builtins),
-        entry_source,
+        (entry_source, normalized_files),
         python_optimization,
         (
             Path::new(bundled_root),

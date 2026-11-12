@@ -232,6 +232,14 @@ impl<'a> PreparedUnit<'a> {
     }
 }
 
+type ParsedInput<'a, 'p> = (ParsedModule<'a, 'p>, Option<super::LoweredRoot>);
+
+impl<'a, 'p> From<ParsedModule<'a, 'p>> for ParsedInput<'a, 'p> {
+    fn from(module: ParsedModule<'a, 'p>) -> Self {
+        (module, None)
+    }
+}
+
 impl<'a> PreparedBody<'a> {
     #[cfg(test)]
     fn module(
@@ -286,6 +294,7 @@ impl<'a> PreparedBody<'a> {
                 ParsedModule::parse(path, source.into())?.parsed,
                 LiteralSites::default(),
                 None,
+                None,
             ),
         )?;
         use_module(module)
@@ -312,22 +321,23 @@ impl<'a> PreparedBody<'a> {
         .ok()
     }
 
-    pub(super) fn from_parsed(
+    pub(super) fn from_parsed<'p>(
         name: &'a str,
         path: impl Into<Cow<'a, Path>>,
-        module: ParsedModule<'a, '_>,
+        module: impl Into<ParsedInput<'a, 'p>>,
         python_optimization: i32,
         origin: ModuleOrigin<'a>,
         literal_sites: LiteralSites,
         operand_types: Option<crate::analysis::OperandTypes<'_>>,
     ) -> Result<Self, String> {
+        let (module, normalized) = module.into();
         let (body, _) = Self::prepare(
             name,
             path.into(),
             module.text,
             python_optimization,
             origin,
-            Input::Module(module.parsed, literal_sites, operand_types),
+            Input::Module(module.parsed, literal_sites, operand_types, normalized),
         )?;
         if let Some(refusal) = body.initializer().refusal {
             use crate::frontend::PreparedRefusal;
@@ -434,18 +444,24 @@ impl<'a> PreparedBody<'a> {
             .filter(|token| token.kind() == ast::token::TokenKind::Class)
             .map(Ranged::start)
             .collect::<Vec<_>>();
-        let (mut body, exec_literals, operand_types) = match input {
-            Input::Module(parsed, sites, types) => (module_source::into_body(parsed), sites, types),
-            Input::Expression(syntax, ..) => (syntax.body, LiteralSites::default(), None),
+        let method_imports = imre_ast::module_imports(&syntax.body);
+        let future_flags = super::literal::future_flags(&syntax.body, inherited_flags);
+        let lower = |mut body: ast::Suite| {
+            let names = module_source::lower_with_future(
+                &mut body,
+                inherited_flags & imre_ast::code_flags::FUTURE_ANNOTATIONS != 0,
+            );
+            (body, names)
         };
-        let method_imports = imre_ast::module_imports(&body);
-        let future_flags = super::literal::future_flags(&body, inherited_flags);
-        let private_names = module_source::lower_with_future(
-            &path,
-            source,
-            &mut body,
-            inherited_flags & imre_ast::code_flags::FUTURE_ANNOTATIONS != 0,
-        )?;
+        let ((body, private_names), exec_literals, operand_types) = match input {
+            Input::Module(parsed, sites, types, normalized) => (
+                normalized.unwrap_or_else(|| lower(module_source::into_body(parsed))),
+                sites,
+                types,
+            ),
+            Input::Expression(syntax, ..) => (lower(syntax.body), LiteralSites::default(), None),
+        };
+        module_source::validate_names(&path, source, &body, &private_names)?;
         let values = crate::frontend::RegisteredSource {
             operand_types,
             text: source,
@@ -815,6 +831,7 @@ enum Input<'a> {
         Cow<'a, ruff_python_parser::Parsed<ast::ModModule>>,
         LiteralSites,
         Option<crate::analysis::OperandTypes<'a>>,
+        Option<super::LoweredRoot>,
     ),
     Expression(ast::ModModule, &'a ast::token::Tokens),
 }
@@ -1853,7 +1870,7 @@ mod tests {
     ) -> Result<(Vec<CodegenUnit>, bool, Option<String>), String> {
         let units = super::super::prepare::units(
             (files, builtins),
-            entry_source,
+            (entry_source, HashMap::new()),
             python_optimization,
             (bundled_root, None),
             module_errors,
