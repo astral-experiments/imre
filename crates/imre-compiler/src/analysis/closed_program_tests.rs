@@ -1017,6 +1017,27 @@ fn selected_startup_precedes_the_package_and_main_body() {
 }
 
 #[test]
+fn registered_program_checks_scalar_locals_across_suspension() {
+    let project = tempdir().unwrap();
+    let path = project.path().join("main.py");
+    let source = "def rows():\n    yield 1\n    score: int = 'wrong'\n    yield score\n";
+    let module = ("__main__".to_owned(), path, source.into());
+    let error = super::check_registered_project(
+        project.path(),
+        &[],
+        std::iter::once(RegisteredSource::new(&module, true, None)),
+        None,
+        None,
+        None,
+    )
+    .unwrap_err();
+    assert!(
+        error.contains("invalid-assignment") && error.contains("main.py:3:18"),
+        "{error}"
+    );
+}
+
+#[test]
 fn registered_generators_require_a_linked_source_body() {
     let project = tempdir().unwrap();
     let path = project.path().join("main.py");

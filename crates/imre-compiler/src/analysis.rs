@@ -2493,6 +2493,8 @@ impl Session {
         overloads: &[Vec<CheckedDiagnostic>],
         native: Option<&crate::frontend::phase::Diagnostic>,
     ) -> Result<(), String> {
+        use ty_python_core::definition::DefinitionKind;
+
         assert_eq!(modules.len(), self.files.len());
         if !modules.iter().any(|module| module.project_path().is_some()) {
             return Ok(());
@@ -2535,9 +2537,8 @@ impl Session {
                 }
             }
         }
-        if parameters.is_empty() && result_scopes.is_empty() && class_files.is_empty() {
-            return Ok(());
-        }
+        let has_signatures =
+            !parameters.is_empty() || !result_scopes.is_empty() || !class_files.is_empty();
         result_scopes.sort_unstable();
         class_files.sort_unstable();
         let declarations =
@@ -2550,7 +2551,22 @@ impl Session {
             if path.extension().is_some_and(|ext| ext == "pyi") {
                 continue;
             }
-            self.dormant_call_errors(index, path, declarations, &mut errors);
+            if !has_signatures {
+                let index = ty_python_core::semantic_index(&self.db, self.db.program_file(file));
+                if !index.scope_ids().any(|scope| {
+                    index
+                        .use_def_map(scope.file_scope_id(&self.db))
+                        .definitions_with_usage()
+                        .any(|(_, def, _)| {
+                            matches!(def.kind(&self.db), DefinitionKind::AnnotatedAssignment(_))
+                        })
+                }) {
+                    continue;
+                }
+            }
+            if !declarations.parameters(&self.db).is_empty() {
+                self.dormant_call_errors(index, path, declarations, &mut errors);
+            }
             let checked = CheckedFile::new(
                 &self.db,
                 file,
@@ -2563,10 +2579,10 @@ impl Session {
             );
             for error in file_errors(&self.db, checked) {
                 let original = native.and_then(|report| {
-                    let (owner, parameter) = error.parameter?;
+                    let (owner, annotation) = error.declaration?;
                     let module = self.files.iter().position(|&file| file == owner)?;
                     modules[module].project_path()?;
-                    report.matching_declared_argument(path, error.range?, module, parameter)
+                    report.matching_declared_operand(path, error.range?, module, annotation)
                 });
                 errors.push(original.map_or_else(|| error.rendered.clone(), ToString::to_string));
             }
@@ -2825,7 +2841,7 @@ fn fallback_data_module(parsed: &ParsedModuleRef) -> bool {
 struct CheckedError {
     rule: DiagnosticId,
     range: Option<TextRange>,
-    parameter: Option<(File, TextRange)>,
+    declaration: Option<(File, TextRange)>,
     rendered: String,
 }
 
@@ -2861,7 +2877,8 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<CheckedEr
                         && diagnostic
                             .primary_span()
                             .and_then(|span| span.range())
-                            .is_some_and(|range| scalar_initializer(db, file, range)))
+                            .and_then(|range| scalar_initializer(db, file, range))
+                            .is_some())
                 && !diagnostic
                     .primary_span()
                     .and_then(|span| span.range())
@@ -2892,7 +2909,7 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<CheckedEr
         })
         .filter_map(|diagnostic| {
             let range = primary_range(diagnostic, file);
-            let parameter = match checked.declarations(db) {
+            let declaration = match checked.declarations(db) {
                 Some(sources) if diagnostic.id().is_lint_named("invalid-argument-type") => {
                     let parameter = declared_parameter(diagnostic, sources.parameters(db));
                     if parameter.is_none()
@@ -2908,10 +2925,18 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<CheckedEr
                     parameter
                 }
                 Some(sources) if diagnostic.id().is_lint_named("invalid-assignment") => {
-                    if !has_declared_nominal_target(db, file, diagnostic, sources.class_files(db)) {
+                    let scalar = range.and_then(|range| scalar_initializer(db, file, range));
+                    if scalar.is_none()
+                        && !has_declared_nominal_target(
+                            db,
+                            file,
+                            diagnostic,
+                            sources.class_files(db),
+                        )
+                    {
                         return None;
                     }
-                    None
+                    scalar.map(|annotation| (file, annotation))
                 }
                 Some(sources) if diagnostic.id().is_lint_named("invalid-return-type") => {
                     let scope = return_scope(db, file, range?)?;
@@ -2927,7 +2952,7 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<CheckedEr
             Some(CheckedError {
                 rule: diagnostic.id(),
                 range,
-                parameter,
+                declaration,
                 rendered: diagnostic
                     .display(
                         &(db as &dyn ruff_db::Db),
@@ -2940,19 +2965,17 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<CheckedEr
 }
 
 /// Literal initializers of scalar names are independent of the operation that required boxing.
-fn scalar_initializer(db: &dyn Db, file: File, range: TextRange) -> bool {
+fn scalar_initializer(db: &dyn Db, file: File, range: TextRange) -> Option<TextRange> {
     use ruff_python_ast::{AnyNodeRef, find_node::covering_node};
 
     let file = db.program_file(file);
     let parsed = ruff_db::parsed::parsed_module(db, file.python_file(db)).load(db);
     let nodes = covering_node(parsed.syntax().into(), range);
     let mut ancestors = nodes.ancestors();
-    let Some(assignment) = ancestors.find_map(|node| match node {
+    let assignment = ancestors.find_map(|node| match node {
         AnyNodeRef::StmtAnnAssign(assignment) => Some(assignment),
         _ => None,
-    }) else {
-        return false;
-    };
+    })?;
     if !assignment.target.is_name_expr()
         || !assignment.value.as_deref().is_some_and(|value| {
             value.range() == range
@@ -2965,7 +2988,7 @@ fn scalar_initializer(db: &dyn Db, file: File, range: TextRange) -> bool {
                 )
         })
     {
-        return false;
+        return None;
     }
     // A metaclass can interpret annotated class attributes as schema fields.
     if ancestors
@@ -2977,11 +3000,12 @@ fn scalar_initializer(db: &dyn Db, file: File, range: TextRange) -> bool {
         })
         .is_some_and(|node| matches!(node, AnyNodeRef::StmtClassDef(_)))
     {
-        return false;
+        return None;
     }
     let model = SemanticModel::new(db, file);
-    annotation_type(db, &model, &assignment.annotation)
-        .is_some_and(|declared| concrete_scalar(db, &model.program_environment(), declared))
+    let declared = annotation_type(db, &model, &assignment.annotation)?;
+    concrete_scalar(db, &model.program_environment(), declared)
+        .then(|| assignment.annotation.range())
 }
 
 fn annotation_type<'db>(
