@@ -624,6 +624,14 @@ fn operation(op: Builtin, ty: Type, operands: Vec<Expr>) -> Expr {
     }
 }
 
+pub(super) fn in_place(op: ast::Operator, left: Expr, right: Expr) -> Expr {
+    operation(
+        Builtin::RegisteredInPlace(op.as_str()),
+        Type::PythonObject,
+        vec![left, right],
+    )
+}
+
 /// The implicit format argument is checked in the lazy evaluator, before its RHS.
 pub(crate) fn type_alias_body(
     value: &ast::Expr,
@@ -2217,13 +2225,10 @@ impl<'a> SuitePreparation<'a> {
                         binding = Some(scope.store(name.id.as_str(), result));
                         Statement::Assign(
                             slot,
-                            operation(
-                                Builtin::RegisteredInPlace(op),
-                                Type::PythonObject,
-                                vec![
-                                    keep(frame_value(&assign.target)),
-                                    keep(frame_value(&assign.value)),
-                                ],
+                            in_place(
+                                assign.op,
+                                keep(frame_value(&assign.target)),
+                                keep(frame_value(&assign.value)),
                             ),
                         )
                     }
@@ -2644,11 +2649,7 @@ impl statements::StatementLowering for SourceScope<'_> {
                 if let Some(name) = assign.target.as_name_expr() {
                     let left = self.ordinary_operand(&assign.target).ok_or(())?;
                     let right = self.ordinary_operand(&assign.value).ok_or(())?;
-                    let value = operation(
-                        Builtin::RegisteredInPlace(assign.op.as_str()),
-                        Type::PythonObject,
-                        vec![left, right],
-                    );
+                    let value = in_place(assign.op, left, right);
                     return Ok((vec![self.store(name.id.as_str(), value)], true));
                 }
                 let target = assign.target.as_subscript_expr().ok_or(())?;
@@ -5053,6 +5054,35 @@ publish(5, callback)
             _ => {}
         });
         assert_eq!((imports, calls), (1, 2));
+    }
+
+    #[test]
+    fn imported_reduction_retains_its_registered_in_place_update() {
+        let project = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/inference/imported");
+        let mut graph = SourceGraph::load(&project.join("main.py"), Some(&project), &[]).unwrap();
+        graph.registered_startup = true;
+        crate::checked_lower(&mut graph).unwrap();
+        let owner = graph.python_file("package.worker").unwrap();
+        let definition = graph.modules[owner]
+            .parsed
+            .syntax()
+            .body
+            .iter()
+            .find_map(|stmt| {
+                stmt.as_function_def_stmt()
+                    .filter(|def| def.name.as_str() == "compute")
+            })
+            .unwrap();
+        let bodies = graph.registered_functions();
+        let checked = &bodies[&owner][&definition.start()];
+        let mut operations = Vec::new();
+        ir::walk_expressions(&checked.function.body, &mut |value| {
+            if let ExprKind::Builtin(Builtin::RegisteredInPlace(op), _) = value.kind {
+                operations.push(op);
+            }
+        });
+        assert_eq!(operations, ["+"]);
     }
 
     #[test]
