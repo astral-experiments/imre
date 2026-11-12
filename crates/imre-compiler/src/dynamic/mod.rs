@@ -347,12 +347,13 @@ fn boxed_opcode(name: &str) -> bool {
 }
 
 fn boxed_sys_export(name: &str) -> bool {
+    use crate::modules::{Binding, Intrinsic, IntrinsicModule};
     matches!(
+        IntrinsicModule::Sys.symbol(name),
+        Some(Binding::Intrinsic(Intrinsic::SYS_IMPORT_REGISTRY))
+    ) || matches!(
         name,
         "path"
-            | "meta_path"
-            | "path_hooks"
-            | "path_importer_cache"
             | "modules"
             | "_xoptions"
             | "version_info"

@@ -1182,6 +1182,7 @@ impl Intrinsic {
         }
     }
 
+    pub(crate) const SYS_IMPORT_REGISTRY: Self = Self::ScopedObjectExport("sys import registry");
     pub(crate) const SOCKET_MSG_PEEK: Self = Self::ScopedObjectExport("socket.MSG_PEEK");
     pub(crate) const SOCKETSERVER_CLASS: Self = Self::ScopedObjectExport("socketserver classes");
     pub(crate) const PICKLER: Self = Self::ObjectRuntimeExport("pickle.Pickler");
@@ -1951,6 +1952,9 @@ impl IntrinsicModule {
             }
             (Self::Sys, "intern") => Intrinsic::SysIntern { query: false },
             (Self::Sys, "_is_interned") => Intrinsic::SysIntern { query: true },
+            (Self::Sys, "meta_path" | "path_hooks" | "path_importer_cache") => {
+                Intrinsic::SYS_IMPORT_REGISTRY
+            }
             (Self::Sys, "flags") => Intrinsic::SysFlags,
             (Self::Sys, "float_info") => Intrinsic::ScopedObjectExport("sys.float_info"),
             (Self::Sys, "float_repr_style") => {
