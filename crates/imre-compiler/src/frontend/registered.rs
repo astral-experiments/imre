@@ -515,11 +515,14 @@ pub(super) fn capture(
 ) {
     let mut pending = inference.pending_bodies.borrow_mut();
     let owners = pending.get_or_insert_with(|| {
-        // Inference can request recovery before signatures settle.
+        // An unrelated diagnostic can leave individual source contracts complete.
         signatures
-            .keys()
-            .copied()
-            .filter(|owner| graph.modules[owner.module].is_program_source())
+            .iter()
+            .filter(|(owner, signature)| {
+                graph.modules[owner.module].is_program_source()
+                    && checked_bodies.is_none_or(|checked| checked.contains(&signature.id))
+            })
+            .map(|(&owner, _)| owner)
             .collect()
     });
     owners.retain(|&owner| {
