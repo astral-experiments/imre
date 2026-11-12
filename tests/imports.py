@@ -2458,6 +2458,27 @@ def main() -> None:
             assert result.returncode != 0 and expected in result.stderr, (name, result.stdout, result.stderr)
             checks += 1
 
+        # A provider can return to the application's check without acquiring its signature policy.
+        app = temporary / "provider-owner"
+        provider = temporary / "provider-search"
+        call = (
+            "def take(value: int) -> int: return value\n"
+            "def text(): return 'wrong'\n"
+            "print(take(text()))\n"
+        )
+        for entry, helper, diagnostic in (
+            ("import helper\n" + call + "import opcode\n", "def marker(): pass\n", "main.py:4:12: Imre: expected int, got str"),
+            ("import helper\nimport opcode\n", call, None),
+        ):
+            write_files(app, {"main.py": entry})
+            write_files(provider, {"helper.py": helper})
+            result = run([compiler, "check", str(app / "main.py"), "--extension-path", str(provider)], temporary)
+            if diagnostic is None:
+                require_success(result)
+            else:
+                assert result.returncode != 0 and diagnostic in result.stderr, result.stderr
+            checks += 1
+
         # Check even uncalled functions when a different function requires boxed operations.
         mock_setup = "from unittest.mock import patch\nclass Owner:\n    value = 0\n"
         invalid = "def uncalled() -> int:\n    return f('wrong')\n"

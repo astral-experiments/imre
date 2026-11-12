@@ -104,6 +104,24 @@ fn after_docstring(body: &[Stmt]) -> &[Stmt] {
     &body[usize::from(skip)..]
 }
 
+/// The module selected for this import and its ownership of application signatures.
+#[derive(Clone, Copy)]
+pub(super) struct InitializerSource<'a> {
+    pub(super) module: crate::modules::ModuleId,
+    pub(super) path: &'a Path,
+    pub(super) declares_signatures: bool,
+}
+
+impl<'a> InitializerSource<'a> {
+    fn application((module, path): (usize, &'a Path)) -> Self {
+        Self {
+            module,
+            path,
+            declares_signatures: true,
+        }
+    }
+}
+
 struct InitializerStatement<'a, 'db> {
     source: (usize, &'a Path),
     parsed: &'a ruff_db::parsed::ParsedModuleRef,
@@ -169,14 +187,19 @@ impl Session {
         runs_as_main: bool,
         application_module: impl Fn(&str) -> Option<(usize, &'a Path)>,
     ) -> InitializerCheck {
-        self.checked_initializer_calls(entry, runs_as_main, application_module, None)
+        self.checked_initializer_calls(
+            entry,
+            runs_as_main,
+            |name| application_module(name).map(InitializerSource::application),
+            None,
+        )
     }
 
     pub(super) fn checked_initializer_calls<'a>(
         &self,
         entry: (usize, &'a Path),
         runs_as_main: bool,
-        application_module: impl Fn(&str) -> Option<(usize, &'a Path)>,
+        selected_module: impl Fn(&str) -> Option<InitializerSource<'a>>,
         captures: Option<&mut super::execution::CapturedImports>,
     ) -> InitializerCheck {
         // These semantic queries establish a diagnostic. Only native lowering's
@@ -186,9 +209,9 @@ impl Session {
         let error = self.reached_initializer_error(entry, captures, |name| {
             read_import_binding.set(true);
             if name == "__main__" {
-                runs_as_main.then_some(entry)
+                runs_as_main.then(|| InitializerSource::application(entry))
             } else {
-                application_module(name)
+                selected_module(name)
             }
         });
         self.hint_reads.set(hints);
@@ -202,12 +225,12 @@ impl Session {
         &self,
         entry: (usize, &'a Path),
         mut captures: Option<&mut super::execution::CapturedImports>,
-        application_module: impl Fn(&str) -> Option<(usize, &'a Path)>,
+        selected_module: impl Fn(&str) -> Option<InitializerSource<'a>>,
     ) -> Option<Diagnostic> {
         // A suspended initializer exposes the declarations preceding its import.
         // Once it completes, all of its final declarations may be read.
         let mut progress = HashMap::from([(entry.0, Some(TextSize::default()))]);
-        let mut pending = vec![(entry, 0, Vec::new(), None::<((usize, &Path), usize)>)];
+        let mut pending = vec![(entry, 0, Vec::new(), None::<(InitializerSource, usize)>)];
         'initializers: while let Some(((module, path), mut start, mut imports, binding)) =
             pending.pop()
         {
@@ -218,19 +241,9 @@ impl Session {
             let mut member = 0;
             if let Some((owner, loaded)) = binding {
                 let stmt = &suite[start - 1];
-                let before = progress[&owner.0];
-                if !self.passive_import_binding(stmt, owner.0, before) {
+                let before = progress[&owner.module];
+                if !self.passive_import_binding(stmt, owner.module, before) {
                     return None;
-                }
-                if let Some(captures) = captures.as_deref_mut()
-                    && let Stmt::ImportFrom(import) = stmt
-                {
-                    self.capture_function_sources(
-                        import,
-                        owner,
-                        before,
-                        captures.entry(module).or_default(),
-                    );
                 }
                 let site = if let Stmt::Import(import) = stmt {
                     if loaded + 1 < import.names.len() {
@@ -241,7 +254,19 @@ impl Session {
                 } else {
                     stmt.range()
                 };
-                imports.push((site, owner.0));
+                if owner.declares_signatures {
+                    if let Some(captures) = captures.as_deref_mut()
+                        && let Stmt::ImportFrom(import) = stmt
+                    {
+                        self.capture_function_sources(
+                            import,
+                            (owner.module, owner.path),
+                            before,
+                            captures.entry(module).or_default(),
+                        );
+                    }
+                    imports.push((site, owner.module));
+                }
             }
             for (i, stmt) in suite.iter().enumerate().skip(start) {
                 progress.insert(module, Some(stmt.start()));
@@ -260,13 +285,20 @@ impl Session {
                     continue;
                 }
                 if let Some(owner) =
-                    self.initializer_import(stmt, member, &model, entry.0, &application_module)
+                    self.initializer_import(stmt, member, &model, entry.0, &selected_module)
                 {
                     pending.push(((module, path), i + 1, imports, Some((owner, member))));
-                    if let std::collections::hash_map::Entry::Vacant(slot) = progress.entry(owner.0)
+                    if let std::collections::hash_map::Entry::Vacant(slot) =
+                        progress.entry(owner.module)
                     {
-                        slot.insert(Some(TextSize::default()));
-                        pending.push((owner, 0, Vec::new(), None));
+                        if owner.declares_signatures {
+                            slot.insert(Some(TextSize::default()));
+                            pending.push(((owner.module, owner.path), 0, Vec::new(), None));
+                        } else if self.passive_initializer(owner.module) {
+                            slot.insert(None);
+                        } else {
+                            return None;
+                        }
                     }
                     continue 'initializers;
                 }
@@ -325,6 +357,10 @@ impl Session {
         })
     }
 
+    fn passive_initializer(&self, module: usize) -> bool {
+        self.parsed(self.files[module]).suite().iter().all(passive)
+    }
+
     pub(crate) fn passive_selected_import(
         &self,
         entry: usize,
@@ -341,10 +377,10 @@ impl Session {
             return false;
         }
         self.initializer_import(statement, 0, &model, entry, &|name| {
-            (name == module_name).then_some((owner, path))
+            (name == module_name).then(|| InitializerSource::application((owner, path)))
         })
         .is_some()
-            && (owner == entry || self.parsed(self.files[owner]).suite().iter().all(passive))
+            && (owner == entry || self.passive_initializer(owner))
             && self.passive_import_binding(
                 statement,
                 owner,
@@ -358,8 +394,8 @@ impl Session {
         member: usize,
         model: &SemanticModel<'_>,
         entry: usize,
-        application_module: &impl Fn(&str) -> Option<(usize, &'a Path)>,
-    ) -> Option<(usize, &'a Path)> {
+        selected_module: &impl Fn(&str) -> Option<InitializerSource<'a>>,
+    ) -> Option<InitializerSource<'a>> {
         let name = match stmt {
             Stmt::Import(import) if !import.is_lazy => import.names.get(member)?.name.as_str(),
             Stmt::ImportFrom(import) if !import.is_lazy && import.level == 0 => {
@@ -367,20 +403,10 @@ impl Session {
             }
             _ => return None,
         };
-        self.initializer_module(name, model, entry, application_module)
-    }
-
-    fn initializer_module<'a>(
-        &self,
-        name: &str,
-        model: &SemanticModel<'_>,
-        entry: usize,
-        application_module: &impl Fn(&str) -> Option<(usize, &'a Path)>,
-    ) -> Option<(usize, &'a Path)> {
-        let (id, path) = application_module(name)?;
+        let source = selected_module(name)?;
         // The launcher name can also reimport the same source in a new namespace.
-        if id == entry {
-            return (name == "__main__").then_some((id, path));
+        if source.module == entry {
+            return (name == "__main__").then_some(source);
         }
         // A package can execute parent initialization. A preloaded provider may already
         // occupy sys.modules even when search-path discovery found a Python file.
@@ -388,10 +414,10 @@ impl Session {
             return None;
         }
         let owner = model.resolve_module(Some(name), 0)?.file(&self.db)?;
-        (self.files[id] == owner
-            && path.extension().is_some_and(|ext| ext == "py")
-            && path.file_stem().is_some_and(|s| s == name))
-        .then_some((id, path))
+        (self.files[source.module] == owner
+            && source.path.extension().is_some_and(|ext| ext == "py")
+            && source.path.file_stem().is_some_and(|s| s == name))
+        .then_some(source)
     }
 
     fn capture_function_sources(
