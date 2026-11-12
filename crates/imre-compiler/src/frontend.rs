@@ -5501,8 +5501,8 @@ impl<'a> Checker<'a> {
             let [index, target] = pattern_elements(target).unwrap() else {
                 unreachable!()
             };
-            body.push(self.assign_value(index, self.local(cursor.unwrap()))?);
-            body.push(self.assign_value(target, item)?);
+            self.store_value(index, self.local(cursor.unwrap()), None, Some(&mut body))?;
+            self.store_value(target, item, None, Some(&mut body))?;
         } else {
             let item = if let Some(counter) = counter {
                 Expr {
@@ -5744,7 +5744,9 @@ impl<'a> Checker<'a> {
                 && let Some((target, parser)) = self
                     .saved_datetime_parser(statement, calendar::ParserBinding::Local(statements))
             {
-                (vec![self.assign(target, parser)?], true)
+                let mut suite = Vec::with_capacity(1);
+                self.assign(target, parser, Some(&mut suite))?;
+                (suite, true)
             } else {
                 let depth = self.present_fields.len();
                 self.guard_return_field(std::slice::from_ref(statement), fallthrough_field);
@@ -6213,7 +6215,9 @@ impl<'a> Checker<'a> {
                         && let Some(element) = self.types.deque_element(left.ty)
                     {
                         let value = self.deque_extend(left, element, &assign.value, "__iadd__")?;
-                        return Ok((vec![self.assign(&assign.target, value)?], true));
+                        let mut suite = Vec::with_capacity(1);
+                        self.assign(&assign.target, value, Some(&mut suite))?;
+                        return Ok((suite, true));
                     }
                     let right = self.expr(&assign.value)?;
                     if assign.op == ast::Operator::Add
@@ -6248,7 +6252,9 @@ impl<'a> Checker<'a> {
                             "in-place list operations are unsupported",
                         ));
                     }
-                    Some(self.assign(&assign.target, value)?)
+                    let mut suite = Vec::with_capacity(1);
+                    self.assign(&assign.target, value, Some(&mut suite))?;
+                    return Ok((suite, true));
                 } else {
                     return Err(error(
                         self.source,
@@ -6526,7 +6532,7 @@ impl<'a> Checker<'a> {
             self.arguments(call, &[], None)?;
             let mut protected = Vec::new();
             if let Some(target) = &item.optional_vars {
-                protected.push(self.assign_value(target, Expr::none())?);
+                self.store_value(target, Expr::none(), None, Some(&mut protected))?;
             }
             let action = |op| {
                 Statement::Expr(Expr {
@@ -6629,7 +6635,7 @@ impl<'a> Checker<'a> {
                     // __enter__ supplies the optional target. Its storage is unknown,
                     // but the same checker can bind it and check the protected suite.
                     if let Some(target) = &item.optional_vars {
-                        self.assign_value(target, Expr::unrepresented())?;
+                        self.store_value(target, Expr::unrepresented(), None, None)?;
                     }
                     return Ok(Continue(out));
                 }
@@ -6656,7 +6662,7 @@ impl<'a> Checker<'a> {
             } else {
                 self.local(captured)
             };
-            protected.push(self.assign(target, value)?);
+            self.assign(target, value, Some(&mut protected))?;
         }
         // The server cleanup is a checked virtual call. Preserve the protected
         // suite's first failure before checking its possible close methods.
@@ -7489,7 +7495,12 @@ impl<'a> Checker<'a> {
         vec![Statement::Assign(slot, value), Statement::Clear(old)]
     }
 
-    fn assign(&mut self, target: &ast::Expr, value: Expr) -> Result<Statement, String> {
+    fn assign(
+        &mut self,
+        target: &ast::Expr,
+        value: Expr,
+        output: Option<&mut Vec<Statement>>,
+    ) -> Result<(), String> {
         let ast::Expr::Name(name) = target else {
             return Err(error(
                 self.source,
@@ -7517,7 +7528,10 @@ impl<'a> Checker<'a> {
             self.remember_inferred_container(slot);
         }
         self.assigned_value(slot, &value);
-        Ok(Statement::Assign(slot, value))
+        if let Some(output) = output {
+            output.push(Statement::Assign(slot, value));
+        }
+        Ok(())
     }
 
     fn integer_addend(op: ast::Operator, value: Expr, other: Type) -> Expr {

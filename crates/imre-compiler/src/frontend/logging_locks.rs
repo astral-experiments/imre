@@ -126,7 +126,7 @@ impl Checker<'_> {
             let result = self.hidden(Type::Bool);
             statements.push(Statement::Assign(result, enter));
             clear.push(result);
-            protected.push(self.assign(target, self.local(result))?);
+            self.assign(target, self.local(result), Some(&mut protected))?;
         } else {
             statements.push(Statement::Expr(enter));
         }

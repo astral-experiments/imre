@@ -181,7 +181,7 @@ impl Checker<'_> {
         let entered = self.hidden(enter_ty);
         let mut protected = Vec::new();
         if let Some(target) = &item.optional_vars {
-            protected.push(self.assign(target, self.local(entered))?);
+            self.assign(target, self.local(entered), Some(&mut protected))?;
         }
         Ok(contexts::enter_native(
             out,
