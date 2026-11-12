@@ -347,10 +347,11 @@ pub(crate) fn emit(
     sanitize: bool,
 ) -> Result<String, Unsupported> {
     let program = analyze_program(module, &mut Default::default())?;
-    Ok(Output::whole(module.functions.len())
+    Ok(Output::whole()
         .emit(module, ranges, sanitize, program)?
         .pop()
-        .expect("whole module"))
+        .expect("whole module")
+        .llvm_ir)
 }
 
 const BRANCH_WEIGHTS: &str = "\n!0 = !{!\"branch_weights\", i32 1, i32 2000}\n!1 = !{!\"branch_weights\", i32 2000, i32 1}\n";

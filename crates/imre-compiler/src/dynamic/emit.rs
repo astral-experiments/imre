@@ -85,7 +85,7 @@ pub(super) fn emit(
     layout: crate::CodegenLayout,
 ) -> Result<(Vec<CodegenUnit>, bool, Option<String>), String> {
     let split = !matches!(layout, crate::CodegenLayout::Whole);
-    let mut units = Vec::new();
+    let mut units = vec![CodegenUnit::new("__main__", String::new())];
     let mut used_archive = false;
     let mut root = ModuleLauncher::new(config, python_optimization < 2);
     // The requested whole IR and split native root share their exact prefix.
@@ -127,10 +127,7 @@ pub(super) fn emit(
                 if whole.is_none() && matches!(layout, crate::CodegenLayout::SplitWithWhole) {
                     whole = Some(root.clone());
                 }
-                units.push(CodegenUnit {
-                    name: name.clone(),
-                    llvm_ir: body.llvm_ir(&symbol),
-                });
+                units.push(CodegenUnit::new(name, body.llvm_ir(&symbol)));
             }
             if archived || separate {
                 external = Some(symbol);
@@ -169,8 +166,8 @@ pub(super) fn emit(
             register(whole, external.as_deref().filter(|_| archived))?;
         }
     }
-    units.insert(0, root.finish());
-    Ok((units, used_archive, whole.map(|root| root.finish().llvm_ir)))
+    units[0].llvm_ir = root.finish();
+    Ok((units, used_archive, whole.map(ModuleLauncher::finish)))
 }
 
 /// A selected single input owns its exact checked body. An unsupported prompt

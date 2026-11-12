@@ -888,6 +888,15 @@ pub struct CodegenUnit {
     pub llvm_ir: String,
 }
 
+impl CodegenUnit {
+    fn new(name: &str, llvm_ir: String) -> Self {
+        Self {
+            name: name.to_owned(),
+            llvm_ir,
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct UnitCompilation {
     pub units: Vec<CodegenUnit>,
