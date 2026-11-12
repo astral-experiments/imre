@@ -150,11 +150,12 @@ pub(super) fn units<'a>(
                     None => ParsedModule::parse(path, text)?,
                 };
                 let registered_values = match origin {
-                    ModuleOrigin::Program(_) => checked
-                        .and_then(|unit| unit.source)
-                        .and_then(|file| {
-                            file.module(registrations.modules).registered_values_for(&module.parsed)
-                        }),
+                    ModuleOrigin::Program(_) => {
+                        checked.and_then(|unit| unit.source).and_then(|file| {
+                            file.module(registrations.modules)
+                                .registered_values_for(&module.parsed)
+                        })
+                    }
                     _ => None,
                 };
                 let mut body = PreparedBody::from_parsed(
