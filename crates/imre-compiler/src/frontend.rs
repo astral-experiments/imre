@@ -229,7 +229,7 @@ struct ClassInfo {
     keyword_copies: HashSet<usize>,
     /// Original base called by a constructor with statically forwarded packs.
     forwarded_initializers: HashMap<usize, DefinitionId>,
-    raising_methods: HashSet<usize>,
+    nonreturning_functions: HashSet<usize>,
     cached: HashMap<usize, function_caches::Policy>,
     cached_properties: cached_properties::Slots,
     setup_fields: unittest_setup::Slots,
@@ -494,7 +494,7 @@ impl ClassInfo {
             setters: vec![HashMap::new(); fields.len()],
             keyword_copies: HashSet::new(),
             forwarded_initializers: HashMap::new(),
-            raising_methods: HashSet::new(),
+            nonreturning_functions: HashSet::new(),
             cached: HashMap::new(),
             cached_properties,
             setup_fields,
@@ -1009,7 +1009,7 @@ fn lower_graph(
                     && matches!(&method.body[after_doc..], [ast::Stmt::Raise(_)])
                     && !imre_ast::code_flags::is_generator(&method.body)
                 {
-                    classes.raising_methods.insert(signature.id);
+                    classes.nonreturning_functions.insert(signature.id);
                 }
             }
             let table = if class.method_kinds[index] == crate::classes::MethodKind::PropertySetter {
@@ -3148,6 +3148,8 @@ struct Checker<'a> {
     globals: &'a ModuleValues,
     inference: Option<&'a inference::Inference>,
     inferred_returns: Option<Vec<Type>>,
+    /// An explicit return can still escape the enclosing cleanup.
+    explicit_return: bool,
     discover_document_return: Option<Type>,
     comprehension_targets: HashSet<String>,
     comprehension_exports: Option<HashMap<String, usize>>,
@@ -3242,6 +3244,7 @@ impl<'a> Checker<'a> {
             globals,
             inference: None,
             inferred_returns: None,
+            explicit_return: false,
             discover_document_return: None,
             comprehension_targets: HashSet::new(),
             comprehension_exports: None,
@@ -3977,6 +3980,10 @@ impl<'a> Checker<'a> {
         expected: Type,
         node: &impl Ranged,
     ) -> Result<Expr, String> {
+        // The called body never supplies an operand to this return.
+        if self.terminating_call(&value) {
+            return Ok(value);
+        }
         self.coerce(value, expected, node).map_err(|failure| {
             if matches!(&failure, Failure::Diagnostic(d) if d.kind == Kind::ExactType) {
                 failure.classify(Kind::ReturnType)
@@ -7004,6 +7011,7 @@ impl<'a> Checker<'a> {
     fn try_statement(&mut self, try_: &ast::StmtTry) -> Result<(Vec<Statement>, bool), String> {
         let before = self.assigned.clone();
         let before_facts = self.narrowed.clone();
+        let earlier_returns = self.explicit_return;
         let earlier_breaks = if try_.finalbody.is_empty() {
             None
         } else {
@@ -7192,11 +7200,13 @@ impl<'a> Checker<'a> {
         } else {
             self.take_breaks()
         };
+        let protected_returns = std::mem::replace(&mut self.explicit_return, earlier_returns);
         let outer_finally = self.finally_scope;
         self.finally_scope = FinallyScope::Cleanup;
         let final_result = self.block(&try_.finalbody);
         self.finally_scope = outer_finally;
         let (finalbody, final_falls) = final_result?;
+        self.explicit_return |= final_falls && protected_returns;
         if final_falls && let Some(mut pending) = pending_breaks {
             let final_state = self.local_state();
             let written = narrowing::assigned_names(&try_.finalbody)

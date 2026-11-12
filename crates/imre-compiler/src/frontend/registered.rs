@@ -2551,11 +2551,11 @@ impl statements::StatementLowering for SourceScope<'_> {
         ))
     }
 
-    fn returned(&mut self, ret: &ast::StmtReturn) -> StdResult<Expr, ()> {
-        match ret.value.as_deref() {
-            Some(value) => self.frame_value(value).ok_or(()),
-            None => Ok(Expr::none()),
-        }
+    fn returned(&mut self, ret: &ast::StmtReturn) -> StdResult<Statement, ()> {
+        Ok(Statement::Return(match ret.value.as_deref() {
+            Some(value) => self.frame_value(value).ok_or(())?,
+            None => Expr::none(),
+        }))
     }
 
     fn async_iteration(&self) -> bool {
