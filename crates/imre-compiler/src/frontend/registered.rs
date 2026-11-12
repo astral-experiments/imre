@@ -3213,7 +3213,7 @@ impl SourceScope<'_> {
         }
         let slot = self.slot(name);
         if matches!(self.kind, RegisteredScope::Module) {
-            Statement::Expr(operation(Builtin::GlobalSet(slot), Type::None, vec![value]))
+            Statement::store_global(slot, value)
         } else {
             Statement::Assign(slot, value)
         }
