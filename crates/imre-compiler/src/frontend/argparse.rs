@@ -1029,7 +1029,7 @@ impl Parsers {
         types: &Types,
         classes: &mut Classes,
         layouts: &mut Vec<Vec<Type>>,
-    ) -> Result<Self, String> {
+    ) -> Self {
         let mut parsers = Self::default();
         for (module_id, module) in graph.modules.iter().enumerate() {
             let functions =
@@ -1050,21 +1050,7 @@ impl Parsers {
                         })
                     });
             for (statement, function) in functions {
-                for (start, stmt) in function.body.iter().enumerate() {
-                    let ast::Stmt::Assign(assign) = stmt else {
-                        continue;
-                    };
-                    let [ast::Expr::Name(name)] = assign.targets.as_slice() else {
-                        continue;
-                    };
-                    let ast::Expr::Call(ctor) = &*assign.value else {
-                        continue;
-                    };
-                    if graph.resolve(module_id, &ctor.func)
-                        != Some(Binding::Intrinsic(Intrinsic::ARGUMENT_PARSER))
-                    {
-                        continue;
-                    }
+                let mut specialize = |start: usize, name: &ast::ExprName, ctor: &ast::ExprCall| {
                     if !ctor.arguments.args.is_empty() {
                         return Err(module
                             .error(ctor, "ArgumentParser requires named literal configuration"));
@@ -1530,10 +1516,29 @@ impl Parsers {
                     for operation in operations {
                         parsers.calls.insert((module_id, operation), parser.clone());
                     }
+                    Ok(())
+                };
+                for (start, stmt) in function.body.iter().enumerate() {
+                    let ast::Stmt::Assign(assign) = stmt else {
+                        continue;
+                    };
+                    let [ast::Expr::Name(name)] = assign.targets.as_slice() else {
+                        continue;
+                    };
+                    let ast::Expr::Call(ctor) = &*assign.value else {
+                        continue;
+                    };
+                    if graph.resolve(module_id, &ctor.func)
+                        != Some(Binding::Intrinsic(Intrinsic::ARGUMENT_PARSER))
+                    {
+                        continue;
+                    }
+                    // Without a fixed layout, the constructor uses its ordinary argparse binding.
+                    let _ = specialize(start, name, ctor);
                 }
             }
         }
-        Ok(parsers)
+        parsers
     }
 }
 
