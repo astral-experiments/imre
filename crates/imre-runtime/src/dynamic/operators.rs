@@ -4734,6 +4734,18 @@ impl Context {
             })
     }
 
+    fn unsupported_binary(&self, op: &str, a: Id, b: Id, inplace: bool) -> Error {
+        Error::new(
+            "TypeError",
+            format!(
+                "unsupported operand type(s) for {op}{}: '{}' and '{}'",
+                if inplace { "=" } else { "" },
+                self.type_name(a),
+                self.type_name(b)
+            ),
+        )
+    }
+
     fn binary_operation(&mut self, op: &str, a: Id, b: Id, inplace: bool) -> Result<Id> {
         match op {
             "is" => return Ok(builtins::boolean(a == b)),
@@ -4783,7 +4795,7 @@ impl Context {
         {
             return super::union::make(self, &[a, b]);
         }
-        if let Some(result) = self.binary_special(op, a, b)? {
+        if let Some(result) = self.dispatch_binary_slots(op, a, b, inplace)? {
             return Ok(result);
         }
         if inplace
@@ -5046,27 +5058,11 @@ impl Context {
             ));
         }
         let (left, right) = (self.scalar_value(a), self.scalar_value(b));
-        // The eligible integer slots already ran. Unwrapping a subclass here
-        // would retry an operation its methods declined.
-        let declined_integer_slots = matches!(op, "+" | "//" | "%")
-            && (left != a || right != b)
-            && [a, b]
-                .into_iter()
-                .all(|id| self.builtin_slot_accepts(id, "int"));
-        if declined_integer_slots
-            || (matches!(op, "*" | "/" | "//" | "%")
-                && (matches!(self.heap.get(left), Value::Complex(_))
-                    || matches!(self.heap.get(right), Value::Complex(_))))
+        if matches!(op, "*" | "/" | "//" | "%")
+            && (matches!(self.heap.get(left), Value::Complex(_))
+                || matches!(self.heap.get(right), Value::Complex(_)))
         {
-            return Err(Error::new(
-                "TypeError",
-                format!(
-                    "unsupported operand type(s) for {op}{}: '{}' and '{}'",
-                    if inplace { "=" } else { "" },
-                    self.type_name(a),
-                    self.type_name(b)
-                ),
-            ));
+            return Err(self.unsupported_binary(op, a, b, inplace));
         }
         let float_operand = matches!(self.heap.get(left), Value::Float(_))
             || matches!(self.heap.get(right), Value::Float(_));
@@ -5340,27 +5336,7 @@ impl Context {
                 return Ok(None);
             }
         }
-        let division = match name {
-            "__floordiv__" => Some((obj, other, 3)),
-            "__rfloordiv__" => Some((other, obj, 3)),
-            "__mod__" => Some((obj, other, 4)),
-            "__rmod__" => Some((other, obj, 4)),
-            _ => None,
-        };
-        let method = if let Some((a, b, op)) = division
-            && self.builtin_slot_accepts(obj, "int")
-        {
-            let method = self.bound_numeric_slot(obj, name)?;
-            if method.is_none() {
-                // The inherited int slot accepts integer storage on both sides.
-                let (Ok(a), Ok(b)) = (self.borrow_int(a), self.borrow_int(b)) else {
-                    return Ok(None);
-                };
-                let result = crate::integer_binary(&a, &b, op)?;
-                return Ok(Some(self.alloc(Value::Int(result))));
-            }
-            method
-        } else if matches!(
+        let method = if matches!(
             (name, self.heap.get(obj)),
             (
                 "__mul__" | "__rmul__" | "__truediv__" | "__rtruediv__" | "__pow__" | "__rpow__",
@@ -5449,6 +5425,10 @@ impl Context {
             }
             return Ok(None);
         };
+        self.call_operator_slot(method, other)
+    }
+
+    fn call_operator_slot(&mut self, method: Id, other: Id) -> Result<Option<Id>> {
         let result = self.call(method, vec![other], vec![])?;
         Ok((result != value::NOT_IMPLEMENTED).then_some(result))
     }
@@ -5534,7 +5514,7 @@ impl Context {
         })
     }
 
-    /// Order a subtype's division override against the effective slot on the left.
+    /// Order a subtype's reflected integer override against the effective slot on the left.
     fn integer_reflected_first(
         &mut self,
         left: Id,
@@ -5694,6 +5674,16 @@ impl Context {
     }
 
     pub(super) fn binary_special(&mut self, op: &str, a: Id, b: Id) -> Result<Option<Id>> {
+        self.dispatch_binary_slots(op, a, b, false)
+    }
+
+    fn dispatch_binary_slots(
+        &mut self,
+        op: &str,
+        a: Id,
+        b: Id,
+        assignment: bool,
+    ) -> Result<Option<Id>> {
         // Keep inherited dict comparisons on the iterative container walk, including cycles.
         if op == "=="
             && [a, b].into_iter().all(|value| {
@@ -5854,7 +5844,9 @@ impl Context {
         // An exact str has a numeric remainder slot. Order it against Python methods,
         // but leave pairs of exact builtins on the direct formatting path.
         let mixed_remainder = op == "%" && (ac.is_some() || bc.is_some());
-        let mixed_integer_slots = matches!(op, "+" | "//" | "%")
+        let shift = matches!(op, "<<" | ">>");
+        let integer_slot = integer_binary_code(op).filter(|_| shift || matches!(op, "//" | "%"));
+        let mixed_integer_slots = (op == "+" || integer_slot.is_some())
             && (ac.is_some() || bc.is_some())
             && [a, b]
                 .into_iter()
@@ -5863,6 +5855,7 @@ impl Context {
             || dict_union
             || mixed_remainder
             || mixed_integer_slots
+            || shift
             || matches!(op, "*" | "/" | "**")
         {
             for (value, class) in [(a, &mut ac), (b, &mut bc)] {
@@ -5870,10 +5863,11 @@ impl Context {
                     (op, self.heap.get(value)),
                     ("*" | "/" | "**", Value::Complex(_))
                         | ("%", Value::Str(_) | Value::SurrogateStr(_))
-                        | ("+" | "//" | "%", Value::Int(_) | Value::Bool(_))
                         | ("^", Value::Set { .. })
                         | ("|", Value::Dict(_) | Value::DefaultDict { .. })
-                ) || (mixed_division && matches!(self.heap.get(value), Value::Float(_)))
+                ) || ((op == "+" || integer_slot.is_some())
+                    && matches!(self.heap.get(value), Value::Int(_) | Value::Bool(_)))
+                    || (mixed_division && matches!(self.heap.get(value), Value::Float(_)))
                 {
                     *class = Some(self.exact_type(value)?);
                 }
@@ -5881,6 +5875,7 @@ impl Context {
         }
         if ac.is_none()
             && bc.is_none()
+            && !shift
             && !(inplace.is_empty()
                 && [a, b]
                     .iter()
@@ -5965,7 +5960,7 @@ impl Context {
                     self.subclass(bc, ac)
                 };
             strict_subclass
-                && if mixed_integer_slots && matches!(op, "//" | "%") {
+                && if mixed_integer_slots && integer_slot.is_some() {
                     self.integer_reflected_first(ac, bc, left, right)?
                 } else if float_operands == [true, true] {
                     // Restoring both original descriptors restores the native division slot.
@@ -5994,10 +5989,26 @@ impl Context {
         } else {
             false
         };
-        if reflected_first && let Some(result) = self.operator_slot(b, right, a)? {
+        let slot = |ctx: &mut Self, receiver, name: &str, other| {
+            if let Some(code) = integer_slot
+                && ctx.builtin_slot_accepts(receiver, "int")
+            {
+                if let Some(method) = ctx.bound_numeric_slot(receiver, name)? {
+                    return ctx.call_operator_slot(method, other);
+                }
+                // In either direction the inherited int slot uses the original operand order.
+                let (Ok(a), Ok(b)) = (ctx.borrow_int(a), ctx.borrow_int(b)) else {
+                    return Ok(None);
+                };
+                let result = crate::integer_binary(&a, &b, code)?;
+                return Ok(Some(ctx.alloc(Value::Int(result))));
+            }
+            ctx.operator_slot(receiver, name, other)
+        };
+        if reflected_first && let Some(result) = slot(self, b, right, a)? {
             return Ok(Some(result));
         }
-        if let Some(result) = self.operator_slot(a, left, b)? {
+        if let Some(result) = slot(self, a, left, b)? {
             return Ok(Some(result));
         }
         if matches!(op, "==" | "!=")
@@ -6007,9 +6018,12 @@ impl Context {
         }
         if !reflected_first
             && (ac != bc || inplace.is_empty())
-            && let Some(result) = self.operator_slot(b, right, a)?
+            && let Some(result) = slot(self, b, right, a)?
         {
             return Ok(Some(result));
+        }
+        if mixed_integer_slots || shift {
+            return Err(self.unsupported_binary(op, a, b, assignment));
         }
         // Both rich comparison methods declined. Keep the explicit numeric boundary,
         // but let unrelated operands use the normal identity or ordering fallback.
