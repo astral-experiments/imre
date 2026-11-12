@@ -1529,11 +1529,23 @@ fn lower_graph(
         recursion_errors.push(helper.recursion_error);
     }
     let mut entry = entry.expect("source graph has an entry module");
+    let mut names = false;
+    let mut uses_builtin_module_names = false;
+    let mut generator_sites = 0;
+    let mut count = false;
+    let mut frame_use = |value: &Expr| match value.kind {
+        ExprKind::Builtin(Builtin::SysGetFrameModuleName, _) => names = true,
+        ExprKind::Builtin(Builtin::SysBuiltinModuleNames, _) => uses_builtin_module_names = true,
+        ExprKind::Builtin(Builtin::SysSetRecursionLimit, _) => count = true,
+        ExprKind::Builtin(Builtin::GeneratorFrameEnter(_), _) => generator_sites += 1,
+        _ => {}
+    };
     let validate_calls = |functions: &[ir::Function]| -> StdResult<(), Diagnostic> {
         typing::validate_functions(functions, &entry, &types)?;
         let callable_targets = callables::targets(functions, &entry, &types)?;
         for (function, calls) in functions.iter().zip(&mut call_graph) {
             ir::walk_expressions(&function.body, &mut |value| {
+                frame_use(value);
                 if let Some(targets) = globals.invoked_functions(value) {
                     calls.extend(targets.iter().copied());
                 } else if let Some(signature) = callables::invoked_signature(value)
@@ -1543,6 +1555,7 @@ fn lower_graph(
                 }
             });
         }
+        ir::walk_expressions(&entry.body, &mut frame_use);
         for function in functions.iter().chain([&entry]) {
             callables::validate_storage(function, &types)?;
         }
@@ -1562,22 +1575,7 @@ fn lower_graph(
     validate_calls(functions).inspect_err(|_| finish_named(&mut completed))?;
     let functions = &mut completed.functions;
     python_frames.push(true); // The program entry runs a Python module body.
-    let mut names = false;
-    let mut uses_builtin_module_names = false;
     let source_functions = python_frames.iter().filter(|&&frame| frame).count();
-    let mut generator_sites = 0;
-    let mut count = false;
-    for function in functions.iter().chain([&entry]) {
-        ir::walk_expressions(&function.body, &mut |value| match value.kind {
-            ExprKind::Builtin(Builtin::SysGetFrameModuleName, _) => names = true,
-            ExprKind::Builtin(Builtin::SysBuiltinModuleNames, _) => {
-                uses_builtin_module_names = true
-            }
-            ExprKind::Builtin(Builtin::SysSetRecursionLimit, _) => count = true,
-            ExprKind::Builtin(Builtin::GeneratorFrameEnter(_), _) => generator_sites += 1,
-            _ => {}
-        });
-    }
     // The native call graph is acyclic. Programs that cannot inspect frames,
     // lower their limit, or reach the default depth need no tracking at all.
     let track_frames = fault_enabled || names || count || source_functions + generator_sites > 1000;
