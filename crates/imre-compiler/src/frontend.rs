@@ -5668,7 +5668,8 @@ impl<'a> Checker<'a> {
                     matches!(&*assignment.value, ast::Expr::List(list) if list.elts.is_empty());
                 let empty_dict =
                     matches!(&*assignment.value, ast::Expr::Dict(dict) if dict.items.is_empty());
-                let empty_set = matches!(&*assignment.value, ast::Expr::Call(call) if matches!(&*call.func, ast::Expr::Name(value) if value.id == "set" && !self.names.contains_key("set")) && self.resolve(&call.func).is_none() && call.arguments.args.is_empty() && call.arguments.keywords.is_empty());
+                // A registered call constructs its set through the live Python binding.
+                let empty_set = self.registered.is_none() && matches!(&*assignment.value, ast::Expr::Call(call) if matches!(&*call.func, ast::Expr::Name(value) if value.id == "set" && !self.names.contains_key("set")) && self.resolve(&call.func).is_none() && call.arguments.args.is_empty() && call.arguments.keywords.is_empty());
                 let returned = || {
                     later.iter().any(|statement| matches!(statement, ast::Stmt::Return(ret) if matches!(ret.value.as_deref(), Some(ast::Expr::Name(value)) if value.id == name.id)))
                 };
