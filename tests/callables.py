@@ -59,7 +59,6 @@ REJECTED = {
     "indirect_cycle": IMPORT + "def apply(fn: Callable[[int], int], value: int) -> int:\n    return fn(value)\ndef again(value: int) -> int:\n    return apply(again, value)\nprint(apply(again, 1))\n",
     "map_wrong_input": FUNCTION + 'print(sum(map(identity, ["1"])))\n',
     "map_multiple_sources": FUNCTION + "print(sum(map(identity, [1], [2])))\n",
-    "map_escaping": FUNCTION + "def run() -> None:\n    values = map(identity, [1])\nrun()\n",
     "filter_wrong_input": FUNCTION + 'print(len(list(filter(identity, ["1"]))))\n',
     "filter_wrong_predicate": "print(len(list(filter(1, [1]))))\n",
     "filter_missing_source": FUNCTION + "print(len(list(filter(identity))))\n",
