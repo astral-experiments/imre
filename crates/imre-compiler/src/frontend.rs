@@ -676,6 +676,13 @@ fn lower_current(
     result
 }
 
+/// The file driver checks this graph again before it can place a registered body.
+fn retries_failed_layout(graph: &SourceGraph) -> bool {
+    graph.layout_hint.get() == crate::modules::LayoutHint::Applied
+        && !graph.reachable_only()
+        && graph.float_components.get() == crate::modules::FloatComponents::Native
+}
+
 /// A body without its native representation still has checked neighbors. Keep its
 /// original diagnostic for backend selection after their source contracts have run.
 fn checked_region<T>(
@@ -692,10 +699,7 @@ fn checked_region<T>(
     // A failed layout trial is discarded. Finish checking and capture any
     // registered siblings in the ordinary pass. Reachable key formatters and
     // native float components have their own retries inside the layout trial.
-    if graph.layout_hint.get() == crate::modules::LayoutHint::Applied
-        && !graph.reachable_only()
-        && graph.float_components.get() == crate::modules::FloatComponents::Native
-    {
+    if retries_failed_layout(graph) {
         return Err(failure.terminal_in(graph, module));
     }
     capture_on_object(&failure);
