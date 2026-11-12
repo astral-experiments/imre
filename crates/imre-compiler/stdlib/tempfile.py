@@ -35,7 +35,7 @@ def _get_candidate_names():
     return _name_sequence
 
 
-# From CPython 3.14.5 Lib/tempfile.py. See ../docstrings/LICENSE.
+# From CPython 3.14.5 Lib/tempfile.py. See docstrings/LICENSE.
 def _exists(fn):
     try:
         _os.lstat(fn)
@@ -52,7 +52,7 @@ def _fsencode(path):
     return path
 
 
-# From CPython 3.14.5 Lib/tempfile.py. See ../docstrings/LICENSE.
+# From CPython 3.14.5 Lib/tempfile.py. See docstrings/LICENSE.
 def _candidate_tempdir_list():
     """Generate a list of candidate temporary directories which
     _get_default_tempdir will try."""
@@ -153,7 +153,7 @@ def gettempprefixb():
     return _os.fsencode(template)
 
 
-# From CPython 3.14.5 Lib/tempfile.py. See ../docstrings/LICENSE.
+# From CPython 3.14.5 Lib/tempfile.py. See docstrings/LICENSE.
 def _infer_return_type(*args):
     return_type = None
     for arg in args:
@@ -241,7 +241,7 @@ def mkdtemp(suffix=None, prefix=None, dir=None):
     raise FileExistsError(_errno.EEXIST, "No usable temporary directory name found")
 
 
-# From CPython 3.14.5 Lib/tempfile.py. See ../docstrings/LICENSE.
+# From CPython 3.14.5 Lib/tempfile.py. See docstrings/LICENSE.
 def mktemp(suffix="", prefix=template, dir=None):
     """User-callable function to return a unique temporary file name.  The
     file is not created.
@@ -274,7 +274,7 @@ def mktemp(suffix="", prefix=template, dir=None):
                           "No usable temporary filename found")
 
 
-# From CPython 3.14.5 Lib/tempfile.py. See ../docstrings/LICENSE.
+# From CPython 3.14.5 Lib/tempfile.py. See docstrings/LICENSE.
 @_finalize_at_shutdown
 class _TemporaryFileCloser:
     """A separate object allowing proper closing of a temporary file's
@@ -402,7 +402,7 @@ class _TemporaryFileWrapper:
         for line in self.file:
             yield line
 
-# From CPython 3.14.5 Lib/tempfile.py. See ../docstrings/LICENSE.
+# From CPython 3.14.5 Lib/tempfile.py. See docstrings/LICENSE.
 def NamedTemporaryFile(mode="w+b", buffering=-1, encoding=None, newline=None,
                        suffix=None, prefix=None, dir=None, delete=True, *,
                        errors=None, delete_on_close=True):
@@ -442,7 +442,7 @@ def NamedTemporaryFile(mode="w+b", buffering=-1, encoding=None, newline=None,
         raise
 
 
-# From CPython 3.14.5 Lib/tempfile.py. See ../docstrings/LICENSE.
+# From CPython 3.14.5 Lib/tempfile.py. See docstrings/LICENSE.
 if _os.name != 'posix' or _sys.platform == 'cygwin':
     # On non-POSIX and Cygwin systems, assume that we cannot unlink a file
     # while it is open.
@@ -528,3 +528,304 @@ else:
         raw = getattr(raw, 'raw', raw)
         raw.name = fd
         return file
+
+# SpooledTemporaryFile from CPython 3.14.5 Lib/tempfile.py. See docstrings/LICENSE.
+import io as _io
+import types as _types
+import warnings as _warnings
+
+
+class SpooledTemporaryFile(_io.IOBase):
+    """Temporary file wrapper, specialized to switch from BytesIO
+    or StringIO to a real file when it exceeds a certain size or
+    when a fileno is needed.
+    """
+    _rolled = False
+
+    def __init__(self, max_size=0, mode='w+b', buffering=-1,
+                 encoding=None, newline=None,
+                 suffix=None, prefix=None, dir=None, *, errors=None):
+        if 'b' in mode:
+            self._file = _io.BytesIO()
+        else:
+            encoding = _io.text_encoding(encoding)
+            self._file = _io.TextIOWrapper(_io.BytesIO(),
+                            encoding=encoding, errors=errors,
+                            newline=newline)
+        self._max_size = max_size
+        self._rolled = False
+        self._TemporaryFileArgs = {'mode': mode, 'buffering': buffering,
+                                   'suffix': suffix, 'prefix': prefix,
+                                   'encoding': encoding, 'newline': newline,
+                                   'dir': dir, 'errors': errors}
+
+    __class_getitem__ = classmethod(_types.GenericAlias)
+
+    def _check(self, file):
+        if self._rolled: return
+        max_size = self._max_size
+        if max_size and file.tell() > max_size:
+            self.rollover()
+
+    def rollover(self):
+        if self._rolled: return
+        file = self._file
+        newfile = self._file = TemporaryFile(**self._TemporaryFileArgs)
+        del self._TemporaryFileArgs
+
+        pos = file.tell()
+        if hasattr(newfile, 'buffer'):
+            newfile.buffer.write(file.detach().getvalue())
+        else:
+            newfile.write(file.getvalue())
+        newfile.seek(pos, 0)
+
+        self._rolled = True
+
+    # The method caching trick from NamedTemporaryFile
+    # won't work here, because _file may change from a
+    # BytesIO/StringIO instance to a real file. So we list
+    # all the methods directly.
+
+    # Context management protocol
+    def __enter__(self):
+        if self._file.closed:
+            raise ValueError("Cannot enter context with closed file")
+        return self
+
+    def __exit__(self, exc, value, tb):
+        self._file.close()
+
+    # file protocol
+    def __iter__(self):
+        return self._file.__iter__()
+
+    def __del__(self):
+        if not self.closed:
+            _warnings.warn(
+                "Unclosed file {!r}".format(self),
+                ResourceWarning,
+                stacklevel=2,
+                source=self
+            )
+            self.close()
+
+    def close(self):
+        self._file.close()
+
+    @property
+    def closed(self):
+        return self._file.closed
+
+    @property
+    def encoding(self):
+        return self._file.encoding
+
+    @property
+    def errors(self):
+        return self._file.errors
+
+    def fileno(self):
+        self.rollover()
+        return self._file.fileno()
+
+    def flush(self):
+        self._file.flush()
+
+    def isatty(self):
+        return self._file.isatty()
+
+    @property
+    def mode(self):
+        try:
+            return self._file.mode
+        except AttributeError:
+            return self._TemporaryFileArgs['mode']
+
+    @property
+    def name(self):
+        try:
+            return self._file.name
+        except AttributeError:
+            return None
+
+    @property
+    def newlines(self):
+        return self._file.newlines
+
+    def readable(self):
+        return self._file.readable()
+
+    def read(self, *args):
+        return self._file.read(*args)
+
+    def read1(self, *args):
+        return self._file.read1(*args)
+
+    def readinto(self, b):
+        return self._file.readinto(b)
+
+    def readinto1(self, b):
+        return self._file.readinto1(b)
+
+    def readline(self, *args):
+        return self._file.readline(*args)
+
+    def readlines(self, *args):
+        return self._file.readlines(*args)
+
+    def seekable(self):
+        return self._file.seekable()
+
+    def seek(self, *args):
+        return self._file.seek(*args)
+
+    def tell(self):
+        return self._file.tell()
+
+    def truncate(self, size=None):
+        if size is None:
+            return self._file.truncate()
+        else:
+            if size > self._max_size:
+                self.rollover()
+            return self._file.truncate(size)
+
+    def writable(self):
+        return self._file.writable()
+
+    def write(self, s):
+        file = self._file
+        rv = file.write(s)
+        self._check(file)
+        return rv
+
+    def writelines(self, iterable):
+        if self._max_size == 0 or self._rolled:
+            return self._file.writelines(iterable)
+
+        it = iter(iterable)
+        for line in it:
+            self.write(line)
+            if self._rolled:
+                return self._file.writelines(it)
+
+    def detach(self):
+        return self._file.detach()
+
+# From CPython 3.14.5 Lib/tempfile.py. See docstrings/LICENSE.
+import shutil as _shutil
+import weakref as _weakref
+
+
+def _dont_follow_symlinks(func, path, *args):
+    # Pass follow_symlinks=False, unless not supported on this platform.
+    if func in _os.supports_follow_symlinks:
+        func(path, *args, follow_symlinks=False)
+    elif not _os.path.islink(path):
+        func(path, *args)
+
+
+def _resetperms(path):
+    try:
+        chflags = _os.chflags
+    except AttributeError:
+        pass
+    else:
+        _dont_follow_symlinks(chflags, path, 0)
+    _dont_follow_symlinks(_os.chmod, path, 0o700)
+
+
+class TemporaryDirectory:
+    """Create and return a temporary directory.  This has the same
+    behavior as mkdtemp but can be used as a context manager.  For
+    example:
+
+        with TemporaryDirectory() as tmpdir:
+            ...
+
+    Upon exiting the context, the directory and everything contained
+    in it are removed (unless delete=False is passed or an exception
+    is raised during cleanup and ignore_cleanup_errors is not True).
+
+    Optional Arguments:
+        suffix - A str suffix for the directory name.  (see mkdtemp)
+        prefix - A str prefix for the directory name.  (see mkdtemp)
+        dir - A directory to create this temp dir in.  (see mkdtemp)
+        ignore_cleanup_errors - False; ignore exceptions during cleanup?
+        delete - True; whether the directory is automatically deleted.
+    """
+
+    def __init__(self, suffix=None, prefix=None, dir=None,
+                 ignore_cleanup_errors=False, *, delete=True):
+        self.name = mkdtemp(suffix, prefix, dir)
+        self._ignore_cleanup_errors = ignore_cleanup_errors
+        self._delete = delete
+        self._finalizer = _weakref.finalize(
+            self, self._cleanup, self.name,
+            warn_message="Implicitly cleaning up {!r}".format(self),
+            ignore_errors=self._ignore_cleanup_errors, delete=self._delete)
+
+    @classmethod
+    def _rmtree(cls, name, ignore_errors=False, repeated=False):
+        def onexc(func, path, exc):
+            if isinstance(exc, PermissionError):
+                if repeated and path == name:
+                    if ignore_errors:
+                        return
+                    raise
+
+                try:
+                    if path != name:
+                        _resetperms(_os.path.dirname(path))
+                    _resetperms(path)
+
+                    try:
+                        _os.unlink(path)
+                    except IsADirectoryError:
+                        cls._rmtree(path, ignore_errors=ignore_errors)
+                    except PermissionError:
+                        # The PermissionError handler was originally added for
+                        # FreeBSD in directories, but it seems that it is raised
+                        # on Windows too.
+                        # bpo-43153: Calling _rmtree again may
+                        # raise NotADirectoryError and mask the PermissionError.
+                        # So we must re-raise the current PermissionError if
+                        # path is not a directory.
+                        if not _os.path.isdir(path) or _os.path.isjunction(path):
+                            if ignore_errors:
+                                return
+                            raise
+                        cls._rmtree(path, ignore_errors=ignore_errors,
+                                    repeated=(path == name))
+                except FileNotFoundError:
+                    pass
+            elif isinstance(exc, FileNotFoundError):
+                pass
+            else:
+                if not ignore_errors:
+                    raise
+
+        _shutil.rmtree(name, onexc=onexc)
+
+    @classmethod
+    def _cleanup(cls, name, warn_message, ignore_errors=False, delete=True):
+        if delete:
+            cls._rmtree(name, ignore_errors=ignore_errors)
+            _warnings.warn(warn_message, ResourceWarning)
+
+    def __repr__(self):
+        return "<{} {!r}>".format(self.__class__.__name__, self.name)
+
+    def __enter__(self):
+        return self.name
+
+    def __exit__(self, exc, value, tb):
+        if self._delete:
+            self.cleanup()
+
+    def cleanup(self):
+        if self._finalizer.detach() or _os.path.exists(self.name):
+            self._rmtree(self.name, ignore_errors=self._ignore_cleanup_errors)
+
+    __class_getitem__ = classmethod(_types.GenericAlias)
