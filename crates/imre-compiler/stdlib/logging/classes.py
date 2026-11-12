@@ -3,7 +3,7 @@
 import logging
 import os.path
 import sys
-from logging import Formatter, Logger, LogRecord, getLevelNamesMapping, getLogger
+from logging import Formatter, Logger, LogRecord, getLogger
 from imre._logging import (
     _Level, _Lock, _TextOutput, _fallback, _file_encoding_uses_utf8, _handler_names, _lookup_handler,
     _print_active_exception, _rename_handler,
@@ -74,9 +74,9 @@ class Filter:
         return name[self.nlen] == "."
 
 
-def _handler_level(level: _Level) -> int:
+def _checkLevel(level: _Level) -> int:
     if isinstance(level, str):
-        levels = getLevelNamesMapping()
+        levels = logging._nameToLevel
         if level not in levels:
             raise ValueError(f"Unknown level: {level!r}")
         return levels[level]
@@ -112,7 +112,7 @@ class LoggerAdapter:
         return self.logger.isEnabledFor(level)
 
     def setLevel(self, level: _Level) -> None:
-        self.logger.setLevel(_handler_level(level))
+        self.logger.setLevel(_checkLevel(level))
 
     def getEffectiveLevel(self) -> int:
         return self.logger.getEffectiveLevel()

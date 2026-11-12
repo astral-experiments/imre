@@ -17,7 +17,7 @@
     name = property(get_name, set_name)
 
     def setLevel(self, level: _Level) -> None:
-        self.level = _handler_level(level)
+        self.level = _checkLevel(level)
 
     def setFormatter(self, fmt: Formatter | None) -> None:
         self.formatter = fmt

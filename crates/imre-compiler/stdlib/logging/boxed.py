@@ -83,10 +83,6 @@ def shutdown(handlerList=_handlerList):
             #else, swallow
 
 
-def _handler_level(level):
-    return _checkLevel(level)
-
-
 def _flush_handler_stream(handler):
     if handler.stream and hasattr(handler.stream, "flush"):
         handler.stream.flush()

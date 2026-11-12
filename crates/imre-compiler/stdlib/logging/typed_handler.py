@@ -11,7 +11,7 @@ class Handler:
     def __init__(self, level: _Level = 0) -> None:
         self.filters = []
         self._name = None
-        self.level = _handler_level(level)
+        self.level = _checkLevel(level)
         self.formatter = None
         self._closed = False
         self.createLock()

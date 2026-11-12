@@ -3064,7 +3064,6 @@ pub(crate) enum LogOperation {
     AddLevel,
     LevelName,
     LevelForName,
-    CheckLevel,
     InvalidLevel,
     Disable,
     EnabledCache,
