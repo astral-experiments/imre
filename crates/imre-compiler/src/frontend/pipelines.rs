@@ -478,12 +478,12 @@ pub(super) fn check_range_step(step: Expr) -> Statement {
 
 impl Checker<'_> {
     pub(super) fn is_builtin_iter(&self, call: &ast::ExprCall) -> bool {
-        matches!(&*call.func, ast::Expr::Name(name) if name.id == "iter")
-            && !self.local_iter
-            && !self.names.contains_key("iter")
+        self.unshadowed_builtin(&call.func, "iter")
             && !self.is_class_receiver(&call.func)
-            && self.local_function_binding(&call.func).is_none()
-            && self.resolve(&call.func).is_none()
+            && self
+                .graph
+                .session
+                .is_stdlib_function(self.module, &call.func, "builtins", "iter")
     }
 
     fn is_chain_from_iterable(&self, call: &ast::ExprCall) -> bool {

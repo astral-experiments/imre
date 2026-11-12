@@ -3205,8 +3205,6 @@ struct Checker<'a> {
     namespace_bindings: HashMap<usize, registered::LocalBinding>,
     /// Doctest prompts share an exec-style namespace until the case ends.
     interactive_names: bool,
-    /// A later local assignment shadows builtin iter throughout a function.
-    local_iter: bool,
     positional_pack: Option<String>,
     context_method: bool,
     fixed_tuple: Option<fixed_tuples::Call>,
@@ -3304,7 +3302,6 @@ impl<'a> Checker<'a> {
             namespace: None,
             namespace_bindings: HashMap::new(),
             interactive_names: false,
-            local_iter: false,
             positional_pack: None,
             zip_sum_rhs: None,
             asynchronous: false,
@@ -5688,7 +5685,6 @@ impl<'a> Checker<'a> {
                 self.omitted_assert_free
                     .retain(|name, _| !live.contains(name));
             }
-            self.local_iter = narrowing::assigned_names(statements).contains("iter");
             self.nullable_assignments = assignments::nullable_assignments(self, statements);
             let mut names: Vec<_> =
                 unbound_locals::candidates(statements, self.interactive_names, &|name| {

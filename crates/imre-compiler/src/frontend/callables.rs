@@ -542,7 +542,6 @@ impl Checker<'_> {
         helper.frame = LexicalFrame::Named(ast::name::Name::new_static("<lambda>"));
         helper.omitted_assert_free = omitted_free;
         helper.inference = self.inference;
-        helper.local_iter = bound.contains("iter");
         helper.class = self.class;
         helper.class_receiver = self
             .class_receiver
