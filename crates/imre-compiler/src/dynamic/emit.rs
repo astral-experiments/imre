@@ -336,6 +336,7 @@ impl<'a> PreparedBody<'a> {
     ) -> Option<Self> {
         let path = path.into();
         let module = ParsedModule::parse(&path, text.into()).ok()?;
+        imre_ast::check_single_input(&module.parsed.syntax().body, module.parsed.tokens()).ok()?;
         Self::from_parsed(
             "<module>",
             path,
@@ -436,7 +437,11 @@ impl<'a> PreparedBody<'a> {
                     parsed,
                     keep_docstrings
                         && !(interactive
-                            && matches!(parsed.syntax().body.as_slice(), [ast::Stmt::Expr(_)])),
+                            && parsed
+                                .syntax()
+                                .body
+                                .first()
+                                .is_some_and(ast::Stmt::is_expr_stmt)),
                 )?,
             ),
             Input::Expression(syntax, tokens) => (
@@ -1822,11 +1827,11 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let entry = directory.path().join("app.py");
         let run = "doctest.DocTestSuite(subject).debug()";
-        for (caller, second, compound) in [
-            (run.to_owned(), "record()", false),
-            (run.to_owned(), "if True:\n...     3", true),
-            (format!("def later():\n    {run}"), "record()", false),
-            (format!("if False:\n    {run}"), "record()", false),
+        for (caller, second, prompt) in [
+            (run.to_owned(), "record()", "record()\n"),
+            (run.to_owned(), "if True:\n...     3", "if True:\n    3\n"),
+            (format!("def later():\n    {run}"), "record()", "record()\n"),
+            (format!("if False:\n    {run}"), "record()", "record()\n"),
         ] {
             std::fs::write(
                 &entry,
@@ -1846,11 +1851,13 @@ mod tests {
                 .iter()
                 .map(|Prompt(body)| (body.source.path.as_ref(), body.source.text.as_ref()))
                 .collect();
-            let mut expected = vec![(Path::new("<doctest subject[0]>"), "3\n")];
-            if !compound {
-                expected.push((Path::new("<doctest subject[1]>"), "record()\n"));
-            }
-            assert_eq!(inputs, expected);
+            assert_eq!(
+                inputs,
+                [
+                    (Path::new("<doctest subject[0]>"), "3\n"),
+                    (Path::new("<doctest subject[1]>"), prompt)
+                ]
+            );
             assert!(graph.doctest_runner().is_some());
             assert!(graph.modules.iter().any(|m| m.is_doctest_case()));
         }
@@ -1868,6 +1875,10 @@ mod tests {
             ("saved = record()\n", false),
             ("raise problem\n", false),
             ("def f():\n    return 3\n", false),
+            (
+                "def outer(value):\n    def read():\n        return value\n    return read\n",
+                false,
+            ),
             ("class C:\n    x = 3\n", false),
             ("type T = int\n", false),
         ] {
@@ -1898,8 +1909,56 @@ mod tests {
             prepared.standalone().unwrap();
         }
         assert!(PreparedBody::interactive(path, "1\n2\n", 0, 0).is_none());
-        assert!(PreparedBody::interactive(path, "if True:\n    3\n", 0, 0).is_none());
+        assert!(PreparedBody::interactive(path, "return 1\n", 0, 0).is_none());
         assert!(PreparedBody::interactive(path, "def f():\n    '\\ud800'\n", 0, 0).is_none());
+    }
+
+    #[test]
+    fn interactive_compound_suites_display_only_their_own_expressions() {
+        use crate::ir::{Builtin, ExprKind};
+
+        let path = Path::new("<doctest sample[4]>");
+        let text = "try:\n    for item in source:\n        saved = item; print(saved); None\n        def quiet():\n            record(item)\n        class C:\n            record(item)\n    else:\n        exhausted()\nexcept Error:\n    'handled'\nelse:\n    del item\nfinally:\n    done()\n";
+        let prepared = PreparedBody::interactive(path, text, 0, 0).unwrap();
+        let suite = prepared.initializer();
+        assert!(suite.fully_checked());
+        crate::verify::registered(suite.checked.region()).unwrap();
+        let mut displayed = Vec::new();
+        let mut checkpoints = Vec::new();
+        crate::ir::walk_expressions(&suite.checked.function.body, &mut |expr| match &expr.kind {
+            ExprKind::Builtin(Builtin::RegisteredDisplayHook, args) => {
+                let ExprKind::Builtin(Builtin::RegisteredLocation(range, ..), _) = &args[0].kind
+                else {
+                    panic!("displayed operand lost its source position")
+                };
+                displayed.push(&text[*range]);
+            }
+            ExprKind::Builtin(Builtin::RegisteredStatement(range, _), _) => {
+                checkpoints.push(text[*range].lines().next().unwrap());
+            }
+            _ => {}
+        });
+        assert_eq!(
+            displayed,
+            ["print(saved)", "None", "exhausted()", "'handled'", "done()"]
+        );
+        assert_eq!(
+            checkpoints,
+            [
+                "try:",
+                "for item in source:",
+                "saved = item",
+                "print(saved)",
+                "None",
+                "def quiet():",
+                "class C:",
+                "exhausted()",
+                "'handled'",
+                "del item",
+                "done()",
+            ]
+        );
+        prepared.standalone().unwrap();
     }
 
     fn emit_modules(
