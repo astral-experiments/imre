@@ -35,6 +35,9 @@ while True:
         print(held_extensions)
     elif op == "types-map":
         print(repr(mimetypes.types_map))
+    elif op == "maps":
+        print(repr({"types_map": mimetypes.types_map, "common_types": mimetypes.common_types,
+                    "suffix_map": mimetypes.suffix_map, "encodings_map": mimetypes.encodings_map}))
     elif op == "db-add":
         db.add_type(arg, input(), strict)
         print("None")

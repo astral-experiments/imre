@@ -1,6 +1,5 @@
 """Compare every pinned built-in mapping and the POSIX host database with ordinary CPython."""
 import argparse
-import ast
 from hashlib import sha256
 import json
 import mimetypes
@@ -35,13 +34,6 @@ def main():
     manifest = json.loads((HERE / "UPSTREAM.json").read_bytes())
     verify_files(HERE / "upstream", manifest["files"])
     assert sha256(Path(mimetypes.__file__).read_bytes()).digest() == sha256((HERE / "upstream/Lib/mimetypes.py").read_bytes()).digest()
-    tables = {"_suffixes": "_suffix_map_default", "_encodings": "_encodings_map_default",
-              "_standard": "_types_map_default", "_common": "_common_types_default"}
-    native = ast.parse((HERE.parents[3] / "crates/imre-compiler/stdlib/mimetypes.py").read_bytes())
-    for node in native.body:
-        if isinstance(node, ast.FunctionDef) and node.name in tables:
-            assert list(ast.literal_eval(node.body[0].value).items()) == list(getattr(mimetypes, tables.pop(node.name)).items())
-    assert not tables
     report = []
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -60,12 +52,18 @@ def main():
                 for mode in ("builtins", "system"):
                     with patch.object(mimetypes, "knownfiles", [] if mode == "builtins" else mimetypes.knownfiles):
                         mimetypes.init()
-                        extensions = sorted(set(mimetypes.types_map) | set(mimetypes.common_types) | set(mimetypes.suffix_map) | set(mimetypes.encodings_map))
                         host = {p: sha256(Path(p).read_bytes()).hexdigest() for p in mimetypes.knownfiles if Path(p).is_file()}
                         count = 0
                         digest = sha256()
                         with worker(program, mode) as native_call:
-                            for name in ["file" + ext for ext in extensions] + list(CASES):
+                            native_maps = native_call("maps")
+                            extensions = set()
+                            for table in ("types_map", "common_types", "suffix_map", "encodings_map"):
+                                expected_map = getattr(mimetypes, table)
+                                if list(native_maps[table].items()) != list(expected_map.items()):
+                                    raise ValueError((opt, reachable, mode, table, "registry entries or order differ"))
+                                extensions.update(expected_map)
+                            for name in ["file" + ext for ext in sorted(extensions)] + list(CASES):
                                 for op, reference in (("url", mimetypes.guess_type), ("file", mimetypes.guess_file_type)):
                                     for strict in (True, False):
                                         value = native_call(op, name, strict)
