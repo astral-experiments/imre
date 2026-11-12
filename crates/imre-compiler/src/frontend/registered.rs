@@ -1761,19 +1761,14 @@ impl<'a> SuitePreparation<'a> {
         let orelse = region.child(otherwise);
         let mut handlers = Vec::with_capacity(stmt.handlers.len());
         for (ast::ExceptHandler::ExceptHandler(handler), name) in stmt.handlers.iter().zip(names) {
-            let matcher = exception_matcher(
-                stmt.is_star,
-                handler.range(),
-                handler.type_.as_deref(),
-                |class, site| {
-                    let operand = self.physical_operand(class, kind, selection, suspended);
-                    Some(values::located(
-                        site,
-                        class.start(),
-                        region.operand(operand, Type::PythonObject),
-                    ))
-                },
-            )
+            let matcher = exception_matcher(handler, stmt.is_star, |class, site| {
+                let operand = self.physical_operand(class, kind, selection, suspended);
+                Ok::<_, std::convert::Infallible>(values::located(
+                    site,
+                    class.start(),
+                    region.operand(operand, Type::PythonObject),
+                ))
+            })
             .expect("prepared exception matcher");
             handlers.push(ir::ExceptHandler {
                 matcher,
@@ -2286,18 +2281,21 @@ impl<'a> SuitePreparation<'a> {
     }
 }
 
-fn exception_matcher(
+pub(super) fn exception_matcher<E>(
+    handler: &ast::ExceptHandlerExceptHandler,
     is_star: bool,
-    handler: TextRange,
-    class: Option<&ast::Expr>,
-    operand: impl FnOnce(&ast::Expr, TextRange) -> Option<Expr>,
-) -> Option<ir::ExceptionMatcher> {
-    let Some(class) = class else {
-        return Some(ir::ExceptionMatcher::Categories(Vec::new()));
+    operand: impl FnOnce(&ast::Expr, TextRange) -> StdResult<Expr, E>,
+) -> StdResult<ir::ExceptionMatcher, E> {
+    let Some(class) = handler.type_.as_deref() else {
+        return Ok(ir::ExceptionMatcher::Categories(Vec::new()));
     };
-    let site = if is_star { handler } else { class.range() };
+    let site = if is_star {
+        handler.range()
+    } else {
+        class.range()
+    };
     let operand = Box::new(operand(class, site)?);
-    Some(if is_star {
+    Ok(if is_star {
         ir::ExceptionMatcher::Subgroup(site, operand)
     } else {
         ir::ExceptionMatcher::Object(site, operand)
@@ -2602,13 +2600,9 @@ impl statements::StatementLowering for SourceScope<'_> {
                 let (body, body_continues) = self.block(&region.body)?;
                 let mut handlers = Vec::with_capacity(region.handlers.len());
                 for ast::ExceptHandler::ExceptHandler(handler) in &region.handlers {
-                    let matcher = exception_matcher(
-                        region.is_star,
-                        handler.range(),
-                        handler.type_.as_deref(),
-                        |class, _| self.frame_value(class),
-                    )
-                    .ok_or(())?;
+                    let matcher = exception_matcher(handler, region.is_star, |class, _| {
+                        self.frame_value(class).ok_or(())
+                    })?;
                     handlers.push(ir::ExceptHandler {
                         matcher,
                         name: handler.name.as_ref().map(|name| self.slot(name.as_str())),
@@ -5685,6 +5679,36 @@ mod tests {
             "fault"
         );
         assert!(crate::llvm::registered::supports(&checked));
+    }
+
+    #[test]
+    fn checked_function_retains_the_live_exception_matcher() {
+        let text = concat!(
+            "def guarded() -> None:\n",
+            "    try:\n        print(1)\n",
+            "    except TypeError as caught:\n        print(caught)\n",
+            "def publish(send):\n    send(1)\n",
+        );
+        let graph = SourceGraph::single(text).unwrap();
+        assert!(super::super::lower(&graph).is_err());
+        let functions = graph.registered_functions();
+        let guarded = &functions[&graph.entry][&TextSize::default()];
+        let handler = guarded
+            .function
+            .body
+            .iter()
+            .find_map(|statement| match statement {
+                Statement::Try { handlers, .. } => handlers.first(),
+                _ => None,
+            })
+            .unwrap();
+        let ir::ExceptionMatcher::Object(range, class) = &handler.matcher else {
+            panic!("expected a live handler class");
+        };
+        assert_eq!(&text[*range], "TypeError");
+        assert!(matches!(&class.without_location().kind,
+            ExprKind::Builtin(Builtin::RegisteredName(name), _) if name == "TypeError"));
+        assert_eq!(guarded.local_names[&handler.name.unwrap()].name, "caught");
     }
 
     #[test]
