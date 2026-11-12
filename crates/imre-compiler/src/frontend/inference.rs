@@ -1097,7 +1097,8 @@ impl Inference {
                             |name| {
                                 exception_kind(name).is_some()
                                     && !graph.modules[*module].bindings.contains_key(name)
-                            })
+                            },
+                        )
                     {
                         self.pending.borrow_mut()[signature.id].discovery =
                             ReturnDiscovery::Independent;
