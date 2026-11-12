@@ -107,8 +107,23 @@ impl Checker<'_> {
             }
             return Ok(self.environ_copy(bytes));
         }
-        if let Some(zip) = self.dict_from_zip(call)? {
-            return Ok(zip);
+        // A two-column zip supplies its own key and value types before the
+        // constructor's result is checked against any enclosing annotation.
+        if call.arguments.keywords.is_empty()
+            && let [source @ ast::Expr::Call(zip)] = call.arguments.args.as_ref()
+            && zip.arguments.args.len() == 2
+            && self.unshadowed_builtin(&zip.func, "zip")
+        {
+            let input = self.iteration_input(source, None)?;
+            let input = self.prepare_iteration(input, source, false)?;
+            let pair =
+                if self.registered.is_some() && self.locals[input.value] == Type::PythonObject {
+                    (Type::PythonObject, Type::PythonObject)
+                } else {
+                    self.dictionary_pair_types(&input, source)?
+                };
+            self.check_dictionary_key(pair.0, call)?;
+            return self.collect_dictionary_pairs(call, call.range(), input, pair, pair);
         }
         let mut scope = calls::ArgumentScope::default();
         let mut sources = Vec::new();
@@ -216,6 +231,21 @@ impl Checker<'_> {
         scope.finish(target)
     }
 
+    fn dictionary_pair_types(
+        &self,
+        input: &pipelines::Prepared,
+        site: &impl Ranged,
+    ) -> Result<(Type, Type), String> {
+        match self.types.fields(self.locals[input.value]).as_deref() {
+            Some(&[key, value]) => Ok((key, value)),
+            _ => Err(error(
+                self.source,
+                site,
+                "dict requires an iterable of key/value pairs",
+            )),
+        }
+    }
+
     /// A generator acquires its outer iterator on creation. Its first item,
     /// like the first item of an ordinary iterable, is pulled after keywords.
     fn dictionary_from_pairs(
@@ -225,24 +255,28 @@ impl Checker<'_> {
         input: Iteration,
         shape: Option<(Type, Type)>,
     ) -> Result<Expr, String> {
-        let mut input = self.prepare_iteration(input, source, false)?;
+        let input = self.prepare_iteration(input, source, false)?;
         self.hint_empty_iteration(&input, shape.map(|(k, v)| self.types.tuple(vec![k, v])));
-        let pair = self.types.fields(self.locals[input.value]);
-        let Some(&[key, value]) = pair.as_deref() else {
-            return Err(error(
-                self.source,
-                source,
-                "dict requires an iterable of key/value pairs",
-            ));
-        };
-        let (key_type, value_type) = shape.unwrap_or((key, value));
-        if !self.types.hashable_key(key_type) {
+        let pair = self.dictionary_pair_types(&input, source)?;
+        let result = shape.unwrap_or(pair);
+        if !self.types.hashable_key(result.0) {
             return Err(error(
                 self.source,
                 source,
                 "dict requires supported immutable keys",
             ));
         }
+        self.collect_dictionary_pairs(call, source.range(), input, pair, result)
+    }
+
+    fn collect_dictionary_pairs(
+        &mut self,
+        call: &ast::ExprCall,
+        site: TextRange,
+        mut input: pipelines::Prepared,
+        (key, value): (Type, Type),
+        (key_type, value_type): (Type, Type),
+    ) -> Result<Expr, String> {
         let ty = self.types.dict(key_type, value_type);
         let target = self.hidden(ty);
         let mut clear = vec![target];
@@ -262,14 +296,17 @@ impl Checker<'_> {
                 kind: ExprKind::Dict(Vec::new()),
             },
         ));
-        let mut body = self.expand_items(Iteration::Prepared(input), source, |c, item| {
+        let mut body = self.expand_items(Iteration::Prepared(input), &site, |c, item| {
+            if item.ty == Type::PythonObject {
+                return Ok(vec![c.store_object_pair(target, item, site)]);
+            }
             let key = c.coerce(
                 Expr {
                     ty: key,
                     kind: ExprKind::Field(Box::new(item.clone()), 0),
                 },
                 key_type,
-                source,
+                &site,
             )?;
             let value = c.coerce(
                 Expr {
@@ -277,7 +314,7 @@ impl Checker<'_> {
                     kind: ExprKind::Field(Box::new(item), 1),
                 },
                 value_type,
-                source,
+                &site,
             )?;
             Ok(vec![Statement::SetItem(c.local(target), key, value)])
         })?;
