@@ -1983,6 +1983,42 @@ pub(super) unsafe extern "C" fn imre_dyn_masked_remainder(
     }
 }
 
+/// Read a subscription whose checked index produced an owned integer or a Python result.
+///
+/// # Safety
+/// The caller transfers the nonzero integer word and roots the receiver and alternate
+/// key. The position is null or points to the registered operation's static range.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_get_int_item(
+    ctx: *mut Context,
+    receiver: Id,
+    word: usize,
+    fallback: Id,
+    span: *const [u32; 4],
+) -> Id {
+    // SAFETY: the checked frame owns the context and supplies its static range.
+    let (ctx, span) = unsafe { (&mut *ctx, span.as_ref()) };
+    let index = (word != 0).then(|| crate::Int(word));
+    if ctx.pending.is_some() {
+        return NONE;
+    }
+    let key = if let Some(index) = index {
+        if let Some(item) = ctx.exact_sequence_item(receiver, &index) {
+            return finish_at(ctx, Ok(item), span);
+        }
+        let object = ctx.alloc(Value::Int(index));
+        let object = finish(ctx, Ok(object));
+        if ctx.pending.is_some() {
+            return NONE;
+        }
+        object
+    } else {
+        fallback
+    };
+    let result = ctx.get_item(receiver, key);
+    finish_at(ctx, result, span)
+}
+
 /// Move one owned tagged integer into the active Python heap.
 ///
 /// # Safety

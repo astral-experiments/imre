@@ -3206,11 +3206,16 @@ impl Context {
         }
         result
     }
+    pub(super) fn exact_sequence_item(&self, obj: Id, index: &crate::Int) -> Option<Id> {
+        let (Value::List(items) | Value::Tuple(items)) = self.heap.get(obj) else {
+            return None;
+        };
+        items.get(usize::try_from(index.as_small()?).ok()?).copied()
+    }
+
     pub(super) fn get_item(&mut self, obj: Id, key: Id) -> Result<Id> {
-        if let Value::List(items) | Value::Tuple(items) = self.heap.get(obj)
-            && let Value::Int(index) = self.heap.get(key)
-            && let Some(index) = index.as_small().and_then(|i| usize::try_from(i).ok())
-            && let Some(&item) = items.get(index)
+        if let Value::Int(index) = self.heap.get(key)
+            && let Some(item) = self.exact_sequence_item(obj, index)
         {
             return Ok(item);
         }

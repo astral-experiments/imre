@@ -548,7 +548,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         {
             return value;
         }
-        let key = operand(self, key);
+        let key = self.operand(key);
         match &mut self.0 {
             Entry::Native(emitter) => CheckedValue::owned(emitter.at_builtin_origin(op, |e| {
                 e.prepared_builtin(
@@ -560,7 +560,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 )
             })),
             Entry::Registered(frame) => frame.subscript_at(op, |frame, span| {
-                frame.op_at("get", &[base.rooted_handle(), key.rooted_handle()], span)
+                frame.read_index(base.rooted_handle(), &key, span)
             }),
         }
     }
