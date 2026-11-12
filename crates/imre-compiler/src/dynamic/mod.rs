@@ -2783,10 +2783,6 @@ pub(crate) fn bundled_module_source(
     Some((file, source.into()))
 }
 
-fn imports_for_module(path: &Path, src: &str) -> Result<Imports, String> {
-    scan_imports(src, SourceKind::File, None, None).map_err(|e| format!("{}: {e}", path.display()))
-}
-
 #[test]
 fn a_native_builtin_need_not_have_a_typeshed_declaration() {
     assert!(builtin_declaration("selectors").unwrap().is_some());
