@@ -16,10 +16,6 @@ class PackageNotFoundError(ModuleNotFoundError):
         return name
 
 
-def _normalize_separators(name):
-    return '_'.join(re.split(r'[-_.]+', name))
-
-
 def _basename(root):
     return basename(root.rstrip('/'))
 

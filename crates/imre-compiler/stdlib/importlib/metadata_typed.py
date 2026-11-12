@@ -12,10 +12,6 @@ def _paths() -> tuple[str, ...]:
     return _filesystem_roots
 
 
-def _normalize_separators(name: str) -> str:
-    return re.sub(r'[-_.]+', '_', name)
-
-
 def _filenames(root: str) -> list[str]:
     return [entry.name for entry in Path(root).iterdir()]
 

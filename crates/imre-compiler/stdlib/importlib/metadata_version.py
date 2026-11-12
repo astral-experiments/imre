@@ -2,6 +2,10 @@
 import re
 
 
+def _normalize_separators(name: str) -> str:
+    return re.sub(r'[-_.]+', '_', name)
+
+
 def _normalize(name: str) -> str:
     return _normalize_separators(name).lower()
 
