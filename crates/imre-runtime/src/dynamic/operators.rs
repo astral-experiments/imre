@@ -5046,14 +5046,14 @@ impl Context {
             ));
         }
         let (left, right) = (self.scalar_value(a), self.scalar_value(b));
-        // Integer subclasses already had both numeric slots tried above. Unwrapping
-        // them here would turn a declined addition back into a successful builtin sum.
-        let declined_integer_sum = op == "+"
+        // The eligible integer slots already ran. Unwrapping a subclass here
+        // would retry an operation its methods declined.
+        let declined_integer_slots = matches!(op, "+" | "//" | "%")
             && (left != a || right != b)
-            && [left, right]
+            && [a, b]
                 .into_iter()
-                .all(|id| matches!(self.heap.get(id), Value::Int(_) | Value::Bool(_)));
-        if declined_integer_sum
+                .all(|id| self.builtin_slot_accepts(id, "int"));
+        if declined_integer_slots
             || (matches!(op, "*" | "/" | "//" | "%")
                 && (matches!(self.heap.get(left), Value::Complex(_))
                     || matches!(self.heap.get(right), Value::Complex(_))))
@@ -5345,7 +5345,27 @@ impl Context {
                 return Ok(None);
             }
         }
-        let method = if matches!(
+        let division = match name {
+            "__floordiv__" => Some((obj, other, 3)),
+            "__rfloordiv__" => Some((other, obj, 3)),
+            "__mod__" => Some((obj, other, 4)),
+            "__rmod__" => Some((other, obj, 4)),
+            _ => None,
+        };
+        let method = if let Some((a, b, op)) = division
+            && self.builtin_slot_accepts(obj, "int")
+        {
+            let method = self.bound_numeric_slot(obj, name)?;
+            if method.is_none() {
+                // The inherited int slot accepts integer storage on both sides.
+                let (Ok(a), Ok(b)) = (self.borrow_int(a), self.borrow_int(b)) else {
+                    return Ok(None);
+                };
+                let result = crate::integer_binary(&a, &b, op)?;
+                return Ok(Some(self.alloc(Value::Int(result))));
+            }
+            method
+        } else if matches!(
             (name, self.heap.get(obj)),
             (
                 "__mul__" | "__rmul__" | "__truediv__" | "__rtruediv__" | "__pow__" | "__rpow__",
@@ -5515,6 +5535,30 @@ impl Context {
             self.slot(obj, name)
                 .is_some_and(|slot| !matches!(self.heap.get(slot), Value::Native(_)))
         })
+    }
+
+    /// Order a subtype's division override against the effective slot on the left.
+    fn integer_reflected_first(
+        &mut self,
+        left: Id,
+        right: Id,
+        forward: &str,
+        reflected: &str,
+    ) -> Result<bool> {
+        if self.numeric_slot_override(right, reflected).is_none() {
+            return Ok(false);
+        }
+        let owner = if self.numeric_slot_override(left, reflected).is_some() {
+            left
+        } else if self.numeric_slot_override(left, forward).is_some() {
+            // Both classes have Python slots. Compare against the inherited int
+            // method, even when another base after int declares the same name.
+            self.builtin("int")
+        } else {
+            // A Python subtype slot precedes the built-in implementation.
+            return Ok(true);
+        };
+        self.reflected_slot_overridden(owner, right, reflected)
     }
 
     /// Compare the attributes on the two classes after applying descriptor binding.
@@ -5812,18 +5856,15 @@ impl Context {
         // An exact str has a numeric remainder slot. Order it against Python methods,
         // but leave pairs of exact builtins on the direct formatting path.
         let mixed_remainder = op == "%" && (ac.is_some() || bc.is_some());
-        let mixed_integer_sum = op == "+"
+        let mixed_integer_slots = matches!(op, "+" | "//" | "%")
             && (ac.is_some() || bc.is_some())
-            && [a, b].iter().all(|&id| {
-                matches!(
-                    self.heap.get(self.scalar_value(id)),
-                    Value::Int(_) | Value::Bool(_)
-                )
-            });
+            && [a, b]
+                .into_iter()
+                .all(|id| self.builtin_slot_accepts(id, "int"));
         if set_xor
             || dict_union
             || mixed_remainder
-            || mixed_integer_sum
+            || mixed_integer_slots
             || matches!(op, "*" | "/" | "**")
         {
             for (value, class) in [(a, &mut ac), (b, &mut bc)] {
@@ -5831,7 +5872,7 @@ impl Context {
                     (op, self.heap.get(value)),
                     ("*" | "/" | "**", Value::Complex(_))
                         | ("%", Value::Str(_) | Value::SurrogateStr(_))
-                        | ("+", Value::Int(_) | Value::Bool(_))
+                        | ("+" | "//" | "%", Value::Int(_) | Value::Bool(_))
                         | ("^", Value::Set { .. })
                         | ("|", Value::Dict(_) | Value::DefaultDict { .. })
                 ) {
@@ -5911,13 +5952,15 @@ impl Context {
                     .into_iter()
                     .all(|id| matches!(self.heap.get(self.scalar_value(id)), Value::Complex(_)));
             let strict_subclass = ac != bc
-                && if set_xor || dict_union || complex_pair || mixed_integer_sum {
+                && if set_xor || dict_union || complex_pair || mixed_integer_slots {
                     self.direct_subclass(bc, ac)
                 } else {
                     self.subclass(bc, ac)
                 };
             strict_subclass
-                && if (dict_union || complex_pair)
+                && if mixed_integer_slots && matches!(op, "//" | "%") {
+                    self.integer_reflected_first(ac, bc, left, right)?
+                } else if (dict_union || complex_pair)
                     && self.has_python_binary_slot(a, left, right)
                     && self.has_python_binary_slot(b, left, right)
                 {
