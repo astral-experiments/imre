@@ -232,7 +232,7 @@ impl<'a> PreparedUnit<'a> {
     }
 }
 
-type ParsedInput<'a, 'p> = (ParsedModule<'a, 'p>, Option<super::LoweredRoot>);
+pub(super) type ParsedInput<'a, 'p> = (ParsedModule<'a, 'p>, Option<super::LoweredRoot>);
 
 impl<'a, 'p> From<ParsedModule<'a, 'p>> for ParsedInput<'a, 'p> {
     fn from(module: ParsedModule<'a, 'p>) -> Self {
