@@ -1316,21 +1316,14 @@ impl Checker<'_> {
         }
         let graph = self.graph;
         let owner = self.module;
-        let mut needs_object_operand = false;
+        let mut frame_identity = false;
         if let ast::Expr::Compare(cmp) = node {
-            let frame_equality = self.registered_local_start.is_some()
-                && matches!(cmp.ops.as_ref(), [ast::CmpOp::Eq | ast::CmpOp::NotEq]);
-            let opaque = cmp.operands.iter().map(|operand| {
-                // A module value is loaded from the live frame namespace. Its
-                // replacement owns equality even when the initializer had a fixed type.
-                if frame_equality
-                    && let Some(name) = operand.as_name_expr()
-                    && !self.names.contains_key(name.id.as_str())
-                    && !self.comprehension_targets.contains(name.id.as_str())
-                    && matches!(graph.resolve(owner, operand), Some(Binding::Value(_)))
-                {
-                    return true;
-                }
+            let frame_op = self
+                .registered_local_start
+                .and(cmp.as_single())
+                .map(|(_, op, _)| *op);
+            frame_identity = matches!(frame_op, Some(ast::CmpOp::Is | ast::CmpOp::IsNot));
+            let opaque = |operand: &ast::Expr| {
                 let object = match operand {
                     ast::Expr::Subscript(subscript) => subscript.value.as_ref(),
                     _ => operand,
@@ -1347,49 +1340,23 @@ impl Checker<'_> {
                     _ => operand,
                 };
                 graph.session.is_dynamic_receiver(owner, receiver)
-            });
-            let mut previous = None;
-            for dynamic in opaque {
-                if previous == Some(false) && !dynamic {
-                    if cmp.ops.len() == 1
-                        && ir::Compare::from_operator(cmp.ops[0]).is_some()
-                        && self.registered_local_start.is_some_and(|first| {
-                            cmp.operands
-                                .iter()
-                                .filter_map(ast::Expr::as_name_expr)
-                                .any(|name| {
-                                    self.names.get(name.id.as_str()).is_some_and(|&slot| {
-                                        slot < first
-                                            && self.locals[slot].builtin_scalar_name().is_some()
-                                    })
-                                })
-                        })
-                    {
-                        let checked = self.fixed_expr(node)?;
-                        if checked.ty == Type::PythonObject
-                            && matches!(&checked.kind, ExprKind::Compare(..))
-                        {
-                            return Ok(Some(source.located(node, checked)));
-                        }
-                        return Ok(None);
-                    }
-                    if self.registered_local_start.is_some()
-                        && matches!(
-                            cmp.ops.as_ref(),
-                            [ast::CmpOp::Eq
-                                | ast::CmpOp::NotEq
-                                | ast::CmpOp::Is
-                                | ast::CmpOp::IsNot]
-                        )
-                    {
-                        // A prepared call can return a live Python handle even when its
-                        // inferred result is concrete. Its comparison uses that handle.
-                        needs_object_operand = true;
-                        break;
-                    }
+            };
+            let mut previous_fixed = false;
+            if matches!(frame_op, Some(ast::CmpOp::Eq | ast::CmpOp::NotEq))
+                || !frame_identity
+                    && cmp.operands.iter().map(opaque).any(|dynamic| {
+                        let fixed_pair = previous_fixed && !dynamic;
+                        previous_fixed = !dynamic;
+                        fixed_pair
+                    })
+            {
+                if frame_op.and_then(ir::Compare::from_operator).is_none() {
                     return Ok(None);
                 }
-                previous = Some(dynamic);
+                let checked = self.fixed_expr(node)?;
+                return Ok((checked.ty == Type::PythonObject
+                    && matches!(checked.kind, ExprKind::Compare(..)))
+                .then(|| source.located(node, checked)));
             }
         }
         let first_local = self.registered_local_start;
@@ -1432,7 +1399,7 @@ impl Checker<'_> {
         else {
             return Ok(None);
         };
-        if needs_object_operand
+        if frame_identity
             && let ExprKind::Compare(values, _) = &value.kind
             && !values
                 .iter()

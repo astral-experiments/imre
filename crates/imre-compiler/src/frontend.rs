@@ -9226,6 +9226,24 @@ impl<'a> Checker<'a> {
                     }
                 }
                 self.restore_state(exit.expect("comparisons have at least two operands"));
+                if let Some(first) = self.registered_local_start
+                    && let [op] = compare.ops.as_ref()
+                    && ir::Compare::from_operator(*op).is_some()
+                {
+                    if matches!(op, ast::CmpOp::Eq | ast::CmpOp::NotEq)
+                        && values.iter().any(|value| value.ty == Type::PythonObject)
+                    {
+                        return Ok(Expr {
+                            ty: Type::PythonObject,
+                            kind: ExprKind::Compare(values, vec![*op]),
+                        });
+                    }
+                    if !values.iter().any(|value| value.ty.builtin_scalar_name().is_some()
+                        && matches!(value.without_location().kind, ExprKind::Local(slot) if slot < first))
+                    {
+                        self.require_registered_operation(expression)?;
+                    }
+                }
                 // A registered frame compares its caller's original scalar argument. Keep
                 // the ordinary operand checks before choosing the Python result convention.
                 let live_scalar_operands = self.registered_local_start.is_some()
