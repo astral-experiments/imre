@@ -244,7 +244,7 @@ impl PhysicalPreparation<'_, '_> {
                 false,
                 ir::control::boolean_literal,
                 |_| true,
-                |child, _| Ok::<_, std::convert::Infallible>(self.logical_operation(child, inputs)),
+                |child| Ok::<_, std::convert::Infallible>(self.logical_operation(child, inputs)),
             )
             .unwrap()
             .expect("a logical or comparison expression has a checked operation");
@@ -287,18 +287,18 @@ impl PhysicalPreparation<'_, '_> {
                 ir::Type::PythonObject,
             );
             ir::Expr::unary(unary.op, operand, ir::Type::PythonObject)
-        } else if let Some((op, [left, right])) = values::binary_operands(node) {
+        } else if let ast::Expr::BinOp(binary) = node {
             let left = super::bind_operand(
                 &mut children,
-                self.ordinary_input(left),
+                self.ordinary_input(&binary.left),
                 ir::Type::PythonObject,
             );
             let right = super::bind_operand(
                 &mut children,
-                self.ordinary_input(right),
+                self.ordinary_input(&binary.right),
                 ir::Type::PythonObject,
             );
-            values::binary(op, left, right)
+            values::binary(binary, ir::Type::PythonObject, left, right, None)
         } else if let Some(value) = values::index_operation(node, source, |child, ordinary| {
             let value = ordinary.or_else(|| {
                 self.suspended

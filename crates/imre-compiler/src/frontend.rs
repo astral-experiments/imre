@@ -5852,6 +5852,7 @@ impl<'a> Checker<'a> {
             // Fixed layouts can erase Python stores (for example, a local += becomes +).
             // Keep every operation in this frame explicit until it has an object-ABI lowering.
             let supported = match statement {
+                ast::Stmt::AnnAssign(assign) => assign.target.is_name_expr(),
                 ast::Stmt::Assign(assign) => {
                     assign.targets.iter().all(ast::Expr::is_name_expr)
                         || matches!(
@@ -7525,10 +7526,13 @@ impl<'a> Checker<'a> {
             self.binary_operands(binary, left.clone(), right.clone())?
                 .ty
         };
-        Ok(Expr {
+        Ok(registered::values::binary(
+            binary,
             ty,
-            kind: ExprKind::Binary(binary.op.into(), Box::new(left), Box::new(right)),
-        })
+            left,
+            right,
+            Some(self.graph.session.operand_types(self.module)),
+        ))
     }
 
     fn binary_operands(

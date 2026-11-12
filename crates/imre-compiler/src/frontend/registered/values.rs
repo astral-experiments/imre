@@ -115,26 +115,8 @@ impl RegisteredSource<'_> {
     }
 
     pub(super) fn located(self, node: &ast::Expr, value: Expr) -> Expr {
-        self.located_operand(node, value, None)
-    }
-
-    /// Keep the source operand's checked layout on its position, independently of the handle.
-    pub(super) fn located_operand(
-        self,
-        node: &ast::Expr,
-        value: Expr,
-        types: Option<crate::analysis::OperandTypes<'_>>,
-    ) -> Expr {
         let position = imre_ast::expression_position(node, self.method_imports, self.private_names);
-        let mut value = located(node.range(), position, value);
-        if value.ty == Type::PythonObject
-            && let ExprKind::Builtin(Builtin::RegisteredLocation(_, _, hint), _) = &mut value.kind
-            && hint.is_none()
-            && let Some(types) = types
-        {
-            *hint = types.scalar_type(node);
-        }
-        value
+        located(node.range(), position, value)
     }
 }
 
@@ -790,40 +772,55 @@ fn display_operands<E>(
         .collect()
 }
 
-/// The Python operand order is also used when a child still needs its source emitter.
-pub(super) fn binary_operands(node: &ast::Expr) -> Option<(Binary, [&ast::Expr; 2])> {
-    let binary = node.as_bin_op_expr()?;
-    Some((binary.op.into(), [&binary.left, &binary.right]))
-}
-
-pub(super) fn binary(op: Binary, left: Expr, right: Expr) -> Expr {
+/// Retain the source layout on the Python operand that the arithmetic guard will inspect.
+pub(in crate::frontend) fn binary(
+    source: &ast::ExprBinOp,
+    ty: Type,
+    mut left: Expr,
+    mut right: Expr,
+    types: Option<crate::analysis::OperandTypes<'_>>,
+) -> Expr {
+    let op = source.op.into();
+    if let Some(types) = types.filter(|_| matches!(op, Binary::Add | Binary::Subtract)) {
+        let refine = |node: &ast::Expr, value: &mut Expr| {
+            if value.ty == Type::PythonObject
+                && let ExprKind::Builtin(Builtin::RegisteredLocation(range, _, hint), _) =
+                    &mut value.kind
+                && *range == node.range()
+                && hint.is_none()
+            {
+                *hint = types.scalar_type(node);
+            }
+        };
+        refine(&source.left, &mut left);
+        if left.checked_operand_type() == Type::Int {
+            refine(&source.right, &mut right);
+        }
+    }
     Expr {
-        ty: Type::PythonObject,
+        ty,
         kind: ExprKind::Binary(op, Box::new(left), Box::new(right)),
     }
 }
 
 /// Select one registered-frame operation before requesting its operands in source order.
-pub(super) fn operation<'a, E>(
+pub(super) fn operation<E>(
     node: &ast::Expr,
-    source: RegisteredSource<'a>,
+    source: RegisteredSource<'_>,
     allow_typed_receiver: bool,
     literal: impl Fn(&Expr) -> Option<bool>,
     dynamic_receiver: impl FnOnce(&ast::Expr) -> bool,
-    mut operand: impl FnMut(&ast::Expr, Option<crate::analysis::OperandTypes<'a>>) -> StdResult<Expr, E>,
+    mut child: impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
 ) -> StdResult<Option<Expr>, E> {
-    if let Some((op, [left, right])) = binary_operands(node) {
-        let types = source
-            .operand_types
-            .filter(|_| matches!(op, Binary::Add | Binary::Subtract));
-        let lhs = operand(left, types)?;
-        let rhs = operand(
-            right,
-            types.filter(|_| lhs.checked_operand_type() == Type::Int),
-        )?;
-        return Ok(Some(binary(op, lhs, rhs)));
+    if let ast::Expr::BinOp(operation) = node {
+        return Ok(Some(binary(
+            operation,
+            Type::PythonObject,
+            child(&operation.left)?,
+            child(&operation.right)?,
+            source.operand_types,
+        )));
     }
-    let mut child = |node: &ast::Expr| operand(node, None);
     if let Some((items, display)) = display_elements(node) {
         let values = display_operands(items, source, &mut child)?;
         return Ok(Some(Expr {
@@ -1007,15 +1004,6 @@ impl Region {
         node: &ast::Expr,
         source: RegisteredSource<'_>,
     ) -> Option<Expr> {
-        self.operand_with_types(node, source, None)
-    }
-
-    fn operand_with_types(
-        self,
-        node: &ast::Expr,
-        source: RegisteredSource<'_>,
-        types: Option<crate::analysis::OperandTypes<'_>>,
-    ) -> Option<Expr> {
         if node.is_slice_expr() {
             return index_key(node, &mut |child| self.operand(child, source).ok_or(())).ok();
         }
@@ -1054,11 +1042,11 @@ impl Region {
                 false,
                 ir::control::boolean_literal,
                 |_| true,
-                |child, types| self.operand_with_types(child, source, types).ok_or(()),
+                |child| self.operand(child, source).ok_or(()),
             )
             .ok()??,
         };
-        Some(source.located_operand(node, value, types))
+        Some(source.located(node, value))
     }
 }
 
@@ -1285,7 +1273,7 @@ impl Checker<'_> {
             |receiver| {
                 string_method || module_method || graph.session.is_dynamic_receiver(owner, receiver)
             },
-            |child, _| self.expr(child),
+            |child| self.expr(child),
         )?
         else {
             return Ok(None);

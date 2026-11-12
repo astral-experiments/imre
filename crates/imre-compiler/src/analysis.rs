@@ -177,10 +177,7 @@ impl RegisteredLayouts {
     }
 
     pub(crate) fn take(&mut self, unit: usize) -> Option<OperandTypes<'_>> {
-        Some(OperandTypes {
-            session: &self.session,
-            module: self.modules.remove(&unit)?,
-        })
+        Some(self.session.operand_types(self.modules.remove(&unit)?))
     }
 }
 
@@ -1982,6 +1979,13 @@ impl Session {
             Ok(ty) => ty,
             Err(payload) if payload.is::<LayoutHintLimit>() => None,
             Err(payload) => std::panic::resume_unwind(payload),
+        }
+    }
+
+    pub(crate) fn operand_types(&self, module: usize) -> OperandTypes<'_> {
+        OperandTypes {
+            session: self,
+            module,
         }
     }
 
