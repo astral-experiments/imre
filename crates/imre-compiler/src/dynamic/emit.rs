@@ -1057,6 +1057,7 @@ impl SourceMap<'_> {
                     in_function,
                     &class.annotations,
                     globals,
+                    start.expect("class definition site"),
                 );
                 frame
             }
@@ -1642,6 +1643,7 @@ impl SourceMap<'_> {
         in_function: bool,
         plan: &crate::frontend::ClassAnnotations,
         globals: &std::collections::BTreeSet<String>,
+        class_start: TextSize,
     ) {
         let Some(body) = &plan.body else {
             return;
@@ -1672,7 +1674,7 @@ impl SourceMap<'_> {
             frame.output,
             body,
             scope,
-            plan.sites[0].site,
+            class_start,
             signature,
             format!("{prefix}__annotate__"),
         );

@@ -511,6 +511,22 @@ where
                     .module_globals
                     .extend(global.names.iter().map(ToString::to_string));
             }
+            // Ordinary try compiles the else suite before its handlers. Class annotation
+            // operands and their conditional indices both follow that declaration order.
+            ast::Stmt::Try(region)
+                if matches!(self.scope, Scope::Class(_))
+                    && !strings
+                    && !region.is_star
+                    && !region.orelse.is_empty() =>
+            {
+                self.visit_body(&region.body);
+                self.visit_body(&region.orelse);
+                for handler in &region.handlers {
+                    self.visit_except_handler(handler);
+                }
+                self.visit_body(&region.finalbody);
+                return;
+            }
             ast::Stmt::AnnAssign(assign) => match self.scope {
                 Scope::Module => self.scopes.module_annotations = true,
                 Scope::Class(site) if !strings => {
