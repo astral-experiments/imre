@@ -1234,7 +1234,7 @@ fn lower_graph(
     let mut frame_sources = Vec::new();
     let mut has_wrapper_link = false;
     let mut refused_body = None;
-    let mut completed_calls = HashSet::new();
+    let mut completed_calls = classes.nonreturning_functions.clone();
     let mut zip_sums = Vec::new();
     let mut owners = Vec::new();
     let mut call_graph = Vec::new();
@@ -1244,6 +1244,7 @@ fn lower_graph(
         let definition = definition.as_ref();
         let module = &graph.modules[*module_id];
         let mut checker = checker_for(*module_id);
+        checker.nonreturning_functions = &completed_calls;
         // Both calling conventions can diagnose the same body. Named startup uses the
         // ordinary binder to check which physical function the entry actually calls.
         let called_body = |report: Diagnostic| {
@@ -1423,7 +1424,7 @@ fn lower_graph(
         let module_id = graph.entry;
         let mut checker = checker_for(module_id);
         checker.module_scope = true;
-        checker.include_completed_declarations(&mut completed_calls);
+        checker.nonreturning_functions = &completed_calls;
         if let Some((definition, mut report)) = refused_body.take() {
             // The normal entry binder can establish that this physical definition
             // is called. Its diagnostic remains the ordinary result on every exit.
@@ -3224,14 +3225,6 @@ struct Checker<'a> {
 }
 
 impl<'a> Checker<'a> {
-    /// Check entry calls against all successfully lowered declarations in this pass.
-    fn include_completed_declarations(&mut self, completed: &'a mut HashSet<usize>) {
-        if !completed.is_empty() {
-            completed.extend(self.nonreturning_functions);
-            self.nonreturning_functions = completed;
-        }
-    }
-
     fn new(
         graph: &'a SourceGraph,
         module: ModuleId,

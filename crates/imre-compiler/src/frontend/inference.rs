@@ -880,7 +880,7 @@ impl Inference {
             let globals = ModuleValues::for_initializers(!registered.is_empty());
             let mut available = HashSet::new();
             let mut errors = Vec::new();
-            let mut completed_calls = HashSet::new();
+            let mut completed_calls = classes.nonreturning_functions.clone();
             let mut conflicting_returns = None;
             let mut opaque_returns = Vec::new();
             for (module, range) in graph.initializers(class_globals) {
@@ -960,6 +960,7 @@ impl Inference {
                 let mut checker = Checker::new(
                     graph, *module, signatures, classes, types, &helpers, &globals,
                 );
+                checker.nonreturning_functions = &completed_calls;
                 if signature.registered_frame() {
                     checker.registered = Some(graph.modules[*module].registered_values());
                 }
@@ -1086,9 +1087,6 @@ impl Inference {
                     }
                     errors.push((*module, diagnostic));
                 } else {
-                    if checked_call_cannot_return {
-                        completed_calls.insert(signature.id);
-                    }
                     if checked_return {
                         checked_bodies.insert(signature.id);
                     }
@@ -1119,6 +1117,9 @@ impl Inference {
                     {
                         classes.nonreturning_functions.insert(signature.id);
                     }
+                    if checked_call_cannot_return {
+                        completed_calls.insert(signature.id);
+                    }
                 }
             }
             let mut checker = Checker::new(
@@ -1132,7 +1133,7 @@ impl Inference {
             );
             checker.inference = Some(self);
             checker.module_scope = true;
-            checker.include_completed_declarations(&mut completed_calls);
+            checker.nonreturning_functions = &completed_calls;
             let result = checker.lower_block(entry_statements, None);
             let entry_callable = match checker.finish_region(result) {
                 Err(Failure::PendingSignature {
