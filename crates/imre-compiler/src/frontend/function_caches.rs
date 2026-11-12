@@ -442,20 +442,68 @@ impl Checker<'_> {
         attribute: &ast::ExprAttribute,
     ) -> phase::Result<Option<Expr>, String> {
         let name = attribute.attr.as_str();
+        if let Some(base) = self.types.constructor_base(receiver.ty)
+            && self.classes.methods[base].get(name).is_some_and(|sig| {
+                sig.method.is_some_and(|m| {
+                    m.kind(&self.classes.declarations) == crate::classes::MethodKind::Class
+                })
+            })
+        {
+            return Err(
+                self.scoped_builtin_error("descriptor lookup on a class factory", attribute)
+            );
+        }
+        let site = self.types.source_method_site(receiver.ty);
+        if site.is_some_and(|(_, _, ty)| matches!(ty, None | Some(Type::BuiltinClass)))
+            && typing::attribute_index(name).is_some()
+        {
+            return Err(self.scoped_builtin_error("source method metadata", attribute));
+        }
         if !matches!(name, "__func__" | "__self__" | "__wrapped__")
             || !matches!(receiver.ty, Type::Callable(_))
         {
             return Ok(None);
         }
         let mut scope = calls::ArgumentScope::default();
-        let owner = if let Some((class, index)) = self.types.bound_method_site(receiver.ty) {
-            let method = &self.classes.declarations.definitions[class].methods[index];
-            let signature = self.classes.methods[class][method.name.as_str()].clone();
+        let owner = if let Some((class, index, Some(ty))) = site {
             if name == "__self__" {
-                let ty = signature.params[0].ty;
-                return Ok(matches!(ty, Type::Class(_))
+                return Ok(matches!(ty, Type::Class(_) | Type::BuiltinClass)
                     .then(|| builtin(Builtin::CallableContext, ty, vec![receiver.clone()])));
             }
+            let record = &self.classes.declarations.definitions[class];
+            let method = &record.methods[index];
+            let owner = if ty == Type::BuiltinClass {
+                // Only a receiver-independent body accepts an arbitrary explicit cls.
+                // A specialized body must resolve methods against the class supplied by the caller.
+                let declaration = &method.function;
+                let origin = record.method_origins[index];
+                let receiver_name = declaration
+                    .parameters
+                    .iter_non_variadic_params()
+                    .next()
+                    .unwrap()
+                    .name();
+                if !self.graph.session.function_reads_only(
+                    origin.module,
+                    declaration,
+                    false,
+                    |name| name != receiver_name.as_str(),
+                    |_| false,
+                ) {
+                    return Err(
+                        self.scoped_builtin_error("the declaring classmethod function", attribute)
+                    );
+                }
+                self.classes.declarations.ids[&origin]
+            } else {
+                class
+            };
+            let Some(signature) = self.classes.methods[owner]
+                .get(method.name.as_str())
+                .cloned()
+            else {
+                return Err(self.scoped_builtin_error("the declaring method function", attribute));
+            };
             scope.hold(self, receiver.clone());
             self.callable_value(&signature, None, None, attribute)?
         } else if name != "__wrapped__" {

@@ -70,7 +70,7 @@ impl Checker<'_> {
             Some(receiver)
         } else {
             scope.hold(self, receiver);
-            None
+            (kind == MethodKind::Class).then(|| self.record_class_object(method.class))
         };
         let skip = usize::from(bound.is_some());
         Ok(scope.finish(self.source_call(call, signature, bound, skip)?))

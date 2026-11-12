@@ -1119,7 +1119,14 @@ class Item:
         let mode = class("Mode");
         let receiver = Type::Class(item);
         let signature = module.types.callable(vec![Type::Int], Type::Int);
-        let method = |owner| Expr::local(0, module.types.bound_source_method(signature, owner, 0));
+        let method = |owner| {
+            Expr::local(
+                0,
+                module
+                    .types
+                    .source_method(signature, owner, 0, Some(Type::Class(owner))),
+            )
+        };
         let check = |args: &[Expr], result| {
             Builtin::CallableContext.verify_specialization(args, result, &module)
         };

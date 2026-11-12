@@ -269,16 +269,20 @@ impl Checker<'_> {
                 "function values require fixed positional parameters",
             ));
         }
+        let class_method = signature.method.is_some_and(|method| {
+            method.kind(&self.classes.declarations) == crate::classes::MethodKind::Class
+        });
         let method_site = signature.method.filter(|_| {
-            receiver.is_some()
-                && expected.is_none()
-                && !signature.asynchronous
-                && signature.params[skip..].iter().any(|p| p.default.is_some())
+            class_method
+                || (receiver.is_some()
+                    && expected.is_none()
+                    && !signature.asynchronous
+                    && signature.params[skip..].iter().any(|p| p.default.is_some()))
         });
         let mut signature = signature.clone();
         // A later call to the saved method can supply its missing formal types.
         if let Some(inference) = self.inference
-            && method_site.is_none()
+            && (method_site.is_none() || class_method)
         {
             let asynchronous = signature.asynchronous;
             inference.callable_signature(
@@ -311,8 +315,35 @@ impl Checker<'_> {
         );
         let unbound = receiver.is_none();
         let ty = if let Some(method) = method_site {
-            self.types
-                .bound_source_method(ty, method.class, method.index)
+            // Inherited reads share a source binder even when they select different
+            // native bodies. Keep specialized layouts and nonliteral defaults local.
+            let class = &self.classes.declarations.definitions[method.class];
+            let owner = self.classes.declarations.ids[&class.method_origins[method.index]];
+            let method = if class_method
+                && owner != method.class
+                && let Some(original) =
+                    self.classes.methods[owner].get(class.methods[method.index].name.as_str())
+                && original.returns == signature.returns
+                && original
+                    .params
+                    .iter()
+                    .map(|p| p.ty)
+                    .eq(signature.params.iter().map(|p| p.ty))
+                && class.methods[method.index]
+                    .parameters
+                    .iter_non_variadic_params()
+                    .all(|p| p.default.as_deref().is_none_or(ast::Expr::is_literal_expr))
+            {
+                original.method.unwrap()
+            } else {
+                method
+            };
+            self.types.source_method(
+                ty,
+                method.class,
+                method.index,
+                receiver.as_ref().map(|r| r.ty),
+            )
         } else if unbound && let Some(&policy) = self.classes.cached.get(&signature.id) {
             self.types.declared_cache(ty, signature.id, policy)
         } else {
@@ -675,17 +706,25 @@ impl Checker<'_> {
         if let Some(result) = self.invoke_bound_unittest(call, &callable)? {
             return Ok(result);
         }
-        if let Some((class, index)) = self.types.bound_method_site(callable.ty) {
+        if let Some((class, index, receiver)) = self.types.source_method_site(callable.ty) {
             let method = &self.classes.declarations.definitions[class].methods[index];
             let signature = self.classes.methods[class][method.name.as_str()].clone();
-            let (returns, args) = self.bind_source(call, &signature, None, 1, None)?;
-            return Ok(Expr {
-                ty: returns,
-                kind: ExprKind::Invoke {
-                    callable: Box::new(callable),
-                    args,
-                },
-            });
+            if !signature.asynchronous {
+                let (returns, args) = self.bind_source(
+                    call,
+                    &signature,
+                    None,
+                    usize::from(receiver.is_some()),
+                    None,
+                )?;
+                return Ok(Expr {
+                    ty: returns,
+                    kind: ExprKind::Invoke {
+                        callable: Box::new(callable),
+                        args,
+                    },
+                });
+            }
         }
         let (params, returns) = self.types.signature(callable.ty).ok_or_else(|| {
             error(

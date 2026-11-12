@@ -2064,7 +2064,11 @@ fn signature(
             graph.resolve(module, value) != Some(Binding::Intrinsic(Intrinsic::ArgparseNamespace))
                 && namedtuples::annotation(graph, module, value, types).is_none()
         });
-        let ty = if let Some(receiver) = receiver
+        let ty = if index == 0
+            && method.is_some_and(|m| m.kind(classes) == crate::classes::MethodKind::Class)
+        {
+            Some(Type::BuiltinClass)
+        } else if let Some(receiver) = receiver
             && index == 0
         {
             if let Some(declared) = parameter.annotation()
@@ -3332,8 +3336,13 @@ impl<'a> Checker<'a> {
         let parameters = closed_calls::parameters(&definition.parameters)
             .chain(definition.parameters.kwarg.as_deref());
         for (index, (parameter, layout)) in parameters.zip(&signature.params).enumerate() {
-            let slot =
-                self.bind_parameter(parameter, layout.ty, signature.parameter_declaration(index))?;
+            // Static class operations still resolve through the specialized method body.
+            // The ordinary bound adapter passes its owned class in the first ABI slot.
+            let slot = if self.class_receiver.as_deref() == Some(parameter.name().as_str()) {
+                self.hidden(layout.ty)
+            } else {
+                self.bind_parameter(parameter, layout.ty, signature.parameter_declaration(index))?
+            };
             bound(slot);
         }
         Ok(())
@@ -4155,6 +4164,11 @@ impl<'a> Checker<'a> {
             return Ok(value);
         }
         let mut concrete = self.types.payload(expected).unwrap_or(expected);
+        if expected == Type::BuiltinClass
+            && let Some(class) = self.class_reference(expression)
+        {
+            return Ok(self.record_class_object(class));
+        }
         if self.types.constructor_base(concrete).is_none() {
             self.reject_class_receiver_value(expression)?;
         }
@@ -9941,6 +9955,9 @@ impl<'a> Checker<'a> {
                 {
                     return Ok(value);
                 }
+                if let Some(wrapped) = self.callable_attribute(&receiver, attribute)? {
+                    return Ok(wrapped);
+                }
                 let receiver = self.class_object_view(receiver);
                 if self.types.has_reflected_functions()
                     && matches!(receiver.ty, Type::FunctionRef | Type::Callable(_))
@@ -9985,9 +10002,6 @@ impl<'a> Checker<'a> {
                 }
                 if let Type::ForwardRef(layout) = receiver.ty {
                     return self.forward_ref_attribute(layout, receiver, attribute);
-                }
-                if let Some(wrapped) = self.callable_attribute(&receiver, attribute)? {
-                    return Ok(wrapped);
                 }
                 if let Some(field) = self.partial_attribute(&receiver, attribute.attr.as_str()) {
                     return Ok(field);

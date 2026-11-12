@@ -135,6 +135,13 @@ impl Checker<'_> {
         wrapped: Expr,
         node: &impl Ranged,
     ) -> Result<Expr, String> {
+        if self
+            .types
+            .source_method_site(wrapper.ty)
+            .is_some_and(|(_, _, receiver)| receiver == Some(Type::BuiltinClass))
+        {
+            return Err(self.scoped_builtin_error("updating a bound classmethod", node));
+        }
         if !matches!(wrapper.ty, Type::Callable(_))
             || self.types.wrapped_link_type(wrapper.ty) != self.types.wrapped_link_type(wrapped.ty)
         {

@@ -418,6 +418,18 @@ impl Session {
         eager_displays: bool,
         fixed_global: impl Fn(&str) -> bool,
     ) -> bool {
+        self.function_reads_only(module, function, eager_displays, |_| true, fixed_global)
+    }
+
+    /// Check a fixed body with separate rules for reads of local and global names.
+    pub(crate) fn function_reads_only(
+        &self,
+        module: usize,
+        function: &ruff_python_ast::StmtFunctionDef,
+        eager_displays: bool,
+        allowed_local_read: impl Fn(&str) -> bool,
+        fixed_global: impl Fn(&str) -> bool,
+    ) -> bool {
         use ty_python_core::scope::{NodeWithScopeKind, NodeWithScopeRef};
 
         let file = self.db.program_file(self.files[module]);
@@ -428,9 +440,13 @@ impl Session {
         let fixed = |scope| {
             let places = index.place_table(scope);
             places.members().next().is_none()
-                && places
-                    .symbols()
-                    .all(|symbol| symbol.is_local() || fixed_global(symbol.name().as_str()))
+                && places.symbols().all(|symbol| {
+                    if symbol.is_local() {
+                        !symbol.is_used() || allowed_local_read(symbol.name().as_str())
+                    } else {
+                        fixed_global(symbol.name().as_str())
+                    }
+                })
                 && !index
                     .use_def_map(scope)
                     .definitions_with_usage()

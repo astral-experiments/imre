@@ -22,8 +22,7 @@ impl MethodContext {
     }
 }
 
-/// A class method has a statically bound class, so its native function needs no
-/// runtime receiver. The original declaration remains available for diagnostics.
+/// Validate the original receiver before preparing the checked method body.
 pub(super) fn executable_method(
     binding: &crate::classes::ClassMethod,
     context: MethodContext,
@@ -107,17 +106,13 @@ pub(super) fn executable_method(
         ));
     }
     if context.kind(classes) == MethodKind::Class {
-        let receiver = if method.parameters.posonlyargs.is_empty() {
-            method.parameters.args.remove(0)
-        } else {
-            method.parameters.posonlyargs.remove(0)
-        };
+        let receiver = method.parameters.iter_non_variadic_params().next().unwrap();
         let module = classes.definitions[context.class].method_origins[context.index].module;
         let source = &graph.modules[module].source;
         if receiver.default.is_some() {
             return Err(diagnostic_message(
                 source,
-                &receiver,
+                receiver,
                 "a class receiver cannot have a default",
             ));
         }
@@ -1175,8 +1170,9 @@ impl Checker<'_> {
             }
             MethodKind::Instance => self.callable_value(&signature, receiver, expected, attribute),
             MethodKind::PropertySetter => unreachable!("setters are resolved only on assignment"),
-            MethodKind::Class | MethodKind::Static => {
-                let value = self.callable_value(&signature, None, expected, attribute)?;
+            kind @ (MethodKind::Class | MethodKind::Static) => {
+                let owner = (kind == MethodKind::Class).then(|| self.record_class_object(class));
+                let value = self.callable_value(&signature, owner, expected, attribute)?;
                 Ok(self.evaluated_receiver(receiver, value))
             }
         }
@@ -1479,10 +1475,10 @@ impl Checker<'_> {
             let value = self.class_attribute(attribute, class, receiver, None)?;
             return self.invoke(call, value);
         }
-        let (receiver, discarded) = if kind == MethodKind::Instance {
-            (receiver, None)
-        } else {
-            (None, receiver)
+        let (receiver, discarded) = match kind {
+            MethodKind::Instance => (receiver, None),
+            MethodKind::Class => (Some(self.record_class_object(class)), receiver),
+            _ => (None, receiver),
         };
         let skip = usize::from(receiver.is_some());
         let value = self.source_call(call, &signature, receiver, skip)?;
