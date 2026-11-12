@@ -31,7 +31,8 @@ pub(crate) enum Kind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct EntryOperand {
     pub(crate) module: ModuleId,
-    pub(crate) body: ModuleId,
+    /// Set by the entry binder after proving this call reaches its physical callee.
+    pub(crate) checked_callee: Option<ModuleId>,
     pub(crate) statement: TextSize,
     pub(crate) operand: TextRange,
 }
@@ -124,7 +125,7 @@ impl<M> Diagnostic<M> {
         if let Some(position) = &mut self.position {
             position.entry_statement = Some(Box::new(EntryOperand {
                 module,
-                body,
+                checked_callee: Some(body),
                 statement,
                 operand: call,
             }));
@@ -297,7 +298,7 @@ impl Failure {
             position.entry_statement.get_or_insert_with(|| {
                 Box::new(EntryOperand {
                     module,
-                    body: module,
+                    checked_callee: None,
                     statement,
                     operand: position.range,
                 })
