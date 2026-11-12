@@ -194,6 +194,9 @@ pub(crate) fn frame_inputs(
                 ir::generator_operands(*scoped, operands).is_ok()
             }
             ExprKind::Compare(values, ops) if ir::Compare::uses_python_protocol(expr.ty, ops) => {
+                let reads = values.iter().map(&protocol_parameter).sum::<usize>();
+                uses_python_protocol |= reads != 0;
+                protocol_reads += reads;
                 !ops.is_empty() && values.len() == ops.len() + 1
             }
             ExprKind::Invoke { .. } => {
