@@ -74,7 +74,7 @@ pub(crate) struct RegisteredFrame<'a, 'p> {
     pub(crate) positions: &'p SourcePositions<'p>,
     pub(crate) unit: usize,
     pub(super) iteration: super::IterationState,
-    pub(in crate::llvm) loops: Vec<super::LoopTarget>,
+    pub(in crate::llvm) loops: Vec<(super::LoopTarget, Option<usize>)>,
     pub(crate) current_range: TextRange,
     pub(super) regions: Vec<super::context::Region>,
     pub(crate) async_generator: bool,
@@ -1134,24 +1134,16 @@ impl RegisteredFrame<'_, '_> {
         result
     }
 
-    pub(crate) fn retained_loop_header(&mut self, header: TextSize) {
-        if self.native_suspension && !self.iteration.in_expression {
-            // A retained frame exposes the statement header on each pull, including exhaustion.
-            self.set_statement_line(self.positions.line(header));
-        }
-    }
-
     /// Leave the item in the current block or branch directly to exhaustion.
     pub(crate) fn pull_item(
         &mut self,
         cursor: &str,
         kind: ir::IterNextKind,
-        header: TextSize,
         has_else: bool,
         exhausted: &str,
     ) -> String {
         match kind {
-            ir::IterNextKind::Generic => self.sync_item(cursor, header, has_else, exhausted),
+            ir::IterNextKind::Generic => self.sync_item(cursor, has_else, exhausted),
             ir::IterNextKind::Async(pull) => {
                 let ready = self.name("b");
                 let item = self.async_pull(cursor, pull, &ready, exhausted);
@@ -1164,14 +1156,7 @@ impl RegisteredFrame<'_, '_> {
 
     /// Advance a synchronous cursor once. An exact forward list cursor supplies
     /// the rooted item directly. All other cursors keep the ordinary lookahead protocol.
-    fn sync_item(
-        &mut self,
-        cursor: &str,
-        header: TextSize,
-        has_else: bool,
-        exhausted: &str,
-    ) -> String {
-        self.retained_loop_header(header);
+    fn sync_item(&mut self, cursor: &str, has_else: bool, exhausted: &str) -> String {
         let ordinary = self.name("b");
         let ordinary_item = self.name("b");
         let list_item = self.name("b");
@@ -1211,12 +1196,10 @@ impl RegisteredFrame<'_, '_> {
     pub(crate) fn next_item_pair(
         &mut self,
         cursor: &str,
-        header: ruff_text_size::TextSize,
         has_else: bool,
         available: &str,
         exhausted: &str,
     ) {
-        self.retained_loop_header(header);
         self.max_live = self.max_live.max(2);
         let more = self.checked(&format!(
             "call i64 @imre_dyn_next_pair(ptr %ctx, i64 {cursor}, ptr %live, i1 {has_else})"

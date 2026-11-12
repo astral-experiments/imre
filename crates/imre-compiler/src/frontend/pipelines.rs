@@ -118,6 +118,17 @@ impl Prepared {
         pair_pull: bool,
     ) -> StdResult<&[Statement], B::Error> {
         let row = binder.pattern_local(self.value);
+        if row.ty != Type::PythonObject || target.is_name_expr() {
+            self.next
+                .push(Self::exhaust_if_empty(Expr::local(self.ready, Type::Bool)));
+            let start = self.next.len();
+            let projected =
+                matches!(row.ty, Type::Tuple(_)).then_some(unpacking::Row::Projected(self.value));
+            unpacking::bind_input(binder, target, row, projected, &mut self.next)?;
+            let end = self.next.len();
+            self.next.push(Statement::Clear(self.value));
+            return Ok(&self.next[start..end]);
+        }
         // The acquired Python cursor and its unadapted one-row pull must still
         // refer to the same slots. Typed rows keep their own snapshot layout.
         let cursor = match (self.evaluate.last(), self.next.as_slice()) {
@@ -138,7 +149,6 @@ impl Prepared {
                 && *clear == self.value
                 && *key == self.value
                 && *ready == self.ready
-                && row.ty == Type::PythonObject
                 && matches!(
                     acquisition.kind,
                     ExprKind::Builtin(Builtin::RegisteredIter(ir::IteratorOp::Loop(_)), _)
@@ -148,17 +158,15 @@ impl Prepared {
             }
             _ => None,
         };
-        let pull_end = self.next.len();
-        self.next
-            .push(Self::exhaust_if_empty(Expr::local(self.ready, Type::Bool)));
-        let start = self.next.len();
-        let projected =
-            (cursor.is_some() || matches!(row.ty, Type::Tuple(_))).then_some(&self.value);
-        let pair = unpacking::bind_input(binder, target, row, projected, &mut self.next)?;
-        if let (Some(cursor), Some(pair)) = (cursor, pair) {
-            let ordinary = std::mem::replace(&mut self.next[pull_end - 1], Statement::Exhaust);
+        let mut scope = self.pull_scope();
+        let source = unpacking::Row::Pulled {
+            scope: &mut scope,
+            pair: cursor.map(|cursor| (cursor, self.ready)),
+        };
+        let pair = unpacking::bind_input(binder, target, row, Some(source), &mut self.next)?;
+        if let (Some(cursor), Some(ordinary)) = (cursor, pair) {
             self.acquire.push(Statement::Assign(
-                pair.ordinary,
+                ordinary,
                 Expr {
                     ty: Type::Bool,
                     kind: ExprKind::Builtin(
@@ -167,22 +175,9 @@ impl Prepared {
                     ),
                 },
             ));
-            self.clear.push(pair.ordinary);
-            self.next[pull_end - 1] = Statement::If(
-                Expr::local(pair.ordinary, Type::Bool),
-                vec![ordinary],
-                vec![Statement::IterNext {
-                    kind: ir::IterNextKind::Generic,
-                    iterator: cursor,
-                    key: pair.items[0],
-                    value: Some(pair.items[1]),
-                    ready: self.ready,
-                }],
-            );
+            self.clear.push(ordinary);
         }
-        let end = self.next.len();
-        self.next.push(Statement::Clear(self.value));
-        Ok(&self.next[start..end])
+        Ok(&self.next)
     }
 
     /// An enclosing adapter has its own iteration semantics even if it reuses this state.
@@ -214,15 +209,16 @@ impl Prepared {
 
     /// The suspension owns this pull, including the exhaustion edge and the yielded item.
     pub(super) fn pull_expression(&mut self, ty: Type) -> Expr {
+        self.pull_scope().finish(Expr::local(self.value, ty))
+    }
+
+    /// Keep the actual pull and its consumer in the same temporary scope.
+    pub(super) fn pull_scope(&mut self) -> calls::ArgumentScope {
         self.next
             .push(Self::exhaust_if_empty(Expr::local(self.ready, Type::Bool)));
-        Expr {
-            ty,
-            kind: ExprKind::Scope {
-                body: std::mem::take(&mut self.next),
-                value: Box::new(Expr::local(self.value, ty)),
-                clear: vec![self.value],
-            },
+        calls::ArgumentScope {
+            body: std::mem::take(&mut self.next),
+            clear: vec![self.value],
         }
     }
 
@@ -2399,7 +2395,8 @@ impl Checker<'_> {
             }
             self.forget_comprehension_writes(&plan, depth);
             let row = self.local(input.value);
-            let stable = matches!(row.ty, Type::Tuple(_)).then_some(&input.value);
+            let stable =
+                matches!(row.ty, Type::Tuple(_)).then_some(unpacking::Row::Projected(input.value));
             let mut binding = Vec::new();
             unpacking::bind_input(self, &clause.target, row, stable, &mut binding)?;
             let filters = self.eager_filters(clause)?;
