@@ -105,9 +105,9 @@ impl Context {
             let value = self.lookup_named_attr(module, &name, Some(key))?;
             self.heap.keep(value);
             let replaced = self.replacing_finalizer(scope, &name, value);
-            self.put_item(locals, key, value)?;
+            let displaced = self.store_binding_item(locals, key, value)?;
             self.heap.release_temporaries_since(mark);
-            if replaced && self.heap.has_unbound_finalizer(NONE) {
+            if (displaced || replaced) && self.heap.has_unbound_finalizer(NONE) {
                 self.finish_binding_release();
             }
         }

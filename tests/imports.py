@@ -1365,6 +1365,16 @@ ACCEPTED = {
         ),
         "computed.py": "from errno import *\nassert _computed == 19\n",
     },
+    "wildcard_binding_release": {
+        "main.py": "from provider import *\nprint(_first, second)\n",
+        "provider.py": (
+            "import sys\napp = sys.modules['__main__']\n"
+            "class Key(str): pass\n"
+            "class Pending:\n    def __del__(self): print('second' in app.__dict__)\n"
+            "app.__dict__[Key('_first')] = Pending()\n"
+            "__all__ = ['_first', 'second']\n_first = 17\nsecond = 37\n"
+        ),
+    },
     "wildcard_dict_subclass_all": {
         "main.py": (
             "from custom_names import *\nprint(custom)\n"

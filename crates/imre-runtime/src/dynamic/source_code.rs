@@ -3364,14 +3364,7 @@ impl Context {
             return Ok(replaced);
         };
         let key = self.heap.code_name(name);
-        if matches!(
-            self.heap.get(target),
-            Value::Dict(_) | Value::DefaultDict { .. }
-        ) {
-            return Ok(self.store_binding_item(target, key, value)? || replaced);
-        }
-        self.put_item(target, key, value)?;
-        Ok(replaced)
+        Ok(self.store_binding_item(target, key, value)? || replaced)
     }
 
     pub(super) fn load_exec_name(&mut self, locals: Id, name: &str) -> Result<Id> {
