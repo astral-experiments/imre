@@ -5,7 +5,7 @@ use crate::frontend::phase::{Diagnostic, Kind};
 use ruff_python_ast::helpers::Truthiness;
 use ruff_python_ast::{Expr, ExprCall, Stmt};
 use ruff_text_size::{Ranged, TextRange, TextSize};
-use std::{collections::HashSet, path::Path};
+use std::{collections::HashMap, path::Path};
 use ty_python_core::FileScopeId;
 use ty_python_core::definition::{Definition, DefinitionKind};
 use ty_python_semantic::{Db, HasType, SemanticModel, types::Type};
@@ -192,17 +192,32 @@ impl Session {
         // The startup module is already in sys.modules. Its namespace is visible
         // to imports before its initializer finishes, including from a child.
         let mut resident = (entry.0, TextSize::default());
-        let mut entered = HashSet::from([entry.0]);
-        let mut pending = vec![(entry, 0, Vec::new())];
-        while let Some(((module, path), start, mut imports)) = pending.pop() {
+        let mut completed = HashMap::from([(entry.0, false)]);
+        let mut pending = vec![(entry, 0, Vec::new(), None::<(usize, &Path)>)];
+        'initializers: while let Some(((module, path), start, mut imports, binding)) = pending.pop()
+        {
             let file = self.files[module];
             let parsed = self.parsed(file);
             let model = SemanticModel::new(&self.db, self.db.program_file(file));
-            for (i, stmt) in after_docstring(parsed.suite())
-                .iter()
-                .enumerate()
-                .skip(start)
-            {
+            let suite = after_docstring(parsed.suite());
+            if let Some(owner) = binding {
+                let stmt = &suite[start - 1];
+                if !self.passive_import_binding(stmt, owner.0, resident) {
+                    return None;
+                }
+                if let Some(captures) = captures.as_deref_mut()
+                    && let Stmt::ImportFrom(import) = stmt
+                {
+                    self.capture_function_sources(
+                        import,
+                        owner,
+                        resident,
+                        captures.entry(module).or_default(),
+                    );
+                }
+                imports.push((stmt.range(), owner.0));
+            }
+            for (i, stmt) in suite.iter().enumerate().skip(start) {
                 if module == resident.0 {
                     resident.1 = stmt.start();
                 }
@@ -239,24 +254,17 @@ impl Session {
                 if let Some(owner) =
                     self.initializer_import(stmt, &model, entry.0, &application_module)
                 {
-                    if self.passive_import_load(stmt, owner.0, resident) {
-                        if let Some(captures) = captures.as_deref_mut()
-                            && let Stmt::ImportFrom(import) = stmt
-                        {
-                            self.capture_function_sources(
-                                import,
-                                owner,
-                                resident,
-                                captures.entry(module).or_default(),
-                            );
+                    pending.push(((module, path), i + 1, imports, Some(owner)));
+                    match completed.get(&owner.0) {
+                        None => {
+                            completed.insert(owner.0, false);
+                            pending.push((owner, 0, Vec::new(), None));
                         }
-                        imports.push((stmt.range(), owner.0));
-                        pending.push(((module, path), i + 1, imports));
+                        // A non-entry cycle can expose a partially initialized member.
+                        Some(false) if owner.0 != entry.0 => return None,
+                        Some(_) => {}
                     }
-                    if entered.insert(owner.0) {
-                        pending.push((owner, 0, Vec::new()));
-                    }
-                    break;
+                    continue 'initializers;
                 }
                 if let Some(stmt) = stmt.as_expr_stmt()
                     && let Some(error) =
@@ -275,17 +283,28 @@ impl Session {
                     return Some(error);
                 }
                 if !passive(stmt) {
-                    break;
+                    return None;
                 }
             }
+            completed.insert(module, true);
         }
         None
     }
 
     fn passive_import_load(&self, stmt: &Stmt, owner: usize, resident: (usize, TextSize)) -> bool {
+        (owner == resident.0 || self.parsed(self.files[owner]).suite().iter().all(passive))
+            && self.passive_import_binding(stmt, owner, resident)
+    }
+
+    fn passive_import_binding(
+        &self,
+        stmt: &Stmt,
+        owner: usize,
+        resident: (usize, TextSize),
+    ) -> bool {
         let file = self.files[owner];
         // A from-import can query __path__ or a missing member during initialization.
-        let passive_load = stmt.as_import_from_stmt().is_none_or(|import| {
+        stmt.as_import_from_stmt().is_none_or(|import| {
             let index = ty_python_core::semantic_index(&self.db, self.db.program_file(file));
             index
                 .place_table(FileScopeId::global())
@@ -295,8 +314,7 @@ impl Session {
                     self.initialized_function(owner, a.name.as_str(), resident)
                         .is_some()
                 })
-        });
-        passive_load && (owner == resident.0 || self.parsed(file).suite().iter().all(passive))
+        })
     }
 
     pub(crate) fn passive_selected_import(
