@@ -2,11 +2,11 @@ use super::*;
 
 /// Register an existing checked function with its original frame positions.
 /// Native analysis has already verified the operation sequence after specialization.
+/// The registered frame boxes each returned value during emission.
 pub(crate) fn place_fixed_function(
-    mut function: ir::Function,
+    function: ir::Function,
     source: FixedBodySource,
 ) -> RegisteredFunction {
-    function.returns = Type::PythonObject;
     RegisteredFunction {
         inputs: FrameInputs::Checked,
         function,
@@ -34,6 +34,7 @@ mod tests {
         assert_eq!(lowered.iter().filter(|name| *name == "scale").count(), 1);
         let functions = graph.registered_functions();
         let body = &functions[&graph.entry][&TextSize::default()];
+        assert_eq!(body.function.returns, Type::Int);
         let positions: Vec<_> = body.fixed_sites.iter().map(|range| &text[*range]).collect();
         assert_eq!(
             positions,
@@ -64,7 +65,7 @@ mod tests {
         let functions = graph.registered_functions();
         let placed = &functions[&graph.entry][&TextSize::default()];
         let function = &placed.function;
-        assert_eq!(function.returns, Type::PythonObject);
+        assert_eq!(function.returns, Type::Int);
         assert_eq!(function.locals[function.params[0]], Type::Int);
         assert_eq!(placed.local_names[&function.params[0]].name, "n");
         let positions: Vec<_> = placed
@@ -99,6 +100,7 @@ mod tests {
         let body = function.body.as_ptr();
         let positions = source.positions.as_ptr();
         let placed = place_fixed_function(function, source);
+        assert_eq!(placed.function.returns, Type::Str);
         assert_eq!(placed.fixed_sites.as_ptr(), positions);
         assert_eq!(placed.function.body.as_ptr(), body);
         assert_eq!(placed.local_names[&0].name, "left");
