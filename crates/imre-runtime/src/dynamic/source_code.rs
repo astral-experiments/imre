@@ -1025,38 +1025,6 @@ impl IndentationDiagnostic {
     }
 }
 
-/// Interactive input accepts one compound statement or one logical line of simple statements.
-fn check_single_input(body: &[ast::Stmt], tokens: &ast::token::Tokens) -> Result<()> {
-    use ast::token::TokenKind::{Dedent, Newline};
-
-    let Some(first) = body.first() else {
-        return Err(Error::new("SyntaxError", "invalid syntax"));
-    };
-    let mut trailing = tokens
-        .iter()
-        .skip_while(|token| token.start() < first.end());
-    if ast::helpers::is_compound_statement(first) {
-        // An indented suite ends in DEDENT. An inline suite needs a real closing newline.
-        if body.len() != 1
-            || !trailing.any(|token| {
-                token.kind() == Dedent || (token.kind() == Newline && !token.range().is_empty())
-            })
-        {
-            return Err(Error::new("SyntaxError", "invalid syntax"));
-        }
-    } else if let Some(last) = body.last()
-        && trailing
-            .take_while(|token| token.start() < last.start())
-            .any(|token| token.kind() == Newline)
-    {
-        return Err(Error::new(
-            "SyntaxError",
-            "multiple statements found while compiling a single statement",
-        ));
-    }
-    Ok(())
-}
-
 impl Program {
     /// Keep each code object's constants alive, including constants owned by unexecuted children.
     fn prepare_strings(
@@ -2432,7 +2400,8 @@ impl Context {
                 && module.body.len() > 1
                 && module.body[1].start().to_usize() < issue.offset
             {
-                check_single_input(&module.body, parsed.tokens())?;
+                imre_ast::check_single_input(&module.body, parsed.tokens())
+                    .map_err(|message| Error::new("SyntaxError", message))?;
             }
             return IndentationDiagnostic::from_issue(source, issue, mode == "exec")
                 .raise(self, filename_id);
@@ -2471,7 +2440,8 @@ impl Context {
             )?);
         }
         if interactive && let ast::Mod::Module(module) = parsed.syntax() {
-            check_single_input(&module.body, parsed.tokens())?;
+            imre_ast::check_single_input(&module.body, parsed.tokens())
+                .map_err(|message| Error::new("SyntaxError", message))?;
         }
         let future_error = match parsed.syntax() {
             ast::Mod::Module(module) => imre_ast::future_import_error(&module.body),

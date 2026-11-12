@@ -1380,26 +1380,20 @@ impl<'a> SuitePreparation<'a> {
     }
 
     pub(crate) fn interactive(&self, stmts: &[ast::Stmt]) -> Option<RegisteredSuite> {
-        let kind = RegisteredScope::Module;
-        let mut suite = match stmts {
-            [stmt @ ast::Stmt::Expr(expr)] => {
-                let mut scope = SourceScope::new(kind, self.source, self.operations, &self.sites);
-                let value = scope.frame_value(&expr.value)?;
-                let display = operation(Builtin::RegisteredDisplayHook, Type::None, vec![value]);
-                let body = vec![checkpoint(stmt), Statement::Expr(display)];
-                RegisteredSuite::new(scope.finish(body), Vec::new())
-            }
-            [
-                ast::Stmt::Assign(_)
-                | ast::Stmt::Raise(_)
-                | ast::Stmt::FunctionDef(_)
-                | ast::Stmt::ClassDef(_)
-                | ast::Stmt::TypeAlias(_),
-            ] => self.complete(stmts, kind)?,
-            _ => return None,
-        };
-        suite.refusal = self.checked_declaration_refusal(&suite.checked.function.body);
-        Some(suite)
+        let mut scope = SourceScope::new(
+            RegisteredScope::Module,
+            self.source,
+            self.operations,
+            &self.sites,
+        );
+        scope.interactive = true;
+        let (body, falls_through) = scope.block(stmts).ok()?;
+        let refusal = self.checked_declaration_refusal(&body);
+        Some(RegisteredSuite {
+            falls_through,
+            refusal,
+            ..RegisteredSuite::new(scope.finish(body), Vec::new())
+        })
     }
 
     /// A residual statement in a suspended function owns its cursor and pending exits.
@@ -2502,10 +2496,16 @@ impl statements::StatementLowering for SourceScope<'_> {
     }
 
     fn effect(&mut self, value: &ast::Expr) -> StdResult<(Option<Statement>, bool), ()> {
-        Ok((
-            Some(Statement::Expr(self.frame_value(value).ok_or(())?)),
-            true,
-        ))
+        if !self.interactive && value.is_string_literal_expr() {
+            return Ok((None, true));
+        }
+        let value = self.frame_value(value).ok_or(())?;
+        let effect = if self.interactive {
+            operation(Builtin::RegisteredDisplayHook, Type::None, vec![value])
+        } else {
+            value
+        };
+        Ok((Some(Statement::Expr(effect)), true))
     }
 
     fn returned(&mut self, ret: &ast::StmtReturn) -> StdResult<Statement, ()> {
@@ -2742,6 +2742,7 @@ enum LoopScope {
 
 struct SourceScope<'a> {
     kind: RegisteredScope,
+    interactive: bool,
     sites: &'a StatementSites,
     operations: &'a HashMap<TextRange, Expr>,
     source: values::RegisteredSource<'a>,
@@ -2850,6 +2851,7 @@ impl<'a> SourceScope<'a> {
     ) -> Self {
         Self {
             kind,
+            interactive: false,
             source,
             operations,
             sites,
@@ -3551,6 +3553,31 @@ mod tests {
             ["take", "text"]
         );
         assert_eq!(calls, stores);
+    }
+
+    #[test]
+    fn interactive_and_ordinary_blocks_agree_on_fallthrough() {
+        for (text, falls_through) in [
+            ("for item in items:\n    item\n", true),
+            ("try:\n    act()\nfinally:\n    finish()\n", true),
+            ("try:\n    act()\nfinally:\n    raise Error()\n", false),
+            ("raise Error()\n", false),
+            ("del first, second\n", true),
+        ] {
+            let graph = SourceGraph::single(text).unwrap();
+            let module = &graph.modules[graph.entry];
+            let stmts = &module.parsed.syntax().body;
+            let source = module.registered_values().context(text);
+            let operations = prepared_sites(stmts, source, false).operations;
+            let mut prepare = SuitePreparation::new(&operations, source, true);
+            let ordinary = prepare.suite(stmts, RegisteredScope::Module);
+            let interactive = prepare.interactive(stmts).unwrap();
+            for suite in [&ordinary, &interactive] {
+                assert!(suite.fully_checked(), "{text}");
+                crate::verify::registered(suite.checked.region()).unwrap();
+                assert_eq!(suite.falls_through, falls_through, "{text}");
+            }
+        }
     }
 
     #[test]

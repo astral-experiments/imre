@@ -66,7 +66,6 @@ pub(super) trait StatementLowering {
             ast::Stmt::Assign(assign) => return self.assignment(assign),
             ast::Stmt::If(branch) => return self.branch(branch),
             ast::Stmt::FunctionDef(def) => (self.definition(def)?, true),
-            ast::Stmt::Expr(expr) if expr.value.is_string_literal_expr() => (None, true),
             ast::Stmt::Expr(expr) => self.effect(&expr.value)?,
             ast::Stmt::Return(ret) if !module => (Some(self.returned(ret)?), false),
             ast::Stmt::For(loop_) if !loop_.is_async || self.async_iteration() => {
@@ -102,7 +101,7 @@ impl StatementLowering for Checker<'_> {
     }
 
     fn effect(&mut self, expr: &ast::Expr) -> Result<(Option<Statement>, bool), String> {
-        if expr.is_ellipsis_literal_expr() {
+        if expr.is_string_literal_expr() || expr.is_ellipsis_literal_expr() {
             return Ok((None, true));
         }
         if let ast::Expr::Yield(yielded) = expr

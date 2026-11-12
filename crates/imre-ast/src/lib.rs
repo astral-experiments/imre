@@ -73,6 +73,38 @@ use ruff_python_ast::{self as ast, Identifier};
 use ruff_python_stdlib::identifiers::is_mangled_private;
 use ruff_text_size::{Ranged, TextSize};
 
+/// Interactive input accepts one compound statement or one logical line of simple statements.
+pub fn check_single_input(
+    body: &[ast::Stmt],
+    tokens: &ast::token::Tokens,
+) -> Result<(), &'static str> {
+    use ast::token::TokenKind::{Dedent, Newline};
+
+    let Some(first) = body.first() else {
+        return Err("invalid syntax");
+    };
+    let mut trailing = tokens
+        .iter()
+        .skip_while(|token| token.start() < first.end());
+    if ast::helpers::is_compound_statement(first) {
+        // An indented suite ends in DEDENT. An inline suite needs a real closing newline.
+        if body.len() != 1
+            || !trailing.any(|token| {
+                token.kind() == Dedent || (token.kind() == Newline && !token.range().is_empty())
+            })
+        {
+            return Err("invalid syntax");
+        }
+    } else if let Some(last) = body.last()
+        && trailing
+            .take_while(|token| token.start() < last.start())
+            .any(|token| token.kind() == Newline)
+    {
+        return Err("multiple statements found while compiling a single statement");
+    }
+    Ok(())
+}
+
 /// A valueless parenthesized name in an annotation neither binds nor reads the name.
 pub fn annotation_visits_target(assignment: &ast::StmtAnnAssign) -> bool {
     assignment.simple || assignment.value.is_some() || !assignment.target.is_name_expr()
