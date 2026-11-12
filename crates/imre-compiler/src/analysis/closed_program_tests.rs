@@ -734,6 +734,36 @@ fn a_nested_import_resumes_the_checked_caller_only_on_its_normal_edge() {
 }
 
 #[test]
+fn grouped_imports_resume_at_each_alias_and_keep_its_binding() {
+    let root = tempdir().unwrap();
+    let paths = ["app.py", "leaf.py", "bridge.py"].map(|name| root.path().join(name));
+    let caller = "import leaf as first, bridge as second\nsecond.take('wrong')\n";
+    let bridge = "import leaf\ndef take(value: int): return value\n";
+    for (leaf, reached) in [
+        ("def take(value: str): return value\n", true),
+        ("raise SystemExit(19)\n", false),
+    ] {
+        let mut session = super::Session::new(root.path(), &[]).unwrap();
+        for (path, source) in paths.iter().zip([caller, leaf, bridge]) {
+            session.add(path, source, crate::SourceKind::File).unwrap();
+        }
+        let result = session.initializer_call_error((0, &paths[0]), true, |name| match name {
+            "leaf" => Some((1, &paths[1])),
+            "bridge" => Some((2, &paths[2])),
+            _ => None,
+        });
+        assert_eq!(result.error.is_some(), reached);
+        if let Some(error) = result.error {
+            assert!(
+                error
+                    .to_string()
+                    .contains("app.py:2:13: Imre: expected int, got str")
+            );
+        }
+    }
+}
+
+#[test]
 fn initializer_calls_use_original_bindings_and_all_arguments() {
     let root = tempdir().unwrap();
     let paths = [
