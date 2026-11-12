@@ -1993,6 +1993,12 @@ ACCEPTED = {
     "library_effect": {"main.py": IMPORT, "helper.py": "print(7)\n" + HELPER},
     "library_state": {"main.py": "from helper import f, values\nprint(f(values[0]))\n", "helper.py": "values = [1]\n" + HELPER},
     "package_effect": {"main.py": "import package\n", "package/__init__.py": "print(1)\n"},
+    "module_expression_before_import": {
+        "main.py": "from provider import seen\nprint(seen)\n",
+        "state.py": "values: list[int] = []\n",
+        "provider.py": "from state import values\nvalues.append(7)\nfrom observer import seen\n",
+        "observer.py": "from state import values\nseen = values[0]\n",
+    },
     "active_library_else": {"main.py": IMPORT, "helper.py": HELPER + 'if __name__ == "__main__":\n    print(1)\nelse:\n    print(2)\n'},
     "module_literal_before_import": {
         "main.py": ('from parentlib import labels\nfrom visitorlib import shared\n'
