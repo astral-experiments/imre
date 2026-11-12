@@ -5068,19 +5068,11 @@ impl Context {
                 ),
             ));
         }
-        if matches!(self.heap.get(left), Value::Float(_))
-            || matches!(self.heap.get(right), Value::Float(_))
-        {
-            let number = |value| -> Result<Option<f64>> {
-                match self.heap.get(value) {
-                    Value::Float(number) => Ok(Some(*number)),
-                    Value::Int(_) | Value::Bool(_) => {
-                        Ok(Some(crate::floats::int_to_float(&self.as_int(value)?)?))
-                    }
-                    _ => Ok(None),
-                }
-            };
-            if let (Some(x), Some(y)) = (number(left)?, number(right)?) {
+        let float_operand = matches!(self.heap.get(left), Value::Float(_))
+            || matches!(self.heap.get(right), Value::Float(_));
+        // After a float subtype declines division, its underlying value cannot retry it.
+        if float_operand && (op != "/" || (a == left && b == right)) {
+            if let (Some(x), Some(y)) = (self.real_component(left)?, self.real_component(right)?) {
                 let result = match op {
                     "+" => Some(x + y),
                     "-" => Some(x - y),
@@ -5171,7 +5163,7 @@ impl Context {
                 ),
             ));
         }
-        if matches!(op, "+" | "**")
+        if (matches!(op, "+" | "**") || (op == "/" && float_operand))
             && [left, right]
                 .into_iter()
                 .any(|id| !matches!(self.heap.get(id), Value::Int(_) | Value::Bool(_)))
@@ -5179,6 +5171,8 @@ impl Context {
             let operator = match (op, inplace) {
                 ("+", true) => "+=",
                 ("+", false) => "+",
+                ("/", true) => "/=",
+                ("/", false) => "/",
                 _ => "** or pow()",
             };
             let left = stdlib::diagnostic_type_name(self, a);
@@ -5370,10 +5364,12 @@ impl Context {
             (
                 "__mul__" | "__rmul__" | "__truediv__" | "__rtruediv__" | "__pow__" | "__rpow__",
                 Value::Complex(_)
-            ) | (
-                "__mod__" | "__rmod__",
-                Value::Str(_) | Value::SurrogateStr(_)
-            ) | ("__lt__" | "__le__" | "__gt__" | "__ge__", Value::Deque(_))
+            ) | ("__truediv__" | "__rtruediv__", Value::Float(_))
+                | (
+                    "__mod__" | "__rmod__",
+                    Value::Str(_) | Value::SurrogateStr(_)
+                )
+                | ("__lt__" | "__le__" | "__gt__" | "__ge__", Value::Deque(_))
                 | ("__xor__" | "__rxor__", Value::Set { .. })
                 | (
                     "__or__" | "__ror__",
@@ -5848,6 +5844,7 @@ impl Context {
             })
         };
         let (mut ac, mut bc) = (class(a), class(b));
+        let mixed_division = op == "/" && (ac.is_some() || bc.is_some());
         let set_xor = op == "^"
             && [a, b]
                 .into_iter()
@@ -5875,7 +5872,8 @@ impl Context {
                         | ("+" | "//" | "%", Value::Int(_) | Value::Bool(_))
                         | ("^", Value::Set { .. })
                         | ("|", Value::Dict(_) | Value::DefaultDict { .. })
-                ) {
+                ) || (mixed_division && matches!(self.heap.get(value), Value::Float(_)))
+                {
                     *class = Some(self.exact_type(value)?);
                 }
             }
@@ -5951,8 +5949,16 @@ impl Context {
                 && [a, b]
                     .into_iter()
                     .all(|id| matches!(self.heap.get(self.scalar_value(id)), Value::Complex(_)));
+            let float_operands = [a, b].map(|id| {
+                mixed_division && matches!(self.heap.get(self.scalar_value(id)), Value::Float(_))
+            });
             let strict_subclass = ac != bc
-                && if set_xor || dict_union || complex_pair || mixed_integer_slots {
+                && if set_xor
+                    || dict_union
+                    || complex_pair
+                    || mixed_integer_slots
+                    || float_operands.contains(&true)
+                {
                     self.direct_subclass(bc, ac)
                 } else {
                     self.subclass(bc, ac)
@@ -5960,6 +5966,22 @@ impl Context {
             strict_subclass
                 && if mixed_integer_slots && matches!(op, "//" | "%") {
                     self.integer_reflected_first(ac, bc, left, right)?
+                } else if float_operands == [true, true] {
+                    // Restoring both original descriptors restores the native division slot.
+                    let float = self.exact_type(self.scalar_value(a))?;
+                    let [left_native, right_native] = [ac, bc].map(|class| {
+                        [left, right].into_iter().all(|name| {
+                            self.numeric_slot_override(class, name)
+                                .is_none_or(|method| {
+                                    self.own_class_attr(float, name) == Some(method)
+                                })
+                        })
+                    });
+                    if left_native || right_native {
+                        left_native != right_native
+                    } else {
+                        self.reflected_slot_overridden(ac, bc, right)?
+                    }
                 } else if (dict_union || complex_pair)
                     && self.has_python_binary_slot(a, left, right)
                     && self.has_python_binary_slot(b, left, right)

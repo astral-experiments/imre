@@ -1525,8 +1525,10 @@ pub(super) fn builtin_slot(
     }
     let set_op = set_operator(method);
     let comparison = super::super::operators::comparison_op(method);
-    if matches!(method, "__add__" | "__iadd__" | "__contains__" | "__pow__")
-        || set_op.is_some()
+    if matches!(
+        method,
+        "__add__" | "__iadd__" | "__contains__" | "__pow__" | "__truediv__" | "__rtruediv__"
+    ) || set_op.is_some()
         || comparison.is_some()
     {
         if !kwargs.is_empty() {
@@ -1571,6 +1573,22 @@ pub(super) fn builtin_slot(
             return Ok(ctx
                 .real_compare_slot(op, storage, *value)?
                 .unwrap_or(NOT_IMPLEMENTED));
+        }
+        if owner == "float" {
+            let other = ctx.scalar_value(*value);
+            if !matches!(
+                ctx.heap.get(other),
+                Value::Float(_) | Value::Int(_) | Value::Bool(_)
+            ) {
+                return Ok(NOT_IMPLEMENTED);
+            }
+            // Calling a builtin wrapper uses the two native values, bypassing Python overrides.
+            let (left, right) = if method == "__rtruediv__" {
+                (other, storage)
+            } else {
+                (storage, other)
+            };
+            return ctx.binary("/", left, right);
         }
         if owner == "int" {
             return integer::add(ctx, storage, *value);

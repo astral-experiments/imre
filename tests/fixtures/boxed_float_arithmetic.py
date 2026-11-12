@@ -70,3 +70,46 @@ def current():
     value = -Named(0.0)
     print(type(value).__name__, value.hex())
     print(-Override(2.5), float.__neg__(Override(-2.5)))
+
+    class Quotient(float):
+        def __rtruediv__(self, other):
+            divide = super().__rtruediv__
+            assert divide.__self__ is self
+            return type(self)(divide(other))
+
+    result = 1 / Quotient(8)
+    assert type(result) is Quotient and result == 0.125
+    assert float.__truediv__(result, object()) is NotImplemented
+
+    class DeclinesDivision(float):
+        def __truediv__(self, other):
+            return NotImplemented
+
+    try:
+        DeclinesDivision(4) / DeclinesDivision(2)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("declined division retried the float payload")
+
+    class Forward(float):
+        def __truediv__(self, other):
+            return "forward"
+
+    class Inherits(Forward):
+        pass
+
+    class Restores(Forward):
+        __truediv__ = float.__truediv__
+
+    assert Forward(6) / Inherits(3) == "forward"
+    assert Forward(6) / Restores(3) == 2.0
+
+    from abc import ABCMeta
+
+    class VirtualBase(int, metaclass=ABCMeta):
+        def __truediv__(self, other):
+            return "int forward"
+
+    VirtualBase.register(float)
+    assert VirtualBase(6) / 3.0 == "int forward"
