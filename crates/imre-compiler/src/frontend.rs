@@ -5010,7 +5010,7 @@ impl<'a> Checker<'a> {
             return Ok(Iteration::Prepared(registered::cursor_input(
                 value,
                 element,
-                expression.range(),
+                Some(expression.range()),
                 None,
                 |ty| self.hidden(ty),
             )));
@@ -5056,7 +5056,7 @@ impl<'a> Checker<'a> {
             return Ok(Iteration::Prepared(registered::cursor_input(
                 iterable,
                 Type::PythonObject,
-                node.range(),
+                Some(node.range()),
                 None,
                 |ty| self.hidden(ty),
             )));
