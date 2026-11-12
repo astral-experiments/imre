@@ -224,12 +224,12 @@ impl<'ast> Escape<'ast, '_> {
                 .any(|range| range.contains_range(expression.range()))
     }
 
-    fn captured_target(&self, call: &ExprCall) -> Option<CapturedImport<'ast>> {
-        let name = call.func.as_name_expr()?;
+    fn captured_target(&self, callee: &Expr) -> Option<CapturedImport<'ast>> {
+        let name = callee.as_name_expr()?;
         let db = self.model.db();
         let binding = self
             .session
-            .file_binding(self.model.file(), &call.func)
+            .file_binding(self.model.file(), callee)
             .or_else(|| {
                 // Free names in a helper use its module's global binding.
                 let index = ty_python_core::semantic_index(db, self.model.program_file());
@@ -249,14 +249,11 @@ impl<'ast> Escape<'ast, '_> {
         };
         let alias = import.alias(self.parsed);
         let (owner, requirement) = self.captured.get(&alias.range())?;
-        call.arguments
-            .iter_source_order()
-            .all(|arg| self.argument_can_return(arg.value()))
-            .then(|| CapturedImport {
-                owner: self.session.files[*owner],
-                name: alias.name.as_str(),
-                requirement: requirement.clone(),
-            })
+        Some(CapturedImport {
+            owner: self.session.files[*owner],
+            name: alias.name.as_str(),
+            requirement: requirement.clone(),
+        })
     }
 
     fn argument_can_return(&self, expression: &Expr) -> bool {
@@ -471,6 +468,13 @@ impl<'ast> Escape<'ast, '_> {
         let capture = capture.filter(|capture| capture.name == function.name.as_str());
         let captured = capture.is_some();
         let bound = crate::frontend::fixed_call_arguments(call, &function.parameters)?;
+        if !call
+            .arguments
+            .iter_source_order()
+            .all(|arg| self.argument_can_return(arg.value()))
+        {
+            return None;
+        }
         if let Some(requirement) = capture.and_then(|capture| capture.requirement) {
             return Some(requirement);
         }
@@ -492,11 +496,7 @@ impl<'ast> Escape<'ast, '_> {
             && (!function.decorator_list.is_empty()
                 || function.is_async
                 || imre_ast::code_flags::is_generator(&function.body)
-                || !self.reachable(call.range())
-                || !call
-                    .arguments
-                    .iter_source_order()
-                    .all(|arg| self.argument_can_return(arg.value())))
+                || !self.reachable(call.range()))
         {
             return None;
         }
@@ -798,7 +798,7 @@ impl<'a> Visitor<'a> for Escape<'a, '_> {
         };
         // Python selects the callable before its argument expressions can rebind that name.
         let live_import = self.has_live_import(expression);
-        let capture = live_import.then(|| self.captured_target(call)).flatten();
+        let capture = live_import.then(|| self.captured_target(&call.func)).flatten();
         let intrinsic = ExecutionIntrinsic::possible(self.model, &call.func);
         let source_callable = intrinsic
             .map(SourceCallable::Builtin)
