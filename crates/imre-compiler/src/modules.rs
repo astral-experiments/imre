@@ -154,14 +154,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "unittest/case.py",
             include_str!("../stdlib/unittest/boxed_case.py"),
         )),
-        "pickle" => Some((
-            "pickle.py",
-            concat!(
-                include_str!("../stdlib/pickle.py"),
-                "\n",
-                include_str!("../stdlib/pickle_writer.py")
-            ),
-        )),
+        "pickle" => bundled_source!("pickle.py"),
         // CPython 3.14.5 Lib/_colorize.py. See licenses/CPython.txt.
         "_colorize" => bundled_source!("_colorize.py"),
         // CPython 3.14.5 Lib/_pyio.py. See licenses/CPython.txt.
