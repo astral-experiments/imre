@@ -1003,7 +1003,7 @@ def _make_autospec(spec, strict, as_instance, name=None, *, eat_self=False, wrap
         cls = NonCallableMagicMock
     mock = _autospec_mock(cls, spec, strict, as_instance, eat_self, name, wraps)
     if is_class and not as_instance:
-        mock.return_value = _make_autospec(spec, strict, True, eat_self=True)
+        mock.return_value = _make_autospec(spec, strict, True, eat_self=True, wraps=wraps)
     if spec is not None:
         # Capture each attribute once. Methods have signatures even before
         # attribute access, including on the class mock of a returned instance.
@@ -1015,13 +1015,16 @@ def _make_autospec(spec, strict, as_instance, name=None, *, eat_self=False, wrap
                 value = getattr(spec, entry)
             except AttributeError:
                 continue
+            # Match the presence check on the wrapped object, but retain the
+            # callable already obtained from the spec, including from a descriptor.
+            child_wraps = value if wraps and hasattr(wraps, entry) and not strict else None
             # Only ordinary functions read from a class still need a receiver.
             skip_receiver = (is_class and isinstance(value, FunctionType)
                              and isinstance(getattr_static(spec, entry, value), FunctionType))
             members[entry] = (value, skip_receiver)
             if isinstance(value, (FunctionType, MethodType)):
                 child_cls = AsyncMock if iscoroutinefunction(value) else MagicMock
-                child = _autospec_mock(child_cls, value, strict, False, skip_receiver)
+                child = _autospec_mock(child_cls, value, strict, False, skip_receiver, wraps=child_wraps)
                 child.return_value = child._get_child_mock()
                 mock._adopt(child, "." + entry)
         # Fields without defaults need not appear in dir(spec). Their declared
@@ -1160,10 +1163,9 @@ def create_autospec(spec, spec_set=False, instance=False, *, unsafe=False, **kwa
         wrap_function = isinstance(spec, FunctionType)
     if not unsafe:
         _check_spec_arg_typos(kwargs)
-    wraps = kwargs.pop("wraps", None) if wrap_function else None
-    for option in ("wraps", "parent"):
-        if option in kwargs:
-            raise NotImplementedError(f"create_autospec does not support {option!r}")
+    wraps = kwargs.pop("wraps", None)
+    if "parent" in kwargs:
+        raise NotImplementedError("create_autospec does not support 'parent'")
     mock = _make_autospec(spec, spec_set, instance, kwargs.pop("name", None), wraps=wraps)
     result = mock
     if wrap_function:
