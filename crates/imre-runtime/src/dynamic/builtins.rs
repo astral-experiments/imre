@@ -723,6 +723,7 @@ pub(super) fn real_methods(owner: &str) -> &'static [&'static str] {
             "__bool__",
             "__eq__",
             "__float__",
+            "__floordiv__",
             "__ge__",
             "__getnewargs__",
             "__gt__",
@@ -731,9 +732,12 @@ pub(super) fn real_methods(owner: &str) -> &'static [&'static str] {
             "__le__",
             "__lshift__",
             "__lt__",
+            "__mod__",
             "__ne__",
             "__pow__",
+            "__rfloordiv__",
             "__rlshift__",
+            "__rmod__",
             "__round__",
             "__rrshift__",
             "__rshift__",
@@ -1877,15 +1881,9 @@ pub(super) fn call(
     if let Some(owner) = exception_init_descriptor(name) {
         return exceptions::initialize(ctx, owner, args, kwargs);
     }
-    let complex_op = match name {
-        "complex.__mul__" => Some(("*", false)),
-        "complex.__rmul__" => Some(("*", true)),
-        "complex.__truediv__" => Some(("/", false)),
-        "complex.__rtruediv__" => Some(("/", true)),
-        "complex.__pow__" => Some(("**", false)),
-        "complex.__rpow__" => Some(("**", true)),
-        _ => None,
-    };
+    let member = name.split_once('.');
+    let numeric_op =
+        member.and_then(|(owner, method)| super::operators::numeric_binary_slot(owner, method));
     if matches!(
         name,
         "object.__hash__"
@@ -1913,7 +1911,7 @@ pub(super) fn call(
             | "mappingproxy.__ior__"
             | "super.__repr__"
             | "struct.Struct.__repr__"
-    ) || complex_op.is_some()
+    ) || numeric_op.is_some()
     {
         let (owner, method) = name.rsplit_once('.').unwrap();
         let owner = if owner == "struct.Struct" {
@@ -1932,11 +1930,17 @@ pub(super) fn call(
                     ctx.heap.get(ctx.scalar_value(receiver)),
                     Value::Struct { .. }
                 ))
-            || (matches!(owner, "super" | "complex") && !ctx.builtin_slot_accepts(receiver, owner))
+            || (matches!(owner, "super" | "complex" | "int")
+                && !ctx.builtin_slot_accepts(receiver, owner))
         {
-            return Err(type_error(format!(
-                "descriptor '{method}' requires a '{owner}' object but received a '{}'",
+            let actual = if owner == "int" {
+                ctx.builtin_type_name(receiver)
+                    .unwrap_or_else(|| ctx.type_name(receiver))
+            } else {
                 ctx.type_name(receiver)
+            };
+            return Err(type_error(format!(
+                "descriptor '{method}' requires a '{owner}' object but received a '{actual}'"
             )));
         }
         if !kwargs.is_empty() {
@@ -1944,7 +1948,7 @@ pub(super) fn call(
                 "wrapper {method}() takes no keyword arguments"
             )));
         }
-        if let Some(("**", reflected)) = complex_op {
+        if let Some(("**", reflected)) = numeric_op {
             let (other, modulus) = match *rest {
                 [other] => (other, None),
                 [other, third] => (other, Some(third)),
@@ -1965,7 +1969,7 @@ pub(super) fn call(
                 .unwrap_or(NOT_IMPLEMENTED));
         }
         let comparison = super::operators::comparison_op(method);
-        if complex_op.is_some()
+        if numeric_op.is_some()
             || comparison.is_some()
             || matches!(method, "__or__" | "__ror__" | "__ior__")
         {
@@ -1975,15 +1979,20 @@ pub(super) fn call(
                     rest.len()
                 )));
             };
-            if let Some((op, reflected)) = complex_op {
+            if let Some((op, reflected)) = numeric_op {
                 let (a, b) = if reflected {
                     (*other, receiver)
                 } else {
                     (receiver, *other)
                 };
-                return Ok(ctx
-                    .complex_product_or_quotient(op, a, b)?
-                    .unwrap_or(NOT_IMPLEMENTED));
+                let result = if owner == "int" {
+                    let code =
+                        super::operators::integer_binary_code(op).expect("integer binary slot");
+                    ctx.inherited_integer_slot(a, b, code)?
+                } else {
+                    ctx.complex_product_or_quotient(op, a, b)?
+                };
+                return Ok(result.unwrap_or(NOT_IMPLEMENTED));
             }
             if owner == "object" {
                 if method != "__ne__" {
@@ -2148,7 +2157,7 @@ pub(super) fn call(
         return Ok(NONE);
     }
     // Module-qualified exceptions use the exception constructor below.
-    if let Some((owner, method)) = name.split_once('.')
+    if let Some((owner, method)) = member
         && !is_exception(name)
     {
         return match owner {
@@ -2430,7 +2439,7 @@ pub(super) fn call(
                 if matches!(
                     method,
                     "__add__" | "__bool__" | "__hash__" | "__index__" | "__pow__"
-                ) || super::operators::int_shift_slot(method).is_some() =>
+                ) =>
             {
                 collections::builtin_slot(ctx, name, args, kwargs)
             }
