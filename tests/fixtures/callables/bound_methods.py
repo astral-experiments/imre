@@ -41,6 +41,7 @@ def main() -> None:
     fn: Callable[[str], str] = item.render
     label = item.label
     item = Item("rebound", 3)
+    assert label.__self__.text == "kept"
     print(label("prefix"))
     print(label(suffix="?", prefix="before"))
     print(fn("!"))
