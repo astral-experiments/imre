@@ -88,8 +88,8 @@ pub(super) fn semantics(
     let str_takes_self = str_method.is_some_and(takes_self);
     let str_needs_depth =
         str_method.is_some_and(|id| function_source_frame(module, repr_methods, id).is_none());
-    let repr = repr.map(|id| units.function_ref(id));
-    let str_method = str_method.map(|id| units.function_ref(id));
+    let repr = repr.map(|id| units.function_ref(module, id));
+    let str_method = str_method.map(|id| units.function_ref(module, id));
     let output = units.entry_buffer();
     let named = module.types.tuple_metadata(ty);
     // These field owners can be dropped without scheduling child records.

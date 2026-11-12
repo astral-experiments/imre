@@ -617,7 +617,6 @@ fn emit_program(
     } else {
         " align 64"
     };
-    let mut bodies = Vec::with_capacity(module.functions.len());
     for (id, function) in module.functions.iter().chain([&module.entry]).enumerate() {
         let entry = id == module.functions.len();
         emitter.output.current = if entry {
@@ -635,7 +634,10 @@ fn emit_program(
             .output
             .include_integers(std::mem::take(&mut emitter.body.integers));
         if !entry {
-            bodies.push(std::mem::take(&mut emitter.body.code));
+            emitter
+                .output
+                .finish_function(id, function, attrs, &emitter.body.code);
+            emitter.body.code.clear();
         }
     }
     emitter
@@ -783,7 +785,6 @@ fn emit_program(
     }
     emitter.enum_table();
     emitter.literal_pool();
-    write_function_bodies(emitter.output, module, bodies, attrs);
     emitter.output.common().push('\n');
     body::write_main(
         emitter.output.entry_buffer(),
@@ -795,28 +796,6 @@ fn emit_program(
     // Layout hints never replace the representation, overflow, or error guards.
     emitter.output.common().push_str(BRANCH_WEIGHTS);
     Ok(())
-}
-
-fn write_function_bodies(output: &mut Output, module: &Module, bodies: Vec<String>, attrs: &str) {
-    for (id, (f, body)) in module.functions.iter().zip(bodies).enumerate() {
-        let params = f
-            .params
-            .iter()
-            .enumerate()
-            .map(|(i, &slot)| format!("{} %arg{i}", f.locals[slot].llvm()))
-            .collect::<Vec<_>>()
-            .join(", ");
-        output.common().push('\n');
-        let name = output.function_name(id);
-        output.define_function(
-            output.function_owner(id),
-            &name,
-            f.returns.llvm(),
-            &params,
-            attrs,
-            |unit| unit.push_str(&body),
-        );
-    }
 }
 
 #[derive(Default)]
@@ -1042,7 +1021,7 @@ impl Emitter<'_, '_> {
         enum_match: bool,
         origin: Option<&ir::FixedOrigin>,
     ) -> Value {
-        let name = self.output.function_ref(function);
+        let name = self.output.function_ref(self.module, function);
         self.call_with_effect(
             &format!("@{name}"),
             None,
@@ -4313,7 +4292,7 @@ impl Emitter<'_, '_> {
             let takes_owner = self
                 .resource_types
                 .contains(&function.locals[function.params[0]]);
-            let shutdown = self.output.function_ref(*shutdown);
+            let shutdown = self.output.function_ref(self.module, *shutdown);
             self.line(format!(
                 "call void @imre_log_handler_register(ptr {}, ptr @{shutdown}, i1 {takes_owner})",
                 handler.operand
@@ -7249,11 +7228,11 @@ impl Emitter<'_, '_> {
                 let desc = self.output.global_ref(format!("exception_type_{kind}"));
                 let text = text.map_or_else(
                     || "null".into(),
-                    |f| format!("@{}", self.output.function_ref(f)),
+                    |f| format!("@{}", self.output.function_ref(self.module, f)),
                 );
                 let repr = repr.map_or_else(
                     || "null".into(),
-                    |f| format!("@{}", self.output.function_ref(f)),
+                    |f| format!("@{}", self.output.function_ref(self.module, f)),
                 );
                 Value{ty:returns,operand:self.instruction(format!("call ptr @imre_named_exception_record_new(ptr @{desc}, ptr {}, ptr {message}, ptr {text}, ptr {repr}, i32 {})",record.operand,(u32::from(*dataclass_repr) | (u32::from(self.resource_types.contains(&record.ty)) << 1) | (u32::from(*tuple_args) << 2)))),small_integer:false}
             }
