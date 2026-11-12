@@ -1491,6 +1491,7 @@ impl Context {
                     let (target, args) = self.operator_call_target(args)?;
                     return self.call_in_scope(scope, target, args, kwargs);
                 }
+                "len" => return call(self, "len", &args, &kwargs),
                 "eval" => return self.call_eval_exec(scope, "eval", &args, &kwargs),
                 "exec" => return self.call_eval_exec(scope, "exec", &args, &kwargs),
                 "locals" | "vars" if args.is_empty() && kwargs.is_empty() => {
