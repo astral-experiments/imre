@@ -320,14 +320,17 @@ pub(super) struct SourceChecks {
 }
 
 impl SourceChecks {
+    fn accepts_range(errors: &[TextRange], definition: TextRange) -> bool {
+        errors
+            .iter()
+            .all(|error| !definition.contains_range(*error))
+    }
+
     fn cached(&self, module: ModuleId, definition: &ast::StmtFunctionDef) -> Option<bool> {
-        let errors = self.errors.borrow();
-        Some(
-            errors
-                .get(&module)?
-                .iter()
-                .all(|range| !definition.range().contains_range(*range)),
-        )
+        self.errors
+            .borrow()
+            .get(&module)
+            .map(|errors| Self::accepts_range(errors, definition.range()))
     }
 
     pub(super) fn accepts(
@@ -342,11 +345,11 @@ impl SourceChecks {
         else {
             return false;
         };
-        self.errors
-            .borrow_mut()
+        let mut modules = self.errors.borrow_mut();
+        let errors = modules
             .entry(module)
             .or_insert_with(|| session.source_error_ranges(module));
-        self.cached(module, definition).expect("checked module")
+        Self::accepts_range(errors, definition.range())
     }
 }
 
