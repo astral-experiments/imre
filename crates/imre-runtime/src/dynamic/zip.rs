@@ -152,13 +152,10 @@ impl Context {
         };
         let width = text.len();
         let digits = crate::objects::string_integer_values(text).ok()?;
-        let mut items = Vec::new();
-        items.try_reserve_exact(digits.len()).ok()?;
-        items.extend(
-            digits
-                .into_iter()
-                .map(|digit| self.alloc(Value::Int(digit))),
-        );
+        let items = digits
+            .into_iter()
+            .map(|digit| self.alloc(Value::Int(digit)))
+            .collect();
         let Value::Iterator {
             offset, sequence, ..
         } = self.heap.get_mut(input)
