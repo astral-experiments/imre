@@ -724,9 +724,24 @@ pub(super) struct ScannedModule {
 
 fn retained_imports(
     module: ParsedModule<'_, '_>,
+    getter: Option<&mut Imports>,
+    prepared_text: Option<&str>,
 ) -> Result<(Imports, Option<ScannedModule>), String> {
+    // File discovery normalizes newlines. A caller preparing the original bytes
+    // needs its own parser so diagnostics keep the executable source offsets.
+    if prepared_text.is_some_and(|text| {
+        !std::ptr::eq(text, module.text.as_ref()) && text != module.text.as_ref()
+    }) {
+        return imports_from_body(
+            &module.text,
+            &mut module_source::into_body(module.parsed),
+            getter,
+            None,
+        )
+        .map(|imports| (imports, None));
+    }
     let mut body = module.parsed.syntax().body.clone();
-    let mut imports = imports_from_body(&module.text, &mut body, None, None)?;
+    let mut imports = imports_from_body(&module.text, &mut body, getter, None)?;
     let scanned = imports.invalid_executable.is_none().then(|| ScannedModule {
         parsed: match module.parsed {
             Cow::Owned(parser) => Some(parser),
@@ -737,9 +752,14 @@ fn retained_imports(
     Ok((imports, scanned))
 }
 
-fn scan_zip_imports(source: &str) -> Result<(Imports, Option<ScannedModule>), String> {
-    match read_import_source(source, SourceKind::DecodedFile)? {
-        ImportSource::Module(module) => retained_imports(module),
+fn scan_shipped_imports(
+    source: &str,
+    kind: SourceKind,
+    getter: Option<&mut Imports>,
+    prepared_text: Option<&str>,
+) -> Result<(Imports, Option<ScannedModule>), String> {
+    match read_import_source(source, kind)? {
+        ImportSource::Module(module) => retained_imports(module, getter, prepared_text),
         ImportSource::Invalid(error) => Ok((
             Imports {
                 invalid_executable: Some(error),
@@ -776,26 +796,33 @@ fn imports_from_body(
     if imports.private_names.string_annotations {
         imports.module_flags |= imre_ast::code_flags::FUTURE_ANNOTATIONS;
     }
-    let mut getter_body = Vec::new();
+    let mut getter_bodies = Vec::new();
     if getter.is_some() {
-        for stmt in body.iter_mut() {
+        for (index, stmt) in body.iter_mut().enumerate() {
             if let Stmt::FunctionDef(function) = stmt
                 && function.name.as_str() == "__getattr__"
+                && !function.body.is_empty()
             {
-                getter_body.extend(std::mem::take(&mut function.body));
+                getter_bodies.push((index, std::mem::take(&mut function.body)));
             }
         }
     }
     imports.visit_body(body);
     if let Some(getter) = getter
-        && !getter_body.is_empty()
+        && !getter_bodies.is_empty()
     {
         // sys.path and pkgutil.get_data can add source hints through module aliases.
         getter.sys_names = std::mem::take(&mut imports.sys_names);
         getter.pkgutil_names = std::mem::take(&mut imports.pkgutil_names);
         getter.get_data_names = std::mem::take(&mut imports.get_data_names);
         getter.machinery_names.clone_from(&imports.machinery_names);
-        getter.visit_body(&getter_body);
+        for (index, statements) in getter_bodies {
+            getter.visit_body(&statements);
+            let Stmt::FunctionDef(function) = &mut body[index] else {
+                unreachable!("saved a module-level __getattr__ declaration");
+            };
+            function.body = statements;
+        }
         imports.literal_calls.append(&mut getter.literal_calls);
         imports.has_open_exec |= getter.has_open_exec;
     }
@@ -1255,6 +1282,42 @@ pub(crate) fn compile(
     let mut literals = LiteralImports::default();
     literals.register(0, &mut first, false, true, ImportOrigin::File);
     let keep_docstrings = python_optimization < 2;
+    // Standalone shipped module checks can release their syntax immediately. Application
+    // types and physical loader registrations are selected later in registration order.
+    let mut shipped_checks = HashMap::new();
+    let mut shipped_imports = |unit: usize,
+                               name: &str,
+                               path: &Path,
+                               source: &str,
+                               kind: SourceKind,
+                               getter: Option<&mut Imports>| {
+        if !matches!(mode, crate::CompilationMode::Check) {
+            return scan_imports(source, kind, getter, None);
+        }
+        let (imports, scanned) = scan_shipped_imports(source, kind, getter, Some(source))?;
+        if let Some(ScannedModule {
+            parsed: Some(parser),
+            lowered,
+        }) = scanned
+        {
+            let module = ParsedModule {
+                text: Cow::Borrowed(source),
+                parsed: Cow::Owned(parser),
+            };
+            let checked = emit::PreparedBody::from_parsed(
+                name,
+                path,
+                (module, Some(lowered)),
+                python_optimization,
+                emit::ModuleOrigin::Bundled,
+                Default::default(),
+                None,
+            )
+            .map(drop);
+            shipped_checks.insert(unit, checked);
+        }
+        Ok(imports)
+    };
     let mut shadowed_imports = VecDeque::new();
     let mut file_origins = Vec::new();
     let mut frozen_files: Vec<String> = Vec::new();
@@ -1620,9 +1683,15 @@ pub(crate) fn compile(
                     let path = Path::new(bundled_root).join(filename);
                     let package = path.ends_with("__init__.py");
                     let mut getter = Imports::default();
-                    let mut imports =
-                        scan_imports(&source, SourceKind::File, Some(&mut getter), None)
-                            .map_err(|e| format!("{}: {e}", path.display()))?;
+                    let mut imports = shipped_imports(
+                        sources.len(),
+                        &prefix,
+                        &path,
+                        &source,
+                        SourceKind::File,
+                        Some(&mut getter),
+                    )
+                    .map_err(|e| format!("{}: {e}", path.display()))?;
                     // unittest's loader imports application modules by name, including during discovery.
                     // Other bundled imports are implementation details of a known provider.
                     if prefix != "unittest.loader" {
@@ -1694,7 +1763,12 @@ pub(crate) fn compile(
                         }
                         if let Some(package) = archive.package(&prefix) {
                             if let Some(member) = archive.module(&prefix)
-                                && let Ok((mut imports, scanned)) = scan_zip_imports(&member.source)
+                                && let Ok((mut imports, scanned)) = scan_shipped_imports(
+                                    &member.source,
+                                    SourceKind::DecodedFile,
+                                    None,
+                                    None,
+                                )
                             {
                                 if let Some(module) = scanned {
                                     scanned_modules.insert(sources.len(), module);
@@ -1946,7 +2020,7 @@ pub(crate) fn compile(
                         .filter(|_| winner && kind == SourceKind::File)
                         .and_then(|(graph, id)| CheckedFile::select(graph, id));
                     let imports = if let Some(file) = parsed {
-                        retained_imports(file.parsed(modules))
+                        retained_imports(file.parsed(modules), None, None)
                     } else {
                         scan_imports(&src, kind, None, alternative).map(|imports| (imports, None))
                     };
@@ -2071,10 +2145,17 @@ pub(crate) fn compile(
                             )
                         };
                     let imports = if digest.is_some() {
-                        scan_zip_imports(&source)
+                        scan_shipped_imports(&source, SourceKind::DecodedFile, None, None)
                     } else {
-                        scan_imports(&source, SourceKind::DecodedFile, None, None)
-                            .map(|imports| (imports, None))
+                        shipped_imports(
+                            sources.len(),
+                            &prefix,
+                            &path,
+                            &source,
+                            SourceKind::DecodedFile,
+                            None,
+                        )
+                        .map(|imports| (imports, None))
                     };
                     let Ok((imports, scanned)) = imports else {
                         continue;
@@ -2402,7 +2483,7 @@ pub(crate) fn compile(
         .unwrap_or_default();
     let mut prepared = prepare::units(
         (&sources, &builtins),
-        (entry_source, scanned_modules),
+        (entry_source, scanned_modules, shipped_checks),
         python_optimization,
         (
             Path::new(bundled_root),
@@ -2781,6 +2862,28 @@ pub(crate) fn bundled_module_source(
         import_module::boxed_source(name)?
     };
     Some((file, source.into()))
+}
+
+#[test]
+fn a_shipped_getter_keeps_its_body_and_executable_source_offsets() {
+    let crlf = "def __getattr__(name):\r\n    import fractions\r\n    return fractions\r\n";
+    let normalized = crlf.replace("\r\n", "\n");
+    let mut getter = Imports::default();
+    let (imports, module) =
+        scan_shipped_imports(crlf, SourceKind::File, Some(&mut getter), Some(&normalized)).unwrap();
+    assert!(imports.names.is_empty());
+    assert_eq!(getter.names, [(0, "fractions".to_owned())]);
+    let (body, _) = module.unwrap().lowered;
+    let [Stmt::FunctionDef(function)] = body.as_slice() else {
+        panic!("expected the module's lazy getter");
+    };
+    let [Stmt::Import(_), Stmt::Return(ret)] = function.body.as_slice() else {
+        panic!("expected the import and return inside the getter");
+    };
+    assert_eq!(&normalized[ret.range()], "return fractions");
+
+    let (_, module) = scan_shipped_imports(crlf, SourceKind::File, None, Some(crlf)).unwrap();
+    assert!(module.is_none());
 }
 
 #[test]
