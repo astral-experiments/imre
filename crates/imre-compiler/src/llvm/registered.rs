@@ -58,17 +58,22 @@ pub(crate) fn frame_inputs(
     let mut scalar_reads = 0usize;
     let mut protocol_reads = 0usize;
     let mut generators = Vec::new();
-    let body = &checked.function.body;
     let mut uses_python_protocol = false;
-    let private = checked.region().private_slots();
-    let has_slot = |slot: &usize| private.contains(slot) || checked.local_names.contains_key(slot);
+    let mut required_private = std::collections::BTreeSet::new();
+    let mut uses_slot = |slot: &usize, private: bool| {
+        if checked.local_names.contains_key(slot) {
+            return !private;
+        }
+        required_private.insert(*slot);
+        true
+    };
     let mut supported = true;
-    // This visit reaches suspensions inside eager scopes and protected binding suites.
-    ir::walk_nodes(body, &mut |node, _| {
+    // Scope declarations can follow uses in the walk. Check their complete set afterward.
+    let private = checked.region().frame_slots(|node| {
         let expr = match node {
             ir::Node::Statement(stmt) => {
                 supported &= match stmt {
-                    Statement::Assign(slot, _) => has_slot(slot),
+                    Statement::Assign(slot, _) => uses_slot(slot, false),
                     Statement::Raise(value) => {
                         uses_python_protocol = true;
                         value.as_ref().is_none_or(|raised| raised.origin.is_none())
@@ -102,18 +107,19 @@ pub(crate) fn frame_inputs(
                         uses_python_protocol = true;
                         binding
                             .as_ref()
-                            .is_none_or(|binding| private.contains(&binding.entered))
+                            .is_none_or(|binding| uses_slot(&binding.entered, true))
                     }
                     Statement::SetItem(receiver, _, _)
                     | Statement::AugmentItem(receiver, _, ir::ItemUpdate::Protocol(_), _) => {
                         uses_python_protocol |= receiver.ty == Type::PythonObject;
                         matches!(receiver.ty, Type::Dict(_) | Type::PythonObject)
                     }
-                    Statement::Clear(slot) => private.contains(slot),
+                    Statement::Clear(slot) => uses_slot(slot, true),
                     Statement::If(..) => true,
-                    Statement::Match(_, cases) => {
-                        cases.iter().flat_map(|case| &case.captures).all(has_slot)
-                    }
+                    Statement::Match(_, cases) => cases
+                        .iter()
+                        .flat_map(|case| &case.captures)
+                        .all(|slot| uses_slot(slot, false)),
                     Statement::IterNext {
                         kind: kind @ (ir::IterNextKind::Generic | ir::IterNextKind::Async(_)),
                         iterator,
@@ -123,11 +129,11 @@ pub(crate) fn frame_inputs(
                     } => {
                         checked.function.locals[*iterator] == Type::PythonObject
                             && value.is_none_or(|slot| {
-                                *kind == ir::IterNextKind::Generic && private.contains(&slot)
+                                *kind == ir::IterNextKind::Generic && uses_slot(&slot, true)
                             })
                             && [iterator, key, ready]
                                 .into_iter()
-                                .all(|slot| private.contains(slot))
+                                .all(|slot| uses_slot(slot, true))
                     }
                     _ => false,
                 };
@@ -138,7 +144,7 @@ pub(crate) fn frame_inputs(
         supported &= match &expr.kind {
             ExprKind::Local(slot) => {
                 scalar_reads += usize::from(scalar_parameter(expr));
-                has_slot(slot)
+                uses_slot(slot, false)
             }
             ExprKind::Bind(slot, _) => {
                 uses_python_protocol = true;
@@ -267,7 +273,11 @@ pub(crate) fn frame_inputs(
         let ty = checked.function.locals[*slot];
         ty == Type::PythonObject || live_parameters && ty.builtin_scalar_name().is_some()
     });
-    if !supported || has_live_parameter && !uses_python_protocol || scalar_reads != protocol_reads {
+    if !supported
+        || !required_private.is_subset(&private)
+        || has_live_parameter && !uses_python_protocol
+        || scalar_reads != protocol_reads
+    {
         return None;
     }
     Some(if live_parameters {
@@ -1518,8 +1528,10 @@ impl RegisteredFrame<'_, '_> {
         let live_roots = self.live_slots.len();
         let first = self.private_slot_count;
         self.iteration.private_slots = checked
-            .frame_slots(|iterator, kind| {
-                self.iteration.cursors.insert(iterator, kind);
+            .frame_slots(|node| {
+                if let ir::Node::Statement(Statement::IterNext { iterator, kind, .. }) = node {
+                    self.iteration.cursors.insert(*iterator, *kind);
+                }
             })
             .into_iter()
             .collect();
