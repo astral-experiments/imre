@@ -5,6 +5,7 @@ import errno
 import os
 import pty
 import selectors
+import shutil
 import signal
 import subprocess
 import sys
@@ -264,7 +265,7 @@ def check_link_options(directory: Path, compiler: str, runtime: str) -> int:
     return 7
 
 
-def check_run_command(directory: Path, compiler: str, flags: list[str], timeout: float) -> int:
+def check_run_command(directory: Path, compiler: str, python: str, flags: list[str], timeout: float) -> int:
     help_text = run([compiler, "run", "--help"], cwd=directory, input=b"")
     require_success(help_text, "imre run --help")
     assert b"imre run SOURCE.py" in help_text.stdout
@@ -326,9 +327,13 @@ def check_run_command(directory: Path, compiler: str, flags: list[str], timeout:
 
     source.write_text("raise ValueError('script failed')\n", encoding="utf-8")
     compiled = [compiler, "run", path, *flags]
+    # Resolve --python in the caller's cwd before running the reference in the fixture directory.
+    interpreter = Path(shutil.which(python) or python).absolute()
+    reference = subprocess.run([interpreter, path], cwd=directory, env=env, capture_output=True, timeout=60)
     failed = subprocess.run(compiled, cwd=directory, env=env, capture_output=True, timeout=60)
-    assert failed.returncode == 1 and failed.stderr == b"ValueError: script failed\n", failed
-    assert not failed.stdout and not list(scratch.iterdir())
+    assert failed.returncode == reference.returncode == 1, (failed, reference)
+    assert failed.stderr == reference.stderr, (failed.stderr, reference.stderr)
+    assert failed.stdout == reference.stdout == b"" and not list(scratch.iterdir())
     before = source.read_bytes()
     collision = run([*compiled, "--emit-llvm", path], cwd=directory, input=b"")
     assert collision.returncode and b"distinct paths" in collision.stderr and source.read_bytes() == before
@@ -371,7 +376,7 @@ def main() -> None:
         if args.sanitize:
             flags.append("--sanitize")
         passed += check_link_options(temporary, compiler, runtime)
-        passed += check_run_command(temporary, compiler, flags, args.timeout)
+        passed += check_run_command(temporary, compiler, args.python, flags, args.timeout)
         sources = {}
         for name, source in PROGRAMS.items():
             path = temporary / f"{name}.py"
