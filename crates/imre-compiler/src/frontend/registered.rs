@@ -2365,7 +2365,7 @@ fn delete_targets(delete: &ast::StmtDelete) -> Vec<&ast::Expr> {
 
 /// Resolve the implicit manager protocol's source anchor while its syntax and
 /// original source text are available. LLVM only converts accepted offsets to columns.
-fn context_site(source: &str, manager: &ast::Expr, is_async: bool) -> ir::ContextSite {
+pub(super) fn context_site(source: &str, manager: &ast::Expr, is_async: bool) -> ir::ContextSite {
     let range = manager.range();
     let delimiter = match manager {
         ast::Expr::Call(call) => Some((call.func.end(), b'(')),
@@ -3088,31 +3088,14 @@ impl SourceScope<'_> {
         let Some(target) = item.optional_vars.as_deref() else {
             return Ok(None);
         };
-        let slot = self.hidden(Type::PythonObject);
-        let value = Expr::local(slot, Type::PythonObject);
-        // Unpacking consumes the container before any individual target can suspend.
-        let value = if pattern_elements(target).is_some() {
-            unpacking::take_pattern_temporary(value, slot)
-        } else {
-            value
-        };
-        let mut body = Vec::with_capacity(1);
-        self.with_binding_operands(|scope| {
-            unpacking::bind_input(scope, target, value, None, &mut body)
-        })
-        .map_err(|()| {
-            self.refusal.unwrap_or((
-                target.range(),
-                "cannot compile this assignment target ahead of time",
-            ))
-        })?;
-        Ok(Some(ir::ContextBinding {
-            entered: slot,
-            body: vec![Statement::Scope {
-                body,
-                clear: vec![slot],
-            }],
-        }))
+        self.with_binding_operands(|scope| contexts::python_binding(scope, target))
+            .map(Some)
+            .map_err(|()| {
+                self.refusal.unwrap_or((
+                    target.range(),
+                    "cannot compile this assignment target ahead of time",
+                ))
+            })
     }
 
     fn with_items(
@@ -4682,6 +4665,169 @@ mod tests {
                 }
             });
             assert_eq!(names, ["key", "callback", "arg", "more", "index"]);
+        }
+    }
+
+    fn checked_named_source(text: &str) -> SourceGraph {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.py");
+        std::fs::write(&path, text).unwrap();
+        let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
+        graph.registered_startup = true;
+        crate::checked_lower(&mut graph).unwrap();
+        graph
+    }
+
+    #[test]
+    fn checked_frames_call_the_live_imported_member() {
+        let graph = checked_named_source(
+            r#"import argparse
+import subprocess
+from pathlib import Path
+
+args = argparse.ArgumentParser().parse_args()
+
+def run(command: list[str], *, cwd: Path) -> None:
+    subprocess.run(command, cwd=cwd, check=True)
+
+def capture(command: list[str], *, cwd: Path) -> str:
+    result = subprocess.run(command, cwd=cwd, check=True, capture_output=True, text=True)
+    return result.stdout.strip()
+
+run(["echo", "run"], cwd=Path("."))
+print(capture(["echo", "capture"], cwd=Path(".")))
+"#,
+        );
+        let bodies = graph.registered_functions();
+        for definition in graph.modules[graph.entry]
+            .parsed
+            .syntax()
+            .body
+            .iter()
+            .filter_map(ast::Stmt::as_function_def_stmt)
+        {
+            let retained = bodies
+                .get(&graph.entry)
+                .and_then(|functions| functions.get(&definition.start()));
+            let body = retained.unwrap_or_else(|| panic!("missing {}", definition.name));
+            let mut calls = Vec::new();
+            ir::walk_expressions(&body.function.body, &mut |value| {
+                let ExprKind::Builtin(Builtin::RegisteredCall(site), operands) = &value.kind else {
+                    return;
+                };
+                let name = match &site.target {
+                    ir::RegisteredCallTarget::Callable { .. } => {
+                        let ExprKind::Builtin(Builtin::RegisteredAttribute { name, .. }, _) =
+                            &operands[0].without_location().kind
+                        else {
+                            panic!("expected a live module member")
+                        };
+                        name
+                    }
+                    ir::RegisteredCallTarget::Method { name, .. } => name,
+                };
+                calls.push(name.clone());
+            });
+            let expected: &[&str] = if definition.name.as_str() == "run" {
+                &["run"]
+            } else {
+                &["run", "strip"]
+            };
+            assert_eq!(calls, expected);
+        }
+    }
+
+    #[test]
+    fn a_checked_frame_keeps_the_parser_truth_test_and_protected_suite() {
+        let text = r#"import argparse
+import tempfile
+
+DEFAULT = "here"
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--repository", default=DEFAULT, help=f"repository {DEFAULT}")
+    args = parser.parse_args()
+    value = args.repository
+    if not value:
+        return
+    with tempfile.TemporaryDirectory() as directory:
+        print(directory)
+
+main()
+"#;
+        let graph = checked_named_source(text);
+        let bodies = graph.registered_functions();
+        let main = bodies[&graph.entry].values().next().unwrap();
+        let mut constructed = false;
+        let mut registered = false;
+        let mut negated = false;
+        let mut protected = false;
+        main.region().frame_slots(|node| match node {
+            ir::Node::Expression(value) => match &value.kind {
+                ExprKind::Builtin(Builtin::RegisteredAttribute { name, .. }, _) if name == "ArgumentParser" => constructed = true,
+                ExprKind::Builtin(Builtin::RegisteredCall(site), _) => {
+                    registered |= matches!(&site.target, ir::RegisteredCallTarget::Method { name, .. } if name == "add_argument");
+                }
+                ExprKind::Unary(ast::UnaryOp::Not, operand) => {
+                    negated |= operand.ty == Type::PythonObject;
+                }
+                _ => {}
+            },
+            ir::Node::Statement(Statement::With { manager, binding: Some(binding), body, .. }) => {
+                protected = manager.ty == Type::PythonObject
+                    && !binding.body.is_empty()
+                    && body.iter().any(|stmt| matches!(stmt, Statement::Expr(value) if value.without_location().is_registered_invoke()));
+            }
+            _ => {}
+        });
+        assert!(constructed && registered && negated && protected);
+    }
+
+    #[test]
+    fn a_checked_method_evaluates_its_computed_receiver_before_arguments() {
+        let text = r#"import argparse
+args = argparse.ArgumentParser().parse_args()
+class Holder:
+    def selected(self, a: str, b: str) -> str:
+        return a + b
+def factory() -> Holder:
+    return Holder()
+def choices() -> list[Holder]:
+    return [Holder()]
+def first() -> str:
+    return "a"
+def second() -> str:
+    return "b"
+def direct() -> str:
+    return factory().selected(first(), second())
+def indexed() -> str:
+    return choices()[0].selected(first(), second())
+exec("print(1)")
+"#;
+        let graph = checked_named_source(text);
+        let bodies = graph.registered_functions();
+        for (name, producer) in [("direct", "factory"), ("indexed", "choices")] {
+            let start = TextSize::try_from(text.find(&format!("def {name}(")).unwrap()).unwrap();
+            let mut names = Vec::new();
+            let mut selections = 0;
+            bodies[&graph.entry][&start].region().frame_slots(|node| {
+                let ir::Node::Expression(value) = node else { return };
+                match &value.kind {
+                    ExprKind::Builtin(Builtin::RegisteredCall(site), operands)
+                        if matches!(&site.target, ir::RegisteredCallTarget::Method { name, .. } if name == "selected") => {
+                            assert_eq!(operands.len(), 3);
+                            selections += 1;
+                        }
+                    ExprKind::Invoke { callable, .. } => {
+                        if let ExprKind::Builtin(Builtin::RegisteredName(name), _) = &callable.without_location().kind {
+                            names.push(name.clone());
+                        }
+                    }
+                    _ => {}
+                }
+            });
+            assert_eq!(selections, 1);
+            assert_eq!(names, [producer, "first", "second"]);
         }
     }
 
