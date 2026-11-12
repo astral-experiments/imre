@@ -1257,12 +1257,19 @@ impl Checker<'_> {
             matches!(method.attr.as_str(), "join" | "split" | "replace")
                 && graph.session.scalar_type(owner, &method.value) == Some(Type::Str)
         });
-        // A Python frame reads this module binding before selecting the method.
-        let module_method = method.is_some_and(|method| {
+        // A bound local holds the actual result of its checked initializer. A frame
+        // resolves the method on that object even when inference knows a concrete type.
+        let bound_method = method.is_some_and(|method| {
             matches!(
                 self.resolve(&method.value),
                 Some(Binding::Value(_) | Binding::ImportedValue(..))
-            )
+            ) || method.value.as_name_expr().is_some_and(|name| {
+                self.names.get(name.id.as_str()).is_some_and(|&slot| {
+                    self.registered_local_start
+                        .is_some_and(|first| slot >= first)
+                        && self.locals[slot] == Type::PythonObject
+                })
+            })
         });
         let Some(mut value) = operation(
             node,
@@ -1271,7 +1278,7 @@ impl Checker<'_> {
             // Even a skipped operand participates in static argument and result checking.
             |_| None,
             |receiver| {
-                string_method || module_method || graph.session.is_dynamic_receiver(owner, receiver)
+                string_method || bound_method || graph.session.is_dynamic_receiver(owner, receiver)
             },
             |child| self.expr(child),
         )?
