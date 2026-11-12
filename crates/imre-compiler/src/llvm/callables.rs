@@ -398,15 +398,17 @@ impl Emitter<'_, '_> {
             .iter()
             .map(|&index| &values[index].value)
             .collect();
-        let result = match &target {
-            NativeCallTarget::Function(id) => self.user_call(
-                *id,
-                returns,
-                &inputs,
-                args.exhaustive_enum_match,
-                args.site.fixed(),
-            ),
-            NativeCallTarget::Callable(callable) => {
+        let result = match (&target, &args.site) {
+            (NativeCallTarget::Function(id), _)
+            | (NativeCallTarget::Callable(_), ir::CallSite::SavedFunction(_, id)) => self
+                .user_call(
+                    *id,
+                    returns,
+                    &inputs,
+                    args.exhaustive_enum_match,
+                    args.site.fixed(),
+                ),
+            (NativeCallTarget::Callable(callable), _) => {
                 let targets = self.callable_targets.get(callable.value.ty).to_vec();
                 let entry = if let [target] = targets.as_slice() {
                     format!(
