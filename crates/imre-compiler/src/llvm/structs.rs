@@ -306,16 +306,6 @@ impl Emitter<'_, '_> {
         self.start(&resume);
     }
 
-    /// Evaluate constructor operands in source order; copy only their checked
-    /// scalar values to the destination in declared field order.
-    pub(super) fn append_struct_constructor(&mut self, list: &Value, item: &Expr) -> bool {
-        let Some(row) = self.packed_constructor(item) else {
-            return false;
-        };
-        self.append_packed(list, row);
-        true
-    }
-
     pub(super) fn packed_constructor(&mut self, item: &Expr) -> Option<PackedRow> {
         let ExprKind::Construct { args, .. } = &item.kind else {
             return None;

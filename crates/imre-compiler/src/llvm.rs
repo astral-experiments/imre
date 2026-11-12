@@ -4318,16 +4318,6 @@ impl Emitter<'_, '_> {
         if let Some(v) = self.at_builtin_origin(builtin, |e| e.line_builtin(builtin, expressions)) {
             return v;
         }
-        if let (Builtin::Append, [receiver, item]) = (builtin, expressions)
-            && self.module.types.is_value_struct(item.ty)
-            && matches!(item.kind, ExprKind::Construct { .. })
-        {
-            let list = self.operand(receiver);
-            let appended = self.append_struct_constructor(&list.value, item);
-            debug_assert!(appended);
-            self.release_operand(&list);
-            return none();
-        }
         if let Builtin::Logging(ir::LogOperation::HandlerRegister(shutdown)) = builtin {
             let handler = self.expr(&expressions[0]);
             let function = &self.module.functions[*shutdown];
@@ -8764,12 +8754,8 @@ impl Emitter<'_, '_> {
                 )),
                 small_integer: false,
             },
-            Builtin::SetAdd | Builtin::SetDiscard => {
-                self.set_member(
-                    &args[0].value,
-                    &args[1].value,
-                    matches!(builtin, Builtin::SetAdd),
-                );
+            Builtin::SetDiscard => {
+                self.set_member(&args[0].value, &args[1].value, false);
                 none()
             }
             Builtin::SetIter => self.call("imre_set_iter", Type::Iterator, &[&args[0].value]),
@@ -8838,19 +8824,13 @@ impl Emitter<'_, '_> {
                     self.unpack_word(word, Type::Int)
                 }
             }
-            Builtin::Append | Builtin::JoinBufferAppend => {
-                if matches!(builtin, Builtin::JoinBufferAppend) {
-                    self.checked_status(format!(
-                        "call i32 @imre_join_buffer_append(ptr {}, ptr {})",
-                        args[0].value.operand, args[1].value.operand
-                    ));
-                    self.release_operand(&args[1]);
-                } else if let Some(window) = self.byte_output_window(&expressions[0]) {
-                    self.append_private_bytes(window, &args[0].value, &args[1].value, None);
-                    self.release_operand(&args[1]);
-                } else {
-                    self.append(&args[0].value, &args[1]);
-                }
+            Builtin::Append | Builtin::SetAdd => unreachable!("checked collection insertion"),
+            Builtin::JoinBufferAppend => {
+                self.checked_status(format!(
+                    "call i32 @imre_join_buffer_append(ptr {}, ptr {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                self.release_operand(&args[1]);
                 self.release_operand(&args[0]);
                 return none();
             }

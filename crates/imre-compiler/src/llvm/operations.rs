@@ -526,6 +526,61 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         .expect("guarded integer arithmetic has a normal result")
     }
 
+    /// Root a Python handle before evaluating another operand that could replace its owner.
+    fn rooted_operand(&mut self, expr: &Expr) -> CheckedValue {
+        match &mut self.0 {
+            Entry::Native(emitter) => CheckedValue::native(emitter.operand(expr)),
+            Entry::Registered(frame) => CheckedValue::handle(frame.evaluate_handle(expr)),
+        }
+    }
+
+    /// Capture the container before the item. A packed record can write its fields directly.
+    fn insert(&mut self, op: &Builtin, exprs: &[Expr]) -> CheckedValue {
+        let Some(Ok(crate::ir::IterationOperands::Insert([target, item]))) =
+            op.iteration_operands(exprs)
+        else {
+            unreachable!("checked collection operands");
+        };
+        let container = self.rooted_operand(target);
+        if let Entry::Native(emitter) = &mut self.0
+            && matches!(op, Builtin::Append)
+            && let Some(row) = emitter.packed_constructor(item)
+        {
+            emitter.append_packed(container.fixed_value(), row);
+            emitter.release_operand(&container.into_native());
+            return CheckedValue::owned(none());
+        }
+        let spread = item.spread_operand();
+        let value = self.rooted_operand(spread.unwrap_or(item));
+        match &mut self.0 {
+            Entry::Native(emitter) => {
+                let container = container.into_native();
+                let value = value.into_native();
+                if matches!(op, Builtin::SetAdd) {
+                    emitter.set_member(&container.value, &value.value, true);
+                    emitter.release_operand(&container);
+                    emitter.release_operand(&value);
+                } else {
+                    if let Some(window) = emitter.byte_output_window(target) {
+                        emitter.append_private_bytes(window, &container.value, &value.value, None);
+                        emitter.release_operand(&value);
+                    } else {
+                        emitter.append(&container.value, &value);
+                    }
+                    emitter.release_operand(&container);
+                }
+                CheckedValue::owned(none())
+            }
+            Entry::Registered(frame) => {
+                let operation = if spread.is_some() { "extend" } else { "append" };
+                CheckedValue::handle(frame.op(
+                    operation,
+                    &[container.rooted_handle(), value.rooted_handle()],
+                ))
+            }
+        }
+    }
+
     fn subscript(&mut self, op: &Builtin, operands: &[Expr], returns: Type) -> CheckedValue {
         let [base, key] = operands else {
             unreachable!("checked subscript operands")
@@ -536,11 +591,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             return CheckedValue::owned(value);
         }
         // A receiver that came from Python must already be rooted before the key can call back.
-        let operand = |code: &mut Self, expr: &Expr| match &mut code.0 {
-            Entry::Native(emitter) => CheckedValue::native(emitter.operand(expr)),
-            Entry::Registered(frame) => CheckedValue::handle(frame.evaluate_handle(expr)),
-        };
-        let base = operand(self, base);
+        let base = self.rooted_operand(base);
         if let (Entry::Registered(frame), Builtin::RegisteredSubscript(..)) = (&mut self.0, op)
             && let Some(value) = frame.slice_subscript(op, base.rooted_handle(), key)
         {
@@ -867,6 +918,9 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 | Builtin::RegisteredSubscript(..)),
                 args,
             ) => self.subscript(op, args, expr.ty),
+            ExprKind::Builtin(op @ (Builtin::Append | Builtin::SetAdd), args) => {
+                self.insert(op, args)
+            }
             ExprKind::Builtin(op @ Builtin::Bool, args) => match &mut self.0 {
                 Entry::Native(emitter) => CheckedValue::owned(emitter.builtin(op, args, expr.ty)),
                 Entry::Registered(_) => {

@@ -1103,15 +1103,7 @@ impl<'f> Frame<'f, '_, '_> {
                         let value = self.evaluate_handle(value);
                         self.code.op("truth", &[&value])
                     }
-                    Insert([out, item]) => {
-                        let out = self.evaluate_handle(out);
-                        let (op, item) = match sequences::spread(item) {
-                            Some(iterable) => ("extend", iterable),
-                            None => ("append", item),
-                        };
-                        let item = self.evaluate_handle(item);
-                        self.code.op(op, &[&out, &item])
-                    }
+                    Insert(_) => unreachable!("checked collection insertion"),
                     Unpack(value, count, star, target) => {
                         let value = self.evaluate_handle(value);
                         let unpack = |frame: &mut Self| frame.unpack(&value, count, star);
