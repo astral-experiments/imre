@@ -1776,6 +1776,28 @@ mod tests {
             error.contains("inferred returns require one supported exact or nullable type"),
             "{error}"
         );
+        let stored = source.replace(
+            "def relay(arg): return take(arg)\nprint(relay(choose()))",
+            "value: int = take(choose())\nprint(value)",
+        );
+        let reannotated = stored.replace(
+            "value: int = take(choose())\nprint(value)",
+            "def outer() -> int:\n    value: str = 'old'\n    value: int = take(choose())\n    return value\nprint(outer())",
+        );
+        for program in [&stored, &reannotated] {
+            std::fs::write(&file, program).unwrap();
+            let mut graph = crate::modules::SourceGraph::load(&file, None, &[]).unwrap();
+            assert!(matches!(
+                crate::checked_lower(&mut graph).unwrap(),
+                crate::CheckedProgram::Native(_)
+            ));
+        }
+        std::fs::write(&file, stored.replace("raise SystemExit(13)", "pass")).unwrap();
+        let error = crate::check_file(&file, None).unwrap_err();
+        assert!(
+            error.contains(":5:19: Imre: expected int, got str"),
+            "{error}"
+        );
         std::fs::write(&file, source.replace("raise SystemExit(13)", "pass")).unwrap();
         let error = crate::check_file(&file, None).unwrap_err();
         assert!(error.contains("expected int, got str"), "{error}");

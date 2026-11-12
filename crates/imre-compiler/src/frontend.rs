@@ -3994,6 +3994,20 @@ impl<'a> Checker<'a> {
         unreachable!("mismatched exact types return an error")
     }
 
+    /// A terminating call supplies no value to the destination that follows it.
+    fn coerce_supplied_result(
+        &self,
+        value: Expr,
+        expected: Type,
+        node: &impl Ranged,
+    ) -> Result<Expr, String> {
+        if self.terminating_call(&value) {
+            Ok(value)
+        } else {
+            self.coerce(value, expected, node)
+        }
+    }
+
     /// Keep an exact return mismatch separate from a TypeError in one of its operands.
     fn coerce_return(
         &self,
@@ -4001,17 +4015,14 @@ impl<'a> Checker<'a> {
         expected: Type,
         node: &impl Ranged,
     ) -> Result<Expr, String> {
-        // The called body never supplies an operand to this return.
-        if self.terminating_call(&value) {
-            return Ok(value);
-        }
-        self.coerce(value, expected, node).map_err(|failure| {
-            if matches!(&failure, Failure::Diagnostic(d) if d.kind == Kind::ExactType) {
-                failure.classify(Kind::ReturnType)
-            } else {
-                failure
-            }
-        })
+        self.coerce_supplied_result(value, expected, node)
+            .map_err(|failure| {
+                if matches!(&failure, Failure::Diagnostic(d) if d.kind == Kind::ExactType) {
+                    failure.classify(Kind::ReturnType)
+                } else {
+                    failure
+                }
+            })
     }
 
     /// Adapt an evaluated argument to the target's concrete or private representation.
@@ -6037,36 +6048,54 @@ impl<'a> Checker<'a> {
                     module: self.module,
                     annotation: assign.annotation.range(),
                 };
-                let check_value = |checker: &mut Self, rhs: &ast::Expr| {
-                    checked.map_or_else(
-                        || checker.expr_expected_from(rhs, ty, Some(declaration)),
-                        Ok,
-                    )
-                };
-                // A new outermost annotation dominates every subsequent read.
-                // Evaluate its RHS with the old binding; closures and nested
-                // suites keep their fixed slots across calls and control flow.
-                if !self.module_scope
-                    && self.block_depth == 1
-                    && self.local_functions.is_empty()
-                    && let Some(&old) = self.names.get(name.id.as_str())
-                    && self.locals[old] != ty
-                    && let Some(rhs) = &assign.value
-                {
-                    let value = check_value(self, rhs)?;
-                    let statements = self.replace_local(name.id.as_str(), old, ty, value);
-                    self.bind_declared_type(self.names[name.id.as_str()], declaration);
-                    return Ok((statements, true));
-                }
-                let slot = self.declare(name.id.as_str(), ty, statement)?;
-                self.bind_declared_type(slot, declaration);
-                if let Some(site) = list_site {
-                    self.document_list_sites.insert(slot, site);
+                // A dominating new annotation evaluates its RHS against the previous binding.
+                let replacement = self.names.get(name.id.as_str()).copied().filter(|&old| {
+                    !self.module_scope
+                        && self.block_depth == 1
+                        && self.local_functions.is_empty()
+                        && self.locals[old] != ty
+                        && assign.value.is_some()
+                });
+                let slot = if let Some(old) = replacement {
+                    old
                 } else {
-                    self.document_list_sites.remove(&slot);
-                }
-                if let Some(value) = &assign.value {
-                    let value = check_value(self, value)?;
+                    let slot = self.declare(name.id.as_str(), ty, statement)?;
+                    self.bind_declared_type(slot, declaration);
+                    if let Some(site) = list_site {
+                        self.document_list_sites.insert(slot, site);
+                    } else {
+                        self.document_list_sites.remove(&slot);
+                    }
+                    slot
+                };
+                if let Some(rhs) = &assign.value {
+                    let value = checked.map_or_else(
+                        || {
+                            self.expr_in_context(
+                                rhs,
+                                ty,
+                                |_, _| false,
+                                Self::coerce_supplied_result,
+                                Some(declaration),
+                            )
+                        },
+                        Ok,
+                    )?;
+                    if self.terminating_call(&value) {
+                        if let Some(old) = replacement {
+                            let slot = self.replacement_slot(name.id.as_str(), old, ty);
+                            self.bind_declared_type(slot, declaration);
+                        }
+                        if let Some(sites) = &mut self.fixed_sites {
+                            sites.statement(rhs.range(), FixedNode::Effect);
+                        }
+                        return Ok((vec![Statement::Expr(value)], false));
+                    }
+                    if replacement.is_some() {
+                        let statements = self.replace_local(name.id.as_str(), slot, ty, value);
+                        self.bind_declared_type(self.names[name.id.as_str()], declaration);
+                        return Ok((statements, true));
+                    }
                     self.assigned_value(slot, &value);
                     Some(Statement::Assign(slot, value))
                 } else {
@@ -7418,13 +7447,19 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// A straight-line rebind publishes the new slot before releasing the old owner.
-    fn replace_local(&mut self, name: &str, old: usize, ty: Type, value: Expr) -> Vec<Statement> {
+    /// Bind following source reads to the replacement slot.
+    fn replacement_slot(&mut self, name: &str, old: usize, ty: Type) -> usize {
         let slot = self.hidden(ty);
         if self.inferred_containers.remove(&old) {
             self.inferred_containers.insert(slot);
         }
         self.names.insert(name.to_owned(), slot);
+        slot
+    }
+
+    /// A straight-line rebind publishes the new slot before releasing the old owner.
+    fn replace_local(&mut self, name: &str, old: usize, ty: Type, value: Expr) -> Vec<Statement> {
+        let slot = self.replacement_slot(name, old, ty);
         self.assigned_value(slot, &value);
         self.assigned.remove(&old);
         self.narrowed.remove_mut(&old);
@@ -8724,7 +8759,7 @@ impl<'a> Checker<'a> {
                         "name is not a local value; globals and first-class functions are unsupported",
                     ));
                 };
-                if !self.assigned.contains(&slot) {
+                if self.reachable && !self.assigned.contains(&slot) {
                     if let Some(&flag) = self.bound_flags.get(name.id.as_str()) {
                         self.graph
                             .checked_unbound_local_read(self.module, expression.range());
