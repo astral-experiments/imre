@@ -99,41 +99,47 @@ fn while_lock_held<T>(probe: impl FnOnce(&Arc<PrimitiveLock>) -> T) -> T {
     })
 }
 
+fn registered(handle: &Arc<Handle>, daemon: bool, owner: Option<Id>) -> Registration {
+    Registration::Thread(RegisteredThread {
+        handle: Arc::clone(handle),
+        daemon,
+        owner,
+    })
+}
+
 #[test]
 fn native_start_and_join_publish_the_worker_lifetime() {
-    let ctx = context();
-    let (worker, poll, alive, active, count) = while_lock_held(|lock| {
-        let worker = launch(
-            &ctx,
+    let mut ctx = context();
+    let handle = Arc::<Handle>::default();
+    while_lock_held(|lock| {
+        let (ident, native_id) = launch(
+            &mut ctx,
             Operation::Acquire {
                 lock: Arc::clone(lock),
                 release: None,
             },
-            None,
-            Arc::default(),
+            registered(&handle, false, None),
+            Vec::new(),
         )
         .unwrap();
-        let poll = worker.handle.join(Some(Duration::ZERO));
-        let alive = worker.handle.alive();
-        let active = worker.active.load(Ordering::Acquire);
-        let count = ctx.threads.count.load(Ordering::Acquire);
-        (worker, poll, alive, active, count)
+        handle.join(Some(Duration::ZERO)).unwrap();
+        assert!(handle.alive());
+        assert!(ctx.workers.entries[0].active.load(Ordering::Acquire));
+        assert_eq!(ctx.threads.count.load(Ordering::Acquire), 1);
+        assert_eq!(ident, handle.ident());
+        assert_ne!(ident, thread_ident());
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        assert_ne!(
+            native_id.unwrap(),
+            crate::objects::locks::native_thread_id()
+        );
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        assert_eq!(native_id, None);
     });
-    worker.handle.join(None).unwrap();
-    worker.handle.join(None).unwrap();
-
-    poll.unwrap();
-    assert!(alive);
-    assert!(active);
-    assert_eq!(count, 1);
-    assert_ne!(worker.ident, thread_ident());
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
-    assert_ne!(
-        worker.native_id.unwrap(),
-        crate::objects::locks::native_thread_id()
-    );
-    assert!(!worker.handle.alive());
-    assert!(!worker.active.load(Ordering::Acquire));
+    handle.join(None).unwrap();
+    handle.join(None).unwrap();
+    assert!(!handle.alive());
+    assert!(!ctx.workers.entries[0].active.load(Ordering::Acquire));
     assert_eq!(ctx.threads.count.load(Ordering::Acquire), 0);
 }
 
@@ -155,32 +161,35 @@ fn bound_hash_worker_owns_expanded_input_while_running() {
 
     // Hold the worker inside the native update while the caller clears the original list.
     let held = hash.lock();
-    let worker = launch(&ctx, operation, None, Arc::default()).unwrap();
-    ctx.workers.entries.push(Entry {
-        thread: Some(RegisteredThread {
-            handle: Arc::clone(&worker.handle),
-            daemon: false,
-            owner: Some(owner),
-        }),
-        active: worker.active,
+    let handle = Arc::<Handle>::default();
+    let weak_owner = ctx.heap.native_weak_reference(owner).unwrap();
+    let (ident, _) = launch(
+        &mut ctx,
+        operation,
+        registered(&handle, false, Some(owner)),
         operands,
-    });
+    )
+    .unwrap();
     let Value::List(items) = ctx.heap.get_mut(args) else {
         unreachable!()
     };
     items.clear();
     ctx.heap.weak_edge_removed(input);
     ctx.heap.release_temporaries_since(mark);
+    ctx.heap.keep(weak_owner);
     ctx.collect_unreachable();
+    assert!(matches!(ctx.heap.get(weak_owner), Value::Weak(wr) if wr.target == Some(owner)));
     assert!(matches!(ctx.heap.get(input), Value::Bytes(data) if data == b"abc"));
-    assert!(worker.handle.alive());
-    assert_ne!(worker.ident, thread_ident());
+    assert!(handle.alive());
+    assert_ne!(ident, thread_ident());
     assert!(ctx.check_thread_reporter_mutable().is_ok());
 
     drop(held);
-    worker.handle.join(None).unwrap();
+    handle.join(None).unwrap();
     ctx.reap_thread_operands();
     assert!(ctx.workers.entries.is_empty());
+    ctx.collect_unreachable();
+    assert!(matches!(ctx.heap.get(weak_owner), Value::Weak(wr) if wr.target.is_none()));
     let hexdigest = ctx.lookup_attr(digest, "hexdigest").unwrap();
     let result = ctx.call(hexdigest, Vec::new(), Vec::new()).unwrap();
     assert_eq!(
@@ -216,18 +225,16 @@ fn joined_and_detached_operands_are_released_at_their_own_checkpoints() {
         assert!(ctx.check_thread_reporter_mutable().is_err());
 
         let owner = ctx.instance(object, None);
-        let joined = launch(&ctx, Operation::Empty, None, Arc::default()).unwrap();
-        joined.handle.join(Some(Duration::from_secs(5))).unwrap();
-        assert!(!joined.handle.alive());
-        ctx.workers.entries.push(Entry {
-            thread: Some(RegisteredThread {
-                handle: joined.handle,
-                daemon: false,
-                owner: Some(owner),
-            }),
-            active: joined.active,
-            operands: vec![],
-        });
+        let joined = Arc::<Handle>::default();
+        launch(
+            &mut ctx,
+            Operation::Empty,
+            registered(&joined, false, Some(owner)),
+            Vec::new(),
+        )
+        .unwrap();
+        joined.join(Some(Duration::from_secs(5))).unwrap();
+        assert!(!joined.alive());
         ctx.reap_thread_operands();
         assert!(!ctx.workers.roots().any(|&id| id == owner));
         ctx.heap.release_temporaries_since(mark);
@@ -324,38 +331,32 @@ fn zero_timeout_applies_to_worker_exit_and_all_observers_share_native_join() {
 #[test]
 fn shutdown_joins_non_daemon_workers_and_leaves_daemon_workers_running() {
     let mut ctx = context();
-    let (daemon, daemon_alive, non_daemon_joined) = while_lock_held(|lock| {
-        let daemon = launch(
-            &ctx,
+    let daemon = Arc::<Handle>::default();
+    let normal = Arc::<Handle>::default();
+    while_lock_held(|lock| {
+        launch(
+            &mut ctx,
             Operation::Acquire {
                 lock: Arc::clone(lock),
                 release: None,
             },
-            None,
-            Arc::default(),
+            registered(&daemon, true, None),
+            Vec::new(),
         )
         .unwrap();
-        let normal = launch(&ctx, Operation::Empty, None, Arc::default()).unwrap();
-        for (worker, is_daemon) in [(&daemon, true), (&normal, false)] {
-            ctx.workers.entries.push(Entry {
-                thread: Some(RegisteredThread {
-                    handle: Arc::clone(&worker.handle),
-                    daemon: is_daemon,
-                    owner: None,
-                }),
-                active: Arc::clone(&worker.active),
-                operands: Vec::new(),
-            });
-        }
+        launch(
+            &mut ctx,
+            Operation::Empty,
+            registered(&normal, false, None),
+            Vec::new(),
+        )
+        .unwrap();
         drop(ctx);
-        let non_daemon_joined = normal.handle.native.lock().unwrap().thread.is_none();
-        let daemon_alive = daemon.handle.alive();
-        normal.handle.join(None).unwrap();
-        (daemon, daemon_alive, non_daemon_joined)
+        assert!(normal.native.lock().unwrap().thread.is_none());
+        assert!(daemon.alive());
+        normal.join(None).unwrap();
     });
-    daemon.handle.join(None).unwrap();
-    assert!(daemon_alive);
-    assert!(non_daemon_joined);
+    daemon.join(None).unwrap();
 }
 
 #[test]
@@ -366,36 +367,26 @@ fn detached_handle_keeps_the_non_daemon_worker_registered_until_exit() {
     assert!(!handle.is_done());
     assert!(handle.set_done().is_err());
     let active = while_lock_held(|gate| {
-        let worker = launch(
-            &ctx,
+        let (ident, _) = launch(
+            &mut ctx,
             Operation::Acquire {
                 lock: Arc::clone(gate),
                 release: None,
             },
-            None,
-            Arc::clone(&handle),
+            registered(&handle, false, None),
+            Vec::new(),
         )
         .unwrap();
-        assert!(Arc::ptr_eq(&worker.handle, &handle));
         assert_ne!(handle.ident(), thread_ident());
-        assert_eq!(handle.ident(), worker.ident);
+        assert_eq!(handle.ident(), ident);
         assert!(handle.check_new().is_err());
-        ctx.workers.entries.push(Entry {
-            thread: Some(RegisteredThread {
-                handle: worker.handle,
-                daemon: false,
-                owner: None,
-            }),
-            operands: Vec::new(),
-            active: Arc::clone(&worker.active),
-        });
         handle.set_done().unwrap();
         handle.join_public(&mut ctx, None).unwrap();
         assert!(handle.is_done());
         assert!(handle.awaiting_exit());
         ctx.reap_thread_operands();
         assert_eq!(ctx.workers.entries.len(), 1);
-        worker.active
+        Arc::clone(&ctx.workers.entries[0].active)
     });
     ctx.workers.join_non_daemon();
     assert!(!active.load(Ordering::Acquire));
