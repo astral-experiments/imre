@@ -3301,7 +3301,7 @@ impl Emitter<'_, '_> {
 
     fn integer_arithmetic(&mut self, op: Binary, left: &str, right: &str) -> Value {
         let result = self.body.integer_arithmetic(op, left, right);
-        if op == Binary::Modulo {
+        if matches!(op, Binary::FloorDivide | Binary::Modulo) {
             self.check_error();
         }
         self.owned(result)
@@ -3399,11 +3399,12 @@ impl Emitter<'_, '_> {
                 };
                 self.call(name, sequence, &[value, count])
             }
-            Binary::Add | Binary::Subtract | Binary::Multiply | Binary::Modulo => {
-                self.integer_arithmetic(op, &left.operand, &right.operand)
-            }
+            Binary::Add
+            | Binary::Subtract
+            | Binary::Multiply
+            | Binary::FloorDivide
+            | Binary::Modulo => self.integer_arithmetic(op, &left.operand, &right.operand),
             Binary::Divide => self.call("imre_int_true_divide", Type::Float, &[left, right]),
-            Binary::FloorDivide => self.call("int_floordiv", Type::Int, &[left, right]),
             Binary::BitAnd => self.call("int_and", Type::Int, &[left, right]),
             Binary::BitOr => self.call("int_or", Type::Int, &[left, right]),
             Binary::BitXor => self.call("int_xor", Type::Int, &[left, right]),
@@ -11571,7 +11572,6 @@ done:
             .unwrap();
         }
     }
-    output.push_str(&division_helper(Binary::FloorDivide));
     output.push_str(&bitwise_helpers());
     output
 }
