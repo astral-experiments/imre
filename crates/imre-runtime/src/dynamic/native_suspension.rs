@@ -292,7 +292,14 @@ impl Context {
         // Operand release can run Python. Publish to the resumer first and keep
         // the generator running until its remaining frame is ready to suspend.
         let result = self.heap.publish_to_resumer(result);
-        self.discard_temporaries(mark, None);
+        if let (Some(delegate), Ok(value)) = (state.delegate_root, &result)
+            && !self.workers.has_unreaped_workers()
+            && self.heap.forwarded_roots_survive(delegate, mark, *value)
+        {
+            self.heap.release_temporaries_since(mark);
+        } else {
+            self.discard_temporaries(mark, None);
+        }
         let frame = self.heap.suspend_native_frame();
         *saved.0.borrow_mut() = Some((state, frame));
         let Value::Generator {

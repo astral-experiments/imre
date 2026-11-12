@@ -189,6 +189,7 @@ fn bound_hash_worker_owns_expanded_input_while_running() {
 #[test]
 fn joined_and_detached_operands_are_released_at_their_own_checkpoints() {
     let mut ctx = context();
+    assert!(!ctx.workers.has_unreaped_workers());
     let mark = ctx.heap.temporary_mark();
     let object = ctx.builtin("object");
     let operand = ctx.instance(object, None);
@@ -206,6 +207,7 @@ fn joined_and_detached_operands_are_released_at_their_own_checkpoints() {
         )
         .unwrap();
         assert_ne!(ident, thread_ident());
+        assert!(ctx.workers.has_unreaped_workers());
         assert!(ctx.workers.shutdown_handles().next().is_none());
         assert!(ctx.workers.live_threads().next().is_none());
         assert!(ctx.check_thread_reporter_mutable().is_err());
@@ -240,8 +242,10 @@ fn joined_and_detached_operands_are_released_at_their_own_checkpoints() {
     assert!(ctx.check_thread_reporter_mutable().is_ok());
     // A low-level worker can exit between reaping and enumerating GC roots.
     ctx.reap_thread_operands();
+    assert!(ctx.workers.has_unreaped_workers());
     assert!(ctx.workers.roots().any(|&id| id == operand));
     assert!(!ctx.heap_and_roots().1.any(|id| id == operand));
+    assert!(!ctx.workers.has_unreaped_workers());
     ctx.collect_unreachable();
     assert!(matches!(ctx.heap.get(weak), Value::Weak(wr) if wr.target.is_none()));
 }
