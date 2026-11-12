@@ -1,6 +1,39 @@
 //! Instruction output and basic-block state for one LLVM function.
 
+use super::Binary;
 use std::fmt::{Display, Write as _};
+
+/// Definitions referenced by the checked instructions written to one LLVM unit.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct IntegerFunctions {
+    arithmetic: u32,
+}
+
+impl IntegerFunctions {
+    pub(super) fn require(&mut self, op: Binary) {
+        self.arithmetic |= 1 << op as u32;
+    }
+
+    pub(super) fn include(&mut self, other: Self) {
+        self.arithmetic |= other.arithmetic;
+    }
+
+    pub(super) fn is_empty(self) -> bool {
+        self.arithmetic == 0
+    }
+
+    pub(super) fn write(self, output: &mut String, declare_overflow: bool) {
+        let uses = |op: Binary| self.arithmetic & (1 << op as u32) != 0;
+        if uses(Binary::Modulo) {
+            output.push_str(&super::division_helper(Binary::Modulo));
+        }
+        for op in [Binary::Add, Binary::Subtract, Binary::Multiply] {
+            if uses(op) {
+                super::write_integer_arithmetic(output, op, declare_overflow);
+            }
+        }
+    }
+}
 
 #[derive(Clone)]
 pub(crate) struct FunctionBody {
@@ -13,6 +46,7 @@ pub(crate) struct FunctionBody {
     pub(crate) terminated: bool,
     next_value: usize,
     next_label: usize,
+    pub(super) integers: IntegerFunctions,
 }
 
 impl FunctionBody {
@@ -25,6 +59,7 @@ impl FunctionBody {
             terminated: false,
             next_value: 0,
             next_label: 0,
+            integers: IntegerFunctions::default(),
         }
     }
 
@@ -88,6 +123,7 @@ impl FunctionBody {
             super::Binary::Modulo => "int_mod",
             _ => unreachable!("expected checked integer operation"),
         };
+        self.integers.require(op);
         super::Value {
             ty: super::Type::Int,
             operand: self.instruction(format!("call i64 @{helper}(i64 {left}, i64 {right})")),

@@ -109,10 +109,7 @@ pub(crate) struct Declarations {
     pub(crate) emitted_guarded_named_op: bool,
     pub(crate) registered_expression: bool,
     pub(crate) exec_operand: bool,
-    pub(crate) checked_integer_add: bool,
-    pub(crate) checked_integer_subtract: bool,
-    pub(crate) checked_integer_multiply: bool,
-    pub(crate) checked_integer_modulo: bool,
+    pub(super) integers: crate::llvm::body::IntegerFunctions,
     pub(crate) reads_exact_int_word: bool,
 }
 
@@ -134,25 +131,11 @@ pub(crate) struct Output {
 
 impl Output {
     pub(crate) fn integer_prelude(&mut self) {
-        use crate::ir::Binary;
         if self.declarations.reads_exact_int_word {
             self.functions
                 .push_str("declare i64 @imre_dyn_exact_int_word(ptr, i64)\n");
         }
-        let helpers = [
-            (self.declarations.checked_integer_add, Binary::Add, "sadd"),
-            (
-                self.declarations.checked_integer_subtract,
-                Binary::Subtract,
-                "ssub",
-            ),
-            (
-                self.declarations.checked_integer_multiply,
-                Binary::Multiply,
-                "smul",
-            ),
-        ];
-        if !self.declarations.checked_integer_modulo && !helpers.iter().any(|(used, _, _)| *used) {
+        if self.declarations.integers.is_empty() {
             return;
         }
         self.functions.push_str(concat!(
@@ -163,21 +146,7 @@ impl Output {
             "!0 = !{!\"branch_weights\", i32 1, i32 2000}\n",
             "!1 = !{!\"branch_weights\", i32 2000, i32 1}\n",
         ));
-        if self.declarations.checked_integer_modulo {
-            self.functions
-                .push_str(&crate::llvm::division_helper(Binary::Modulo));
-        }
-        for (used, op, intrinsic) in helpers {
-            if used {
-                writeln!(
-                    self.functions,
-                    "declare {{ i64, i1 }} @llvm.{intrinsic}.with.overflow.i64(i64, i64)"
-                )
-                .unwrap();
-                self.functions
-                    .push_str(&crate::llvm::integer_arithmetic_helper(op));
-            }
-        }
+        self.declarations.integers.write(&mut self.functions, true);
     }
 
     pub(crate) fn data(&mut self, bytes: &[u8]) -> String {

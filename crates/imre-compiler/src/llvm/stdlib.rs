@@ -208,9 +208,7 @@ impl Emitter<'_, '_> {
                 Type::Float,
                 &[&args[0].value, &args[1].value],
             ),
-            Builtin::Abs if args[0].value.ty == Type::Int => {
-                self.call("int_abs", Type::Int, &[&args[0].value])
-            }
+            Builtin::Abs if args[0].value.ty == Type::Int => self.integer_absolute(&args[0].value),
             Builtin::Abs => self.call("llvm.fabs.f64", Type::Float, &[&args[0].value]),
             _ => unreachable!("only typed stdlib operations enter this dispatch"),
         }

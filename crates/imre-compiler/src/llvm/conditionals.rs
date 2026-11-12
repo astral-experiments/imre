@@ -95,6 +95,17 @@ mod tests {
     use crate::{CompileOptions, compile};
 
     #[test]
+    fn integer_abs_builtin_emits_its_slow_path() {
+        let output = compile(
+            "def magnitude(value: int) -> int:\n    return abs(value)\n",
+            &CompileOptions::default(),
+        )
+        .unwrap();
+        assert!(output.contains("define internal i64 @int_abs("));
+        assert!(output.contains("define internal i64 @int_sub("));
+    }
+
+    #[test]
     fn checked_absolute_value_guards_heap_words_before_testing_overflow() {
         let output = compile(
             "def magnitude(value: int) -> int:\n    return -value if value < 0 else value\n",
