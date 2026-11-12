@@ -382,7 +382,9 @@ impl<'p> RegisteredBody<'p> {
             Self::Function(checked) => (checked, None, &[][..]),
             Self::Suite(suite) => (&suite.checked, Some(suite), suite.operands.as_slice()),
         };
-        let Some(enclosing) = code.enter_checked_slots(checked.region()) else {
+        let Some(enclosing) =
+            code.enter_checked_slots(checked.region(), Some(checked.function.locals.len()))
+        else {
             return;
         };
         let next = Cell::new(0);
@@ -411,7 +413,7 @@ impl<'a, 'p> FrameOwner<'_, 'a, 'p> {
         emit: impl FnOnce(&mut Frame<'_, 'a, 'p>) -> String,
     ) -> String {
         let enclosing = if let Some(operand) = operand {
-            let Some(enclosing) = self.enter_checked_slots(operand.region()) else {
+            let Some(enclosing) = self.enter_checked_slots(operand.region(), None) else {
                 return "0".into();
             };
             Some(enclosing)
@@ -1588,6 +1590,7 @@ impl RegisteredFrame<'_, '_> {
     pub(crate) fn enter_checked_slots(
         &mut self,
         checked: RegisteredRegion<'_>,
+        local_count: Option<usize>,
     ) -> Option<EnclosingSlots> {
         #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
         if let Err(error) = crate::verify::registered(checked) {
@@ -1599,14 +1602,17 @@ impl RegisteredFrame<'_, '_> {
         let iteration = std::mem::take(&mut self.iteration);
         let live_roots = self.live_slots.len();
         let first = self.private_slot_count;
-        self.iteration.private_slots = checked
-            .frame_slots(|node| {
-                if let ir::Node::Statement(Statement::IterNext { iterator, kind, .. }) = node {
-                    self.iteration.cursors.insert(*iterator, *kind);
-                }
-            })
-            .into_iter()
-            .collect();
+        // Iterator cursors and other private storage occupy unnamed local slots.
+        if local_count != Some(checked.local_names.len()) {
+            self.iteration.private_slots = checked
+                .frame_slots(|node| {
+                    if let ir::Node::Statement(Statement::IterNext { iterator, kind, .. }) = node {
+                        self.iteration.cursors.insert(*iterator, *kind);
+                    }
+                })
+                .into_iter()
+                .collect();
+        }
         self.iteration.first_slot = first;
         let end = first + self.iteration.private_slots.len();
         self.private_slot_count = end;
