@@ -113,13 +113,19 @@ pub(super) fn units<'a>(
                 Ok(Initializer::Archived(symbol))
             } else {
                 // Preserve the loader's digest while compiling its normalized source.
-                let file_digest = physical_files.get(path).and_then(|file| file.digest);
                 let (text, syntax) = if let Some(entry) = discovered {
                     (entry.text, Some(entry.parsed))
                 } else {
-                    let text = if physical.is_some() && file_digest.is_none() {
-                        crate::normalize_source(source, crate::SourceKind::File)?
-                    } else if file_digest.is_some() || zip.is_some() {
+                    let text = if let Some(file) = physical {
+                        crate::normalize_source(
+                            source,
+                            file.source_kind.unwrap_or(crate::SourceKind::File),
+                        )?
+                    } else if zip.is_some()
+                        || physical_files
+                            .get(path)
+                            .is_some_and(|file| file.digest.is_some())
+                    {
                         crate::normalize_source(source, crate::SourceKind::DecodedFile)?
                     } else {
                         Cow::Borrowed(source.as_ref())

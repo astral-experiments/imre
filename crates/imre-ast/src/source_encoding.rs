@@ -176,28 +176,48 @@ fn decode_single_byte(
     Ok(Cow::Owned(text))
 }
 
+/// The selected cookie, physical line and byte count scanned in the source header.
+fn header<'a>(
+    lines: &mut impl Iterator<Item = &'a [u8]>,
+) -> (Option<&'a str>, &'a [u8], usize, usize) {
+    let first = lines.next().unwrap_or_default();
+    let encoding = cookie(first);
+    if encoding.is_none() && matches!(trim_space(first).first(), None | Some(b'#' | b'\r' | b'\n'))
+    {
+        let second = lines.next().unwrap_or_default();
+        (cookie(second), second, 2, first.len() + second.len())
+    } else {
+        (encoding, first, 1, first.len())
+    }
+}
+
+pub fn declared_encoding(source: &str) -> Option<&str> {
+    let bytes = source.as_bytes();
+    header(
+        &mut bytes
+            .strip_prefix(BOM)
+            .unwrap_or(bytes)
+            .split_inclusive(|b| *b == b'\n'),
+    )
+    .0
+}
+
 pub fn decode_source(
     bytes: &[u8],
     utf8_error: impl FnOnce(&[u8], std::str::Utf8Error) -> String,
 ) -> Result<Cow<'_, str>, SourceDecodeError> {
+    decode_source_with(bytes, utf8_error, None)
+}
+
+fn decode_source_with<'a>(
+    bytes: &'a [u8],
+    utf8_error: impl FnOnce(&[u8], std::str::Utf8Error) -> String,
+    file: Option<&std::path::Path>,
+) -> Result<Cow<'a, str>, SourceDecodeError> {
     let bom = bytes.starts_with(BOM);
     let bytes = bytes.strip_prefix(BOM).unwrap_or(bytes);
-    let mut lines = bytes.split_inclusive(|b| *b == b'\n');
-    let first = lines.next().unwrap_or_default();
-    let mut checked = first.len();
-    let mut declaration_line = first;
-    let mut lineno = 1;
-    let declared = cookie(first).or_else(|| {
-        if matches!(trim_space(first).first(), None | Some(b'#' | b'\r' | b'\n')) {
-            let second = lines.next().unwrap_or_default();
-            checked += second.len();
-            declaration_line = second;
-            lineno = 2;
-            cookie(second)
-        } else {
-            None
-        }
-    });
+    let (declared, declaration_line, lineno, checked) =
+        header(&mut bytes.split_inclusive(|b| *b == b'\n'));
     let name = declared.map(normal_name).unwrap_or("utf-8");
     if bom && name != "utf-8" {
         return Err(SourceDecodeError::Invalid(
@@ -240,7 +260,7 @@ pub fn decode_source(
     }
     match mode {
         "utf-8" | "utf-8-sig" => std::str::from_utf8(bytes).map(Cow::Borrowed).map_err(|err| {
-            if name != "utf-8" {
+            if name != "utf-8" && file.is_none() {
                 let message = utf8_error(bytes, err);
                 return SourceDecodeError::Invalid(message, None);
             }
@@ -249,7 +269,20 @@ pub fn decode_source(
             let start = bytes[..pos].iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
             let offset = 1 + std::str::from_utf8(&bytes[start..pos]).unwrap().chars().count();
             let raw_line = bytes[start..].split(|&b| b == b'\n').next().unwrap_or_default();
-            SourceDecodeError::Invalid(format!("Non-UTF-8 code starting with '\\x{:02x}' on line {line}, but no encoding declared; see https://peps.python.org/pep-0263/ for details", bytes[pos]), Some(SourceRange { line, start: offset, end: offset, text: String::from_utf8_lossy(raw_line).into_owned(), tokenizer: true }))
+            let byte = bytes[pos];
+            let message = if file.is_some() && (declared.is_some() || bom) {
+                // While looking for a second-line cookie, the tokenizer retains line one.
+                let position = if line == 2 && lineno == 2 { pos } else { pos - start };
+                let length = err.error_len().unwrap_or(bytes.len() - pos);
+                let reason = if (0xc2..=0xf4).contains(&byte) { "invalid continuation byte" } else { "invalid start byte" };
+                let span = if length == 1 { format!("byte 0x{byte:02x} in position {position}") }
+                    else { format!("bytes in position {position}-{}", position + length - 1) };
+                format!("(unicode error) 'utf-8' codec can't decode {span}: {reason}")
+            } else {
+                let origin = file.map_or_else(String::new, |p| format!(" in file {}", p.display()));
+                format!("Non-UTF-8 code starting with '\\x{byte:02x}'{origin} on line {line}, but no encoding declared; see https://peps.python.org/pep-0263/ for details")
+            };
+            SourceDecodeError::Invalid(message, Some(SourceRange { line, start: offset, end: offset, text: String::from_utf8_lossy(raw_line).into_owned(), tokenizer: true }))
         }),
         "ascii" => {
             if let Some(pos) = bytes.iter().position(|b| !b.is_ascii()) {
@@ -275,27 +308,30 @@ pub fn decode_source(
 }
 
 /// Compile scans physical lines after universal newline translation, before decoding.
-pub fn decode_compile_source(
-    bytes: &[u8],
-    utf8_error: impl FnOnce(&[u8], std::str::Utf8Error) -> String,
-) -> Result<String, SourceDecodeError> {
+fn compile_input(bytes: &[u8]) -> Result<Cow<'_, [u8]>, SourceDecodeError> {
     if bytes.contains(&0) {
         return Err(SourceDecodeError::Null);
     }
-    let mut normalized;
-    let input = if bytes.contains(&b'\r') || !bytes.ends_with(b"\n") {
-        normalized = Vec::new();
+    if bytes.contains(&b'\r') || !bytes.ends_with(b"\n") {
+        let mut normalized = Vec::new();
         normalized.try_reserve_exact(bytes.len().saturating_add(1))?;
         normalized.extend_from_slice(bytes);
         normalize_newlines(&mut normalized);
         if !normalized.ends_with(b"\n") {
             normalized.push(b'\n');
         }
-        &normalized
+        Ok(Cow::Owned(normalized))
     } else {
-        bytes
-    };
-    let text = decode_source(input, utf8_error)?;
+        Ok(Cow::Borrowed(bytes))
+    }
+}
+
+fn compile_text<'a>(
+    input: &'a [u8],
+    utf8_error: impl FnOnce(&[u8], std::str::Utf8Error) -> String,
+    file: Option<&std::path::Path>,
+) -> Result<Cow<'a, str>, SourceDecodeError> {
+    let text = decode_source_with(input, utf8_error, file)?;
     if text.starts_with('\u{feff}') {
         // Ruff accepts an initial BOM; the Python tokenizer already consumed the signature.
         return Err(SourceDecodeError::Invalid(
@@ -309,20 +345,52 @@ pub fn decode_compile_source(
             }),
         ));
     }
-    let text = match text {
-        Cow::Owned(text) => text,
+    Ok(if text.contains('\r') {
+        Cow::Owned(universal_newlines(text.into_owned()))
+    } else {
+        text
+    })
+}
+
+fn owned_text(text: Cow<'_, str>) -> Result<String, SourceDecodeError> {
+    match text {
+        Cow::Owned(text) => Ok(text),
         Cow::Borrowed(slice) => {
             let mut text = String::new();
             text.try_reserve_exact(slice.len())?;
             text.push_str(slice);
-            text
+            Ok(text)
         }
-    };
-    Ok(if text.contains('\r') {
-        universal_newlines(text)
-    } else {
-        text
-    })
+    }
+}
+
+pub fn decode_compile_source(
+    bytes: &[u8],
+    utf8_error: impl FnOnce(&[u8], std::str::Utf8Error) -> String,
+) -> Result<String, SourceDecodeError> {
+    owned_text(compile_text(&compile_input(bytes)?, utf8_error, None)?)
+}
+
+/// Keep the original read buffer when the codec preserved every prepared byte.
+/// Otherwise retain the raw bytes for the loader's source identity.
+pub fn decode_disk_source(
+    bytes: Vec<u8>,
+    path: &std::path::Path,
+) -> Result<(String, Option<Vec<u8>>), SourceDecodeError> {
+    let input = compile_input(&bytes)?;
+    let decoded = compile_text(&input, |_, error| error.to_string(), Some(path))?;
+    if std::ptr::eq(decoded.as_bytes(), input.as_ref()) || decoded.as_bytes() == input.as_ref() {
+        return Ok((
+            String::from_utf8(bytes).expect("only ASCII line endings changed in valid UTF-8"),
+            None,
+        ));
+    }
+    let mut text = owned_text(decoded)?;
+    if !bytes.ends_with(b"\n") && !bytes.ends_with(b"\r") {
+        text.pop();
+    }
+    let raw = (bytes != text.as_bytes()).then_some(bytes);
+    Ok((text, raw))
 }
 
 /// CR and CRLF shrink to a single ASCII byte, so conversion can reuse the decoded buffer.

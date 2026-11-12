@@ -2851,6 +2851,7 @@ pub(crate) struct SourceModule {
     pub(crate) source: String,
     /// Physical text when newline normalization changed the source for analysis.
     original_source: Option<Box<str>>,
+    pub(crate) raw_digest: Option<[u8; 32]>,
     doctest_documents: std::sync::OnceLock<Vec<doctest::Docstring>>,
     registered_values: std::sync::OnceLock<Box<crate::frontend::RegisteredModuleSource>>,
     pub(crate) doctest_prompts: Vec<doctest::Prompt>,
@@ -3975,8 +3976,7 @@ impl SourceGraph {
             filename.clone(),
             "__main__".into(),
             false,
-            &command.source,
-            crate::SourceKind::Command,
+            ModuleText::Text(command.source.as_str().into(), crate::SourceKind::Command),
         )?;
         loader.scan_python_entry(entry, import_failure)?;
         let reachable_only = loader.reachable_only;
@@ -4116,8 +4116,7 @@ impl SourceGraph {
         if let Some(error) = crate::bytecode_script_error(path, &bytes) {
             return Err(error.into());
         }
-        let source = String::from_utf8(bytes)
-            .map_err(|error| crate::script_decode_error(&filename, error))?;
+        let source = ModuleText::disk(&filename, bytes)?;
         let root = entry
             .parent()
             .ok_or("script has no parent directory")?
@@ -4133,7 +4132,7 @@ impl SourceGraph {
         loader.frozen_modules = flags.frozen_modules;
         let reachable = options.reachable_only || options.entry_profile.is_some();
         loader.reachable_only = reachable;
-        let id = loader.add(entry.clone(), entry, "__main__".into(), false, &source)?;
+        let id = loader.add_source(entry.clone(), entry, "__main__".into(), false, source)?;
         loader.scan_python_entry(id, import_failure)?;
         let mut graph = loader.finish(id, filename, reachable, options.entry_profile.as_deref())?;
         graph.command_startup = Some((flags.clone(), executable.to_owned()));
@@ -4223,9 +4222,10 @@ impl SourceGraph {
         if parts.len() > 1 && parts.iter().all(|part| !part.contains('.')) {
             site_probes.packaged_file_module = Some(name.clone());
         }
-        let source = fs
-            .read_source_string(&entry)
+        let bytes = fs
+            .read_source(&entry)
             .map_err(|error| format!("{}: {error}", entry.display()))?;
+        let source = ModuleText::disk(&entry, bytes)?;
         let mut loader = Loader::new(
             root,
             &options.extension_paths,
@@ -4237,7 +4237,7 @@ impl SourceGraph {
         if inferred {
             loader.inputs.missing.push(loader.root.join("__init__.py"));
         }
-        let id = loader.add(entry.clone(), entry, name.clone(), false, &source)?;
+        let id = loader.add_source(entry.clone(), entry, name.clone(), false, source)?;
         // Like `python -m package.program`, package initialization precedes the entry.
         // The entry itself is __main__, and is deliberately not attached as a package child.
         if let Some((package, _)) = name.rsplit_once('.') {
@@ -4701,6 +4701,18 @@ impl SiteProbes {
 /// Import path, canonical identity, package flag, search-root index and native archive.
 type ModuleFile = (PathBuf, PathBuf, bool, usize, Option<NativeArchive>);
 
+enum ModuleText<'a> {
+    Text(std::borrow::Cow<'a, str>, crate::SourceKind),
+    Disk(crate::DiskSource, String),
+}
+
+impl ModuleText<'_> {
+    fn disk(path: &Path, bytes: Vec<u8>) -> Result<Self, String> {
+        let hash = blake3::hash(&bytes).to_hex().to_string();
+        Ok(Self::Disk(crate::DiskSource::decode(path, bytes)?, hash))
+    }
+}
+
 struct Loader<'a> {
     local_declarations: BTreeSet<String>,
     python_optimization: i32,
@@ -4845,8 +4857,7 @@ impl<'a> Loader<'a> {
             identity,
             name,
             is_package,
-            source,
-            crate::SourceKind::File,
+            ModuleText::Text(source.into(), crate::SourceKind::File),
         )
     }
 
@@ -4856,19 +4867,31 @@ impl<'a> Loader<'a> {
         identity: PathBuf,
         name: String,
         is_package: bool,
-        source: &str,
-        kind: crate::SourceKind,
+        input: ModuleText<'_>,
     ) -> Result<ModuleId, String> {
-        self.inputs.files.push((
-            path.clone(),
-            identity.clone(),
-            blake3::hash(source.as_bytes()).to_hex().to_string(),
-        ));
-        let normalized = crate::normalize_source(source, kind)
-            .map_err(|error| format!("{}: {error}", path.display()))?;
-        let original_source =
-            matches!(normalized, std::borrow::Cow::Owned(_)).then(|| source.into());
-        let source = normalized.into_owned();
+        let (text, kind, hash, raw_digest) = match input {
+            ModuleText::Text(text, kind) => {
+                let hash = blake3::hash(text.as_bytes()).to_hex().to_string();
+                (text, kind, hash, None)
+            }
+            ModuleText::Disk(source, hash) => (
+                source.text.into(),
+                crate::SourceKind::DiskFile,
+                hash,
+                source.raw_digest,
+            ),
+        };
+        self.inputs
+            .files
+            .push((path.clone(), identity.clone(), hash));
+        let (source, original_source) = match crate::normalize_source(&text, kind)
+            .map_err(|error| format!("{}: {error}", path.display()))?
+        {
+            std::borrow::Cow::Borrowed(_) => (text.into_owned(), None),
+            std::borrow::Cow::Owned(normalized) => {
+                (normalized, Some(text.into_owned().into_boxed_str()))
+            }
+        };
         let parsed = self.session.add(&path, &source, kind)?;
         let id = self.modules.len();
         self.by_name.insert(name.clone(), id);
@@ -4879,6 +4902,7 @@ impl<'a> Loader<'a> {
             name,
             source,
             original_source,
+            raw_digest,
             doctest_documents: Default::default(),
             registered_values: Default::default(),
             doctest_prompts: Vec::new(),
@@ -6661,8 +6685,9 @@ impl<'a> Loader<'a> {
             blake3::hash(bytes).to_hex().to_string()
         });
         if path.extension().is_some_and(|ext| ext == "py")
-            && let Some(source) = bytes.as_deref().and_then(|b| std::str::from_utf8(b).ok())
-            && let Ok(source) = crate::normalize_source(source, crate::SourceKind::File)
+            && let Some(bytes) = bytes
+            && let Ok((source, _)) = imre_ast::source_encoding::decode_disk_source(bytes, &path)
+            && let Ok(source) = crate::normalize_source(&source, crate::SourceKind::DiskFile)
         {
             self.session.add_declaration_source(&path, &source)?;
         }
@@ -6907,18 +6932,18 @@ impl<'a> Loader<'a> {
                 self.modules[previous].name
             ));
         }
-        let (source, kind) = if let Some(source) = member_source {
-            (source, crate::SourceKind::DecodedFile)
+        let input = if let Some(source) = member_source {
+            ModuleText::Text(source.into(), crate::SourceKind::DecodedFile)
         } else {
-            let source = self
+            let bytes = self
                 .fs
-                .read_source_string(&identity)
-                .map_err(|error| format!("{}: {error}", path.display()))?;
-            (source, crate::SourceKind::File)
+                .read_source(&identity)
+                .map_err(|err| format!("{}: {err}", path.display()))?;
+            ModuleText::disk(&path, bytes)?
         };
         // ty resolves logical import paths; canonical identities enforce containment
         // and uniqueness without breaking a single internal symlink's import name.
-        let id = self.add_source(path, identity, name.to_owned(), is_package, &source, kind)?;
+        let id = self.add_source(path, identity, name.to_owned(), is_package, input)?;
         self.modules[id].search_roots = SearchRoots::Single(root_index);
         self.modules[id].archive = archive;
         self.scan(id)?;
