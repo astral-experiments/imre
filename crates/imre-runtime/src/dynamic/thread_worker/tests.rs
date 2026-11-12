@@ -61,6 +61,9 @@ fn owned_registered_entry_roots_bound_slots_and_restores_its_frame() {
             let frame = ctx
                 .prepare_bound_function(target, vec![value, value])
                 .unwrap();
+            // A parked native entry leaves the complete binding layout with its code.
+            let layout = ctx.code_object(code).parsed_parameters.get().unwrap();
+            assert_eq!(std::rc::Rc::strong_count(layout), 1);
             (value, frame)
         };
         // SAFETY: preparation released its RefMut. This thread owns the stable Context.

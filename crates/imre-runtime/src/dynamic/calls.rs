@@ -271,22 +271,22 @@ impl RegisteredCall {
 
 struct FunctionReturn {
     callable: Id,
-    signature: std::rc::Rc<CallParameters>,
+    declared: ScalarHint,
     name: crate::Str,
 }
 
-impl FunctionReturn {
-    fn finish(self, ctx: &mut Context, result: Result<Id>) -> Result<Id> {
-        ctx.call_depth -= 1;
+impl Context {
+    fn finish_function(&mut self, check: Option<FunctionReturn>, result: Result<Id>) -> Result<Id> {
+        self.call_depth -= 1;
         let value = result?;
-        if let Some(expected) = self.signature.return_type.as_deref() {
-            ctx.require_scalar(
-                self.callable,
+        if let Some(check) = check {
+            self.require_scalar(
+                check.callable,
                 "return",
                 value,
-                (expected, None),
+                (check.declared.0, None),
                 false,
-                format_args!("{} return value", self.name),
+                format_args!("{} return value", check.name),
             )?;
         }
         Ok(value)
@@ -297,7 +297,7 @@ impl FunctionReturn {
 pub(super) struct RegisteredFrame {
     entry: Code,
     scope: Id,
-    returning: FunctionReturn,
+    returning: Option<FunctionReturn>,
 }
 
 impl RegisteredFrame {
@@ -311,7 +311,7 @@ impl RegisteredFrame {
             // SAFETY: the entry has returned, leaving the live Context exclusively with the caller.
             let ctx = unsafe { &mut *context };
             let result = ctx.finish_native_frame(value);
-            self.returning.finish(ctx, result)
+            ctx.finish_function(self.returning, result)
         })
     }
 }
@@ -9259,11 +9259,12 @@ impl Context {
         }
         self.check_call_depth(0)?;
         self.call_depth += 1;
-        let returning = FunctionReturn {
+        let returning = sig.return_type.map(|declared| FunctionReturn {
             callable,
-            signature: sig,
+            declared,
             name,
-        };
+        });
+        drop(sig);
         let owner = FrameOwner::Function(callable);
         if let value::Body::Native(entry, _) = self.code_object(code).body {
             self.heap.enter(local, code, owner);
@@ -9276,7 +9277,8 @@ impl Context {
         let result = stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
             self.execute(code, local, owner)
         });
-        returning.finish(self, result).map(RegisteredCall::Returned)
+        self.finish_function(returning, result)
+            .map(RegisteredCall::Returned)
     }
 
     /// Guard nested native slots that can recurse without entering a Python frame.
@@ -9340,10 +9342,7 @@ impl Context {
                         function,
                         param,
                         id,
-                        (
-                            builtin.or_else(|| expected.as_str()).unwrap_or_default(),
-                            target,
-                        ),
+                        (builtin.or_else(|| expected.as_str()), target),
                         sig.integer_sign_parameters[param] == true,
                         format_args!("{name} argument {param:?}"),
                     )?;
@@ -9539,7 +9538,7 @@ impl Context {
         function: Id,
         slot: &str,
         value: Id,
-        declaration: (&str, Option<Id>),
+        declaration: (Option<&str>, Option<Id>),
         integer_sign: bool,
         context: std::fmt::Arguments<'_>,
     ) -> Result<()> {
@@ -9593,11 +9592,8 @@ impl Context {
                 return Ok(());
             }
             family
-        } else if matches!(
-            expected,
-            "str" | "bytes" | "int" | "bool" | "float" | "None"
-        ) {
-            expected
+        } else if let Some(fallback) = expected.and_then(|name| ScalarHint::new(name).0) {
+            fallback
         } else {
             return Ok(());
         };
