@@ -5278,7 +5278,7 @@ impl<'a> Loader<'a> {
                                                 || literal_export(value)
                                                     && module.rebound_target(id, stmt).is_none()
                                         })
-                                    || nested_source && matches!(stmt, ast::Stmt::Expr(_))
+                                    || self.partial_source(id) && matches!(stmt, ast::Stmt::Expr(_))
                             });
                         if is_entry || !simple && !ordered {
                             self.import_failure =
