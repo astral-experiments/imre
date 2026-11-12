@@ -88,7 +88,7 @@ impl Checker<'_> {
         if let Some(ty) = self.graph.session.scalar_type(self.module, insertion.value) {
             return Some(ty);
         }
-        if !set || self.graph.set_layout_hint.get() == crate::modules::SetLayoutHint::Disabled {
+        if !set || self.graph.layout_hint.get() == crate::modules::LayoutHint::Disabled {
             return None;
         }
         let for_loop = insertion.for_loop?;
@@ -109,8 +109,8 @@ impl Checker<'_> {
         // Later uses may need heterogeneous storage. A failed native attempt
         // must recover the ordinary diagnostics and object fallback for set().
         self.graph
-            .set_layout_hint
-            .set(crate::modules::SetLayoutHint::Applied);
+            .layout_hint
+            .set(crate::modules::LayoutHint::Applied);
         Some(element)
     }
 

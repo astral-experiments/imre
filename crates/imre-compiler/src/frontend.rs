@@ -689,10 +689,10 @@ fn checked_region<T>(
         Ok(body) => return Ok(Some(body)),
         Err(failure) => failure,
     };
-    // A failed set-layout trial is discarded. Finish checking and capture any
+    // A failed layout trial is discarded. Finish checking and capture any
     // registered siblings in the ordinary pass. Reachable key formatters and
-    // native float components have their own retries inside the set trial.
-    if graph.set_layout_hint.get() == crate::modules::SetLayoutHint::Applied
+    // native float components have their own retries inside the layout trial.
+    if graph.layout_hint.get() == crate::modules::LayoutHint::Applied
         && !graph.reachable_only()
         && graph.float_components.get() == crate::modules::FloatComponents::Native
     {
@@ -4742,7 +4742,9 @@ impl<'a> Checker<'a> {
     fn value_declaration(&self, value: &Expr) -> Option<TypeDeclaration> {
         match self.value_source(value)? {
             ValueSource::Declaration(declaration) => Some(declaration),
-            ValueSource::InferredList(_) | ValueSource::Function(_) => None,
+            ValueSource::InferredList(_)
+            | ValueSource::Function(_)
+            | ValueSource::ReboundMethod => None,
         }
     }
 

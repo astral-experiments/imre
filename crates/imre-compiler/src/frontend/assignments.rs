@@ -265,6 +265,8 @@ pub(super) enum ValueSource {
     Declaration(TypeDeclaration),
     InferredList(DefinitionId),
     Function(usize),
+    /// A different source method can occupy this captured slot when it is called.
+    ReboundMethod,
 }
 
 #[derive(Default, Clone, Copy)]

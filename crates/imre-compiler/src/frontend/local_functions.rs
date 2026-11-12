@@ -1,6 +1,6 @@
 //! Lift typed local definitions into native functions. A captured binding is
 //! loaded at each direct call, after its explicit arguments, as Python would
-//! read the enclosing cell on entry. No callable with captures can escape.
+//! read the enclosing cell on entry. A stable callable can own a lifted callback’s context.
 use ruff_python_ast::visitor::{Visitor, walk_expr};
 use std::collections::VecDeque;
 use std::rc::Rc;
@@ -12,6 +12,7 @@ pub(super) struct Function {
     pub signature: Signature,
     pub definition: Rc<ast::StmtFunctionDef>,
     captures: Vec<usize>,
+    bound_capture: bool,
 }
 
 #[derive(Clone)]
@@ -187,14 +188,14 @@ impl Binding {
 impl Function {
     pub(super) fn callback(
         &self,
-        types: &Types,
-        source: &str,
+        checker: &Checker<'_>,
         node: &impl Ranged,
     ) -> std::result::Result<Expr, String> {
+        let types = checker.types;
         if self.signature.asynchronous {
             types.set_coroutine_target(self.signature.id, crate::types::CoroutineTarget::Coroutine);
         }
-        if !self.captures.is_empty()
+        if (!self.captures.is_empty() && !self.bound_capture)
             || self.signature.params.iter().any(|p| {
                 matches!(
                     p.kind,
@@ -203,10 +204,16 @@ impl Function {
             })
         {
             return Err(diagnostic_message(
-                source,
+                checker.source,
                 node,
                 "local callbacks must be noncapturing and have positional parameters",
             ));
+        }
+        if self.bound_capture {
+            checker
+                .graph
+                .layout_hint
+                .set(crate::modules::LayoutHint::Applied);
         }
         Ok(Expr {
             ty: types.callable(
@@ -219,7 +226,9 @@ impl Function {
             ),
             kind: ExprKind::Callable {
                 function: self.signature.id,
-                receiver: None,
+                receiver: self
+                    .bound_capture
+                    .then(|| Box::new(checker.local(self.captures[0]))),
             },
         })
     }
@@ -245,9 +254,7 @@ impl Checker<'_> {
         if let Some(slot) = binding.value_slot {
             Ok(self.local(slot))
         } else {
-            Ok(binding
-                .target(self.source, value)?
-                .callback(self.types, self.source, value)?)
+            Ok(binding.target(self.source, value)?.callback(self, value)?)
         }
     }
 
@@ -479,35 +486,33 @@ impl Checker<'_> {
                 definition
             },
             signature,
+            site.value_read && !overload && definition.decorator_list.is_empty(),
         )?;
         let value = if let Some(config) = wraps {
             let (scope, wrapped) = self.wraps_config(config)?;
-            let wrapper = function.callback(self.types, self.source, definition)?;
+            let wrapper = function.callback(self, definition)?;
             Some(scope.finish(self.attach_wrapped(wrapper, wrapped, config)?))
         } else if let Some(policy) = policy {
-            let raw = function.callback(self.types, self.source, definition)?;
+            let raw = function.callback(self, definition)?;
             let origin = self.local_annotation_origin(&function);
             Some(self.owned_cache(raw, policy, Some(origin), definition)?)
         } else if let Some(decorator) = decorator {
-            let target = function.callback(self.types, self.source, definition)?;
+            let target = function.callback(self, definition)?;
             Some(self.decorate_dispatch(decorator, target, definition)?)
         } else if site.value_read || overload {
-            function
-                .callback(self.types, self.source, definition)
-                .ok()
-                .map(|value| {
-                    if overload {
-                        Expr {
-                            ty: Type::OverloadStub,
-                            kind: ExprKind::Builtin(
-                                Builtin::Typing(ir::TypingOperation::Register),
-                                vec![value],
-                            ),
-                        }
-                    } else {
-                        value
+            function.callback(self, definition).ok().map(|value| {
+                if overload {
+                    Expr {
+                        ty: Type::OverloadStub,
+                        kind: ExprKind::Builtin(
+                            Builtin::Typing(ir::TypingOperation::Register),
+                            vec![value],
+                        ),
                     }
-                })
+                } else {
+                    value
+                }
+            })
         } else {
             None
         };
@@ -563,7 +568,7 @@ impl Checker<'_> {
             })?;
         let key = (left, right);
         if let Some(function) = comparator.instances.get(&key) {
-            return Ok(function.callback(self.types, self.source, node)?);
+            return Ok(function.callback(self, node)?);
         }
         let definition = Rc::clone(&comparator.definition);
         let params = definition
@@ -592,8 +597,8 @@ impl Checker<'_> {
             returns: Type::None,
             params,
         };
-        let function = self.lift_local(&definition, signature)?;
-        let value = function.callback(self.types, self.source, node)?;
+        let function = self.lift_local(&definition, signature, false)?;
+        let value = function.callback(self, node)?;
         self.local_functions
             .get_mut(&name)
             .unwrap()
@@ -673,7 +678,7 @@ impl Checker<'_> {
                     sign_only: false,
                 }],
             };
-            let function = self.lift_local(definition, signature)?;
+            let function = self.lift_local(definition, signature, false)?;
             self.local_functions
                 .get_mut(name)
                 .unwrap()
@@ -688,6 +693,7 @@ impl Checker<'_> {
         &mut self,
         definition: &ast::StmtFunctionDef,
         mut signature: Signature,
+        materialize: bool,
     ) -> Result<Function, String> {
         signature.id = self.helpers.reserve();
         self.types.bind_function_site(
@@ -737,6 +743,7 @@ impl Checker<'_> {
             .flat_map(|binding| &binding.later_writes)
             .filter_map(|name| self.names.get(name).copied())
             .collect();
+        let mut stable_callbacks = HashSet::new();
         let mut capture = |outer: usize, helper: &mut Checker<'_>| -> usize {
             *slots.entry(outer).or_insert_with(|| {
                 let inner = helper.hidden(self.locals[outer]);
@@ -759,6 +766,31 @@ impl Checker<'_> {
         for read in reads {
             if let Some(&outer) = self.names.get(&read) {
                 let inner = capture(outer, &mut helper);
+                if self.loop_breaks.is_empty()
+                    && matches!(self.locals[outer], Type::Callable(_))
+                    && self.assigned.contains(&outer)
+                    && !rebound.contains(&outer)
+                    && self
+                        .graph
+                        .session
+                        .stable_enclosing_binding(self.module, definition, &read)
+                {
+                    stable_callbacks.insert(outer);
+                    if let Some(&ty) = self.narrowed.get(&outer)
+                        && self.types.method_signature(ty) == Some(self.locals[outer])
+                    {
+                        helper.narrowed.insert_mut(inner, ty);
+                    }
+                } else if materialize
+                    && self.narrowed.get(&outer).is_some_and(|&ty| {
+                        self.types.method_signature(ty) == Some(self.locals[outer])
+                            && self.types.source_method_site(ty).is_some()
+                    })
+                {
+                    helper
+                        .assigned
+                        .set_value_source(inner, Some(ValueSource::ReboundMethod));
+                }
                 helper.names.insert(read, inner);
             } else if let Some(binding) = self.local_functions.get(&read) {
                 if binding.function.is_some() && !binding.sites.is_empty() {
@@ -833,6 +865,15 @@ impl Checker<'_> {
         }
         helper.finish_region(Ok(()))?;
         helper.fault_frame(&mut body, definition.name.as_str(), definition.start());
+        // Native bound adapters take their context first. The source arguments
+        // keep their evaluation order at direct calls to the same lifted body.
+        let bound_capture = materialize
+            && self.graph.layout_hint.get() != crate::modules::LayoutHint::Disabled
+            && !signature.asynchronous
+            && matches!(captures.as_slice(), [slot] if stable_callbacks.contains(slot));
+        if bound_capture {
+            params.rotate_right(1);
+        }
         self.helpers.finish(
             signature.id,
             comprehensions::Helper {
@@ -853,6 +894,7 @@ impl Checker<'_> {
         Ok(Function {
             signature,
             captures,
+            bound_capture,
             definition: Rc::new(definition.clone()),
         })
     }
@@ -883,6 +925,9 @@ impl Checker<'_> {
             }
             args.order.push(args.values.len());
             args.values.push(self.local(slot));
+        }
+        if function.bound_capture {
+            args.order.rotate_right(1);
         }
         self.calls.insert(function.signature.id);
         Ok(self.call_value(&function.signature, function.signature.returns, args))

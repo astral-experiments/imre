@@ -773,7 +773,12 @@ impl Checker<'_> {
         returns: Type,
         registered_effect: Option<&ast::Expr>,
     ) -> Result<Expr, String> {
-        if !call.arguments.keywords.is_empty() || call.arguments.args.len() != params.len() {
+        let needs_cell_default = call.arguments.args.len() < params.len()
+            && matches!(callable.kind, ExprKind::Local(slot)
+                if self.assigned.value_source(slot) == Some(ValueSource::ReboundMethod));
+        if !call.arguments.keywords.is_empty()
+            || (call.arguments.args.len() != params.len() && !needs_cell_default)
+        {
             return Err(error(
                 self.source,
                 call,
@@ -833,6 +838,15 @@ impl Checker<'_> {
                     }
                 })
                 .collect::<std::result::Result<Vec<_>, _>>()?;
+        if needs_cell_default {
+            // The checked positional ABI constrains supplied arguments. The current
+            // function in the shared cell owns the defaults for the remaining slots.
+            self.require_registered_operation(call)?;
+            return Ok(Expr {
+                ty: returns,
+                ..Expr::unrepresented()
+            });
+        }
         if let Some(expr) = registered_effect {
             return Ok(self.located_callback_effect(expr, call, callable, values));
         }
