@@ -1354,7 +1354,7 @@ fn lower_graph(
                     .as_function_def_stmt()
                     == Some(definition);
             let slot = completed.functions.len();
-            if original && (named || *module_id == graph.entry) {
+            if original {
                 completed
                     .frames
                     .push((slot, callable_definitions[signature.id], source));
