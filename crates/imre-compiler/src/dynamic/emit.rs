@@ -12,7 +12,9 @@ use super::prepare::{Initializer, PreparedUnit};
 use crate::dynamic::literal::LiteralSites;
 use crate::frontend::function_scope::{CallableMetadata, ClassBindings, NamedFunction};
 use crate::frontend::module_source::{self, ParsedModule};
-use crate::frontend::{ParameterEvaluator, RegisteredGenerator, RegisteredLambda, RequiredSite};
+use crate::frontend::{
+    FrameInputs, FrameSite, ParameterEvaluator, RegisteredGenerator, RegisteredLambda, RequiredSite,
+};
 use crate::ir::RegisteredTypeParameter;
 use crate::llvm::ModuleLauncher;
 use crate::llvm::registered::sites::{
@@ -612,10 +614,13 @@ impl<'a> PreparedBody<'a> {
             let checked = program_bodies
                 .and_then(|bodies| bodies.get(&start))
                 .filter(|checked| match &checked.inputs {
-                    crate::frontend::FrameInputs::Checked => true,
-                    crate::frontend::FrameInputs::Protocol {
-                        generators: required,
-                    } => required.iter().all(|range| generators.contains_key(range)),
+                    FrameInputs::Checked => true,
+                    FrameInputs::Protocol { sites } => sites.iter().all(|site| match site {
+                        FrameSite::Lambda(start) => lambdas
+                            .get(start)
+                            .is_some_and(|lambda| lambda.body.is_some()),
+                        FrameSite::Generator(range) => generators.contains_key(range),
+                    }),
                 });
             let refusal = if let Some(checked) = checked {
                 prepare.checked_declaration_refusal(&checked.function.body)
@@ -2509,6 +2514,43 @@ mod tests {
                 ),
                 retained
             );
+        }
+    }
+
+    #[test]
+    fn a_checked_lambda_reference_requires_its_lexical_body() {
+        let source = "async def make():\n    return lambda: 1\n";
+        let refused = "async def make():\n    return [lambda v=await get(x): v for x in [1, 2]]\n";
+        let path = Path::new("example.py");
+        let site = TextSize::default();
+        let mut original =
+            PreparedBody::module("example", path, source, 0, ModuleOrigin::Program(None)).unwrap();
+        let suite = original.source.function_suites.remove(&site).unwrap();
+        let mut checked = suite.checked;
+        checked.inputs = crate::llvm::registered::frame_inputs(&checked, true).unwrap();
+        let bodies = HashMap::from([(site, checked)]);
+        for (text, retained) in [(source, true), (refused, false)] {
+            let module = PreparedBody::module(
+                "example",
+                path,
+                text,
+                0,
+                ModuleOrigin::Program(Some(&bodies)),
+            )
+            .unwrap();
+            assert_eq!(
+                matches!(
+                    module.source.definition_body(site),
+                    RegisteredBody::Function(_)
+                ),
+                retained
+            );
+            if !retained {
+                assert_eq!(
+                    module.standalone().unwrap_err(),
+                    "example.py:2:12: cannot compile this comprehension ahead of time (through 2:54)"
+                );
+            }
         }
     }
 

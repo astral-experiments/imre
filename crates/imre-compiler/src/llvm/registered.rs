@@ -46,7 +46,7 @@ pub(crate) fn frame_inputs(
     checked: &RegisteredFunction,
     live_parameters: bool,
 ) -> Option<crate::frontend::FrameInputs> {
-    use crate::frontend::FrameInputs;
+    use crate::frontend::{FrameInputs, FrameSite};
     let scalar_parameter = |value: &Expr| {
         live_parameters
             && value.ty != Type::PythonObject
@@ -56,7 +56,7 @@ pub(crate) fn frame_inputs(
     let protocol_parameter = |value: &Expr| usize::from(scalar_parameter(value.without_location()));
     let mut scalar_reads = 0usize;
     let mut protocol_reads = 0usize;
-    let mut generators = Vec::new();
+    let mut sites = Vec::new();
     let mut uses_python_protocol = false;
     let mut required_private = std::collections::BTreeSet::new();
     let mut uses_slot = |slot: &usize, private: bool| {
@@ -185,13 +185,16 @@ pub(crate) fn frame_inputs(
             ExprKind::Builtin(Builtin::RegisteredAssertionFailure { .. }, args) => {
                 expr.ty == Type::None && args.len() <= 1
             }
-            ExprKind::Builtin(Builtin::RegisteredLambda(_, scoped), operands) => {
+            ExprKind::Builtin(Builtin::RegisteredLambda(site, scoped), operands) => {
+                if live_parameters {
+                    sites.push(FrameSite::Lambda(*site));
+                }
                 uses_python_protocol = true;
                 !scoped || !operands.is_empty()
             }
             ExprKind::Builtin(Builtin::RegisteredGenerator(range, scoped), operands) => {
                 if live_parameters {
-                    generators.push(*range);
+                    sites.push(FrameSite::Generator(*range));
                 }
                 uses_python_protocol = true;
                 ir::generator_operands(*scoped, operands).is_ok()
@@ -289,7 +292,7 @@ pub(crate) fn frame_inputs(
     }
     Some(if live_parameters {
         FrameInputs::Protocol {
-            generators: generators.into_boxed_slice(),
+            sites: sites.into_boxed_slice(),
         }
     } else {
         FrameInputs::Checked
