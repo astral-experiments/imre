@@ -177,12 +177,12 @@ impl<M> Diagnostic<M> {
                 .is_some_and(|(a, b)| a.range.start() < b.range.start())
     }
 
-    pub(crate) fn matching_declared_argument(
+    pub(crate) fn matching_declared_operand(
         &self,
         path: &std::path::Path,
         operand: TextRange,
         module: ModuleId,
-        parameter: TextRange,
+        annotation: TextRange,
     ) -> Option<&Self> {
         std::iter::once(self)
             .chain(self.following.iter())
@@ -193,7 +193,7 @@ impl<M> Diagnostic<M> {
                         position.range == operand
                             && position.expected_from.is_some_and(|declaration| {
                                 declaration.module == module
-                                    && parameter.contains_range(declaration.annotation)
+                                    && annotation.contains_range(declaration.annotation)
                             })
                     })
             })
