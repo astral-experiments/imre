@@ -3751,6 +3751,14 @@ impl Emitter<'_, '_> {
         best
     }
 
+    fn integer_order(&mut self, left: &Value, right: &Value) -> String {
+        self.output.local_helper("compare_int", INTEGER_COMPARE);
+        self.instruction(format!(
+            "call i32 @compare_int(i64 {}, i64 {})",
+            left.operand, right.operand
+        ))
+    }
+
     fn compare(&mut self, op: Compare, left: &Value, right: &Value) -> Value {
         let predicate = match op {
             Compare::Equal => "eq",
@@ -3833,10 +3841,7 @@ impl Emitter<'_, '_> {
                     format!("icmp {predicate} i64 {}, {}", left.operand, right.operand),
                 ),
                 Type::Int => {
-                    let order = self.instruction(format!(
-                        "call i32 @compare_int(i64 {}, i64 {})",
-                        left.operand, right.operand
-                    ));
+                    let order = self.integer_order(left, right);
                     self.instruction(format!("icmp {predicate} i32 {order}, 0"))
                 }
                 Type::Float => {
@@ -4276,6 +4281,7 @@ impl Emitter<'_, '_> {
     fn integer_absolute(&mut self, value: &Value) -> Value {
         self.output
             .local_helper("int_abs", conditionals::INTEGER_ABSOLUTE_HELPER);
+        self.output.local_helper("compare_int", INTEGER_COMPARE);
         // The slow absolute-value path negates a heap word with tagged subtraction.
         self.body.integers.require(Binary::Subtract);
         self.call("int_abs", Type::Int, &[value])
@@ -7491,11 +7497,7 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::IntSignAsFloat => {
-                let order = self.instruction(format!(
-                    "call i32 @compare_int(i64 {}, i64 {})",
-                    args[0].value.operand,
-                    small(0).operand
-                ));
+                let order = self.integer_order(&args[0].value, &small(0));
                 Value {
                     ty: Type::Float,
                     operand: self.instruction(format!("sitofp i32 {order} to double")),
@@ -11572,8 +11574,10 @@ done:
     }
     output.push_str(&division_helper(Binary::FloorDivide));
     output.push_str(&bitwise_helpers());
-    output.push_str(
-        r#"
+    output
+}
+
+const INTEGER_COMPARE: &str = r#"
 define internal i32 @compare_int(i64 %a, i64 %b) alwaysinline {
 entry:
   %both = and i64 %a, %b
@@ -11590,10 +11594,7 @@ big:
   %slow = call i32 @imre_int_compare(i64 %a, i64 %b) cold
   ret i32 %slow
 }
-"#,
-    );
-    output
-}
+"#;
 
 /// Tagged add, subtract and multiply used by checked integer operations in either call ABI.
 fn write_integer_arithmetic(output: &mut String, op: Binary, declare_overflow: bool) {
