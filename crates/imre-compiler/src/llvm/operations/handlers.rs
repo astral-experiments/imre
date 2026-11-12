@@ -4,14 +4,22 @@ use super::{CheckedBody, Entry};
 use crate::ir::{ExceptHandler, ExceptionMatcher, Expr, ExprKind, Statement, Type};
 use crate::llvm::{Completion, Value};
 
-/// The native frame owns an exception pointer and unwinds to the saved cleanup
-/// depth. The registered frame roots a Python handle across the handler chain.
+/// The native frame owns the exception pointer. The registered frame roots a
+/// Python handle across the handler chain.
 enum Caught {
-    Native(Value, Completion),
-    Registered(String, String),
+    Native(Value),
+    Registered(String),
 }
 
 impl CheckedBody<'_, '_, '_, '_> {
+    /// Leave the active cleanups before branching to the target's lexical depth.
+    pub(super) fn jump_from_regions(&mut self, label: String, depth: usize) {
+        match &mut self.0 {
+            Entry::Native(e) => e.route(Completion::Jump { label, depth }),
+            Entry::Registered(f) => f.jump_from_regions(label, depth),
+        }
+    }
+
     /// Resume the saved action when cleanup falls through. The final destination
     /// is unconditional, including when all predecessors recorded the same action.
     pub(in crate::llvm) fn resume_completions<T>(
@@ -64,8 +72,8 @@ impl CheckedBody<'_, '_, '_, '_> {
                 {
                     return code.block(body);
                 }
-                code.with_try_cleanups(finalbody, |code, exit| {
-                    run(&mut CheckedBody::native(code), Some(exit));
+                code.with_try_cleanups(finalbody, |code, done, depth| {
+                    run(&mut CheckedBody::native(code), Some((done, depth)));
                 });
             }
             Entry::Registered(frame) if !finalbody.is_empty() => {
@@ -85,7 +93,7 @@ impl CheckedBody<'_, '_, '_, '_> {
         handlers: &[ExceptHandler],
         otherwise: &[Statement],
         catches_error: bool,
-        native_exit: Option<Completion>,
+        native_exit: Option<(String, usize)>,
     ) {
         if handlers.is_empty() && native_exit.is_none() {
             // The registered finally already installed its landing pad.
@@ -94,11 +102,11 @@ impl CheckedBody<'_, '_, '_, '_> {
         }
         let dispatch = self.block_name();
         self.protected_suites(body, otherwise, catches_error.then_some(&dispatch));
-        let caught = if let Some(exit) = native_exit {
-            let code = self.fixed();
-            if !code.body.terminated {
-                code.route(exit.clone());
+        let (caught, done, depth) = if let Some((done, depth)) = native_exit {
+            if !self.body().terminated {
+                self.jump_from_regions(done.clone(), depth);
             }
+            let code = self.fixed();
             if !catches_error {
                 return;
             }
@@ -107,36 +115,28 @@ impl CheckedBody<'_, '_, '_, '_> {
                 code.route(Completion::Error);
                 return;
             }
-            Caught::Native(code.call("imre_error_take", Type::Exception, &[]), exit)
+            let exception = code.call("imre_error_take", Type::Exception, &[]);
+            (Caught::Native(exception), done, depth)
         } else {
-            let (exception, done) = self.python().enter_handlers(&dispatch);
-            Caught::Registered(exception, done)
+            let (exception, done, depth) = self.python().enter_handlers(&dispatch);
+            (Caught::Registered(exception), done, depth)
         };
-        let exception = match &caught {
-            Caught::Native(exception, _) => &exception.operand,
-            Caught::Registered(exception, _) => exception,
-        };
-        if let Caught::Registered(_, done) = &caught
+        if let Caught::Registered(exception) = &caught
             && matches!(handlers[0].matcher, ExceptionMatcher::Subgroup(..))
         {
-            self.python().groups(handlers, exception, done);
-        } else if self.ordinary_handlers(handlers, exception, |code, handler| match &caught {
-            Caught::Native(exception, exit) => code.fixed().caught_arm(handler, exception, exit),
-            Caught::Registered(exception, done) => {
-                code.python().caught_arm(handler, exception, done)
-            }
-        }) {
+            self.python().groups(handlers, exception, &done);
+        } else if self.ordinary_handlers(handlers, &caught, &done, depth) {
             match &caught {
-                Caught::Native(exception, _) => {
+                Caught::Native(exception) => {
                     let code = self.fixed();
                     code.void_call("imre_error_set", &[exception]);
                     code.release(exception);
                     code.route(Completion::Error);
                 }
-                Caught::Registered(exception, _) => self.python().raise(exception, None, true),
+                Caught::Registered(exception) => self.python().raise(exception, None, true),
             }
         }
-        if let Caught::Registered(_, done) = caught {
+        if let Caught::Registered(_) = caught {
             self.python().leave_handlers(&done);
         }
     }
@@ -211,14 +211,40 @@ impl CheckedBody<'_, '_, '_, '_> {
         }
     }
 
+    /// Enter the handler's binding, emit its checked suite, then unwind a normal
+    /// exit through the same lexical cleanup as an explicit loop transfer.
+    fn caught_arm(&mut self, handler: &ExceptHandler, caught: &Caught, done: &str, depth: usize) {
+        let binding = match caught {
+            Caught::Native(exception) => {
+                self.fixed().catch_exception(handler.name, exception);
+                None
+            }
+            Caught::Registered(exception) => self.python().bind_handler_name(handler, exception),
+        };
+        self.handler_suite(&handler.body);
+        if !self.body().terminated {
+            self.jump_from_regions(done.to_owned(), depth);
+        }
+        if let Some(failed) = binding {
+            self.python().leave_handler_name(&failed);
+        } else if let Entry::Native(code) = &mut self.0 {
+            code.cleanups.pop();
+        }
+    }
+
     /// Emit each match and its handler once. A bare handler consumes the exception
     /// unconditionally, so only a chain of conditional handlers can propagate it.
     fn ordinary_handlers(
         &mut self,
         handlers: &[ExceptHandler],
-        exception: &str,
-        mut caught: impl FnMut(&mut Self, &ExceptHandler),
+        caught: &Caught,
+        done: &str,
+        depth: usize,
     ) -> bool {
+        let exception = match caught {
+            Caught::Native(value) => &value.operand,
+            Caught::Registered(handle) => handle,
+        };
         let pending = match &self.0 {
             Entry::Native(code) => code.temporaries.clone(),
             Entry::Registered(_) => Vec::new(),
@@ -227,10 +253,12 @@ impl CheckedBody<'_, '_, '_, '_> {
             // A Python exception matcher can allocate blocks of its own.
             let next = self.block_name();
             let Some(condition) = self.matches_exception(exception, &handler.matcher) else {
-                caught(self, handler);
+                self.caught_arm(handler, caught, done, depth);
                 return false;
             };
-            self.when(&condition, Some(next), |code| caught(code, handler));
+            self.when(&condition, Some(next), |code| {
+                code.caught_arm(handler, caught, done, depth)
+            });
             if let Entry::Native(code) = &mut self.0 {
                 code.temporaries.clone_from(&pending);
             }

@@ -13,8 +13,8 @@ use crate::contracts::{
 };
 use crate::effects::{self, ExceptionEffects};
 use crate::ir::{
-    self, Binary, Builtin, CallArgs, Compare, ExceptHandler, Expr, ExprKind, Function,
-    InstanceType, Module, RegexCapture, Statement, TUPLE_PROBE_ARITY, Type,
+    self, Binary, Builtin, CallArgs, Compare, Expr, ExprKind, Function, InstanceType, Module,
+    RegexCapture, Statement, TUPLE_PROBE_ARITY, Type,
 };
 use crate::ranges::{IntRange, RangeFacts};
 use crate::types::Types;
@@ -2186,8 +2186,7 @@ impl Emitter<'_, '_> {
         }
     }
 
-    fn caught_arm(&mut self, handler: &ExceptHandler, exception: &Value, exit: &Completion) {
-        let name = handler.name;
+    fn catch_exception(&mut self, name: Option<usize>, exception: &Value) {
         let previous = self.call("imre_exception_swap_active", Type::Exception, &[exception]);
         self.forget(&previous);
         if let Some(name) = name {
@@ -2196,18 +2195,13 @@ impl Emitter<'_, '_> {
             self.release(exception);
         }
         self.cleanups.push(Cleanup::Active { previous, name });
-        self.block(&handler.body);
-        if !self.body.terminated {
-            self.route(exit.clone());
-        }
-        self.cleanups.pop();
     }
 
     /// Preserve enclosing expression owners until a transfer leaves the protected scope.
     fn with_try_cleanups(
         &mut self,
         finalbody: &[Statement],
-        protected: impl FnOnce(&mut Self, Completion),
+        protected: impl FnOnce(&mut Self, String, usize),
     ) {
         if self.try_nesting == 0 {
             self.cleanup_bytes = 0;
@@ -2224,13 +2218,7 @@ impl Emitter<'_, '_> {
         if !finalbody.is_empty() {
             self.push_finalbody();
         }
-        protected(
-            self,
-            Completion::Jump {
-                label: end.clone(),
-                depth,
-            },
-        );
+        protected(self, end.clone(), depth);
         if !finalbody.is_empty() {
             self.cleanups.truncate(depth);
             self.emit_finalbody(finalbody);

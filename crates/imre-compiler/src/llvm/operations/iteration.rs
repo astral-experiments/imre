@@ -1,7 +1,7 @@
 //! Shared traversal of loop and unpacking IR for fixed and registered entries.
 use super::{CheckedBody, CheckedValue, Entry, Expr, ExprKind, FrameEmitter, Statement};
 use crate::ir::{Binary, Compare, ItemUpdate, IterNextKind};
-use crate::llvm::{Cleanup, Completion, Emitter, LoopTarget, NativeLoop, small};
+use crate::llvm::{Cleanup, Emitter, LoopTarget, NativeLoop, small};
 
 #[derive(Clone)]
 pub(crate) struct LoopEdges {
@@ -347,10 +347,7 @@ impl CheckedBody<'_, '_, '_, '_> {
         }
         .clone();
         let depth = target.cleanup_depth;
-        match &mut self.0 {
-            Entry::Native(e) => e.route(Completion::Jump { label, depth }),
-            Entry::Registered(f) => f.jump_from_regions(label, depth),
-        }
+        self.jump_from_regions(label, depth);
     }
 
     /// A Python setter needs each real object before the next target callback can run.

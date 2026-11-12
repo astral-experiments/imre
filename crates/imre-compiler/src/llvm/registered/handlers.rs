@@ -8,14 +8,14 @@ use crate::llvm::{Completion, finally::Finalbody};
 impl RegisteredFrame<'_, '_> {
     /// The normal else edge skips the handlers. On the error edge, keep the
     /// pending exception live and active until handler dispatch is complete.
-    pub(in crate::llvm) fn enter_handlers(&mut self, handler: &str) -> (String, String) {
+    pub(in crate::llvm) fn enter_handlers(&mut self, handler: &str) -> (String, String, usize) {
         let done = self.name("b");
         self.jump(&done);
         self.label(handler);
         let exception = self.op("take_error", &[]);
         self.live.push(exception.clone());
         self.caught.push(exception.clone());
-        (exception, done)
+        (exception, done, self.regions.len())
     }
 
     pub(in crate::llvm) fn leave_handlers(&mut self, done: &str) {
@@ -160,36 +160,32 @@ impl<'f, 'p> Frame<'f, '_, 'p> {
         });
     }
 
-    /// A named handler clears its binding on every path out of the body.
-    pub(in crate::llvm) fn caught_arm(
+    pub(in crate::llvm) fn bind_handler_name(
         &mut self,
         handler: &ExceptHandler,
         exception: &str,
-        done: &str,
-    ) {
-        if let Some(name) = self.handler_name(handler) {
-            self.code.bind(name, exception);
-            let failed = self.name("b");
-            let enclosing = std::mem::replace(&mut self.body.error_target, failed.clone());
-            self.regions.push(Region::ExceptionName {
-                name: name.into(),
-                outer: enclosing.clone(),
-            });
-            self.emit_handler_suite(&handler.body);
-            self.regions.pop();
-            self.body.error_target = enclosing;
-            if !self.body.terminated {
-                self.clear_exception_name(name);
-            }
-            self.jump(done);
-            self.label(&failed);
-            let error = self.op("take_error", &[]);
-            self.clear_exception_name(name);
-            self.raise(&error, None, true);
-        } else {
-            self.emit_handler_suite(&handler.body);
-            self.jump(done);
-        }
+    ) -> Option<String> {
+        let name = self.handler_name(handler)?;
+        self.code.bind(name, exception);
+        let failed = self.name("b");
+        let outer = std::mem::replace(&mut self.body.error_target, failed.clone());
+        self.regions.push(Region::ExceptionName {
+            name: name.into(),
+            outer,
+        });
+        Some(failed)
+    }
+
+    /// Errors raised by the handler clear its binding under the enclosing error target.
+    pub(in crate::llvm) fn leave_handler_name(&mut self, failed: &str) {
+        let Some(Region::ExceptionName { name, outer }) = self.regions.pop() else {
+            unreachable!("named exception handler")
+        };
+        self.body.error_target = outer;
+        self.label(failed);
+        let error = self.op("take_error", &[]);
+        self.clear_exception_name(&name);
+        self.raise(&error, None, true);
     }
 
     /// Split a pending group in source order and retain both halves until the handlers finish.
