@@ -2063,7 +2063,7 @@ impl<'a> SuitePreparation<'a> {
             scope.refusal = None;
             let lowered = match select {
                 SuiteSelection::All => scope.statement(stmt, &mut body),
-                SuiteSelection::Physical => scope.physical_statement(stmt, &mut body),
+                SuiteSelection::Physical => scope.physical_statement(stmt, &mut body, self),
             };
             if let Ok(continues) = lowered {
                 if !continues {
@@ -3106,6 +3106,7 @@ impl SourceScope<'_> {
         &mut self,
         stmt: &ast::Stmt,
         body: &mut Vec<Statement>,
+        preparation: &SuitePreparation<'_>,
     ) -> StdResult<bool, ()> {
         if let ast::Stmt::Assign(assign) = stmt {
             // The physical frame owns an assignment that yields or awaits its value.
@@ -3144,7 +3145,14 @@ impl SourceScope<'_> {
         };
         let begin = body.len();
         let continues = self.statement(stmt, body)?;
-        if !region.accepts(&body[begin..]) {
+        let checked = &body[begin..];
+        // A refused declaration needs the protected suite's original diagnostic order.
+        if region == PhysicalRegion::Protected
+            && preparation.checked_declaration_refusal(checked).is_none()
+        {
+            return Ok(continues);
+        }
+        if !region.accepts(checked) {
             body.truncate(begin);
             return Err(());
         }
