@@ -2163,6 +2163,20 @@ impl Context {
         self.dict_storage(id).is_none() && self.has_sequence_item_slot(id)
     }
 
+    /// Require the sequence item slot used by native sequence consumers.
+    fn require_sequence_item_slot(&self, id: Id) -> Result<()> {
+        if self.has_sequence_item_slot(id) {
+            return Ok(());
+        }
+        let kind = stdlib::diagnostic_type_name(self, id);
+        let message = if self.has_mapping_subscription(id) || self.heap.get(id).is_weak_proxy() {
+            format!("{kind} is not a sequence")
+        } else {
+            format!("'{kind}' object does not support indexing")
+        };
+        Err(Error::new("TypeError", message))
+    }
+
     fn has_sequence_item_slot(&self, id: Id) -> bool {
         matches!(
             self.heap.get(self.scalar_value(id)),
@@ -4814,6 +4828,7 @@ impl Context {
                     self.bind(scope, name, class);
                 }
             }
+            "_bisect" if source.is_none() => stdlib::bisect::install(self, module, scope),
             "_lzma" if source.is_none() => {
                 for name in [
                     "is_check_supported",

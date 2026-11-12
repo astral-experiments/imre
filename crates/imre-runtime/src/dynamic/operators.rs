@@ -5313,7 +5313,7 @@ impl Context {
             .is_some_and(|slot| Some(&slot) != self.builtins.get("object.__ne__"))
     }
 
-    fn operator_slot(&mut self, obj: Id, name: &str, other: Id) -> Result<Option<Id>> {
+    pub(super) fn operator_slot(&mut self, obj: Id, name: &str, other: Id) -> Result<Option<Id>> {
         // Rich comparison calls a native wrapper with an explicit receiver. In
         // particular, an alias on a foreign class raises the wrapper's call error.
         if comparison_op(name).is_some()

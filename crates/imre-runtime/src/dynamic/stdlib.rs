@@ -12,6 +12,7 @@ pub(super) mod ast;
 mod asyncgen_hooks;
 pub(super) mod audit;
 mod binascii;
+pub(super) mod bisect;
 pub(super) mod bz2;
 pub(super) mod codecs;
 mod contextvars;
@@ -1342,6 +1343,9 @@ pub(super) fn call(
     }
     if name == "io.open_code" {
         return io::open_code(ctx, args, kwargs);
+    }
+    if let Some(method) = name.strip_prefix("_bisect.") {
+        return bisect::call(ctx, method, &args[1..], kwargs);
     }
     if let Some(method) = name.strip_prefix("_opcode.") {
         return opcode::call(ctx, method, &args[1..], kwargs);
