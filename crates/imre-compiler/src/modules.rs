@@ -2781,15 +2781,6 @@ impl IntrinsicModule {
             (Self::UrllibRequest, "install_opener") => {
                 Intrinsic::ScopedObjectExport("urllib.request.install_opener")
             }
-            (Self::UrllibError, "URLError") => {
-                Intrinsic::ScopedObjectExport("urllib.error.URLError")
-            }
-            (Self::UrllibError, "HTTPError") => {
-                Intrinsic::ScopedObjectExport("urllib.error.HTTPError")
-            }
-            (Self::UrllibError, "ContentTooShortError") => {
-                Intrinsic::ScopedObjectExport("urllib.error.ContentTooShortError")
-            }
             (Self::UrllibParse, "quote") => Intrinsic::Quote,
             (Self::UrllibParse, "quote_from_bytes") => Intrinsic::QuoteFromBytes,
             (Self::UrllibParse, "quote_plus") => Intrinsic::QuotePlus,

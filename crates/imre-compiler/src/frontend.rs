@@ -7100,8 +7100,8 @@ impl<'a> Checker<'a> {
             let ast::ExceptHandler::ExceptHandler(handler) = handler;
             self.assigned = handler_assigned.clone();
             self.narrowed = handler_facts.clone();
-            let matcher = if self.registered.is_some() {
-                registered::exception_matcher(handler, try_.is_star, |class, _| self.expr(class))?
+            let categories = if self.registered.is_some() {
+                None
             } else if let Some(target) = &handler.type_ {
                 let expressions = if let ast::Expr::Tuple(tuple) = &**target {
                     tuple.elts.as_slice()
@@ -7115,42 +7115,51 @@ impl<'a> Checker<'a> {
                         "an exception handler requires at least one builtin category",
                     ));
                 }
-                let kinds = expressions
-                    .iter()
-                    .map(|target| {
-                        if let Some(kind) = self
-                            .exception_category(target)
-                            .or_else(|| self.fixed_testcase_failure_kind(target))
-                        {
-                            return Ok(kind);
-                        }
-                        if matches!(self.resolve(target), Some(Binding::RegisteredClass(_))) {
-                            return Err(
-                                self.scoped_builtin_error("a Python exception class", target)
-                            );
-                        }
-                        if let Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
+                let mut kinds = Vec::with_capacity(expressions.len());
+                for expression in expressions {
+                    if let Some(kind) = self
+                        .exception_category(expression)
+                        .or_else(|| self.fixed_testcase_failure_kind(expression))
+                    {
+                        kinds.push(kind);
+                        continue;
+                    }
+                    match self.resolve(expression) {
+                        Some(Binding::RegisteredClass(site))
+                            if self.graph.session.is_exception_declaration(site) => {}
+                        Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
                             name @ ("_pickle.PickleError"
                             | "_pickle.PicklingError"
                             | "_pickle.UnpicklingError"
                             | "lzma.LZMAError"),
-                        ))) = self.resolve(target)
-                        {
-                            return Err(self.scoped_builtin_error(name, target));
+                        ))) => return Err(self.scoped_builtin_error(name, expression)),
+                        _ => {
+                            return Err(error(
+                                self.source,
+                                expression,
+                                "exception handlers require fixed builtin categories",
+                            ));
                         }
-                        Err(error(
-                            self.source,
-                            target,
-                            "exception handlers require fixed builtin categories",
-                        ))
-                    })
-                    .collect::<StdResult<Vec<_>, _>>()?;
-                ir::ExceptionMatcher::Categories(kinds)
+                    }
+                }
+                (kinds.len() == expressions.len()).then_some(kinds)
             } else {
                 if index + 1 != try_.handlers.len() {
                     return Err(error(self.source, handler, "a bare handler must be last"));
                 }
-                ir::ExceptionMatcher::Categories(Vec::new())
+                Some(Vec::new())
+            };
+            let matcher = if let Some(kinds) = categories {
+                ir::ExceptionMatcher::Categories(kinds)
+            } else {
+                registered::exception_matcher(handler, try_.is_star, |class, _| {
+                    if self.registered.is_some() {
+                        return self.expr(class);
+                    }
+                    // Continue checking the handler body. Its class operand needs a Python frame.
+                    self.require_registered_operation(class)?;
+                    Ok(Expr::unrepresented())
+                })?
             };
             let name = handler
                 .name

@@ -6,6 +6,24 @@ use ruff_python_ast::name::Name;
 use ty_python_core::definition::{Definition, DefinitionKind, DefinitionState};
 
 impl Session {
+    /// Check the class bound by the selected runtime declaration.
+    pub(crate) fn is_exception_declaration(&self, site: FileRange) -> bool {
+        use ruff_python_ast::{AnyNodeRef, find_node::covering_node};
+        use ty_python_semantic::types::{KnownClass, Type};
+
+        let parsed = self.parsed(site.file());
+        let name = covering_node(parsed.syntax().into(), site.range());
+        let Some(AnyNodeRef::StmtClassDef(class)) = name.parent() else {
+            return false;
+        };
+        let db = &self.db;
+        let model = SemanticModel::new(db, db.program_file(site.file()));
+        let env = model.program_environment();
+        class.name.range() == site.range()
+            && matches!(class.inferred_type(&model), Some(ty @ Type::ClassLiteral(_))
+                if ty.is_assignable_to(db, &env, KnownClass::BaseException.to_subclass_of(db, &env)))
+    }
+
     pub(crate) fn class_declaration(&self, id: crate::modules::DefinitionId) -> FileRange {
         let file = self.files[id.module];
         let parsed = self.parsed(file);

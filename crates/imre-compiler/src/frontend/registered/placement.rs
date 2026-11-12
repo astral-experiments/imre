@@ -80,6 +80,34 @@ mod tests {
     }
 
     #[test]
+    fn imported_exception_handler_keeps_the_checked_arithmetic_body() {
+        let text = concat!(
+            "def scale(n: int) -> int:\n    return n * 3 + 1\n",
+            "from urllib.error import URLError as NetworkError\n",
+            "try:\n    int('bad')\n",
+            "except NetworkError:\n    pass\n",
+            "except ValueError:\n    print(scale(7))\n",
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.py");
+        std::fs::write(&path, text).unwrap();
+        let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
+        crate::checked_lower(&mut graph).unwrap();
+        let functions = graph.registered_functions();
+        let placed = &functions[&graph.entry][&TextSize::default()];
+        assert_eq!(placed.function.locals[placed.function.params[0]], Type::Int);
+        let sites: Vec<_> = placed
+            .fixed_sites
+            .iter()
+            .map(|range| &text[*range])
+            .collect();
+        assert_eq!(
+            sites,
+            ["return n * 3 + 1", "n * 3 + 1", "n * 3", "n", "3", "1"]
+        );
+    }
+
+    #[test]
     fn original_sites_survive_only_unchanged_checked_operations() {
         let text = concat!(
             "class Receiver:\n    def read(self, value: str) -> str:\n        return value\n",
