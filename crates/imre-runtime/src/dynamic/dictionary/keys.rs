@@ -1210,7 +1210,7 @@ impl Context {
         dict: Id,
         key: Id,
         value: Id,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         self.heap.keep(value);
         let (hash, index) = self.find_dictionary_key(dict, key, None)?;
         let previous = index.map(|i| self.stored_entries(dict)[i].1);
@@ -1218,9 +1218,12 @@ impl Context {
         if let Some(previous) = previous
             && previous != value
         {
+            let released =
+                self.heap.tracks_finalizers() && self.heap.could_own_finalizer(previous, false);
             self.release_list_owner(previous);
+            return Ok(released);
         }
-        Ok(())
+        Ok(false)
     }
 
     pub(in super::super) fn set_ordered_dictionary_key(
