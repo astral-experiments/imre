@@ -937,10 +937,11 @@ impl Builtin {
         &self,
         args: &[Expr],
         result: Type,
-        types: &crate::types::Types,
+        module: &crate::ir::Module,
     ) -> Result<(), &'static str> {
         use crate::ir::ExprKind;
 
+        let types = &module.types;
         let signature = |params: &[Type], returns| {
             result == returns && args.iter().map(|arg| arg.ty).eq(params.iter().copied())
         };
@@ -1172,7 +1173,13 @@ impl Builtin {
             Self::CallableContext => {
                 matches!(args, [callable] if types.cached_function(callable.ty).map(|c| c.frame)
                     .or_else(|| types.partial_function(callable.ty).map(|p| p.frame))
-                    .or_else(|| types.dispatcher(callable.ty).map(|d| d.frame)) == Some(result))
+                    .or_else(|| types.dispatcher(callable.ty).map(|d| d.frame))
+                    .or_else(|| {
+                        let (class, _) = types.bound_method_site(callable.ty)?;
+                        let owner = module.class_metadata.get(class)?;
+                        // Only record methods expose a Class receiver through __self__.
+                        owner.enum_members.is_empty().then_some(Type::Class(class))
+                    }) == Some(result))
             }
             Self::EmptyPartial => {
                 matches!(args, [target] if matches!(result, Type::Callable(_)) && target.ty == result)
