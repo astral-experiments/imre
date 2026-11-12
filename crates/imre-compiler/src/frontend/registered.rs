@@ -175,12 +175,17 @@ impl RegisteredOperand {
     }
 }
 
+pub(crate) enum FrameSite {
+    Lambda(TextSize),
+    Generator(TextRange),
+}
+
 /// Argument binding and lexical dependencies of a retained Python frame.
 pub(crate) enum FrameInputs {
     Checked,
     /// Scalar parameters reach Python call operands without native coercion.
     Protocol {
-        generators: Box<[TextRange]>,
+        sites: Box<[FrameSite]>,
     },
 }
 

@@ -1211,7 +1211,8 @@ impl Checker<'_> {
             return Ok(Some(source.located(node, value)));
         }
         if let ast::Expr::Lambda(lambda) = node {
-            if !has_checked_lambda_body(lambda, source) {
+            // A protocol frame resolves its lexical children when the checked body is placed.
+            if !self.live_protocol_parameters && !has_checked_lambda_body(lambda, source) {
                 return Ok(None);
             }
             let defaults = lambda_defaults(lambda)
