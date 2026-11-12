@@ -980,6 +980,15 @@ impl Context {
     }
 }
 
+impl From<crate::source_arguments::Error> for Error {
+    fn from(error: crate::source_arguments::Error) -> Self {
+        match error {
+            crate::source_arguments::Error::Memory => Self::new("MemoryError", ""),
+            crate::source_arguments::Error::Type(message) => Self::new("TypeError", message),
+        }
+    }
+}
+
 impl From<crate::Error> for Error {
     fn from(error: crate::Error) -> Self {
         let os_args = match error

@@ -285,45 +285,44 @@ fn python_arguments<'a, const N: usize>(
 ) -> Result<[Option<Id>; N]> {
     let mut args = args.into_iter().copied();
     let mut values = [None; N];
+    let mut supplied = 0;
     for (slot, value) in values[..positional].iter_mut().zip(&mut args) {
         *slot = Some(value);
+        supplied += 1;
     }
-    for (key, value) in kwargs {
-        let Some(index) = params.iter().position(|&param| param == key) else {
-            return Err(super::calls::unexpected_keyword_error(name, key, &params));
-        };
-        if values[index].replace(*value).is_some() {
-            return Err(Error::new(
-                "TypeError",
-                format!("{name}() got multiple values for argument '{key}'"),
-            ));
-        }
-    }
-    let extra = args.count();
-    if extra != 0 {
-        let keywords = values[positional..].iter().flatten().count();
-        return Err(super::calls::excess_positional_error(
-            name,
-            positional,
-            defaults,
-            positional + extra,
-            keywords,
-        ));
-    }
-    let required = positional - defaults;
-    if values[..required].contains(&None) {
-        let missing: Vec<_> = params[..required]
-            .iter()
-            .zip(values)
-            .filter_map(|(&param, value)| value.is_none().then_some(param))
-            .collect();
-        return Err(super::calls::missing_arguments_error(
-            name,
-            "positional",
-            &missing,
-        ));
-    }
+    bind_python_keywords(
+        name,
+        params.split_at(positional),
+        supplied + args.count(),
+        defaults,
+        kwargs,
+        &mut values,
+    )?;
     Ok(values)
+}
+
+/// These providers supply their keyword-only defaults when consuming the bound slots.
+fn bind_python_keywords(
+    name: &str,
+    (positional, keyword_only): (&[&str], &[&str]),
+    supplied: usize,
+    defaults: usize,
+    kwargs: &[(String, Id)],
+    values: &mut [Option<Id>],
+) -> Result<()> {
+    let shape = crate::source_arguments::Shape {
+        positional,
+        positional_only: 0,
+        keyword_only,
+        varargs: false,
+        kwargs: false,
+    };
+    let keys = kwargs.iter().map(|(key, _)| key.as_str());
+    let binding = shape.bind(name, supplied, keys, defaults, |_| true)?;
+    for ((_, value), slot) in kwargs.iter().zip(binding.keywords) {
+        values[slot.expect("fixed keyword parameter")] = Some(*value);
+    }
+    Ok(())
 }
 
 /// Bind a Python function whose parameters are all required and positional-or-keyword.
