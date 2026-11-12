@@ -27,7 +27,7 @@ use ruff_db::system::{InMemorySystem, System, SystemPath, SystemPathBuf};
 use ruff_db::vendored::VendoredFileSystem;
 use ruff_python_ast::token::{TokenKind, Tokens};
 use ruff_python_ast::visitor::{Visitor, walk_stmt};
-use ruff_python_ast::{Expr, Stmt};
+use ruff_python_ast::{Expr, ExprCall, ExprRef, Stmt};
 use ruff_python_parser::{Mode, lexer::lex};
 use ruff_text_size::{Ranged, TextRange, TextSize};
 use salsa::Setter;
@@ -187,6 +187,12 @@ pub(crate) struct OperandTypes<'a> {
     module: usize,
 }
 
+#[derive(Clone, Copy)]
+enum ScalarMatch {
+    Assignable,
+    Exact,
+}
+
 impl OperandTypes<'_> {
     pub(crate) fn matches_source(self, text: &str) -> bool {
         self.session.matches_parser_input(self.module, text)
@@ -197,6 +203,15 @@ impl OperandTypes<'_> {
     }
 
     pub(crate) fn scalar_type(self, operand: &Expr) -> Option<crate::ir::Type> {
+        self.checked_scalar(operand.into(), ScalarMatch::Assignable)
+    }
+
+    /// The untaken continuation needs the exact result of the original call.
+    pub(crate) fn stopped_call_result(self, call: &ExprCall) -> Option<crate::ir::Type> {
+        self.checked_scalar(call.into(), ScalarMatch::Exact)
+    }
+
+    fn checked_scalar(self, operand: ExprRef<'_>, rule: ScalarMatch) -> Option<crate::ir::Type> {
         use ruff_python_ast::{AnyRootNodeRef, ExprContext, HasNodeIndex};
         let session = self.session;
         let index = ty_python_core::semantic_index(
@@ -204,20 +219,20 @@ impl OperandTypes<'_> {
             session.db.program_file(session.files[self.module]),
         );
         // Forwarding may preserve a node index while changing the expression it evaluates.
-        index.try_expression_scope_id(operand)?;
+        index.try_expression_scope_id(&operand)?;
         let parsed = self.parsed();
         let AnyRootNodeRef::Expr(original) = parsed.get_by_index(operand.node_index().load())
         else {
             return None;
         };
-        if original != operand
+        if ExprRef::from(original) != operand
             || original
                 .as_name_expr()
                 .is_some_and(|name| name.ctx != ExprContext::Load)
         {
             return None;
         }
-        session.scalar_type(self.module, original)
+        session.inferred_scalar_layout(self.module, original, rule)
     }
 }
 
@@ -2020,20 +2035,33 @@ impl Session {
 
     /// Get a scalar layout hint for an operand in its own lexical scope.
     pub(crate) fn scalar_type(&self, module: usize, value: &Expr) -> Option<crate::ir::Type> {
+        self.inferred_scalar_layout(module, value, ScalarMatch::Assignable)
+    }
+
+    fn inferred_scalar_layout(
+        &self,
+        module: usize,
+        value: &Expr,
+        rule: ScalarMatch,
+    ) -> Option<crate::ir::Type> {
         use ty_python_semantic::types::ProgramEnvironment;
         let ty = self.inferred_layout_type(module, value)?;
         let env = ProgramEnvironment::from_file(self.db.program_file(self.files[module]));
-        self.scalar_layout(&env, ty)
+        self.scalar_layout(&env, ty, rule)
     }
 
     fn scalar_layout<'db>(
         &'db self,
         env: &ty_python_semantic::types::ProgramEnvironment<'db>,
         ty: ty_python_semantic::types::Type<'db>,
+        rule: ScalarMatch,
     ) -> Option<crate::ir::Type> {
         use crate::ir::Type;
         use ty_python_semantic::types::{KnownClass, Type as Ty};
 
+        if matches!(rule, ScalarMatch::Exact) && ty.is_none(&self.db) {
+            return Some(Type::None);
+        }
         if !matches!(
             ty,
             Ty::LiteralValue(_) | Ty::NominalInstance(_) | Ty::Union(_)
@@ -2052,6 +2080,9 @@ impl Session {
         .into_iter()
         .find(|(class, _)| {
             let mut instance = class.to_instance(&self.db, env);
+            if matches!(rule, ScalarMatch::Exact) {
+                return ty == instance;
+            }
             if matches!(class, KnownClass::Float) {
                 instance = ty_python_semantic::types::UnionType::from_two_elements(
                     &self.db,
