@@ -14,28 +14,36 @@ def main():
         raise SystemExit("Run with CPython 3.14.5")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output", type=Path)
-    parser.add_argument("--encoding", choices=("shift_jis", "big5"), default="shift_jis")
+    parser.add_argument("--encoding", choices=("shift_jis", "big5", "euc_jp"), default="shift_jis")
     args = parser.parse_args()
 
-    if args.encoding == "big5":
+    prefix = b""
+    if args.encoding == "euc_jp":
+        # JIS X 0208 already occupies the Shift JIS table in row-major order.
+        # Generate only JIS X 0212, up to its last assigned row.
+        leads = range(0xA1, 0xEE)
+        trails = range(0xA1, 0xFF)
+        prefix = b"\x8f"
+    elif args.encoding == "big5":
         leads = range(0xA1, 0xFA)
-        upper_trails = range(0xA1, 0xFF)
+        trails = (*range(0x40, 0x7F), *range(0xA1, 0xFF))
     else:
         leads = (*range(0x81, 0xA0), *range(0xE0, 0xEB))
-        upper_trails = range(0x80, 0xFD)
-    trails = (*range(0x40, 0x7F), *upper_trails)
+        trails = (*range(0x40, 0x7F), *range(0x80, 0xFD))
     table = bytearray()
     reverse = {}
     for lead in leads:
         for trail in trails:
-            pair = bytes((lead, trail))
+            pair = prefix + bytes((lead, trail))
             try:
                 scalar = pair.decode(args.encoding)
             except UnicodeDecodeError:
                 value = 0xFFFE
             else:
                 value = ord(scalar)
-                reverse[scalar] = pair
+                # ASCII '~' also has a JIS X 0212 decoding, but encodes as ASCII.
+                if not scalar.isascii():
+                    reverse[scalar] = pair
             table.extend(value.to_bytes(2, "little"))
     for scalar, pair in reverse.items():
         if scalar.encode(args.encoding) != pair:
