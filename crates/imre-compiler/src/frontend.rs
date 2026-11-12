@@ -487,7 +487,7 @@ impl<'a> ClassInfo<'a> {
                 }
             }
         }
-        let parsers = argparse::Parsers::collect(graph, types, declarations, &mut fields)?;
+        let parsers = argparse::Parsers::collect(graph, types, declarations, &mut fields);
         let classes = Self {
             parsers,
             truth_dispatch,
