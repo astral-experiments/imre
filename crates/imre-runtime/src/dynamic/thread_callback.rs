@@ -314,7 +314,7 @@ impl Callback {
             .bind(
                 ctx.str_value(code.name)?,
                 pos.len(),
-                &keys,
+                keys.iter().copied(),
                 defaults.len(),
                 |name| ctx.dict_named_item(kwdefaults, name).is_some(),
             )

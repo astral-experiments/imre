@@ -30,11 +30,11 @@ impl<N: AsRef<str>> Shape<'_, N> {
         }
     }
 
-    pub(crate) fn bind(
+    pub(crate) fn bind<'k>(
         &self,
         name: &str,
         positional: usize,
-        keywords: &[&str],
+        mut keywords: impl ExactSizeIterator<Item = &'k str> + Clone,
         positional_defaults: usize,
         has_keyword_default: impl Fn(&str) -> bool,
     ) -> Result<Binding, Error> {
@@ -48,7 +48,7 @@ impl<N: AsRef<str>> Shape<'_, N> {
         targets
             .try_reserve(keywords.len())
             .map_err(|_| Error::Memory)?;
-        for (index, &key) in keywords.iter().enumerate() {
+        while let Some(key) = keywords.next() {
             let slot = (self.positional_only..count).find(|&i| self.parameter(i) == key);
             if let Some(slot) = slot {
                 if std::mem::replace(&mut supplied[slot], true) {
@@ -60,7 +60,7 @@ impl<N: AsRef<str>> Shape<'_, N> {
                 let conflicts: Vec<_> = self.positional[..self.positional_only]
                     .iter()
                     .map(AsRef::as_ref)
-                    .filter(|p| keywords[index..].contains(p))
+                    .filter(|p| *p == key || keywords.clone().any(|remaining| remaining == *p))
                     .collect();
                 if !conflicts.is_empty() {
                     return Err(Error::Type(format!(

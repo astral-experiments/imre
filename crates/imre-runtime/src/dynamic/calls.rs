@@ -9168,19 +9168,15 @@ impl Context {
                 } else {
                     self.items(defaults)?
                 };
-                let mut keys = smallvec::SmallVec::<[&str; 8]>::new();
-                keys.try_reserve(kwargs.len())
-                    .map_err(|_| Error::new("MemoryError", ""))?;
-                keys.extend(kwargs.iter().map(|(key, _)| key.as_str()));
+                let keys = kwargs.iter().map(|(key, _)| key.as_str());
                 let binding = shape
-                    .bind(&name, args.len(), &keys, default_values.len(), |n| {
+                    .bind(&name, args.len(), keys, default_values.len(), |n| {
                         self.dict_named_item(kwdefaults, n).is_some()
                     })
                     .map_err(|e| match e {
                         crate::source_arguments::Error::Memory => Error::new("MemoryError", ""),
                         crate::source_arguments::Error::Type(msg) => Error::new("TypeError", msg),
                     })?;
-                drop(keys);
                 for (n, &v) in pos.iter().zip(&args) {
                     self.bind_argument(local, n, v)?;
                 }
