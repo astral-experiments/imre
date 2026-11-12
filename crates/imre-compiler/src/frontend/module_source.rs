@@ -42,8 +42,15 @@ impl CheckedFile {
             .then_some(Self(id))
     }
 
+    pub(crate) fn module(
+        self,
+        modules: &[crate::modules::SourceModule],
+    ) -> &crate::modules::SourceModule {
+        &modules[self.0]
+    }
+
     pub(crate) fn parsed(self, modules: &[crate::modules::SourceModule]) -> ParsedModule<'_, '_> {
-        let module = &modules[self.0];
+        let module = self.module(modules);
         ParsedModule {
             text: Cow::Borrowed(&module.source),
             parsed: Cow::Borrowed(&module.parsed),

@@ -2893,6 +2893,18 @@ impl SourceModule {
             .get_or_init(|| Box::new(crate::frontend::RegisteredModuleSource::new(self)))
     }
 
+    /// A layout may supply its own parser when preparing the registered initializer.
+    pub(crate) fn registered_values_for(
+        &self,
+        parsed: &ruff_python_parser::Parsed<ast::ModModule>,
+    ) -> Option<&crate::frontend::RegisteredModuleSource> {
+        if self.is_program_source() && std::ptr::eq(&*self.parsed, parsed) {
+            self.registered_values.get().map(Box::as_ref)
+        } else {
+            None
+        }
+    }
+
     pub(crate) fn original_source(&self) -> &str {
         self.original_source.as_deref().unwrap_or(&self.source)
     }

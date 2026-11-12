@@ -4,9 +4,9 @@ use crate::ir::DisplayKind;
 use std::collections::BTreeSet;
 
 pub(crate) struct ModuleSource {
-    method_imports: BTreeSet<String>,
+    pub(crate) method_imports: BTreeSet<String>,
     replacements: HashMap<TextRange, Vec<u32>>,
-    has_templates: bool,
+    pub(crate) has_templates: bool,
 }
 
 impl ModuleSource {

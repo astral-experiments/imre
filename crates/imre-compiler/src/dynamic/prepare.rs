@@ -45,7 +45,7 @@ pub(super) fn check_shipped(
         python_optimization,
         ModuleOrigin::Bundled,
         Default::default(),
-        None,
+        Default::default(),
     )
     .map(drop)
 }
@@ -149,6 +149,14 @@ pub(super) fn units<'a>(
                     Some(parsed) => ParsedModule { text, parsed },
                     None => ParsedModule::parse(path, text)?,
                 };
+                let registered_values = match origin {
+                    ModuleOrigin::Program(_) => checked
+                        .and_then(|unit| unit.source)
+                        .and_then(|file| {
+                            file.module(registrations.modules).registered_values_for(&module.parsed)
+                        }),
+                    _ => None,
+                };
                 let mut body = PreparedBody::from_parsed(
                     name,
                     path.as_path(),
@@ -158,7 +166,7 @@ pub(super) fn units<'a>(
                     checked
                         .map(|unit| unit.literal_sites.clone())
                         .unwrap_or_default(),
-                    types,
+                    (types, registered_values),
                 )?;
                 if let Some(module) = checked.and_then(|unit| unit.prompt_module) {
                     body.prompts = &registrations.modules[module].doctest_prompts;
