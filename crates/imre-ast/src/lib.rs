@@ -247,18 +247,7 @@ pub fn misplaced_star_import(body: &[ast::Stmt]) -> Option<ruff_text_size::TextR
 }
 
 /// A display of literal values is held by the code's constant table in CPython.
-pub fn literal_tuple_element(expr: &ast::Expr) -> bool {
-    match expr {
-        ast::Expr::NoneLiteral(_)
-        | ast::Expr::EllipsisLiteral(_)
-        | ast::Expr::BooleanLiteral(_)
-        | ast::Expr::NumberLiteral(_)
-        | ast::Expr::StringLiteral(_)
-        | ast::Expr::BytesLiteral(_) => true,
-        ast::Expr::Tuple(node) => node.elts.iter().all(literal_tuple_element),
-        _ => false,
-    }
-}
+pub use ruff_python_ast::helpers::is_constant as literal_tuple_element;
 
 pub mod annotations;
 pub mod async_generators;
