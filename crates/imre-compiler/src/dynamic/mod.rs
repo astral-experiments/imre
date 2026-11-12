@@ -8,6 +8,7 @@ mod prepare;
 mod provider_archive;
 pub(crate) mod provider_pack;
 
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 
@@ -683,7 +684,7 @@ fn read_import_source(source: &str, kind: SourceKind) -> Result<ImportSource<'_>
     crate::analysis::check_form_feeds(&normalized, parsed.tokens())?;
     Ok(ImportSource::Module(ParsedModule {
         text: normalized,
-        parsed: std::borrow::Cow::Owned(parsed),
+        parsed: Cow::Owned(parsed),
     }))
 }
 
@@ -714,6 +715,40 @@ fn scan_imports(
 }
 
 pub(super) type LoweredRoot = (ast::Suite, imre_ast::Names);
+
+/// The saved name lowering belongs to this parser's node IDs.
+pub(super) struct ScannedModule {
+    parsed: Option<ruff_python_parser::Parsed<ast::ModModule>>,
+    lowered: LoweredRoot,
+}
+
+fn retained_imports(
+    module: ParsedModule<'_, '_>,
+) -> Result<(Imports, Option<ScannedModule>), String> {
+    let mut body = module.parsed.syntax().body.clone();
+    let mut imports = imports_from_body(&module.text, &mut body, None, None)?;
+    let scanned = imports.invalid_executable.is_none().then(|| ScannedModule {
+        parsed: match module.parsed {
+            Cow::Owned(parser) => Some(parser),
+            Cow::Borrowed(_) => None,
+        },
+        lowered: (body, std::mem::take(&mut imports.private_names)),
+    });
+    Ok((imports, scanned))
+}
+
+fn scan_zip_imports(source: &str) -> Result<(Imports, Option<ScannedModule>), String> {
+    match read_import_source(source, SourceKind::DecodedFile)? {
+        ImportSource::Module(module) => retained_imports(module),
+        ImportSource::Invalid(error) => Ok((
+            Imports {
+                invalid_executable: Some(error),
+                ..Imports::default()
+            },
+            None,
+        )),
+    }
+}
 
 fn imports_from_body(
     normalized: &str,
@@ -1127,7 +1162,7 @@ pub(crate) fn compile(
     let mut inputs = SourceInputs::default();
     let mut archives = HashMap::new();
     let mut registrations = emit::RegisteredBodies::default();
-    let mut normalized_files = HashMap::new();
+    let mut scanned_modules = HashMap::new();
     let mut syntax = None;
     for path in options
         .extension_paths
@@ -1659,13 +1694,11 @@ pub(crate) fn compile(
                         }
                         if let Some(package) = archive.package(&prefix) {
                             if let Some(member) = archive.module(&prefix)
-                                && let Ok(mut imports) = scan_imports(
-                                    &member.source,
-                                    SourceKind::DecodedFile,
-                                    None,
-                                    None,
-                                )
+                                && let Ok((mut imports, scanned)) = scan_zip_imports(&member.source)
                             {
+                                if let Some(module) = scanned {
+                                    scanned_modules.insert(sources.len(), module);
+                                }
                                 if !initial[..path0_len].contains(root) {
                                     registrations.python_providers.insert(sources.len());
                                 }
@@ -1912,15 +1945,12 @@ pub(crate) fn compile(
                     let parsed = checked_package
                         .filter(|_| winner && kind == SourceKind::File)
                         .and_then(|(graph, id)| CheckedFile::select(graph, id));
-                    let (imports, normalized_file) = if let Some(file) = parsed {
-                        let module = file.parsed(modules);
-                        let mut body = module_source::into_body(module.parsed);
-                        let imports = imports_from_body(&module.text, &mut body, None, None);
-                        (imports, Some(body))
+                    let imports = if let Some(file) = parsed {
+                        retained_imports(file.parsed(modules))
                     } else {
-                        (scan_imports(&src, kind, None, alternative), None)
+                        scan_imports(&src, kind, None, alternative).map(|imports| (imports, None))
                     };
-                    let mut imports = match imports {
+                    let (mut imports, scanned) = match imports {
                         Ok(imports) => imports,
                         Err(_) if file_alternatives => continue,
                         Err(error) => return Err(format!("{}: {error}", path.display())),
@@ -1972,11 +2002,8 @@ pub(crate) fn compile(
                             } else {
                                 &mut work
                             };
-                            if let Some(body) = normalized_file {
-                                normalized_files.insert(
-                                    sources.len(),
-                                    (body, std::mem::take(&mut imports.private_names)),
-                                );
+                            if let Some(module) = scanned {
+                                scanned_modules.insert(sources.len(), module);
                             }
                             queue.push_back((
                                 (prefix.clone(), package, imports),
@@ -2043,10 +2070,18 @@ pub(crate) fn compile(
                                 digest,
                             )
                         };
-                    let Ok(imports) = scan_imports(&source, SourceKind::DecodedFile, None, None)
-                    else {
+                    let imports = if digest.is_some() {
+                        scan_zip_imports(&source)
+                    } else {
+                        scan_imports(&source, SourceKind::DecodedFile, None, None)
+                            .map(|imports| (imports, None))
+                    };
+                    let Ok((imports, scanned)) = imports else {
                         continue;
                     };
+                    if let Some(module) = scanned {
+                        scanned_modules.insert(sources.len(), module);
+                    }
                     registrations.python_providers.insert(sources.len());
                     if let Some(digest) = digest {
                         registrations
@@ -2367,7 +2402,7 @@ pub(crate) fn compile(
         .unwrap_or_default();
     let mut prepared = prepare::units(
         (&sources, &builtins),
-        (entry_source, normalized_files),
+        (entry_source, scanned_modules),
         python_optimization,
         (
             Path::new(bundled_root),
