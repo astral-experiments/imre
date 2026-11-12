@@ -376,7 +376,7 @@ impl Checker<'_> {
         &mut self,
         name: &str,
         args: ir::CallArgs,
-        call: &ast::ExprCall,
+        at: &impl Ranged,
     ) -> Result<Expr, String> {
         let sig = self
             .graph
@@ -385,7 +385,7 @@ impl Checker<'_> {
             .ok_or_else(|| {
                 error(
                     self.source,
-                    call,
+                    at,
                     &format!("missing native logging function {name}"),
                 )
             })?;
@@ -534,14 +534,17 @@ impl Checker<'_> {
         self.checked_level_value(value, arg)
     }
 
-    fn checked_level_value(&self, value: Expr, arg: &impl Ranged) -> Result<Expr, String> {
+    fn checked_level_value(&mut self, value: Expr, arg: &impl Ranged) -> Result<Expr, String> {
         match value.ty {
             Type::Int => Ok(value),
             Type::Bool => Ok(Expr {
                 ty: Type::Int,
                 kind: ExprKind::Builtin(Builtin::Int(None), vec![value]),
             }),
-            Type::Str => Ok(operation(Log::CheckLevel, Type::Int, vec![value])),
+            Type::Str => {
+                let level = self.coerce(value, self.types.string_or_int(), arg)?;
+                self.logging_source_call("_checkLevel", ir::CallArgs::positional(vec![level]), arg)
+            }
             ty if dataclass_values::can_format(ty, self.types, self.classes)
                 && !matches!(ty, Type::Class(_)) =>
             {

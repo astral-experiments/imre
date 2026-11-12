@@ -4998,7 +4998,6 @@ impl Emitter<'_, '_> {
                     AddLevel => "imre_log_add_level",
                     LevelName => "imre_log_level_name",
                     LevelForName => "imre_log_level_for_name",
-                    CheckLevel => "imre_log_check_level",
                     InvalidLevel => "imre_log_invalid_level",
                     Disable => "imre_log_disable",
                     EnabledCache => "imre_log_enabled_cache",
@@ -11325,7 +11324,6 @@ declare ptr @imre_log_new(ptr, i64)
 declare void @imre_log_add_level(i64, ptr)
 declare ptr @imre_log_level_name(i64)
 declare i64 @imre_log_level_for_name(ptr)
-declare i64 @imre_log_check_level(ptr)
 declare i64 @imre_log_invalid_level(ptr)
 declare void @imre_log_disable(i64)
 declare ptr @imre_log_enabled_cache(ptr)
