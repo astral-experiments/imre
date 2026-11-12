@@ -11514,37 +11514,40 @@ done:
     output
 }
 
-/// Operates on tagged integers directly. For E(x) = 2x + 1, addition and
-/// subtraction produce E(x +/- y); multiplication first produces 2xy.
-/// Signed overflow is exactly failure to fit the tagged-small range.
-/// Explicit odd results expose representation facts after helper inlining;
-/// cold ownership boundaries keep heap destructors out of immediate fast paths.
 fn integer_helpers() -> String {
     let mut output = String::new();
     for operation in ["retain", "release"] {
-        writeln!(
-            output,
-            r#"
+        write_integer_reference(&mut output, operation, &[false, true]);
+    }
+    output.push_str(&bitwise_helpers());
+    output
+}
+
+/// The low bit distinguishes an immediate integer from an owned heap reference.
+fn write_integer_reference(output: &mut String, operation: &str, nonzero_forms: &[bool]) {
+    writeln!(
+        output,
+        r#"
 define internal void @{operation}_int_heap(i64 %value) cold noinline {{
 entry:
   call void @imre_int_{operation}(i64 %value)
   ret void
 }}"#
-        )
-        .unwrap();
-        for nonzero in [false, true] {
-            let (suffix, presence, immediate) = if nonzero {
-                ("_nonzero", "", "%small")
-            } else {
-                (
-                    "",
-                    "  %absent = icmp eq i64 %value, 0\n  %immediate = or i1 %small, %absent\n",
-                    "%immediate",
-                )
-            };
-            writeln!(
-                output,
-                r#"
+    )
+    .unwrap();
+    for &nonzero in nonzero_forms {
+        let (suffix, presence, immediate) = if nonzero {
+            ("_nonzero", "", "%small")
+        } else {
+            (
+                "",
+                "  %absent = icmp eq i64 %value, 0\n  %immediate = or i1 %small, %absent\n",
+                "%immediate",
+            )
+        };
+        writeln!(
+            output,
+            r#"
 define internal void @{operation}_int{suffix}(i64 %value) alwaysinline {{
 entry:
   %tag = and i64 %value, 1
@@ -11556,12 +11559,9 @@ big:
 done:
   ret void
 }}"#
-            )
-            .unwrap();
-        }
+        )
+        .unwrap();
     }
-    output.push_str(&bitwise_helpers());
-    output
 }
 
 const INTEGER_COMPARE: &str = r#"

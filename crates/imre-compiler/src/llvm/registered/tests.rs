@@ -251,7 +251,7 @@ fn checked_integer_remainder_keeps_its_operation_with_a_registered_sibling() {
 
 #[test]
 fn cached_power_of_two_remainder_needs_no_integer_owner() {
-    let output = emit_captured_body(concat!(
+    let mut output = emit_captured_body(concat!(
         "def modulo(a: int) -> int:\n    return a % 8\n",
         "def publish(send):\n    send(1)\n",
     ));
@@ -265,6 +265,12 @@ fn cached_power_of_two_remainder_needs_no_integer_owner() {
     assert!(!body.contains("int_owner"));
     assert!(!body.contains("@int_mod("));
     assert!(!body.contains("@imre_dyn_exact_int_word("));
+    output.integer_prelude();
+    assert!(
+        !output
+            .functions
+            .contains("define internal void @release_int")
+    );
 }
 
 #[test]
@@ -281,7 +287,7 @@ fn integer_product_consumes_its_operands_without_reprojecting_the_sum() {
     assert_eq!(body.matches("call i64 @int_add(").count(), 1);
     assert_eq!(body.matches("call i64 @int_mul(").count(), 1);
     let (_, failure) = body.split_once("\nfailed:\n").unwrap();
-    assert!(failure.contains("call void @imre_int_release("));
+    assert!(failure.contains("call void @release_int_nonzero("));
     for op in [plus, product] {
         assert_eq!(
             body.matches(&format!("call i64 @imre_dyn_op_at(ptr %ctx, ptr {op},"))
@@ -289,6 +295,17 @@ fn integer_product_consumes_its_operands_without_reprojecting_the_sum() {
             1
         );
     }
+    output.integer_prelude();
+    assert!(
+        output
+            .functions
+            .contains("define internal void @release_int_nonzero(")
+    );
+    assert!(
+        !output
+            .functions
+            .contains("define internal void @release_int(")
+    );
 }
 
 #[test]
