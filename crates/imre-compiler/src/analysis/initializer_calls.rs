@@ -193,14 +193,16 @@ impl Session {
         // to imports before its initializer finishes, including from a child.
         let mut resident = (entry.0, TextSize::default());
         let mut completed = HashMap::from([(entry.0, false)]);
-        let mut pending = vec![(entry, 0, Vec::new(), None::<(usize, &Path)>)];
-        'initializers: while let Some(((module, path), start, mut imports, binding)) = pending.pop()
+        let mut pending = vec![(entry, 0, Vec::new(), None::<((usize, &Path), usize)>)];
+        'initializers: while let Some(((module, path), mut start, mut imports, binding)) =
+            pending.pop()
         {
             let file = self.files[module];
             let parsed = self.parsed(file);
             let model = SemanticModel::new(&self.db, self.db.program_file(file));
             let suite = after_docstring(parsed.suite());
-            if let Some(owner) = binding {
+            let mut member = 0;
+            if let Some((owner, loaded)) = binding {
                 let stmt = &suite[start - 1];
                 if !self.passive_import_binding(stmt, owner.0, resident) {
                     return None;
@@ -215,27 +217,20 @@ impl Session {
                         captures.entry(module).or_default(),
                     );
                 }
-                imports.push((stmt.range(), owner.0));
+                let site = if let Stmt::Import(import) = stmt {
+                    if loaded + 1 < import.names.len() {
+                        start -= 1;
+                        member = loaded + 1;
+                    }
+                    import.names[loaded].range()
+                } else {
+                    stmt.range()
+                };
+                imports.push((site, owner.0));
             }
             for (i, stmt) in suite.iter().enumerate().skip(start) {
                 if module == resident.0 {
                     resident.1 = stmt.start();
-                }
-                // Each import in a comma-separated list must leave the following binding intact.
-                if let Stmt::Import(import) = stmt
-                    && !import.is_lazy
-                    && import.names.len() > 1
-                    && import.names.iter().all(|alias| {
-                        self.initializer_module(
-                            alias.name.as_str(),
-                            &model,
-                            entry.0,
-                            &application_module,
-                        )
-                        .is_some_and(|(owner, _)| self.passive_import_load(stmt, owner, resident))
-                    })
-                {
-                    continue;
                 }
                 // The builtin namespace is resident when Python starts. Importing it
                 // in a passive prefix cannot execute an application's module body.
@@ -252,9 +247,9 @@ impl Session {
                     continue;
                 }
                 if let Some(owner) =
-                    self.initializer_import(stmt, &model, entry.0, &application_module)
+                    self.initializer_import(stmt, member, &model, entry.0, &application_module)
                 {
-                    pending.push(((module, path), i + 1, imports, Some(owner)));
+                    pending.push(((module, path), i + 1, imports, Some((owner, member))));
                     match completed.get(&owner.0) {
                         None => {
                             completed.insert(owner.0, false);
@@ -326,7 +321,13 @@ impl Session {
         path: &Path,
     ) -> bool {
         let model = SemanticModel::new(&self.db, self.db.program_file(self.files[entry]));
-        self.initializer_import(statement, &model, entry, &|name| {
+        if statement
+            .as_import_stmt()
+            .is_some_and(|import| import.names.len() != 1)
+        {
+            return false;
+        }
+        self.initializer_import(statement, 0, &model, entry, &|name| {
             (name == module_name).then_some((owner, path))
         })
         .is_some()
@@ -336,14 +337,13 @@ impl Session {
     fn initializer_import<'a>(
         &self,
         stmt: &Stmt,
+        member: usize,
         model: &SemanticModel<'_>,
         entry: usize,
         application_module: &impl Fn(&str) -> Option<(usize, &'a Path)>,
     ) -> Option<(usize, &'a Path)> {
         let name = match stmt {
-            Stmt::Import(import) if !import.is_lazy && import.names.len() == 1 => {
-                import.names[0].name.as_str()
-            }
+            Stmt::Import(import) if !import.is_lazy => import.names.get(member)?.name.as_str(),
             Stmt::ImportFrom(import) if !import.is_lazy && import.level == 0 => {
                 import.module.as_ref()?.as_str()
             }
@@ -439,7 +439,7 @@ impl Session {
         let member = match (binding.kind(&self.db), attr) {
             (DefinitionKind::Function(_), None) => None,
             (DefinitionKind::Import(import), Some(attr)) => {
-                Some((import.import(parsed).range(), attr))
+                Some((import.alias(parsed).range(), attr))
             }
             (DefinitionKind::ImportFrom(import), None) => Some((
                 import.import(parsed).range(),
