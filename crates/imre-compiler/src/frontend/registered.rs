@@ -506,7 +506,7 @@ pub(super) fn checkpoint(stmt: &ast::Stmt) -> Statement {
     ))
 }
 
-fn assertion_statements(
+pub(super) fn assertion_statements(
     stmt: &ast::StmtAssert,
     test: Expr,
     message: Option<Expr>,
@@ -4720,6 +4720,44 @@ mod tests {
         graph.registered_startup = true;
         crate::checked_lower(&mut graph).unwrap();
         graph
+    }
+
+    #[test]
+    fn checked_function_asserts_against_the_live_global() {
+        let text =
+            "events = ['truth']\ndef current():\n    assert events == ['truth']\ncurrent()\n";
+        let graph = checked_named_source(text);
+        let current = graph.modules[graph.entry].parsed.syntax().body[1]
+            .as_function_def_stmt()
+            .unwrap();
+        let assertion = current.body[0].as_assert_stmt().unwrap();
+        let functions = graph.registered_functions();
+        let body = &functions[&graph.entry][&current.start()].function.body;
+        let [
+            Statement::Expr(mark),
+            Statement::If(_, pass, fail),
+            Statement::Return(_),
+        ] = &body[..]
+        else {
+            panic!("expected the checked assertion and implicit return")
+        };
+        assert!(
+            matches!(mark.kind, ExprKind::Builtin(Builtin::RegisteredStatement(range, None), _) if range == assertion.test.range())
+        );
+        assert!(pass.is_empty());
+        let [Statement::Expr(failure)] = &fail[..] else {
+            panic!("expected the failure on the false branch");
+        };
+        let ExprKind::Builtin(Builtin::RegisteredAssertionFailure { statement, test }, args) =
+            &failure.kind
+        else {
+            panic!("expected a Python assertion failure")
+        };
+        assert_eq!(
+            (*statement, *test),
+            (assertion.start(), assertion.test.range())
+        );
+        assert!(args.is_empty());
     }
 
     #[test]

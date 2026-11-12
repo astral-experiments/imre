@@ -1268,8 +1268,19 @@ impl Checker<'_> {
         let graph = self.graph;
         let owner = self.module;
         if let ast::Expr::Compare(cmp) = node {
-            // Preserve the existing checker for every link between concrete operands.
+            let frame_equality = self.registered_local_start.is_some()
+                && matches!(cmp.ops.as_ref(), [ast::CmpOp::Eq | ast::CmpOp::NotEq]);
             let opaque = cmp.operands.iter().map(|operand| {
+                // A module value is loaded from the live frame namespace. Its
+                // replacement owns equality even when the initializer had a fixed type.
+                if frame_equality
+                    && let Some(name) = operand.as_name_expr()
+                    && !self.names.contains_key(name.id.as_str())
+                    && !self.comprehension_targets.contains(name.id.as_str())
+                    && matches!(graph.resolve(owner, operand), Some(Binding::Value(_)))
+                {
+                    return true;
+                }
                 let object = match operand {
                     ast::Expr::Subscript(subscript) => subscript.value.as_ref(),
                     _ => operand,

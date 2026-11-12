@@ -5780,8 +5780,10 @@ impl<'a> Checker<'a> {
             }
             if let Some(body) = output.as_deref_mut() {
                 if self.registered.is_some() {
-                    // Even a pass has a Python frame checkpoint for pending signals and exceptions.
-                    body.push(registered::checkpoint(statement));
+                    // Assertions own the test checkpoint and disappear under Python optimization.
+                    if !statement.is_assert_stmt() {
+                        body.push(registered::checkpoint(statement));
+                    }
                 } else if !lowered.is_empty() && self.fault_enabled() {
                     body.push(self.fault_line(statement));
                 }
@@ -5894,6 +5896,7 @@ impl<'a> Checker<'a> {
                         )
                 }
                 ast::Stmt::For(loop_) => !loop_.is_async,
+                ast::Stmt::Assert(_) => self.registered_local_start.is_some(),
                 ast::Stmt::With(scope) => self.registered_local_start.is_some() && !scope.is_async,
                 ast::Stmt::While(_) => true,
                 ast::Stmt::If(_) => true,
@@ -6488,22 +6491,31 @@ impl<'a> Checker<'a> {
             ast::Stmt::Assert(assert) => {
                 let test = self.condition(&assert.test)?;
                 let successful = self.local_state();
-                let message = assert
-                    .msg
-                    .as_deref()
-                    .map(|message| self.expr_expected(message, Type::Str).map(Box::new))
-                    .transpose()?;
-                let result = Statement::If(
-                    test,
-                    Vec::new(),
-                    vec![Statement::raise(Expr {
-                        ty: Type::Exception,
-                        kind: ExprKind::Exception { kind: 9, message },
-                    })],
-                );
+                let result = if self.registered.is_some() {
+                    let message = assert
+                        .msg
+                        .as_deref()
+                        .map(|message| self.expr(message))
+                        .transpose()?;
+                    Vec::from(registered::assertion_statements(assert, test, message))
+                } else {
+                    let message = assert
+                        .msg
+                        .as_deref()
+                        .map(|message| self.expr_expected(message, Type::Str).map(Box::new))
+                        .transpose()?;
+                    vec![Statement::If(
+                        test,
+                        Vec::new(),
+                        vec![Statement::raise(Expr {
+                            ty: Type::Exception,
+                            kind: ExprKind::Exception { kind: 9, message },
+                        })],
+                    )]
+                };
                 self.restore_state(successful);
                 self.apply_facts(&assert.test, true);
-                Some(result)
+                return Ok((result, true));
             }
             ast::Stmt::With(with_) if !with_.is_async => {
                 if self.registered_local_start.is_some() {

@@ -182,6 +182,9 @@ pub(crate) fn frame_inputs(
                 true
             }
             ExprKind::Builtin(Builtin::RegisteredSpread, args) => args.len() == 1,
+            ExprKind::Builtin(Builtin::RegisteredAssertionFailure { .. }, args) => {
+                expr.ty == Type::None && args.len() <= 1
+            }
             ExprKind::Builtin(Builtin::RegisteredLambda(_, scoped), operands) => {
                 uses_python_protocol = true;
                 !scoped || !operands.is_empty()
