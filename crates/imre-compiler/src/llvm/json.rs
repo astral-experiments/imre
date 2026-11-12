@@ -147,20 +147,6 @@ struct Schemas<'a, 'units> {
 }
 
 impl Schemas<'_, '_> {
-    fn bytes(&mut self, name: &str, value: &str) {
-        let output = self.output.entry_buffer();
-        write!(
-            output,
-            "@{name} = private unnamed_addr constant [{} x i8] c\"",
-            value.len()
-        )
-        .unwrap();
-        for byte in value.bytes() {
-            write!(output, "\\{byte:02X}").unwrap();
-        }
-        output.push_str("\"\n");
-    }
-
     fn schema(&mut self, ty: Type) -> String {
         let ty = match ty {
             Type::StrLiteral(_) => Type::Str,
@@ -231,13 +217,21 @@ impl Schemas<'_, '_> {
                 {
                     let child = self.schema(self.module.class_fields[class][index]);
                     let prefix = format!("json_field_{class}_{index}");
-                    self.bytes(&format!("{prefix}_name"), &field.name);
+                    write_private_bytes(
+                        self.output.entry_buffer(),
+                        &format!("{prefix}_name"),
+                        &field.name,
+                    );
                     let (default_kind, default_pointer, default_len) = match &field.default {
                         None => (0, "null".to_owned(), 0),
                         Some(JsonDefault::EmptyList) => (2, "null".to_owned(), 0),
                         Some(value) => {
                             let value = literal(value);
-                            self.bytes(&format!("{prefix}_default"), &value);
+                            write_private_bytes(
+                                self.output.entry_buffer(),
+                                &format!("{prefix}_default"),
+                                &value,
+                            );
                             (1, format!("@{prefix}_default"), value.len())
                         }
                     };

@@ -257,11 +257,7 @@ impl<'units> Output<'units> {
             "unnamed_addr constant",
             format_args!("[{} x i8]", bytes.len()),
         );
-        output.push_str("c\"");
-        for byte in bytes {
-            write!(output, "\\{byte:02X}").unwrap();
-        }
-        output.push_str("\"\n");
+        write_byte_string(output, bytes.iter().copied(), ByteEscapes::All);
     }
 
     pub fn global(

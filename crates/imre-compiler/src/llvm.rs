@@ -56,6 +56,42 @@ pub(crate) use module_registration::ModuleLauncher;
 use operations::{CheckedBody, LoopEdges};
 use units::Output;
 
+/// Fixed data uses hex escapes throughout. Registered strings keep printable ASCII readable.
+enum ByteEscapes {
+    All,
+    NonPrintable,
+}
+
+/// Write the exact initializer bytes, including any terminator supplied by the caller.
+fn write_byte_string(
+    output: &mut String,
+    bytes: impl IntoIterator<Item = u8>,
+    escapes: ByteEscapes,
+) {
+    output.push_str("c\"");
+    for byte in bytes {
+        if matches!(escapes, ByteEscapes::NonPrintable)
+            && (b' '..=b'~').contains(&byte)
+            && !matches!(byte, b'"' | b'\\')
+        {
+            output.push(char::from(byte));
+        } else {
+            write!(output, "\\{byte:02X}").unwrap();
+        }
+    }
+    output.push_str("\"\n");
+}
+
+fn write_private_bytes(output: &mut String, name: &str, value: &str) {
+    write!(
+        output,
+        "@{name} = private unnamed_addr constant [{} x i8] ",
+        value.len()
+    )
+    .unwrap();
+    write_byte_string(output, value.bytes(), ByteEscapes::All);
+}
+
 enum LlvmType {
     I1,
     I8,
