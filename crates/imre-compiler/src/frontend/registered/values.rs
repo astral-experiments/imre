@@ -488,6 +488,25 @@ impl Checker<'_> {
         value
     }
 
+    /// Resolve the live imported target before evaluating its already checked operand.
+    pub(in crate::frontend) fn call_import_with_operand(
+        &mut self,
+        call: &ast::ExprCall,
+        operand: Expr,
+    ) -> Result<Expr, String> {
+        let source = self
+            .registered
+            .unwrap_or_else(|| self.graph.modules[self.module].registered_values())
+            .context(self.source);
+        let (selection, receiver) = source.call_target(call);
+        let target = registered_value(receiver, source).map_or_else(|| self.expr(receiver), Ok)?;
+        let mut value = bound_call(call, selection, target, vec![operand]);
+        if let Some(slot) = self.namespace {
+            in_namespace(&mut value, self.local(slot));
+        }
+        Ok(value)
+    }
+
     /// Bind the Python method and check its operands in source order. A fixed
     /// caller can check the result contract before selecting its registered frame.
     pub(in crate::frontend) fn registered_method_call(
