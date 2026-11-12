@@ -65,6 +65,31 @@ struct Database {
     analysis: Arc<AnalysisSettings>,
 }
 
+/// The eager body check reads the lowering filesystem with independent diagnostic rules.
+pub(crate) struct RegisteredBodyChecks(Database);
+
+impl RegisteredBodyChecks {
+    pub(crate) fn source_error_ranges(
+        &self,
+        source: &Session,
+        module: usize,
+    ) -> Option<Vec<Option<TextRange>>> {
+        let path = source.files[module].path(&source.db);
+        let file = system_path_to_file(&self.0, path.as_str()).ok()?;
+        Some(self.0.source_error_ranges(file))
+    }
+}
+
+impl Database {
+    fn source_error_ranges(&self, file: File) -> Vec<Option<TextRange>> {
+        self.check_file(file)
+            .into_iter()
+            .filter(|diagnostic| diagnostic.severity() >= Severity::Error)
+            .map(|diagnostic| diagnostic.primary_span().and_then(|span| span.range()))
+            .collect()
+    }
+}
+
 pub(crate) enum AnnotationClass {
     Linked(usize, TextRange),
     Declaration(String),
@@ -1526,34 +1551,41 @@ impl Session {
 
     /// Check a prospective function against the source typing rules before an
     /// unresolved signature can acquire a new registered entry.
-    pub(crate) fn registered_body_checks(&self) -> Result<Self, String> {
-        let mut session = self.diagnostic_copy()?;
-        session.set_registered_body_rules();
-        Ok(session)
+    pub(crate) fn registered_body_checks(&self) -> Result<RegisteredBodyChecks, String> {
+        let mut db = Database {
+            storage: salsa::Storage::default(),
+            files: Files::default(),
+            ..self.db.clone()
+        };
+        db.settings.search_paths.try_register_static_roots(&db);
+        DiagnosticRules::new(&db, Self::registered_body_rules());
+        // Source rewrites belong to the owning Salsa database. Imports without
+        // an override already read their selected bytes from the shared filesystem.
+        for &original in self.files.iter().chain(&self.declarations) {
+            if let Some(text) = original.source_text_override(&self.db) {
+                let file = system_path_to_file(&db, original.path(&self.db).as_str())
+                    .map_err(|error| error.to_string())?;
+                file.set_source_text_override(&mut db)
+                    .to(Some(text.clone()));
+            }
+        }
+        Ok(RegisteredBodyChecks(db))
     }
 
-    fn set_registered_body_rules(&mut self) {
-        DiagnosticRules::get(&self.db)
-            .set_rules(&mut self.db)
-            .to(Arc::new(RuleSelection::from_registry(
-                default_lint_registry(),
-            )));
+    fn registered_body_rules() -> Arc<RuleSelection> {
+        Arc::new(RuleSelection::from_registry(default_lint_registry()))
     }
 
-    pub(crate) fn registered_source_error_ranges(&mut self, module: usize) -> Vec<TextRange> {
+    pub(crate) fn registered_source_error_ranges(
+        &mut self,
+        module: usize,
+    ) -> Vec<Option<TextRange>> {
         self.with_diagnostic_rules(|session| {
-            session.set_registered_body_rules();
-            session.source_error_ranges(module)
+            DiagnosticRules::get(&session.db)
+                .set_rules(&mut session.db)
+                .to(Self::registered_body_rules());
+            session.db.source_error_ranges(session.files[module])
         })
-    }
-
-    pub(crate) fn source_error_ranges(&self, module: usize) -> Vec<TextRange> {
-        self.db
-            .check_file(self.files[module])
-            .into_iter()
-            .filter(|diagnostic| diagnostic.severity() >= Severity::Error)
-            .filter_map(|diagnostic| diagnostic.primary_span()?.range())
-            .collect()
     }
 
     pub(crate) fn copy_for_diagnostics(

@@ -284,7 +284,7 @@ pub(super) fn finish_source_checks(
     let mut accepted = |module,
                         range,
                         session: &mut crate::analysis::Session,
-                        errors: &mut HashMap<ModuleId, Vec<TextRange>>| {
+                        errors: &mut HashMap<ModuleId, _>| {
         let errors = errors.entry(module).or_insert_with(|| {
             source_checks
                 .as_deref_mut()
@@ -390,14 +390,15 @@ pub(super) fn lower_definition(
 /// operations satisfy the first-party source contract. Cache the check per physical module.
 #[derive(Default)]
 pub(super) struct SourceChecks {
-    session: std::cell::OnceCell<Option<crate::analysis::Session>>,
+    session: std::cell::OnceCell<Option<crate::analysis::RegisteredBodyChecks>>,
     pub(super) solved: Option<std::cell::RefCell<Vec<(ModuleId, TextRange)>>>,
 }
 
 impl SourceChecks {
-    fn accepts_range(errors: &[TextRange], definition: TextRange) -> bool {
+    fn accepts_range(errors: &[Option<TextRange>], definition: TextRange) -> bool {
         errors
             .iter()
+            .flatten()
             .all(|error| !definition.contains_range(*error))
     }
 
@@ -422,13 +423,14 @@ impl SourceChecks {
         if let Some(accepted) = Self::cached(graph, module, definition) {
             return accepted;
         }
-        let Some(session) = self
+        let Some(errors) = self
             .session
             .get_or_init(|| graph.session.registered_body_checks().ok())
+            .as_ref()
+            .and_then(|checks| checks.source_error_ranges(&graph.session, module))
         else {
             return false;
         };
-        let errors = session.source_error_ranges(module);
         let accepted = Self::accepts_range(&errors, definition.range());
         graph
             .registered_source_errors
