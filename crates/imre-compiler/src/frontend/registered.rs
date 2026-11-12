@@ -705,7 +705,10 @@ pub(crate) fn registered_type_alias(site: TextSize) -> Expr {
 }
 
 /// Preserve the requested module separately from the names bound in the current namespace.
-pub(super) fn registered_import(stmt: &ast::Stmt, private_names: &imre_ast::Names) -> Option<Expr> {
+pub(super) fn registered_import(
+    stmt: &ast::Stmt,
+    private_names: Option<&imre_ast::Names>,
+) -> Option<Expr> {
     let import = match stmt {
         ast::Stmt::Import(import) => ir::NamespaceImport::Modules(
             import
@@ -722,7 +725,7 @@ pub(super) fn registered_import(stmt: &ast::Stmt, private_names: &imre_ast::Name
                             .map_or(root, ast::Identifier::as_str)
                             .to_owned(),
                         bind_leaf: alias.asname.is_some()
-                            && !private_names.imports_root(&alias.name),
+                            && !private_names.is_some_and(|names| names.imports_root(&alias.name)),
                     }
                 })
                 .collect(),
@@ -1050,9 +1053,6 @@ pub(super) fn collect_sites<'a>(
     }
     impl<'a> StatementVisitor<'a> for Collector<'_, 'a> {
         fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
-            if let Some(import) = registered_import(stmt, self.names) {
-                self.output.operations.insert(stmt.range(), import);
-            }
             match stmt {
                 ast::Stmt::ClassDef(class) => {
                     self.output.declarations.push(DeclarationSite::Class(class));
@@ -2784,10 +2784,7 @@ impl statements::StatementLowering for SourceScope<'_> {
                     .ok_or(())?;
                 Ok((body, true))
             }
-            _ => self
-                .operations
-                .get(&stmt.range())
-                .cloned()
+            _ => registered_import(stmt, self.source.private_names)
                 .map(|import| (vec![Statement::Expr(import)], true))
                 .ok_or(()),
         }
@@ -3134,6 +3131,8 @@ impl SourceScope<'_> {
                 stmt,
                 ast::Stmt::Pass(_) | ast::Stmt::Global(_) | ast::Stmt::Nonlocal(_)
             )
+            || stmt.is_import_stmt()
+            || stmt.is_import_from_stmt()
             || stmt.is_class_def_stmt()
             || stmt.is_assert_stmt()
             || stmt.is_return_stmt()
@@ -4312,6 +4311,7 @@ mod tests {
         };
         let operands = prepared_sites(&stmts, source, false);
         let ops = operands.operations;
+        assert_eq!(ops.len(), 2);
         assert_eq!(operands.module_annotations.fields.len(), 2);
         let mut prepare = SuitePreparation::new(&ops, source, true);
         let plan = prepare.suite(&stmts, RegisteredScope::Module);
@@ -4498,7 +4498,7 @@ mod tests {
             .body;
         let names = imre_ast::lower(&mut body);
         let class = body[0].as_class_def_stmt().unwrap();
-        let import = registered_import(&class.body[0], &names).unwrap();
+        let import = registered_import(&class.body[0], Some(&names)).unwrap();
         let ExprKind::Builtin(Builtin::RegisteredImport(ir::NamespaceImport::Modules(modules)), _) =
             import.kind
         else {

@@ -6018,7 +6018,7 @@ impl<'a> Checker<'a> {
             return Ok((bindings, true));
         }
         if self.bound_function_imports
-            && let Some(import) = registered::registered_import(statement, &Default::default())
+            && let Some(import) = registered::registered_import(statement, None)
         {
             return Ok((vec![Statement::Expr(import)], true));
         }
