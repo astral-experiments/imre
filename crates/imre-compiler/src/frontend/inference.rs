@@ -1221,7 +1221,7 @@ impl Inference {
                 }
                 let mut reports = reports.into_iter();
                 if let Some(primary) = reports.next() {
-                    if primary.kind.is_object() {
+                    if primary.kind.is_object() && !retries_failed_layout(graph) {
                         registered::capture(graph, signatures, classes, types, self, None);
                     }
                     return Err(primary.with_following(reports));
@@ -1237,8 +1237,9 @@ impl Inference {
                     else {
                         continue;
                     };
-                    if unresolved.kind.is_object()
-                        || matches!(unresolved.kind, Kind::UnresolvedParameter(..))
+                    if !retries_failed_layout(graph)
+                        && (unresolved.kind.is_object()
+                            || matches!(unresolved.kind, Kind::UnresolvedParameter(..)))
                     {
                         registered::capture(graph, signatures, classes, types, self, None);
                     }
