@@ -1025,13 +1025,13 @@ impl Inference {
                         && matches!(&diagnostic, Failure::Diagnostic(report) if report.exact_operand().is_some())
                         && !function.is_async
                         && !imre_ast::code_flags::is_generator(&function.body)
-                        && graph.session.function_may_return(*module, function)
                     {
-                        let mut exits = ast::helpers::ReturnStatementVisitor::default();
-                        exits.visit_body(&function.body);
-                        if exits.returns.iter().all(|ret| {
+                        let exits = crate::analysis::explicit_returns(function);
+                        if exits.iter().all(|ret| {
                             matches!(ret.value.as_deref(), None | Some(ast::Expr::NoneLiteral(_)))
-                        }) {
+                        }) && (graph.session.call_may_return_implicitly(*module, function)
+                            || graph.session.has_reachable_return(*module, &exits))
+                        {
                             self.pending.borrow_mut()[signature.id].returns = Some(Type::None);
                             self.revision.set(self.revision.get() + 1);
                         }
