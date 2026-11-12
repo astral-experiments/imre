@@ -143,23 +143,12 @@ fn case_chars(source: &str, case: Case) -> impl Iterator<Item = char> {
 }
 
 /// Map a scalar string with the same Unicode data used by native string operations.
-pub(crate) fn case_map(source: &str, case: Case) -> super::Result<String> {
-    let mut result = String::new();
-    result
-        .try_reserve_exact(source.len())
-        .map_err(|_| Error::allocation())?;
-    if matches!(case, Case::Lower | Case::Fold) && source.is_ascii() {
-        result.push_str(source);
-        result.make_ascii_lowercase();
-        return Ok(result);
+pub(crate) fn case_map(source: &str, case: Case) -> super::Result<Str> {
+    match case {
+        Case::Title | Case::Swap => map_chars(source, case),
+        _ => convert(source, case),
     }
-    for ch in case_chars(source, case) {
-        result
-            .try_reserve(ch.len_utf8())
-            .map_err(|_| Error::allocation())?;
-        result.push(ch);
-    }
-    Ok(result)
+    .map_err(|_| Error::allocation())
 }
 
 /// Preserve surrogates as uncased boundaries when mapping Python code points.
@@ -203,7 +192,7 @@ pub unsafe extern "C" fn imre_str_case_map(source: *const Str, title: u32) -> *c
     } else {
         let case = if title != 0 { Case::Title } else { Case::Swap };
         case_map(source, case)
-            .and_then(|value| StrOwner::try_new(Str::from(value)).map_err(|_| Error::allocation()))
+            .and_then(|value| StrOwner::try_new(value).map_err(|_| Error::allocation()))
     };
     finish(result.map(StrOwner::into_raw), std::ptr::null())
 }
@@ -213,8 +202,7 @@ pub(in crate::objects) fn lowercase_chars(source: &str) -> impl Iterator<Item = 
     case_chars(source, Case::Lower)
 }
 
-/// CPython titlecases just the first code point for capitalize, then lowercases
-/// the rest in the context of the original string (not of the suffix alone).
+/// Lower, upper, capitalize and fold have a direct ASCII mapping.
 fn convert(source: &str, case: Case) -> Result<Str, ReserveError> {
     if source.is_ascii() {
         let mut result = Str::try_new(source)?;
@@ -231,6 +219,10 @@ fn convert(source: &str, case: Case) -> Result<Str, ReserveError> {
         }
         return Ok(result);
     }
+    map_chars(source, case)
+}
+
+fn map_chars(source: &str, case: Case) -> Result<Str, ReserveError> {
     let mut result = Str::try_with_capacity(source.len())?;
     for ch in case_chars(source, case) {
         result.try_reserve(ch.len_utf8())?;
