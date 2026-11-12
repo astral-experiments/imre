@@ -9,8 +9,17 @@ from _io import BufferedRWPair as NativePair
 class Pair(io.BufferedRWPair):
     pass
 
+def check_unsupported_truncate(stream):
+    try:
+        stream.truncate(0)
+    except io.UnsupportedOperation as exc:
+        assert exc.args == ("truncate",)
+    else:
+        raise AssertionError("BufferedRWPair accepted truncate")
+
 assert io.BufferedRWPair is NativePair
 assert issubclass(Pair, io.BufferedIOBase)
+assert NativePair.truncate is _io._IOBase.truncate
 src = "imre-rw-in-" + str(os.getpid())
 dst = "imre-rw-out-" + str(os.getpid())
 with io.open(src, "wb") as source:
@@ -115,6 +124,7 @@ try:
     with Pair(raw_in, raw_out, 4) as pair:
         gc.collect()
         assert not pair.closed and pair.readable() and pair.writable()
+        check_unsupported_truncate(pair)
         assert pair.peek(1) == b"ab\nc"
         assert pair.read(1) == b"a"
         assert pair.readline() == b"b\n"
@@ -124,6 +134,7 @@ try:
         assert pair.flush() is None and raw_out.tell() == 3
         assert pair.write(b"!") == 1
     assert pair.closed and raw_in.closed and raw_out.closed
+    check_unsupported_truncate(pair)
     assert pair.close() is None
     with io.open(dst, "rb") as check:
         assert check.read() == b"foo!"
