@@ -578,8 +578,8 @@ pub(crate) enum Binding {
     Definition(DefinitionId),
     /// The owning Python module initializes the checked class object.
     RegisteredClass(ruff_db::files::FileRange),
-    /// A Python function bound by the selected module's actual initializer.
-    RegisteredFunction(ruff_db::files::FileRange),
+    /// The value stored by a shipped function definition after applying its decorators.
+    RegisteredValue(ruff_db::files::FileRange),
     /// The module initializer establishes this binding when its guard executes.
     ConditionalValue,
     /// A class defined by the runtime arm of a TYPE_CHECKING guard.
@@ -593,8 +593,8 @@ pub(crate) enum Binding {
 }
 
 impl Binding {
-    pub(crate) fn is_registered_callable(self) -> bool {
-        matches!(self, Self::RegisteredClass(_) | Self::RegisteredFunction(_))
+    pub(crate) fn is_registered_object(self) -> bool {
+        matches!(self, Self::RegisteredClass(_) | Self::RegisteredValue(_))
     }
 }
 
@@ -4535,7 +4535,7 @@ fn resolve_binding(
                 }
                 Binding::Definition(_)
                 | Binding::RegisteredClass(_)
-                | Binding::RegisteredFunction(_)
+                | Binding::RegisteredValue(_)
                 | Binding::ConditionalValue
                 | Binding::RuntimeClass
                 | Binding::Value(_)
@@ -5798,7 +5798,7 @@ impl<'a> Loader<'a> {
                                 self.session.prepare_shipped_source(&child_name)?;
                             }
                         }
-                        if matches!(binding, Binding::RegisteredFunction(_)) {
+                        if matches!(binding, Binding::RegisteredValue(_)) {
                             self.modules[id]
                                 .registered_imports
                                 .entry(index)
@@ -5806,7 +5806,7 @@ impl<'a> Loader<'a> {
                         }
                         if binding
                             == Binding::Intrinsic(Intrinsic::Fnmatch(FnmatchOperation::Parts))
-                            || binding.is_registered_callable()
+                            || binding.is_registered_object()
                             || binding == Binding::IntrinsicModule(IntrinsicModule::ReConstants)
                             || module == IntrinsicModule::EmailHeaderValueParser
                             || matches!(

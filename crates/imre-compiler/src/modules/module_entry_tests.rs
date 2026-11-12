@@ -192,7 +192,7 @@ fn demanded_shipped_classes_use_the_defining_source() {
     let module = &graph.modules[graph.entry];
     assert!(matches!(
         graph.session.shipped_declaration("traceback", "format_exc"),
-        Some(Binding::RegisteredFunction(_))
+        Some(Binding::RegisteredValue(_))
     ));
     // asyncio imports tasks with a wildcard. Its explicit __all__ omits this class.
     assert!(
@@ -273,7 +273,7 @@ fn shipped_function_imports_keep_the_defining_name_range() {
             .filter_map(ruff_python_ast::Stmt::as_function_def_stmt)
             .find(|def| def.name.as_str() == name)
             .unwrap();
-        let expected = Some(Binding::RegisteredFunction(ruff_db::files::FileRange::new(
+        let expected = Some(Binding::RegisteredValue(ruff_db::files::FileRange::new(
             file,
             function.name.range(),
         )));
@@ -289,4 +289,39 @@ fn shipped_function_imports_keep_the_defining_name_range() {
             .shipped_declaration("urllib.request", "_opener")
             .is_none()
     );
+}
+
+#[test]
+fn decorated_shipped_import_and_attribute_share_the_defining_slot() {
+    use super::Binding;
+    use ruff_text_size::Ranged;
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("app.py");
+    fs::write(
+        &path,
+        "import typing\nfrom typing import TypeAlias as marker\ntyping.TypeAlias\ntyping.Missing\n",
+    )
+    .unwrap();
+    let graph = SourceGraph::load(&path, Some(dir.path()), &[]).unwrap();
+    let module = &graph.modules[graph.entry];
+    let (file, parsed, _) = graph
+        .session
+        .selected_file(&Path::new(crate::dynamic::BUNDLED_SOURCE_ROOT).join("typing.py"))
+        .unwrap();
+    let definition = parsed
+        .suite()
+        .iter()
+        .filter_map(ruff_python_ast::Stmt::as_function_def_stmt)
+        .find(|def| def.name.as_str() == "TypeAlias")
+        .unwrap();
+    assert!(!definition.decorator_list.is_empty());
+    let site = ruff_db::files::FileRange::new(file, definition.name.range());
+    let expected = Some(Binding::RegisteredValue(site));
+    assert!(!graph.session.is_exception_declaration(site));
+    assert_eq!(module.export("marker"), expected);
+    let qualified = &module.parsed.suite()[2].as_expr_stmt().unwrap().value;
+    assert_eq!(graph.resolve(graph.entry, qualified), expected);
+    let missing = &module.parsed.suite()[3].as_expr_stmt().unwrap().value;
+    assert_eq!(graph.resolve(graph.entry, missing), None);
 }
