@@ -36,6 +36,9 @@ declare void @imre_dyn_named_assignment(ptr, i64, i64, i64)
 declare void @imre_dyn_unwind_frame(ptr, ptr, i64, i64)
 declare void @imre_dyn_assignment_target(ptr, ptr, i64, i64)
 declare i64 @imre_dyn_op_at(ptr, ptr, i64, i64, i64, ptr)
+declare i64 @imre_boxed_named_op(ptr, ptr, i64, ptr, i64, i64)
+declare i64 @imre_boxed_guarded_named_op(ptr, ptr, i64, ptr, i64, i64)
+declare i64 @imre_boxed_guarded_lit(ptr, i32, ptr, i64)
 declare i64 @imre_dyn_masked_remainder(ptr, i64, i64)
 declare i64 @imre_dyn_get_slice_at(ptr, i64, i64, i64, ptr)
 declare i64 @imre_dyn_get_linked_slice_at(ptr, i64, i64, i64, ptr, ptr)
@@ -58,55 +61,11 @@ declare void @imre_dyn_statement_with_exception(ptr, ptr, i64, ptr, i32, i64)
 declare void @llvm.memcpy.p0.p0.i64(ptr noalias nocapture writeonly, ptr noalias nocapture readonly, i64, i1 immarg)
 ";
 
-// Keep repeated code-name loads and their error edge out of each caller.
-pub(crate) const NAMED_OP: &str = "\
-define internal i64 @imre_boxed_named_op(ptr %ctx, ptr %op, i64 %receiver, ptr %name, i64 %len, i64 %value) noinline {
-entry:
-  %key = call i64 @imre_dyn_lit(ptr %ctx, i32 6, ptr %name, i64 %len)
-  %failed = call i1 @imre_dyn_failed(ptr %ctx)
-  br i1 %failed, label %error, label %apply
-error:
-  ret i64 0
-apply:
-  %result = tail call i64 @imre_dyn_op_at(ptr %ctx, ptr %op, i64 %receiver, i64 %key, i64 %value, ptr null)
-  ret i64 %result
-}
-";
-
-pub(crate) const GUARDED_NAMED_OP: &str = "\
-define internal i64 @imre_boxed_guarded_named_op(ptr %ctx, ptr %op, i64 %receiver, ptr %name, i64 %len, i64 %value) noinline {
-entry:
-  %pending = call i1 @imre_dyn_failed(ptr %ctx)
-  br i1 %pending, label %error, label %apply
-error:
-  ret i64 0
-apply:
-  %result = tail call i64 @imre_boxed_named_op(ptr %ctx, ptr %op, i64 %receiver, ptr %name, i64 %len, i64 %value)
-  ret i64 %result
-}
-";
-
-pub(crate) const GUARDED_LIT: &str = "\
-define internal i64 @imre_boxed_guarded_lit(ptr %ctx, i32 %kind, ptr %data, i64 %len) noinline {
-entry:
-  %pending = call i1 @imre_dyn_failed(ptr %ctx)
-  br i1 %pending, label %error, label %load
-error:
-  ret i64 0
-load:
-  %value = tail call i64 @imre_dyn_lit(ptr %ctx, i32 %kind, ptr %data, i64 %len)
-  ret i64 %value
-}
-";
-
 #[derive(Clone, Copy, Default)]
 pub(crate) struct Declarations {
     pub(crate) declared_suspension: bool,
     pub(crate) declared_statement_line: bool,
     pub(crate) declared_definition_position: bool,
-    pub(crate) emitted_named_op: bool,
-    pub(crate) emitted_guarded_lit: bool,
-    pub(crate) emitted_guarded_named_op: bool,
     pub(crate) registered_expression: bool,
     pub(crate) exec_operand: bool,
     pub(super) integers: crate::llvm::body::IntegerFunctions,

@@ -1995,6 +1995,24 @@ pub(super) unsafe extern "C" fn imre_dyn_lit(
     ctx.linked_constant(|ctx| load_linked_literal(ctx, kind, data))
 }
 
+/// Load a literal only after the preceding checked operation succeeded.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_boxed_guarded_lit(
+    ctx: *mut Context,
+    kind: i32,
+    data: *const u8,
+    len: usize,
+) -> Id {
+    // SAFETY: compiled code holds the context and supplies exactly len literal bytes.
+    unsafe {
+        if imre_dyn_failed(ctx) {
+            0
+        } else {
+            imre_dyn_lit(ctx, kind, data, len)
+        }
+    }
+}
+
 fn load_linked_literal(ctx: &mut Context, kind: i32, data: &[u8]) -> Id {
     // Small decimal integers already occupy permanent slots and need no temporary root.
     if kind == 0
@@ -2163,6 +2181,48 @@ pub(super) unsafe extern "C" fn imre_dyn_get_linked_slice_at(
         (!marker.is_null()).then_some(marker as usize),
     );
     finish_at(ctx, result, span)
+}
+
+/// Apply a boxed operation with a linked code name as its second operand.
+#[unsafe(no_mangle)]
+#[inline(never)]
+pub(super) unsafe extern "C" fn imre_boxed_named_op(
+    ctx: *mut Context,
+    op: *const c_char,
+    receiver: Id,
+    name: *const u8,
+    len: usize,
+    value: Id,
+) -> Id {
+    // SAFETY: generated code owns the context, opcode and linked name for this call.
+    unsafe {
+        let key = imre_dyn_lit(ctx, 6, name, len);
+        if imre_dyn_failed(ctx) {
+            0
+        } else {
+            imre_dyn_op_at(ctx, op, receiver, key, value, std::ptr::null())
+        }
+    }
+}
+
+/// Preserve a pending exception before loading the operation's linked name.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_boxed_guarded_named_op(
+    ctx: *mut Context,
+    op: *const c_char,
+    receiver: Id,
+    name: *const u8,
+    len: usize,
+    value: Id,
+) -> Id {
+    // SAFETY: the guarded entry borrows the same inputs as imre_boxed_named_op.
+    unsafe {
+        if imre_dyn_failed(ctx) {
+            0
+        } else {
+            imre_boxed_named_op(ctx, op, receiver, name, len, value)
+        }
+    }
 }
 
 #[unsafe(no_mangle)]
