@@ -42,7 +42,7 @@ pub fn is_zip_path(path: &Path) -> bool {
 
 /// Find an imported module in the SDK archive's existing build-time member index.
 pub(crate) fn packaged_member(name: &str) -> Option<&'static str> {
-    module_member(
+    imre_ast::providers::module_member(
         name,
         include_str!(concat!(env!("OUT_DIR"), "/imre-stdlib-members.txt")).lines(),
     )
@@ -53,18 +53,7 @@ pub(crate) fn standalone_member(name: &str) -> Option<&'static str> {
     let members = include_str!("../stdlib/runtime-only-sources.txt")
         .lines()
         .filter_map(|entry| entry.strip_prefix("standalone "));
-    module_member(name, members)
-}
-
-fn module_member(
-    name: &str,
-    mut members: impl Iterator<Item = &'static str>,
-) -> Option<&'static str> {
-    members.find(|file| {
-        file.strip_suffix("/__init__.py")
-            .or_else(|| file.strip_suffix(".py"))
-            .is_some_and(|module| module.split('/').eq(name.split('.')))
-    })
+    imre_ast::providers::module_member(name, members)
 }
 
 fn read_source<R: Read + Seek>(archive: &mut ZipArchive<R>, member: &str) -> Option<String> {

@@ -1740,7 +1740,7 @@ pub(crate) fn compile(
                         imre_ast::providers::builtin_finder_provider(
                             &prefix,
                             || false,
-                            || bundled.is_some()
+                            || bundled.is_some() || installed.is_some()
                         ),
                         Some(imre_ast::providers::Provider::Builtin)
                     );
@@ -2450,9 +2450,10 @@ pub(crate) fn compile(
                 name,
                 || imre_ast::providers::is_frozen(name, || frozen_modules),
                 || {
-                    sources
-                        .iter()
-                        .any(|(n, path, _)| n == name && path.starts_with(bundled_root))
+                    crate::zip_entry::packaged_member(name).is_some()
+                        || sources
+                            .iter()
+                            .any(|(n, path, _)| n == name && path.starts_with(bundled_root))
                 },
             );
             if !matches!(provider, Some(imre_ast::providers::Provider::Builtin))
@@ -2834,6 +2835,11 @@ pub(crate) fn builtin_inventory_sources(graph: &crate::modules::SourceGraph) -> 
         .chain(defaults.map(|(name, _, _)| name))
         .filter(|name| imre_ast::providers::provider(name).is_some())
         .collect();
+    for name in imre_ast::providers::builtin_module_candidates() {
+        if crate::zip_entry::packaged_member(name).is_some() {
+            names.push(name);
+        }
+    }
     names.sort_unstable();
     names.dedup();
     names.join("\0")

@@ -304,3 +304,15 @@ pub fn is_native_fallback(name: &str) -> bool {
         || cfg!(target_os = "linux") && name == "mmap"
         || cfg!(any(target_os = "linux", target_os = "macos")) && name == "termios"
 }
+
+/// Find a module or package in the target SDK’s installed Python source index.
+pub fn module_member<'a>(
+    name: &str,
+    mut members: impl Iterator<Item = &'a str>,
+) -> Option<&'a str> {
+    members.find(|file| {
+        file.strip_suffix("/__init__.py")
+            .or_else(|| file.strip_suffix(".py"))
+            .is_some_and(|module| module.split('/').eq(name.split('.')))
+    })
+}
