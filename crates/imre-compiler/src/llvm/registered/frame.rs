@@ -218,6 +218,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
             .declarations
             .integers
             .include(self.body.integers);
+        self.output.declarations.releases_integer_owner |= self.integer_owners != 0;
         let name = format!("@code{}", self.id);
         if !self.body.terminated {
             self.return_value("0");
@@ -298,7 +299,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         name
     }
 
-    fn release_integer_owners(&mut self, slots: std::ops::Range<usize>, clear: bool) {
+    pub(super) fn release_integer_owners(&mut self, slots: std::ops::Range<usize>, clear: bool) {
         for slot in slots {
             let word = self
                 .body
@@ -307,7 +308,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
                 self.body.line(format!("store i64 1, ptr %int_owner{slot}"));
             }
             self.body
-                .line(format!("call void @imre_int_release(i64 {word})"));
+                .line(format!("call void @release_int_nonzero(i64 {word})"));
         }
     }
 

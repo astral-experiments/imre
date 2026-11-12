@@ -111,6 +111,7 @@ pub(crate) struct Declarations {
     pub(crate) exec_operand: bool,
     pub(super) integers: crate::llvm::body::IntegerFunctions,
     pub(crate) reads_exact_int_word: bool,
+    pub(super) releases_integer_owner: bool,
 }
 
 #[derive(Clone, Default)]
@@ -147,6 +148,9 @@ impl Output {
             "!1 = !{!\"branch_weights\", i32 2000, i32 1}\n",
         ));
         self.declarations.integers.write(&mut self.functions, true);
+        if self.declarations.releases_integer_owner {
+            crate::llvm::write_integer_reference(&mut self.functions, "release", &[true]);
+        }
     }
 
     pub(crate) fn data(&mut self, bytes: &[u8]) -> String {

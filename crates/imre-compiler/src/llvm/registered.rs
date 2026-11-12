@@ -1044,11 +1044,8 @@ impl<'f> Frame<'f, '_, '_> {
     }
 
     pub(crate) fn release_word(&mut self, owner: usize) {
-        let word = self.code.value(&format!("load i64, ptr %int_owner{owner}"));
-        self.code
-            .line(&format!("store i64 1, ptr %int_owner{owner}"));
-        self.code
-            .line(&format!("call void @imre_int_release(i64 {word})"));
+        self.code.flush_check();
+        self.code.release_integer_owners(owner..owner + 1, true);
     }
 
     pub(crate) fn builtin(&mut self, op: &Builtin, operands: &[Expr]) -> CheckedValue {
