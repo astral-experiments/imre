@@ -316,7 +316,6 @@ pub(super) fn lower_definition(
 #[derive(Default)]
 pub(super) struct SourceChecks {
     session: std::cell::OnceCell<Option<crate::analysis::Session>>,
-    errors: std::cell::RefCell<HashMap<ModuleId, Vec<TextRange>>>,
 }
 
 impl SourceChecks {
@@ -326,8 +325,13 @@ impl SourceChecks {
             .all(|error| !definition.contains_range(*error))
     }
 
-    fn cached(&self, module: ModuleId, definition: &ast::StmtFunctionDef) -> Option<bool> {
-        self.errors
+    fn cached(
+        graph: &SourceGraph,
+        module: ModuleId,
+        definition: &ast::StmtFunctionDef,
+    ) -> Option<bool> {
+        graph
+            .registered_source_errors
             .borrow()
             .get(&module)
             .map(|errors| Self::accepts_range(errors, definition.range()))
@@ -339,17 +343,22 @@ impl SourceChecks {
         module: ModuleId,
         definition: &ast::StmtFunctionDef,
     ) -> bool {
+        if let Some(accepted) = Self::cached(graph, module, definition) {
+            return accepted;
+        }
         let Some(session) = self
             .session
             .get_or_init(|| graph.session.registered_body_checks().ok())
         else {
             return false;
         };
-        let mut modules = self.errors.borrow_mut();
-        let errors = modules
-            .entry(module)
-            .or_insert_with(|| session.source_error_ranges(module));
-        Self::accepts_range(errors, definition.range())
+        let errors = session.source_error_ranges(module);
+        let accepted = Self::accepts_range(&errors, definition.range());
+        graph
+            .registered_source_errors
+            .borrow_mut()
+            .insert(module, errors);
+        accepted
     }
 }
 
@@ -460,7 +469,7 @@ pub(super) fn capture(
         }
         // The fixed-layout checker owns the return contract. The registered activation returns a handle.
         signature.returns = Type::PythonObject;
-        let contract = inference.source_checks.cached(id, function);
+        let contract = SourceChecks::cached(graph, id, function);
         if contract == Some(false) {
             return false;
         }
