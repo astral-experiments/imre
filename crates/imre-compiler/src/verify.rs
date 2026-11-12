@@ -806,7 +806,7 @@ impl Verifier<'_> {
                     _ => {}
                 }
                 operation
-                    .verify_specialization(args, value.ty, types)
+                    .verify_specialization(args, value.ty, self.module)
                     .map_err(str::to_owned)
             }
             // Arithmetic and value-selecting boolean semantics remain the
@@ -1084,14 +1084,53 @@ mod tests {
 
     #[test]
     fn weak_proxy_upgrade_returns_its_referent_class() {
-        let types = Default::default();
+        let module = empty();
         let check = |input, result| {
             let arg = Expr::local(0, input);
-            Builtin::WeakProxyTarget.verify_specialization(&[arg], result, &types)
+            Builtin::WeakProxyTarget.verify_specialization(&[arg], result, &module)
         };
         assert!(check(Type::WeakProxy(0), Type::Class(0)).is_ok());
         assert!(check(Type::WeakProxy(0), Type::Class(1)).is_err());
         assert!(check(Type::Class(0), Type::Class(0)).is_err());
+    }
+
+    #[test]
+    fn callable_context_returns_the_bound_method_receiver_class() {
+        let source = "\
+from enum import Enum
+class Mode(Enum):
+    ON = 'on'
+    def label(self, value: int = 1) -> int:
+        return value
+class Item:
+    def label(self, value: int = 1) -> int:
+        return value
+";
+        let graph = crate::modules::SourceGraph::single(source).unwrap();
+        let module = crate::frontend::lower(&graph).unwrap();
+        let class = |name| {
+            module
+                .class_metadata
+                .iter()
+                .position(|c| c.name == name)
+                .unwrap()
+        };
+        let item = class("Item");
+        let mode = class("Mode");
+        let receiver = Type::Class(item);
+        let signature = module.types.callable(vec![Type::Int], Type::Int);
+        let method = |owner| Expr::local(0, module.types.bound_source_method(signature, owner, 0));
+        let check = |args: &[Expr], result| {
+            Builtin::CallableContext.verify_specialization(args, result, &module)
+        };
+        assert!(check(&[method(item)], receiver).is_ok());
+        assert!(check(&[method(item)], Type::Class(mode)).is_err());
+        assert!(check(&[method(mode)], Type::Class(mode)).is_err());
+        assert!(check(&[method(item)], Type::Int).is_err());
+        assert!(check(&[Expr::local(0, signature)], receiver).is_err());
+        assert!(check(&[Expr::integer(1)], receiver).is_err());
+        assert!(check(&[], receiver).is_err());
+        assert!(check(&[method(item), method(item)], receiver).is_err());
     }
 
     #[test]
