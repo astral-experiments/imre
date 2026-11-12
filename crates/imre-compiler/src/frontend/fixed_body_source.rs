@@ -11,12 +11,15 @@ pub(crate) struct FixedBodySource {
 }
 
 impl FixedBodySource {
-    pub(super) fn matches(&self, function: &ir::Function) -> bool {
+    pub(crate) fn matches(&self, function: &ir::Function) -> bool {
+        if self.local_names.len() != function.locals.len() {
+            return false;
+        }
         let mut remaining = Some(self.operations.as_slice());
         ir::walk_nodes(&function.body, &mut |node, _| {
             remaining = FixedNode::consume(remaining, &node);
         });
-        matches!(remaining, Some([])) && self.local_names.len() == function.locals.len()
+        matches!(remaining, Some([]))
     }
 }
 
@@ -260,21 +263,21 @@ mod tests {
             panic!("expected a fixed field read")
         };
         let mut module = fixed.ir.0;
-        let original = fixed.frame_sources;
-        let mut sources = original.clone();
-        crate::llvm::analyze_program(&module, &mut sources).unwrap();
+        let sources = fixed.frame_sources;
         // The free function read was checked before any wrapper link was seen.
         let native = text.find("def native").unwrap();
         assert!(
             !sources
-                .values()
-                .any(|(start, _)| usize::from(*start) == native)
+                .iter()
+                .any(|(id, start, source)| usize::from(*start) == native
+                    && source.matches(&module.functions[*id]))
         );
         let both = text.find("def both").unwrap();
-        let (&id, (_, source)) = sources
+        let &(id, _, ref source) = sources
             .iter()
-            .find(|(_, (start, _))| usize::from(*start) == both)
+            .find(|(_, start, _)| usize::from(*start) == both)
             .unwrap();
+        assert!(source.matches(&module.functions[id]));
         assert_eq!(source.fields.len(), 2);
         for (range, field) in &source.fields {
             assert_eq!(field.name, "text");
@@ -304,9 +307,7 @@ mod tests {
             };
             *field = slot;
             receiver.ty = owner;
-            let mut changed = original.clone();
-            crate::llvm::analyze_program(&module, &mut changed).unwrap();
-            assert!(!changed.contains_key(&id));
+            assert!(!source.matches(&module.functions[id]));
         }
     }
 
@@ -337,9 +338,9 @@ mod tests {
         };
         let mut owners: Vec<_> = fixed
             .frame_sources
-            .values()
-            .filter(|(_, body)| body.local_names.contains_key(&1))
-            .map(|(start, _)| usize::from(*start))
+            .iter()
+            .filter(|(_, _, body)| body.local_names.contains_key(&1))
+            .map(|(_, start, _)| usize::from(*start))
             .collect();
         owners.sort_unstable();
         assert_eq!(
@@ -370,7 +371,9 @@ mod tests {
         };
         let sources = &program.frame_sources;
         assert_eq!(sources.len(), 1);
-        let (_, source) = &sources[&0];
+        let (0, _, source) = &sources[0] else {
+            panic!("expected the first function")
+        };
         let spellings: Vec<_> = source.positions.iter().map(|range| &text[*range]).collect();
         assert_eq!(
             spellings,
