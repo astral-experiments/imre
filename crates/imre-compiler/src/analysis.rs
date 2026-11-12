@@ -3170,7 +3170,6 @@ fn source_class_annotation(
     db: &dyn Db,
     file: File,
     range: TextRange,
-    at_annotation: bool,
     class_files: &[File],
 ) -> bool {
     use ruff_python_ast::{AnyNodeRef, find_node::covering_node};
@@ -3185,7 +3184,7 @@ fn source_class_annotation(
     }) else {
         return false;
     };
-    if at_annotation && annotation.range() != range {
+    if annotation.range() != range {
         return false;
     }
     contains_source_class(
@@ -3261,9 +3260,8 @@ fn has_declared_nominal_target(
                 let ruff_db::diagnostic::UnifiedFile::Ty(owner) = span.file() else {
                     return false;
                 };
-                span.range().is_some_and(|range| {
-                    source_class_annotation(db, *owner, range, true, class_files)
-                })
+                span.range()
+                    .is_some_and(|range| source_class_annotation(db, *owner, range, class_files))
             })
     {
         return true;
@@ -3340,18 +3338,42 @@ fn property_accessor<'db>(
     }
 }
 
-fn declared_nominal_place(
-    db: &dyn Db,
-    model: &SemanticModel<'_>,
+fn declared_nominal_place<'db>(
+    db: &'db dyn Db,
+    model: &SemanticModel<'db>,
     receiver: &Expr,
     class_files: &[File],
 ) -> bool {
+    let source_class = |file, annotation: &Expr| {
+        contains_source_class(
+            db,
+            &SemanticModel::new(db, file),
+            annotation,
+            class_files,
+            &mut std::collections::HashSet::new(),
+        )
+    };
+    let declared = |definition: ty_python_core::definition::Definition<'db>| {
+        use ty_python_core::definition::DefinitionKind;
+
+        let source = definition.program_file(db);
+        let parsed = ruff_db::parsed::parsed_module(db, source.python_file(db)).load(db);
+        let annotation = match definition.kind(db) {
+            DefinitionKind::AnnotatedAssignment(field) => Some(field.annotation(&parsed)),
+            DefinitionKind::Parameter(parameter) => parameter.annotation(&parsed),
+            _ => None,
+        };
+        annotation.is_some_and(|annotation| source_class(source, annotation))
+    };
     if let Expr::Attribute(attribute) = receiver {
         return ty_python_semantic::definitions_for_attribute(model, attribute)
             .iter()
             .any(|declaration| {
-                if let ty_python_semantic::ResolvedDefinition::Definition(definition) = declaration
-                    && let Some(accessor) = property_accessor(db, *definition, attribute.ctx)
+                let ty_python_semantic::ResolvedDefinition::Definition(definition) = declaration
+                else {
+                    return false;
+                };
+                if let Some(accessor) = property_accessor(db, *definition, attribute.ctx)
                     && let ty_python_core::definition::DefinitionKind::Function(function) =
                         accessor.kind(db)
                 {
@@ -3372,18 +3394,9 @@ fn declared_nominal_place(
                             .and_then(|parameter| parameter.annotation.as_deref()),
                         _ => None,
                     };
-                    return annotation.is_some_and(|annotation| {
-                        contains_source_class(
-                            db,
-                            &SemanticModel::new(db, source),
-                            annotation,
-                            class_files,
-                            &mut std::collections::HashSet::new(),
-                        )
-                    });
+                    return annotation.is_some_and(|annotation| source_class(source, annotation));
                 }
-                let site = declaration.focus_range(db);
-                source_class_annotation(db, site.file(), site.range(), false, class_files)
+                declared(*definition)
             });
     }
     let program = model.program_file();
@@ -3395,16 +3408,6 @@ fn declared_nominal_place(
         return false;
     };
     let map = index.use_def_map(scope);
-    let parsed = ruff_db::parsed::parsed_module(db, model.python_file()).load(db);
-    let declared = |binding: ty_python_core::definition::Definition<'_>| {
-        source_class_annotation(
-            db,
-            model.file(),
-            binding.focus_range(db, &parsed).range(),
-            false,
-            class_files,
-        )
-    };
     map.bindings_at_use(use_id)
         .filter_map(|entry| entry.binding.definition())
         .any(|binding| {
