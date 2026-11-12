@@ -328,7 +328,7 @@ impl Checker<'_> {
             }
             return Ok(types);
         }
-        match self.collection_class_name(expression) {
+        match Self::collection_class_name(numeric) {
             Some("collections.deque") => return Ok(vec![Deque]),
             Some("collections.abc.MutableMapping") => return Ok(vec![InstanceType::Dict]),
             Some("collections.abc.MutableSequence") => return Ok(vec![List, Deque]),

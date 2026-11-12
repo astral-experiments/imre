@@ -62,10 +62,8 @@ pub(super) fn sequence_annotation(binding: Option<Binding>) -> bool {
 }
 
 impl Checker<'_> {
-    /// Resolve the class object exported by collections, collections.abc or array.
-    /// A local with the same name takes precedence over the module binding.
-    pub(super) fn collection_class_name(&self, expression: &ast::Expr) -> Option<&'static str> {
-        match self.collection_binding(expression) {
+    pub(super) fn collection_class_name(binding: Option<Binding>) -> Option<&'static str> {
+        match binding {
             Some(Binding::Intrinsic(Intrinsic::NominalClass(name))) => Some(name),
             Some(Binding::Intrinsic(Intrinsic::WeakProxyClass { callable })) => {
                 Some(Self::weak_proxy_type_name(callable))
@@ -76,16 +74,18 @@ impl Checker<'_> {
         }
     }
 
-    /// Resolve an imported collections class only when no local shadows its root.
-    pub(super) fn collection_binding(&self, expression: &ast::Expr) -> Option<Binding> {
+    pub(super) fn local_collection_root(&self, expression: &ast::Expr) -> bool {
         let mut root = expression;
         while let ast::Expr::Attribute(attribute) = root {
             root = &attribute.value;
         }
-        if root
-            .as_name_expr()
+        root.as_name_expr()
             .is_some_and(|name| self.names.contains_key(name.id.as_str()))
-        {
+    }
+
+    /// Resolve an imported collections class only when no local shadows its root.
+    pub(super) fn collection_binding(&self, expression: &ast::Expr) -> Option<Binding> {
+        if self.local_collection_root(expression) {
             return None;
         }
         self.resolve(expression)
