@@ -76,9 +76,9 @@ pub(super) fn compare(
     ops: &[ast::CmpOp],
     source: &str,
     node: &ast::Expr,
-) -> std::result::Result<Expr, String> {
+) -> Result<Expr, String> {
     let invalid = || {
-        diagnostic_message(
+        error(
             source,
             node,
             "JSON comparisons require == or != with another parsed value or a literal string",
@@ -95,7 +95,7 @@ pub(super) fn compare(
     } else {
         let parsed = |ty| matches!(ty, Type::JsonRoot | Type::JsonObject | Type::JsonValue);
         if !parsed(left.ty) || !parsed(right.ty) {
-            return Err(invalid());
+            return Err(invalid().classify(Kind::ScopedObject));
         }
         Expr {
             ty: Type::Bool,
@@ -954,6 +954,34 @@ mod tests {
 
     fn lower(source: &str) -> std::result::Result<ir::Module, String> {
         super::super::lower(&SourceGraph::single(source)?)
+    }
+
+    #[test]
+    fn mixed_comparisons_keep_the_following_constructor_check() {
+        let source = r#"
+import json
+from dataclasses import dataclass
+
+@dataclass
+class Package:
+    name: str
+
+def collect(text: str) -> list[Package]:
+    data = json.loads(text)
+    members = set(data["members"])
+    packages = []
+    for item in data["packages"]:
+        if item["id"] not in members:
+            continue
+        if item.get("publish") == []:
+            continue
+        packages.append(Package(name=17))
+    return packages
+"#;
+        let error = lower(source)
+            .err()
+            .expect("invalid package name was accepted");
+        assert!(error.contains("expected str, got int"), "{error}");
     }
 
     #[test]

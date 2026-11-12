@@ -9193,6 +9193,8 @@ impl<'a> Checker<'a> {
                         (Type::Str, Builtin::StringTupleContains)
                     } else if self.types.element(receiver.ty) == Some(Type::Str) {
                         (Type::Str, Builtin::StringListContains)
+                    } else if receiver.ty == Type::PythonObject {
+                        return Err(self.scoped_builtin_error("membership", expression));
                     } else {
                         return Err(error(
                             self.source,
@@ -9407,12 +9409,7 @@ impl<'a> Checker<'a> {
                         Type::JsonRoot | Type::JsonValue | Type::JsonObject
                     )
                 }) {
-                    return Ok(json::compare(
-                        values,
-                        &compare.ops,
-                        self.source,
-                        expression,
-                    )?);
+                    return json::compare(values, &compare.ops, self.source, expression);
                 }
                 let uuid_and_scalar = |uuid: Type, other: Type| {
                     matches!(uuid, Type::Class(id) if self.classes.declarations.definitions[id].is_uuid(self.graph))
