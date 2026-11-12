@@ -494,7 +494,7 @@ impl Checker<'_> {
         &mut self,
         statement: &ast::Stmt,
         definition: DefinitionId,
-        body: &mut Vec<Statement>,
+        mut body: Option<&mut Vec<Statement>>,
     ) -> Result<(), String> {
         use crate::modules::ImportSnapshot;
         let snapshot = self.graph.modules[self.module]
@@ -514,10 +514,9 @@ impl Checker<'_> {
                 if let Some(target) = self.globals.saved_function(&value) {
                     self.globals.publish_function(slot, target);
                 }
-                body.push(Statement::Expr(Expr {
-                    ty: Type::None,
-                    kind: ExprKind::Builtin(Builtin::GlobalSet(slot), vec![value]),
-                }));
+                if let Some(body) = body.as_deref_mut() {
+                    body.push(Statement::store_global(slot, value));
+                }
             }
             return Ok(());
         }
@@ -525,7 +524,10 @@ impl Checker<'_> {
         if let Some(first) = rebound
             && first != definition
         {
-            body.push(self.replace_global(first, statement)?);
+            let store = self.replace_global(first, statement)?;
+            if let Some(body) = body {
+                body.push(store);
+            }
             return Ok(());
         }
         let parser = if rebound.is_some() {
@@ -603,10 +605,21 @@ impl Checker<'_> {
         if let Some(groups) = self.globals.regex_groups(&value) {
             self.globals.regex_globals.borrow_mut().insert(slot, groups);
         }
-        body.push(Statement::Expr(Expr {
-            ty: Type::None,
-            kind: ExprKind::Builtin(Builtin::GlobalSet(slot), vec![value]),
-        }));
+        if self.graph.registered_startup
+            && self.module == self.graph.entry
+            && self.inference.is_none()
+            && self.module_namespace.is_unexposed()
+            && self.unrepresented.borrow().is_none()
+            && self.graph.deferred_object_error.borrow().is_none()
+        {
+            self.globals
+                .checked_entry_stores
+                .borrow_mut()
+                .insert(definition.statement);
+        }
+        if let Some(body) = body {
+            body.push(Statement::store_global(slot, value));
+        }
         Ok(())
     }
 }
@@ -781,10 +794,9 @@ impl Initialization {
                             slot
                         };
                         checker.globals.publish_function(slot, signature.id);
-                        body.push(Statement::Expr(Expr {
-                            ty: Type::None,
-                            kind: ExprKind::Builtin(Builtin::GlobalSet(slot), vec![value]),
-                        }));
+                        if output.is_some() {
+                            body.push(Statement::store_global(slot, value));
+                        }
                     }
                     if inspect::marks_function(checker.graph, checker.module, function)
                         && let Some(signature) = checker.functions.get(&definition)
@@ -862,31 +874,12 @@ impl Initialization {
                     Some(crate::modules::ImportSnapshot::Values(sources)) => Some(sources),
                     _ => None,
                 };
-                match checker.initialize_global(statement, definition, &mut body) {
-                    Ok(()) => {
-                        if captured.is_none()
-                            && checker.graph.registered_startup
-                            && checker.module == checker.graph.entry
-                            && checker.inference.is_none()
-                            && checker.module_namespace.is_unexposed()
-                            && checker.unrepresented.borrow().is_none()
-                            && checker.graph.deferred_object_error.borrow().is_none()
-                            && matches!(
-                                &body[start..],
-                                [Statement::Expr(Expr {
-                                    kind: ExprKind::Builtin(Builtin::GlobalSet(_), _),
-                                    ..
-                                })]
-                            )
-                        {
-                            checker
-                                .globals
-                                .checked_entry_stores
-                                .borrow_mut()
-                                .insert(index);
-                        }
-                    }
-
+                match checker.initialize_global(
+                    statement,
+                    definition,
+                    output.is_some().then_some(&mut body),
+                ) {
+                    Ok(()) => {}
                     Err(wait @ Failure::PendingSignature { .. }) => {
                         checker
                             .globals

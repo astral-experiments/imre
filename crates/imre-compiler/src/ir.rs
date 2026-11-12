@@ -3704,6 +3704,13 @@ macro_rules! statement_children {
 }
 
 impl Statement {
+    pub(crate) fn store_global(slot: usize, value: Expr) -> Self {
+        Self::Expr(Expr {
+            ty: Type::None,
+            kind: ExprKind::Builtin(Builtin::GlobalSet(slot), vec![value]),
+        })
+    }
+
     pub(crate) fn raise(exception: Expr) -> Self {
         Self::raise_at(exception, None, None)
     }
