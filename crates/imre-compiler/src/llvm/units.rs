@@ -370,6 +370,32 @@ mod tests {
     }
 
     #[test]
+    fn tagged_floor_division_is_defined_only_in_its_calling_unit() {
+        let temp = tempfile::tempdir().unwrap();
+        let entry = temp.path().join("main.py");
+        fs::write(&entry, "from ratios import divide\nprint(divide(-7, 3))\n").unwrap();
+        fs::write(
+            temp.path().join("ratios.py"),
+            "def divide(a: int, b: int) -> int:\n    return (a // b) // b\n",
+        )
+        .unwrap();
+
+        let compiled =
+            crate::compile_file_units(&entry, None, &crate::CompileOptions::default()).unwrap();
+        assert_eq!(compiled.units.len(), 2);
+        for unit in compiled.units {
+            let calls = unit.llvm_ir.matches("call i64 @int_floordiv(").count();
+            assert_eq!(calls, if unit.name == "ratios" { 2 } else { 0 });
+            assert_eq!(
+                unit.llvm_ir
+                    .matches("define internal i64 @int_floordiv(")
+                    .count(),
+                usize::from(calls > 0)
+            );
+        }
+    }
+
+    #[test]
     fn sequence_layout_follows_inline_reads() {
         let options = crate::CompileOptions::default();
         assert!(

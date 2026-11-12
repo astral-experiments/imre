@@ -24,8 +24,10 @@ impl IntegerFunctions {
 
     pub(super) fn write(self, output: &mut String, declare_overflow: bool) {
         let uses = |op: Binary| self.arithmetic & (1 << op as u32) != 0;
-        if uses(Binary::Modulo) {
-            output.push_str(&super::division_helper(Binary::Modulo));
+        for op in [Binary::FloorDivide, Binary::Modulo] {
+            if uses(op) {
+                output.push_str(&super::division_helper(op));
+            }
         }
         for op in [Binary::Add, Binary::Subtract, Binary::Multiply] {
             if uses(op) {
@@ -120,6 +122,7 @@ impl FunctionBody {
             super::Binary::Add => "int_add",
             super::Binary::Subtract => "int_sub",
             super::Binary::Multiply => "int_mul",
+            super::Binary::FloorDivide => "int_floordiv",
             super::Binary::Modulo => "int_mod",
             _ => unreachable!("expected checked integer operation"),
         };
