@@ -98,19 +98,8 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
             names.extend(super::super::paramspec::names().map(str::to_owned));
             ctx.builtin("object")
         }
-        Value::Native(symbol)
-            if let Some(descriptor) = BuiltinDescriptor::lookup(symbol)
-                && descriptor.class() == "method_descriptor" =>
-        {
-            names
-                .extend(["__get__", "__name__", "__objclass__", "__qualname__"].map(str::to_owned));
-            if descriptor
-                .attribute(ctx, "__text_signature__", None)
-                .is_some()
-            {
-                names.insert("__text_signature__".to_owned());
-            }
-            ctx.builtin("object")
+        Value::Native(symbol) if let Some(descriptor) = BuiltinDescriptor::lookup(symbol) => {
+            ctx.builtin(descriptor.class())
         }
         Value::Native(_) | Value::Method { .. }
             if ctx.builtin_type_name(object) == Some("builtin_function_or_method") =>
@@ -154,6 +143,9 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
         | Value::Complex(_)
         | Value::MappingProxy(_)
         | Value::Property(_)
+        | Value::GetSetDescriptor { .. }
+        | Value::LayoutDescriptor(..)
+        | Value::None
         | Value::SlotMember { .. }
         | Value::ReadOnlyMember(_, _)
         | Value::TupleGetterDoc
@@ -498,6 +490,11 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
                     | "staticmethod"
                     | "property"
                     | "member_descriptor"
+                    | "getset_descriptor"
+                    | "method_descriptor"
+                    | "classmethod_descriptor"
+                    | "wrapper_descriptor"
+                    | "NoneType"
                     | "method"
                     | "dict"
                     | "list"
@@ -560,7 +557,19 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
                         "fset",
                     ],
                 ),
-                "member_descriptor" => (
+                "NoneType" => (&[], &["__bool__"]),
+                "method_descriptor" | "classmethod_descriptor" | "wrapper_descriptor" => (
+                    &[],
+                    &[
+                        "__call__",
+                        "__get__",
+                        "__name__",
+                        "__objclass__",
+                        "__qualname__",
+                        "__text_signature__",
+                    ],
+                ),
+                "getset_descriptor" | "member_descriptor" => (
                     &[],
                     &[
                         "__delete__",
