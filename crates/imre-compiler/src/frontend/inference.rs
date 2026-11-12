@@ -1755,7 +1755,12 @@ mod tests {
             "value: int = take(choose())\nprint(value)",
             "def outer() -> int:\n    value: str = 'old'\n    value: int = take(choose())\n    return value\nprint(outer())",
         );
-        for program in [&stored, &reannotated] {
+        let item = stored.replace(
+            "value: int = take(choose())\nprint(value)",
+            "def key() -> int: return 0\nvalues = [0]\nvalues[key()] = take(choose())\nprint(values[0])",
+        );
+        let fresh = stored.replace("value: int =", "value =");
+        for program in [&stored, &reannotated, &item, &fresh] {
             std::fs::write(&file, program).unwrap();
             let mut graph = crate::modules::SourceGraph::load(&file, None, &[]).unwrap();
             assert!(matches!(
@@ -1763,6 +1768,12 @@ mod tests {
                 crate::CheckedProgram::Native(_)
             ));
         }
+        std::fs::write(&file, item.replace("raise SystemExit(13)", "pass")).unwrap();
+        let error = crate::check_file(&file, None).unwrap_err();
+        assert!(
+            error.contains(":7:22: Imre: expected int, got str"),
+            "{error}"
+        );
         std::fs::write(&file, stored.replace("raise SystemExit(13)", "pass")).unwrap();
         let error = crate::check_file(&file, None).unwrap_err();
         assert!(

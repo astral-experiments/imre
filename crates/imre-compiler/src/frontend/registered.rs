@@ -2475,9 +2475,9 @@ impl statements::StatementLowering for SourceScope<'_> {
         )]))
     }
 
-    fn assignment(&mut self, assign: &ast::StmtAssign) -> StdResult<Vec<Statement>, ()> {
+    fn assignment(&mut self, assign: &ast::StmtAssign) -> StdResult<statements::Block, ()> {
         let value = self.frame_value(&assign.value).ok_or(())?;
-        self.assignment_targets(&assign.targets, value)
+        Ok((self.assignment_targets(&assign.targets, value)?, true))
     }
 
     fn branch(&mut self, branch: &ast::StmtIf) -> StdResult<statements::Block, ()> {
