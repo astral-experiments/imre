@@ -3274,7 +3274,7 @@ impl SourceScope<'_> {
     }
 
     fn operand(&mut self, expr: &ast::Expr) -> Option<Expr> {
-        self.lower_operand(expr, true, None)
+        self.lower_operand(expr, true)
     }
 
     fn condition_operand(&mut self, test: &ast::Expr) -> Option<Expr> {
@@ -3306,18 +3306,13 @@ impl SourceScope<'_> {
     }
 
     fn ordinary_operand(&mut self, expr: &ast::Expr) -> Option<Expr> {
-        self.lower_operand(expr, false, None)
+        self.lower_operand(expr, false)
     }
 
-    fn lower_operand(
-        &mut self,
-        expr: &ast::Expr,
-        whole: bool,
-        types: Option<crate::analysis::OperandTypes<'_>>,
-    ) -> Option<Expr> {
+    fn lower_operand(&mut self, expr: &ast::Expr, whole: bool) -> Option<Expr> {
         if expr.is_dict_expr() && self.report_child_refusals {
             self.report_child_refusals = false;
-            let value = self.checked_operand(expr, whole, types);
+            let value = self.checked_operand(expr, whole);
             self.report_child_refusals = true;
             if value.is_none() {
                 self.refusal.get_or_insert((
@@ -3328,7 +3323,7 @@ impl SourceScope<'_> {
             return value;
         }
 
-        let value = self.checked_operand(expr, whole, types);
+        let value = self.checked_operand(expr, whole);
         if value.is_none() && self.report_child_refusals {
             let reason = match expr {
                 ast::Expr::FString(_) => FORMATTED_STRING_REFUSAL,
@@ -3340,12 +3335,7 @@ impl SourceScope<'_> {
         value
     }
 
-    fn checked_operand(
-        &mut self,
-        expr: &ast::Expr,
-        whole: bool,
-        types: Option<crate::analysis::OperandTypes<'_>>,
-    ) -> Option<Expr> {
+    fn checked_operand(&mut self, expr: &ast::Expr, whole: bool) -> Option<Expr> {
         // A generator lambda can resume within its return expression. Eager
         // display bodies use their own iteration and operand boundaries.
         let suspension = match self.kind {
@@ -3439,7 +3429,7 @@ impl SourceScope<'_> {
         } else if let ast::Expr::Named(named) = expr {
             let target = named.target.as_name_expr()?;
             let value =
-                self.with_binding_operands(|scope| scope.lower_operand(&named.value, whole, None))?;
+                self.with_binding_operands(|scope| scope.lower_operand(&named.value, whole))?;
             Expr {
                 ty: value.ty,
                 kind: ExprKind::Bind(self.slot(&target.id), Box::new(value)),
@@ -3451,11 +3441,10 @@ impl SourceScope<'_> {
                     .as_ref()
                     .map_or(&self.names, |scope| &scope.targets);
                 if let Some(&slot) = bindings.get(name.id.as_str()) {
-                    return Some(self.source.located_operand(
-                        expr,
-                        Expr::local(slot, Type::PythonObject),
-                        types,
-                    ));
+                    return Some(
+                        self.source
+                            .located(expr, Expr::local(slot, Type::PythonObject)),
+                    );
                 }
             }
             values::operation(
@@ -3464,7 +3453,7 @@ impl SourceScope<'_> {
                 matches!(self.kind, RegisteredScope::Class),
                 ir::control::boolean_literal,
                 |_| true,
-                |child, types| {
+                |child| {
                     match expr {
                         ast::Expr::Generator(_) => {
                             self.creating_iterable(|scope| scope.ordinary_operand(child))
@@ -3476,7 +3465,7 @@ impl SourceScope<'_> {
                         {
                             self.operand(child)
                         }
-                        _ => self.lower_operand(child, false, types),
+                        _ => self.ordinary_operand(child),
                     }
                     .ok_or(())
                 },
@@ -3486,7 +3475,7 @@ impl SourceScope<'_> {
         if let Some(scope) = &self.comprehension {
             values::in_namespace(&mut value, Expr::local(scope.slot, Type::PythonObject));
         }
-        Some(self.source.located_operand(expr, value, types))
+        Some(self.source.located(expr, value))
     }
 
     fn suspend_operand(
@@ -4958,6 +4947,27 @@ mod tests {
     }
 
     #[test]
+    fn retained_list_membership_caller_keeps_its_checked_integer_addition() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("__main__.py"),
+            include_str!("../../../../tests/fixtures/containers/int_list_membership.py"),
+        )
+        .unwrap();
+        let options = crate::CompileOptions {
+            path_entry: true,
+            module_entry: Some("__main__".to_owned()),
+            ..crate::CompileOptions::default()
+        };
+        let ir = crate::compile_file(dir.path(), None, &options)
+            .unwrap()
+            .llvm_ir;
+        let main = registered_body_at(&ir, "__main__.py", 14);
+        assert!(main.contains("call i64 @imre_dyn_exact_int_word("));
+        assert!(main.contains("call i64 @int_add("));
+    }
+
+    #[test]
     fn a_late_import_keeps_the_selected_sources_operand_types() {
         let dir = tempfile::tempdir().unwrap();
         let entry = dir.path().join("app.py");
@@ -6213,6 +6223,30 @@ mod tests {
                 && binding.namespace.is_none()
                 && body.function.locals[slot] == Type::PythonObject
         }));
+    }
+
+    #[test]
+    fn registered_function_retains_the_checked_nullable_local() {
+        let graph = SourceGraph::single(concat!(
+            "def consume() -> None:\n",
+            "    value: int | None = 1\n",
+            "    print(value)\n",
+            "    value = None\n",
+            "    print(value)\n",
+            "def publish(sink):\n    sink(1)\n",
+        ))
+        .unwrap();
+        assert!(super::super::lower(&graph).is_err());
+        let functions = graph.registered_functions();
+        let body = &functions[&graph.entry][&TextSize::default()];
+        let mut present = false;
+        let mut absent = false;
+        ir::walk_expressions(&body.function.body, &mut |expr| match &expr.kind {
+            ExprKind::Present(_) => present = true,
+            ExprKind::Absent(_) => absent = true,
+            _ => {}
+        });
+        assert!(present && absent);
     }
 
     #[test]

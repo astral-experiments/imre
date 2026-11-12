@@ -881,6 +881,13 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 Entry::Native(emitter) => CheckedValue::owned(emitter.builtin(op, args, expr.ty)),
                 Entry::Registered(frame) => frame.builtin(op, args),
             },
+            // Python handles already represent both the payload and None. Evaluating
+            // the original operand also preserves effects of a None-valued call.
+            ExprKind::Present(value) | ExprKind::Absent(value) | ExprKind::Unwrap(value)
+                if matches!(self.0, Entry::Registered(_)) =>
+            {
+                self.operand_for(value, usage)
+            }
             ExprKind::Present(value) => {
                 let emitter = self.fixed();
                 let value = emitter.operand(value);

@@ -157,6 +157,8 @@ pub(crate) fn frame_inputs(
             | ExprKind::Str(_)
             | ExprKind::Bytes(_)
             | ExprKind::Scope { .. } => true,
+            ExprKind::Present(_) | ExprKind::Unwrap(_) => true,
+            ExprKind::Absent(value) => value.ty == Type::None,
             ExprKind::Conditional(..) | ExprKind::BooleanValue(..) | ExprKind::Boolean(..) => true,
             ExprKind::Dict(entries) => expr.ty == Type::PythonObject || entries.is_empty(),
             ExprKind::Builtin(op, args) if let Some(iteration) = op.iteration_operands(args) => {
