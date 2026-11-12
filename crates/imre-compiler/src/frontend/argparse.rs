@@ -1650,56 +1650,72 @@ impl Checker<'_> {
                 ),
             }));
         }
-        let explicit = match (
-            call.arguments.args.as_ref(),
-            call.arguments.keywords.as_ref(),
-        ) {
-            ([], []) => None,
-            ([value], []) => Some(value),
-            ([], [keyword]) if keyword.arg.as_ref().is_some_and(|name| name == "args") => {
-                Some(&keyword.value)
-            }
-            (args, keywords)
-                if !args.iter().any(ast::Expr::is_starred_expr)
-                    && match (args.len(), keywords.len()) {
-                        (2, 0) => true,
-                        (0 | 1, 1) => keywords[0].arg.as_deref() == Some("namespace"),
-                        (0, 2) => {
-                            call.arguments.find_keyword("args").is_some()
-                                && call.arguments.find_keyword("namespace").is_some()
-                        }
-                        _ => false,
-                    } =>
-            {
-                // A supplied namespace keeps its identity and existing attributes.
-                return Err(self.scoped_builtin_error(method, call));
-            }
-            _ => {
-                return Err(error(
-                    self.source,
-                    call,
-                    &format!("argparse {method} accepts one argument list"),
-                ));
-            }
-        };
-        let explicit = explicit.filter(|value| !matches!(value, ast::Expr::NoneLiteral(_)));
         let argv_type = self.types.list(Type::Str);
-        let argv = match explicit {
-            Some(ast::Expr::Tuple(tuple)) => Expr {
-                ty: argv_type,
-                kind: ExprKind::List(
-                    tuple
-                        .elts
-                        .iter()
-                        .map(|value| self.expr_expected(value, Type::Str))
-                        .collect::<Result<_, _>>()?,
-                ),
-            },
-            Some(value) => self.expr_expected(value, argv_type)?,
-            None => Expr {
+        let params = [
+            calls::parameter("args", argv_type, Some(Expr::none())),
+            calls::parameter("namespace", Type::PythonObject, Some(Expr::none())),
+        ];
+        let supplied = call
+            .arguments
+            .find_argument_value("namespace", 1)
+            .is_some_and(|value| !value.is_none_literal_expr());
+        let mut bound = self.arguments_with(call, &params, None, |checker, slot, arg| {
+            if supplied {
+                if slot == 1
+                    && let Some(name) = arg.as_name_expr()
+                    && !checker.names.contains_key(name.id.as_str())
+                    && checker.class_reference(arg).is_some()
+                {
+                    // Actions can write to the class itself. Read that binding in its Python frame.
+                    return Ok(registered::values::name_binding(name.id.as_str()));
+                }
+                return checker.expr(arg);
+            }
+            if slot == 1 || arg.is_none_literal_expr() {
+                return Ok(Expr::none());
+            }
+            if let ast::Expr::Tuple(tuple) = arg {
+                return Ok(Expr {
+                    ty: argv_type,
+                    kind: ExprKind::List(
+                        tuple
+                            .elts
+                            .iter()
+                            .map(|value| checker.expr_expected(value, Type::Str))
+                            .collect::<Result<_, _>>()?,
+                    ),
+                });
+            }
+            checker.expr_expected(arg, argv_type)
+        })?;
+        if supplied {
+            // The collected builder name denotes the real parser in the Python frame.
+            let attribute = call.func.as_attribute_expr().unwrap();
+            let builder = attribute
+                .value
+                .as_name_expr()
+                .expect("collected parser name");
+            let receiver = registered::values::name_binding(builder.id.as_str());
+            bound.values.truncate(call.arguments.len());
+            return self
+                .registered_method_call_with_values(
+                    call,
+                    attribute,
+                    receiver,
+                    Type::PythonObject,
+                    bound.values,
+                )
+                .map(Some);
+        }
+        let argv = bound.values.swap_remove(bound.order[0]);
+        let process_argv = argv.ty == Type::None;
+        let argv = if process_argv {
+            Expr {
                 ty: argv_type,
                 kind: ExprKind::Builtin(Builtin::SysArgv, Vec::new()),
-            },
+            }
+        } else {
+            argv
         };
         let namespace = Type::Class(parser.class);
         Ok(Some(Expr {
@@ -1712,7 +1728,7 @@ impl Checker<'_> {
                 Builtin::ParseArgs {
                     namespace: parser.class,
                     children: parser.children.clone(),
-                    process_argv: explicit.is_none(),
+                    process_argv,
                 },
                 vec![schema, description, argv],
             ),

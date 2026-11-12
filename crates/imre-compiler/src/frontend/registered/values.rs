@@ -470,14 +470,22 @@ impl Checker<'_> {
         call: &ast::ExprCall,
         target: Expr,
     ) -> Result<Expr, String> {
-        let arguments = imre_ast::argument_values(&call.arguments)
+        let arguments = self.registered_call_arguments(call)?;
+        Ok(self.call_with_values(call, target, arguments))
+    }
+
+    fn registered_call_arguments(&mut self, call: &ast::ExprCall) -> Result<Vec<Expr>, String> {
+        imre_ast::argument_values(&call.arguments)
             .map(|arg| self.expr(arg))
-            .collect::<Result<_, _>>()?;
+            .collect()
+    }
+
+    fn call_with_values(&self, call: &ast::ExprCall, target: Expr, arguments: Vec<Expr>) -> Expr {
         let mut value = bound_call(call, callable_target(call), target, arguments);
         if let Some(slot) = self.namespace {
             in_namespace(&mut value, self.local(slot));
         }
-        Ok(value)
+        value
     }
 
     /// Bind the Python method and check its operands in source order. A fixed
@@ -489,9 +497,21 @@ impl Checker<'_> {
         receiver: Expr,
         fixed_result: Type,
     ) -> Result<Expr, String> {
+        let arguments = self.registered_call_arguments(call)?;
+        self.registered_method_call_with_values(call, method, receiver, fixed_result, arguments)
+    }
+
+    pub(in crate::frontend) fn registered_method_call_with_values(
+        &mut self,
+        call: &ast::ExprCall,
+        method: &ast::ExprAttribute,
+        receiver: Expr,
+        fixed_result: Type,
+        arguments: Vec<Expr>,
+    ) -> Result<Expr, String> {
         let ty = receiver.ty;
         let target = loaded_attribute(method, receiver);
-        let mut value = self.call_with_target(call, target)?;
+        let mut value = self.call_with_values(call, target, arguments);
         if self.registered.is_none() {
             let failure = self.scoped_builtin_error(&format!("{ty}.{}", method.attr), call);
             if !self.missing_operation(&failure) {
