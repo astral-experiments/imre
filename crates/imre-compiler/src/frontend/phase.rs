@@ -2,7 +2,7 @@
 //! In this result type M is the diagnostic payload. A wait has no diagnostic text.
 
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use ruff_text_size::{Ranged, TextRange, TextSize};
 
