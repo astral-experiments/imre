@@ -442,7 +442,8 @@ impl Checker<'_> {
         attribute: &ast::ExprAttribute,
     ) -> phase::Result<Option<Expr>, String> {
         let name = attribute.attr.as_str();
-        if !matches!(name, "__func__" | "__wrapped__") || !matches!(receiver.ty, Type::Callable(_))
+        if !matches!(name, "__func__" | "__self__" | "__wrapped__")
+            || !matches!(receiver.ty, Type::Callable(_))
         {
             return Ok(None);
         }
@@ -450,9 +451,14 @@ impl Checker<'_> {
         let owner = if let Some((class, index)) = self.types.bound_method_site(receiver.ty) {
             let method = &self.classes.declarations.definitions[class].methods[index];
             let signature = self.classes.methods[class][method.name.as_str()].clone();
+            if name == "__self__" {
+                let ty = signature.params[0].ty;
+                return Ok(matches!(ty, Type::Class(_))
+                    .then(|| builtin(Builtin::CallableContext, ty, vec![receiver.clone()])));
+            }
             scope.hold(self, receiver.clone());
             self.callable_value(&signature, None, None, attribute)?
-        } else if name == "__func__" {
+        } else if name != "__wrapped__" {
             return Ok(None);
         } else {
             receiver.clone()
