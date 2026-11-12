@@ -53,6 +53,7 @@ pub(super) fn adapters(emitter: &mut Emitter<'_, '_>) {
     for (name, kinds, length) in [
         ("python_function", "i32 0, i32 6, i32 6", 3),
         ("callable", "i32 0, i32 6", 2),
+        ("class_factory", "i32 0, i32 11", 2),
         ("callable_enum", "i32 0, i32 10", 2),
         ("callable_object", "i32 0, i32 5", 2),
         ("callable_list", "i32 0, i32 4", 2),
@@ -244,12 +245,17 @@ impl Emitter<'_, '_> {
         function: usize,
         receiver: Option<&Expr>,
     ) -> Value {
-        if let Some(slot) = self.module.types.constructor_slot(function, ty) {
+        if let Some((slot, class)) = self.module.types.constructor_slot(function, ty) {
             let slot = self.output.global_ref(format!("module_value_{slot}"));
-            let layout = self.callable_layout("callable");
+            let name = self.literal_root(
+                self.module.class_metadata[class].qualified_name.as_bytes(),
+                Type::Str,
+            );
+            let layout = self.callable_layout("class_factory");
             let target = self.callable_adapter(function, false, ty);
             let operand = self.checked_pointer(format!(
-                "call ptr @imre_record_class_factory(ptr @{slot}, ptr @{layout}, ptr @{target})"
+                "call ptr @imre_record_class_value(ptr @{slot}, ptr @{layout}, ptr @{target}, ptr {})",
+                name.operand
             ));
             return self.owned(Value {
                 ty,

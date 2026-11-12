@@ -9938,6 +9938,7 @@ impl<'a> Checker<'a> {
                 {
                     return Ok(value);
                 }
+                let receiver = self.class_object_view(receiver);
                 if self.types.has_reflected_functions()
                     && matches!(receiver.ty, Type::FunctionRef | Type::Callable(_))
                     && let Some(index) = typing::attribute_index(attribute.attr.as_str())
@@ -14050,6 +14051,17 @@ impl<'a> Checker<'a> {
                 return self.dispatch_record(class, operand.clone(), call, |checker, layout, _| {
                     Ok(checker.record_class_object(layout))
                 });
+            }
+            "type"
+                if let [value] = args.as_slice()
+                    && self.has_plain_factory_metaclass(value.ty)
+                    && self.unshadowed_builtin(&call.func, "type")
+                    && registered::values::fixed_positional_arguments(call) =>
+            {
+                return Ok(self.evaluated_receiver(
+                    Some(value.clone()),
+                    annotations::class_value("type"),
+                ));
             }
             "type"
                 if let [exception] = args.as_slice()

@@ -1560,10 +1560,11 @@ impl Types {
         }
     }
 
-    pub(crate) fn constructor_slot(&self, function: usize, ty: Type) -> Option<usize> {
+    pub(crate) fn constructor_slot(&self, function: usize, ty: Type) -> Option<(usize, usize)> {
         self.constructor_base(ty)?;
         let storage = self.0.borrow();
-        Some(storage.constructor_slots[&storage.constructor_targets[&function]])
+        let class = storage.constructor_targets[&function];
+        Some((storage.constructor_slots[&class], class))
     }
 
     /// A module cache keeps its declaration's identity when bound to another name.

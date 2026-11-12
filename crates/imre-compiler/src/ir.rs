@@ -1735,6 +1735,8 @@ pub(crate) enum Builtin {
     },
     StrEnumName,
     ClassNameView,
+    /// Read the retained nominal class from its checked constructor.
+    ConstructorClass,
     ClassNamePart {
         module: bool,
     },
@@ -3375,10 +3377,10 @@ impl InstanceType {
             Self::Exact(Type::Str) => {
                 matches!(ty, Type::Str | Type::StrLiteral(_) | Type::StrEnum(_))
             }
-            Self::Exact(Type::BuiltinClass) => matches!(
-                ty,
-                Type::BuiltinClass | Type::Placeholder(PlaceholderKind::Class)
-            ),
+            Self::Exact(Type::BuiltinClass) => {
+                matches!(ty, Type::BuiltinClass | Type::Placeholder(PlaceholderKind::Class))
+                    || types.constructor_base(ty).is_some()
+            }
             Self::Exact(expected) => {
                 expected == ty
                     || (types.time_attributes(expected).is_some()

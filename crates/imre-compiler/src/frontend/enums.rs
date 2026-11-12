@@ -459,6 +459,11 @@ impl Checker<'_> {
         if self.types.is_url_split_result(left.ty) || self.types.is_url_split_result(right.ty) {
             return Err(self.scoped_builtin_error("urllib.parse.urlsplit result identity", node));
         }
+        let (left, right) = if left.ty == Type::BuiltinClass || right.ty == Type::BuiltinClass {
+            (self.class_object_view(left), self.class_object_view(right))
+        } else {
+            (left, right)
+        };
         let operands = [&left, &right];
         let tuple = |e: &Expr| {
             matches!(e.ty, Type::Tuple(_))

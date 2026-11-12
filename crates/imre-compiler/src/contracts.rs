@@ -683,6 +683,7 @@ impl Builtin {
             | Self::AnnotationIs
             | Self::StaticFunction(_)
             | Self::NewForwardRef
+            | Self::ConstructorClass
             | Self::ClassNameView
             | Self::ClassNamePart { .. }
             | Self::IntEnumValue
@@ -1156,6 +1157,10 @@ impl Builtin {
                 matches!(args, [owner, target] if matches!(result, Type::Callable(_))
                     && owner.ty == result
                     && types.wrapped_link_type(result) == types.wrapped_link_type(target.ty))
+            }
+            Self::ConstructorClass => {
+                matches!(args, [factory] if types.constructor_base(factory.ty).is_some())
+                    && result == Type::BuiltinClass
             }
             Self::IsCoroutineFunction => {
                 matches!(args, [arg] if matches!(arg.ty, Type::Callable(_))) && result == Type::Bool

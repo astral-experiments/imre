@@ -1583,6 +1583,30 @@ impl Checker<'_> {
         })
     }
 
+    /// Use the declaration's fixed class object when an operation observes the
+    /// class instead of invoking its constructor adapter.
+    pub(super) fn class_object_view(&self, value: Expr) -> Expr {
+        if self.types.constructor_base(value.ty).is_some() {
+            Expr {
+                ty: Type::BuiltinClass,
+                kind: ExprKind::Builtin(Builtin::ConstructorClass, vec![value]),
+            }
+        } else {
+            value
+        }
+    }
+
+    /// A base-typed factory can be any concrete subclass, including one with
+    /// a different metaclass. Only use the builtin metaclass when it is exact.
+    pub(super) fn has_plain_factory_metaclass(&self, factory: Type) -> bool {
+        self.types.constructor_base(factory).is_some_and(|base| {
+            self.classes.concrete_layouts(base).into_iter().all(|id| {
+                let class = &self.classes.declarations.definitions[id];
+                !class.abc && class.enum_members.is_none()
+            })
+        })
+    }
+
     pub(super) fn decimal_class(&self, class: usize) -> bool {
         let decl = &self.classes.declarations.definitions[class];
         decl.name == "Decimal" && self.graph.modules[decl.definition.module].is_bundled("decimal")

@@ -5463,7 +5463,7 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::EmptyPartial => self.empty_partial(&args[0].value),
-            Builtin::CallableContext => {
+            Builtin::CallableContext | Builtin::ConstructorClass => {
                 let address = self.callable_context_slot(&args[0].value);
                 let value = Value {
                     ty: returns,
@@ -10845,7 +10845,7 @@ declare ptr @imre_sys_filesystem_errors()
 declare ptr @imre_record_try_new(ptr)
 declare ptr @imre_record_try_new_sized(ptr, i64)
 declare ptr @imre_tuple_batch_try_new(ptr)
-declare ptr @imre_record_class_factory(ptr, ptr, ptr)
+declare ptr @imre_record_class_value(ptr, ptr, ptr, ptr)
 declare ptr @imre_tuple_probe(ptr, ptr)
 declare ptr @imre_json_decode(ptr, ptr)
 declare ptr @imre_json_loads(ptr)
