@@ -66,7 +66,7 @@ static ISO8859_15: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(10, "iso8
 static ISO8859_2: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(12, "iso8859_2"));
 static KOI8_R: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(18, "koi8_r"));
 
-const CODEC_NAMES: [&str; 19] = [
+const CODEC_NAMES: [&str; 20] = [
     "ascii",
     "iso8859-1",
     "utf-8",
@@ -86,6 +86,7 @@ const CODEC_NAMES: [&str; 19] = [
     "utf-32-be",
     "big5",
     "koi8-r",
+    "euc_jp",
 ];
 
 thread_local! {
@@ -612,6 +613,7 @@ impl Codec {
             Self::CodePage(page) => page.index,
             Self::DoubleByte(DoubleByte::ShiftJis) => 7,
             Self::DoubleByte(DoubleByte::Big5) => 17,
+            Self::DoubleByte(DoubleByte::EucJp) => 19,
             Self::Idna => 11,
             Self::Wide(FixedUnicode::Utf16(Utf16Order::Little)) => 13,
             Self::Wide(FixedUnicode::Utf16(Utf16Order::Big)) => 14,
@@ -654,6 +656,7 @@ impl Codec {
             "shift_jis" | "shiftjis" | "s_jis" | "sjis" | "csshiftjis" | "x_mac_japanese" => {
                 Ok(Self::DoubleByte(DoubleByte::ShiftJis))
             }
+            "euc_jp" | "eucjp" | "ujis" | "u_jis" => Ok(Self::DoubleByte(DoubleByte::EucJp)),
             "big5" | "big5_tw" | "csbig5" | "x_mac_trad_chinese" => {
                 Ok(Self::DoubleByte(DoubleByte::Big5))
             }
@@ -829,12 +832,12 @@ impl Codec {
         }
     }
 
-    /// Encodings other than UTF-8 write one or two bytes for a representable scalar.
-    pub(crate) fn encode_unit(self, ch: char) -> Option<([u8; 2], usize)> {
+    /// A representable scalar in these single-byte and multibyte mappings uses up to three bytes.
+    pub(crate) fn encode_unit(self, ch: char) -> Option<([u8; 3], usize)> {
         if let Self::DoubleByte(format) = self {
             return format.encode_char(ch);
         }
-        self.encode_byte(ch).map(|byte| ([byte, 0], 1))
+        self.encode_byte(ch).map(|byte| ([byte, 0, 0], 1))
     }
 
     pub(crate) fn encode_byte(self, ch: char) -> Option<u8> {

@@ -106,8 +106,8 @@ def check_surrogate_reads():
         assert text.read() == "\udcffB"
 
 
-def check_split_double_byte():
-    for encoding, char in (("big5", "台"), ("shift_jis", "表")):
+def check_split_multibyte():
+    for encoding, char, end in (("big5", "台", 8193), ("shift_jis", "表", 8193), ("euc_jp", "丂", 8194)):
         prefix = "x" * 8191
         raw = (prefix + char + "\r\n").encode(encoding)
         with io.TextIOWrapper(io.BytesIO(raw), encoding=encoding, newline="") as text:
@@ -115,7 +115,7 @@ def check_split_double_byte():
             before = text.tell()
             assert text.read(1) == char
             after = text.tell()
-            assert (before, after) == (8191, 8193)
+            assert (before, after) == (8191, end)
             assert text.seek(before) == before and text.read(1) == char
             assert text.readline() == "\r\n"
             assert text.read() == text.read() == ""
@@ -132,7 +132,7 @@ def check_split_double_byte():
 
 
 def current():
-    check_split_double_byte()
+    check_split_multibyte()
     check_surrogate_reads()
     check_repr()
     assert original_type is type(sys.stdout) is io.TextIOWrapper is _io.TextIOWrapper
