@@ -1525,15 +1525,11 @@ pub(super) fn builtin_slot(
     }
     let set_op = set_operator(method);
     let comparison = super::super::operators::comparison_op(method);
-    let shift = (owner == "int")
-        .then(|| super::super::operators::int_shift_slot(method))
-        .flatten();
     if matches!(
         method,
         "__add__" | "__iadd__" | "__contains__" | "__pow__" | "__truediv__" | "__rtruediv__"
     ) || set_op.is_some()
         || comparison.is_some()
-        || shift.is_some()
     {
         if !kwargs.is_empty() {
             return Err(type_error(format!(
@@ -1593,17 +1589,6 @@ pub(super) fn builtin_slot(
                 (storage, other)
             };
             return ctx.binary("/", left, right);
-        }
-        if let Some((op, reflected)) = shift {
-            let (left, right) = if reflected {
-                (*value, storage)
-            } else {
-                (storage, *value)
-            };
-            let code = super::super::operators::integer_binary_code(op).expect("integer shift");
-            return Ok(ctx
-                .inherited_integer_slot(left, right, code)?
-                .unwrap_or(NOT_IMPLEMENTED));
         }
         if owner == "int" {
             return integer::add(ctx, storage, *value);

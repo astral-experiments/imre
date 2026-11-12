@@ -5224,9 +5224,17 @@ pub(super) fn integer_binary_code(op: &str) -> Option<u32> {
     })
 }
 
-/// Resolve an integer shift wrapper against the operator's forward and reflected names.
-pub(super) fn int_shift_slot(name: &str) -> Option<(&'static str, bool)> {
-    ["<<", ">>"].into_iter().find_map(|op| {
+// These operations implement both integer slots through integer_binary.
+const INHERITED_INTEGER_OPS: [&str; 4] = ["//", "%", "<<", ">>"];
+
+/// Match a numeric wrapper to its operation and operand direction.
+pub(super) fn numeric_binary_slot(owner: &str, name: &str) -> Option<(&'static str, bool)> {
+    let operations: &[&str] = match owner {
+        "int" => &INHERITED_INTEGER_OPS,
+        "complex" => &["*", "/", "**"],
+        _ => return None,
+    };
+    operations.iter().find_map(|&op| {
         let (forward, reflected, _) = binary_slots(op)?;
         (name == forward || name == reflected).then_some((op, name == reflected))
     })
@@ -5861,7 +5869,7 @@ impl Context {
         // but leave pairs of exact builtins on the direct formatting path.
         let mixed_remainder = op == "%" && (ac.is_some() || bc.is_some());
         let shift = matches!(op, "<<" | ">>");
-        let integer_slot = integer_binary_code(op).filter(|_| shift || matches!(op, "//" | "%"));
+        let integer_slot = integer_binary_code(op).filter(|_| INHERITED_INTEGER_OPS.contains(&op));
         let mixed_integer_slots = (op == "+" || integer_slot.is_some())
             && (ac.is_some() || bc.is_some())
             && [a, b]

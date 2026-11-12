@@ -20,11 +20,12 @@ def current():
             raise AssertionError("the int wrapper must decline")
 
     wide = Number(-(1 << 150) + 7)
-    for forward, reflected, sign in (
-        ("__lshift__", "__rlshift__", "<<"),
-        ("__rshift__", "__rrshift__", ">>"),
+    for forward, reflected, sign, expected in (
+        ("__lshift__", "__rlshift__", "<<", int(wide) << 2),
+        ("__rshift__", "__rrshift__", ">>", int(wide) >> 2),
+        ("__floordiv__", "__rfloordiv__", "//", int(wide) // 2),
+        ("__mod__", "__rmod__", "%", int(wide) % 2),
     ):
-        expected = int(wide) << 2 if sign == "<<" else int(wide) >> 2
         for name, receiver, other, expression in (
             (forward, wide, 2, "self" + sign + "value"),
             (reflected, 2, wide, "value" + sign + "self"),
@@ -40,12 +41,20 @@ def current():
             assert wrapper.__self__ is receiver
             assert wrapper(other) == expected
             assert wrapper(Foreign()) is NotImplemented
-        try:
-            getattr(int, reflected)(-1, 7)
-        except ValueError as e:
-            assert str(e) == "negative shift count"
+        if sign in ("<<", ">>"):
+            try:
+                getattr(int, reflected)(-1, 7)
+            except ValueError as e:
+                assert str(e) == "negative shift count"
+            else:
+                raise AssertionError("negative count accepted")
         else:
-            raise AssertionError("negative count accepted")
+            try:
+                getattr(int, reflected)(0, 7)
+            except ZeroDivisionError:
+                pass
+            else:
+                raise AssertionError("zero divisor accepted")
     assert Number(8) >> Restored(2) == "override"
     assert Number(8) >> Sibling(2) == "override"
     assert Number(8) >> Swapped(2) == 0
