@@ -1549,6 +1549,26 @@ ACCEPTED = {
         "orchard/leaf.py": "print('leaf init')\nmarker = 47\n",
         "unrelated.py": "invalid syntax for an unrelated source file!\n",
     },
+    "module_docstring_store_frame": {
+        "main.py": (
+            "import sys\n"
+            "import leaf\n"
+            "\n"
+            "class Key(str):\n"
+            "    __hash__ = str.__hash__\n"
+            "\n"
+            "    def __eq__(self, other):\n"
+            "        frame = sys._getframe(1)\n"
+            "        print(\"binding\", frame.f_globals[\"__name__\"], frame.f_lineno)\n"
+            "        return str.__eq__(self, other)\n"
+            "\n"
+            "del leaf.__doc__\n"
+            "leaf.__dict__[Key(\"__doc__\")] = 41\n"
+            "leaf.__spec__.loader.exec_module(leaf)\n"
+            "print(\"complete\")\n"
+        ),
+        "leaf.py": "# first line\n\n\"\"\"module\ndocumentation\"\"\"\nfrom __future__ import annotations\nprint(\"leaf\")\n",
+    },
     "reload_source_plugin": {
         "main.py": (
             "from importlib import *\n"
