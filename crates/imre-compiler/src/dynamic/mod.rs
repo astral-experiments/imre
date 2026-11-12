@@ -772,7 +772,7 @@ fn retained_imports<'a, 'p>(
     Ok((imports, Some((module, lowered))))
 }
 
-fn scan_shipped_imports<'a>(
+fn scan_imports_for_preparation<'a>(
     source: &'a str,
     kind: SourceKind,
     getter: Option<&mut Imports>,
@@ -1343,7 +1343,7 @@ pub(crate) fn compile(
         if output.is_some() {
             return scan_imports(source, kind, getter, None);
         }
-        let (imports, scanned) = scan_shipped_imports(source, kind, getter, Some(source))?;
+        let (imports, scanned) = scan_imports_for_preparation(source, kind, getter, Some(source))?;
         if let Some(input) = scanned
             && imports.invalid_executable.is_none()
         {
@@ -1827,7 +1827,7 @@ pub(crate) fn compile(
                         }
                         if let Some(package) = archive.package(&prefix) {
                             if let Some(member) = archive.module(&prefix)
-                                && let Ok((mut imports, scanned)) = scan_shipped_imports(
+                                && let Ok((mut imports, scanned)) = scan_imports_for_preparation(
                                     &member.source,
                                     SourceKind::DecodedFile,
                                     None,
@@ -2076,6 +2076,8 @@ pub(crate) fn compile(
                         .and_then(|(graph, id)| CheckedFile::select(graph, id));
                     let imports = if let Some(file) = parsed {
                         retained_imports(file.parsed(modules), None, None)
+                    } else if output.is_none() && winner && alternative.is_none() {
+                        scan_imports_for_preparation(&src, kind, None, None)
                     } else {
                         scan_imports(&src, kind, None, alternative).map(|imports| (imports, None))
                     };
@@ -2203,7 +2205,7 @@ pub(crate) fn compile(
                             )
                         };
                     let imports = if digest.is_some() {
-                        scan_shipped_imports(&source, SourceKind::DecodedFile, None, None)
+                        scan_imports_for_preparation(&source, SourceKind::DecodedFile, None, None)
                     } else {
                         shipped_imports(
                             sources.len(),
@@ -2951,7 +2953,8 @@ fn a_shipped_getter_keeps_its_body_and_executable_source_offsets() {
     let normalized = crlf.replace("\r\n", "\n");
     let mut getter = Imports::default();
     let (imports, module) =
-        scan_shipped_imports(crlf, SourceKind::File, Some(&mut getter), Some(&normalized)).unwrap();
+        scan_imports_for_preparation(crlf, SourceKind::File, Some(&mut getter), Some(&normalized))
+            .unwrap();
     assert!(imports.names.is_empty());
     assert_eq!(getter.names, [(0, "fractions".to_owned())]);
     let (_, lower) = module.unwrap();
@@ -2964,7 +2967,8 @@ fn a_shipped_getter_keeps_its_body_and_executable_source_offsets() {
     };
     assert_eq!(&normalized[ret.range()], "return fractions");
 
-    let (_, module) = scan_shipped_imports(crlf, SourceKind::File, None, Some(crlf)).unwrap();
+    let (_, module) =
+        scan_imports_for_preparation(crlf, SourceKind::File, None, Some(crlf)).unwrap();
     assert!(module.is_none());
 }
 
