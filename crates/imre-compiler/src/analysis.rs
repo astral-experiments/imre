@@ -825,14 +825,23 @@ pub(crate) fn check_native_syntax(
 ) -> Result<Option<ParsedModuleRef>, String> {
     let input = imre_ast::indentation::prepare(source);
     let cached = checked.and_then(|graph| {
-        let id = if name == "__main__" {
-            graph.entry
-        } else {
-            graph.python_file(name)?
-        };
         let session = &graph.session;
-        let file = session.files[id];
-        (graph.modules[id].path == *path && session.matches_parser_input(id, &input.text))
+        let module = if name == "__main__" {
+            Some(graph.entry)
+        } else {
+            graph.python_file(name)
+        };
+        let file = if let Some(id) = module {
+            (graph.modules[id].path == *path).then_some(session.files[id])?
+        } else {
+            *session.declarations.iter().find(|file| {
+                file.path(&session.db)
+                    .as_system_path()
+                    .is_some_and(|origin| origin.as_std_path() == path)
+            })?
+        };
+        session
+            .file_matches_parser_input(file, &input.text)
             .then_some((session, file))
     });
     let (session, file) = if let Some(cached) = cached {
@@ -1379,7 +1388,12 @@ impl Session {
     }
 
     pub(crate) fn matches_parser_input(&self, module: usize, text: &str) -> bool {
-        ruff_db::source::source_text(&self.db, self.files[module]).as_str() == text
+        self.file_matches_parser_input(self.files[module], text)
+    }
+
+    /// Match the parser input of a selected physical file, including a declaration-only module.
+    fn file_matches_parser_input(&self, file: File, text: &str) -> bool {
+        ruff_db::source::source_text(&self.db, file).as_str() == text
     }
 
     fn parsed(&self, file: File) -> ParsedModuleRef {
