@@ -2129,6 +2129,32 @@ pub(super) unsafe extern "C" fn imre_dyn_lookup(
     finish(ctx, result)
 }
 
+/// Read a checked target from its owning comprehension scope, including a captured cell.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_lookup_local(
+    ctx: *mut Context,
+    scope: Id,
+    name: *const u8,
+    len: usize,
+) -> Id {
+    // SAFETY: the emitter links a Rust str identifier of exactly len bytes.
+    let (ctx, key) = unsafe {
+        (
+            &mut *ctx,
+            std::str::from_utf8_unchecked(slice::from_raw_parts(name, len)),
+        )
+    };
+    if ctx.pending.is_none()
+        && ctx.scope_data(scope).namespace.is_none()
+        && let Some(value) = ctx.scope_name(scope, key)
+    {
+        ctx.heap.take_call_position();
+        return finish(ctx, Ok(value));
+    }
+    // SAFETY: the ordinary lookup accepts the same scope and identifier.
+    unsafe { imre_dyn_lookup(ctx, scope, name, len) }
+}
+
 /// Store a linked identifier and report whether its previous owner needs releasing.
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_assign_target(
