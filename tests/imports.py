@@ -1897,6 +1897,7 @@ ACCEPTED = {
     },
     "registered_source_spec": {
         "main.py": (
+            "import importlib.util\n"
             "from importlib.util import find_spec\nfrom importlib import import_module\n"
             "first = find_spec('orchard.leaf')\nsecond = find_spec('.leaf', 'orchard')\n"
             "print(first == second, first is second, first.parent, first.loader.is_package(first.name))\n"
@@ -1905,6 +1906,19 @@ ACCEPTED = {
             "print(package.__path__ is package.__spec__.submodule_search_locations, "
             "leaf.__file__ == first.origin, find_spec('orchard.missing') is None)\n"
             "leaf.__spec__ = 'app spec'\nprint(find_spec('.leaf', 'orchard'))\n"
+            "blocked = RuntimeError('parent import')\n"
+            "def deny_parent(name, /, *, fromlist):\n"
+            "    assert name == 'orchard' and fromlist == ['__path__']\n"
+            "    raise blocked\n"
+            "importlib.util.__import__ = deny_parent\n"
+            "assert find_spec('.leaf', 'orchard') is leaf.__spec__\n"
+            "try:\n"
+            "    find_spec('.missing', 'orchard')\n"
+            "except RuntimeError as error:\n"
+            "    assert error is blocked\n"
+            "else:\n"
+            "    raise AssertionError('find_spec skipped the parent import')\n"
+            "del importlib.util.__import__\n"
         ),
         "orchard/__init__.py": "print('parent init')\n",
         "orchard/leaf.py": "print('leaf init')\nmarker = __name__\n",
