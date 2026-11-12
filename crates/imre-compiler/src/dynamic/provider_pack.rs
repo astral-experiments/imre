@@ -21,10 +21,6 @@ pub(crate) fn write(directory: &Path) -> Result<(), String> {
                         source: &str,
                         pending: Option<&mut VecDeque<String>>|
      -> io::Result<()> {
-        // The launcher already emits empty module entries in its own unit.
-        if source.is_empty() {
-            return Ok(());
-        }
         let path = Path::new("<imre stdlib>").join(file);
         let discovered = pending.and_then(|pending| {
             let (imports, input) =
@@ -54,9 +50,11 @@ pub(crate) fn write(directory: &Path) -> Result<(), String> {
                     Default::default(),
                 )
             })
-            .and_then(|body| body.standalone());
+            .and_then(|body| body.has_statements.then(|| body.standalone()).transpose());
         match compiled {
-            Ok((symbol, mut ir)) => {
+            // The launcher emits entries for statement-free modules in its own unit.
+            Ok(None) => Ok(()),
+            Ok(Some((symbol, mut ir))) => {
                 super::provider_archive::seal(&mut ir, &symbol, name, &path, source);
                 fs::write(directory.join(format!("{symbol}.ll")), ir)
             }

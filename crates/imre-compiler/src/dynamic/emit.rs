@@ -127,7 +127,7 @@ impl crate::ProgramOutput {
                 let mut external = None;
                 let mut archived = matches!(initializer, Initializer::Archived(_));
                 if let Initializer::Checked(initializer) = initializer
-                    && !source.is_empty()
+                    && initializer.has_statements
                     && (check_archive || separate)
                 {
                     // Commit the fork only if the provider gets an independent native unit.
@@ -219,6 +219,7 @@ impl Prompt {
 /// Normalized source and lowered names shared by archive, split, and inline placement.
 pub(super) struct PreparedBody<'a> {
     pub(super) prompts: &'a [Prompt],
+    pub(super) has_statements: bool,
     name: &'a str,
     #[cfg(test)]
     syntax: Option<Cow<'static, ast::Suite>>,
@@ -474,6 +475,7 @@ impl<'a> PreparedBody<'a> {
             },
             |values| values.has_templates,
         );
+        let has_statements = !syntax.body.is_empty();
         // CPython starts the module provider at the first statement, excluding its decorators.
         let module_start = syntax
             .body
@@ -716,6 +718,7 @@ impl<'a> PreparedBody<'a> {
         Ok((
             PreparedBody {
                 prompts: &[],
+                has_statements,
                 name,
                 #[cfg(test)]
                 syntax: None,
