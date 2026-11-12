@@ -9,6 +9,7 @@ pub(crate) mod provider;
 mod sni;
 pub(in crate::dynamic) use sni::{Owner, Registration};
 
+const CONTEXT_MEMBER: &str = "_imre_ssl._ContextBase._ctx";
 const PROVIDER_ERROR: &str = "_imre_ssl.Error";
 
 pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
@@ -28,6 +29,36 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
         class
     };
     ctx.bind(scope, "Error", class);
+    let base = if let Some(&member) = ctx.builtins.get(CONTEXT_MEMBER) {
+        let Value::SlotMember { owner, .. } = *ctx.heap.get(member) else {
+            unreachable!()
+        };
+        owner
+    } else {
+        let module_key = ctx.text("__module__");
+        let module = ctx.text("_imre_ssl");
+        let slots_key = ctx.text("__slots__");
+        let slot = ctx.text("_ctx");
+        let slots = ctx.alloc(Value::Tuple(vec![slot]));
+        let namespace = ctx.dict(vec![(module_key, module), (slots_key, slots)]);
+        let name = ctx.text("_ContextBase");
+        let object = ctx.builtin("object");
+        let bases = ctx.alloc(Value::Tuple(vec![object]));
+        let base = ctx.type_from_namespace(None, name, bases, namespace, &[], false)?;
+        let Value::Class { scope: fields, .. } = *ctx.heap.get(base) else {
+            unreachable!()
+        };
+        let Value::Scope(frame) = ctx.heap.get_mut(fields) else {
+            unreachable!()
+        };
+        frame.class_namespace.as_mut().unwrap().immutable_type = true;
+        let member = ctx
+            .own_class_attr(base, "_ctx")
+            .expect("declared context slot");
+        ctx.builtins.insert(CONTEXT_MEMBER.into(), member);
+        base
+    };
+    ctx.bind(scope, "_ContextBase", base);
     for name in [
         "context",
         "server_context",
@@ -93,6 +124,22 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
         ctx.bind(scope, name, function);
     }
     Ok(())
+}
+
+pub(in crate::dynamic) fn set_public_context(
+    ctx: &mut Context,
+    session: Id,
+    value: Id,
+) -> Result<()> {
+    let member = ctx.builtins[CONTEXT_MEMBER];
+    let handle = ctx.read_slot_member(member, value).map_err(|error| {
+        if error.kind == "TypeError" {
+            Error::new("TypeError", "The value must be a SSLContext")
+        } else {
+            error
+        }
+    })?;
+    sni::set_context(ctx, session, handle, value)
 }
 
 fn context(ctx: &Context, id: Id) -> Result<&RefCell<provider::Context>> {

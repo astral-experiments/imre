@@ -5301,6 +5301,12 @@ impl Context {
             #[cfg(target_os = "linux")]
             Value::Epoll(_) if name == "fromfd" => return Ok(self.builtin("select.epoll.fromfd")),
             #[cfg(unix)]
+            Value::TlsSession(_, owner) | Value::TlsBioSession { owner, .. }
+                if name == "context" =>
+            {
+                return Ok(owner.context());
+            }
+            #[cfg(unix)]
             Value::TlsBioSession { .. } if name == "do_handshake" => {
                 let module = self.module("ssl")?;
                 let callable = self.lookup_attr(module, "_bio_handshake")?;
@@ -7380,6 +7386,15 @@ impl Context {
                 name,
                 Some(value),
             );
+        }
+        #[cfg(unix)]
+        if name == "context"
+            && matches!(
+                self.heap.get(obj),
+                Value::TlsSession(..) | Value::TlsBioSession { .. }
+            )
+        {
+            return stdlib::ssl::set_public_context(self, obj, value);
         }
         if name == "cell_contents" && matches!(self.heap.get(obj), Value::Cell(_)) {
             self.heap.replace_cell(obj, Some(value));

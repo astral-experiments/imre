@@ -265,10 +265,10 @@ class Purpose(_ASN1Object, _Enum):
     CLIENT_AUTH = '1.3.6.1.5.5.7.3.2'
 
 
-class SSLContext:
+class SSLContext(_imre_ssl._ContextBase):
     """TLS settings, trusted certificates and local certificate chains."""
 
-    __slots__ = ("_ctx", "__dict__", "__weakref__")
+    __slots__ = ("__dict__", "__weakref__")
 
     def __new__(cls, protocol=None, *args, **kwargs):
         if protocol is None:
@@ -544,12 +544,6 @@ def _tls_result(result):
     raise error
 
 
-def _set_context(session, context):
-    if not issubclass(type(context), SSLContext):
-        raise TypeError("The value must be a SSLContext")
-    _tls_result(_call(_imre_ssl.set_context, session, SSLContext._ctx.__get__(context), context))
-
-
 def _bio_handshake(session):
     return _tls_result(_call(_imre_ssl.bio_handshake, session))
 
@@ -572,18 +566,16 @@ class SSLObject:
         self = cls.__new__(cls)
         self._sslobj = _call(_imre_ssl.wrap_bio, native_context, incoming, outgoing,
                              server_hostname, server_side, context, _ref(self))
-        self._context = context
         self._server_side = server_side
         return self
 
     @property
     def context(self):
-        return self._context
+        return self._sslobj.context
 
     @context.setter
     def context(self, context):
-        _set_context(self._sslobj, context)
-        self._context = context
+        self._sslobj.context = context
 
     @property
     def server_side(self):
@@ -645,7 +637,7 @@ _NO_FLAGS = 0
 class SSLSocket(_socket.socket):
     """Encrypted I/O on a socket returned by SSLContext.wrap_socket()."""
 
-    __slots__ = ("_session", "_context", "_server_hostname", "server_side",
+    __slots__ = ("_session", "_sslobj", "_context", "_server_hostname", "server_side",
                  "do_handshake_on_connect", "suppress_ragged_eofs", "_connected")
 
     def __init__(self, *args, **kwargs):
@@ -681,6 +673,7 @@ class SSLSocket(_socket.socket):
         sock.detach()
         try:
             SSLSocket._session.__set__(peer, None)
+            SSLSocket._sslobj.__set__(peer, None)
             peer._context = context
             SSLSocket._server_hostname.__set__(peer, server_hostname)
             peer.server_side = bool(server_side)
@@ -716,6 +709,8 @@ class SSLSocket(_socket.socket):
             result = _tls_result(result)
             SSLSocket._session.__set__(peer, result)
             connected = _imre_ssl.is_session(result)
+            if connected:
+                SSLSocket._sslobj.__set__(peer, result)
             peer._connected = connected
             if connected and do_handshake_on_connect:
                 if peer.gettimeout() == 0.0:
@@ -736,11 +731,7 @@ class SSLSocket(_socket.socket):
     @context.setter
     def context(self, context):
         self._context = context
-        if not _imre_ssl.is_session(self._session):
-            # The public context changes even when there is no underlying SSL object.
-            setattr(None, "context", context)
-        else:
-            _set_context(self._session, context)
+        self._sslobj.context = context
 
     @property
     def server_hostname(self):
@@ -767,7 +758,7 @@ class SSLSocket(_socket.socket):
         context = self.context
         result = _call(_imre_ssl.wrap, context._ctx, self, self.server_hostname,
                        False, True, context, _ref(self))
-        self._session = _tls_result(result)
+        self._session = self._sslobj = _tls_result(result)
         try:
             if connect_ex:
                 rc = super().connect_ex(addr)
@@ -783,6 +774,7 @@ class SSLSocket(_socket.socket):
             # A failed handshake may leave TCP connected. Restore the guarded
             # endpoint so subsequent socket I/O cannot send plaintext.
             self._session = pending
+            self._sslobj = None
             raise
 
     def connect(self, addr):
@@ -951,6 +943,7 @@ class SSLSocket(_socket.socket):
             raise ValueError("No SSL wrapper around " + str(self))
         _tls_result(_call(_imre_ssl.tls_shutdown, self._session))
         self._session = _imre_ssl.release_session(self._session)
+        self._sslobj = None
         return self
 
     def get_channel_binding(self, cb_type="tls-unique"):
@@ -961,12 +954,14 @@ class SSLSocket(_socket.socket):
         return _call(_imre_ssl.channel_binding, self._session, cb_type)
 
     def shutdown(self, how):
+        SSLSocket._sslobj.__set__(self, None)
         session = SSLSocket._session.__get__(self)
         if session is None:
             return super().shutdown(how)
         _imre_ssl.transport_shutdown(session, how)
 
     def _real_close(self):
+        SSLSocket._sslobj.__set__(self, None)
         _imre_ssl.release_session(getattr(self, "_session", None))
         SSLSocket._session.__set__(self, None)
         super()._real_close()
