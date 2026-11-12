@@ -7,7 +7,6 @@ import sys
 
 from _imre_importlib import (
     builtin_compile as _builtin_compile,
-    cache_name as _cache_name,
     compile_file as _compile_file,
     compile_filename as _compile_filename,
     get_code as _registered_code,
@@ -38,6 +37,8 @@ path_sep_tuple = tuple(path_separators)
 
 SOURCE_SUFFIXES = [".py", ".pyw"] if _MS_WINDOWS else [".py"]
 BYTECODE_SUFFIXES = [".pyc"]
+_PYCACHE = "__pycache__"
+_OPT = "opt-"
 MAGIC_NUMBER = _imp.pyc_magic_number_token.to_bytes(4, 'little')
 EXTENSION_SUFFIXES = _imp.extension_suffixes()
 
@@ -101,15 +102,31 @@ def cache_from_source(path, debug_override=None, *, optimization=None):
         if optimization is not None:
             raise TypeError("debug_override or optimization must be set to None")
         optimization = "" if debug_override else 1
-    path = _cache_path(path)
+    path = _fspath(path)
+    head, tail = _path_split(path)
+    base, sep, rest = tail.rpartition('.')
     tag = sys.implementation.cache_tag
     if tag is None:
         raise NotImplementedError("sys.implementation.cache_tag is None")
-    if not isinstance(tag, str):
-        raise TypeError(f"sequence item 2: expected str instance, {type(tag).__name__} found")
+    almost_filename = ''.join([(base if base else rest), sep, tag])
     if optimization is None:
-        optimization = sys.flags.optimize or ""
-    return _cache_name(path, tag, str(optimization), BYTECODE_SUFFIXES, sys, _path_join)
+        if sys.flags.optimize == 0:
+            optimization = ''
+        else:
+            optimization = sys.flags.optimize
+    optimization = str(optimization)
+    if optimization != '':
+        if not optimization.isalnum():
+            raise ValueError(f'{optimization!r} is not alphanumeric')
+        almost_filename = f'{almost_filename}.{_OPT}{optimization}'
+    filename = almost_filename + BYTECODE_SUFFIXES[0]
+    if sys.pycache_prefix is not None:
+        head = _path_abspath(head)
+        # Drop the drive, if present, before placing the root-relative path under the prefix.
+        if head[1:2] == ':' and head[0:1] not in path_separators:
+            head = head[2:]
+        return _path_join(sys.pycache_prefix, head.lstrip(path_separators), filename)
+    return _path_join(head, _PYCACHE, filename)
 
 
 def source_from_cache(path):

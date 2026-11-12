@@ -633,7 +633,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "get_code"
             | "loader_fields"
             | "path_stats"
-            | "cache_name"
             | "source_name"
             | "warn_debug_override"
             | "warn_loader_deprecation"
@@ -2519,46 +2518,6 @@ pub(super) fn call(
     }
     if let Some(method) = name.strip_prefix("_imre_importlib.") {
         match (method, args, kwargs) {
-            ("cache_name", [path, tag, optimization, suffixes, sys, join], []) => {
-                use crate::objects::cache_paths;
-                if matches!(
-                    ctx.heap.get(ctx.scalar_value(*optimization)),
-                    Value::SurrogateStr(_)
-                ) {
-                    let quoted = ctx.object_repr(*optimization)?;
-                    return Err(Error::new(
-                        "ValueError",
-                        format!("{} is not alphanumeric", ctx.str_value(quoted)?),
-                    ));
-                }
-                let (head, stem) = cache_paths::cache_stem(
-                    ctx.str_value(*path)?,
-                    ctx.str_value(*tag)?,
-                    ctx.str_value(*optimization)?,
-                )?;
-                let head_end = head.len();
-                let filename = cache_filename(ctx, *suffixes, stem)?;
-                let prefix = ctx.lookup_attr(*sys, "pycache_prefix")?;
-                // The suffix may execute Python; borrow the immutable path again after it returns.
-                let head = &ctx.str_value(*path)?[..head_end];
-                match filename {
-                    CacheFilename::Text(name) => {
-                        let prefix = (prefix != NONE)
-                            .then(|| ctx.str_value(prefix))
-                            .transpose()?;
-                        let result = cache_paths::cache_location(head, &name, prefix)?;
-                        return Ok(ctx.text(result.to_string()));
-                    }
-                    CacheFilename::Object(name) => {
-                        let (first, second) = if prefix == NONE {
-                            (ctx.text(head.to_owned()), ctx.text(cache_paths::PYCACHE))
-                        } else {
-                            (prefix, ctx.text(cache_paths::cache_relative_head(head)?))
-                        };
-                        return ctx.call(*join, vec![first, second, name], Vec::new());
-                    }
-                }
-            }
             ("source_name", [path, prefix, suffixes, join], []) => {
                 use crate::objects::cache_paths;
                 let prefix = (*prefix != NONE)
