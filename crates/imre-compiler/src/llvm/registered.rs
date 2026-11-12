@@ -308,12 +308,12 @@ pub(super) struct IterationState {
     private_slots: Vec<usize>,
     first_slot: usize,
     cursors: HashMap<usize, ir::IterNextKind>,
-    in_expression: bool,
+    expression_mark: Option<String>,
 }
 
 pub(super) struct ExpressionScope {
     mark: String,
-    outer_expression: bool,
+    outer_expression: Option<String>,
     error_targets: (String, String),
 }
 
@@ -679,9 +679,7 @@ impl<'f> Frame<'f, '_, '_> {
             return;
         }
         let (scope, name) = self.assignment_name(slot);
-        let mark = self.target_mark();
-        self.code
-            .assign_owned_name(&scope, &name, &handle, mark.as_deref());
+        self.code.assign_owned_name(&scope, &name, &handle);
     }
 
     fn assignment_name(&mut self, slot: usize) -> (String, String) {
@@ -701,7 +699,7 @@ impl<'f> Frame<'f, '_, '_> {
         let replaced = self
             .code
             .op("assign_named_target", &[&scope, &name, handle]);
-        self.code.release_replaced(&replaced, Some((mark, handle)));
+        self.code.line(&format!("call void @imre_dyn_named_assignment(ptr %ctx, i64 {mark}, i64 {handle}, i64 {replaced})"));
     }
 
     pub(crate) fn body(&mut self) -> &mut FunctionBody {
@@ -775,11 +773,16 @@ impl<'f> Frame<'f, '_, '_> {
         }
     }
 
-    pub(crate) fn target_mark(&mut self) -> Option<String> {
+    pub(super) fn iteration_mark(&mut self) -> Option<String> {
         self.code
             .iteration
-            .in_expression
+            .expression_mark
+            .is_some()
             .then(|| self.temporary_mark())
+    }
+
+    pub(super) fn replace_expression_mark(&mut self, mark: Option<String>) -> Option<String> {
+        std::mem::replace(&mut self.code.iteration.expression_mark, mark)
     }
     pub(crate) fn unpack(&mut self, value: &str, count: usize, star: Option<usize>) -> String {
         let count = self.code.integer(count);
@@ -796,9 +799,10 @@ impl<'f> Frame<'f, '_, '_> {
         self.code.op("comprehension_scope", &[&parent, &names])
     }
     pub(super) fn start_expression(&mut self) -> ExpressionScope {
+        let mark = self.temporary_mark();
         ExpressionScope {
-            mark: self.temporary_mark(),
-            outer_expression: std::mem::replace(&mut self.code.iteration.in_expression, true),
+            outer_expression: self.replace_expression_mark(Some(mark.clone())),
+            mark,
             error_targets: self.begin_operand_scope(),
         }
     }
@@ -808,18 +812,40 @@ impl<'f> Frame<'f, '_, '_> {
         clear: &[usize],
         result: &CheckedValue,
     ) {
-        self.code.iteration.in_expression = scope.outer_expression;
+        self.code.iteration.expression_mark = scope.outer_expression;
         let mark = scope.mark;
+        let nested = self
+            .code
+            .scope_unwinds
+            .remove(&scope.error_targets.0)
+            .filter(|slots| !slots.is_empty());
         self.code.finish_unwind(scope.error_targets, |code| {
-            // A handler checkpoint republishes these slots. Forget the abandoned handles
-            // before releasing their roots, including when nested inside another expression.
-            for slot in clear {
-                if let Ok(index) = code.iteration.private_slots.binary_search(slot) {
-                    let physical = code.iteration.first_slot + index;
-                    code.line(&format!("store i64 0, ptr %ir_slot{physical}"));
+            let slots = clear.iter().rev().filter_map(|slot| {
+                let index = code.iteration.private_slots.binary_search(slot).ok()?;
+                Some(code.iteration.first_slot + index)
+            });
+            if let Some(nested) = nested {
+                // Pending targets sit below the failed receiver or index. Retain
+                // them in lexical unwind order until those operands are gone.
+                let slots = slots.chain(nested).collect();
+                let retiring = code.take_unwind_slots(slots);
+                let (ptr, count) = code.handle_array(&retiring);
+                code.output.declare(
+                    |d| &mut d.unwind_slots,
+                    "declare void @imre_dyn_unwind_slots(ptr, i64, ptr, i64)\n",
+                );
+                code.line(&format!(
+                    "call void @imre_dyn_unwind_slots(ptr %ctx, i64 {mark}, ptr {ptr}, i64 {count})"
+                ));
+            } else {
+                for slot in clear {
+                    if let Ok(index) = code.iteration.private_slots.binary_search(slot) {
+                        let physical = code.iteration.first_slot + index;
+                        code.line(&format!("store i64 0, ptr %ir_slot{physical}"));
+                    }
                 }
+                code.release_owned_operands(&mark);
             }
-            code.release_owned_operands(&mark);
         });
         let handle = match result {
             CheckedValue::Handle { id, .. } => id.as_str(),
@@ -858,7 +884,7 @@ impl<'f> Frame<'f, '_, '_> {
     pub(crate) fn enter_loop(&mut self, edges: &LoopEdges) {
         let cleanup_depth = self.code.regions.len();
         // A resumed for statement keeps its header even inside an operand's cleanup scope.
-        let line = (self.code.native_suspension && !self.code.iteration.in_expression)
+        let line = (self.code.native_suspension && self.code.iteration.expression_mark.is_none())
             .then(|| self.code.positions.line(self.code.current_range.start()));
         self.code.loops.push((
             LoopTarget {
@@ -1005,9 +1031,8 @@ impl<'f> Frame<'f, '_, '_> {
                 _
             )
         ) {
-            let mark = self.target_mark();
             self.evaluate(expr);
-            self.release_target(mark.as_deref());
+            self.release_target();
             true
         } else if matches!(
             expr.kind,
@@ -1345,7 +1370,7 @@ impl<'f> Frame<'f, '_, '_> {
 
     pub(crate) fn bind(&mut self, name: &str, handle: &str) {
         let scope = self.code.scope.clone();
-        self.code.assign_owned_name(&scope, name, handle, None);
+        self.code.assign_owned_name(&scope, name, handle);
     }
 
     pub(super) fn exec_literal_at(&mut self, site: TextRange) -> Option<sites::CompiledExec> {
@@ -1633,7 +1658,7 @@ impl RegisteredFrame<'_, '_> {
         self.value(&format!("load i64, ptr %ir_slot{slot}"))
     }
     pub(super) fn owns_sync_cursor(&self, slots: &[usize]) -> bool {
-        !self.iteration.in_expression
+        self.iteration.expression_mark.is_none()
             && slots
                 .iter()
                 .any(|slot| self.iteration.cursors.get(slot) == Some(&ir::IterNextKind::Generic))
@@ -1653,7 +1678,7 @@ impl RegisteredFrame<'_, '_> {
             }
         }
         if self.owns_sync_cursor(slots) {
-            self.release_target(None);
+            self.release_target();
         }
     }
     fn physical_slot(&self, slot: usize) -> usize {

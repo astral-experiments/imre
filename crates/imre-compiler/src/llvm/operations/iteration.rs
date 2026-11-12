@@ -192,7 +192,7 @@ impl CheckedBody<'_, '_, '_, '_> {
                     // The landing block clears this loop's slots. Publish the
                     // surviving roots before the enclosing cleanup runs.
                     let terminated = f.terminated();
-                    f.finish_unwind(unwind, |code| code.release_target(None));
+                    f.finish_unwind(unwind, |code| code.release_target());
                     if terminated {
                         f.end("unreachable");
                     }
@@ -259,9 +259,13 @@ impl CheckedBody<'_, '_, '_, '_> {
             )),
             Entry::Registered(_) => None,
         };
-        let mark = match &mut self.0 {
-            Entry::Registered(f) => f.target_mark(),
-            _ => None,
+        let (mark, outer_mark) = match &mut self.0 {
+            Entry::Registered(f) => {
+                let mark = f.iteration_mark();
+                let outer = f.replace_expression_mark(mark.clone());
+                (mark, outer)
+            }
+            _ => (None, None),
         };
         loop_region(
             self,
@@ -311,6 +315,9 @@ impl CheckedBody<'_, '_, '_, '_> {
             },
             (!otherwise.is_empty()).then_some(|this: &mut Self| this.emit_block(otherwise)),
         );
+        if let Entry::Registered(f) = &mut self.0 {
+            f.replace_expression_mark(outer_mark);
+        }
         if let Some((lengths, buffers, _)) = optimized {
             let e = self.fixed();
             e.length_snapshots = lengths;
@@ -427,22 +434,18 @@ impl CheckedBody<'_, '_, '_, '_> {
                 };
                 (slot, e.nonnegative_index(key), None)
             }
-            Entry::Registered(f) => {
-                let target = f.target_mark();
-                let operands = target.clone().unwrap_or_else(|| f.temporary_mark());
-                (None, false, Some((target, operands)))
-            }
+            Entry::Registered(f) => (None, false, Some(f.temporary_mark())),
         };
         let value = self.store_operand(value);
         let table = self.store_operand(table);
         let key = self.store_operand(key);
         self.write_item(&table, &key, &value, buffer, nonnegative);
-        if let Some((target, operands)) = mark {
+        if let Some(operands) = mark {
             // STORE_SUBSCR pops key and receiver before the RHS. The target
             // checkpoint also releases any earlier snapshot of a taken slot.
             let f = self.python();
             f.release_owned_operands(&operands);
-            f.release_target(target.as_deref());
+            f.release_target();
         } else {
             let e = self.fixed();
             let (list, index, value) =
