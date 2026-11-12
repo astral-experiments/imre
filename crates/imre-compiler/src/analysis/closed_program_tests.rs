@@ -953,6 +953,15 @@ fn a_linked_signature_requires_a_reaching_initializer_call() {
     };
     let read = "from __main__ import take as use\nif False: use('x')\n";
     let take = "def take(n: int): return n\n";
+    let main = format!("{take}import rules\n");
+    let child = |guard| {
+        format!(
+            "from __main__ import take\nheading = 'value'\nif {guard}: print(heading, end=take('wrong'))\n"
+        )
+    };
+    let error = check(&main, &child("1 == 1"), true).unwrap_err();
+    assert!(error.contains("rules.py:3:36"), "{error}");
+    check(&main, &child("1 == 2"), true).unwrap();
     assert!(
         check(&format!("{take}import rules\n"), read, true)
             .unwrap_err()
@@ -1171,6 +1180,26 @@ fn earlier_unlinked_source_precedes_a_later_initializer_argument() {
         before.contains("main.py:2:6") && before.contains("expected int"),
         "{before}"
     );
+}
+
+#[test]
+fn a_resolved_guarded_call_keeps_the_earlier_declaration_diagnostic() {
+    let root = tempdir().unwrap();
+    for (name, source) in [
+        ("main.py", "import child\nimport opcode\n"),
+        (
+            "child.py",
+            "from scalars import take\nheading = 'value'\nif 1 == 1: print(heading, end=take('wrong'))\n",
+        ),
+        (
+            "scalars.py",
+            "def declared() -> int: return 'separate'\ndef take(value: int): return value\n",
+        ),
+    ] {
+        fs::write(root.path().join(name), source).unwrap();
+    }
+    let error = crate::check_file(&root.path().join("main.py"), None).unwrap_err();
+    assert!(error.contains("scalars.py:1:31"), "{error}");
 }
 
 #[test]
