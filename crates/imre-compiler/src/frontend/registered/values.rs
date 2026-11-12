@@ -1296,6 +1296,16 @@ impl Checker<'_> {
             matches!(method.attr.as_str(), "join" | "split" | "replace")
                 && graph.session.scalar_type(owner, &method.value) == Some(Type::Str)
         });
+        // A checked list parameter is still the object supplied by the Python caller.
+        let typed_receiver = string_method
+            || method
+                .and_then(|method| method.value.as_name_expr())
+                .and_then(|name| self.names.get(name.id.as_str()))
+                .is_some_and(|&slot| {
+                    self.registered_local_start
+                        .is_some_and(|first| slot < first)
+                        && matches!(self.locals[slot], Type::ListInt | Type::List(_))
+                });
         // A bound local holds the actual result of its checked initializer. A frame
         // resolves the method on that object even when inference knows a concrete type.
         let bound_method = method.is_some_and(|method| {
@@ -1313,11 +1323,11 @@ impl Checker<'_> {
         let Some(mut value) = operation(
             node,
             source,
-            string_method,
+            typed_receiver,
             // Even a skipped operand participates in static argument and result checking.
             |_| None,
             |receiver| {
-                string_method || bound_method || graph.session.is_dynamic_receiver(owner, receiver)
+                typed_receiver || bound_method || graph.session.is_dynamic_receiver(owner, receiver)
             },
             |child| self.expr(child),
         )?
