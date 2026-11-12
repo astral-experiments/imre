@@ -2678,11 +2678,7 @@ pub(super) fn call(
             if receiver == NONE {
                 return Err(type_error("instance must not be None"));
             }
-            Ok(ctx.alloc(Value::Method {
-                callable,
-                receiver,
-                explicit: true,
-            }))
+            Ok(ctx.bind_python_method(callable, receiver))
         }
         "module" => {
             let class = ctx.builtin("module");

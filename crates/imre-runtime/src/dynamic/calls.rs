@@ -1339,6 +1339,15 @@ impl Context {
             || (self.slot(member, "__get__").is_some() && self.data_descriptor(member))
     }
 
+    /// Bind a Python method to the receiver selected by descriptor lookup.
+    pub(super) fn bind_python_method(&mut self, callable: Id, receiver: Id) -> Id {
+        self.alloc(Value::Method {
+            callable,
+            receiver,
+            explicit: true,
+        })
+    }
+
     /// Bind a native class method to the class through which it was retrieved.
     fn bind_native_classmethod(&mut self, callable: Id, owner: Id) -> Id {
         self.alloc(Value::Method {
@@ -1409,11 +1418,7 @@ impl Context {
             }));
         }
         if let Value::ClassMethod { callable, .. } = *self.heap.get(value) {
-            return Ok(self.alloc(Value::Method {
-                callable,
-                receiver: owner,
-                explicit: true,
-            }));
+            return Ok(self.bind_python_method(callable, owner));
         }
         if let Value::Super {
             start,
@@ -1451,10 +1456,10 @@ impl Context {
                 Value::GetSetDescriptor { get, .. } => {
                     return self.call(*get, vec![receiver], Vec::new());
                 }
-                Value::Function { .. }
-                | Value::Cached { .. }
-                | Value::Partial { .. }
-                | Value::IoMethod { .. } => true,
+                Value::Function { .. } | Value::Cached { .. } | Value::Partial { .. } => {
+                    return Ok(self.bind_python_method(value, receiver));
+                }
+                Value::IoMethod { .. } => true,
                 Value::HeapTypeMethod { owner, name } => {
                     self.check_heap_method_receiver(*owner, name, receiver)?;
                     true
@@ -1522,10 +1527,7 @@ impl Context {
                 return Ok(self.alloc(Value::Method {
                     callable,
                     receiver,
-                    explicit: matches!(
-                        self.heap.get(value),
-                        Value::Cached { .. } | Value::Partial { .. }
-                    ),
+                    explicit: false,
                 }));
             }
         }
@@ -2424,6 +2426,10 @@ impl Context {
         } else {
             let class = match self.heap.get(obj) {
                 Value::Partial { .. } => stdlib::functools::PARTIAL_CLASS,
+                Value::Native(symbol) if let Some(slot) = BuiltinDescriptor::lookup(symbol) => {
+                    slot.class()
+                }
+                Value::Method { .. } => self.builtin_type_name(obj).unwrap_or("method"),
                 _ => self.type_name(obj),
             };
             format!("'{class}' object has no attribute '{name}'")
@@ -4397,6 +4403,18 @@ impl Context {
                 }
             }
             Value::Method {
+                callable,
+                receiver,
+                explicit,
+            } if explicit || matches!(self.heap.get(callable), Value::Function { .. }) => {
+                return match name {
+                    "__self__" => Ok(receiver),
+                    "__func__" => Ok(callable),
+                    "__init__" => self.builtin_attribute(obj, name, lookup, native_key),
+                    _ => self.lookup_attr(callable, name),
+                };
+            }
+            Value::Method {
                 callable, receiver, ..
             } if let Value::Native(ref symbol) = *self.heap.get(callable)
                 && let Some(slot) = BuiltinDescriptor::lookup(symbol) =>
@@ -4422,9 +4440,7 @@ impl Context {
                 }
             }
             Value::Method {
-                callable,
-                receiver,
-                explicit,
+                callable, receiver, ..
             } => match name {
                 "__self__" => return Ok(receiver),
                 _ if let Value::HeapTypeMethod {
@@ -4477,17 +4493,6 @@ impl Context {
                 _ if matches!(self.heap.get(callable), Value::IoOpen { .. }) => {
                     let original = self.builtin("open");
                     return self.lookup_attr(original, name);
-                }
-                "__func__"
-                    if explicit || matches!(self.heap.get(callable), Value::Function { .. }) =>
-                {
-                    return Ok(callable);
-                }
-                _ if explicit || matches!(self.heap.get(callable), Value::Function { .. }) => {
-                    if name == "__init__" {
-                        return self.builtin_attribute(obj, name, lookup, native_key);
-                    }
-                    return self.lookup_attr(callable, name);
                 }
                 _ => {
                     if let Value::Native(method) = self.heap.get(callable) {
@@ -6114,15 +6119,17 @@ impl Context {
         }
         // Native directories can list unmaterialized slots. A bound descriptor already
         // returned its value or error above; only an intrinsic miss reaches this point.
-        if lookup == AttributeLookup::ListedClassMember {
-            if matches!(self.heap.get(obj), Value::Native(_))
-                && let Some(member) = self.own_class_attr(obj, name)
-            {
-                return self.bind_attribute(member, NONE, obj);
-            }
-            if builtins::dir::listed_by_native_base(self, obj, name)? {
-                return Ok(NONE);
-            }
+        if matches!(self.heap.get(obj), Value::Native(_))
+            && let Some(member) = self.own_class_attr(obj, name)
+            && (lookup == AttributeLookup::ListedClassMember
+                || matches!(self.heap.get(member), Value::ReadOnlyMember(_, _)))
+        {
+            return self.bind_attribute(member, NONE, obj);
+        }
+        if lookup == AttributeLookup::ListedClassMember
+            && builtins::dir::listed_by_native_base(self, obj, name)?
+        {
+            return Ok(NONE);
         }
         if let Some((class, receiver, key)) = native_key {
             return self.native_attribute_with_key(obj, class, receiver, key, name);
@@ -6637,7 +6644,8 @@ impl Context {
         }
         if matches!(
             self.heap.get(obj),
-            Value::Code(_)
+            Value::Method { .. }
+                | Value::Code(_)
                 | Value::LzmaDecompressor(_)
                 | Value::Bz2Decompressor(_)
                 | Value::ThreadHandle(_)

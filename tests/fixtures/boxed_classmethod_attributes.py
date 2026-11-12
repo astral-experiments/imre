@@ -24,6 +24,8 @@ def current():
     from types import MethodType
 
     class Auto:
+        slot = classmethod(object.__str__)
+
         def __class_getitem__(cls, key):
             return cls, key
 
@@ -43,6 +45,26 @@ def current():
     raw = vars(Auto)["explicit"]
     bound = Derived.explicit
     assert type(bound) is MethodType and type(raw) is classmethod
+    assert Derived.slot.__self__ is Derived and Derived.slot.__func__ is object.__str__
+    add = MethodType(int.__add__, 4)
+    assert add.__func__ is int.__add__ and add(3) == 7
+    assert not hasattr((4).__add__, "__func__")
+    try:
+        add.missing
+    except AttributeError as exc:
+        assert str(exc) == "'wrapper_descriptor' object has no attribute 'missing'"
+    else:
+        raise AssertionError("method delegated to the wrong callable")
+    for name, value in (("__func__", int.__add__), ("__self__", 4)):
+        member = vars(MethodType)[name]
+        assert member is getattr(MethodType, name)
+        assert member.__get__(add) is value
+        try:
+            setattr(bound, name, value)
+        except AttributeError as exc:
+            assert str(exc) == "readonly attribute"
+        else:
+            raise AssertionError(name)
     assert MethodType.__doc__ == "Create a bound instance method object."
     assert classmethod.__doc__.startswith("Convert a function to be a class method.")
     assert bound.__self__ is Derived and bound.__func__ is raw.__func__
