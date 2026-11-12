@@ -5,9 +5,10 @@ use std::path::Path;
 use std::{fs, io};
 
 use super::{
-    Imports, add_late_bundled_imports, bundled_module_source, emit, imports_for_module,
-    runtime_sources,
+    ImportSource, Imports, add_late_bundled_imports, bundled_module_source, emit,
+    imports_from_body, read_import_source, runtime_sources,
 };
+use crate::SourceKind;
 
 use crate::frontend::module_source::ParsedModule;
 
@@ -15,9 +16,37 @@ const STDLIB_NAMES: &str = include_str!("../../../imre-runtime/native/stdlib-mod
 
 pub(crate) fn write(directory: &Path) -> Result<(), String> {
     fs::create_dir_all(directory).map_err(|err| err.to_string())?;
-    let write_module = |name: &str, file: &str, source: &str| -> io::Result<()> {
+    let write_module = |name: &str,
+                        file: &str,
+                        source: &str,
+                        pending: Option<&mut VecDeque<String>>|
+     -> io::Result<()> {
         let path = Path::new("<imre stdlib>").join(file);
-        let compiled = ParsedModule::parse(&path, source.into())
+        let discovered = pending.and_then(|pending| {
+            let ImportSource::Module(module) = read_import_source(source, SourceKind::File).ok()?
+            else {
+                return None;
+            };
+            let mut body = module.parsed.syntax().body.clone();
+            let imports = imports_from_body(&module.text, &mut body, None, None).ok()?;
+            let package = crate::modules::import_package(name, path.ends_with("__init__.py"));
+            for (level, imported) in imports.names {
+                if let Some(resolved) = crate::modules::resolve_import(package, level, &imported) {
+                    enqueue(pending, resolved);
+                }
+            }
+            // Source seals and instruction positions refer to the packer's original text.
+            let lowered = imports
+                .invalid_executable
+                .is_none()
+                .then_some((body, imports.private_names));
+            (module.text == source).then_some((module, lowered))
+        });
+        let compiled = discovered
+            .map_or_else(
+                || ParsedModule::parse(&path, source.into()).map(Into::into),
+                Ok,
+            )
             .and_then(|module| {
                 emit::PreparedBody::from_parsed(
                     name,
@@ -69,26 +98,17 @@ pub(crate) fn write(directory: &Path) -> Result<(), String> {
         let Some((file, source)) = bundled_module_source(&name, true) else {
             continue;
         };
-        write_module(&name, file, &source).map_err(|err| err.to_string())?;
-        let path = Path::new(file);
-        if let Ok(imports) = imports_for_module(path, &source) {
-            let package = crate::modules::import_package(&name, path.ends_with("__init__.py"));
-            for (level, imported) in imports.names {
-                if let Some(resolved) = crate::modules::resolve_import(package, level, &imported) {
-                    enqueue(&mut pending, resolved);
-                }
-            }
-        }
+        write_module(&name, file, &source, Some(&mut pending)).map_err(|err| err.to_string())?;
     }
     for (name, file, source) in super::builtin_sources(std::env::consts::OS) {
-        write_module(name, file, source).map_err(|err| err.to_string())?;
+        write_module(name, file, source, None).map_err(|err| err.to_string())?;
     }
     for (name, file, source) in defaults {
         if bundled_module_source(name, true)
             .as_ref()
             .is_none_or(|(path, text)| *path != file || text.as_ref() != source)
         {
-            write_module(name, file, source).map_err(|err| err.to_string())?;
+            write_module(name, file, source, None).map_err(|err| err.to_string())?;
         }
     }
     Ok(())
