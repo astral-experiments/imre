@@ -1580,7 +1580,12 @@ fn lower_graph(
         )?;
         Ok(())
     };
-    validate_calls(functions).inspect_err(|_| finish_named(&mut completed))?;
+    validate_calls(functions).inspect_err(|_| {
+        // A failed layout trial goes through ordinary lowering before registration.
+        if graph.layout_hint.get() != crate::modules::LayoutHint::Applied {
+            finish_named(&mut completed);
+        }
+    })?;
     let functions = &mut completed.functions;
     python_frames.push(true); // The program entry runs a Python module body.
     let source_functions = python_frames.iter().filter(|&&frame| frame).count();
