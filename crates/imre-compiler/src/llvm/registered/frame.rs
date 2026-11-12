@@ -1745,12 +1745,6 @@ pub(crate) trait FrameEmitter<'a, 'p>:
                 (callee, bound, attribute.end())
             }),
         };
-        let fixed_arguments = |frame: &mut Self, mut values: Vec<String>| {
-            if let Some(child) = &exec {
-                frame.link_exec_operand(&callable, &mut values[0], child);
-            }
-            frame.handle_array(&values)
-        };
         let operands = match &call.arguments {
             RegisteredArguments::Positional => {
                 let receiver_slot = receiver.is_some();
@@ -1758,7 +1752,7 @@ pub(crate) trait FrameEmitter<'a, 'p>:
                     .into_iter()
                     .chain(args.map(|a| evaluate(self, a)))
                     .collect();
-                let (array, count) = fixed_arguments(self, values);
+                let (array, count) = self.fixed_call_arguments(&callable, values, exec);
                 if let Some((index, range)) = call.partition_field {
                     let span = self.expression_range_span(range, call.range.end(), b'[');
                     let get_position =
@@ -1779,7 +1773,7 @@ pub(crate) trait FrameEmitter<'a, 'p>:
             }
             RegisteredArguments::Keywords { positional, names } => {
                 let values: Vec<_> = args.map(|a| evaluate(self, a)).collect();
-                let (array, _) = fixed_arguments(self, values);
+                let (array, _) = self.fixed_call_arguments(&callable, values, exec);
                 CallArguments::FixedKeywords {
                     array,
                     positional: *positional,
@@ -2043,20 +2037,25 @@ impl RegisteredFrame<'_, '_> {
 }
 
 impl RegisteredFrame<'_, '_> {
-    pub(crate) fn link_exec_operand(
+    /// Write evaluated arguments to the call frame, linking a literal exec source when present.
+    pub(crate) fn fixed_call_arguments(
         &mut self,
         callable: &str,
-        source: &mut String,
-        child: &super::sites::CompiledExec,
-    ) {
-        self.output.declare(
-            |d| &mut d.exec_operand,
-            "declare i64 @imre_dyn_exec_operand(ptr, i64, i64, ptr, i32, ptr)\n",
-        );
-        *source = self.checked(&format!(
-            "call i64 @imre_dyn_exec_operand(ptr %ctx, i64 {callable}, i64 {source}, ptr {}, i32 {}, ptr {})",
-            child.entry, child.flags, child.source
-        ));
+        mut values: Vec<String>,
+        exec: Option<super::sites::CompiledExec>,
+    ) -> (&'static str, usize) {
+        if let Some(child) = exec {
+            self.output.declare(
+                |d| &mut d.exec_operand,
+                "declare i64 @imre_dyn_exec_operand(ptr, i64, i64, ptr, i32, ptr)\n",
+            );
+            let source = &mut values[0];
+            *source = self.checked(&format!(
+                "call i64 @imre_dyn_exec_operand(ptr %ctx, i64 {callable}, i64 {source}, ptr {}, i32 {}, ptr {})",
+                child.entry, child.flags, child.source
+            ));
+        }
+        self.handle_array(&values)
     }
 
     pub(crate) fn invoke(&mut self, callable: &str, values: &[&str]) -> String {
