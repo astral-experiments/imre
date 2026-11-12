@@ -135,14 +135,17 @@ pub(crate) fn validate(
     path: &Path,
     source: &str,
     parsed: &Parsed<ast::ModModule>,
+    scope_checked: bool,
     keep_docstrings: bool,
 ) -> Result<HashMap<TextRange, Vec<u32>>, String> {
     if let Some((range, reason)) = imre_ast::comprehension::dict_unpacking_error(parsed) {
         let error = super::diagnostic_message(source, &range, &format!("SyntaxError: {reason}"));
         return Err(format!("{}:{error}", path.display()));
     }
-    crate::analysis::check_scope_syntax(source, parsed.syntax())
-        .map_err(|error| format!("{}:{error}", path.display()))?;
+    if !scope_checked {
+        crate::analysis::check_scope_syntax(source, parsed.syntax())
+            .map_err(|error| format!("{}:{error}", path.display()))?;
+    }
     if let Some(keyword) = imre_ast::repeated_keyword(parsed.syntax().into()) {
         let name = keyword.arg.as_ref().expect("repeated named argument");
         let reason = format!("SyntaxError: keyword argument repeated: {name}");

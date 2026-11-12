@@ -721,7 +721,7 @@ fn scan_imports(
         }
     };
     if let Some((path, keep_docstrings)) = file_alternative {
-        module_source::validate(path, &module.text, &module.parsed, keep_docstrings)?;
+        module_source::validate(path, &module.text, &module.parsed, false, keep_docstrings)?;
     }
     imports_from_body(
         &module.text,

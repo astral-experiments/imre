@@ -162,13 +162,10 @@ pub(super) fn units<'a>(
                     Some(parsed) => ParsedModule { text, parsed },
                     None => ParsedModule::parse(path, text)?,
                 };
-                let registered_values = match origin {
-                    ModuleOrigin::Program(_) => {
-                        checked.and_then(|unit| unit.source).and_then(|file| {
-                            file.module(registrations.modules)
-                                .registered_values_for(&module.parsed)
-                        })
-                    }
+                let checked_source = match origin {
+                    ModuleOrigin::Program(_) => checked
+                        .and_then(|unit| unit.source)
+                        .map(|file| file.module(registrations.modules)),
                     _ => None,
                 };
                 let mut body = PreparedBody::from_parsed(
@@ -180,7 +177,7 @@ pub(super) fn units<'a>(
                     checked
                         .map(|unit| unit.literal_sites.clone())
                         .unwrap_or_default(),
-                    (types, registered_values),
+                    (types, checked_source),
                 )?;
                 if let Some(module) = checked.and_then(|unit| unit.prompt_module) {
                     body.prompts = &registrations.modules[module].doctest_prompts;
