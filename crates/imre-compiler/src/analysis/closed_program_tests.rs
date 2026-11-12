@@ -1151,7 +1151,7 @@ fn the_ordinary_entry_keeps_an_operand_in_the_default_flow_region() {
         panic!("expected the normal checker operand diagnostic")
     };
     let site = report.entry_operand().unwrap();
-    assert_eq!(site.body, site.module);
+    assert_eq!(site.checked_callee, None);
     assert!(
         graph
             .session

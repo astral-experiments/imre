@@ -262,26 +262,29 @@ pub(crate) fn check_registered_project<'a>(
         .filter(|(path, _)| path.extension().is_some_and(|ext| ext == "pyi"));
     let entry_operand = checked.zip(refusal).and_then(|(graph, report)| {
         let site = report.entry_operand()?;
-        if site.body != site.module {
-            let callee = &graph.modules[site.body];
-            if !sources.clone().any(|winner| {
-                winner.declares_signatures
-                    && winner.name == callee.name
-                    && winner.source == callee.original_source()
-                    && winner
-                        .checked_module
-                        .map_or(winner.path == callee.path, |id| id == site.body)
-            }) {
-                return None;
-            }
+        if site.module != graph.entry {
+            return None;
         }
-        (site.module == graph.entry
-            && graph.session.unconditional_module_operand(
+        let reached = match site.checked_callee {
+            Some(body) if body != site.module => {
+                let callee = &graph.modules[body];
+                sources.clone().any(|winner| {
+                    winner.declares_signatures
+                        && winner.name == callee.name
+                        && winner.source == callee.original_source()
+                        && winner
+                            .checked_module
+                            .map_or(winner.path == callee.path, |id| id == body)
+                })
+            }
+            Some(_) => true,
+            None => graph.session.unconditional_module_operand(
                 site.module,
                 site.statement,
                 site.operand,
-            ))
-        .then(|| {
+            ),
+        };
+        reached.then(|| {
             (
                 site.module,
                 graph.modules[site.module].original_source(),
