@@ -152,6 +152,27 @@ pub(super) fn enter_native(
     )
 }
 
+pub(super) fn python_binding<B: unpacking::PatternBinder>(
+    binder: &mut B,
+    target: &ast::Expr,
+) -> StdResult<ir::ContextBinding, B::Error> {
+    let entered = binder.pattern_hidden(Type::PythonObject);
+    let mut value = binder.pattern_local(entered);
+    // Release the entered container after unpacking, before any individual target can suspend.
+    if pattern_elements(target).is_some() {
+        value = unpacking::take_pattern_temporary(value, entered);
+    }
+    let mut body = Vec::with_capacity(1);
+    unpacking::bind_input(binder, target, value, None, &mut body)?;
+    Ok(ir::ContextBinding {
+        entered,
+        body: vec![Statement::Scope {
+            body,
+            clear: vec![entered],
+        }],
+    })
+}
+
 pub(super) fn python_with(
     managers: impl IntoIterator<Item = (ir::ContextSite, Expr, Option<ir::ContextBinding>)>,
     body: Vec<Statement>,
@@ -176,6 +197,29 @@ pub(super) fn python_with(
 }
 
 impl Checker<'_> {
+    pub(super) fn checked_python_with(
+        &mut self,
+        stmt: &ast::StmtWith,
+    ) -> Result<(Vec<Statement>, bool), String> {
+        let mut managers = Vec::with_capacity(stmt.items.len());
+        for item in &stmt.items {
+            let manager = self.expr(&item.context_expr)?;
+            if manager.ty != Type::PythonObject {
+                self.require_registered_operation(&item.context_expr)?;
+            }
+            let binding = item
+                .optional_vars
+                .as_deref()
+                .map(|target| python_binding(self, target))
+                .transpose()?;
+            let site = registered::context_site(self.source, &item.context_expr, false);
+            managers.push((site, manager, binding));
+        }
+        let (body, _) = self.block(&stmt.body)?;
+        // A manager can suppress an exception from its protected suite.
+        Ok((python_with(managers, body), true))
+    }
+
     pub(super) fn enter_generator_context<'s>(
         &mut self,
         out: &'s mut Vec<Statement>,
