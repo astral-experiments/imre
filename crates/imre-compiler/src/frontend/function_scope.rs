@@ -392,8 +392,7 @@ impl ScopeFacts {
         body: &'a [ast::Stmt],
         names: &imre_ast::Names,
         alias_site: impl FnMut(&'a ast::StmtTypeAlias, Option<TextSize>),
-        generator_site: impl FnMut(TextRange, &Plan<'a>, bool, FunctionScope),
-        expressions: &mut LexicalSites<'a>,
+        expression: impl FnMut(LexicalSite<'a, '_>),
     ) -> Self {
         let mut scopes = Self::default();
         Collector {
@@ -401,17 +400,19 @@ impl ScopeFacts {
             names,
             scope: Scope::Module,
             suite_scope: None,
-            expressions,
             alias_site,
-            generator_site,
+            expression,
         }
         .visit_body(body);
         scopes
     }
 }
 
-/// Lambda and template operands in dependency order, with their evaluation scopes.
-pub(crate) type LexicalSites<'a> = Vec<(&'a ast::Expr, super::RegisteredScope)>;
+/// A lexical operand is ready after the scopes of its children have closed.
+pub(crate) enum LexicalSite<'a, 's> {
+    Operand(&'a ast::Expr, super::RegisteredScope),
+    Generator(TextRange, &'s Plan<'a>, bool, &'s FunctionScope),
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Scope {
@@ -432,20 +433,19 @@ impl Scope {
     }
 }
 
-struct Collector<'s, 'a, A, G> {
+struct Collector<'s, A, G> {
     scopes: &'s mut ScopeFacts,
     names: &'s imre_ast::Names,
     scope: Scope,
     suite_scope: Option<Scope>,
-    expressions: &'s mut LexicalSites<'a>,
     alias_site: A,
-    generator_site: G,
+    expression: G,
 }
 
-impl<'a, A, G> Visitor<'a> for Collector<'_, 'a, A, G>
+impl<'a, A, G> Visitor<'a> for Collector<'_, A, G>
 where
     A: FnMut(&'a ast::StmtTypeAlias, Option<TextSize>),
-    G: FnMut(TextRange, &Plan<'a>, bool, FunctionScope),
+    G: FnMut(LexicalSite<'a, '_>),
 {
     fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
         let strings = self.names.string_annotations;
@@ -571,7 +571,7 @@ where
                 let parent = std::mem::replace(&mut self.scope, Scope::Lambda);
                 self.visit_expr(&lambda.body);
                 self.scope = parent;
-                self.expressions.push((expr, parent.registered()));
+                (self.expression)(LexicalSite::Operand(expr, parent.registered()));
             }
             ast::Expr::Generator(generator) => {
                 let plan = Plan::generator(generator);
@@ -583,11 +583,16 @@ where
                         self.visit_expr(child)
                     });
                 self.scope = parent;
-                (self.generator_site)(expr.range(), &plan, is_async, scope);
+                (self.expression)(LexicalSite::Generator(
+                    expr.range(),
+                    &plan,
+                    is_async,
+                    &scope,
+                ));
             }
             ast::Expr::TString(_) => {
                 visitor::walk_expr(self, expr);
-                self.expressions.push((expr, self.scope.registered()));
+                (self.expression)(LexicalSite::Operand(expr, self.scope.registered()));
             }
             _ => visitor::walk_expr(self, expr),
         });

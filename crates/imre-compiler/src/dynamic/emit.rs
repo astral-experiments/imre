@@ -525,26 +525,20 @@ impl<'a> PreparedBody<'a> {
             lambdas: None,
         };
         let mut aliases = Vec::new();
-        let mut logicals = crate::frontend::ExpressionSites::default();
-        let mut lexical = Vec::new();
-        let (mut scopes, generators) = RegisteredGenerator::collect_scopes(
+        let mut lexical = crate::frontend::LexicalOperands::default();
+        let mut scopes = crate::frontend::function_scope::ScopeFacts::prepare(
             &body,
             &private_names,
-            values,
             |alias, class| aliases.push((alias, class)),
-            &mut lexical,
+            |site| lexical.prepare(site, values, private_names.string_annotations),
         );
+        let crate::frontend::LexicalOperands {
+            generators,
+            lambdas,
+            expressions,
+        } = lexical;
         let values = crate::frontend::RegisteredSource {
             generators: Some(&generators),
-            ..values
-        };
-        let lambdas = RegisteredLambda::prepare_sites(
-            lexical,
-            values,
-            private_names.string_annotations,
-            &mut logicals,
-        );
-        let values = crate::frontend::RegisteredSource {
             lambdas: Some(&lambdas),
             ..values
         };
@@ -587,7 +581,7 @@ impl<'a> PreparedBody<'a> {
         let mut prepare =
             crate::frontend::SuitePreparation::new(&operations, values, python_optimization == 0);
         prepare.literal_refusals = exec_literals.has_refusals().then_some(&exec_literals);
-        prepare.sites.expressions = logicals;
+        prepare.sites.expressions = expressions;
         // Preparing inner declarations first lets their binding sites consume
         // the selected body's decision in the enclosing suite.
         use crate::frontend::DeclarationSite;
@@ -2039,13 +2033,25 @@ mod tests {
             lambdas: Some(&missing),
             ..prepared.source.registered_source()
         };
-        let (_, generators) = RegisteredGenerator::collect_scopes(
+        let mut lexical = crate::frontend::LexicalOperands::default();
+        crate::frontend::function_scope::ScopeFacts::prepare(
             body,
             &prepared.source.private_names,
-            source,
             |_, _| {},
-            &mut Vec::new(),
+            |site| {
+                if matches!(
+                    site,
+                    crate::frontend::function_scope::LexicalSite::Generator(..)
+                ) {
+                    lexical.prepare(
+                        site,
+                        source,
+                        prepared.source.private_names.string_annotations,
+                    );
+                }
+            },
         );
+        let generators = lexical.generators;
         let source = RegisteredSource {
             generators: Some(&generators),
             ..source

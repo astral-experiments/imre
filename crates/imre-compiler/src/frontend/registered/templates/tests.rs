@@ -182,19 +182,16 @@ fn template_default_and_body_suspend_in_their_defining_frames() {
             generators: None,
             method_imports: &Default::default(),
         };
-        let mut templates = ExpressionSites::default();
         let mut body = parsed.into_syntax().body;
         let names = imre_ast::lower(&mut body);
-        let mut lexical = Vec::new();
+        let mut sites = LexicalOperands::default();
         crate::frontend::function_scope::ScopeFacts::prepare(
             &body,
             &names,
             |_, _| {},
-            |_, _, _, _| {},
-            &mut lexical,
+            |site| sites.prepare(site, source, names.string_annotations),
         );
-        RegisteredLambda::prepare_sites(lexical, source, names.string_annotations, &mut templates);
-        templates
+        sites.expressions
     };
     let mut sites: Vec<_> = templates.templates().collect();
     sites.sort_by_key(|(range, _)| range.start());
@@ -276,27 +273,23 @@ fn unavailable_template_child_is_reported_at_its_own_range() {
         .as_tuple_expr()
         .unwrap();
     for complete in [false, true] {
-        let mut lexical = Vec::new();
-        let (_, mut generators) = RegisteredGenerator::collect_scopes(
+        let mut sites = LexicalOperands::default();
+        crate::frontend::function_scope::ScopeFacts::prepare(
             &module.body,
             &Default::default(),
-            source,
             |_, _| {},
-            &mut lexical,
-        );
-        if !complete {
-            generators.clear();
-        }
-        let mut sites = ExpressionSites::default();
-        RegisteredLambda::prepare_sites(
-            lexical,
-            RegisteredSource {
-                generators: Some(&generators),
-                ..source
+            |site| {
+                if complete
+                    || !matches!(
+                        site,
+                        crate::frontend::function_scope::LexicalSite::Generator(..)
+                    )
+                {
+                    sites.prepare(site, source, false);
+                }
             },
-            false,
-            &mut sites,
         );
+        let sites = sites.expressions;
         for template in &templates.elts {
             let (_, result) = sites
                 .templates()

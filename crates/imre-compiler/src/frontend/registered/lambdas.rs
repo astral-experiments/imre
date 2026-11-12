@@ -1,7 +1,7 @@
 //! Prepare the binding expression in the enclosing scope and the return in its own frame.
 
 use super::*;
-use crate::frontend::function_scope::{CallableMetadata, FunctionScope, LexicalSites};
+use crate::frontend::function_scope::{CallableMetadata, FunctionScope};
 use imre_ast::code_flags;
 
 pub(crate) struct RegisteredLambda {
@@ -11,33 +11,6 @@ pub(crate) struct RegisteredLambda {
 }
 
 impl RegisteredLambda {
-    /// Prepare the collected children after their generator dependencies are available.
-    pub(crate) fn prepare_sites(
-        sites: LexicalSites<'_>,
-        source: values::RegisteredSource<'_>,
-        string_annotations: bool,
-        expressions: &mut ExpressionSites,
-    ) -> HashMap<TextSize, Self> {
-        let mut lambdas = HashMap::new();
-        for (expr, owner) in sites {
-            let source = values::RegisteredSource {
-                lambdas: Some(&lambdas),
-                ..source
-            };
-            match expr {
-                ast::Expr::Lambda(lambda) => {
-                    let scope = FunctionScope::lambda(lambda, string_annotations);
-                    let plan = Self::prepare(lambda, source, &scope, owner);
-                    expressions.register_lexical(expr, std::rc::Rc::clone(&plan.binding));
-                    lambdas.insert(lambda.start(), plan);
-                }
-                ast::Expr::TString(_) => expressions.prepare_template(expr, source, owner),
-                _ => unreachable!("only lambdas and templates have lexical operand sites"),
-            }
-        }
-        lambdas
-    }
-
     pub(super) fn body(
         lambda: &ast::ExprLambda,
         source: values::RegisteredSource<'_>,
@@ -52,7 +25,7 @@ impl RegisteredLambda {
         Some(function)
     }
 
-    fn prepare(
+    pub(super) fn prepare(
         lambda: &ast::ExprLambda,
         source: values::RegisteredSource<'_>,
         scope: &FunctionScope,
@@ -117,19 +90,18 @@ async def factory(seed, rows, mark):
             lambdas: None,
             private_names: Some(&names),
         };
-        let mut lexical = Vec::new();
-        let (_, generators) =
-            RegisteredGenerator::collect_scopes(&body, &names, source, |_, _| {}, &mut lexical);
+        let mut lexical = LexicalOperands::default();
+        crate::frontend::function_scope::ScopeFacts::prepare(
+            &body,
+            &names,
+            |_, _| {},
+            |site| lexical.prepare(site, source, names.string_annotations),
+        );
         let source = values::RegisteredSource {
-            generators: Some(&generators),
+            generators: Some(&lexical.generators),
             ..source
         };
-        let mut sites = RegisteredLambda::prepare_sites(
-            lexical,
-            source,
-            names.string_annotations,
-            &mut ExpressionSites::default(),
-        );
+        let mut sites = lexical.lambdas;
         let factory = body[0].as_function_def_stmt().unwrap();
         let lambda = |index: usize| {
             factory.body[index]
@@ -199,7 +171,7 @@ async def factory(seed, rows, mark):
                 }
             });
             assert_eq!(children, [site]);
-            assert_eq!(generators[&site].is_async(), is_async);
+            assert_eq!(lexical.generators[&site].is_async(), is_async);
         }
         // A missing child is diagnosed at its original site before LLVM.
         assert!(sites.get_mut(&thunk.start()).unwrap().body.take().is_some());

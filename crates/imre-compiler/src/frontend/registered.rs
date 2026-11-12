@@ -5,7 +5,7 @@ use super::*;
 pub(super) mod booleans;
 mod eager;
 mod generators;
-pub(crate) use generators::RegisteredGenerator;
+pub(crate) use generators::{LexicalOperands, RegisteredGenerator};
 mod lambdas;
 pub(crate) use lambdas::RegisteredLambda;
 pub(super) mod patterns;
