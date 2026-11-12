@@ -1381,36 +1381,6 @@ impl Checker<'_> {
         Ok(Iteration::Prepared(input))
     }
 
-    pub(super) fn prepare_object_iteration(
-        &mut self,
-        iterable: Expr,
-        node: &impl Ranged,
-    ) -> Result<Prepared, String> {
-        self.require_registered_operation(node)?;
-        let value = self.hidden(Type::PythonObject);
-        let ready = self.hidden(Type::Bool);
-        Ok(Prepared {
-            evaluate: vec![Statement::Expr(iterable)],
-            acquire: Vec::new(),
-            next: vec![
-                Statement::Assign(
-                    ready,
-                    Expr {
-                        ty: Type::Bool,
-                        ..Expr::unrepresented()
-                    },
-                ),
-                Statement::Assign(value, Expr::unrepresented()),
-            ],
-            value,
-            ready,
-            elementless: false,
-            eager_list: None,
-            writes: HashSet::new(),
-            clear: vec![value, ready],
-        })
-    }
-
     pub(super) fn prepare_cursor(&mut self, cursor: Expr, element: Type) -> Prepared {
         Prepared::cursor(cursor, element, |ty| self.hidden(ty))
     }

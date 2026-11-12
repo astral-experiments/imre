@@ -5017,9 +5017,14 @@ impl<'a> Checker<'a> {
     ) -> Result<Iteration, String> {
         if iterable.ty == Type::PythonObject && self.graph.modules[self.module].is_program_source()
         {
-            return Ok(Iteration::Prepared(
-                self.prepare_object_iteration(iterable, node)?,
-            ));
+            self.require_registered_operation(node)?;
+            return Ok(Iteration::Prepared(registered::cursor_input(
+                iterable,
+                Type::PythonObject,
+                node.range(),
+                None,
+                |ty| self.hidden(ty),
+            )));
         }
         if let Some(prepared) = self.record_iteration(&iterable, node)? {
             return Ok(Iteration::Prepared(prepared));
