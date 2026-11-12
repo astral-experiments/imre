@@ -20,6 +20,7 @@ from textwrap import dedent
 from fixture_entry import imported_fixture
 
 ACCEPTED = {
+    "typing_member": "from typing import Any\nvalue: Any = 1",
     "whole_regular_file": """
         with open("large.bin", "wb") as output:
             output.write(b"a" * 262144)
@@ -742,7 +743,6 @@ REJECTED = {
     "unknown_sys_member": "import sys\nprint(sys.missing_path_member)",
     "io_unknown_member": "from io import TextCapture\nTextCapture()",
     "string_io_binary_input": "from io import StringIO\nStringIO(b'input')",
-    "typing_member": "from typing import Any\nvalue: Any = 1",
     "module_rebind": 'import sys\nsys.argv = ["replacement"]',
     "alias_rebind": 'from sys import argv\nargv = ["replacement"]',
     "parameter_shadow": "import sys\ndef f(sys: int) -> int:\n    return sys",
