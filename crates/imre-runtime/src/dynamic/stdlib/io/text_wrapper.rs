@@ -74,6 +74,7 @@ struct Coder {
 
 /// The heap traces the buffer until detach returns it. No borrow spans a Python stream call.
 pub(in crate::dynamic) struct Wrapper {
+    initialized: Cell<bool>,
     pub(super) buffer: Cell<Option<Id>>,
     encoding: Cell<Id>,
     errors: Cell<Id>,
@@ -86,9 +87,9 @@ pub(in crate::dynamic) struct Wrapper {
     chunk_size: Cell<usize>,
     readable: Cell<bool>,
     writable: Cell<bool>,
-    seekable: bool,
+    seekable: Cell<bool>,
     telling: Cell<bool>,
-    read1: bool,
+    read1: Cell<bool>,
     // CPython's fast encoders track the stream start on the wrapper. UTF-8-SIG
     // tracks its first write on each new incremental encoder, even across reentry.
     write_start: Cell<bool>,
@@ -198,29 +199,6 @@ fn validate_newline(value: &str) -> Result<&'static str> {
     }
 }
 
-pub(in crate::dynamic::stdlib) fn text_options(
-    ctx: &mut Context,
-    encoding: Id,
-    errors: Id,
-    newline: Id,
-) -> Result<(String, Option<&'static str>, StreamCodec)> {
-    // Argument Clinic converts encoding and newline before __init__ checks errors.
-    for (id, name) in [
-        (encoding, "encoding"),
-        (newline, "newline"),
-        (errors, "errors"),
-    ] {
-        if id != NONE {
-            super::file_io::check_string_arg(ctx, id, "TextIOWrapper", name, "str or None")?;
-        }
-    }
-    let string = |id| (id != NONE).then(|| ctx.str_value(id)).transpose();
-    let encoding = crate::sys::file_encoding(string(encoding)?).into_owned();
-    let newline = string(newline)?.map(validate_newline).transpose()?;
-    let codec = StreamCodec::for_stream(&encoding)?;
-    Ok((encoding, newline, codec))
-}
-
 fn initialize(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     const KEYS: [&str; 6] = [
         "buffer",
@@ -273,23 +251,36 @@ fn initialize(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, I
         line_buffering,
         write_through,
     ] = options;
-    let (encoding, newline, codec) = text_options(ctx, encoding, errors, newline)?;
+    // Argument Clinic converts these strings and flags before __init__ begins.
+    for (value, name) in [(encoding, "encoding"), (newline, "newline")] {
+        if value != NONE {
+            super::file_io::check_string_arg(ctx, value, "TextIOWrapper", name, "str or None")?;
+        }
+    }
     let line_buffering = ctx.truth(line_buffering)?;
     let write_through = ctx.truth(write_through)?;
-    let readable = flag(ctx, buffer, "readable")?;
-    let writable = flag(ctx, buffer, "writable")?;
-    let seekable = flag(ctx, buffer, "seekable")?;
-    let read1 = match ctx.lookup_attr(buffer, "read1") {
-        Ok(_) => true,
-        Err(e) if e.kind == "AttributeError" => false,
-        Err(e) => return Err(e),
-    };
-    let write_start = if writable && seekable {
-        let position = invoke(ctx, buffer, "tell", vec![])?;
-        !ctx.truth(position)?
-    } else {
-        true
-    };
+
+    let old = Wrapper::stored(ctx, receiver).cloned();
+    if let Some(old) = &old {
+        old.initialized.set(false);
+    }
+    if errors != NONE {
+        super::file_io::check_string_arg(ctx, errors, "TextIOWrapper", "errors", "str or None")?;
+    }
+    let newline = (newline != NONE)
+        .then(|| validate_newline(ctx.str_value(newline)?))
+        .transpose()?;
+
+    // Argument errors above leave the old members in place. A new codec lookup
+    // discards them even when the encoding is unknown.
+    if let Some(old) = old {
+        old.clear(ctx);
+    }
+    let name = (encoding != NONE)
+        .then(|| ctx.str_value(encoding))
+        .transpose()?;
+    let encoding = crate::sys::file_encoding(name).into_owned();
+    let codec = StreamCodec::for_stream(&encoding)?;
     let errors = if errors == NONE {
         ctx.text("strict")
     } else {
@@ -300,6 +291,7 @@ fn initialize(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, I
         errors: ctx.scalar_value(errors),
     };
     let state = Wrapper {
+        initialized: Cell::new(false),
         buffer: Cell::new(Some(buffer)),
         decoder: Cell::new(coder),
         encoder: Cell::new(coder),
@@ -310,25 +302,52 @@ fn initialize(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, I
         line_buffering: Cell::new(line_buffering),
         write_through: Cell::new(write_through),
         chunk_size: Cell::new(CHUNK),
-        readable: Cell::new(readable),
-        writable: Cell::new(writable),
-        seekable,
-        telling: Cell::new(seekable),
-        read1,
-        write_start: Cell::new(write_start),
-        utf8_signature_pending: Cell::new(write_start),
+        readable: Cell::new(false),
+        writable: Cell::new(false),
+        seekable: Cell::new(false),
+        telling: Cell::new(false),
+        read1: Cell::new(false),
+        write_start: Cell::new(true),
+        utf8_signature_pending: Cell::new(true),
         output: RefCell::default(),
         input: RefCell::default(),
     };
     let Value::Instance { memory_stream, .. } = ctx.heap.get_mut(receiver) else {
         return Err(Error::new("TypeError", "expected a TextIOWrapper instance"));
     };
-    if let Some(MemoryStream::Wrapper(old)) =
-        memory_stream.replace(MemoryStream::Wrapper(Rc::new(state)))
-        && let Some(buffer) = old.buffer.get()
-    {
-        ctx.heap.weak_edge_removed(buffer);
+    *memory_stream = Some(MemoryStream::Wrapper(Rc::new(state)));
+    // A capability callback may reinitialize this receiver. Its current members
+    // own the subsequent writes, including when an outer callback raises.
+    if flag(ctx, buffer, "readable")? {
+        let state = Wrapper::current(ctx, receiver)?;
+        state.readable.set(true);
+        state.decoder.set(coder);
     }
+    if flag(ctx, Wrapper::current(ctx, receiver)?.binary()?, "writable")? {
+        let state = Wrapper::current(ctx, receiver)?;
+        state.writable.set(true);
+        state.encoder.set(coder);
+    }
+    let seekable = flag(ctx, buffer, "seekable")?;
+    let state = Wrapper::current(ctx, receiver)?;
+    state.seekable.set(seekable);
+    state.telling.set(seekable);
+    let read1 = match ctx.lookup_attr(buffer, "read1") {
+        Ok(_) => true,
+        Err(e) if e.kind == "AttributeError" => false,
+        Err(e) => return Err(e),
+    };
+    let state = Wrapper::current(ctx, receiver)?;
+    state.read1.set(read1);
+    if state.writable.get() && state.seekable.get() {
+        let buffer = state.binary()?;
+        let position = invoke(ctx, buffer, "tell", vec![])?;
+        let write_start = !ctx.truth(position)?;
+        let state = Wrapper::current(ctx, receiver)?;
+        state.write_start.set(write_start);
+        state.utf8_signature_pending.set(write_start);
+    }
+    Wrapper::current(ctx, receiver)?.initialized.set(true);
     Ok(NONE)
 }
 
@@ -425,19 +444,48 @@ pub(super) fn repr(ctx: &mut Context, receiver: Id) -> Result<Id> {
 }
 
 impl Wrapper {
-    /// Get the current stream state after a Python callback may have reinitialized it.
+    fn stored(ctx: &Context, receiver: Id) -> Option<&Rc<Self>> {
+        match ctx.heap.get(receiver) {
+            Value::Instance {
+                memory_stream: Some(MemoryStream::Wrapper(w)),
+                ..
+            } => Some(w),
+            _ => None,
+        }
+    }
+
+    fn uninitialized() -> Error {
+        Error::new("ValueError", "I/O operation on uninitialized object")
+    }
+
+    fn current(ctx: &Context, receiver: Id) -> Result<&Rc<Self>> {
+        Self::stored(ctx, receiver).ok_or_else(Self::uninitialized)
+    }
+
     fn from_receiver(ctx: &Context, receiver: Id) -> Result<Rc<Self>> {
-        let Value::Instance {
-            memory_stream: Some(MemoryStream::Wrapper(w)),
-            ..
-        } = ctx.heap.get(receiver)
-        else {
-            return Err(Error::new(
-                "ValueError",
-                "I/O operation on uninitialized object",
-            ));
-        };
-        Ok(w.clone())
+        Self::stored(ctx, receiver)
+            .filter(|w| w.initialized.get())
+            .cloned()
+            .ok_or_else(Self::uninitialized)
+    }
+
+    fn clear(&self, ctx: &mut Context) {
+        if let Some(buffer) = self.buffer.take() {
+            ctx.heap.weak_edge_removed(buffer);
+        }
+        for id in [self.encoding.replace(NONE), self.errors.replace(NONE)] {
+            ctx.heap.weak_edge_removed(id);
+        }
+        for coder in [&self.encoder, &self.decoder] {
+            let old = coder.get();
+            coder.set(Coder {
+                errors: NONE,
+                ..old
+            });
+            ctx.heap.weak_edge_removed(old.errors);
+        }
+        self.output.take();
+        self.input.take();
     }
 
     /// Resolve the current buffer before calling a method that can reenter the wrapper.
@@ -551,7 +599,7 @@ impl Wrapper {
                 signature: bom,
             } => {
                 let errors = ctx.str_value(encoder.errors)?.to_owned();
-                let signature = bom && self.seekable && self.write_start.get();
+                let signature = bom && self.seekable.get() && self.write_start.get();
                 let order = if signature { 0 } else { format.byte_order() };
                 codecs::encode_fixed(ctx, translated, format, &errors, order)
             }
@@ -634,7 +682,7 @@ impl Wrapper {
                     size = w.input.borrow().read_size(size, limit);
                 }
                 (
-                    if w.read1 { "read1" } else { "read" },
+                    if w.read1.get() { "read1" } else { "read" },
                     vec![ctx.int(size as i64)],
                 )
             };
@@ -830,7 +878,7 @@ pub(super) fn next(
     }
     let w = Wrapper::from_receiver(ctx, receiver)?;
     w.input.borrow_mut().clear_snapshot();
-    w.telling.set(w.seekable);
+    w.telling.set(w.seekable.get());
     Err(Error::new("StopIteration", ""))
 }
 
@@ -874,6 +922,18 @@ pub(super) fn call(
     if name == "reconfigure" {
         return reconfigure::call(ctx, receiver, args, kwargs);
     }
+    // These four read-only members are accessible on a freshly allocated or
+    // partially initialized wrapper. The other getters check initialization.
+    if args.is_empty() && kwargs.is_empty() {
+        let raw = || Wrapper::stored(ctx, receiver);
+        match name {
+            "buffer" => return Ok(raw().and_then(|w| w.buffer_id()).unwrap_or(NONE)),
+            "encoding" => return Ok(raw().map_or(NONE, |w| w.encoding.get())),
+            "line_buffering" => return Ok(boolean(raw().is_some_and(|w| w.line_buffering.get()))),
+            "write_through" => return Ok(boolean(raw().is_some_and(|w| w.write_through.get()))),
+            _ => {}
+        }
+    }
     let w = Wrapper::from_receiver(ctx, receiver)?;
     if !kwargs.is_empty() {
         return Err(Error::new(
@@ -906,11 +966,7 @@ pub(super) fn call(
     }
     super::argument_count("TextIOWrapper", name, args.len())?;
     match name {
-        "buffer" => return Ok(w.buffer.get().unwrap_or(NONE)),
-        "encoding" => return Ok(w.encoding.get()),
         "errors" => return Ok(w.errors.get()),
-        "line_buffering" => return Ok(boolean(w.line_buffering.get())),
-        "write_through" => return Ok(boolean(w.write_through.get())),
         "__exit__" => return invoke(ctx, receiver, "close", vec![]),
         _ => {}
     }
@@ -974,7 +1030,7 @@ pub(super) fn call(
     match name {
         "__enter__" => Ok(receiver),
         "flush" => {
-            w.telling.set(w.seekable);
+            w.telling.set(w.seekable.get());
             w.drain(ctx, receiver)?;
             Wrapper::invoke_buffer(ctx, receiver, "flush", vec![])
         }
@@ -996,7 +1052,7 @@ pub(super) fn call(
             Wrapper::read(ctx, receiver, usize::try_from(n).ok(), name == "readline")
         }
         "seek" | "tell" => {
-            if !w.seekable {
+            if !w.seekable.get() {
                 return Err(Error::new(
                     "UnsupportedOperation",
                     "underlying stream is not seekable",

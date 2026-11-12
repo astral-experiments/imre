@@ -22,7 +22,7 @@ fn setting_flag(
     if option != NONE {
         return Ok(ctx.index_c_long(option)? != 0);
     }
-    Ok(Wrapper::from_receiver(ctx, receiver).is_ok_and(|w| get(&w)))
+    Ok(Wrapper::stored(ctx, receiver).is_some_and(|w| get(w)))
 }
 
 fn release_option(ctx: &mut Context, old: Id, new: Id) -> Result<()> {
@@ -94,8 +94,8 @@ pub(super) fn call(
     }
     let change = encoding != NONE || errors != NONE || newline.is_some();
     if change
-        && Wrapper::from_receiver(ctx, receiver)
-            .is_ok_and(|w| w.input.borrow().decoded_chunk_nonempty.is_some())
+        && Wrapper::stored(ctx, receiver)
+            .is_some_and(|w| w.input.borrow().decoded_chunk_nonempty.is_some())
     {
         return Err(Error::new(
             "UnsupportedOperation",
@@ -161,7 +161,7 @@ pub(super) fn call(
         let w = Wrapper::from_receiver(ctx, receiver)?;
         release_option(ctx, w.errors.replace(errors), errors)?;
         let w = Wrapper::from_receiver(ctx, receiver)?;
-        if w.writable.get() && w.seekable {
+        if w.writable.get() && w.seekable.get() {
             w.write_start.set(true);
             let position = Wrapper::invoke_buffer(ctx, receiver, "tell", vec![])?;
             let zero = ctx.int(0);
