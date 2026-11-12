@@ -1625,8 +1625,8 @@ fn snapshot_pair(ctx: &mut Context, value: Id, items: &mut [Id; 2]) -> Result<Id
     }
 }
 
-/// Pull from the current contents of a forward list cursor. Return 1 for an item,
-/// 0 for exhaustion or a pending error, and -1 to leave the pull to Python.
+/// Pull from an acquired range iterator or a forward cursor over a live list.
+/// Return 1 for an item, 0 for exhaustion or error, and -1 for other iterators.
 ///
 /// # Safety
 /// Generated code supplies a live cursor and one writable handle slot.
@@ -1642,28 +1642,41 @@ pub(super) unsafe extern "C" fn imre_dyn_list_cursor_pull(
     if ctx.pending.is_some() {
         return 0;
     }
-    let Value::Iterator {
-        sequence: Some(list),
-        offset,
-        reverse: false,
-        context: None,
-        ..
-    } = *ctx.heap.get(iter)
-    else {
-        return -1;
-    };
-    let Value::List(values) = ctx.heap.get(list) else {
-        return -1;
-    };
-    let value = values.get(offset).copied();
-    let Value::Iterator {
-        sequence, offset, ..
-    } = ctx.heap.get_mut(iter)
-    else {
-        unreachable!()
+    let value = match *ctx.heap.get(iter) {
+        Value::RangeIterator(_) => match ctx.next_result(iter) {
+            Ok(value) => value,
+            Err(error) => {
+                finish(ctx, Err(error));
+                return 0;
+            }
+        },
+        Value::Iterator {
+            sequence: Some(list),
+            offset,
+            reverse: false,
+            context: None,
+            ..
+        } => {
+            let Value::List(values) = ctx.heap.get(list) else {
+                return -1;
+            };
+            let value = values.get(offset).copied();
+            let Value::Iterator {
+                sequence, offset, ..
+            } = ctx.heap.get_mut(iter)
+            else {
+                unreachable!()
+            };
+            if value.is_some() {
+                *offset += 1;
+            } else {
+                *sequence = None;
+            }
+            value
+        }
+        _ => return -1,
     };
     if let Some(value) = value {
-        *offset += 1;
         // The loop body can remove this item and collect its former owner.
         let value = finish(ctx, Ok(value));
         if ctx.pending.is_some() {
@@ -1673,7 +1686,6 @@ pub(super) unsafe extern "C" fn imre_dyn_list_cursor_pull(
         unsafe { item.write(value) };
         1
     } else {
-        *sequence = None;
         if has_else {
             ctx.heap.release_unbound_finalizers();
         }
@@ -3848,6 +3860,35 @@ impl Context {
 mod tests {
     use super::*;
     use std::rc::{Rc, Weak};
+
+    #[test]
+    fn compiled_pull_uses_the_current_range_iterator() {
+        use crate::Int;
+
+        let mut ctx = new_context(serde_json::json!({"paths": []}), ["imre"]);
+        for (start, reverse) in [(20_i128, false), (i128::from(i64::MAX) + 1, true)] {
+            let range = range::Range::new(
+                Int::new(start.into()),
+                Int::new((start + 3).into()),
+                Int::from(1),
+            )
+            .unwrap();
+            let iter = ctx.alloc(Value::RangeIterator(range.iter(reverse)));
+            // Advance the same iterator through a different reference before the loop.
+            ctx.next_item(iter).unwrap().unwrap();
+            let mut item = NONE;
+            for expected in [start + 1, if reverse { start } else { start + 2 }] {
+                // SAFETY: the iterator is live and the item slot is writable.
+                let status = unsafe { imre_dyn_list_cursor_pull(&mut ctx, iter, &mut item, false) };
+                assert_eq!(status, 1);
+                assert_eq!(ctx.repr(item), expected.to_string());
+            }
+            // SAFETY: exhaustion uses the same live context and slot.
+            let status = unsafe { imre_dyn_list_cursor_pull(&mut ctx, iter, &mut item, true) };
+            assert_eq!(status, 0);
+            assert!(ctx.pending.is_none());
+        }
+    }
 
     #[test]
     fn native_function_construction_uses_interpreter_builtins_without_mutating_globals() {
