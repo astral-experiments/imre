@@ -6571,6 +6571,12 @@ impl Context {
             else {
                 layout.dictionary =
                     layout.dictionary || self.native_owns_layout_descriptor(owner_id, "__dict__");
+                // These native instances carry their namespace in their own representation.
+                if let Value::Native(kind) = base {
+                    layout.dictionary |=
+                        matches!(kind.as_str(), "module" | "classmethod" | "staticmethod")
+                            || builtins::is_exception(kind);
+                }
                 if matches!(base, Value::Native(kind) if super::slot_member::VARIABLE_SIZE_BASES.contains(&kind.as_str()))
                 {
                     layout.materialize_dictionary_on_write = true;
@@ -6806,20 +6812,17 @@ impl Context {
     }
 
     /// Introduce a getset where a source class first adds an ordinary instance dictionary.
-    pub(super) fn install_instance_dictionary_descriptor(&mut self, class: Id, scope: Id) {
-        let object = self.builtin("object");
-        if self.scope_name(scope, "__dict__").is_some()
-            || self.allocation_base(class) != Some(object)
+    pub(super) fn install_instance_dictionary_descriptor(
+        &mut self,
+        class: Id,
+        scope: Id,
+        layout_base: Id,
+    ) {
+        // A metaclass instance exposes its class namespace through type's mapping proxy.
+        if self.has_base(layout_base, "type")
+            || self.scope_name(scope, "__dict__").is_some()
             || !self.class_instances_have_dict(class)
-        {
-            return;
-        }
-        let Value::Class { ancestors, .. } = self.heap.get(class) else {
-            return;
-        };
-        if ancestors
-            .iter()
-            .any(|&base| self.class_instances_have_dict(base))
+            || self.class_instances_have_dict(layout_base)
         {
             return;
         }
@@ -10230,7 +10233,7 @@ impl Context {
         } else {
             super::typing::ClassLayout::Specialized
         };
-        let class = self.allocate_class_with_slots(
+        let (class, layout_base) = self.allocate_class_with_slots(
             name.clone(),
             scope,
             bases,
@@ -10241,7 +10244,7 @@ impl Context {
             unreachable!()
         };
         *metaclass = class_meta;
-        self.install_instance_dictionary_descriptor(class, scope);
+        self.install_instance_dictionary_descriptor(class, scope, layout_base);
         self.install_weakref_descriptor(class, scope);
         self.heap.replace_cell(cell, Some(class));
         let Value::Scope(class_scope) = self.heap.get_mut(scope) else {

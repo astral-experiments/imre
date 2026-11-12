@@ -102,8 +102,38 @@ except TypeError:
     pass
 else:
     raise AssertionError("dictionary descriptor accepted an unrelated receiver")
+
+def check_dictionary_owner(base):
+    class Owner(base):
+        pass
+
+    class Child(Owner):
+        __slots__ = ()
+
+    value = Child()
+    descriptor = vars(Owner)["__dict__"]
+    assert descriptor.__objclass__ is Owner
+    assert "__dict__" not in vars(Child)
+    assert getattr_static(Child, "__dict__") is getattr_static(value, "__dict__") is descriptor
+    storage = descriptor.__get__(value)
+    storage["marker"] = 12
+    assert storage is vars(value) and value.marker == 12
+
+
+for base in (object, list, tuple, dict, int, str):
+    check_dictionary_owner(base)
+
+
 class Mixin:
     pass
+
+
+class MixedList(Mixin, list):
+    __slots__ = ()
+
+
+assert vars(MixedList)["__dict__"].__objclass__ is MixedList
+assert getattr_static(MixedList(), "__dict__") is vars(MixedList)["__dict__"]
 
 
 class ErrorWithMixin(Mixin, Exception):

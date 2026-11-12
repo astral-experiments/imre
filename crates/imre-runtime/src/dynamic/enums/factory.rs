@@ -103,7 +103,7 @@ impl Context {
     ) -> Result<Id> {
         let class = self.allocate_class(class_name, scope, vec![base])?;
         self.heap.keep(class);
-        self.install_instance_dictionary_descriptor(class, scope);
+        self.install_instance_dictionary_descriptor(class, scope, base);
         self.install_weakref_descriptor(class, scope);
         self.initialize_class_members(class, scope, None)?;
         Ok(class)

@@ -3217,6 +3217,7 @@ impl Context {
     /// Preserve the actual direct bases as well as the immutable C3 tuple exposed by type.
     pub(super) fn allocate_class(&mut self, name: String, scope: Id, bases: Vec<Id>) -> Result<Id> {
         self.allocate_class_with_slots(name, scope, bases, ClassLayout::Specialized, None)
+            .map(|(class, _)| class)
     }
 
     pub(super) fn allocate_class_with_slots(
@@ -3226,7 +3227,7 @@ impl Context {
         mut bases: Vec<Id>,
         layout: ClassLayout,
         namedtuple_namespace: Option<Id>,
-    ) -> Result<Id> {
+    ) -> Result<(Id, Id)> {
         let declared_fields =
             self.namedtuple_layout(&name, &mut bases, scope, namedtuple_namespace)?;
         let bases = self.validate_class_bases(bases, layout)?;
@@ -3243,7 +3244,7 @@ impl Context {
             };
             *namedtuple_fields = Some(fields);
         }
-        Ok(class)
+        Ok((class, layout_base))
     }
 
     pub(super) fn validate_class_bases(

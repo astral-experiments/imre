@@ -246,13 +246,19 @@ impl Context {
         let bases = self
             .class_bases_tuple(old)
             .expect("validated dataclass bases");
-        let class = self.allocate_class(name_text, scope, bases)?;
+        let (class, layout_base) = self.allocate_class_with_slots(
+            name_text,
+            scope,
+            bases,
+            super::typing::ClassLayout::Specialized,
+            None,
+        )?;
         // The initial qualified name is type metadata, outside the __set_name__ member walk.
         let Value::Scope(frame) = self.heap.get_mut(scope) else {
             unreachable!()
         };
         frame.names.insert(crate::Str::new("__qualname__"), name);
-        self.finish_namespace_class(class, scope, cell, None, Vec::new())
+        self.finish_namespace_class(class, scope, layout_base, cell, None, Vec::new())
     }
 
     /// Allocate through type.__new__, validating its explicit receiver and positional arguments.
@@ -505,7 +511,7 @@ impl Context {
             unreachable!()
         };
         *class_meta = metaclass;
-        self.finish_namespace_class(class, scope, cell, dict_cell, kwargs.to_vec())?;
+        self.finish_namespace_class(class, scope, layout_base, cell, dict_cell, kwargs.to_vec())?;
         if abc_new {
             self.init_abstract_class(class, scope)?;
         }
@@ -549,6 +555,7 @@ impl Context {
         &mut self,
         class: Id,
         scope: Id,
+        layout_base: Id,
         cell: Id,
         dict_cell: Option<Id>,
         kwargs: Vec<(String, Id)>,
@@ -567,7 +574,7 @@ impl Context {
             let dict = self.class_namespace_dict(scope, false);
             self.heap.replace_cell(dict_cell, Some(dict));
         }
-        self.install_instance_dictionary_descriptor(class, scope);
+        self.install_instance_dictionary_descriptor(class, scope, layout_base);
         self.install_weakref_descriptor(class, scope);
         self.initialize_class_members(class, scope, None)?;
         let hook = self.super_attribute(class, class, class, "__init_subclass__")?;
@@ -713,10 +720,7 @@ impl Context {
                 _ => None,
             });
         let partial_base = native == Some(super::stdlib::functools::PARTIAL_CLASS);
-        let mut dictionary = self.class_instances_have_dict(base)
-            || partial_base
-            || matches!(native, Some("classmethod" | "staticmethod" | "module"))
-            || native.is_some_and(super::builtins::is_exception);
+        let mut dictionary = self.class_instances_have_dict(base);
         let mut weakref = self.class_instances_support_weakref(base)
             || partial_base
             || matches!(
