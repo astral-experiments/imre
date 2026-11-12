@@ -55,7 +55,6 @@ mod units;
 pub(crate) use module_registration::ModuleLauncher;
 use operations::{CheckedBody, LoopEdges};
 use units::Output;
-pub(crate) use units::emit_units;
 
 enum LlvmType {
     I1,
@@ -347,11 +346,10 @@ pub(crate) fn emit(
     sanitize: bool,
 ) -> Result<String, Unsupported> {
     let program = analyze_program(module, &mut Default::default())?;
-    Ok(Output::whole()
-        .emit(module, ranges, sanitize, program)?
-        .pop()
-        .expect("whole module")
-        .llvm_ir)
+    let mut unit = crate::CodegenUnit::new("__main__", String::new());
+    Output::new([], std::slice::from_mut(&mut unit), 0, false)
+        .emit(module, ranges, sanitize, program)?;
+    Ok(unit.llvm_ir)
 }
 
 const BRANCH_WEIGHTS: &str = "\n!0 = !{!\"branch_weights\", i32 1, i32 2000}\n!1 = !{!\"branch_weights\", i32 2000, i32 1}\n";
@@ -454,7 +452,7 @@ fn emit_program(
     module: &Module,
     ranges: &RangeFacts<'_>,
     sanitize: bool,
-    output: &mut Output,
+    output: &mut Output<'_>,
     program: NativeProgram,
 ) -> Result<(), Unsupported> {
     let mut literal_globals = vec![None; module.globals.len()];
@@ -810,9 +808,9 @@ enum CheckedFaultOrigin {
     SplitField(ir::SplitFieldOrigins),
 }
 
-struct Emitter<'a, 'module> {
+struct Emitter<'a, 'units> {
     module: &'a Module,
-    output: &'a mut Output,
+    output: &'a mut Output<'units>,
     body: body::FunctionBody,
     mapping_words: usize,
     forward_cursors: BTreeMap<usize, ForwardCursor>,
@@ -871,7 +869,7 @@ struct Emitter<'a, 'module> {
     cleanup_limit_hit: bool,
     return_exit: String,
     sanitize: bool,
-    ranges: &'a RangeFacts<'module>,
+    ranges: &'a RangeFacts<'a>,
     effects: ExceptionEffects,
     inline_dispatch: Vec<bool>,
     callable_targets: crate::callables::Targets,
@@ -10136,7 +10134,7 @@ fn storage_type(ty: Type) -> &'static str {
 /// initialization, and their exact kinds are shared by every instance.
 fn record_layouts(
     module: &Module,
-    output: &mut Output,
+    output: &mut Output<'_>,
     resource_types: &HashSet<Type>,
     repr_methods: &HashSet<usize>,
 ) {

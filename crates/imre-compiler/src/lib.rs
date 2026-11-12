@@ -292,6 +292,14 @@ impl SourceInputs {
         self.files.iter().chain(&self.declaration_files)
     }
 
+    /// Paths that a build must protect from being overwritten by its output.
+    fn protected_paths(&self, profile: Option<&Path>) -> Vec<PathBuf> {
+        self.source_files()
+            .map(|(path, _, _)| path.clone())
+            .chain(profile.map(Path::to_path_buf))
+            .collect()
+    }
+
     pub fn fresh(&self) -> bool {
         self.missing
             .iter()
@@ -372,7 +380,7 @@ fn check_with(
     filesystem: watch::FileSystem<'_>,
 ) -> Result<(), String> {
     object_fallback(
-        CompilationMode::Check,
+        None,
         entry,
         options,
         filesystem,
@@ -438,28 +446,16 @@ pub enum CodegenLayout {
     SplitWithWhole,
 }
 
-enum CompilationMode {
-    Check,
-    Build(CodegenLayout),
-}
-
-enum CompilationResult {
-    Checked(SourceInputs),
-    Built(UnitCompilation, Option<String>),
-}
-
-impl CompilationResult {
-    fn into_built(self) -> (UnitCompilation, Option<String>) {
-        match self {
-            Self::Built(compilation, whole) => (compilation, whole),
-            Self::Checked(_) => unreachable!("build requested a code generation layout"),
-        }
-    }
+/// The ordered code and optional whole-program dump requested by a build.
+struct ProgramOutput {
+    layout: CodegenLayout,
+    compilation: UnitCompilation,
+    whole: Option<String>,
 }
 
 /// Uses the boxed backend when the checked graph requires Python object operations.
 fn object_fallback(
-    mode: CompilationMode,
+    mut output: Option<&mut ProgramOutput>,
     entry: ProgramEntry<'_>,
     options: &CompileOptions,
     mut filesystem: watch::FileSystem<'_>,
@@ -468,7 +464,7 @@ fn object_fallback(
         &mut modules::SourceGraph,
         Option<&LoweringDiagnostic>,
     ) -> Result<CheckedProgram, String>,
-) -> Result<CompilationResult, String> {
+) -> Result<SourceInputs, String> {
     for name in &options.include_modules {
         if !modules::valid_module_operand(name) {
             return Err(format!(
@@ -485,18 +481,6 @@ fn object_fallback(
                     .to_owned(),
             )
         }
-    };
-    let native_result = |graph, units| {
-        native_includes()?;
-        let compilation = if matches!(entry, ProgramEntry::Source(_)) {
-            UnitCompilation {
-                units,
-                ..Default::default()
-            }
-        } else {
-            UnitCompilation::native(graph, units, options.entry_profile.as_deref())
-        };
-        Ok(CompilationResult::Built(compilation, None))
     };
     let checked_file = options.python_startup().is_none();
     // A Python module launch enters through the runtime registration. Other callers
@@ -542,23 +526,30 @@ fn object_fallback(
                     CheckedProgram::Registered(reason) => break reason,
                     CheckedProgram::Native(mut fixed) => {
                         let (module, owners) = &mut fixed.ir;
-                        let CompilationMode::Build(layout) = &mode else {
+                        let Some(output) = output.as_deref_mut() else {
                             verify_after(module, "lowering")?;
                             native_includes()?;
-                            return Ok(CompilationResult::Checked(graph.inputs));
+                            return Ok(graph.inputs);
                         };
                         for original in specialize(module)? {
                             owners.push(owners[original]);
                         }
                         let reason = match llvm::analyze_program(module, &mut fixed.frame_sources) {
-                            Ok(program) => match llvm::emit_units(
+                            Ok(program) => match output.emit_fixed(
                                 &graph,
                                 fixed.into_ir(&graph),
                                 program,
-                                layout,
                                 options.address_sanitizer,
                             ) {
-                                Ok(units) => return native_result(graph, units),
+                                Ok(()) => {
+                                    native_includes()?;
+                                    return Ok(match entry {
+                                        ProgramEntry::Source(_) => SourceInputs::default(),
+                                        ProgramEntry::File(..) => output
+                                            .compilation
+                                            .native_inputs(graph, options.entry_profile.as_deref()),
+                                    });
+                                }
                                 Err(refusal) => refusal.0,
                             },
                             Err(refusal) => {
@@ -810,15 +801,12 @@ fn object_fallback(
         operation
             .or(ordered_command_import.then_some(dynamic::ObjectOperation::OrderedCommandImport)),
         &mut checked_graph,
-        mode,
+        output,
         check,
     )? {
-        Some(mut result) => {
-            site_probes.record(match &mut result {
-                CompilationResult::Checked(inputs) => inputs,
-                CompilationResult::Built(compilation, _) => &mut compilation.source_inputs,
-            });
-            Ok(result)
+        Some(mut inputs) => {
+            site_probes.record(&mut inputs);
+            Ok(inputs)
         }
         None => fallback(checked_graph),
     }
@@ -872,15 +860,16 @@ fn compile_with_layout(
     layout: CodegenLayout,
     mut cache: Option<&mut IncrementalCompiler>,
 ) -> Result<(UnitCompilation, Option<String>), String> {
-    object_fallback(
-        CompilationMode::Build(layout),
+    let mut output = ProgramOutput::new(layout);
+    output.compilation.source_inputs = object_fallback(
+        Some(&mut output),
         entry,
         options,
         Default::default(),
         cache.is_some(),
         |graph, call_error| checked_lower_with(graph, cache.as_deref_mut(), call_error),
-    )
-    .map(CompilationResult::into_built)
+    )?;
+    Ok((output.compilation, output.whole))
 }
 
 pub struct CodegenUnit {
@@ -888,21 +877,32 @@ pub struct CodegenUnit {
     pub llvm_ir: String,
 }
 
-impl CodegenUnit {
-    /// Place the startup and each locally emitted source in their program order.
-    /// An inlined initializer or one supplied by an archive has no separate unit.
-    fn place_sources<'a, S, E>(
+impl ProgramOutput {
+    fn new(layout: CodegenLayout) -> Self {
+        Self {
+            layout,
+            compilation: UnitCompilation::default(),
+            whole: None,
+        }
+    }
+
+    /// Place each local source in program order, then finish the startup and its
+    /// dependencies. A failed fixed emission leaves the registered retry untouched.
+    fn emit_sources<'a, S, W, E>(
+        &mut self,
         sources: impl IntoIterator<Item = S>,
         entry: (usize, &str),
         split: bool,
-        mut emit: impl FnMut(usize, S, bool) -> Result<(&'a str, Option<String>), E>,
-    ) -> Result<(Vec<Self>, usize), E> {
+        mut writer: W,
+        mut emit: impl FnMut(&mut W, usize, S, bool) -> Result<(&'a str, Option<String>), E>,
+        finish: impl FnOnce(W, &mut [CodegenUnit], usize) -> Result<Option<String>, E>,
+    ) -> Result<(), E> {
         let mut units = Vec::new();
         let mut startup = None;
         for (id, source) in sources.into_iter().enumerate() {
             let is_entry = id == entry.0;
             let separate = split && !is_entry;
-            let (name, body) = emit(id, source, separate)?;
+            let (name, body) = emit(&mut writer, id, source, separate)?;
             let (name, body) = if is_entry {
                 startup = Some(units.len());
                 (entry.1, body.unwrap_or_default())
@@ -912,14 +912,17 @@ impl CodegenUnit {
             } else {
                 continue;
             };
-            units.push(Self::new(name, body));
+            units.push(CodegenUnit::new(name, body));
         }
-        Ok((
-            units,
-            startup.expect("the checked sources include the program entry"),
-        ))
+        let entry = startup.expect("the checked sources include the program entry");
+        let whole = finish(writer, &mut units, entry)?;
+        self.compilation.units = units;
+        self.whole = whole;
+        Ok(())
     }
+}
 
+impl CodegenUnit {
     fn new(name: &str, llvm_ir: String) -> Self {
         Self {
             name: name.to_owned(),
@@ -938,22 +941,19 @@ pub struct UnitCompilation {
 }
 
 impl UnitCompilation {
-    fn native(
+    fn native_inputs(
+        &mut self,
         mut graph: modules::SourceGraph,
-        units: Vec<CodegenUnit>,
         profile: Option<&Path>,
-    ) -> Self {
-        let (source_inputs, input_paths) = graph.disk_inputs(profile);
-        Self {
-            units,
-            input_paths,
-            source_inputs,
-            extension_archives: graph
-                .modules
-                .into_iter()
-                .filter_map(|module| Some(module.archive?.identity))
-                .collect(),
-        }
+    ) -> SourceInputs {
+        let (inputs, paths) = graph.disk_inputs(profile);
+        self.input_paths = paths;
+        self.extension_archives = graph
+            .modules
+            .into_iter()
+            .filter_map(|module| Some(module.archive?.identity))
+            .collect();
+        inputs
     }
 
     fn into_whole(self) -> Compilation {
@@ -1845,7 +1845,7 @@ print("result", call(b=2, a=1))
             std::fs::write(&path, format!("{INFERRED_SET_GATHER}{usage}")).unwrap();
             let options = CompileOptions::default();
             let ordinary = super::object_fallback(
-                super::CompilationMode::Check,
+                None,
                 super::ProgramEntry::File(&path, None),
                 &options,
                 Default::default(),
@@ -1879,7 +1879,7 @@ print("result", call(b=2, a=1))
         std::fs::write(&path, source).unwrap();
         let mut passes = 0;
         let result = super::object_fallback(
-            super::CompilationMode::Check,
+            None,
             super::ProgramEntry::File(&path, None),
             &CompileOptions::default(),
             Default::default(),
@@ -1915,7 +1915,7 @@ print("result", call(b=2, a=1))
         let expected = super::check_file(&path, None);
         let mut passes = Vec::new();
         let result = super::object_fallback(
-            super::CompilationMode::Check,
+            None,
             super::ProgramEntry::File(&path, None),
             &options,
             Default::default(),

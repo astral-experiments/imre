@@ -439,7 +439,7 @@ fn retained_native_candidate_registers_its_original_source_owner() {
     symlink(&after, &helper).unwrap();
     fs::write(&external, replacement).unwrap();
     assert!(!graph.inputs.fresh());
-    let compilation = crate::dynamic::compile(
+    let inputs = crate::dynamic::compile(
         (
             crate::ProgramEntry::File(&entry, None),
             None,
@@ -450,7 +450,7 @@ fn retained_native_candidate_registers_its_original_source_owner() {
         true,
         Some(crate::dynamic::ObjectOperation::CheckedEntry),
         &mut Some(graph),
-        crate::CompilationMode::Check,
+        None,
         |_, _, sources| {
             let sources = sources.unwrap();
             for (name, id) in [("helper", helper_id), ("external", external_id)] {
@@ -463,9 +463,6 @@ fn retained_native_candidate_registers_its_original_source_owner() {
     )
     .unwrap()
     .unwrap();
-    let crate::CompilationResult::Checked(inputs) = compilation else {
-        panic!("expected checked inputs");
-    };
     assert!(inputs.files.contains(&(
         vendor.join("external.py"),
         external,
@@ -493,7 +490,7 @@ fn retained_native_candidate_registers_its_original_source_owner() {
         true,
         Some(crate::dynamic::ObjectOperation::CheckedEntry),
         &mut Some(next),
-        crate::CompilationMode::Check,
+        None,
         |_, _, _| panic!("a different import kind reached object admission"),
     )
     .err()

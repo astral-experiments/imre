@@ -140,13 +140,13 @@ fn schema_name(ty: Type) -> String {
     }
 }
 
-struct Schemas<'a> {
+struct Schemas<'a, 'units> {
     module: &'a Module,
     seen: HashSet<Type>,
-    output: &'a mut Output,
+    output: &'a mut Output<'units>,
 }
 
-impl Schemas<'_> {
+impl Schemas<'_, '_> {
     fn bytes(&mut self, name: &str, value: &str) {
         let output = self.output.entry_buffer();
         write!(
