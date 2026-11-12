@@ -1534,30 +1534,30 @@ pub(super) fn call(
     match name {
         "if_nameindex" => {
             check_args(name, args, kwargs, 0, &[])?;
-            return if_nameindex(ctx);
+            if_nameindex(ctx)
         }
         "if_nametoindex" => {
             let arg = super::super::builtins::one_positional_arg(name, args, kwargs)?;
-            return if_nametoindex(ctx, arg);
+            if_nametoindex(ctx, arg)
         }
         "if_indextoname" => {
             let arg = super::super::builtins::one_positional_arg(name, args, kwargs)?;
-            return if_indextoname(ctx, arg);
+            if_indextoname(ctx, arg)
         }
-        "getaddrinfo" => return public_getaddrinfo(ctx, args, kwargs),
-        "getnameinfo" => return getnameinfo(ctx, args, kwargs),
-        "getservbyname" | "getservbyport" => return lookup_service(ctx, name, args, kwargs),
+        "getaddrinfo" => public_getaddrinfo(ctx, args, kwargs),
+        "getnameinfo" => getnameinfo(ctx, args, kwargs),
+        "getservbyname" | "getservbyport" => lookup_service(ctx, name, args, kwargs),
         "gethostname" => {
             check_args(name, args, kwargs, 0, &[])?;
             super::audit::event(ctx, "socket.gethostname", args)?;
             let raw = native::hostname()?;
             let codec = crate::objects::Codec::lookup(crate::sys::filesystem_encoding()?.as_str())?;
-            return Ok(ctx.text_codepoints(codec.decode_filesystem(&raw)?));
+            Ok(ctx.text_codepoints(codec.decode_filesystem(&raw)?))
         }
         "gethostbyname" => {
             let host = host_argument(ctx, name, args, kwargs)?;
             super::audit::event(ctx, "socket.gethostbyname", args)?;
-            return Ok(ctx.text(native::hostbyname(&host)?.to_string()));
+            Ok(ctx.text(native::hostbyname(&host)?.to_string()))
         }
         "gethostbyaddr" | "gethostbyname_ex" => {
             let host = host_argument(ctx, name, args, kwargs)?;
@@ -1573,7 +1573,7 @@ pub(super) fn call(
             let aliases = ctx.alloc(Value::List(aliases));
             let addresses = entry.addresses.into_iter().map(|s| ctx.text(s)).collect();
             let addresses = ctx.alloc(Value::List(addresses));
-            return Ok(ctx.alloc(Value::Tuple(vec![name, aliases, addresses])));
+            Ok(ctx.alloc(Value::Tuple(vec![name, aliases, addresses])))
         }
         "getfqdn" => {
             check_args(name, args, kwargs, 1, &["name"])?;
@@ -1587,11 +1587,11 @@ pub(super) fn call(
                 super::audit::event(ctx, "socket.gethostbyaddr", &[name])?;
                 Ok(native::fqdn(&host)?)
             })();
-            return match lookup {
+            match lookup {
                 Ok(result) => Ok(ctx.text(result)),
                 Err(error) if ctx.is_builtin_error(&error, "OSError") => Ok(name),
                 Err(error) => Err(error),
-            };
+            }
         }
         _ => Err(Error::new(
             "TypeError",
