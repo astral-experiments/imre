@@ -3,7 +3,7 @@
 use super::{ScalarMatch, Session, concrete_scalar};
 use crate::frontend::phase::{Diagnostic, Kind};
 use ruff_python_ast::helpers::Truthiness;
-use ruff_python_ast::{Expr, ExprCall, Stmt};
+use ruff_python_ast::{Expr, ExprCall, Stmt, StmtReturn};
 use ruff_text_size::{Ranged, TextRange, TextSize};
 use std::{collections::HashMap, path::Path};
 use ty_python_core::FileScopeId;
@@ -64,10 +64,18 @@ pub(crate) fn inert_declaration(statement: &Stmt) -> bool {
     ) && passive(statement)
 }
 
-/// No statement in this function can enter application code when all supplied
-/// and defaulted arguments are literals. The caller still establishes its identity.
+/// Can this loaded definition run without invoking application code on literal arguments?
 pub(crate) fn passive_function(function: &ruff_python_ast::StmtFunctionDef) -> bool {
-    function.decorator_list.is_empty()
+    passive_function_return(function).is_some()
+}
+
+/// For an effect-free call, the first return supplies its operand. Falling off the
+/// end or executing a bare return supplies None. An open body has no proven result.
+fn passive_function_return(
+    function: &ruff_python_ast::StmtFunctionDef,
+) -> Option<Option<&StmtReturn>> {
+    let mut first_return = None;
+    let passive_body = function.decorator_list.is_empty()
         && function.type_params.is_none()
         && function
             .parameters
@@ -79,10 +87,14 @@ pub(crate) fn passive_function(function: &ruff_python_ast::StmtFunctionDef) -> b
                     .is_none_or(Expr::is_literal_expr)
             })
         && function.body.iter().all(|statement| match statement {
-            Stmt::Return(ret) => ret.value.as_deref().is_none_or(Expr::is_literal_expr),
+            Stmt::Return(ret) => {
+                first_return.get_or_insert(ret);
+                ret.value.as_deref().is_none_or(Expr::is_literal_expr)
+            }
             Stmt::Pass(_) | Stmt::Expr(_) | Stmt::If(_) => passive(statement),
             _ => false,
-        })
+        });
+    passive_body.then_some(first_return)
 }
 
 fn after_docstring(body: &[Stmt]) -> &[Stmt] {
@@ -92,28 +104,14 @@ fn after_docstring(body: &[Stmt]) -> &[Stmt] {
     &body[usize::from(skip)..]
 }
 
-/// A standalone call with no earlier operation in its statement. Dormant
-/// suites under passive guards retain their existing positional contracts.
-fn statement_call<'a>(
+struct InitializerStatement<'a, 'db> {
+    source: (usize, &'a Path),
+    parsed: &'a ruff_db::parsed::ParsedModuleRef,
+    model: &'a SemanticModel<'db>,
     stmt: &'a Stmt,
-    bound_name: impl Fn(&Expr) -> bool,
-    nested_operand: impl Fn(&'a ExprCall) -> Option<&'a Expr>,
-) -> Option<&'a ExprCall> {
-    let value = match stmt {
-        Stmt::Expr(stmt) => &stmt.value,
-        Stmt::Assign(stmt) => &stmt.value,
-        _ => return None,
-    };
-    let mut call = value.as_call_expr()?;
-    // A name lookup and literal operands can precede another call without
-    // invoking the outer callable. Assignment targets follow the entire RHS.
-    while call.func.is_name_expr()
-        && bound_name(&call.func)
-        && let Some(nested) = nested_operand(call).and_then(Expr::as_call_expr)
-    {
-        call = nested;
-    }
-    Some(call)
+    guard_start: TextSize,
+    imports: &'a [(TextRange, usize)],
+    progress: &'a HashMap<usize, Option<TextSize>>,
 }
 
 impl Session {
@@ -278,14 +276,28 @@ impl Session {
                 {
                     return Some(error.classified(Kind::ExecutionOperand(module)));
                 }
-                if let Some(error) = self.initializer_statement_error(
-                    (module, path),
-                    &parsed,
-                    &model,
+                let (body, guard_start) = self.guarded_call_statement(module, stmt);
+                let statement = InitializerStatement {
+                    source: (module, path),
+                    parsed: &parsed,
+                    model: &model,
                     stmt,
-                    &imports,
-                    &progress,
-                ) {
+                    guard_start,
+                    imports: &imports,
+                    progress: &progress,
+                };
+                let call = match stmt {
+                    Stmt::For(loop_) if !loop_.is_async => loop_.iter.as_call_expr(),
+                    _ => match body {
+                        Stmt::Expr(stmt) => stmt.value.as_call_expr(),
+                        Stmt::Assign(stmt) => stmt.value.as_call_expr(),
+                        _ => None,
+                    },
+                };
+                if let Some(call) = call
+                    && let Some(Err(error)) =
+                        self.initializer_call(&statement, call, stmt.is_for_stmt())
+                {
                     return Some(error);
                 }
                 if !passive(stmt) {
@@ -410,58 +422,17 @@ impl Session {
         }
     }
 
-    fn initializer_statement_error(
-        &self,
-        source: (usize, &Path),
-        parsed: &ruff_db::parsed::ParsedModuleRef,
-        model: &SemanticModel<'_>,
-        stmt: &Stmt,
-        imports: &[(TextRange, usize)],
-        progress: &HashMap<usize, Option<TextSize>>,
-    ) -> Option<Diagnostic> {
-        let (module, path) = source;
+    /// An error belongs to the first failing invocation. An effect-free return resumes the
+    /// enclosing argument list. An unknown outcome stops this initializer proof.
+    fn initializer_call<'db>(
+        &'db self,
+        site: &InitializerStatement<'_, 'db>,
+        call: &ExprCall,
+        iterated: bool,
+    ) -> Option<Result<Type<'db>, Diagnostic>> {
+        let (module, path) = site.source;
+        let (parsed, model, stmt) = (site.parsed, site.model, site.stmt);
         let file = self.files[module];
-        let literal = |value| {
-            self.assigned_value(file, parsed, value, Expr::is_name_expr)
-                .filter(|origin| origin.is_literal_expr())
-        };
-        let (body, start) = self.guarded_call_statement(module, stmt);
-        let call = match stmt {
-            Stmt::For(loop_) if !loop_.is_async => loop_.iter.as_call_expr()?,
-            _ => statement_call(
-                body,
-                |name| {
-                    self.reaching_binding(module, name).is_some()
-                        || name.as_name_expr().is_some_and(|n| {
-                            imre_ast::providers::BUILTIN_FUNCTIONS.contains(&n.id.as_str())
-                                && self.is_unbound_module_read(module, name)
-                        })
-                },
-                |call| {
-                    let args = &call.arguments;
-                    let operand = imre_ast::evaluated_arguments(args)
-                        .take_while(|arg| !arg.is_variadic())
-                        .map(|arg| arg.value())
-                        .find(|arg| literal(arg).is_none())?;
-                    // A partially initialized import can supply a concrete function
-                    // where ordinary source inference still sees an unknown callee.
-                    let required = if start != stmt.start()
-                        && operand.as_call_expr().is_some_and(|nested| {
-                            nested.func.inferred_type(model) == Some(Type::unknown())
-                        }) {
-                        start
-                    } else {
-                        stmt.start()
-                    };
-                    if self.unconditional_module_operand(module, required, operand.range()) {
-                        Some(operand)
-                    } else {
-                        // Dormant source retains its existing positional scalar contracts.
-                        args.args.iter().find(|arg| !arg.is_literal_expr())
-                    }
-                },
-            )?,
-        };
         let (name, attr) = match call.func.as_ref() {
             name @ Expr::Name(_) => (name, None),
             Expr::Attribute(attr) if !attr.attr.starts_with("__") => {
@@ -469,10 +440,52 @@ impl Session {
             }
             _ => return None,
         };
-        let binding = self.reaching_binding(module, name)?;
-        if binding.file(&self.db) != file {
-            return None;
+        let binding = self.reaching_binding(module, name);
+        let loaded = attr.is_none()
+            && (binding.is_some()
+                || name.as_name_expr().is_some_and(|n| {
+                    imre_ast::providers::BUILTIN_FUNCTIONS.contains(&n.id.as_str())
+                        && self.is_unbound_module_read(module, name)
+                }));
+        let mut actuals = Vec::new();
+        for argument in imre_ast::evaluated_arguments(&call.arguments) {
+            if argument.is_variadic() {
+                return None;
+            }
+            let value = argument.value();
+            if let Some(origin) = self.assigned_value(file, parsed, value, Expr::is_name_expr)
+                && origin.is_literal_expr()
+            {
+                actuals.push(origin.inferred_type(model).unwrap_or_else(Type::unknown));
+            } else {
+                if !loaded || iterated {
+                    return None;
+                }
+                let required = if site.guard_start != stmt.start()
+                    && value.as_call_expr().is_some_and(|nested| {
+                        nested.func.inferred_type(model) == Some(Type::unknown())
+                    }) {
+                    site.guard_start
+                } else {
+                    stmt.start()
+                };
+                if !self.unconditional_module_operand(module, required, value.range()) {
+                    // Dormant source retains its existing positional contracts, without a returned value.
+                    let nested = call
+                        .arguments
+                        .args
+                        .iter()
+                        .find(|arg| !arg.is_literal_expr())?
+                        .as_call_expr()?;
+                    return self.initializer_call(site, nested, false)?.err().map(Err);
+                }
+                match self.initializer_call(site, value.as_call_expr()?, false)? {
+                    Ok(actual) => actuals.push(actual),
+                    error @ Err(_) => return Some(error),
+                }
+            }
         }
+        let binding = binding.filter(|binding| binding.file(&self.db) == file)?;
         let member = match (binding.kind(&self.db), attr) {
             (DefinitionKind::Function(_), None) => None,
             (DefinitionKind::Import(import), Some(attr)) => {
@@ -484,10 +497,10 @@ impl Session {
             )),
             _ => return None,
         };
-        let (def, owner_module) = if let Some((site, name)) = member {
-            let owner = imports.iter().find(|(r, _)| *r == site)?.1;
+        let (def, owner_module) = if let Some((import_site, name)) = member {
+            let owner = site.imports.iter().find(|(r, _)| *r == import_site)?.1;
             (
-                self.initialized_function(owner, name, progress[&owner])?,
+                self.initialized_function(owner, name, site.progress[&owner])?,
                 owner,
             )
         } else {
@@ -508,23 +521,29 @@ impl Session {
                 .try_node_scope(ty_python_core::scope::NodeWithScopeRef::Function(function))
                 .map(|scope| scope.is_generator_function(index))
         };
-        if matches!(stmt, Stmt::For(_)) && (owner == file || function.is_async || !generator()?) {
+        if iterated && (owner == file || function.is_async || !generator()?) {
             return None;
         }
         let bound = crate::frontend::fixed_call_arguments(call, &function.parameters)?;
-        // Every supplied argument must be passive, including the ones following a mismatch.
-        let operands = bound
-            .into_iter()
-            .map(|(p, value)| Some((p, value, literal(value)?)))
-            .collect::<Option<Vec<_>>>()?;
         let owner_model = SemanticModel::new(&self.db, self.db.program_file(owner));
-        for (p, value, origin) in operands {
+        for ((p, value), actual) in bound.into_iter().zip(actuals) {
             if p.parameter.annotation.is_some()
                 && let Some(expected) = p.parameter.inferred_type(&owner_model)
-                && let Some(error) = self.scalar_argument_error(model, expected, value, origin)
+                && let Some(error) = self.scalar_argument_error(model, expected, value, actual)
             {
-                return Some(error.with_path(path));
+                return Some(Err(error.with_path(path)));
             }
+        }
+        if !iterated
+            && !function.is_async
+            && let Some(ret) = passive_function_return(function)
+            && !generator()?
+        {
+            let actual = match ret.and_then(|ret| ret.value.as_deref()) {
+                Some(value) => value.inferred_type(&owner_model)?,
+                None => Type::none(&self.db, &owner_model.program_environment()),
+            };
+            return Some(Ok(actual));
         }
         // Read the body only after the real initializer and its passive arguments have
         // selected this function. Literal guards above are also checked for scalar contracts.
@@ -559,7 +578,7 @@ impl Session {
             }
             _ => return None,
         };
-        Some(error.classified(Kind::RegisteredExecution))
+        Some(Err(error.classified(Kind::RegisteredExecution)))
     }
 
     fn initialized_function(
@@ -598,10 +617,9 @@ impl Session {
         model: &SemanticModel<'db>,
         expected: Type<'db>,
         operand: &Expr,
-        origin: &Expr,
+        actual: Type<'db>,
     ) -> Option<Diagnostic> {
         let env = model.program_environment();
-        let actual = origin.inferred_type(model)?;
         if !concrete_scalar(&self.db, &env, expected)
             || actual.is_assignable_to(&self.db, &env, expected)
         {

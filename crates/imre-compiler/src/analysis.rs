@@ -2509,7 +2509,8 @@ impl Session {
                         param.name.as_str(),
                     )
                     && let Some(expected) = param.inferred_type(&owner_model)
-                    && let Some(error) = self.scalar_argument_error(&model, expected, value, value)
+                    && let Some(actual) = value.inferred_type(&model)
+                    && let Some(error) = self.scalar_argument_error(&model, expected, value, actual)
                 {
                     errors.push(error.with_path(path).to_string());
                 }
