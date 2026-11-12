@@ -2439,7 +2439,11 @@ pub(crate) fn compile(
             };
             registration.initial = entry_start.filter(|_| {
                 index < ordinary_registrations.unwrap_or(usize::MAX)
-                    && registration.name == module_entry.unwrap_or("__main__")
+                    && match module_entry {
+                        Some(name) => registration.name == name,
+                        // A packaged FILE enters its body after importing the parent.
+                        None => registration.main_body && packaged_file_module.is_none(),
+                    }
                     && !registration.name.contains('.')
                     && options.user_site_pth.is_none()
                     && module_entry.is_none_or(|name| {

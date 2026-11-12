@@ -2234,7 +2234,15 @@ def main() -> None:
                 checks += 1
 
         check_saved_package_files(args, temporary, build_flags)
-        checks += 2
+        cached = temporary / "package-cache"
+        write_files(cached, {
+            "pkg/__init__.py": "import sys\nsys.modules['opcode'] = sys\n",
+            "pkg/main.py": "import __main__\nimport opcode\nprint(opcode.__name__)\n",
+            "__main__.py": "import opcode\n",
+            "opcode.py": "def take(x: int) -> int: return x\ndef text(): return 'wrong'\nprint(take(text()))\n",
+        })
+        require_success(run([compiler, "check", str(cached / "pkg/main.py"), "--module-root", str(cached)], temporary))
+        checks += 3
 
         build_timeout = 120 if args.lto_linker and not args.sanitize else 60
         for name, files in ACCEPTED.items():
