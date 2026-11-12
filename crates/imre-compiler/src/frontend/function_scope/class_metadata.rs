@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 use ruff_python_ast as ast;
 use ruff_python_ast::visitor::{self, Visitor};
 
-use super::{ClassBindings, ClosureNames};
+use super::{ClassBindings, ClosureNames, FunctionScope};
 
 const GENERATED: [&str; 3] = ["__module__", "__qualname__", "__doc__"];
 
@@ -78,26 +78,34 @@ pub(super) fn comprehension_scope(
     (uses.direct, uses.walrus, uses.nested)
 }
 
-/// Resolve the body in its own scope. The leftmost iterable has already been
-/// evaluated in the enclosing scope and cannot contribute to this code's cells.
-pub(super) fn generator_scope(
-    plan: &imre_ast::comprehension::Plan<'_>,
-    string_annotations: bool,
-) -> ClosureNames {
-    let mut uses = Uses {
-        implicit_class: true,
-        ..Uses::new(string_annotations)
-    };
-    let locals = plan.scope_bindings(|expr| uses.visit_expr(expr));
-    uses.direct.append(&mut uses.nested);
-    let mut scope = ClosureNames {
-        locals,
-        reads: uses.direct,
-        nonlocals: uses.walrus,
-        ..ClosureNames::default()
-    };
-    scope.finish_scope();
-    scope
+impl FunctionScope {
+    /// Collect the suspended body’s binding and declaration sites together. Its first
+    /// iterable has already been evaluated in the enclosing scope.
+    pub(super) fn generator<'a>(
+        plan: &imre_ast::comprehension::Plan<'a>,
+        string_annotations: bool,
+        mut visit: impl FnMut(&'a ast::Expr),
+    ) -> Self {
+        let mut uses = Uses {
+            implicit_class: true,
+            ..Uses::new(string_annotations)
+        };
+        let mut locals: indexmap::IndexSet<String> = plan.scope_bindings(|expr| {
+            visit(expr);
+            uses.visit_expr(expr);
+        });
+        locals.insert(".0".into());
+        uses.direct.append(&mut uses.nested);
+        let names = ClosureNames {
+            locals,
+            reads: uses.direct,
+            nonlocals: uses.walrus,
+            ..ClosureNames::default()
+        };
+        let mut scope = Self::new(names, None, false);
+        scope.captures_class = scope.names.reads.contains("__class__");
+        scope
+    }
 }
 
 #[derive(Default)]

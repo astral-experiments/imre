@@ -294,7 +294,7 @@ impl EagerDisplay for Checker<'_> {
         Ok(Iteration::Prepared(registered::cursor_input(
             value,
             Type::PythonObject,
-            clause.iter.range(),
+            Some(clause.iter.range()),
             Some(pull),
             |ty| self.hidden(ty),
         )))

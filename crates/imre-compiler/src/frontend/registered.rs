@@ -1209,26 +1209,26 @@ fn for_pull(loop_: &ast::StmtFor) -> Option<ir::AsyncPull> {
     })
 }
 
-/// Acquire the live Python iterator and prepare its matching pull in the owning frame.
+/// Prepare a Python pull. An acquisition site belongs to this frame; without one
+/// the defining frame has already obtained the iterator passed to the generator.
 pub(super) fn cursor_input(
     value: Expr,
     element: Type,
-    iterable: TextRange,
+    acquire_at: Option<TextRange>,
     pull: Option<ir::AsyncPull>,
     hidden: impl FnMut(Type) -> usize,
 ) -> pipelines::Prepared {
-    let (acquire, kind) = match pull {
-        Some(pull) => (
-            ir::IteratorOp::Async(iterable),
-            ir::IterNextKind::Async(pull),
-        ),
-        None => (ir::IteratorOp::Loop(iterable), ir::IterNextKind::Generic),
+    let acquire = match (acquire_at, pull) {
+        (Some(range), None) => Some(ir::IteratorOp::Loop(range)),
+        (Some(range), Some(_)) => Some(ir::IteratorOp::Async(range)),
+        (None, None) => Some(ir::IteratorOp::LoopCursor),
+        (None, Some(_)) => None,
     };
-    let cursor = operation(
-        Builtin::RegisteredIter(acquire),
-        Type::PythonObject,
-        vec![value],
-    );
+    let cursor = match acquire {
+        Some(op) => operation(Builtin::RegisteredIter(op), Type::PythonObject, vec![value]),
+        None => value,
+    };
+    let kind = pull.map_or(ir::IterNextKind::Generic, ir::IterNextKind::Async);
     pipelines::Prepared::pull_cursor(cursor, element, kind, hidden)
 }
 
@@ -1894,7 +1894,7 @@ impl<'a> SuitePreparation<'a> {
         let mut input = cursor_input(
             iterable,
             Type::PythonObject,
-            loop_.iter.range(),
+            Some(loop_.iter.range()),
             for_pull(loop_),
             |ty| scope.hidden(ty),
         );
@@ -3233,7 +3233,7 @@ impl SourceScope<'_> {
         Some(cursor_input(
             value,
             Type::PythonObject,
-            iterable.range(),
+            Some(iterable.range()),
             pull,
             |ty| self.hidden(ty),
         ))

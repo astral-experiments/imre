@@ -578,18 +578,12 @@ where
                 self.visit_expr(plan.outer);
                 let is_async = plan.body_suspends();
                 let parent = std::mem::replace(&mut self.scope, Scope::Function { is_async });
-                plan.visit_body(|child| self.visit_expr(child));
+                let scope =
+                    FunctionScope::generator(&plan, self.names.string_annotations, |child| {
+                        self.visit_expr(child)
+                    });
                 self.scope = parent;
-                let mut names =
-                    class_metadata::generator_scope(&plan, self.names.string_annotations);
-                let captures_class = names.reads.contains("__class__");
-                names.locals.insert(".0".into());
-                (self.generator_site)(
-                    expr.range(),
-                    &plan,
-                    is_async,
-                    FunctionScope::new(names, None, captures_class),
-                );
+                (self.generator_site)(expr.range(), &plan, is_async, scope);
             }
             ast::Expr::TString(_) => {
                 visitor::walk_expr(self, expr);

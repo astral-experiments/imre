@@ -65,26 +65,15 @@ impl RegisteredGenerator {
         );
         scope.generator_expression = true;
         let outer = imre_ast::comprehension::outer_clause(plan.clauses);
-        let range = outer.iter.range();
-        let (acquire, cursor, kind) = match comprehensions::async_pull(outer) {
-            Some(pull) => (
-                ir::IteratorOp::Async(range),
-                values::name_binding(".0"),
-                ir::IterNextKind::Async(pull),
-            ),
-            None => (
-                ir::IteratorOp::Get(range),
-                operation(
-                    Builtin::RegisteredIter(ir::IteratorOp::LoopCursor),
-                    Type::PythonObject,
-                    vec![values::name_binding(".0")],
-                ),
-                ir::IterNextKind::Generic,
-            ),
-        };
-        let input = pipelines::Prepared::pull_cursor(cursor, Type::PythonObject, kind, |ty| {
-            scope.hidden(ty)
-        });
+        let pull = comprehensions::async_pull(outer);
+        let argument = scope.slot(".0");
+        let input = cursor_input(
+            Expr::local(argument, Type::PythonObject),
+            Type::PythonObject,
+            None,
+            pull,
+            |ty| scope.hidden(ty),
+        );
         let mut body = scope
             .comprehension_loop(plan, 0, input, &mut |scope, output, _| {
                 let item = output.value();
@@ -114,10 +103,16 @@ impl RegisteredGenerator {
             })
             .ok()?;
         body.push(Statement::Return(Expr::none()));
+        let mut body = scope.finish(body);
+        body.function.params.push(argument);
         Some(Self {
-            body: scope.finish(body),
+            body,
             metadata: CallableMetadata::generator(scope_facts, is_async),
-            acquire,
+            acquire: if pull.is_some() {
+                ir::IteratorOp::Async(outer.iter.range())
+            } else {
+                ir::IteratorOp::Get(outer.iter.range())
+            },
         })
     }
 }
@@ -182,6 +177,14 @@ mod tests {
         generators
     }
 
+    fn iterator_parameter(child: &RegisteredGenerator) -> usize {
+        let [slot] = child.body.function.params[..] else {
+            panic!("the child takes the iterator acquired by its creator");
+        };
+        assert_eq!(child.body.local_names[&slot].name, ".0");
+        slot
+    }
+
     #[test]
     fn async_child_pulls_the_outer_iterator_without_reacquiring_it() {
         let graph =
@@ -196,9 +199,15 @@ mod tests {
             matches!(child.acquire, ir::IteratorOp::Async(range) if &module.source[range] == "rows")
         );
         assert_eq!(child.metadata.parameter_names().collect::<Vec<_>>(), [".0"]);
+        let argument = iterator_parameter(child);
         let body = &child.body.function.body;
         let mut pulls = 0;
+        let mut inputs = 0;
         ir::walk_statements(body, &mut |statement| {
+            if matches!(statement, Statement::Assign(_, value) if matches!(value.kind, ExprKind::Local(slot) if slot == argument))
+            {
+                inputs += 1;
+            }
             if matches!(
                 statement,
                 Statement::IterNext {
@@ -222,7 +231,7 @@ mod tests {
                 yields += 1;
             }
         });
-        assert_eq!((pulls, yields), (1, 1));
+        assert_eq!((inputs, pulls, yields), (1, 1, 1));
     }
 
     #[test]
@@ -243,8 +252,12 @@ mod tests {
         let mut awaits = 0;
         let mut yields = 0;
         let mut adapted = 0;
+        let argument = iterator_parameter(child);
         ir::walk_expressions(&child.body.function.body, &mut |expr| match &expr.kind {
-            ExprKind::Builtin(Builtin::RegisteredIter(ir::IteratorOp::LoopCursor), _) => {
+            ExprKind::Builtin(Builtin::RegisteredIter(ir::IteratorOp::LoopCursor), args) => {
+                assert!(
+                    matches!(args.as_slice(), [arg] if matches!(arg.kind, ExprKind::Local(slot) if slot == argument))
+                );
                 adapted += 1;
             }
             ExprKind::Builtin(Builtin::RegisteredSuspend(ir::SuspendValue::Await, _), _) => {
