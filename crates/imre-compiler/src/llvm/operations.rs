@@ -483,15 +483,25 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         let out = self.body();
         // A declined projection is zero. Integer zero is the tagged word one.
         // The Python frame owns the exception when a divisor is zero.
-        let guard_zero = matches!(op, Binary::FloorDivide | Binary::Modulo);
-        let right_guard = |out: &mut FunctionBody| {
-            if guard_zero {
-                out.instruction(format!("icmp ugt i64 {b}, 1"))
-            } else {
-                out.instruction(format!("icmp ne i64 {b}, 0"))
+        let right_guard = |out: &mut FunctionBody| match op {
+            Binary::FloorDivide | Binary::Modulo => out.instruction(format!("icmp ugt i64 {b}, 1")),
+            Binary::RightShift => {
+                // A nonnegative immediate count cannot raise. Let Python handle heap counts
+                // (of either sign), negative counts and overridden operators.
+                let immediate = out.instruction(format!("trunc i64 {b} to i1"));
+                let nonnegative = out.instruction(format!("icmp sge i64 {b}, 1"));
+                out.instruction(format!("and i1 {immediate}, {nonnegative}"))
             }
+            _ => out.instruction(format!("icmp ne i64 {b}, 0")),
         };
-        let guard = match (check_a, check_b || guard_zero) {
+        let guard = match (
+            check_a,
+            check_b
+                || matches!(
+                    op,
+                    Binary::FloorDivide | Binary::Modulo | Binary::RightShift
+                ),
+        ) {
             (false, false) => None,
             (true, false) => Some(out.instruction(format!("icmp ne i64 {a}, 0"))),
             (false, true) => Some(right_guard(out)),
@@ -633,7 +643,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             left.checked_operand_type() == Type::Int && right.checked_operand_type() == Type::Int;
         let positioned = matches!(op, Binary::Add | Binary::Subtract | Binary::Multiply)
             || op == Binary::Modulo && checked_ints;
-        let arithmetic = op == Binary::FloorDivide && checked_ints
+        let arithmetic = matches!(op, Binary::FloorDivide | Binary::RightShift) && checked_ints
             || positioned
                 && (matches!(site, OperationSite::Placed(..))
                     || expr.ty == Type::PythonObject
