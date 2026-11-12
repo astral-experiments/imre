@@ -78,22 +78,28 @@ impl RegisteredSource<'_> {
     pub(super) fn object_operation<E>(
         self,
         node: &ast::Expr,
-        allow_typed_receiver: bool,
+        allow_typed_receiver: impl FnOnce(Option<&str>, &ast::Expr, &Expr) -> bool,
         dynamic_receiver: impl FnOnce(&ast::Expr) -> bool,
         mut child: impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
     ) -> StdResult<Option<Expr>, E> {
-        let receiver = |node: &ast::Expr, needs_protocol: bool| {
+        let receiver = |node: &ast::Expr, needs_protocol: bool, method| {
             if needs_protocol && !dynamic_receiver(node) {
                 return Ok(None);
             }
             let value = child(node)?;
-            Ok((allow_typed_receiver || value.ty == Type::PythonObject).then_some(value))
+            Ok(
+                (allow_typed_receiver(method, node, &value) || value.ty == Type::PythonObject)
+                    .then_some(value),
+            )
         };
         match node {
             ast::Expr::Call(call) => {
                 let (selection, target) = self.call_target(call);
-                let method = matches!(selection, ir::RegisteredCallTarget::Method { .. });
-                let Some(target) = receiver(target, method)? else {
+                let method = match &selection {
+                    ir::RegisteredCallTarget::Method { name, .. } => Some(name.as_str()),
+                    ir::RegisteredCallTarget::Callable { .. } => None,
+                };
+                let Some(target) = receiver(target, method.is_some(), method)? else {
                     return Ok(None);
                 };
                 let args = imre_ast::argument_values(&call.arguments)
@@ -101,7 +107,7 @@ impl RegisteredSource<'_> {
                     .collect::<StdResult<_, _>>()?;
                 Ok(Some(bound_call(call, selection, target, args)))
             }
-            ast::Expr::Attribute(field) => Ok(receiver(&field.value, true)?.map(|value| {
+            ast::Expr::Attribute(field) => Ok(receiver(&field.value, true, None)?.map(|value| {
                 super::operation(attribute_load(field), Type::PythonObject, vec![value])
             })),
             _ => Ok(None),
@@ -890,7 +896,7 @@ pub(in crate::frontend) fn binary(
 pub(super) fn operation<E>(
     node: &ast::Expr,
     source: RegisteredSource<'_>,
-    allow_typed_receiver: bool,
+    allow_typed_receiver: impl FnOnce(Option<&str>, &ast::Expr, &Expr) -> bool,
     literal: impl Fn(&Expr) -> Option<bool>,
     dynamic_receiver: impl FnOnce(&ast::Expr) -> bool,
     mut child: impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
@@ -930,7 +936,8 @@ pub(super) fn operation<E>(
             return Ok(None);
         }
         let value = child(&unary.operand)?;
-        return Ok((allow_typed_receiver || value.ty == Type::PythonObject)
+        return Ok((allow_typed_receiver(None, &unary.operand, &value)
+            || value.ty == Type::PythonObject)
             .then(|| Expr::unary(unary.op, value, Type::PythonObject)));
     }
     if let Some(value) =
@@ -1126,7 +1133,7 @@ impl Region {
             _ => operation(
                 node,
                 source,
-                false,
+                |_, _, _| false,
                 ir::control::boolean_literal,
                 |_| true,
                 |child| self.operand(child, source).ok_or(()),
@@ -1367,41 +1374,31 @@ impl Checker<'_> {
                 previous = Some(dynamic);
             }
         }
-        // These methods consume or produce an iterable through Python's string protocol.
-        // A typed receiver in this frame can still be a subclass with an overriding method.
-        let method = node
-            .as_call_expr()
-            .filter(|_| self.registered_local_start.is_some())
-            .and_then(|call| source.direct_method(call));
-        let string_method = method.is_some_and(|method| {
-            matches!(method.attr.as_str(), "join" | "split" | "replace")
-                && graph.session.scalar_type(owner, &method.value) == Some(Type::Str)
-        });
-        // A parameter read in this frame returns the caller's object. Its attribute
-        // must be looked up at the use, even when the signature has a fixed layout.
-        let attribute = node.as_attribute_expr();
-        let typed_receiver = string_method
-            || method
-                .or(attribute)
-                .and_then(|method| method.value.as_name_expr())
-                .and_then(|name| self.names.get(name.id.as_str()))
-                .is_some_and(|&slot| {
-                    self.registered_local_start
-                        .is_some_and(|first| slot < first)
-                        && (attribute.is_some()
-                            || matches!(self.locals[slot], Type::ListInt | Type::List(_)))
-                });
-        // Recovery checks each receiver once. Its Python handle can participate in
-        // ordinary lookup or unary dispatch even when inference knows a concrete type.
-        let checked_frame = self.registered_local_start.is_some();
+        let first_local = self.registered_local_start;
+        let mut string_method = false;
         let Some(mut value) = operation(
             node,
             source,
-            typed_receiver,
+            |method, receiver, operand| {
+                let Some(first) = first_local else {
+                    return false;
+                };
+                // A parameter read in this frame is the object supplied by the caller.
+                let parameter = receiver.is_name_expr()
+                    && matches!(operand.without_location().kind, ExprKind::Local(slot) if slot < first);
+                if let Some(name) = method {
+                    string_method = matches!(name, "join" | "split" | "replace")
+                        && graph.session.scalar_type(owner, receiver) == Some(Type::Str);
+                    string_method
+                        || parameter && matches!(operand.ty, Type::ListInt | Type::List(_))
+                } else {
+                    node.is_attribute_expr() && parameter
+                }
+            },
             // Even a skipped operand participates in static argument and result checking.
             |_| None,
             |receiver| {
-                checked_frame
+                first_local.is_some()
                     || graph.session.is_dynamic_receiver(owner, receiver)
                     || node
                         .as_call_expr()

@@ -3520,10 +3520,11 @@ impl SourceScope<'_> {
                     );
                 }
             }
+            let class = matches!(self.kind, RegisteredScope::Class);
             values::operation(
                 expr,
                 self.source,
-                matches!(self.kind, RegisteredScope::Class),
+                |_, _, _| class,
                 ir::control::boolean_literal,
                 |_| true,
                 |child| {
