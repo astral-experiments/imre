@@ -9,7 +9,11 @@ from tempfile import TemporaryDirectory
 
 
 PROBE = '''\
+import concurrent
 import sys
+
+print('package', concurrent is sys.modules['concurrent'],
+      hasattr(concurrent, '__path__'), concurrent.__doc__)
 
 # Both candidates have the same module name. Only the first import sees the project file.
 sys.modules.pop('reprlib', None)
@@ -105,6 +109,7 @@ def main():
         providers = {origin: [] for origin in origins}
         for unit in ir.glob('*.ll'):
             body = unit.read_bytes()
+            assert b'c"<imre stdlib>/concurrent/__init__.py\\00"' not in body, unit
             for origin in origins:
                 if b'c"<imre stdlib>/' + origin + b'\\00"' in body:
                     providers[origin].append(unit.stem.encode())
