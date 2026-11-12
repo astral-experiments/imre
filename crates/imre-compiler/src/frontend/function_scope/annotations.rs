@@ -135,7 +135,6 @@ impl ClassAnnotations {
         self.reads = reads;
         self.incomplete = !complete;
         self.reads.insert("__classdict__".into());
-        self.sites.sort_unstable_by_key(|entry| entry.site);
         let mut conditional = 0;
         for entry in &mut self.sites {
             if class
