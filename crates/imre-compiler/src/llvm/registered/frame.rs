@@ -214,6 +214,10 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
     }
 
     fn finish(&mut self, module: bool) -> String {
+        self.output
+            .declarations
+            .integers
+            .include(self.body.integers);
         let name = format!("@code{}", self.id);
         if !self.body.terminated {
             self.return_value("0");

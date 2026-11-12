@@ -9,6 +9,7 @@ pub(super) struct Output {
     /// Whether a reference to this named type also needs its destruction descriptor.
     pub(super) record_types: HashMap<Type, bool>,
     units: Vec<String>,
+    integers: Vec<body::IntegerFunctions>,
     common: Option<String>,
     pub entry: usize,
     pub current: usize,
@@ -40,6 +41,7 @@ impl Output {
         Self {
             record_types: HashMap::new(),
             units: vec![String::new(); count],
+            integers: vec![body::IntegerFunctions::default(); count],
             common: split.then(|| "source_filename = \"imre-unit\"\n".to_owned()),
             entry,
             current: entry,
@@ -53,6 +55,10 @@ impl Output {
 
     pub(super) fn whole(functions: usize) -> Self {
         Self::new(std::iter::repeat_n(0, functions), 1, 0, false)
+    }
+
+    pub(super) fn include_integers(&mut self, function: body::IntegerFunctions) {
+        self.integers[self.current].include(function);
     }
 
     pub fn split(&self) -> bool {
@@ -246,6 +252,9 @@ impl Output {
         program: NativeProgram,
     ) -> Result<Vec<String>, Unsupported> {
         emit_program(module, ranges, sanitize, &mut self, program)?;
+        for (integers, unit) in self.integers.into_iter().zip(&mut self.units) {
+            integers.write(unit, false);
+        }
         let Some(common) = self.common else {
             return Ok(self.units);
         };
@@ -324,6 +333,35 @@ mod tests {
             assert_eq!(uses > 0, unit.name == "loops");
             assert_eq!(definitions, usize::from(uses > 0));
             assert!(!unit.llvm_ir.contains("@imre_repeat_fadd"));
+        }
+    }
+
+    #[test]
+    fn arithmetic_definitions_follow_calls_in_their_own_unit() {
+        let temp = tempfile::tempdir().unwrap();
+        let entry = temp.path().join("main.py");
+        fs::write(
+            &entry,
+            "from math_ops import add, magnitude\nprint(add(1, magnitude(-2)))\n",
+        )
+        .unwrap();
+        fs::write(temp.path().join("math_ops.py"), "def add(a: int, b: int) -> int:\n    return a + b\ndef magnitude(n: int) -> int:\n    return -n if n < 0 else n\n").unwrap();
+        let compiled =
+            crate::compile_file_units(&entry, None, &crate::CompileOptions::default()).unwrap();
+        for unit in compiled.units {
+            let ir = unit.llvm_ir;
+            for helper in ["add", "sub", "mul", "mod", "abs", "abs_slow"] {
+                let defined = ir
+                    .matches(&format!("define internal i64 @int_{helper}("))
+                    .count();
+                assert_eq!(
+                    defined,
+                    usize::from(ir.contains(&format!("call i64 @int_{helper}("))),
+                    "{}: {helper}",
+                    unit.name
+                );
+            }
+            assert_eq!(ir.contains("call i64 @int_add("), unit.name == "math_ops");
         }
     }
 

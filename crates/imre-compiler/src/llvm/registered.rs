@@ -13,7 +13,7 @@ use crate::frontend::{
     RegisteredRegion, RegisteredSuite,
 };
 use crate::ir::DisplayKind;
-use crate::ir::{self, Binary, Builtin, Expr, ExprKind, Statement, Type};
+use crate::ir::{self, Builtin, Expr, ExprKind, Statement, Type};
 use crate::llvm::LoopTarget;
 use crate::llvm::body::FunctionBody;
 pub(crate) use abi::{ABI, CallArguments, Output, permanent};
@@ -897,16 +897,6 @@ impl<'f> Frame<'f, '_, '_> {
         self.code.jump(&done);
         self.code.label(&done);
     }
-    pub(crate) fn declare_integer_arithmetic(&mut self, op: Binary) {
-        match op {
-            Binary::Add => self.code.output.declarations.checked_integer_add = true,
-            Binary::Subtract => self.code.output.declarations.checked_integer_subtract = true,
-            Binary::Multiply => self.code.output.declarations.checked_integer_multiply = true,
-            Binary::Modulo => self.code.output.declarations.checked_integer_modulo = true,
-            _ => unreachable!("expected checked integer operation"),
-        }
-    }
-
     pub(crate) fn integer(&mut self, text: &str, integer: Option<i64>) -> CheckedValue {
         match integer {
             Some(n) => CheckedValue::rooted_integer(self.code.integer(n), n),

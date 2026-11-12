@@ -624,6 +624,9 @@ fn emit_program(
         }
         let frame = function_source_frame(module, &repr_methods, id);
         emitter.function(function, entry.then_some(attrs), frame, &borrows[id])?;
+        emitter
+            .output
+            .include_integers(std::mem::take(&mut emitter.body.integers));
         bodies.push(std::mem::take(&mut emitter.body.code));
     }
     emitter
@@ -4270,9 +4273,17 @@ impl Emitter<'_, '_> {
         self.operand(expression)
     }
 
+    fn integer_absolute(&mut self, value: &Value) -> Value {
+        self.output
+            .local_helper("int_abs", conditionals::INTEGER_ABSOLUTE_HELPER);
+        // The slow absolute-value path negates a heap word with tagged subtraction.
+        self.body.integers.require(Binary::Subtract);
+        self.call("int_abs", Type::Int, &[value])
+    }
+
     fn absolute_choice(&mut self, test: &Expr, yes: &Expr, no: &Expr) -> Option<Value> {
         let value = self.operand(conditionals::absolute_operand(test, yes, no)?);
-        let result = self.call("int_abs", Type::Int, &[&value.value]);
+        let result = self.integer_absolute(&value.value);
         self.release_operand(&value);
         Some(result)
     }
@@ -11559,13 +11570,7 @@ done:
             .unwrap();
         }
     }
-    for op in [Binary::Add, Binary::Subtract, Binary::Multiply] {
-        output.push_str(&integer_arithmetic_helper(op));
-    }
-    output.push_str(conditionals::INTEGER_ABSOLUTE_HELPER);
-    for op in [Binary::FloorDivide, Binary::Modulo] {
-        output.push_str(&division_helper(op));
-    }
+    output.push_str(&division_helper(Binary::FloorDivide));
     output.push_str(&bitwise_helpers());
     output.push_str(
         r#"
@@ -11591,19 +11596,27 @@ big:
 }
 
 /// Tagged add, subtract and multiply used by checked integer operations in either call ABI.
-pub(crate) fn integer_arithmetic_helper(op: Binary) -> String {
+fn write_integer_arithmetic(output: &mut String, op: Binary, declare_overflow: bool) {
     let (op, intrinsic, number) = match op {
         Binary::Add => ("add", "sadd", 0),
         Binary::Subtract => ("sub", "ssub", 1),
         Binary::Multiply => ("mul", "smul", 2),
         _ => unreachable!("expected integer addition, subtraction or multiplication"),
     };
+    if declare_overflow {
+        writeln!(
+            output,
+            "declare {{ i64, i1 }} @llvm.{intrinsic}.with.overflow.i64(i64, i64)"
+        )
+        .unwrap();
+    }
     let (left, decode) = if op == "mul" {
         ("%x", "  %x = ashr i64 %a, 1\n")
     } else {
         ("%a", "")
     };
-    format!(
+    write!(
+        output,
         r#"
 define internal i64 @int_{op}(i64 %a, i64 %b) alwaysinline {{
 entry:
@@ -11626,6 +11639,7 @@ big:
 }}
 "#
     )
+    .unwrap();
 }
 
 /// A power of two has a nonnegative Python remainder even for negative dividends.
@@ -12760,7 +12774,11 @@ def handler(a: defaultdict[str, list[int]], b: defaultdict[str, list[int]]) -> l
 
     #[test]
     fn integer_fast_results_are_odd_only_after_the_overflow_guard() {
-        let helpers = super::integer_helpers();
+        let helpers = compile(
+            "def arithmetic(a: int, b: int) -> int:\n    return (a + b) * (a - b)\n",
+            &CompileOptions::default(),
+        )
+        .unwrap();
         for (operation, number) in [("add", 0), ("sub", 1), ("mul", 2)] {
             let body = helpers
                 .split_once(&format!("define internal i64 @int_{operation}("))

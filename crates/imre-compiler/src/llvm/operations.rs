@@ -477,11 +477,8 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
     ) -> CheckedValue {
         let (a, check_a) = self.integer_operand(left);
         let (b, check_b) = self.integer_operand(right);
-        match &mut self.0 {
-            Entry::Native(emitter) => {
-                return CheckedValue::owned(emitter.integer_arithmetic(op, &a, &b));
-            }
-            Entry::Registered(frame) => frame.declare_integer_arithmetic(op),
+        if let Entry::Native(emitter) = &mut self.0 {
+            return CheckedValue::owned(emitter.integer_arithmetic(op, &a, &b));
         }
         let out = self.body();
         // A declined projection is zero. Integer zero is the tagged word one.
