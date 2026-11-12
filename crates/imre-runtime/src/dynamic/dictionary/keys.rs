@@ -1211,6 +1211,13 @@ impl Context {
         key: Id,
         value: Id,
     ) -> Result<bool> {
+        if !matches!(
+            self.heap.get(dict),
+            Value::Dict(_) | Value::DefaultDict { .. }
+        ) {
+            self.put_item(dict, key, value)?;
+            return Ok(false);
+        }
         self.heap.keep(value);
         let (hash, index) = self.find_dictionary_key(dict, key, None)?;
         let previous = index.map(|i| self.stored_entries(dict)[i].1);
