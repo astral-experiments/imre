@@ -306,24 +306,20 @@ impl Callback {
             };
             keys.push(key);
         }
-        let defaults = match ctx.heap.get(defaults) {
-            Value::Tuple(values) => values.as_slice(),
-            _ => &[],
-        };
+        let num_defaults = ctx.tuple_elements(defaults).map_or(0, <[_]>::len);
         let binding = shape
             .bind(
                 ctx.str_value(code.name)?,
                 pos.len(),
                 keys.iter().copied(),
-                defaults.len(),
+                num_defaults,
                 |name| ctx.dict_named_item(kwdefaults, name).is_some(),
             )
             .map_err(|error| match error {
                 crate::source_arguments::Error::Memory => Error::new("MemoryError", ""),
                 crate::source_arguments::Error::Type(_) => unsupported(),
             })?;
-        let positional = shape.positional.len();
-        let count = positional + shape.keyword_only.len();
+        let count = shape.positional.len() + shape.keyword_only.len();
         let mut bound = Vec::new();
         bound
             .try_reserve_exact(count)
@@ -334,12 +330,7 @@ impl Callback {
             bound[slot.expect("nonvariadic keyword")] = value;
         }
         for slot in binding.defaults {
-            bound[slot] = if slot < positional {
-                defaults[slot + defaults.len() - positional]
-            } else {
-                ctx.dict_named_item(kwdefaults, shape.parameter(slot))
-                    .expect("bound keyword default")
-            };
+            bound[slot] = ctx.bound_default(&shape, slot, defaults, kwdefaults);
         }
         let mut values = Vec::new();
         values

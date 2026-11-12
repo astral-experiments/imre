@@ -9098,6 +9098,25 @@ impl Context {
         )
     }
 
+    /// Read a default selected by the Python argument binder from the function's live storage.
+    pub(super) fn bound_default(
+        &self,
+        shape: &crate::source_arguments::Shape<'_, String>,
+        slot: usize,
+        defaults: Id,
+        kwdefaults: Id,
+    ) -> Id {
+        if slot < shape.positional.len() {
+            let values = self
+                .tuple_elements(defaults)
+                .expect("bound positional default");
+            values[slot + values.len() - shape.positional.len()]
+        } else {
+            self.dict_named_item(kwdefaults, shape.parameter(slot))
+                .expect("bound keyword default")
+        }
+    }
+
     fn prepare_function(
         &mut self,
         callable: Id,
@@ -9176,13 +9195,9 @@ impl Context {
                 variadic,
             } => {
                 let pos = &sig.positional;
-                let default_values = if defaults == NONE {
-                    Vec::new()
-                } else {
-                    self.items(defaults)?
-                };
+                let num_defaults = self.tuple_elements(defaults).map_or(0, <[_]>::len);
                 let keys = kwargs.iter().map(|(key, _)| key.as_str());
-                let binding = shape.bind(&name, args.len(), keys, default_values.len(), |n| {
+                let binding = shape.bind(&name, args.len(), keys, num_defaults, |n| {
                     self.dict_named_item(kwdefaults, n).is_some()
                 })?;
                 for (n, &v) in pos.iter().zip(&args) {
@@ -9212,14 +9227,8 @@ impl Context {
                 }
                 let supplied_types = self.check_supplied_types(callable, local, &sig, &name);
                 for slot in binding.defaults {
-                    let n = shape.parameter(slot);
-                    let value = if slot < pos.len() {
-                        default_values[slot + default_values.len() - pos.len()]
-                    } else {
-                        self.dict_named_item(kwdefaults, n)
-                            .expect("bound keyword default")
-                    };
-                    self.bind_argument(local, n, value)?;
+                    let value = self.bound_default(&shape, slot, defaults, kwdefaults);
+                    self.bind_argument(local, shape.parameter(slot), value)?;
                 }
                 supplied_types?;
             }
