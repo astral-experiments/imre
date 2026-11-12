@@ -39,9 +39,6 @@ impl Checker<'_> {
     /// Store a protocol operand once, then provide the test and exact values for
     /// its two possible layouts. The caller assigns the operand to the returned slot.
     pub(super) fn protocol_alternatives(&mut self, ty: Type) -> Option<(usize, Expr, Expr, Expr)> {
-        if self.types.payload(ty).is_none() && self.types.members(ty).is_none() {
-            return None;
-        }
         if self
             .types
             .members(ty)
@@ -49,8 +46,18 @@ impl Checker<'_> {
         {
             return None;
         }
+        self.split_protocol_union(ty)
+    }
+
+    /// Split off one possible layout, keeping the remaining alternatives as a typed union.
+    pub(super) fn split_protocol_union(&mut self, ty: Type) -> Option<(usize, Expr, Expr, Expr)> {
+        let payload = self.types.payload(ty);
+        let members = self.types.members(ty);
+        if payload.is_none() && members.is_none() {
+            return None;
+        }
         let slot = self.hidden(ty);
-        let (test, first, second) = if let Some(payload) = self.types.payload(ty) {
+        let (test, first, second) = if let Some(payload) = payload {
             (
                 Expr {
                     ty: Type::Bool,
@@ -63,7 +70,8 @@ impl Checker<'_> {
                 },
             )
         } else {
-            let members = self.types.members(ty).unwrap();
+            let members = members.unwrap();
+            let rest = self.types.union(&members[1..])?;
             // A record stored in the base arm can have any of its concrete layouts.
             let alternatives = match members[0] {
                 Type::Class(base) => self
@@ -87,7 +95,7 @@ impl Checker<'_> {
                     ),
                 },
                 project(members[0]),
-                project(members[1]),
+                project(rest),
             )
         };
         Some((slot, test, first, second))
