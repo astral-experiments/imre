@@ -626,7 +626,8 @@ fn fault_frame_statement(file: String, name: &str, line: u32) -> Statement {
 /// Resolves the project-wide call graph without changing source-level namespaces.
 #[cfg(test)]
 pub(crate) fn lower(graph: &SourceGraph) -> StdResult<ir::Module, String> {
-    lower_current(graph, None, &mut HashSet::new(), &mut Vec::new())
+    lower_current(graph, None, &mut HashSet::new(), &mut Vec::new(), false)
+        .0
         .map_err(|report| report.to_string())?
         .into_native(graph)
         .map(|(module, _)| module)
@@ -641,20 +642,42 @@ pub(crate) fn lower_with_owners(
         .map_err(Into::into)
 }
 
+/// Cached layout hints can keep a shared handle to the graph's quiet Salsa storage.
+pub(crate) enum SourceCheckSession<'a> {
+    Borrowed(&'a mut crate::analysis::Session),
+    SharedGraph,
+}
+
 pub(crate) fn lower_with_caller_cache(
     graph: &mut SourceGraph,
     mut cache: Option<&mut CallerCache>,
-    source_checks: Option<&mut crate::analysis::Session>,
+    source_checks: Option<SourceCheckSession<'_>>,
 ) -> StdResult<crate::CheckedProgram, Diagnostic> {
     let mut key_reprs = HashSet::new();
     loop {
         let before = key_reprs.len();
         graph.missing_repr.set(None);
         let mut unresolved = Vec::new();
-        let lowered = lower_current(graph, cache.take(), &mut key_reprs, &mut unresolved);
+        let (lowered, checks) = lower_current(
+            graph,
+            cache.take(),
+            &mut key_reprs,
+            &mut unresolved,
+            !matches!(source_checks, Some(SourceCheckSession::SharedGraph)),
+        );
         key_reprs.extend(graph.missing_repr.take());
         if key_reprs.len() == before {
-            registered::retain_unresolved_generators(graph, unresolved, source_checks);
+            let session = match source_checks {
+                Some(SourceCheckSession::SharedGraph) => {
+                    for owner in unresolved {
+                        registered::retain_generator(graph, owner, &checks);
+                    }
+                    return lowered;
+                }
+                Some(SourceCheckSession::Borrowed(session)) => Some(session),
+                None => None,
+            };
+            registered::finish_source_checks(graph, unresolved, checks, session);
             return lowered;
         }
         // Only the typed subscript knows the key's class. Include its missing
@@ -668,14 +691,24 @@ fn lower_current(
     cache: Option<&mut CallerCache>,
     key_reprs: &mut HashSet<DefinitionId>,
     unresolved: &mut Vec<DefinitionId>,
-) -> StdResult<crate::CheckedProgram, Diagnostic> {
+    defer_solved: bool,
+) -> (
+    StdResult<crate::CheckedProgram, Diagnostic>,
+    registered::SourceChecks,
+) {
     use crate::modules::FloatComponents;
+    let mut attempt = |cache| {
+        let mut inference = inference::Inference::default();
+        inference.source_checks.solved = defer_solved.then(Default::default);
+        let result = lower_graph(graph, cache, key_reprs, unresolved, &inference);
+        (result, inference.source_checks)
+    };
     graph.float_components.set(FloatComponents::Native);
-    let result = lower_graph(graph, cache, key_reprs, unresolved);
-    if result.is_err() && graph.float_components.get() == FloatComponents::Used {
+    let result = attempt(cache);
+    if result.0.is_err() && graph.float_components.get() == FloatComponents::Used {
         // Recover the original descriptor diagnostic when a later use needs object semantics.
         graph.float_components.set(FloatComponents::Boxed);
-        return lower_graph(graph, None, key_reprs, unresolved);
+        return attempt(None);
     }
     result
 }
@@ -732,6 +765,7 @@ fn lower_graph(
     mut cache: Option<&mut CallerCache>,
     key_reprs: &mut HashSet<DefinitionId>,
     unresolved: &mut Vec<DefinitionId>,
+    inference: &inference::Inference,
 ) -> StdResult<crate::CheckedProgram, Diagnostic> {
     graph.clear_registered_functions();
     unresolved.clear();
@@ -741,7 +775,6 @@ fn lower_graph(
     let (mut classes, mut initializer_defaults) = ClassInfo::new(graph, &types)?;
     dataclass_values::validate(&classes, graph, &types)?;
     let mut signatures = HashMap::new();
-    let inference = inference::Inference::default();
     let mut definitions = Vec::new();
     let mut callable_definitions = Vec::new();
     // A source method needs its original binder and operand sites if its
@@ -846,7 +879,7 @@ fn lower_graph(
                         &classes.declarations,
                         &types,
                         None,
-                        &inference,
+                        inference,
                     )
                     .map_err(|error| format!("{}:{error}", module.path.display()))?;
                     // Rewriting a top-level function takes ownership of its declaration.
@@ -976,7 +1009,7 @@ fn lower_graph(
                 &classes.declarations,
                 &types,
                 Some(context),
-                &inference,
+                inference,
             )
             .map_err(|error| format!("{}:{error}", module.path.display()))?;
             if method.name.as_str() == "__init__" {
@@ -1059,7 +1092,7 @@ fn lower_graph(
         &mut classes,
         &mut definitions,
         &mut callable_definitions,
-        &inference,
+        inference,
         graph,
         &types,
     )?;
@@ -1163,7 +1196,7 @@ fn lower_graph(
                 &signatures,
                 &classes,
                 &types,
-                &inference,
+                inference,
                 needs_registered_entry.then_some(&checked_bodies),
             );
         }

@@ -1177,11 +1177,21 @@ fn checked_lower_with(
     let lowered = if let Some(compiler) = cache.as_deref_mut() {
         let mut fresh = compiler.cache.restore_hints(graph)?;
         let callers = compiler.callers.prepare(graph);
-        let result = frontend::lower_with_caller_cache(graph, callers, fresh.as_mut());
+        let result = frontend::lower_with_caller_cache(
+            graph,
+            callers,
+            fresh.as_mut().map(frontend::SourceCheckSession::Borrowed),
+        );
         compiler.cache.retain_hints(graph, result.is_ok());
         result
     } else {
-        frontend::lower_with_caller_cache(graph, None, retry_checks.as_mut())
+        let source_checks = retry_checks
+            .as_mut()
+            .map(frontend::SourceCheckSession::Borrowed)
+            .or_else(|| {
+                retry_with_cached_hints.then_some(frontend::SourceCheckSession::SharedGraph)
+            });
+        frontend::lower_with_caller_cache(graph, None, source_checks)
     };
     // Registered-body admission runs after checking the application's source contracts.
     if let Some(error) = call_error {
