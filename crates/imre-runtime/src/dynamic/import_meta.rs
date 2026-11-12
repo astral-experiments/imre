@@ -160,9 +160,18 @@ impl Context {
         self.module_code(source.code, Path::new(&format!("<frozen {original}>")))
     }
 
+    fn target_native_module(&self, name: &str) -> bool {
+        stdlib::is_module(name) && !self.installed_module(name)
+    }
+
+    fn installed_module(&self, name: &str) -> bool {
+        let members = self.config["stdlib_members"].as_str().unwrap_or_default();
+        imre_ast::providers::module_member(name, members.lines()).is_some()
+    }
+
     pub(super) fn sealed_native(&self, name: &str) -> bool {
         self.is_frozen(name)
-            || (stdlib::is_module(name)
+            || (self.target_native_module(name)
                 && !imre_ast::providers::is_native_package(name)
                 && !imre_ast::providers::is_native_fallback(name))
     }
@@ -172,7 +181,9 @@ impl Context {
         let name = self.str_value(key)?;
         let sealed = self.sealed_native(name);
         let registration = self.bundled_registration(name);
-        if sealed == bundled || (!sealed && registration.is_none() && !stdlib::is_module(name)) {
+        if sealed == bundled
+            || (!sealed && registration.is_none() && !self.target_native_module(name))
+        {
             return Err(Self::missing_module(name, key));
         }
         Ok(registration)
@@ -257,7 +268,7 @@ impl Context {
         builtin_module_names::owns(
             name,
             || self.is_frozen(name),
-            || self.bundled_registration(name).is_some(),
+            || self.bundled_registration(name).is_some() || self.installed_module(name),
         )
     }
 
@@ -267,7 +278,7 @@ impl Context {
             return Ok(NONE);
         }
         let source = self.bundled_source(name);
-        if source.is_none() && !stdlib::is_module(name) {
+        if source.is_none() && !self.target_native_module(name) {
             return Ok(NONE);
         }
         if bundled && path != NONE {
@@ -354,7 +365,7 @@ impl Context {
 
     pub(super) fn create_native_module(&mut self, name: &str) -> Result<Id> {
         let source = self.bundled_source(name);
-        if source.is_none() && !stdlib::is_module(name) {
+        if source.is_none() && !self.target_native_module(name) {
             return Err(Self::missing_module(name, self.text(name)));
         }
         let locations = self.native_locations(name, source.as_ref().map(|(p, _)| p.as_path()))?;
@@ -380,7 +391,7 @@ impl Context {
         let source = self
             .bundled_source(&name)
             .map(|(path, code)| (path, code, origin));
-        if source.is_none() && !stdlib::is_module(&name) {
+        if source.is_none() && !self.target_native_module(&name) {
             return Err(Self::missing_module(&name, name_id));
         }
         self.run_initializer(&name, module, scope, name_id, NONE, source)?;
