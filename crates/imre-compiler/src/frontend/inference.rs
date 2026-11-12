@@ -1458,7 +1458,7 @@ impl Checker<'_> {
         if direct
             && signature.params.len() == 1
             && let [value] = args.values.as_slice()
-            && self.terminating_call(value)
+            && self.terminating_operand(value)
         {
             return Ok(scope.finish(args.values.pop().expect("one checked argument")));
         }
@@ -1537,25 +1537,14 @@ impl Checker<'_> {
                 let index = index + skip;
                 let parameter = &signature.params[index];
                 let declaration = signature.parameter_declaration(index);
-                // A direct source call supplies its own result layout. Keep the checked
-                // value for the ordinary binder if it returns to this argument.
-                let node = argument.site();
-                let argument = if direct_input
-                    && let Some(inner) = node.as_call_expr()
-                    && (matches!(checker.resolve(&inner.func), Some(Binding::Definition(id)) if checker.functions.contains_key(&id))
-                        || inner.func.as_name_expr()
-                            .and_then(|name| checker.names.get(name.id.as_str()))
-                            .and_then(|&slot| checker.saved_call_target(slot))
-                            .is_some_and(|id| checker.nonreturning_functions.contains(&id)))
-                {
-                    let value = argument.value(checker)?;
-                    if checker.terminating_call(&value) {
-                        return Ok(value);
-                    }
-                    calls::Supplied::Field(value, node)
-                } else {
-                    argument
-                };
+                let direct_value =
+                    |checker: &Checker<'_>, value: Expr, expected, site: &ast::Expr| {
+                        if direct_input && checker.terminating_operand(&value) {
+                            Ok(value)
+                        } else {
+                            checker.direct_value(value, site, expected, parameter.sign_only)
+                        }
+                    };
                 if selector_wait && parameter.name == "timeout" {
                     let node = argument.site();
                     let value = argument.value(checker)?;
@@ -1575,11 +1564,12 @@ impl Checker<'_> {
                     };
                 }
                 let Some(inference) = inference else {
-                    return argument.checked(
+                    return argument.check_with(
                         checker,
                         parameter.ty,
                         parameter.sign_only,
                         declaration,
+                        direct_value,
                     );
                 };
                 let node = argument.site();
@@ -1713,7 +1703,7 @@ impl Checker<'_> {
                                     );
                                     Ok(value)
                                 } else {
-                                    checker.direct_value(value, site, expected, parameter.sign_only)
+                                    direct_value(checker, value, expected, site)
                                 }
                             },
                         )?
@@ -1723,7 +1713,9 @@ impl Checker<'_> {
                     checker.keep_module_list_layout(&value);
                     value
                 };
-                inference.learn_parameter(signature.id, index, value.ty);
+                if !direct_input || !checker.terminating_operand(&value) {
+                    inference.learn_parameter(signature.id, index, value.ty);
+                }
                 Ok(value)
             },
         )

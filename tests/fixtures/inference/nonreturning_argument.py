@@ -19,4 +19,8 @@ try:
     print(take(through_stop()))
 except ValueError as error:
     print(str(error))
+try:
+    take(print("unreached", stop()))
+except ValueError as error:
+    print(str(error))
 print("after")
