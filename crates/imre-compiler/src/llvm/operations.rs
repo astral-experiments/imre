@@ -633,11 +633,12 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         }
         let checked_ints =
             left.checked_operand_type() == Type::Int && right.checked_operand_type() == Type::Int;
-        let arithmetic = matches!(op, Binary::Add | Binary::Subtract | Binary::Multiply)
+        let positioned = matches!(op, Binary::Add | Binary::Subtract | Binary::Multiply)
+            || op == Binary::Modulo && checked_ints;
+        let arithmetic = positioned
             && (matches!(site, OperationSite::Placed(..))
                 || expr.ty == Type::PythonObject
-                || checked_ints)
-            || op == Binary::Modulo && checked_ints;
+                || checked_ints);
         let (left_use, right_use) =
             if arithmetic && (op == Binary::Multiply || checked_ints || usage.needs_integer()) {
                 // The left operand must be ready before the right can call Python.
@@ -662,7 +663,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 OperationSite::Placed(range, _) | OperationSite::Registered(range),
                 Some(lhs),
                 Some(rhs),
-            ) if arithmetic => frame.binary_span(range, lhs, rhs, op),
+            ) if positioned => frame.binary_span(range, lhs, rhs, op),
             _ => None,
         };
         let result = if op == Binary::Modulo

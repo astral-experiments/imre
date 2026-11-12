@@ -1207,6 +1207,10 @@ impl Checker<'_> {
             // The fixed call checker binds the positional signature and result type.
             return Ok(None);
         }
+        if let ast::Expr::Named(named) = node {
+            let value = self.named_expression(named, None)?;
+            return Ok(Some(source.located(node, value)));
+        }
         if let ast::Expr::BinOp(binary) = node {
             let value = self.binary_operation(binary)?;
             return Ok(Some(source.located(node, value)));
