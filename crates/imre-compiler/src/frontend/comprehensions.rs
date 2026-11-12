@@ -100,6 +100,50 @@ pub(super) fn dict_entry(
     }
 }
 
+/// The creating frame acquires the outer iterator before the target names shadow it.
+pub(super) fn acquire_in_namespace(
+    input: &mut pipelines::Prepared,
+    namespace: usize,
+    parent: Option<usize>,
+    names: Vec<String>,
+) -> Vec<Statement> {
+    let mut body = std::mem::take(&mut input.evaluate);
+    body.append(&mut input.acquire);
+    body.push(Statement::Assign(
+        namespace,
+        Expr {
+            ty: Type::PythonObject,
+            kind: ExprKind::Builtin(
+                Builtin::RegisteredNamespace(names),
+                parent
+                    .map(|slot| Expr::local(slot, Type::PythonObject))
+                    .into_iter()
+                    .collect(),
+            ),
+        },
+    ));
+    body
+}
+
+/// The result escapes the display. Private slots unwind together, except for
+/// assignment expressions that wrote a binding in the surrounding function.
+pub(super) fn scoped_result(
+    body: Vec<Statement>,
+    value: Expr,
+    private: std::ops::Range<usize>,
+    exported: impl Iterator<Item = usize>,
+) -> Expr {
+    let exported: HashSet<_> = exported.filter(|slot| private.contains(slot)).collect();
+    Expr {
+        ty: value.ty,
+        kind: ExprKind::Scope {
+            body,
+            value: Box::new(value),
+            clear: private.filter(|slot| !exported.contains(slot)).collect(),
+        },
+    }
+}
+
 /// A consumer can fuse integer addition into an eager list plan.
 #[derive(Clone, Copy)]
 pub(super) enum Collector {
@@ -1041,24 +1085,10 @@ impl Checker<'_> {
             let Iteration::Prepared(cursor) = &mut input else {
                 unreachable!("Python iterables have an explicit acquisition")
             };
-            prefix.append(&mut cursor.evaluate);
-            prefix.append(&mut cursor.acquire);
             let slot = self.hidden(Type::PythonObject);
             let mut declared: Vec<_> = targets.iter().cloned().collect();
             declared.sort();
-            prefix.push(Statement::Assign(
-                slot,
-                Expr {
-                    ty: Type::PythonObject,
-                    kind: ExprKind::Builtin(
-                        Builtin::RegisteredNamespace(declared),
-                        enclosing
-                            .map(|parent| self.local(parent))
-                            .into_iter()
-                            .collect(),
-                    ),
-                },
-            ));
+            prefix = acquire_in_namespace(cursor, slot, enclosing, declared);
             self.namespace = Some(slot);
         }
         let scope = self.enter_comprehension(targets.clone());
@@ -1086,7 +1116,7 @@ impl Checker<'_> {
         }
         self.namespace = enclosing;
         let exports = self.leave_comprehension(scope);
-        let ty = checked?;
+        checked?;
         if first_pull && !writes.is_empty() {
             // A filter runs before it can suppress the output or the next clause.
             let mut bind = |expression| {
@@ -1109,18 +1139,12 @@ impl Checker<'_> {
                 self.narrowed.remove_mut(slot);
             }
         }
-        let exported = exports.into_values().collect::<HashSet<_>>();
-        let clear = (first_private..self.locals.len())
-            .filter(|slot| !exported.contains(slot))
-            .collect();
-        Ok(Expr {
-            ty,
-            kind: ExprKind::Scope {
-                body: prefix,
-                value: Box::new(self.local(result)),
-                clear,
-            },
-        })
+        Ok(scoped_result(
+            prefix,
+            self.local(result),
+            first_private..self.locals.len(),
+            exports.into_values(),
+        ))
     }
 
     pub(super) fn forget_comprehension_writes(&mut self, plan: &Plan<'_>, depth: usize) {

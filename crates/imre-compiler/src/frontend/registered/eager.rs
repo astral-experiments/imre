@@ -1,7 +1,9 @@
 //! Eager displays in prepared Python suites use the checked frontend's loop traversal.
 
 use super::*;
-use crate::frontend::comprehensions::{Collector, EagerDisplay, async_pull};
+use crate::frontend::comprehensions::{
+    Collector, EagerDisplay, acquire_in_namespace, async_pull, scoped_result,
+};
 use imre_ast::comprehension::{Output, Plan};
 
 pub(super) struct Namespace {
@@ -34,8 +36,6 @@ impl SourceScope<'_> {
         // The first iterable belongs to the creating frame and runs before this cursor exists.
         let first = &plan.clauses[0];
         let mut input = self.creating_iterable(|scope| scope.input(first)).ok()?;
-        let mut prefix = std::mem::take(&mut input.evaluate);
-        prefix.append(&mut input.acquire);
         let namespace = self.hidden(Type::PythonObject);
         let mut names: Vec<_> = plan.target_names().into_iter().collect();
         names.sort();
@@ -51,18 +51,8 @@ impl SourceScope<'_> {
             );
             targets.insert(name.clone(), slot);
         }
-        let parent = self
-            .comprehension
-            .as_ref()
-            .map(|scope| Expr::local(scope.slot, Type::PythonObject));
-        prefix.push(Statement::Assign(
-            namespace,
-            operation(
-                Builtin::RegisteredNamespace(names),
-                Type::PythonObject,
-                parent.into_iter().collect(),
-            ),
-        ));
+        let parent = self.comprehension.as_ref().map(|scope| scope.slot);
+        let mut prefix = acquire_in_namespace(&mut input, namespace, parent, names);
         let result = self.hidden(Type::PythonObject);
         let outer = self.comprehension.replace(Namespace {
             slot: namespace,
@@ -78,19 +68,12 @@ impl SourceScope<'_> {
         );
         self.comprehension = outer;
         checked.ok()?;
-        // A walrus writes into the enclosing activation. Release only the display's private slots.
-        let exported: HashSet<_> = self.names.values().copied().collect();
-        let clear = (first_private..self.locals.len())
-            .filter(|slot| !exported.contains(slot))
-            .collect();
-        Some(Expr {
-            ty: Type::PythonObject,
-            kind: ExprKind::Scope {
-                body: prefix,
-                value: Box::new(Expr::local(result, Type::PythonObject)),
-                clear,
-            },
-        })
+        Some(scoped_result(
+            prefix,
+            Expr::local(result, Type::PythonObject),
+            first_private..self.locals.len(),
+            self.names.values().copied(),
+        ))
     }
 }
 
