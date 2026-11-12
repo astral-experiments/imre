@@ -218,32 +218,28 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         if !self.body.terminated {
             self.return_value("0");
         }
-        let mut entry = if self.max_live == 0 {
-            String::new()
-        } else {
-            format!("  %live = alloca [{} x i64]\n", self.max_live)
-        };
+        if self.max_live != 0 {
+            self.body
+                .entry_slot("%live", format_args!("[{} x i64]", self.max_live), None);
+        }
         let count = self.private_slot_count;
         if count != 0 {
-            writeln!(
-                entry,
-                "  %ir_slot0 = alloca [{count} x i64]\n  store [{count} x i64] zeroinitializer, ptr %ir_slot0"
-            )
-            .unwrap();
+            self.body.entry_slot(
+                "%ir_slot0",
+                format_args!("[{count} x i64]"),
+                Some("zeroinitializer"),
+            );
             for slot in 1..count {
                 writeln!(
-                    entry,
+                    self.body.entry,
                     "  %ir_slot{slot} = getelementptr i64, ptr %ir_slot0, i64 {slot}"
                 )
                 .unwrap();
             }
         }
         for slot in 0..self.integer_owners {
-            writeln!(
-                entry,
-                "  %int_owner{slot} = alloca i64\n  store i64 1, ptr %int_owner{slot}"
-            )
-            .unwrap();
+            self.body
+                .entry_slot(format_args!("%int_owner{slot}"), "i64", Some("1"));
         }
         // A loaded code object owns its identifier-like strings before any statement runs.
         if module && !self.output.interned_identifiers.is_empty() {
@@ -253,7 +249,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
                 .join("\0");
             let data = self.output.data(names.as_bytes());
             writeln!(
-                entry,
+                self.body.entry,
                 "  call i64 @imre_dyn_lit(ptr %ctx, i32 5, ptr {data}, i64 {})",
                 names.len()
             )
@@ -271,14 +267,14 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
                 .line("call void @imre_dyn_suspend_return(ptr %context_slot, i64 0)");
             self.body.jump("complete");
             writeln!(self.output.functions,
-                "define internal ptr {name}(ptr %context_slot, i64 %scope) presplitcoroutine {{\nentry:\n{entry}{}{}{} }}",
-                suspension::PROLOGUE, self.body.code, suspension::EPILOGUE).unwrap();
+                "define internal ptr {name}(ptr %context_slot, i64 %scope) presplitcoroutine {{\nentry:\n{}{}{}{} }}",
+                self.body.entry, suspension::PROLOGUE, self.body.code, suspension::EPILOGUE).unwrap();
         } else {
             self.body.end("ret i64 0");
             writeln!(
                 self.output.functions,
-                "define internal i64 {name}(ptr %ctx, i64 %scope) {{\nentry:\n{entry}{}}}",
-                self.body.code
+                "define internal i64 {name}(ptr %ctx, i64 %scope) {{\nentry:\n{}{}}}",
+                self.body.entry, self.body.code
             )
             .unwrap();
         }

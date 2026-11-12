@@ -526,7 +526,6 @@ fn emit_program(
         module,
         output,
         body: body::FunctionBody::new("entry", ""),
-        entry_allocas: String::new(),
         mapping_words: 0,
         forward_cursors: BTreeMap::new(),
         uses_forward_cursors: false,
@@ -824,7 +823,6 @@ struct Emitter<'a, 'module> {
     module: &'a Module,
     output: &'a mut Output,
     body: body::FunctionBody,
-    entry_allocas: String,
     mapping_words: usize,
     forward_cursors: BTreeMap<usize, ForwardCursor>,
     uses_forward_cursors: bool,
@@ -945,7 +943,7 @@ impl Emitter<'_, '_> {
     /// including operations inside loops and duplicated finally cleanup paths.
     fn entry_alloca(&mut self, ty: impl AsRef<str>) -> String {
         let result = self.body.name("%scratch");
-        writeln!(self.entry_allocas, "  {result} = alloca {}", ty.as_ref()).unwrap();
+        self.body.entry_slot(&result, ty.as_ref(), None);
         result
     }
 
@@ -2246,7 +2244,7 @@ impl Emitter<'_, '_> {
         let entry = main_attrs.is_some();
         self.uses_regex_positions =
             self.module_reads_regex_positions && regex_positions_may_escape(self.module, function);
-        self.entry_allocas.clear();
+        self.body.entry.clear();
         self.mapping_words = 0;
         self.locals = function.locals.clone();
         self.borrowed_locals = borrows.locals.clone();
@@ -2379,14 +2377,14 @@ impl Emitter<'_, '_> {
             self.locals[slot] = Type::Str;
             let start = invariant.contains(&slot).then(|| {
                 let start = self.entry_alloca("ptr");
-                writeln!(self.entry_allocas, "  store ptr null, ptr {start}").unwrap();
+                writeln!(self.body.entry, "  store ptr null, ptr {start}").unwrap();
                 start
             });
             let next = self.entry_alloca("ptr");
             let end = self.entry_alloca("ptr");
             if estimated.contains(&slot) {
-                writeln!(self.entry_allocas, "  store ptr null, ptr {next}").unwrap();
-                writeln!(self.entry_allocas, "  store ptr null, ptr {end}").unwrap();
+                writeln!(self.body.entry, "  store ptr null, ptr {next}").unwrap();
+                writeln!(self.body.entry, "  store ptr null, ptr {end}").unwrap();
             }
             self.forward_cursors
                 .insert(slot, ForwardCursor { next, end, start });
@@ -2459,27 +2457,25 @@ impl Emitter<'_, '_> {
             }
         }
         if function.returns != Type::None {
-            let ty = function.returns.llvm();
-            self.line(format!("%function_return = alloca {ty}"));
-            self.line(format!(
-                "store {ty} {}, ptr %function_return",
-                function.returns.initial()
-            ));
+            self.body.stack_slot(
+                "%function_return",
+                function.returns.llvm(),
+                Some(function.returns.initial()),
+            );
         }
         for (slot, &ty) in function.locals.iter().enumerate() {
             if self.byte_output_owners.get(slot) == Some(&Some(slot)) {
-                self.line(format!("%byte_window{slot} = alloca {{ ptr, i64, i64 }}"));
+                self.body.stack_slot(
+                    format_args!("%byte_window{slot}"),
+                    "{ ptr, i64, i64 }",
+                    None,
+                );
             }
-            self.line(format!("%local{slot} = alloca {}", ty.llvm()));
             // Parameters initialize exactly once below. ASan can relocate their
             // argument stores into its prologue, ahead of a default initializer.
-            if !function.params.contains(&slot) {
-                self.line(format!(
-                    "store {} {}, ptr %local{slot}",
-                    ty.llvm(),
-                    ty.initial()
-                ));
-            }
+            let initial = (!function.params.contains(&slot)).then(|| ty.initial());
+            self.body
+                .stack_slot(format_args!("%local{slot}"), ty.llvm(), initial);
         }
         for (i, &slot) in function.params.iter().enumerate() {
             let value = Value {
@@ -2658,7 +2654,7 @@ impl Emitter<'_, '_> {
             .into_iter()
             .take(self.mapping_words)
         {
-            writeln!(self.entry_allocas, "  {name} = alloca i64").unwrap();
+            self.body.entry_slot(name, "i64", None);
         }
         if entry {
             // Main is emitted last, including any sequence operations in its own body.
@@ -2681,7 +2677,7 @@ impl Emitter<'_, '_> {
                 ),
             );
         }
-        self.body.code.insert_str(allocas_at, &self.entry_allocas);
+        self.body.code.insert_str(allocas_at, &self.body.entry);
         if self.cleanup_limit_hit {
             return Err(Unsupported(
                 "Imre: finally cleanup expansion exceeds the compiler limit",

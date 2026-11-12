@@ -1,10 +1,12 @@
 //! Instruction output and basic-block state for one LLVM function.
 
-use std::fmt::Write as _;
+use std::fmt::{Display, Write as _};
 
 #[derive(Clone)]
 pub(crate) struct FunctionBody {
     pub(crate) code: String,
+    /// Entry instructions whose storage requirements are discovered while emitting the body.
+    pub(super) entry: String,
     pub(crate) current: String,
     /// Destination after the calling convention has handled its outstanding owners.
     pub(crate) error_target: String,
@@ -17,6 +19,7 @@ impl FunctionBody {
     pub(crate) fn new(entry: &str, error_target: &str) -> Self {
         Self {
             code: String::new(),
+            entry: String::new(),
             current: entry.into(),
             error_target: error_target.into(),
             terminated: false,
@@ -92,6 +95,24 @@ impl FunctionBody {
         }
     }
 
+    pub(super) fn stack_slot(
+        &mut self,
+        name: impl Display,
+        ty: impl Display,
+        initial: Option<&str>,
+    ) {
+        write_slot(&mut self.code, name, ty, initial);
+    }
+
+    pub(super) fn entry_slot(
+        &mut self,
+        name: impl Display,
+        ty: impl Display,
+        initial: Option<&str>,
+    ) {
+        write_slot(&mut self.entry, name, ty, initial);
+    }
+
     pub(crate) fn start(&mut self, label: &str) {
         writeln!(self.code, "{label}:").unwrap();
         self.current = label.into();
@@ -126,5 +147,14 @@ impl FunctionBody {
         self.end(format!(
             "br i1 {condition}, label %{yes}, label %{no}{metadata}"
         ));
+    }
+}
+
+/// A parameter or scratch slot has no initial owner. Other slots start with the
+/// empty value of their representation before any path can release or replace it.
+fn write_slot(out: &mut String, name: impl Display, ty: impl Display, initial: Option<&str>) {
+    writeln!(out, "  {name} = alloca {ty}").unwrap();
+    if let Some(value) = initial {
+        writeln!(out, "  store {ty} {value}, ptr {name}").unwrap();
     }
 }
