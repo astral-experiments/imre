@@ -28,7 +28,10 @@ pub(super) struct PreparedUnit<'a> {
 /// initializers until every source has passed preparation.
 pub(super) fn units<'a>(
     (files, builtins): (&'a [ModuleSource], &'a [ModuleSource]),
-    mut entry_source: Option<ParsedModule<'a, 'a>>,
+    (mut entry_source, mut normalized_files): (
+        Option<ParsedModule<'a, 'a>>,
+        HashMap<usize, super::LoweredRoot>,
+    ),
     python_optimization: i32,
     (bundled_root, providers): (&'a Path, Option<&'a Providers>),
     module_errors: &'a HashMap<PathBuf, Box<ModuleSyntaxError>>,
@@ -92,6 +95,14 @@ pub(super) fn units<'a>(
             };
             let types = types.filter(|types| types.matches_source(&text));
             let indexed = types.map(|types| types.parsed());
+            // An indexed parser from another check owns different expression and statement IDs.
+            let normalized = normalized_files.remove(&unit).filter(|_| {
+                syntax.as_deref().is_some_and(|original| {
+                    indexed
+                        .as_deref()
+                        .is_none_or(|indexed| std::ptr::eq(indexed, original))
+                })
+            });
             let module = match indexed.as_deref().map(Cow::Borrowed).or(syntax) {
                 Some(parsed) => ParsedModule { text, parsed },
                 None => ParsedModule::parse(path, text)?,
@@ -99,7 +110,7 @@ pub(super) fn units<'a>(
             let mut body = PreparedBody::from_parsed(
                 name,
                 path.as_path(),
-                module,
+                (module, normalized),
                 python_optimization,
                 origin,
                 checked

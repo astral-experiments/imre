@@ -151,17 +151,25 @@ pub(crate) fn lower(
     source: &str,
     body: &mut [ast::Stmt],
 ) -> Result<imre_ast::Names, String> {
-    lower_with_future(path, source, body, false)
+    let private_names = lower_with_future(body, false);
+    validate_names(path, source, body, &private_names)?;
+    Ok(private_names)
 }
 
 pub(crate) fn lower_with_future(
-    path: &Path,
-    source: &str,
     body: &mut [ast::Stmt],
     inherited_annotations: bool,
-) -> Result<imre_ast::Names, String> {
+) -> imre_ast::Names {
     let string_annotations = inherited_annotations || imre_ast::future_annotations(body);
-    let private_names = imre_ast::lower_in(body, "", string_annotations);
+    imre_ast::lower_in(body, "", string_annotations)
+}
+
+pub(crate) fn validate_names(
+    path: &Path,
+    source: &str,
+    body: &[ast::Stmt],
+    private_names: &imre_ast::Names,
+) -> Result<(), String> {
     if source.contains("nonlocal") {
         super::function_scope::check_nonlocals(source, body)
             .map_err(|error| format!("{}:{error}", path.display()))?;
@@ -175,7 +183,7 @@ pub(crate) fn lower_with_future(
         let error = super::diagnostic_message(source, param, &reason);
         return Err(format!("{}:{error}", path.display()));
     }
-    Ok(private_names)
+    Ok(())
 }
 
 #[cfg(test)]
