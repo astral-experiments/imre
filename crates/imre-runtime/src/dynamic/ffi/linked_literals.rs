@@ -33,7 +33,8 @@ pub(super) unsafe extern "C" fn imre_dyn_linked_string(
     }
     let key = ConstantSlot::Linked(slot.addr());
     if let Some(value) = ctx.heap.constant_at(&key) {
-        return finish(ctx, Ok(value));
+        // The active code already roots this constant across operand cleanup and collection.
+        return value;
     }
     // SAFETY: the emitter places the exact length of immutable data in this code unit.
     let bytes = unsafe { std::slice::from_raw_parts(data, len) };
