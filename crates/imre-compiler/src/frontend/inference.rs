@@ -846,6 +846,11 @@ impl Inference {
         let mut checked_bodies = HashSet::new();
         let mut registered_generators = HashSet::new();
         let mut checked_before_registration = HashSet::new();
+        let unshadowed_builtin = |module: ModuleId, name: &str| {
+            !graph.modules[module].bindings.contains_key(name)
+                && (reserved_builtin_function(name)
+                    || imre_ast::providers::BUILTIN_TYPES.contains(&name))
+        };
         loop {
             let widened = self.widened.replace(false);
             let signatures_settled = !self.unresolved();
@@ -945,7 +950,9 @@ impl Inference {
                     })
                     && graph
                         .session
-                        .function_uses_fixed_names(*module, function, false, |_| false)
+                        .function_uses_fixed_names(*module, function, false, |name| {
+                            function.returns.is_none() && unshadowed_builtin(*module, name)
+                        })
                 {
                     continue;
                 }
@@ -1204,11 +1211,7 @@ impl Inference {
                                 *module,
                                 function,
                                 true,
-                                |name| {
-                                    !graph.modules[*module].bindings.contains_key(name)
-                                        && (reserved_builtin_function(name)
-                                            || imre_ast::providers::BUILTIN_TYPES.contains(&name))
-                                },
+                                |name| unshadowed_builtin(*module, name),
                             )
                     });
                     // Revisit actual calls now that registered initializers can supply their operands.
