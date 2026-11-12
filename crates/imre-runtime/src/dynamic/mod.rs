@@ -3368,7 +3368,8 @@ impl Context {
                 &[]
             }
             "function" => &["__call__", "__get__"],
-            "builtin_function_or_method" | "method" | "method-wrapper" => &["__reduce__"],
+            "method" => &["__get__", "__reduce__"],
+            "builtin_function_or_method" | "method-wrapper" => &["__reduce__"],
             defaultdict::CLASS => {
                 self.builtin("dict");
                 defaultdict::METHODS
