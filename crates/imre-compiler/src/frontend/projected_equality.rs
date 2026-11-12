@@ -182,18 +182,20 @@ impl Checker<'_> {
     pub(super) fn function_body(
         &mut self,
         stmts: &[ast::Stmt],
-    ) -> Result<(Vec<Statement>, bool), String> {
+        mut output: Option<&mut Vec<Statement>>,
+    ) -> Result<bool, String> {
         self.collect_local_definitions(stmts)?;
         if self.returns != Type::Bool {
-            return self.block(stmts);
+            return self.lower_block(stmts, output);
         }
         let Some((at, a, b, answers)) = tail(self, stmts) else {
-            return self.block(stmts);
+            return self.lower_block(stmts, output);
         };
-        let (mut body, prefix_falls) = self.block(&stmts[..at])?;
+        let prefix_falls = self.lower_block(&stmts[..at], output.as_deref_mut())?;
         let reachable = self.reachable;
         self.reachable &= prefix_falls;
-        if (a.target.is_none() || a.target != b.target)
+        if let Some(body) = output.as_deref_mut()
+            && (a.target.is_none() || a.target != b.target)
             && a.target.is_none_or(|name| !self.names.contains_key(name))
             && b.target.is_none_or(|name| !self.names.contains_key(name))
             && let (Some(a), Some(b)) = (self.projected_input(a), self.projected_input(b))
@@ -214,9 +216,9 @@ impl Checker<'_> {
                 Vec::new(),
             ));
         }
-        let suffix_falls = self.lower_block(&stmts[at..], Some(&mut body))?;
+        let suffix_falls = self.lower_block(&stmts[at..], output)?;
         self.reachable = reachable;
-        Ok((body, prefix_falls && suffix_falls))
+        Ok(prefix_falls && suffix_falls)
     }
 
     fn projected_input(&self, mapped: Mapped<'_>) -> Option<Input> {

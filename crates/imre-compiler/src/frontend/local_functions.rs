@@ -835,7 +835,9 @@ impl Checker<'_> {
                 &format!("asynchronous capture '{name}' may be rebound before the coroutine runs"),
             ));
         }
-        let (mut body, falls) = helper.function_body(&definition.body)?;
+        // Inference uses the signature and captures, then drops its helper slots.
+        let mut body = self.inference.is_none().then(Vec::new);
+        let falls = helper.function_body(&definition.body, body.as_mut())?;
         if let Some(mut returns) = helper.inferred_returns.take() {
             if falls || returns.is_empty() {
                 returns.push(Type::None);
@@ -851,11 +853,10 @@ impl Checker<'_> {
             signature.returns = result;
         }
         if falls && self.types.payload(signature.returns).is_some() {
-            body.push(Statement::Return(helper.coerce(
-                Expr::none(),
-                signature.returns,
-                definition,
-            )?));
+            let value = helper.coerce(Expr::none(), signature.returns, definition)?;
+            if let Some(body) = &mut body {
+                body.push(Statement::Return(value));
+            }
         } else if falls && signature.returns != Type::None {
             return Err(error(
                 self.source,
@@ -864,33 +865,35 @@ impl Checker<'_> {
             ));
         }
         helper.finish_region(Ok(()))?;
-        helper.fault_frame(&mut body, definition.name.as_str(), definition.start());
         // Native bound adapters take their context first. The source arguments
         // keep their evaluation order at direct calls to the same lifted body.
         let bound_capture = materialize
             && self.graph.layout_hint.get() != crate::modules::LayoutHint::Disabled
             && !signature.asynchronous
             && matches!(captures.as_slice(), [slot] if stable_callbacks.contains(slot));
-        if bound_capture {
-            params.rotate_right(1);
-        }
-        self.helpers.finish(
-            signature.id,
-            comprehensions::Helper {
-                module: self.module,
-                function: ir::Function {
-                    params,
-                    returns: signature.returns,
-                    locals: helper.locals,
-                    body,
+        if let Some(mut body) = body {
+            helper.fault_frame(&mut body, definition.name.as_str(), definition.start());
+            if bound_capture {
+                params.rotate_right(1);
+            }
+            self.helpers.finish(
+                signature.id,
+                comprehensions::Helper {
+                    module: self.module,
+                    function: ir::Function {
+                        params,
+                        returns: signature.returns,
+                        locals: helper.locals,
+                        body,
+                    },
+                    calls: helper.calls,
+                    class_reads: helper.class_reads.into_inner(),
+                    source_frame: true,
+                    recursion_error: self.graph.modules[self.module]
+                        .error(definition, "recursive local function calls are unsupported"),
                 },
-                calls: helper.calls,
-                class_reads: helper.class_reads.into_inner(),
-                source_frame: true,
-                recursion_error: self.graph.modules[self.module]
-                    .error(definition, "recursive local function calls are unsupported"),
-            },
-        );
+            );
+        }
         Ok(Function {
             signature,
             captures,

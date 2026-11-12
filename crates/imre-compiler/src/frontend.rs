@@ -1903,8 +1903,9 @@ fn lower_function(
         // The generated initializer stores the normalized field on all input paths.
         (vec![], true)
     } else {
-        match checker.function_body(&definition.body) {
-            Ok((body, falls)) => {
+        let mut body = Vec::new();
+        match checker.function_body(&definition.body, Some(&mut body)) {
+            Ok(falls) => {
                 cannot_return = checker.checked_call_cannot_return(definition, falls);
                 (body, falls)
             }
