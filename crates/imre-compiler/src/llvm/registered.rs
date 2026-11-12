@@ -691,13 +691,13 @@ impl<'f> Frame<'f, '_, '_> {
         } else {
             self.code.scope.clone()
         };
-        let name = self.code.code_name(&binding.name);
-        (scope, name)
+        (scope, binding.name.clone())
     }
 
     /// Retain the original RHS across a replaced owner's finalizer.
     pub(crate) fn bind_expression(&mut self, slot: usize, mark: &str, handle: &str) {
         let (scope, name) = self.assignment_name(slot);
+        let name = self.code.code_name(&name);
         let replaced = self
             .code
             .op("assign_named_target", &[&scope, &name, handle]);
@@ -1334,9 +1334,8 @@ impl<'f> Frame<'f, '_, '_> {
     }
 
     pub(crate) fn bind(&mut self, name: &str, handle: &str) {
-        let name = self.code.code_name(name);
         let scope = self.code.scope.clone();
-        self.code.assign_owned_name(&scope, &name, handle, None);
+        self.code.assign_owned_name(&scope, name, handle, None);
     }
 
     pub(super) fn exec_literal_at(&mut self, site: TextRange) -> Option<sites::CompiledExec> {

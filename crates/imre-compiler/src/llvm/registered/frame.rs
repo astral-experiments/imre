@@ -953,7 +953,13 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         value: &str,
         mark: Option<&str>,
     ) {
-        let replaced = self.op("assign_target", &[scope, name, value]);
+        self.output.interned_identifiers.insert(name.to_owned());
+        let data = self.output.data(name.as_bytes());
+        self.take_matching_check();
+        let replaced = self.checked(&format!(
+            "call i64 @imre_dyn_assign_target(ptr %ctx, i64 {scope}, ptr {data}, i64 {}, i64 {value})",
+            name.len()
+        ));
         self.release_replaced(&replaced, mark.map(|mark| (mark, value)));
     }
 
