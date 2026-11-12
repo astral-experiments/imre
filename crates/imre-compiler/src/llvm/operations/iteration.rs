@@ -336,7 +336,7 @@ impl CheckedBody<'_, '_, '_, '_> {
     pub(in crate::llvm) fn loop_transfer(&mut self, statement: &Statement) {
         let target = match &self.0 {
             Entry::Native(e) => e.loops.last().map(|active| &active.target),
-            Entry::Registered(f) => f.loops.last(),
+            Entry::Registered(f) => f.loops.last().map(|(target, _)| target),
         }
         .expect("loop transfer");
         let label = match statement {

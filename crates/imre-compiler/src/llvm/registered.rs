@@ -855,10 +855,16 @@ impl<'f> Frame<'f, '_, '_> {
     }
     pub(crate) fn enter_loop(&mut self, edges: &LoopEdges) {
         let cleanup_depth = self.code.regions.len();
-        self.code.loops.push(LoopTarget {
-            edges: edges.clone(),
-            cleanup_depth,
-        });
+        // A resumed for statement keeps its header even inside an operand's cleanup scope.
+        let line = (self.code.native_suspension && !self.code.iteration.in_expression)
+            .then(|| self.code.positions.line(self.code.current_range.start()));
+        self.code.loops.push((
+            LoopTarget {
+                edges: edges.clone(),
+                cleanup_depth,
+            },
+            line,
+        ));
     }
     pub(crate) fn leave_loop(&mut self) {
         self.code.loops.pop();
@@ -909,20 +915,24 @@ impl<'f> Frame<'f, '_, '_> {
         let exhausted = exhaust.then(|| self.code.name("b"));
         let empty = exhausted.as_deref().unwrap_or(&done);
         self.store_private(ready, &permanent::FALSE.to_string());
-        let header = self.code.current_range.start();
+        if kind == ir::IterNextKind::Generic
+            && let Some(line) = self.code.loops.last().and_then(|(_, line)| *line)
+        {
+            self.code.set_statement_line(line);
+        }
         let has_else = self
             .code
             .loops
             .last()
-            .is_some_and(|target| target.edges.exhausted != target.edges.done);
+            .is_some_and(|(target, _)| target.edges.exhausted != target.edges.done);
         if let Some(second) = second {
             let available = self.code.name("b");
             self.code
-                .next_item_pair(&cursor, header, has_else, &available, empty);
+                .next_item_pair(&cursor, has_else, &available, empty);
             self.code.label(&available);
             self.code.store_item_pair([key, second]);
         } else {
-            let item = self.code.pull_item(&cursor, kind, header, has_else, empty);
+            let item = self.code.pull_item(&cursor, kind, has_else, empty);
             self.store_private(key, &item);
         }
         self.store_private(ready, &permanent::TRUE.to_string());
