@@ -323,6 +323,20 @@ impl CellLayout {
     }
 }
 
+/// The fallback for a declared annotation whose live Python binding cannot be resolved.
+#[derive(Clone, Copy, Debug)]
+struct ScalarHint(Option<&'static str>);
+
+impl ScalarHint {
+    fn new(name: &str) -> Self {
+        Self(
+            ["str", "bytes", "int", "bool", "float", "None"]
+                .into_iter()
+                .find(|&ty| ty == name),
+        )
+    }
+}
+
 /// Immutable parameter lists used to bind calls to the same code object.
 #[derive(Debug)]
 struct CallParameters {
@@ -336,7 +350,7 @@ struct CallParameters {
     class_cell: bool,
     varargs: Option<String>,
     kwargs: Option<String>,
-    return_type: Option<String>,
+    return_type: Option<ScalarHint>,
     types: serde_json::Value,
     integer_sign_parameters: serde_json::Value,
     annotation_references: Option<Box<serde_json::Value>>,
@@ -407,10 +421,7 @@ impl CallParameters {
             class_cell: metadata["class_cell"] == true,
             varargs: metadata["varargs"].as_str().map(copy_label).transpose()?,
             kwargs: metadata["kwargs"].as_str().map(copy_label).transpose()?,
-            return_type: metadata["return_type"]
-                .as_str()
-                .map(copy_label)
-                .transpose()?,
+            return_type: metadata["return_type"].as_str().map(ScalarHint::new),
             types: metadata
                 .get_mut("types")
                 .map(serde_json::Value::take)
