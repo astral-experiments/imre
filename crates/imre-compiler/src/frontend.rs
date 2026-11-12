@@ -1886,7 +1886,7 @@ fn lower_function(
     } else {
         match checker.function_body(&definition.body) {
             Ok((body, falls)) => {
-                cannot_return = checker.declared_call_cannot_return(definition, falls);
+                cannot_return = checker.checked_call_cannot_return(definition, falls);
                 (body, falls)
             }
             Err(failure) => return checker.finish_region(Err(failure)),
