@@ -109,8 +109,8 @@ with Rust-competitive performance.
 
 ## Standard library test results
 
-Across the 45 standard library module families below, **13,153 of 16,225 tests (81.07%)** have recorded paired passes.
-The paired pass rate is 80.0% (10,668 of 13,327) for the original 25 families and 85.7% (2,485 of 2,898) for the 20 additional families.
+Across the 45 standard library module families below, **13,152 of 16,225 tests (81.06%)** have recorded paired passes.
+The paired pass rate is 80.0% (10,668 of 13,327) for the original 25 families and 85.7% (2,484 of 2,898) for the 20 additional families.
 A **paired pass** means that CPython 3.14.5 passed the original test and Imre passed it at both
 `-O0` and `-O3`. The total combines focused and intact suite runs across revisions, including
 development branches. The intact `dataclasses` run at `143809dd` replaces that family’s earlier count. Each original test occurrence counts once. Skipped and omitted tests remain
@@ -123,9 +123,9 @@ On public #6856, stock CPython passed all 143 previously credited `importlib` or
 
 The [supplemental `test_urllib2` decision](docs/stdlib-omissions.md#test_urllib2) covers the single packaging-specific error in a separate 80-case replay.
 
-On the campaign's x86-64 Linux runner, stock CPython 3.14.5 registered **16,191** of the **16,202** originals in the earlier 44 families. It passed **15,161**, skipped 1,023, and reported 7 errors. Of the 13,131 paired originals in that cohort, **13,033** passed in that stock run. The other 98 skipped or recorded an error.
+On the campaign's x86-64 Linux runner, stock CPython 3.14.5 registered **16,191** of the **16,202** originals in the earlier 44 families. It passed **15,161**, skipped 1,023, and reported 7 errors. Of the 13,130 paired originals in that cohort, **13,032** passed in that stock run. The other 98 skipped or recorded an error.
 
-The separate Linux `netrc` run added 22 stock passes, all paired, and one WASI skip. Together the two stock measurements registered 16,214 originals, with 15,183 passes, 1,024 skips, and 7 errors. Across the 45 families, **13,055 of the 15,183 stock Linux passes (86.0%)** have paired passes, leaving **610** more to reach 90%.
+The separate Linux `netrc` run added 22 stock passes, all paired, and one WASI skip. Together the two stock measurements registered 16,214 originals, with 15,183 passes, 1,024 skips, and 7 errors. Across the 45 families, **13,054 of the 15,183 stock Linux passes (86.0%)** have paired passes, leaving **611** more to reach 90%.
 
 | Module | Paired passes | Upstream tests | Omitted | How the tests ran |
 | --- | ---: | ---: | ---: | --- |
@@ -186,10 +186,14 @@ CPython 3.14.5 discovers **2,898 test occurrences** across these 20 families on 
 | `types` | 134 | 141 | 1 | Two Linux workers passed the integer and float locale-formatting originals at stock and both native levels with genuine en_US numeric data. |
 | `uuid` | 48 | 120 | 1 | Both native builds passed 47 of 120 originals on the public squash, including 47 of 48 frozen CPython-positive cases. An earlier host also passed the IP-dependent lookup. The private enum layout check has a [documented omission decision](docs/stdlib-omissions.md#uuid). [Public change](https://github.com/astral-experiments/imre/pull/5313). |
 | `warnings` | 181 | 187 | 0 | The intact default suite paired 177/187. Four additional async originals passed with `-X context_aware_warnings=1` on pinned stock and public O0 and O3. Each flag-enabled run registered all 187 originals and completed teardown. |
-| `weakref` | 169 | 183 | 7 | All 46 WeakSet originals and 123 weakref originals passed. Seven [CPython-specific tests](docs/stdlib-omissions.md#weakref) have individual omission decisions. Seven other originals remain unpaired. |
+| `weakref` | 168 | 183 | 7 | On #7040, all 46 WeakSet originals and 122 of 137 weakref originals passed on stock and at both native parent tiers. The previously credited doctest `test.test_weakref.__test__.libreftest` (occurrence 1) passed on frozen stock. All 35 examples failed at both native tiers because their source had no compiled body. [Per-occurrence results](benchmarks/cpython_stdlib/full/weakref-recheck-7040.tsv) · [Seven CPython-specific omissions](docs/stdlib-omissions.md#weakref) |
 | `zipfile` | 370 | 383 | 1 | The PyZipFile writer added the original filtered-package and invalid-syntax cases. Its source fallback preserves custom cache resolvers and up-to-date bytecode archives. Five historical denominator slots still lack verified method identities. [Archive writer](https://github.com/astral-experiments/imre/pull/6003) |
 | `zoneinfo` | 229 | 261 | 2 | All 261 original registrations completed on public Imre. Both native builds passed 228, including `test.test_zoneinfo.test_zoneinfo.MiscTests.test_pydatetime` (occurrence 1), which exercises the pure-Python datetime provider. Two private-cache tests have [documented omission decisions](docs/stdlib-omissions.md#zoneinfo). [Public change](https://github.com/astral-experiments/imre/pull/5295). The numeric replay also confirmed that both ZoneInfo classes are tracked by the garbage collector. [Pinned replay](https://github.com/astral-experiments/imre/commit/e400ad995d604f2108c031d0bf536a0d0e6c583f) |
-| **Measured total (20 of 20 families)** | **2,485** | **2,898** | **13** |  |
+| **Measured total (20 of 20 families)** | **2,484** | **2,898** | **13** |  |
+
+With the frozen resource settings, stock CPython 3.14.5 passed 179 of the 183 weakref-family occurrences and skipped four CPU-resource tests. Both native tiers ran all 183. Each recorded 168 successes, one doctest failure, three errors in `Thread.start()` before the weak-value mapping loops, and 11 skips. Of the 168 parent successes, 167 ran at matching tiers throughout. For `FinalizeTestCase.test_atexit` (occurrence 1), each parent started an isolated child that compiled at the SDK default O3. Each child exited 0, returned the same 32 stdout bytes as stock and reported `ZeroDivisionError` on stderr. [Measured Imre revision](https://github.com/astral-experiments/imre/commit/fd31e5b88d8bf60b1eb95b79f1e691f4fb18a8af)
+
+Ordinary native `-m unittest` discovery stopped before collection for both modules at both tiers. The documented launcher with the test module declared also stopped before collection, at `runpy.py:88`. With the module declared on the interpreter command line and default unittest resources enabled, WeakSet passed all 46 at each tier. Each weakref run recorded 12 passes and one implementation skip, then started `MappingTestCase.test_threaded_weak_key_dict_copy`. O0 was stopped after 1,203.9 seconds in that method. O3 was stopped about two seconds into the method once the frozen-profile runs had finished. Both processes exited 143, leaving the active case without a terminal result and the remaining 123 occurrences unobserved.
 
 ### Whole-suite baselines for later additions
 
