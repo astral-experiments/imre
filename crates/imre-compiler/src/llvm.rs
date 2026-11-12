@@ -3302,7 +3302,7 @@ impl Emitter<'_, '_> {
     }
 
     fn integer_arithmetic(&mut self, op: Binary, left: &str, right: &str) -> Value {
-        let result = self.body.integer_arithmetic(op, left, right);
+        let result = self.body.integer_arithmetic(op, left, right, false);
         if matches!(op, Binary::FloorDivide | Binary::Modulo) {
             self.check_error();
         }
@@ -3458,6 +3458,11 @@ impl Emitter<'_, '_> {
         bounds: Option<(IntRange, IntRange)>,
     ) -> Value {
         debug_assert!(left.small_integer && right.small_integer);
+        if matches!(op, Binary::Add | Binary::Subtract) {
+            return self
+                .body
+                .integer_arithmetic(op, &left.operand, &right.operand, true);
+        }
         let widening = matches!(op, Binary::Multiply) && self.active_subtotal().is_some();
         let mut decode = |operand: &Value, bound: Option<IntRange>| {
             let raw = self.instruction(format!("ashr i64 {}, 1", operand.operand));
@@ -3474,15 +3479,7 @@ impl Emitter<'_, '_> {
             .filter(|right| right.min == right.max)
             .map(|right| right.min);
         let result = match op {
-            Binary::Add | Binary::Subtract | Binary::Multiply => {
-                let instruction = match op {
-                    Binary::Add => "add",
-                    Binary::Subtract => "sub",
-                    Binary::Multiply => "mul",
-                    _ => unreachable!(),
-                };
-                self.instruction(format!("{instruction} nsw i64 {left}, {right}"))
-            }
+            Binary::Multiply => self.instruction(format!("mul nsw i64 {left}, {right}")),
             Binary::FloorDivide | Binary::Modulo
                 if let Some(mask) = right_constant.and_then(remainder_mask) =>
             {
@@ -3554,7 +3551,11 @@ impl Emitter<'_, '_> {
                 };
                 self.instruction(format!("{instruction} i64 {left}, {right}"))
             }
-            Binary::Power | Binary::MatrixMultiply | Binary::Divide => {
+            Binary::Add
+            | Binary::Subtract
+            | Binary::Power
+            | Binary::MatrixMultiply
+            | Binary::Divide => {
                 unreachable!("only proved integer arithmetic")
             }
         };
@@ -4284,8 +4285,6 @@ impl Emitter<'_, '_> {
         self.output
             .local_helper("int_abs", conditionals::INTEGER_ABSOLUTE_HELPER);
         self.output.local_helper("compare_int", INTEGER_COMPARE);
-        // The slow absolute-value path negates a heap word with tagged subtraction.
-        self.body.integers.require(Binary::Subtract);
         self.call("int_abs", Type::Int, &[value])
     }
 
@@ -11598,6 +11597,8 @@ big:
 "#;
 
 /// Tagged add, subtract and multiply used by checked integer operations in either call ABI.
+/// Overflow promotes an unbounded input. For a bounded operation it violates the
+/// range proof, so the immediate result carries the same poison as a signed no-wrap operation.
 fn write_integer_arithmetic(output: &mut String, op: Binary, declare_overflow: bool) {
     let (op, intrinsic, number) = match op {
         Binary::Add => ("add", "sadd", 0),
@@ -11620,20 +11621,23 @@ fn write_integer_arithmetic(output: &mut String, op: Binary, declare_overflow: b
     write!(
         output,
         r#"
-define internal i64 @int_{op}(i64 %a, i64 %b) alwaysinline {{
+define internal i64 @int_{op}(i64 %a, i64 %b, i1 %bounded) alwaysinline {{
 entry:
   %both = and i64 %a, %b
   %tag = and i64 %both, 1
   %small = icmp eq i64 %tag, 1
-  br i1 %small, label %fast, label %big, !prof !1
+  %immediate = or i1 %bounded, %small
+  br i1 %immediate, label %fast, label %big, !prof !1
 fast:
 {decode}  %right = sub i64 %b, 1
   %pair = call {{ i64, i1 }} @llvm.{intrinsic}.with.overflow.i64(i64 {left}, i64 %right)
   %result = extractvalue {{ i64, i1 }} %pair, 0
   %overflow = extractvalue {{ i64, i1 }} %pair, 1
-  br i1 %overflow, label %big, label %done, !prof !0
+  %promote = select i1 %bounded, i1 false, i1 %overflow
+  br i1 %promote, label %big, label %done, !prof !0
 done:
-  %encoded = or i64 %result, 1
+  %exact = select i1 %overflow, i64 poison, i64 %result
+  %encoded = or i64 %exact, 1
   ret i64 %encoded
 big:
   %slow = call i64 @imre_int_binary(i64 %a, i64 %b, i32 {number}) cold
@@ -12790,12 +12794,15 @@ def handler(a: defaultdict[str, list[int]], b: defaultdict[str, list[int]]) -> l
                 .unwrap()
                 .0;
             let guard = body
-                .find("br i1 %overflow, label %big, label %done")
+                .find("br i1 %promote, label %big, label %done")
                 .unwrap();
-            let encoded = body.find("%encoded = or i64 %result, 1").unwrap();
+            let encoded = body.find("%encoded = or i64 %exact, 1").unwrap();
             assert!(guard < encoded, "{body}");
-            assert!(body.contains("br i1 %small, label %fast, label %big, !prof !1"));
-            assert!(body.contains("br i1 %overflow, label %big, label %done, !prof !0"));
+            assert!(body.contains("%immediate = or i1 %bounded, %small"));
+            assert!(body.contains("br i1 %immediate, label %fast, label %big, !prof !1"));
+            assert!(body.contains("%promote = select i1 %bounded, i1 false, i1 %overflow"));
+            assert!(body.contains("br i1 %promote, label %big, label %done, !prof !0"));
+            assert!(body.contains("%exact = select i1 %overflow, i64 poison, i64 %result"));
             let (_, slow) = body.split_once("big:").unwrap();
             assert!(slow.contains(&format!(
                 "call i64 @imre_int_binary(i64 %a, i64 %b, i32 {number}) cold"
@@ -12808,17 +12815,21 @@ def handler(a: defaultdict[str, list[int]], b: defaultdict[str, list[int]]) -> l
         }
     }
 
+    fn calls_integer_operation(body: &str, operation: &str, bounded: bool) -> bool {
+        let call = format!("call i64 @int_{operation}(");
+        let proof = format!(", i1 {bounded})");
+        body.lines()
+            .any(|line| line.contains(&call) && line.ends_with(&proof))
+    }
+
     #[test]
     fn suspended_list_pipeline_cursors_use_native_arithmetic() {
-        for (source, operation, fallback) in [
-            ("values", "add nsw i64", "@int_add("),
-            ("reversed(values)", "sub nsw i64", "@int_sub("),
-        ] {
+        for (source, operation) in [("values", "add"), ("reversed(values)", "sub")] {
             let body = function_body(&format!(
                 "def same(values: list[int]) -> bool:\n    return all(left == right for left, right in zip({source}, {source}))\n"
             ));
-            assert!(body.contains(operation));
-            assert!(!body.contains(fallback));
+            assert!(calls_integer_operation(&body, operation, true));
+            assert!(!calls_integer_operation(&body, operation, false));
             assert!(body.contains("@imre_list_get_index("));
             assert!(!body.contains("@imre_list_get("));
         }
@@ -12888,9 +12899,9 @@ def handler(a: defaultdict[str, list[int]], b: defaultdict[str, list[int]]) -> l
                 !body.contains("call void @llvm.assume"),
                 "the accumulator proof must not add a second use of its recurrence"
             );
-            assert!(body.contains("add nsw i64"));
+            assert!(calls_integer_operation(&body, "add", true));
             assert!(
-                body.contains("call i64 @int_add"),
+                calls_integer_operation(&body, "add", false),
                 "lists outside the checked subtotal budget retain arbitrary-precision arithmetic"
             );
             assert!(body.contains("icmp sle i64"));
@@ -13032,8 +13043,8 @@ def total(text: str) -> int:
         )
         .unwrap();
         assert!(llvm.contains("call i64 @imre_list_borrow_index_proven("));
-        assert!(llvm.contains("add nsw i64"));
-        assert!(llvm.contains("call i64 @int_add"));
+        assert!(calls_integer_operation(&llvm, "add", true));
+        assert!(calls_integer_operation(&llvm, "add", false));
         assert!(
             !llvm.contains("!llvm.loop"),
             "bounded arithmetic and access proofs do not guarantee backend vectorization"

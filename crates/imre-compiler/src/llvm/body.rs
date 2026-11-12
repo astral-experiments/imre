@@ -107,11 +107,13 @@ impl FunctionBody {
     }
 
     /// Both ABIs call the same tagged arithmetic helper after obtaining exact integers.
+    /// A bounded operation has immediate operands and an immediate result.
     pub(crate) fn integer_arithmetic(
         &mut self,
         op: super::Binary,
         left: &str,
         right: &str,
+        bounded: bool,
     ) -> super::Value {
         let helper = match op {
             super::Binary::Add => "int_add",
@@ -121,11 +123,18 @@ impl FunctionBody {
             super::Binary::Modulo => "int_mod",
             _ => unreachable!("expected checked integer operation"),
         };
+        let proof = match op {
+            super::Binary::FloorDivide | super::Binary::Modulo => "",
+            _ if bounded => ", i1 true",
+            _ => ", i1 false",
+        };
         self.integers.require(op);
         super::Value {
             ty: super::Type::Int,
-            operand: self.instruction(format!("call i64 @{helper}(i64 {left}, i64 {right})")),
-            small_integer: false,
+            operand: self.instruction(format!(
+                "call i64 @{helper}(i64 {left}, i64 {right}{proof})"
+            )),
+            small_integer: bounded,
         }
     }
 

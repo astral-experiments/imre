@@ -49,7 +49,7 @@ pub(super) fn absolute_operand<'a>(test: &'a Expr, yes: &Expr, no: &Expr) -> Opt
 }
 
 /// Returns an owned absolute value. Negating the minimum tagged-small integer
-/// promotes through the ordinary arithmetic helper; positive heap integers
+/// promotes through runtime subtraction. Positive heap integers
 /// retain their existing owner. The common path uses a select without a sign
 /// branch. For odd small words, checked `2 - value` overflows only at the minimum
 /// representation; all other positive and negative inputs share its exact result.
@@ -82,7 +82,7 @@ entry:
   %below = icmp slt i32 %order, 0
   br i1 %below, label %negate, label %retain
 negate:
-  %positive = call i64 @int_sub(i64 1, i64 %value)
+  %positive = call i64 @imre_int_binary(i64 1, i64 %value, i32 1)
   ret i64 %positive
 retain:
   call void @retain_int_nonzero(i64 %value)
@@ -102,7 +102,7 @@ mod tests {
         )
         .unwrap();
         assert!(output.contains("define internal i64 @int_abs("));
-        assert!(output.contains("define internal i64 @int_sub("));
+        assert!(!output.contains("define internal i64 @int_sub("));
     }
 
     #[test]
@@ -136,7 +136,7 @@ mod tests {
             .split_once("\n}")
             .unwrap()
             .0;
-        assert!(slow.contains("call i64 @int_sub(i64 1, i64 %value)"));
+        assert!(slow.contains("call i64 @imre_int_binary(i64 1, i64 %value, i32 1)"));
         assert!(slow.contains("call void @retain_int_nonzero(i64 %value)"));
     }
 

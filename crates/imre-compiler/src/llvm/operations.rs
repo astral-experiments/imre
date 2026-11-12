@@ -501,7 +501,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             }
         };
         let exact = |code: &mut Self| {
-            let value = code.body().integer_arithmetic(op, &a, &b);
+            let value = code.body().integer_arithmetic(op, &a, &b, false);
             CheckedValue::frame_integer(value, code.python(), usage)
         };
         let Some(guard) = guard else {
