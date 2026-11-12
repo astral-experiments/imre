@@ -6058,13 +6058,10 @@ impl<'a> Checker<'a> {
                         },
                         Ok,
                     )?;
-                    if self.terminating_call(&value) {
+                    if self.ends_before_assignment(rhs, &value, &[])? {
                         if let Some(old) = replacement {
                             let slot = self.replacement_slot(name.id.as_str(), old, ty);
                             self.bind_declared_type(slot, declaration);
-                        }
-                        if let Some(sites) = &mut self.fixed_sites {
-                            sites.statement(rhs.range(), FixedNode::Effect);
                         }
                         return Ok((vec![Statement::Expr(value)], false));
                     }

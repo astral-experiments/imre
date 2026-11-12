@@ -283,7 +283,13 @@ impl Checker<'_> {
             // Keep a mutable owner until the resolved target decides its storage.
             self.document_annotation_value(value, expected, documents::MAP)
         } else {
-            self.expr_expected_from(value, expected, declaration)
+            self.expr_in_context(
+                value,
+                expected,
+                |_, _| false,
+                Self::coerce_supplied_result,
+                declaration,
+            )
         }
     }
 
@@ -292,12 +298,39 @@ impl Checker<'_> {
         take_pattern_temporary(self.local(slot), slot)
     }
 
+    /// Keep a terminating RHS and any fresh name declarations, without evaluating its targets.
+    pub(super) fn ends_before_assignment(
+        &mut self,
+        source: &ast::Expr,
+        value: &Expr,
+        targets: &[ast::Expr],
+    ) -> Result<bool, String> {
+        if !self.terminating_call(value)
+            || targets
+                .iter()
+                .any(|target| pattern_elements(target).is_some())
+        {
+            return Ok(false);
+        }
+        for target in targets {
+            if let Some(name) = target.as_name_expr()
+                && !self.names.contains_key(name.id.as_str())
+            {
+                self.declare(name.id.as_str(), value.ty, target)?;
+            }
+        }
+        if let Some(sites) = &mut self.fixed_sites {
+            sites.statement(source.range(), FixedNode::Effect);
+        }
+        Ok(true)
+    }
+
     /// A chain shares one RHS object and visits targets in source order. A later
     /// annotated target can supply the type of an otherwise empty literal.
     pub(super) fn assignment_statement(
         &mut self,
         assignment: &ast::StmtAssign,
-    ) -> Result<Vec<Statement>, String> {
+    ) -> Result<statements::Block, String> {
         // The live namespace owns later lookups. An enclosing call may already
         // have loaded its callable before an argument mutates this attribute.
         for target in &assignment.targets {
@@ -332,10 +365,16 @@ impl Checker<'_> {
             let receiver = self.expr(&attribute.value)?;
             if self.types.is_default_list_dict(receiver.ty) {
                 let enabled = !matches!(&*assignment.value, ast::Expr::NoneLiteral(_));
-                return Ok(vec![Statement::Expr(Expr {
-                    ty: Type::None,
-                    kind: ExprKind::Builtin(Builtin::DefaultFactorySet { enabled }, vec![receiver]),
-                })]);
+                return Ok((
+                    vec![Statement::Expr(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::Builtin(
+                            Builtin::DefaultFactorySet { enabled },
+                            vec![receiver],
+                        ),
+                    })],
+                    true,
+                ));
             }
         }
         if let [ast::Expr::Attribute(attribute)] = assignment.targets.as_slice()
@@ -345,11 +384,10 @@ impl Checker<'_> {
         {
             let receiver = self.expr(&attribute.value)?;
             if receiver.ty == Type::LogFormatter {
-                return Ok(vec![self.formatter_set(
-                    receiver,
-                    attribute,
-                    Expr::boolean(utc),
-                )?]);
+                return Ok((
+                    vec![self.formatter_set(receiver, attribute, Expr::boolean(utc))?],
+                    true,
+                ));
             }
         }
         // A literal tuple assigned to plain locals can stage its elements in native
@@ -379,12 +417,12 @@ impl Checker<'_> {
                 let value = self.take_temporary(slot);
                 body.push(self.assign_value(target, value)?);
             }
-            return Ok(vec![Statement::Scope { body, clear: slots }]);
+            return Ok((vec![Statement::Scope { body, clear: slots }], true));
         }
         if let [target] = assignment.targets.as_slice() {
             if pattern_elements(target).is_some() {
                 let value = self.unpacking_value(target, &assignment.value)?;
-                return self.bind_pattern(target, value);
+                return Ok((self.bind_pattern(target, value)?, true));
             }
             let local = target.as_name_expr().filter(|_| {
                 !self.module_scope && self.block_depth == 1 && self.local_functions.is_empty()
@@ -414,10 +452,13 @@ impl Checker<'_> {
             } else {
                 self.typed_expr(&assignment.value)?
             };
+            if self.ends_before_assignment(&assignment.value, &value, &assignment.targets)? {
+                return Ok((vec![Statement::Expr(value)], false));
+            }
             if let Some((name, old)) = previous
                 && value.ty != self.locals[old]
             {
-                return Ok(self.replace_local(name, old, value.ty, value));
+                return Ok((self.replace_local(name, old, value.ty, value), true));
             }
             let value = if context.is_none()
                 && let ast::Expr::Name(name) = target
@@ -435,7 +476,7 @@ impl Checker<'_> {
             {
                 sites.statement(assignment.value.range(), FixedNode::Store(*slot));
             }
-            return Ok(vec![statement]);
+            return Ok((vec![statement], true));
         }
         let context = assignment.targets.iter().find_map(|target| {
             self.target_expectation(target, Some(&assignment.value))
@@ -451,7 +492,10 @@ impl Checker<'_> {
                 .unwrap_or(&assignment.targets[0]);
             self.unpacking_value(target, &assignment.value)?
         };
-        bind_assignment(self, &assignment.targets, value)
+        if self.ends_before_assignment(&assignment.value, &value, &assignment.targets)? {
+            return Ok((vec![Statement::Expr(value)], false));
+        }
+        Ok((bind_assignment(self, &assignment.targets, value)?, true))
     }
 
     /// Receivers and indices are checked after the RHS and preceding targets.
