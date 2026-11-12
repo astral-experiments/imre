@@ -2531,7 +2531,8 @@ with zipfile.ZipFile('zip-writer-capability.zip', 'w', zipfile.ZIP_DEFLATED) as 
             package.mkdir(parents=True)
             (package / "adapter.py").write_text("from .settings import label\n")
             (package / "settings.py").write_text(f"label = {portion.name!r}\n")
-        (root / "choose_backend.py").write_text(
+        chooser = root / "choose_backend.py"
+        chooser.write_text(
             "import sys\n"
             "sys.path.insert(0, sys.argv[1])\n"
             "from backends.adapter import label\n"
@@ -2544,6 +2545,25 @@ with zipfile.ZipFile('zip-writer-capability.zip', 'w', zipfile.ZIP_DEFLATED) as 
         (roots[1] / "backends" / "adapter.py").write_text("from . import optional\n")
         (roots[1] / "backends" / "optional.py").write_text("invalid syntax!\n")
         compare("-B", "-m", "choose_backend", str(roots[0]), extra=search)
+
+        bad = roots[1] / "backends" / "adapter.py"
+        bad.write_bytes(b"# coding: latin-1\r\n\xe9 = )\r\n")
+        cache = root / "backend-cache"
+        saved = root / "choose-backend"
+        built = run(imre, "build", chooser, "-o", saved, "--opt-level", "0",
+                    extra={**search, "IMRE_CACHE_DIR": str(cache)}, timeout=300)
+        assert built.returncode == 0, built.stderr
+        chooser.unlink()
+        for portion in roots:
+            for source in portion.rglob("*.py"):
+                source.unlink()
+        if cache.exists():
+            shutil.rmtree(cache)
+        first = run(saved, str(roots[0]), extra=search)
+        assert (first.returncode, first.stdout, first.stderr) == (0, b"first_portion\n", b""), first
+        second = run(saved, str(roots[1]), extra=search)
+        assert (second.returncode, second.stdout) == (1, b""), second
+        assert b"SyntaxError" in second.stderr and os.fsencode(bad) in second.stderr, second
 
         # An ordinary module under the first root wins over a package in a later root.
         (root / "preferred.py").write_text("print('file wins')\n")
