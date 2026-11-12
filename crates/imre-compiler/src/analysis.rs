@@ -1987,17 +1987,26 @@ impl Session {
 
     /// Get a scalar layout hint for an operand in its own lexical scope.
     pub(crate) fn scalar_type(&self, module: usize, value: &Expr) -> Option<crate::ir::Type> {
-        use crate::ir::Type;
-        use ty_python_semantic::types::{KnownClass, ProgramEnvironment, Type as Ty};
-
+        use ty_python_semantic::types::ProgramEnvironment;
         let ty = self.inferred_layout_type(module, value)?;
+        let env = ProgramEnvironment::from_file(self.db.program_file(self.files[module]));
+        self.scalar_layout(&env, ty)
+    }
+
+    fn scalar_layout<'db>(
+        &'db self,
+        env: &ty_python_semantic::types::ProgramEnvironment<'db>,
+        ty: ty_python_semantic::types::Type<'db>,
+    ) -> Option<crate::ir::Type> {
+        use crate::ir::Type;
+        use ty_python_semantic::types::{KnownClass, Type as Ty};
+
         if !matches!(
             ty,
             Ty::LiteralValue(_) | Ty::NominalInstance(_) | Ty::Union(_)
         ) {
             return None;
         }
-        let env = ProgramEnvironment::from_file(self.db.program_file(self.files[module]));
         // ty expands a float annotation to float | int. Match that annotation
         // after the narrower bool and int cases; Imre checks the exact operand.
         [
@@ -2009,16 +2018,16 @@ impl Session {
         ]
         .into_iter()
         .find(|(class, _)| {
-            let mut instance = class.to_instance(&self.db, &env);
+            let mut instance = class.to_instance(&self.db, env);
             if matches!(class, KnownClass::Float) {
                 instance = ty_python_semantic::types::UnionType::from_two_elements(
                     &self.db,
-                    &env,
+                    env,
                     instance,
-                    KnownClass::Int.to_instance(&self.db, &env),
+                    KnownClass::Int.to_instance(&self.db, env),
                 );
             }
-            ty.is_assignable_to(&self.db, &env, instance)
+            ty.is_assignable_to(&self.db, env, instance)
         })
         .map(|(_, ty)| ty)
     }
@@ -2312,8 +2321,7 @@ impl Session {
                         param.name.as_str(),
                     )
                     && let Some(expected) = param.inferred_type(&owner_model)
-                    && let Some(error) =
-                        self.scalar_argument_error(module, &model, expected, value, value)
+                    && let Some(error) = self.scalar_argument_error(&model, expected, value, value)
                 {
                     errors.push(error.with_path(path).to_string());
                 }
