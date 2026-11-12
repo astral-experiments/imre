@@ -136,7 +136,12 @@ impl Checker<'_> {
             .then_some(id)
     }
 
-    fn checked_mapping_size(&self, size: Expr, at: &impl Ranged) -> Result<Expr, String> {
+    fn checked_mapping_size(
+        &self,
+        size: Expr,
+        at: &impl Ranged,
+        origin: ir::FixedOrigin,
+    ) -> Result<Expr, String> {
         let size = if size.ty == Type::Bool {
             Expr {
                 ty: Type::Int,
@@ -148,17 +153,18 @@ impl Checker<'_> {
         };
         Ok(Expr {
             ty: Type::Int,
-            kind: ExprKind::Builtin(Builtin::LengthResult, vec![size]),
+            kind: ExprKind::Builtin(Builtin::LengthResult(Box::new(origin)), vec![size]),
         })
     }
 
     pub(super) fn mapping_length(
         &mut self,
         receiver: Expr,
-        at: &impl Ranged,
+        call: &ast::ExprCall,
     ) -> Result<Expr, String> {
-        let size = self.record_primitive(receiver, "__len__", &[], at)?;
-        self.checked_mapping_size(size, at)
+        let size = self.record_primitive(receiver, "__len__", &[], call)?;
+        let origin = self.call_origin(call);
+        self.checked_mapping_size(size, call, origin)
     }
 
     /// Truth uses the concrete class's __bool__ when present, otherwise __len__.
@@ -173,11 +179,12 @@ impl Checker<'_> {
                 checker.record_slot(class, receiver, "__bool__", &[], at)
             } else if checker.classes.declarations.definitions[class].mapping {
                 let size = checker.record_slot(class, receiver, "__len__", &[], at)?;
+                let origin = checker.fixed_origin(at.range(), None);
                 Ok(Expr {
                     ty: Type::Bool,
                     kind: ExprKind::Builtin(
                         Builtin::Bool,
-                        vec![checker.checked_mapping_size(size, at)?],
+                        vec![checker.checked_mapping_size(size, at, origin)?],
                     ),
                 })
             } else {

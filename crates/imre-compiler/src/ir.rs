@@ -1952,7 +1952,7 @@ pub(crate) enum Builtin {
     /// object.__repr__ for a rooted source instance, bypassing its __repr__ override.
     DefaultRecordRepr,
     Len,
-    LengthResult,
+    LengthResult(Box<FixedOrigin>),
     Abs,
     FloatCopySign,
     /// Stable permutation of a fully typed list by precomputed scalar keys.
