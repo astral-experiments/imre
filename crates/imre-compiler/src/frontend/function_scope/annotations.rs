@@ -8,11 +8,6 @@ use ruff_text_size::{Ranged, TextSize};
 
 use super::{ClassBindings, ClosureNames};
 
-#[derive(Default)]
-pub(crate) struct AnnotationScopes {
-    assignments: HashMap<TextSize, AssignmentReads>,
-}
-
 #[derive(Clone)]
 pub(in crate::frontend) struct ParameterReads {
     pub(super) direct: BTreeSet<String>,
@@ -33,48 +28,6 @@ impl ParameterReads {
         }
         self.direct.append(&mut self.nested);
         self.direct
-    }
-}
-
-struct AssignmentReads {
-    reads: BTreeSet<String>,
-    incomplete: bool,
-}
-
-impl AnnotationScopes {
-    pub(super) fn assignment(&mut self, assign: &ast::StmtAnnAssign) {
-        if assign.simple {
-            let mut names = ClosureNames::default();
-            names.visit_expr(&assign.annotation);
-            self.assignments.insert(
-                assign.start(),
-                AssignmentReads {
-                    reads: names.reads,
-                    incomplete: names.incomplete,
-                },
-            );
-        }
-    }
-
-    pub(crate) fn class_reads<'a>(
-        &self,
-        sites: impl Iterator<Item = &'a TextSize>,
-        class: &ClassBindings,
-    ) -> (BTreeSet<String>, bool) {
-        let mut reads = BTreeSet::new();
-        let mut complete = true;
-        for site in sites {
-            let assignment = &self.assignments[site];
-            reads.extend(
-                assignment
-                    .reads
-                    .iter()
-                    .filter(|name| !class.locals.contains(*name) && !class.globals.contains(*name))
-                    .cloned(),
-            );
-            complete &= !assignment.incomplete;
-        }
-        (reads, complete)
     }
 }
 
@@ -114,6 +67,13 @@ impl ClassAnnotations {
 
     pub(super) fn observe(&mut self, assign: &ast::StmtAnnAssign) {
         if assign.simple && assign.target.is_name_expr() {
+            let mut names = ClosureNames {
+                reads: std::mem::take(&mut self.reads),
+                ..ClosureNames::default()
+            };
+            names.visit_expr(&assign.annotation);
+            self.reads = names.reads;
+            self.incomplete |= names.incomplete;
             self.sites.push(ClassAnnotationSite {
                 site: assign.start(),
                 index: None,
@@ -121,19 +81,12 @@ impl ClassAnnotations {
         }
     }
 
-    pub(super) fn finish(
-        &mut self,
-        class: &ast::StmtClassDef,
-        scopes: &AnnotationScopes,
-        bindings: &ClassBindings,
-    ) {
+    pub(super) fn finish(&mut self, class: &ast::StmtClassDef, bindings: &ClassBindings) {
         if self.sites.is_empty() {
             return;
         }
-        let (reads, complete) =
-            scopes.class_reads(self.sites.iter().map(|entry| &entry.site), bindings);
-        self.reads = reads;
-        self.incomplete = !complete;
+        self.reads
+            .retain(|name| !bindings.locals.contains(name) && !bindings.globals.contains(name));
         self.reads.insert("__classdict__".into());
         let mut conditional = 0;
         for entry in &mut self.sites {
