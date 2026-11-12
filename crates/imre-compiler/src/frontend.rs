@@ -1231,7 +1231,7 @@ fn lower_graph(
             capture_on_object(failure);
         }
     };
-    let mut frame_sources = HashMap::new();
+    let mut frame_sources = Vec::new();
     let mut has_wrapper_link = false;
     let mut refused_body = None;
     let mut completed_calls = HashSet::new();
@@ -1362,7 +1362,7 @@ fn lower_graph(
                     .frames
                     .push((slot, callable_definitions[signature.id], source));
             } else if can_transfer_frames || graph.registered_startup {
-                frame_sources.insert(slot, (definition.start(), source));
+                frame_sources.push((slot, definition.start(), source));
             }
         }
         graph.ordered_reads(*module_id, &definition.body, true, &mut reads);
@@ -1492,7 +1492,7 @@ fn lower_graph(
     if !named && can_transfer_frames {
         for (slot, owner, source) in completed.frames.drain(..) {
             let definition = &graph.modules[owner.module].parsed.syntax().body[owner.statement];
-            frame_sources.insert(slot, (definition.start(), source));
+            frame_sources.push((slot, definition.start(), source));
         }
     }
     let functions = &mut completed.functions;

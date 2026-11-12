@@ -1,7 +1,7 @@
 use super::*;
 
 /// Register an existing checked function with its original frame positions.
-/// Native analysis has already verified the operation sequence after specialization.
+/// The caller has matched these positions to the current operations.
 /// The registered frame boxes each returned value during emission.
 pub(crate) fn place_fixed_function(
     function: ir::Function,
@@ -113,21 +113,35 @@ mod tests {
             "class Receiver:\n    def read(self, value: str) -> str:\n        return value\n",
             "def append(left: str, right: str) -> str:\n",
             "    return left + right\n",
+            "def changed(left: str, right: str) -> str:\n",
+            "    return left + right\n",
             "print(append('a', 'b'))\n",
         );
         let mut graph = SourceGraph::single(text).unwrap();
-        let crate::CheckedProgram::Native(fixed) = crate::checked_lower(&mut graph).unwrap() else {
+        let crate::CheckedProgram::Native(mut fixed) = crate::checked_lower(&mut graph).unwrap()
+        else {
             panic!("expected fixed checked operations")
         };
-        let mut module = fixed.ir.0;
-        let mut sites = fixed.frame_sources;
-        let mut changed = sites.clone();
-        crate::llvm::analyze_program(&module, &mut sites).unwrap();
-        let (_, source) = sites.remove(&0).unwrap();
-        let function = module.functions[0].clone();
-        let body = function.body.as_ptr();
+        let body = fixed.ir.0.functions[0].body.as_ptr();
+        let &(_, start, ref source) = fixed
+            .frame_sources
+            .iter()
+            .find(|(id, ..)| *id == 0)
+            .unwrap();
         let positions = source.positions.as_ptr();
-        let placed = place_fixed_function(function, source);
+        let changed = TextSize::try_from(text.find("def changed").unwrap()).unwrap();
+        let [Statement::Return(result)] = fixed.ir.0.functions[1].body.as_mut_slice() else {
+            panic!()
+        };
+        let ExprKind::Binary(_, _, right) = &mut result.kind else {
+            panic!()
+        };
+        right.kind = ExprKind::Local(0);
+        fixed.register_definitions(&graph);
+        let functions = graph.registered_functions();
+        let definitions = &functions[&graph.entry];
+        assert!(!definitions.contains_key(&changed));
+        let placed = &definitions[&start];
         assert_eq!(placed.function.returns, Type::Str);
         assert_eq!(placed.fixed_sites.as_ptr(), positions);
         assert_eq!(placed.function.body.as_ptr(), body);
@@ -138,16 +152,5 @@ mod tests {
             spellings,
             ["return left + right", "left + right", "left", "right"]
         );
-
-        // An optimizer can change a slot without changing the operation count or type.
-        let [Statement::Return(result)] = module.functions[0].body.as_mut_slice() else {
-            panic!()
-        };
-        let ExprKind::Binary(_, _, right) = &mut result.kind else {
-            panic!()
-        };
-        right.kind = ExprKind::Local(0);
-        crate::llvm::analyze_program(&module, &mut changed).unwrap();
-        assert!(!changed.contains_key(&0));
     }
 }

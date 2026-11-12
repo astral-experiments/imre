@@ -63,7 +63,6 @@ fn placed_field_uses_the_ordinary_descriptor_and_attribute_line() {
     let crate::CheckedProgram::Native(mut fixed) = crate::checked_lower(&mut graph).unwrap() else {
         panic!("expected fixed field access");
     };
-    crate::llvm::analyze_program(&fixed.ir.0, &mut fixed.frame_sources).unwrap();
     let statements = &graph.modules[graph.entry].parsed.syntax().body;
     let class = statements
         .iter()
@@ -75,11 +74,12 @@ fn placed_field_uses_the_ordinary_descriptor_and_attribute_line() {
         .filter_map(|stmt| stmt.as_function_def_stmt())
         .find(|function| function.name.as_str() == "read")
         .unwrap();
-    let (id, (_, placement)) = fixed
+    let (id, _, placement) = fixed
         .frame_sources
         .into_iter()
-        .find(|(_, (start, _))| *start == definition.start())
+        .find(|(_, start, _)| *start == definition.start())
         .unwrap();
+    assert!(placement.matches(&fixed.ir.0.functions[id]));
     let function = fixed.ir.0.functions.swap_remove(id);
     assert!(
         matches!(function.body.as_slice(), [Statement::Return(value)] if matches!(value.kind, ExprKind::Field(_, 0)))
@@ -405,8 +405,12 @@ fn placed_arithmetic_keeps_the_python_operator_and_integer_guards() {
         else {
             panic!("expected a fixed function");
         };
-        crate::llvm::analyze_program(&fixed.ir.0, &mut fixed.frame_sources).unwrap();
-        let (_, frame) = fixed.frame_sources.remove(&0).unwrap();
+        let (_, _, frame) = fixed
+            .frame_sources
+            .into_iter()
+            .find(|(id, ..)| *id == 0)
+            .unwrap();
+        assert!(frame.matches(&fixed.ir.0.functions[0]));
         let function = fixed.ir.0.functions.remove(0);
         let [Statement::Return(value)] = function.body.as_slice() else {
             panic!()

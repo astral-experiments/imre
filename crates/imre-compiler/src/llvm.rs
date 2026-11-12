@@ -381,7 +381,7 @@ pub(crate) fn emit(
     ranges: &RangeFacts<'_>,
     sanitize: bool,
 ) -> Result<String, Unsupported> {
-    let program = analyze_program(module, &mut Default::default())?;
+    let program = analyze_program(module)?;
     let mut unit = crate::CodegenUnit::new("__main__", String::new());
     Output::new([], std::slice::from_mut(&mut unit), 0, false)
         .emit(module, ranges, sanitize, program)?;
@@ -396,26 +396,12 @@ pub(crate) struct NativeProgram {
     linked_functions: HashSet<usize>,
 }
 
-pub(crate) fn analyze_program(
-    module: &Module,
-    sites: &mut crate::FixedFrameSources,
-) -> Result<NativeProgram, Unsupported> {
+pub(crate) fn analyze_program(module: &Module) -> Result<NativeProgram, Unsupported> {
     let mut function_link_types = HashSet::new();
     let mut link_owners = BTreeMap::<usize, Vec<&Expr>>::new();
     let mut targets = crate::callables::TargetCollector::default();
     for (id, function) in module.functions.iter().chain([&module.entry]).enumerate() {
-        // The tags are needed only for this post-specialization inventory.
-        // A valid frame keeps the original position table through admission.
-        let operations = sites
-            .get_mut(&id)
-            .filter(|(_, source)| source.local_names.len() == function.locals.len())
-            .map(|(_, source)| std::mem::take(&mut source.operations));
-        let mut remaining = operations.as_deref();
-        ir::walk_nodes(&function.body, &mut |node, _| {
-            remaining = crate::frontend::FixedNode::consume(remaining, &node);
-            let ir::Node::Expression(expr) = node else {
-                return;
-            };
+        ir::walk_expressions(&function.body, &mut |expr| {
             targets.inspect(&module.types, expr);
             let ExprKind::Builtin(builtin, args) = &expr.kind else {
                 return;
@@ -429,9 +415,6 @@ pub(crate) fn analyze_program(
                 _ => {}
             }
         });
-        if !matches!(remaining, Some([])) {
-            sites.remove(&id);
-        }
     }
     let callable_targets = targets.finish();
     let cached = |id| module.types.cache_adapter(id).is_some();

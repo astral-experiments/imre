@@ -534,7 +534,7 @@ fn object_fallback(
                         for original in specialize(module)? {
                             owners.push(owners[original]);
                         }
-                        let reason = match llvm::analyze_program(module, &mut fixed.frame_sources) {
+                        let reason = match llvm::analyze_program(module) {
                             Ok(program) => match output.emit_fixed(
                                 &graph,
                                 fixed.into_ir(&graph),
@@ -1069,8 +1069,7 @@ pub fn compile_file_units(
 
 type CheckedIr = (ir::Module, Vec<modules::ModuleId>);
 
-type FixedFrameSources =
-    std::collections::HashMap<usize, (ruff_text_size::TextSize, frontend::FixedBodySource)>;
+type FixedFrameSources = Vec<(usize, ruff_text_size::TextSize, frontend::FixedBodySource)>;
 
 pub(crate) struct FixedProgram {
     ir: CheckedIr,
@@ -1092,16 +1091,21 @@ impl FixedProgram {
 
     fn register_definitions(self, graph: &modules::SourceGraph) {
         let (module, owners) = self.ir;
+        let mut functions = module.functions.into_iter();
+        let mut next = 0;
         let mut sources = self.frame_sources;
-        for (id, function) in module.functions.into_iter().enumerate() {
-            let Some((start, source)) = sources.remove(&id) else {
-                continue;
-            };
+        // Top-level and method sites were collected separately. Keep the first
+        // checked definition at a source position, in original function order.
+        sources.sort_unstable_by_key(|(id, ..)| *id);
+        for (id, start, source) in sources {
+            let function = functions.nth(id - next).expect("checked function slot");
+            next = id + 1;
             let owner = owners[id];
             if graph
                 .registered_functions()
                 .get(&owner)
                 .is_some_and(|entries| entries.contains_key(&start))
+                || !source.matches(&function)
             {
                 continue;
             }
