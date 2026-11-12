@@ -243,33 +243,81 @@ pub(crate) struct LocalBinding {
     pub(crate) namespace: Option<usize>,
 }
 
-/// Lower a definition whose binder supplies Python object handles in its normal function scope.
-/// A call to a generator returns its resumable frame. Keep the actual checked body
-/// so emission can bind the same instructions that established this calling convention.
-pub(super) fn generator_body(
-    module: &crate::modules::SourceModule,
-    definition: &ast::StmtFunctionDef,
-    optimization: i32,
-) -> Option<RegisteredFunction> {
-    let physical = module.parsed.syntax().body.iter().find_map(|stmt| {
-        stmt.as_function_def_stmt()
-            .filter(|original| original.start() == definition.start())
-    })?;
-    if physical.is_async || !imre_ast::code_flags::is_generator(&physical.body) {
-        return None;
+fn generator_definition<'a>(
+    modules: &'a [crate::modules::SourceModule],
+    session: &crate::analysis::Session,
+    owner: DefinitionId,
+) -> Option<&'a ast::StmtFunctionDef> {
+    let module = &modules[owner.module];
+    let definition = module.parsed.syntax().body[owner.statement].as_function_def_stmt()?;
+    (module.is_program_source()
+        && !definition.is_async
+        && session.is_generator_definition(owner.module, definition))
+    .then_some(definition)
+}
+
+pub(super) fn retain_generator(
+    graph: &SourceGraph,
+    owner: DefinitionId,
+    checks: &SourceChecks,
+) -> bool {
+    let Some(definition) = generator_definition(&graph.modules, &graph.session, owner) else {
+        return false;
+    };
+    checks.accepts(graph, owner.module, definition)
+        && retain_generator_body(graph, owner.module, definition)
+}
+
+/// Inference has released its shared graph borrow, so check the remaining declarations
+/// on their own parser and restore its diagnostic rules before selecting operand layouts.
+pub(super) fn retain_unresolved_generators(
+    graph: &mut SourceGraph,
+    owners: Vec<DefinitionId>,
+    mut source_checks: Option<&mut crate::analysis::Session>,
+) {
+    for owner in owners {
+        let Some(definition) = generator_definition(&graph.modules, &graph.session, owner) else {
+            continue;
+        };
+        let errors = graph
+            .registered_source_errors
+            .get_mut()
+            .entry(owner.module)
+            .or_insert_with(|| {
+                source_checks
+                    .as_deref_mut()
+                    .unwrap_or(&mut graph.session)
+                    .registered_source_error_ranges(owner.module)
+            });
+        if SourceChecks::accepts_range(errors, definition.range()) {
+            retain_generator_body(graph, owner.module, definition);
+        }
     }
+}
+
+fn retain_generator_body(
+    graph: &SourceGraph,
+    id: ModuleId,
+    physical: &ast::StmtFunctionDef,
+) -> bool {
+    let module = &graph.modules[id];
     let operations = HashMap::new();
     let preparation = SuitePreparation::new(
         &operations,
-        module.registered_values().context(&module.source),
-        optimization == 0,
+        RegisteredSource {
+            operand_types: Some(graph.session.operand_types(id)),
+            ..module.registered_values().context(&module.source)
+        },
+        graph.python_optimization() == 0,
     );
-    preparation
-        .complete(
-            &physical.body,
-            RegisteredScope::Function { is_async: false },
-        )
-        .map(|suite| suite.checked)
+    let Some(suite) = preparation.complete(
+        &physical.body,
+        RegisteredScope::Function { is_async: false },
+    ) else {
+        return false;
+    };
+    graph.register_function(id, physical.start(), suite.checked);
+    true
 }
 
 pub(super) fn lower_definition(
@@ -5719,8 +5767,8 @@ publish(5, callback)
         assert!(crate::check_file(&path, None).is_err());
         std::fs::write(&path, positive).unwrap();
         crate::check_file(&path, None).unwrap();
-        let graph = SourceGraph::single(positive).unwrap();
-        let selected = super::super::lower_current(&graph, None, &mut HashSet::new());
+        let mut graph = SourceGraph::single(positive).unwrap();
+        let selected = super::super::lower_with_caller_cache(&mut graph, None, None);
         match selected {
             Ok(crate::CheckedProgram::Registered(None)) => {}
             Err(error) | Ok(crate::CheckedProgram::Runtime(error)) => {
@@ -5772,8 +5820,8 @@ publish(5, callback)
             "    if best[neighbor] == -1 or candidate < best[neighbor]:\n",
             "        accept(candidate)\n",
         );
-        let graph = SourceGraph::single(source).unwrap();
-        let _ = super::super::lower_current(&graph, None, &mut HashSet::new());
+        let mut graph = SourceGraph::single(source).unwrap();
+        let _ = super::super::lower_with_caller_cache(&mut graph, None, None);
         let registered = graph.registered_functions();
         let checked = &registered[&graph.entry][&TextSize::default()].function;
         let mut comparisons = Vec::new();

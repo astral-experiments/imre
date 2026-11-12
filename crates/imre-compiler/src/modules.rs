@@ -7421,7 +7421,7 @@ except ImportError:
             assert!(loader.modules[child].registered_namespace);
             loader.scan(entry).unwrap();
             let mut graph = loader.finish(entry, filename, false, None).unwrap();
-            let program = crate::frontend::lower_with_caller_cache(&mut graph, None).unwrap();
+            let program = crate::frontend::lower_with_caller_cache(&mut graph, None, None).unwrap();
             assert!(match program {
                 crate::CheckedProgram::Registered(Some(reason)) => {
                     imported

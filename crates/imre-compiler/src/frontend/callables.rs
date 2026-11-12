@@ -913,7 +913,9 @@ mod tests {
         )
         .unwrap();
         let mut graph = SourceGraph::load(&entry, None, &[installed.path().to_path_buf()]).unwrap();
-        let diagnostic = lower_with_caller_cache(&mut graph, None).err().unwrap();
+        let diagnostic = lower_with_caller_cache(&mut graph, None, None)
+            .err()
+            .unwrap();
         assert_eq!(diagnostic.kind, Kind::ScopedObject);
         assert_eq!(
             diagnostic.to_string(),
@@ -1067,7 +1069,7 @@ mod tests {
                 });
                 assert!(indirect);
             } else {
-                let Err(error) = lower_with_caller_cache(&mut graph, None) else {
+                let Err(error) = lower_with_caller_cache(&mut graph, None, None) else {
                     panic!("eager factory cannot enter a cold callback adapter");
                 };
                 assert_eq!(error.kind, Kind::UnsupportedRepresentation);

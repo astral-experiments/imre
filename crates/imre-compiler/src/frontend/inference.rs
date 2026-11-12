@@ -830,6 +830,8 @@ impl Inference {
         &self,
         graph: &SourceGraph,
         entry_statements: &[ast::Stmt],
+        owners: &[DefinitionId],
+        unresolved: &mut Vec<DefinitionId>,
         definitions: &mut [FunctionDefinition<'_>],
         signatures: &mut HashMap<DefinitionId, Signature>,
         classes: &mut ClassInfo,
@@ -1045,16 +1047,12 @@ impl Inference {
                     }
                     if matches!(&diagnostic, Failure::Diagnostic(report) if report.kind == Kind::GeneratorSuspension)
                         && signature.method.is_none()
-                        && graph.modules[*module].is_program_source()
-                        && !function.is_async
-                        && self.source_checks.accepts(graph, *module, function)
-                        && let Some(body) = registered::generator_body(
-                            &graph.modules[*module],
-                            function,
-                            graph.python_optimization(),
+                        && registered::retain_generator(
+                            graph,
+                            owners[signature.id],
+                            &self.source_checks,
                         )
                     {
-                        graph.register_function(*module, function.start(), body);
                         registered_generators.insert(signature.id);
                         checked_bodies.insert(signature.id);
                         if infer_return {
@@ -1179,6 +1177,16 @@ impl Inference {
                     .iter()
                     .position(|report| !report.kind.is_representation())
                 {
+                    // An earlier module error can leave a generator's arguments unsolved.
+                    // Named startup still needs its suspended body, with the lexical Python binder.
+                    if graph.registered_startup {
+                        let pending = self.pending.borrow();
+                        for (owner, signature) in signatures.iter() {
+                            if pending[signature.id].params.iter().any(Option::is_none) {
+                                unresolved.push(*owner);
+                            }
+                        }
+                    }
                     let primary = reports.remove(index);
                     return Err(primary.with_following(reports.into_iter()));
                 }
@@ -1737,7 +1745,7 @@ mod tests {
             "    return set()\n",
         ))
         .unwrap();
-        let diagnostic = super::super::lower_with_caller_cache(&mut graph, None)
+        let diagnostic = super::super::lower_with_caller_cache(&mut graph, None, None)
             .err()
             .unwrap();
         assert_eq!(diagnostic.kind, Kind::ExactType);
@@ -1753,7 +1761,7 @@ mod tests {
             "    values.append(True)\n",
         ))
         .unwrap();
-        let error = super::super::lower_with_caller_cache(&mut graph, None)
+        let error = super::super::lower_with_caller_cache(&mut graph, None, None)
             .err()
             .unwrap();
         assert_eq!(error.kind, Kind::ExactType);
