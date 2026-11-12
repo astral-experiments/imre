@@ -43,10 +43,11 @@ fn invalid_aggregate(ty: Type, types: &Types) -> bool {
     }
 }
 
-/// Checks inferred displays as well as annotations, including discarded values.
+/// Check inferred displays and annotations while visiting the function's call and frame uses.
 pub(super) fn validate_storage(
     function: &ir::Function,
     types: &Types,
+    mut visit: impl FnMut(&Expr),
 ) -> std::result::Result<(), String> {
     let mut invalid = invalid_aggregate(function.returns, types)
         || function
@@ -57,6 +58,7 @@ pub(super) fn validate_storage(
     // Its callable cannot enter a language-visible tuple or container.
     let mut frames = HashSet::new();
     ir::walk_expressions(&function.body, &mut |value| {
+        visit(value);
         if let ExprKind::Builtin(
             Builtin::Process(
                 ir::ProcessOperation::IndirectCoroutine { .. }

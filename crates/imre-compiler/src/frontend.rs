@@ -1566,7 +1566,7 @@ fn lower_graph(
         typing::validate_functions(functions, &entry, &types)?;
         let callable_targets = callables::targets(functions, &entry, &types)?;
         for (function, calls) in functions.iter().zip(&mut call_graph) {
-            ir::walk_expressions(&function.body, &mut |value| {
+            callables::validate_storage(function, &types, |value| {
                 frame_use(value);
                 if let Some(targets) = globals.invoked_functions(value) {
                     calls.extend(targets.iter().copied());
@@ -1575,12 +1575,9 @@ fn lower_graph(
                 {
                     calls.extend(targets);
                 }
-            });
+            })?;
         }
-        ir::walk_expressions(&entry.body, &mut frame_use);
-        for function in functions.iter().chain([&entry]) {
-            callables::validate_storage(function, &types)?;
-        }
+        callables::validate_storage(&entry, &types, &mut frame_use)?;
         if let Some(id) = recursive_call_root(&call_graph) {
             return Err(recursion_errors.swap_remove(id).into());
         }
