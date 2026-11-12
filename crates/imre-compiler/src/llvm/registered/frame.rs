@@ -120,9 +120,8 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         unit: usize,
         start: TextSize,
     ) -> Self {
-        if native_suspension && !output.declarations.declared_suspension {
-            output.functions.push_str(suspension::ABI);
-            output.declarations.declared_suspension = true;
+        if native_suspension {
+            output.declare(|d| &mut d.declared_suspension, suspension::ABI);
         }
         let id = output.count;
         output.count += 1;
@@ -195,12 +194,13 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         let entry = self.finish(false);
         let Some(start) = start else { return entry };
         // Python definitions keep distinct addresses even if LLVM merges their bodies.
-        let site = format!("@code_site{}", self.id);
+        let site = self.output.code_symbol("code_site", self.id);
         let tag = if self.native_suspension {
             permanent::NATIVE_SUSPENDED_BODY
         } else {
             0
         };
+        let offset = self.output.constants.len();
         writeln!(
             self.output.constants,
             "{site} = private constant %code_site {{ ptr {entry}, ptr {}, i32 {}, i32 {tag} }}",
@@ -208,6 +208,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
             self.positions.line(start)
         )
         .unwrap();
+        self.output.place_site(offset);
         site
     }
 
@@ -217,7 +218,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
             .integers
             .include(self.body.integers);
         self.output.declarations.releases_integer_owner |= self.integer_owners != 0;
-        let name = format!("@code{}", self.id);
+        let name = self.output.code_symbol("code", self.id);
         if !self.body.terminated {
             self.return_value("0");
         }
@@ -265,6 +266,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         }
         self.body.start("failed");
         self.release_integer_owners(0..self.integer_owners, false);
+        let offset = self.output.functions.len();
         if self.native_suspension {
             self.body
                 .line("call void @imre_dyn_suspend_return(ptr %context_slot, i64 0)");
@@ -294,6 +296,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
                 |unit| write!(unit, "entry:\n{}{}", self.body.entry, self.body.code).unwrap(),
             );
         }
+        self.output.place_function(offset);
         name
     }
 
@@ -2045,12 +2048,10 @@ impl RegisteredFrame<'_, '_> {
         source: &mut String,
         child: &super::sites::CompiledExec,
     ) {
-        if !self.output.declarations.exec_operand {
-            self.output
-                .functions
-                .push_str("declare i64 @imre_dyn_exec_operand(ptr, i64, i64, ptr, i32, ptr)\n");
-            self.output.declarations.exec_operand = true;
-        }
+        self.output.declare(
+            |d| &mut d.exec_operand,
+            "declare i64 @imre_dyn_exec_operand(ptr, i64, i64, ptr, i32, ptr)\n",
+        );
         *source = self.checked(&format!(
             "call i64 @imre_dyn_exec_operand(ptr %ctx, i64 {callable}, i64 {source}, ptr {}, i32 {}, ptr {})",
             child.entry, child.flags, child.source
@@ -2126,12 +2127,10 @@ impl RegisteredFrame<'_, '_> {
 
     pub(crate) fn set_statement_line(&mut self, line: usize) {
         self.position = SourcePosition::statement(line);
-        if !self.output.declarations.declared_statement_line {
-            self.output
-                .functions
-                .push_str("declare void @imre_dyn_set_statement_line(ptr, i32)\n");
-            self.output.declarations.declared_statement_line = true;
-        }
+        self.output.declare(
+            |d| &mut d.declared_statement_line,
+            "declare void @imre_dyn_set_statement_line(ptr, i32)\n",
+        );
         self.line(&format!(
             "call void @imre_dyn_set_statement_line(ptr %ctx, i32 {line})"
         ));
@@ -2239,20 +2238,7 @@ impl RegisteredFrame<'_, '_> {
     /// Equal literals share a slot within a source unit. The address remains distinct after linking
     /// independently compiled providers, and the runtime holds its value in the current heap.
     pub(crate) fn constant_slot(&mut self, key: Constant) -> String {
-        let output = &mut self.output;
-        let next = output.constant_slots.len();
-        let index = *output
-            .constant_slots
-            .entry((self.unit, key))
-            .or_insert(next);
-        if index == next {
-            writeln!(
-                output.constants,
-                "@const_slot{index} = private constant i8 0"
-            )
-            .unwrap();
-        }
-        format!("@const_slot{index}")
+        self.output.constant_slot(self.unit, key)
     }
 
     pub(crate) fn build_sequence(

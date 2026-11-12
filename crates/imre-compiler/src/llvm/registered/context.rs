@@ -16,12 +16,10 @@ struct ContextRegion {
 impl RegisteredFrame<'_, '_> {
     /// Publish an implicit operation's actual full range without releasing the frame's operands.
     pub(crate) fn set_source_range(&mut self, range: Option<TextRange>) {
-        if !self.output.declarations.declared_definition_position {
-            self.output
-                .functions
-                .push_str("declare void @imre_dyn_definition_position(ptr, ptr)\n");
-            self.output.declarations.declared_definition_position = true;
-        }
+        self.output.declare(
+            |d| &mut d.declared_definition_position,
+            "declare void @imre_dyn_definition_position(ptr, ptr)\n",
+        );
         let position = if let Some(range) = range {
             self.position = SourcePosition::Implicit(range);
             self.position_constant(range)

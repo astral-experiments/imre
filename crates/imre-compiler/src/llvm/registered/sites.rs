@@ -463,12 +463,10 @@ impl RegisteredFrame<'_, '_> {
 
 impl RegisteredFrame<'_, '_> {
     pub(crate) fn bind_annotation_expression(&mut self, text: &str, code: &str) {
-        if !self.output.declarations.registered_expression {
-            self.output
-                .functions
-                .push_str("declare void @imre_dyn_bind_expression(ptr, i64, ptr)\n");
-            self.output.declarations.registered_expression = true;
-        }
+        self.output.declare(
+            |d| &mut d.registered_expression,
+            "declare void @imre_dyn_bind_expression(ptr, i64, ptr)\n",
+        );
         self.line(&format!(
             "call void @imre_dyn_bind_expression(ptr %ctx, i64 {text}, ptr {code})"
         ));

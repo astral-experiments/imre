@@ -87,9 +87,68 @@ pub(crate) struct Output {
     pub(crate) constants: String,
     pub(crate) functions: String,
     pub(crate) count: u32,
+    pub(crate) whole: Option<Box<Output>>,
+    pub(crate) whole_unit: usize,
 }
 
 impl Output {
+    // Private operands can have different numbers in the standalone unit and whole dump.
+    // Source bytes are escaped in data constants. Only compiler-created operands carry NUL.
+    fn operand(local: String, whole: String) -> String {
+        if local == whole {
+            local
+        } else {
+            format!("\0{local}\0{whole}\0")
+        }
+    }
+
+    pub(crate) fn code_symbol(&self, kind: &str, id: u32) -> String {
+        let local = format!("@{kind}{id}");
+        match &self.whole {
+            Some(whole) => Self::operand(local, format!("@{kind}{}", whole.count + id)),
+            None => local,
+        }
+    }
+
+    pub(crate) fn declare(&mut self, flag: fn(&mut Declarations) -> &mut bool, text: &'static str) {
+        if let Some(whole) = &mut self.whole {
+            whole.declare(flag, text);
+        }
+        if !std::mem::replace(flag(&mut self.declarations), true) {
+            self.functions.push_str(text);
+        }
+    }
+
+    pub(crate) fn place_function(&mut self, start: usize) {
+        if let Some(whole) = &mut self.whole {
+            place_operands(&mut self.functions, start, &mut whole.functions);
+        }
+    }
+
+    pub(crate) fn place_site(&mut self, start: usize) {
+        if let Some(whole) = &mut self.whole {
+            place_operands(&mut self.constants, start, &mut whole.constants);
+        }
+    }
+
+    pub(crate) fn finish_placement(
+        &mut self,
+        target: &mut Output,
+        entry: &mut String,
+        whole_entry: &mut String,
+    ) {
+        place_operands(entry, 0, whole_entry);
+        let mut whole = self.whole.take().unwrap();
+        whole.count += self.count;
+        whole
+            .declarations
+            .integers
+            .include(self.declarations.integers);
+        whole.declarations.reads_exact_int_word |= self.declarations.reads_exact_int_word;
+        whole.declarations.releases_integer_owner |= self.declarations.releases_integer_owner;
+        *target = *whole;
+    }
+
     pub(crate) fn integer_prelude(&mut self) {
         if self.declarations.reads_exact_int_word {
             self.functions
@@ -131,7 +190,11 @@ impl Output {
             }
             self.constants.push_str("\\00\"\n");
         }
-        format!("@str{index}")
+        let local = format!("@str{index}");
+        match &mut self.whole {
+            Some(whole) => Self::operand(local, whole.data(bytes)),
+            None => local,
+        }
     }
 
     pub(crate) fn position(&mut self, span: [usize; 4]) -> String {
@@ -141,8 +204,50 @@ impl Output {
             let [line, start, split, end] = span;
             writeln!(self.constants, "@pos{index} = private unnamed_addr constant [4 x i32] [i32 {line}, i32 {start}, i32 {split}, i32 {end}]").unwrap();
         }
-        format!("@pos{index}")
+        let local = format!("@pos{index}");
+        match &mut self.whole {
+            Some(whole) => Self::operand(local, whole.position(span)),
+            None => local,
+        }
     }
+
+    pub(crate) fn constant_slot(&mut self, unit: usize, key: Constant) -> String {
+        let other = self
+            .whole
+            .as_mut()
+            .map(|whole| whole.constant_slot(self.whole_unit, key.clone()));
+        let next = self.constant_slots.len();
+        let index = *self.constant_slots.entry((unit, key)).or_insert(next);
+        if index == next {
+            writeln!(self.constants, "@const_slot{index} = private constant i8 0").unwrap();
+        }
+        let local = format!("@const_slot{index}");
+        match other {
+            Some(whole) => Self::operand(local, whole),
+            None => local,
+        }
+    }
+}
+
+/// Place a completed definition. Instructions and local SSA names are identical in both units.
+fn place_operands(local: &mut String, start: usize, whole: &mut String) {
+    let body = &local[start..];
+    if !body.contains('\0') {
+        whole.push_str(body);
+        return;
+    }
+    let mut resolved = String::with_capacity(body.len());
+    let mut pieces = body.split('\0');
+    while let Some(common) = pieces.next() {
+        resolved.push_str(common);
+        whole.push_str(common);
+        if let Some(operand) = pieces.next() {
+            resolved.push_str(operand);
+            whole.push_str(pieces.next().expect("paired LLVM operand"));
+        }
+    }
+    local.truncate(start);
+    local.push_str(&resolved);
 }
 
 /// Pass fixed operands in native storage or pack expanded operands in Python containers.
