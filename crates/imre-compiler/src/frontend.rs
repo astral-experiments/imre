@@ -1506,7 +1506,9 @@ fn lower_graph(
         }
         return Err(error);
     }
-    if !named && can_transfer_frames {
+    // A checked constructor can admit registered emission if native code generation
+    // declines. Keep the original frame sites of its completed siblings.
+    if !named && (can_transfer_frames || graph.has_object_constructor_fallback.get()) {
         for (slot, owner, source) in completed.frames.drain(..) {
             let definition = &graph.modules[owner.module].parsed.syntax().body[owner.statement];
             frame_sources.push((slot, definition.start(), source));

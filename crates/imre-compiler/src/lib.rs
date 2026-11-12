@@ -534,32 +534,23 @@ fn object_fallback(
                         for original in specialize(module)? {
                             owners.push(owners[original]);
                         }
-                        let reason = match llvm::analyze_program(module) {
-                            Ok(program) => match output.emit_fixed(
-                                &graph,
-                                fixed.into_ir(&graph),
-                                program,
-                                options.address_sanitizer,
-                            ) {
-                                Ok(()) => {
-                                    native_includes()?;
-                                    return Ok(match entry {
-                                        ProgramEntry::Source(_) => SourceInputs::default(),
-                                        ProgramEntry::File(..) => output
-                                            .compilation
-                                            .native_inputs(graph, options.entry_profile.as_deref()),
-                                    });
-                                }
-                                Err(refusal) => refusal,
-                            },
-                            Err(refusal) => {
-                                // A callable without a fixed representation can still use the
-                                // verified bodies of its siblings if its source is registered.
-                                fixed.register_definitions(&graph);
-                                refusal
+                        match output.emit_fixed(&graph, &mut fixed, options.address_sanitizer) {
+                            Ok(()) => {
+                                native_includes()?;
+                                return Ok(match entry {
+                                    ProgramEntry::Source(_) => SourceInputs::default(),
+                                    ProgramEntry::File(..) => output
+                                        .compilation
+                                        .native_inputs(graph, options.entry_profile.as_deref()),
+                                });
                             }
-                        };
-                        LoweringDiagnostic::plain(reason.0.to_owned()).classified(reason.1)
+                            Err(reason) => {
+                                // Native analysis and emission can both decline. Hand the
+                                // original checked siblings to the registered source once.
+                                fixed.register_definitions(&graph);
+                                LoweringDiagnostic::plain(reason.0.to_owned()).classified(reason.1)
+                            }
+                        }
                     }
                     CheckedProgram::Runtime(error) => error,
                 };
@@ -1078,14 +1069,12 @@ pub(crate) struct FixedProgram {
 }
 
 impl FixedProgram {
-    /// Native emission consumes the checked module and releases pending Python frame maps.
-    fn into_ir(mut self, graph: &modules::SourceGraph) -> CheckedIr {
+    fn prepare_native_sources(&mut self, graph: &modules::SourceGraph) {
         // The registered launcher inventories its own winning providers. Only a
         // committed native entry needs the fixed graph's built-in module list.
         if self.uses_builtin_module_names {
             self.ir.0.builtin_module_sources = Some(dynamic::builtin_inventory_sources(graph));
         }
-        self.ir
     }
 
     fn register_definitions(self, graph: &modules::SourceGraph) {
@@ -1130,7 +1119,10 @@ pub(crate) enum CheckedProgram {
 impl CheckedProgram {
     fn into_native(self, graph: &modules::SourceGraph) -> Result<CheckedIr, String> {
         match self {
-            Self::Native(fixed) => Ok(fixed.into_ir(graph)),
+            Self::Native(mut fixed) => {
+                fixed.prepare_native_sources(graph);
+                Ok(fixed.ir)
+            }
             Self::Runtime(reason) => Err(reason.to_string()),
             Self::Registered(Some(reason)) => Err(reason.to_string()),
             Self::Registered(None) => Err("the checked program requires a registered entry".into()),

@@ -342,10 +342,12 @@ impl crate::ProgramOutput {
     pub(crate) fn emit_fixed(
         &mut self,
         graph: &crate::modules::SourceGraph,
-        (module, owners): crate::CheckedIr,
-        program: NativeProgram,
+        fixed: &mut crate::FixedProgram,
         sanitize: bool,
     ) -> Result<(), Unsupported> {
+        let program = analyze_program(&fixed.ir.0)?;
+        fixed.prepare_native_sources(graph);
+        let (module, owners) = &fixed.ir;
         let split = matches!(self.layout, crate::CodegenLayout::Split);
         let source = &graph.modules[graph.entry];
         let (sources, entry, owners) = if split {
@@ -365,8 +367,8 @@ impl crate::ProgramOutput {
             |_, _, source, separate| Ok((source.name.as_str(), separate.then(String::new))),
             |program, units, entry| {
                 let output = Output::new(owners.iter().copied(), units, entry, split);
-                let ranges = crate::ranges::analyze(&module);
-                output.emit(&module, &ranges, sanitize, program)?;
+                let ranges = crate::ranges::analyze(module);
+                output.emit(module, &ranges, sanitize, program)?;
                 Ok(None)
             },
         )
