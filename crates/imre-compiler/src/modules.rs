@@ -3370,15 +3370,12 @@ impl SourceGraph {
         self.registered_functions.borrow()
     }
 
-    /// Registration has finished using the type database and import graph. Keep the
-    /// checked file snapshots and fixed frames that the selected units will borrow.
-    pub(crate) fn into_registered_files(
-        self,
-    ) -> (
-        Vec<SourceModule>,
-        HashMap<ModuleId, crate::dynamic::CheckedFunctions>,
-    ) {
-        (self.modules, self.registered_functions.into_inner())
+    /// Source discovery has committed to registration. The selected units borrow
+    /// the frontend's original body tables while the graph finishes diagnostics.
+    pub(crate) fn take_registered_functions(
+        &self,
+    ) -> HashMap<ModuleId, crate::dynamic::CheckedFunctions> {
+        self.registered_functions.take()
     }
 
     /// The fixed adapter displaced when this source supplies the import.

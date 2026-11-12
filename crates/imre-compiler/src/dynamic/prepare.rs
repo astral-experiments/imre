@@ -118,7 +118,9 @@ pub(super) fn units<'a>(
                     .unwrap_or_default(),
                 types,
             )?;
-            body.prompts = checked.map_or(&[][..], |unit| unit.prompts);
+            if let Some(module) = checked.and_then(|unit| unit.prompt_module) {
+                body.prompts = &registrations.modules[module].doctest_prompts;
+            }
             Ok(Initializer::Checked(Box::new(body)))
         };
         // Release each checker database after its last selected first-party file.
