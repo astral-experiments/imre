@@ -762,7 +762,7 @@ fn object_fallback(
                     .map(|source| dynamic::RegisteredSource {
                         is_program: false,
                         declares_signatures: false,
-                        initial: false,
+                        initial: None,
                         check_execution: false,
                         ..*source
                     })
