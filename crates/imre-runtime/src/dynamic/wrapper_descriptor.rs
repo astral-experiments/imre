@@ -302,9 +302,6 @@ impl BuiltinDescriptor {
             Some(("typing.TypeAliasType", attr)) => {
                 Some(("typing.TypeAliasType", attr, &["__reduce__"][..]))
             }
-            Some(("socket.socket", attr)) => {
-                Some(("socket.socket", attr, stdlib::SOCKET_CLASS_METHODS))
-            }
             Some(("slice", attr)) => Some(("slice", attr, slice::METHODS)),
             _ => None,
         };
@@ -505,7 +502,6 @@ impl BuiltinDescriptor {
             return Ok(descriptor);
         }
         let accepts = match self.owner {
-            "socket.socket" => ctx.heap.get(receiver).socket_handle().is_some(),
             owner if self.name == "__init__" && builtins::is_exception(owner) => {
                 ctx.instance_of(receiver, ctx.builtins[owner])
             }
@@ -1032,14 +1028,7 @@ pub(super) fn descriptor_get(
         Value::Super { .. } if class == "super" => None,
         Value::ClassMethod { .. } if class == "classmethod" => None,
         Value::Partial { .. } if class == "functools.partial" => None,
-        Value::HeapTypeMethod { name, .. }
-            if class
-                == if matches!(*name, "__repr__" | "__str__") {
-                    "wrapper_descriptor"
-                } else {
-                    "method_descriptor"
-                } =>
-        {
+        member @ Value::HeapTypeMethod { .. } if member.intrinsic_type_name() == Some(class) => {
             None
         }
         Value::Native(symbol)

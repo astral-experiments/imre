@@ -29,7 +29,11 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, module: Id, scope: Id) -> R
         "block_size",
         "digest_size",
     ] {
-        let method = ctx.alloc(Value::HeapTypeMethod { owner, name });
+        let method = ctx.alloc(Value::HeapTypeMethod {
+            owner,
+            name,
+            slot_wrapper: false,
+        });
         let member = if matches!(name, "name" | "block_size" | "digest_size") {
             ctx.alloc(Value::GetSetDescriptor {
                 get: method,
@@ -42,7 +46,11 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, module: Id, scope: Id) -> R
         };
         ctx.bind(fields, name, member);
     }
-    let callable = ctx.alloc(Value::HeapTypeMethod { owner, name: "md5" });
+    let callable = ctx.alloc(Value::HeapTypeMethod {
+        owner,
+        name: "md5",
+        slot_wrapper: false,
+    });
     let factory = ctx.alloc(Value::Method {
         callable,
         receiver: module,

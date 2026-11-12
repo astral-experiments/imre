@@ -863,7 +863,9 @@ impl Context {
             Value::Module {
                 constructor: None, ..
             } => "module",
-            Value::Instance { class, .. } if let Some(name) = self.heap.get(*class).heap_type() => {
+            Value::Socket { class, .. } | Value::Instance { class, .. }
+                if let Some(name) = self.heap.get(*class).heap_type() =>
+            {
                 name
             }
             Value::Instance { class, .. }
@@ -1074,6 +1076,8 @@ pub(super) struct ClassNamespace {
     pub itertools_layout: Option<&'static str>,
     /// Attribute writes to the type object itself are forbidden, independently of its instance layout.
     pub immutable_type: bool,
+    /// A native heap layout can be used as the base of a Python class.
+    pub subclassable_heap_type: bool,
     pub bases: Id,
     /// The tuple passed to type.__new__ when it differs from the direct bases' native storage.
     pub supplied_bases: Option<Id>,
@@ -1240,6 +1244,7 @@ impl<T> std::ops::Deref for BoxedFile<T> {
 #[derive(Clone, Copy)]
 pub(super) enum NativeModuleState {
     PendingBuiltin,
+    SocketType(Id),
     LocaleError(Id),
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     TermiosError(Id),
@@ -1257,9 +1262,10 @@ impl NativeModuleState {
     fn references(self, visit: &mut impl VisitReferences) {
         match self {
             Self::PendingBuiltin => {}
-            Self::LocaleError(class) | Self::IsoCalendarDate(class) | Self::SslError(class) => {
-                visit.push(class)
-            }
+            Self::SocketType(class)
+            | Self::LocaleError(class)
+            | Self::IsoCalendarDate(class)
+            | Self::SslError(class) => visit.push(class),
             #[cfg(any(target_os = "linux", target_os = "macos"))]
             Self::TermiosError(class) => visit.push(class),
             Self::PickleWriter {
@@ -1403,7 +1409,10 @@ pub(super) enum Value {
         server_hostname: Id,
         owner: super::stdlib::ssl::Owner,
     },
-    Socket(crate::ObjectOwner),
+    Socket {
+        class: Id,
+        handle: crate::ObjectOwner,
+    },
     Deque(Box<crate::objects::DequeRing<Id>>),
     GenericAliasIterator(Option<Id>),
     StructUnpackIterator {
@@ -1720,6 +1729,8 @@ pub(super) enum Value {
     HeapTypeMethod {
         owner: Id,
         name: &'static str,
+        /// Slot wrappers and native methods have different descriptor and bound-callable types.
+        slot_wrapper: bool,
     },
     IoMethod {
         owner: Id,
@@ -1817,7 +1828,7 @@ impl Value {
 
     pub(super) fn socket_handle(&self) -> Option<&crate::ObjectOwner> {
         match self {
-            Self::Socket(s)
+            Self::Socket { handle: s, .. }
             | Self::Instance {
                 socket: Some(s), ..
             } => Some(s),
@@ -1833,7 +1844,7 @@ impl Value {
             Self::Epoll(epoll) => epoll.fd() >= 0,
             #[cfg(target_os = "linux")]
             Self::Mmap { region, .. } => region.is_some(),
-            Self::Socket(socket)
+            Self::Socket { handle: socket, .. }
             | Self::Instance {
                 socket: Some(socket),
                 ..
@@ -1903,8 +1914,7 @@ impl Value {
             Self::Filter { .. } => "filter",
             Self::Hash(state) => state.lock().class_name(),
             Self::HeapTypeMethod {
-                name: "__repr__" | "__str__",
-                ..
+                slot_wrapper: true, ..
             } => "wrapper_descriptor",
             Self::HeapTypeMethod { .. } => "method_descriptor",
             Self::Zip { .. } => "zip",
@@ -2050,7 +2060,9 @@ impl Value {
 
     pub(super) fn instance_class(&self) -> Option<Id> {
         match self {
-            Self::Instance { class, .. } | Self::FrameLocalsProxy { class, .. } => Some(*class),
+            Self::Instance { class, .. }
+            | Self::Socket { class, .. }
+            | Self::FrameLocalsProxy { class, .. } => Some(*class),
             Self::Class { metaclass, .. } => *metaclass,
             Self::Module { constructor, .. } => *constructor,
             Self::Raised(error) => error.class(),
@@ -2681,6 +2693,7 @@ impl Value {
                 owner, unsupported, ..
             } => visit.extend([*owner, *unsupported]),
             Self::HeapTypeMethod { owner, .. } => visit.push(*owner),
+            Self::Socket { class, .. } => visit.push(*class),
             Self::RegexScanner {
                 pattern, subject, ..
             } => visit.extend([*pattern, *subject]),
@@ -2724,7 +2737,6 @@ impl Value {
             | Self::ThreadHandle(_)
             | Self::PrimitiveLock(_)
             | Self::Poll(_)
-            | Self::Socket(_)
             | Self::Native(_)
             | Self::TupleGetterDoc
             | Self::ReadOnlyMember(_, _)
@@ -4254,7 +4266,7 @@ impl Heap {
                 self.classes.push(id);
                 id
             }
-            Value::Socket(_) => {
+            Value::Socket { .. } => {
                 let id = self.alloc_slot(value);
                 self.register_finalizer(id);
                 id

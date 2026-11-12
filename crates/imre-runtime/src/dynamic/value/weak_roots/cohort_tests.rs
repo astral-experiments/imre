@@ -699,7 +699,11 @@ fn learns_a_descriptor_added_after_the_ordinary_finalizer_paths() {
         panic!("could not open a Unix socket");
     };
     // Track the new descriptor independently of the ordinary Python finalizer above.
-    let descriptor = heap.alloc_slot(Value::Socket(socket));
+    let class = heap.alloc(Value::Native("type".into()));
+    let descriptor = heap.alloc_slot(Value::Socket {
+        class,
+        handle: socket,
+    });
     heap.track_initialized_descriptor(descriptor).unwrap();
     let Value::List(items) = heap.get_mut(owners) else {
         unreachable!()

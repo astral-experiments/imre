@@ -120,7 +120,11 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, module: Id, scope: Id) -> R
     namespace.immutable_type = true;
     namespace.defining_module = Some(module);
     for name in ["category", "bidirectional", "normalize", "is_normalized"] {
-        let method = ctx.alloc(Value::HeapTypeMethod { owner, name });
+        let method = ctx.alloc(Value::HeapTypeMethod {
+            owner,
+            name,
+            slot_wrapper: false,
+        });
         ctx.bind(fields, name, method);
     }
     let name = ctx.text("unidata_version");

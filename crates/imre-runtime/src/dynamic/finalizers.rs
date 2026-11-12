@@ -165,9 +165,7 @@ impl Context {
                 ..
             }
         );
-        let exact_socket = matches!(self.heap.get(owner), Value::Socket(_));
-        let found = exact_socket
-            || scan.is_some()
+        let found = scan.is_some()
             || generator_frame.is_some()
             || async_generator
             || unpack_iterator
@@ -220,17 +218,14 @@ impl Context {
                     "Exception ignored while closing generator",
                 );
             }
-        } else if let Some(slot) = if exact_socket {
-            Some(self.builtin("socket.socket.__del__"))
-        } else {
-            self.slot(owner, "__del__")
-        } {
+        } else if let Some(slot) = self.slot(owner, "__del__") {
             self.heap.keep(slot);
             // CPython calls method descriptors unbound, including ordinary
             // functions. Only custom descriptors resolve __get__ before the call.
-            let unbound = exact_socket
-                || matches!(self.heap.get(slot), Value::Function { .. })
-                || matches!(self.heap.get(slot), Value::Native(name)
+            let unbound = matches!(
+                self.heap.get(slot),
+                Value::Function { .. } | Value::HeapTypeMethod { .. }
+            ) || matches!(self.heap.get(slot), Value::Native(name)
                     if super::wrapper_descriptor::BuiltinDescriptor::lookup(name).is_some());
             let target = if unbound {
                 Some((slot, vec![owner]))

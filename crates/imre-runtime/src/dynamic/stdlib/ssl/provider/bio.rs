@@ -441,7 +441,11 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, module: Id, scope: Id) -> R
     namespace.immutable_type = true;
     namespace.defining_module = Some(module);
     for name in ["__new__", "read", "write", "write_eof", "pending", "eof"] {
-        let method = ctx.alloc(Value::HeapTypeMethod { owner, name });
+        let method = ctx.alloc(Value::HeapTypeMethod {
+            owner,
+            name,
+            slot_wrapper: false,
+        });
         let member = match name {
             "__new__" => ctx.alloc(Value::Method {
                 callable: method,

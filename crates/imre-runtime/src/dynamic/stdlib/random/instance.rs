@@ -25,8 +25,20 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
     };
     *heap_type = Some(CLASS);
     let fields = *fields;
+    let Value::Scope(frame) = ctx.heap.get_mut(fields) else {
+        unreachable!()
+    };
+    frame
+        .class_namespace
+        .as_mut()
+        .unwrap()
+        .subclassable_heap_type = true;
     for name in ["__init__", "seed", "random", "getrandbits"] {
-        let method = ctx.alloc(Value::HeapTypeMethod { owner: class, name });
+        let method = ctx.alloc(Value::HeapTypeMethod {
+            owner: class,
+            name,
+            slot_wrapper: false,
+        });
         ctx.bind(fields, name, method);
     }
     let singleton = ctx.instance(class, None);
@@ -90,6 +102,7 @@ pub(super) fn bound_stream(ctx: &Context, method: Id) -> Option<(Id, Id)> {
     let Value::HeapTypeMethod {
         owner,
         name: "random",
+        ..
     } = *ctx.heap.get(callable)
     else {
         return None;

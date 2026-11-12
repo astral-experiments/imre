@@ -557,7 +557,6 @@ impl Context {
             | ("map", Value::Map { .. })
             | ("zip", Value::Zip { .. })
             | ("mappingproxy", Value::MappingProxy(_))
-            | ("socket.socket", Value::Socket(_))
             | ("super", Value::Super { .. })
             | ("complex", Value::Complex(_))
             | ("str", Value::Str(_) | Value::SurrogateStr(_))
@@ -3078,9 +3077,6 @@ impl Context {
         if name == "code" {
             self.install_code_members(value);
         }
-        if name == "socket.socket" {
-            stdlib::install_socket_layout(self, value);
-        }
         if name == thread_handle::CLASS {
             thread_handle::install(self, value);
         }
@@ -4902,7 +4898,7 @@ impl Context {
             "errno" => stdlib::install_errno(self, scope)?,
             "atexit" => atexit::install(self, scope),
             "faulthandler" => stdlib::faulthandler::install(self, scope),
-            "_socket" => stdlib::install_lowlevel_socket(self, scope)?,
+            "_socket" => stdlib::install_lowlevel_socket(self, module, scope)?,
             "socket"
                 if source.is_none()
                     || source.as_ref().is_some_and(|(path, _, _)| {

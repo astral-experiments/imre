@@ -3271,11 +3271,16 @@ impl Context {
                     "Cannot subclass special typing classes",
                 ));
             }
-            if let Some(name) = self.heap.get(base).heap_type()
-                && !matches!(
-                    name,
-                    super::value::SSL_ERROR_TYPE | super::stdlib::random::instance::CLASS
-                )
+            if let Value::Class {
+                heap_type: Some(name),
+                scope,
+                ..
+            } = self.heap.get(base)
+                && !self
+                    .scope_data(*scope)
+                    .class_namespace
+                    .as_ref()
+                    .is_some_and(|ns| ns.subclassable_heap_type)
             {
                 return Err(Error::new(
                     "TypeError",

@@ -47,8 +47,7 @@ pub(super) mod unicodedata;
 pub(super) mod zstd;
 pub(super) use files::BinaryFile;
 pub(super) use socket::{
-    CLASS_METHODS as SOCKET_CLASS_METHODS, IMPORTED_FUNCTIONS as SOCKET_FUNCTIONS,
-    import_socket_constants, install_lowlevel_socket, install_socket_layout,
+    IMPORTED_FUNCTIONS as SOCKET_FUNCTIONS, import_socket_constants, install_lowlevel_socket,
 };
 pub(super) mod io;
 mod json;
@@ -82,7 +81,7 @@ mod resource;
 mod select;
 #[cfg(unix)]
 pub(super) mod signal;
-mod socket;
+pub(super) mod socket;
 #[cfg(unix)]
 pub(super) mod ssl;
 pub(super) mod structure;
