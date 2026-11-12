@@ -106,21 +106,20 @@ impl EagerDisplay for SourceScope<'_> {
     fn with_target(
         &mut self,
         target: &ast::Expr,
-        input: Self::Input,
+        mut input: Self::Input,
         output: Output<'_>,
         body: impl FnOnce(&mut Self) -> StdResult<Vec<Statement>, ()>,
     ) -> StdResult<Vec<Statement>, ()> {
-        let binding = input.bind_target(self, target)?;
+        input.bind_loop_target(self, target, false)?;
         let body = self.in_loop(LoopScope::WithCursor, body)?;
         Ok(match output {
             Output::Generator(item) => generators::clause(
                 input,
-                binding,
                 body,
                 item.range(),
                 self.loop_scope == super::LoopScope::WithCursor,
             ),
-            _ => input.for_suite(binding, body, Vec::new(), Vec::new()),
+            _ => input.for_suite(body, Vec::new(), Vec::new()),
         })
     }
 

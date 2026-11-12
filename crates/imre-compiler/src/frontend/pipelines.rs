@@ -115,7 +115,8 @@ impl Prepared {
         &mut self,
         binder: &mut B,
         target: &ast::Expr,
-    ) -> StdResult<Vec<Statement>, B::Error> {
+        pair_pull: bool,
+    ) -> StdResult<&[Statement], B::Error> {
         let row = binder.pattern_local(self.value);
         // The acquired Python cursor and its unadapted one-row pull must still
         // refer to the same slots. Typed rows keep their own snapshot layout.
@@ -132,7 +133,8 @@ impl Prepared {
                         ready,
                     },
                 ],
-            ) if slot == iterator
+            ) if pair_pull
+                && slot == iterator
                 && *clear == self.value
                 && *key == self.value
                 && *ready == self.ready
@@ -142,36 +144,45 @@ impl Prepared {
                     ExprKind::Builtin(Builtin::RegisteredIter(ir::IteratorOp::Loop(_)), _)
                 ) =>
             {
-                *iterator
+                Some(*iterator)
             }
-            _ => return self.bind_target(binder, target),
+            _ => None,
         };
-        let (binding, pair) = unpacking::bind_input(binder, target, row, None, true)?;
-        let Some(pair) = pair else { return Ok(binding) };
-        let ordinary = self.next.pop().unwrap();
-        self.acquire.push(Statement::Assign(
-            pair.ordinary,
-            Expr {
-                ty: Type::Bool,
-                kind: ExprKind::Builtin(
-                    Builtin::RegisteredPairNeedsRow,
-                    vec![Expr::local(cursor, Type::PythonObject)],
-                ),
-            },
-        ));
-        self.clear.push(pair.ordinary);
-        self.next.push(Statement::If(
-            Expr::local(pair.ordinary, Type::Bool),
-            vec![ordinary],
-            vec![Statement::IterNext {
-                kind: ir::IterNextKind::Generic,
-                iterator: cursor,
-                key: pair.items[0],
-                value: Some(pair.items[1]),
-                ready: self.ready,
-            }],
-        ));
-        Ok(binding)
+        let pull_end = self.next.len();
+        self.next
+            .push(Self::exhaust_if_empty(Expr::local(self.ready, Type::Bool)));
+        let start = self.next.len();
+        let projected =
+            (cursor.is_some() || matches!(row.ty, Type::Tuple(_))).then_some(&self.value);
+        let pair = unpacking::bind_input(binder, target, row, projected, &mut self.next)?;
+        if let (Some(cursor), Some(pair)) = (cursor, pair) {
+            let ordinary = std::mem::replace(&mut self.next[pull_end - 1], Statement::Exhaust);
+            self.acquire.push(Statement::Assign(
+                pair.ordinary,
+                Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Builtin(
+                        Builtin::RegisteredPairNeedsRow,
+                        vec![Expr::local(cursor, Type::PythonObject)],
+                    ),
+                },
+            ));
+            self.clear.push(pair.ordinary);
+            self.next[pull_end - 1] = Statement::If(
+                Expr::local(pair.ordinary, Type::Bool),
+                vec![ordinary],
+                vec![Statement::IterNext {
+                    kind: ir::IterNextKind::Generic,
+                    iterator: cursor,
+                    key: pair.items[0],
+                    value: Some(pair.items[1]),
+                    ready: self.ready,
+                }],
+            );
+        }
+        let end = self.next.len();
+        self.next.push(Statement::Clear(self.value));
+        Ok(&self.next[start..end])
     }
 
     /// An enclosing adapter has its own iteration semantics even if it reuses this state.
@@ -190,32 +201,13 @@ impl Prepared {
         reads
     }
 
-    /// A private fixed tuple can supply its fields directly. Other rows follow
-    /// ordinary unpacking and snapshot their elements before the target stores.
-    pub(super) fn bind_target<B: unpacking::PatternBinder>(
-        &self,
-        binder: &mut B,
-        target: &ast::Expr,
-    ) -> StdResult<Vec<Statement>, B::Error> {
-        let row = binder.pattern_local(self.value);
-        let stable = matches!(row.ty, Type::Tuple(_)).then_some(self.value);
-        unpacking::bind_targets(binder, target, row, stable)
-    }
-
     /// Execute one pull per iteration and release the cursor before running the exhaustion suite.
     pub(super) fn for_suite(
         mut self,
-        binding: Vec<Statement>,
         body: Vec<Statement>,
         otherwise: Vec<Statement>,
         before_iteration: Vec<Statement>,
     ) -> Vec<Statement> {
-        Self::bind_next(
-            &mut self.next,
-            Expr::local(self.ready, Type::Bool),
-            [self.value],
-            binding,
-        );
         self.next.extend(body);
         self.loop_suite(otherwise, before_iteration)
     }
@@ -258,19 +250,7 @@ impl Prepared {
         }]
     }
 
-    /// Bind a successful pull before releasing its output slots, or exit on exhaustion.
-    pub(super) fn bind_next(
-        next: &mut Vec<Statement>,
-        ready: Expr,
-        slots: impl IntoIterator<Item = usize>,
-        bindings: Vec<Statement>,
-    ) {
-        next.push(Self::exhaust_if_empty(ready));
-        next.extend(bindings);
-        next.extend(slots.into_iter().map(Statement::Clear));
-    }
-
-    fn exhaust_if_empty(ready: Expr) -> Statement {
+    pub(super) fn exhaust_if_empty(ready: Expr) -> Statement {
         Statement::If(not(ready), vec![Statement::Exhaust], Vec::new())
     }
 }
@@ -2418,7 +2398,10 @@ impl Checker<'_> {
                 }
             }
             self.forget_comprehension_writes(&plan, depth);
-            let binding = input.bind_target(self, &clause.target)?;
+            let row = self.local(input.value);
+            let stable = matches!(row.ty, Type::Tuple(_)).then_some(&input.value);
+            let mut binding = Vec::new();
+            unpacking::bind_input(self, &clause.target, row, stable, &mut binding)?;
             let filters = self.eager_filters(clause)?;
             pulls.push(Pull {
                 input,
@@ -2443,12 +2426,9 @@ impl Checker<'_> {
             let items = targets.map(|name| self.names[name]);
             let zip = &pulls[0].input;
             let mut next = zip.next.clone();
-            Prepared::bind_next(
-                &mut next,
-                self.local(zip.ready),
-                [zip.value],
-                pulls[0].binding.clone(),
-            );
+            next.push(Prepared::exhaust_if_empty(self.local(zip.ready)));
+            next.extend_from_slice(&pulls[0].binding);
+            next.push(Statement::Clear(zip.value));
             *out = Some(zip_sums::Sum {
                 lists,
                 items,
@@ -2894,18 +2874,15 @@ impl Checker<'_> {
         }
         let before = self.assigned.clone();
         let mut facts = self.narrowed.clone();
-        let binding = input.bind_loop_target(self, target)?;
-        assignments::forget_binding_writes(&mut facts, &binding);
+        let binding = input.bind_loop_target(self, target, true)?;
+        assignments::forget_binding_writes(&mut facts, binding);
         self.loop_breaks.push(None);
         let body = lower_body(self)?;
         let breaks = self.loop_breaks.pop().unwrap();
         self.assigned.after_iteration(before);
         self.narrowed = facts;
         let (orelse, falls) = self.loop_else(orelse, breaks, true)?;
-        Ok((
-            input.for_suite(binding, body, orelse, before_iteration),
-            falls,
-        ))
+        Ok((input.for_suite(body, orelse, before_iteration), falls))
     }
 
     /// A statically empty tuple can adopt its consumer's element layout because
