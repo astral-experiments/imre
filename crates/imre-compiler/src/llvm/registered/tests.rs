@@ -250,6 +250,20 @@ fn checked_integer_remainder_keeps_its_operation_with_a_registered_sibling() {
 }
 
 #[test]
+fn checked_floor_division_can_call_a_python_override() {
+    let mut output = emit_captured_body("def publish(a: int, b: int, send):\n    send(a // b)\n");
+    let floor = output.data(b"//");
+    let body = &output.functions;
+    assert_eq!(
+        body.matches("call i64 @imre_dyn_exact_int_word(").count(),
+        2
+    );
+    assert!(body.contains("icmp ugt i64"));
+    assert!(body.contains("call i64 @int_floordiv("));
+    assert!(body.contains(&format!("call i64 @imre_dyn_op_at(ptr %ctx, ptr {floor},")));
+}
+
+#[test]
 fn cached_power_of_two_remainder_needs_no_integer_owner() {
     let mut output = emit_captured_body(concat!(
         "def modulo(a: int) -> int:\n    return a % 8\n",
