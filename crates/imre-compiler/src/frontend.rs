@@ -2532,7 +2532,8 @@ fn annotation_with_aliases(
             "type aliases nest more than 32 levels or form a cycle",
         ));
     }
-    if let Some(Binding::TypeAlias(origin, index)) = graph.resolve_type(module, expression) {
+    let binding = graph.resolve_type(module, expression);
+    if let Some(Binding::TypeAlias(origin, index)) = binding {
         let module = &graph.modules[origin];
         if let Some(value) = module.aliases[index].annotation_value(module) {
             return annotation_with_aliases(
@@ -2601,7 +2602,7 @@ fn annotation_with_aliases(
             )
         });
     }
-    match graph.resolve_type(module, expression) {
+    match binding {
         Some(Binding::Definition(definition)) => {
             if let Some(ty) = declaration_annotation(definition, graph, classes, types) {
                 return Ok(ty);
