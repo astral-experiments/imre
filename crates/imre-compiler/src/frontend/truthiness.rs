@@ -17,6 +17,11 @@ impl Checker<'_> {
         expression: &ast::Expr,
         site: Option<ast::ExprRef<'_>>,
     ) -> Result<Expr, String> {
+        if let ast::Expr::UnaryOp(unary) = expression
+            && unary.op == UnaryOp::Not
+        {
+            return self.condition(&unary.operand).map(Expr::not);
+        }
         if let ast::Expr::If(value) = expression {
             return self.conditional_with(value, false, Self::condition);
         }
