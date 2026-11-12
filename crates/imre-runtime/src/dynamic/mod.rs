@@ -4954,8 +4954,8 @@ impl Context {
             "_opcode" => {
                 // Imre emits native code and has no adaptive bytecode interpreter.
                 let disabled = self.int(0);
-                self.bind(scope, "ENABLE_SPECIALIZATION", disabled);
-                self.bind(scope, "ENABLE_SPECIALIZATION_FT", disabled);
+                self.bind_source_name(scope, "ENABLE_SPECIALIZATION", disabled)?;
+                self.bind_source_name(scope, "ENABLE_SPECIALIZATION_FT", disabled)?;
             }
             "_frozen_importlib" => {
                 if self.bootstrap_globals == NONE {
