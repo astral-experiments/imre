@@ -211,7 +211,8 @@ impl StatementLowering for Checker<'_> {
     }
 
     fn returned(&mut self, ret: &ast::StmtReturn) -> Result<Statement, String> {
-        let value = if let Some(value) = &ret.value {
+        let mut origin = ret.range();
+        let mut value = if let Some(value) = &ret.value {
             if let Some(repr) = self.exception_formatter {
                 let value = self.expr(value)?;
                 if value.ty == Type::ObjectValue {
@@ -236,20 +237,36 @@ impl StatementLowering for Checker<'_> {
             } else if self.inferred_returns.is_some() {
                 self.expr(value)?
             } else {
-                self.expr_in_context(value, self.returns, |_, _| false, Self::coerce_return, None)?
+                origin = value.range();
+                self.expr_in_context(
+                    value,
+                    self.returns,
+                    |_, _| false,
+                    |_, value, _, _| Ok(value),
+                    None,
+                )?
             }
         } else {
             Expr::none()
         };
         let terminates = self.terminating_call(&value);
         self.explicit_return |= !terminates;
-        let value = if let Some(types) = &mut self.inferred_returns {
+        if let Some(types) = &mut self.inferred_returns {
             if !terminates {
                 types.push(value.ty);
             }
-            value
         } else {
-            let value = self.coerce_return(value, self.returns, ret)?;
+            if !terminates {
+                value = self
+                    .coerce(value, self.returns, &origin)
+                    .map_err(|failure| {
+                        if matches!(&failure, Failure::Diagnostic(d) if d.kind == Kind::ExactType) {
+                            failure.classify(Kind::ReturnType)
+                        } else {
+                            failure
+                        }
+                    })?;
+            }
             if let (Some(sites), Some(operand)) = (&mut self.fixed_sites, &ret.value) {
                 let kind = if terminates {
                     FixedNode::Effect
@@ -258,8 +275,7 @@ impl StatementLowering for Checker<'_> {
                 };
                 sites.statement(operand.range(), kind);
             }
-            value
-        };
+        }
         Ok(if terminates {
             Statement::Expr(value)
         } else {
