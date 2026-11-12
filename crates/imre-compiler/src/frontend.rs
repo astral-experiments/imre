@@ -139,10 +139,10 @@ pub(crate) use registered::values::{
     push_codepoints,
 };
 pub(crate) use registered::{
-    AnnotationProvider, CheckedProvider, DeclarationSite, DeferredAnnotation, FrameInputs, FrameSite,
-    LexicalOperands, ParameterAnnotations, ParameterEvaluator, PhysicalOperand, PreparedRefusal,
-    RegisteredBindings, RegisteredFunction, RegisteredGenerator, RegisteredLambda, RegisteredScope,
-    RegisteredSuite, SuitePreparation, TypeParameterValues, annotation_expression,
+    AnnotationProvider, CheckedProvider, DeclarationSite, DeferredAnnotation, FrameInputs,
+    FrameSite, LexicalOperands, ParameterAnnotations, ParameterEvaluator, PhysicalOperand,
+    PreparedRefusal, RegisteredBindings, RegisteredFunction, RegisteredGenerator, RegisteredLambda,
+    RegisteredScope, RegisteredSuite, SuitePreparation, TypeParameterValues, annotation_expression,
     place_fixed_function, registered_sites, registered_type_alias,
 };
 pub(crate) use registered::{LocalBinding, RegisteredClass, RegisteredOperand, RegisteredRegion};
