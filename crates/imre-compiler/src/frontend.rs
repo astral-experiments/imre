@@ -5799,7 +5799,12 @@ impl<'a> Checker<'a> {
                 } else if !lowered.is_empty() && self.fault_enabled() {
                     body.push(self.fault_line(statement));
                 }
-                body.extend(lowered);
+                // The final statement can already own the entire checked suite.
+                if index + 1 == statements.len() && body.capacity() == 0 && !lowered.is_empty() {
+                    *body = lowered;
+                } else {
+                    body.extend(lowered);
+                }
             }
             falls_through &= continues;
         }
