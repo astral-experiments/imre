@@ -3368,10 +3368,9 @@ impl Context {
             self.heap.get(target),
             Value::Dict(_) | Value::DefaultDict { .. }
         ) {
-            self.store_binding_item(target, key, value)?;
-        } else {
-            self.put_item(target, key, value)?;
+            return Ok(self.store_binding_item(target, key, value)? || replaced);
         }
+        self.put_item(target, key, value)?;
         Ok(replaced)
     }
 
