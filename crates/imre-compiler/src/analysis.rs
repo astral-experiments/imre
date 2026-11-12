@@ -794,15 +794,23 @@ impl Session {
                 // No import was queried on this prefix, so no imported function was captured.
                 closed.error.clone()
             } else {
-                let declarations: HashMap<_, _> = sources
+                let selected: HashMap<_, _> = sources
                     .clone()
-                    .filter(|(_, source)| source.declares_signatures)
-                    .map(|(id, source)| (source.name, (id, source.path)))
+                    .map(|(id, source)| {
+                        (
+                            source.name,
+                            initializer_calls::InitializerSource {
+                                module: id,
+                                path: source.path,
+                                declares_signatures: source.declares_signatures,
+                            },
+                        )
+                    })
                     .collect();
                 self.checked_initializer_calls(
                     (entry, start.path),
                     start.main_body,
-                    |name| declarations.get(name).copied(),
+                    |name| selected.get(name).copied(),
                     Some(&mut captures),
                 )
                 .error
