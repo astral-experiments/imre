@@ -381,13 +381,7 @@ impl EagerDisplay for Checker<'_> {
             .and_then(|ty| self.types.mapping(ty))
             .map(|(key, _)| key);
         let value = self.guarded_element(key, expected, guarded)?;
-        if !self.comprehension_key(value.ty) {
-            return Err(error(
-                self.source,
-                key,
-                "dictionary keys must be int, str, bytes, Path, or immutable scalar tuples",
-            ));
-        }
+        self.check_dictionary_key(value.ty, key)?;
         Ok((self.hidden(value.ty), value))
     }
 
@@ -684,57 +678,6 @@ impl Checker<'_> {
             return Ok(filtered);
         }
         self.comprehension_display(expression, display, Collector::Display(expected))
-    }
-
-    /// A dict can consume an exact two-column zip in the same order as a
-    /// dictionary comprehension; the iterator itself never escapes.
-    pub(super) fn dict_from_zip(&mut self, call: &ast::ExprCall) -> Result<Option<Expr>, String> {
-        let [source @ ast::Expr::Call(zip)] = call.arguments.args.as_ref() else {
-            return Ok(None);
-        };
-        if !call.arguments.keywords.is_empty()
-            || zip.arguments.args.len() != 2
-            || !matches!(&*zip.func,ast::Expr::Name(n) if n.id == "zip" && !self.names.contains_key("zip"))
-            || self.resolve(&zip.func).is_some()
-        {
-            return Ok(None);
-        }
-        let range = call.range();
-        let node_index = || ast::AtomicNodeIndex::NONE;
-        let item = |name: &str, ctx| {
-            ast::Expr::Name(ast::ExprName {
-                range,
-                node_index: node_index(),
-                id: name.into(),
-                ctx,
-            })
-        };
-        let target = ast::Expr::Tuple(ast::ExprTuple {
-            range,
-            node_index: node_index(),
-            parenthesized: false,
-            ctx: ast::ExprContext::Store,
-            elts: vec![
-                item("@zipkey", ast::ExprContext::Store),
-                item("@zipvalue", ast::ExprContext::Store),
-            ],
-        });
-        let clauses = [ast::Comprehension {
-            range,
-            node_index: node_index(),
-            target,
-            iter: source.clone(),
-            ifs: Vec::new(),
-            is_async: false,
-        }];
-        let key = item("@zipkey", ast::ExprContext::Load);
-        let value = item("@zipvalue", ast::ExprContext::Load);
-        self.comprehension_display(
-            &call.func,
-            &Plan::new(&clauses, Output::Dict(&key, &value)),
-            Collector::Display(None),
-        )
-        .map(Some)
     }
 
     pub(super) fn comprehension_display(
@@ -1155,6 +1098,18 @@ impl Checker<'_> {
             if let Some(slot) = self.names.get(&name) {
                 self.narrowed.remove_mut(slot);
             }
+        }
+    }
+
+    pub(super) fn check_dictionary_key(&self, ty: Type, site: &impl Ranged) -> Result<(), String> {
+        if self.comprehension_key(ty) {
+            Ok(())
+        } else {
+            Err(error(
+                self.source,
+                site,
+                "dictionary keys must be int, str, bytes, Path, or immutable scalar tuples",
+            ))
         }
     }
 

@@ -248,6 +248,28 @@ pub(super) fn bind_input<B: PatternBinder>(
 }
 
 impl Checker<'_> {
+    /// Store a row from a Python cursor using the ordinary two-target unpack.
+    pub(super) fn store_object_pair(
+        &mut self,
+        target: usize,
+        item: Expr,
+        site: TextRange,
+    ) -> Statement {
+        let sequence = self.types.list(Type::PythonObject);
+        let PatternSnapshot {
+            mut body,
+            clear,
+            items,
+            ..
+        } = protocol_snapshot(self, site, 2, None, item, sequence);
+        body.push(Statement::SetItem(
+            self.local(target),
+            self.local(items[0]),
+            self.local(items[1]),
+        ));
+        Statement::Scope { body, clear }
+    }
+
     /// Finds a target's storage without executing its receiver or index.
     pub(super) fn target_context(
         &self,
