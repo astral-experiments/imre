@@ -1066,11 +1066,7 @@ pub(super) fn descriptor_get(
                 return Ok(if receiver == NONE {
                     descriptor
                 } else {
-                    ctx.alloc(Value::Method {
-                        callable: descriptor,
-                        receiver,
-                        explicit: true,
-                    })
+                    ctx.bind_python_method(descriptor, receiver)
                 });
             }
             if let Value::Super {

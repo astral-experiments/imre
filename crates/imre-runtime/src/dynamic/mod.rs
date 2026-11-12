@@ -3471,6 +3471,11 @@ impl Context {
                 if name == "function" {
                     let descriptor = self.alloc(Value::LayoutDescriptor(value, "__code__"));
                     entries.push((self.heap.code_name("__code__"), descriptor));
+                } else if name == "method" {
+                    for field in ["__func__", "__self__"] {
+                        let descriptor = self.readonly_member("method", field);
+                        entries.push((self.heap.code_name(field), descriptor));
+                    }
                 }
                 if let Some(symbol) = object_size::descriptor(name) {
                     entries.push((self.heap.code_name("__sizeof__"), self.builtin(symbol)));
