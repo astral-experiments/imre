@@ -1182,14 +1182,14 @@ impl Program {
     fn resolve_directives(
         &mut self,
         enclosing: &dyn Fn(&str) -> Option<EnclosingBinding>,
-        module_globals: &mut HashSet<String>,
     ) -> Result<()> {
         self.locals
             .retain(|name| !self.directives.contains_key(name));
         for (name, (kind, range)) in &self.directives {
             if *kind == ScopeDirective::Global {
-                module_globals.insert(name.clone());
-            } else if let Some(binding) = enclosing(name) {
+                continue;
+            }
+            if let Some(binding) = enclosing(name) {
                 if matches!(binding, EnclosingBinding::TypeParameter) {
                     return Err(Error::new(
                         "SyntaxError",
@@ -1236,18 +1236,15 @@ impl Program {
             if let SourceItem::Define(definition) = op {
                 let child = &mut definition.body;
                 if let Some(params) = definition.kind.type_params() {
-                    child.resolve_directives(
-                        &|name| {
-                            if params.iter().any(|p| p.name().as_str() == name) {
-                                Some(EnclosingBinding::TypeParameter)
-                            } else {
-                                bound(name)
-                            }
-                        },
-                        module_globals,
-                    )?;
+                    child.resolve_directives(&|name| {
+                        if params.iter().any(|p| p.name().as_str() == name) {
+                            Some(EnclosingBinding::TypeParameter)
+                        } else {
+                            bound(name)
+                        }
+                    })?;
                 } else {
-                    child.resolve_directives(&bound, module_globals)?;
+                    child.resolve_directives(&bound)?;
                 }
             }
         }
@@ -2556,14 +2553,7 @@ impl Context {
                 let lowering = code.lower_namespace(body, false).and_then(|()| {
                     // Closure binding resolution follows symbol collection and future placement.
                     if symbol_error.is_none() {
-                        let mut module_globals = HashSet::new();
-                        code.resolve_directives(&|_| None, &mut module_globals)?;
-                        // A global declared by a nested block makes module assignments use the globals dictionary.
-                        for name in module_globals {
-                            code.directives
-                                .entry(name)
-                                .or_insert((ScopeDirective::Global, Default::default()));
-                        }
+                        code.resolve_directives(&|_| None)?;
                     }
                     Ok(())
                 });
