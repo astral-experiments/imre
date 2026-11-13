@@ -627,7 +627,6 @@ impl<'a> PreparedBody<'a> {
                             &private_names,
                             values,
                             class,
-                            &scopes,
                         )
                     }),
                 },
@@ -1567,7 +1566,7 @@ impl LexicalDefinitions<'_, '_> {
                     Ok(self.compile_evaluator(
                         body.range.start(),
                         &parameter.name,
-                        &provider.scope,
+                        &provider.scope(class),
                         true,
                         body,
                         class,

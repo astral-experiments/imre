@@ -55,7 +55,7 @@ def nested_expressions(External):
     class Local:
         External = "class"
 
-        def method(x: [External for _ in (1,)], y: [x for x in [External]]):
+        def method[T: External](x: [External for _ in (1,)], y: [x for x in [External]]):
             pass
 
     class Global:
@@ -64,6 +64,12 @@ def nested_expressions(External):
         def method(x: External, y: (lambda: External)):
             pass
 
+    bound = Local.method.__type_params__[0].evaluate_bound
+    assert bound.__code__.co_freevars == ("__classdict__",)
+    annotation = Local.method.__annotate__
+    classdict = annotation.__code__.co_freevars.index("__classdict__")
+    assert bound.__closure__[0] is annotation.__closure__[classdict]
+    assert bound() == "class"
     Global.External = "shadow"
     return Local.method.__annotate__, Global.method.__annotate__
 
