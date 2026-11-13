@@ -135,9 +135,16 @@ pub(crate) struct Row<F> {
     save_field: F,
     field: Field,
     chars: usize,
-    limit: i64,
     quoted: bool,
     state: State,
+}
+
+#[cold]
+fn field_limit_error(limit: i64) -> Error {
+    Error::new(
+        Kind::CsvError,
+        format!("field larger than field limit ({limit})"),
+    )
 }
 
 impl<F: FnMut(Field, bool) -> Result<()>> Row<F> {
@@ -146,7 +153,6 @@ impl<F: FnMut(Field, bool) -> Result<()>> Row<F> {
             save_field,
             field: Field::Text(String::new()),
             chars: 0,
-            limit: 131_072,
             quoted: false,
             state: State::Record,
         }
@@ -158,11 +164,10 @@ impl<F: FnMut(Field, bool) -> Result<()>> Row<F> {
         line: impl Iterator<Item = u32>,
         limit: i64,
     ) -> Result<bool> {
-        self.limit = limit;
         for ch in line {
-            self.token(dialect, Some(ch))?;
+            self.token(dialect, Some(ch), limit)?;
         }
-        self.token(dialect, None)?;
+        self.token(dialect, None, limit)?;
         Ok(self.state == State::Record)
     }
 
@@ -177,12 +182,9 @@ impl<F: FnMut(Field, bool) -> Result<()>> Row<F> {
         Ok(true)
     }
 
-    fn add(&mut self, point: u32) -> Result<()> {
-        if self.chars as i64 >= self.limit {
-            return Err(Error::new(
-                Kind::CsvError,
-                format!("field larger than field limit ({})", self.limit),
-            ));
+    fn add(&mut self, point: u32, limit: i64) -> Result<()> {
+        if self.chars as i64 >= limit {
+            return Err(field_limit_error(limit));
         }
         match &mut self.field {
             Field::Text(text) => {
@@ -220,7 +222,7 @@ impl<F: FnMut(Field, bool) -> Result<()>> Row<F> {
     }
 
     /// None is the iterator's end-of-line marker, which need not be a newline.
-    fn token(&mut self, dialect: &Dialect, token: Option<u32>) -> Result<()> {
+    fn token(&mut self, dialect: &Dialect, token: Option<u32>, limit: i64) -> Result<()> {
         use State::*;
         let newline = token == Some(u32::from('\n')) || token == Some(u32::from('\r'));
         if self.state == Record {
@@ -249,7 +251,7 @@ impl<F: FnMut(Field, bool) -> Result<()>> Row<F> {
                     self.quoted = true;
                     self.state = Quoted;
                 } else if self.state == AfterQuote && token == dialect.quote.map(u32::from) {
-                    self.add(ch)?;
+                    self.add(ch, limit)?;
                     self.state = Quoted;
                 } else if self.state != AfterQuote && token == dialect.escape.map(u32::from) {
                     self.state = EscapeField;
@@ -271,7 +273,7 @@ impl<F: FnMut(Field, bool) -> Result<()>> Row<F> {
                         ),
                     ));
                 } else {
-                    self.add(ch)?;
+                    self.add(ch, limit)?;
                     if self.state != AfterEscapeNewline {
                         self.state = Field;
                     }
@@ -288,12 +290,12 @@ impl<F: FnMut(Field, bool) -> Result<()>> Row<F> {
                             Field
                         };
                     } else {
-                        self.add(ch)?;
+                        self.add(ch, limit)?;
                     }
                 }
             }
             EscapeField | EscapeQuoted => {
-                self.add(token.unwrap_or(u32::from('\n')))?;
+                self.add(token.unwrap_or(u32::from('\n')), limit)?;
                 self.state = if self.state == EscapeQuoted {
                     Quoted
                 } else if newline {
