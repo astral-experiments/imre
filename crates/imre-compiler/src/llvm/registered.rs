@@ -851,7 +851,15 @@ impl<'f> Frame<'f, '_, '_> {
         let done = self.code.name("b");
         let exhausted = exhaust.then(|| self.code.name("b"));
         let empty = exhausted.as_deref().unwrap_or(&done);
-        self.store_private(ready, &permanent::FALSE.to_string());
+        // The landing clears this private flag before its handler can read it.
+        // Only normal exhaustion needs to reset it when the pull owns that edge.
+        let reset_on_exhaustion = exhaust
+            && kind == ir::IterNextKind::Generic
+            && !self.code.native_suspension
+            && self.code.unwinds_slot(self.code.physical_slot(ready));
+        if !reset_on_exhaustion {
+            self.store_private(ready, &permanent::FALSE.to_string());
+        }
         if kind == ir::IterNextKind::Generic
             && let Some(line) = self.code.loops.last().and_then(|(_, line)| *line)
         {
@@ -876,6 +884,9 @@ impl<'f> Frame<'f, '_, '_> {
         self.code.jump(&done);
         if let Some(label) = exhausted {
             self.code.label(&label);
+            if reset_on_exhaustion {
+                self.store_private(ready, &permanent::FALSE.to_string());
+            }
             CheckedBody::registered(self.reborrow()).loop_transfer(&Statement::Exhaust);
         }
         self.code.label(&done);

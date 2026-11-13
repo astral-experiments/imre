@@ -429,6 +429,13 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         }
     }
 
+    /// Whether the current error landing clears this physical root before its handler runs.
+    pub(super) fn unwinds_slot(&self, slot: usize) -> bool {
+        self.scope_unwinds
+            .get(&self.body.error_target)
+            .is_some_and(|slots| slots.contains(&slot))
+    }
+
     fn start_label(&mut self, label: &str) -> IndexSet<usize> {
         self.flush_check();
         self.body.start(label);
