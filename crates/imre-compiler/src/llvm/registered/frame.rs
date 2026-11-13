@@ -1834,6 +1834,7 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
         let mut args = args.iter();
 
         let mark = self.temporary_mark();
+        let edge = self.begin_operand_scope();
         if self.native_suspension
             && let RegisteredCallTarget::Callable {
                 suspended_name: Some(name),
@@ -1854,21 +1855,21 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
             }
             RegisteredCallTarget::Method {
                 name, attribute, ..
-            } => self.unwind_operands(&mark, |f| {
-                let receiver = f.evaluate_handle(target);
+            } => {
+                let receiver = self.evaluate_handle(target);
                 let direct = matches!(call.arguments, RegisteredArguments::Positional);
-                let (callee, bound) = if let SourcePosition::Expression(active) = f.position {
+                let (callee, bound) = if let SourcePosition::Expression(active) = self.position {
                     let lookup =
                         TextRange::new(active.start().max(attribute.start()), attribute.end());
-                    f.with_source_range(lookup, |f| {
+                    self.with_source_range(lookup, |f| {
                         f.method_target(&receiver, name, lookup, direct)
                     })
                 } else {
-                    f.method_target(&receiver, name, *attribute, direct)
+                    self.method_target(&receiver, name, *attribute, direct)
                 };
-                f.keep_operands(&mark, &callee, bound.as_deref().unwrap_or("0"));
+                self.keep_operands(&mark, &callee, bound.as_deref().unwrap_or("0"));
                 (callee, bound, attribute.end())
-            }),
+            }
         };
         let operands = match &call.arguments {
             RegisteredArguments::Positional => {
@@ -1906,11 +1907,12 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
                     names: self.output.data(names.join("\0").as_bytes()),
                 }
             }
-            RegisteredArguments::Packed(pack) => self.unwind_operands(&mark, |f| {
-                let (args, kwargs) = f.pack_arguments(pack, args.as_slice(), Some(&callable));
+            RegisteredArguments::Packed(pack) => {
+                let (args, kwargs) = self.pack_arguments(pack, args.as_slice(), Some(&callable));
                 CallArguments::Packed { args, kwargs }
-            }),
+            }
         };
+        self.finish_unwind(edge, |frame| frame.release_owned_operands(&mark));
         self.positioned_call(
             &callable,
             operands,
