@@ -719,7 +719,7 @@ fn launch(request: Start) -> Result<(Ready, Entry)> {
         // A failed bootstrap publishes no identity and contributes nothing to the live count.
         match request.operation {
             Operation::Python(callback) => {
-                let (mut worker, function, slots) = match callback.load() {
+                let (mut worker, function, args, kwargs) = match callback.load() {
                     Ok(call) => call,
                     Err(error) => {
                         let _ = ready.send(Err(error.to_string()));
@@ -732,11 +732,11 @@ fn launch(request: Start) -> Result<(Ready, Entry)> {
                 if !exit.enter(request.count, starting, &ready, None) {
                     return Ok(());
                 }
-                let result = match worker.prepare_bound_function(function, slots) {
+                let result = match worker.prepare_call(function, args, kwargs) {
                     // SAFETY: the ABI pointer comes from the Context owned by this
                     // pthread. Preparation's borrow has ended and no other code can
                     // move or access the Context until this frame returns.
-                    Ok(frame) => unsafe { frame.run(&raw mut worker) },
+                    Ok(call) => unsafe { call.run(&raw mut worker) },
                     Err(error) => Err(error),
                 };
                 if let Err(error) = result {

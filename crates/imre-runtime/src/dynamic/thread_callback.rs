@@ -369,7 +369,7 @@ impl Callback {
         })
     }
 
-    pub(super) fn load(self) -> Result<(Context, Id, Vec<Id>)> {
+    pub(super) fn load(self) -> Result<(Context, Id, Vec<Id>, Vec<(String, Id)>)> {
         let heap = super::Heap::with_worker_stack(
             Some(self.frames),
             self.gc_settings,
@@ -434,9 +434,24 @@ impl Callback {
             slots.push(id);
         }
         let parameters = ctx.parsed_parameters(code)?;
-        if slots.len() != parameters.positional.len() + parameters.keyword_only.len() {
+        if parameters.varargs.is_some()
+            || parameters.kwargs.is_some()
+            || slots.len() != parameters.positional.len() + parameters.keyword_only.len()
+        {
             return Err(unsupported());
         }
-        Ok((ctx, function, slots))
+        // The creator already selected defaults and supplied operands in parameter order.
+        let mut keywords = Vec::new();
+        keywords
+            .try_reserve_exact(parameters.keyword_only.len())
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        for (name, value) in parameters
+            .keyword_only
+            .iter()
+            .zip(slots.drain(parameters.positional.len()..))
+        {
+            keywords.push((copy_label(name)?, value));
+        }
+        Ok((ctx, function, slots, keywords))
     }
 }

@@ -59,23 +59,21 @@ fn owned_registered_entry_roots_bound_slots_and_restores_its_frame() {
             let value = ctx.alloc(Value::List(if fails { vec![NONE] } else { Vec::new() }));
             // Collection in the linked entry must find the value through its bound scope.
             ctx.heap.release_temporaries_since(mark);
-            let frame = if forwarded {
+            let call = if forwarded {
                 let method = ctx.bind_python_method(target, value);
-                let call = ctx
-                    .prepare_call_in_scope(
-                        scope,
-                        operator,
-                        vec![method],
-                        vec![("alias".into(), value)],
-                    )
-                    .unwrap();
-                let crate::dynamic::calls::RegisteredCall::Native(frame) = call else {
-                    panic!("operator.call ran the registered method during preparation");
-                };
-                frame
+                ctx.prepare_call_in_scope(
+                    scope,
+                    operator,
+                    vec![method],
+                    vec![("alias".into(), value)],
+                )
+                .unwrap()
             } else {
-                ctx.prepare_bound_function(target, vec![value, value])
+                ctx.prepare_call(target, vec![value], vec![("alias".into(), value)])
                     .unwrap()
+            };
+            let crate::dynamic::calls::RegisteredCall::Native(frame) = call else {
+                panic!("registered function ran during preparation");
             };
             // A parked native entry leaves the complete binding layout with its code.
             let layout = ctx.code_object(code).parsed_parameters.get().unwrap();

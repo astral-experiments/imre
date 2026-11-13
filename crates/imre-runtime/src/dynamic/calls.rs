@@ -229,27 +229,11 @@ fn non_callable_error(name: &str) -> Error {
     Error::new_static("TypeError", message)
 }
 
-enum FunctionArguments {
-    Call {
-        args: Vec<Id>,
-        kwargs: Vec<(String, Id)>,
-        variadic: Option<Id>,
-    },
-    Bound(Vec<Id>),
-}
-
 fn method_arguments(receiver: Id, mut args: Vec<Id>) -> Result<Vec<Id>> {
     args.try_reserve_exact(1)
         .map_err(|_| Error::new("MemoryError", ""))?;
     args.insert(0, receiver);
     Ok(args)
-}
-
-fn invalid_bound_call() -> Error {
-    Error::new(
-        "SystemError",
-        "invalid bound arguments for registered function",
-    )
 }
 
 pub(super) enum RegisteredCall {
@@ -9167,35 +9151,6 @@ impl Context {
         }
     }
 
-    /// Prepare the worker-local function using the canonical slots already bound by its caller.
-    pub(super) fn prepare_bound_function(
-        &mut self,
-        callable: Id,
-        slots: Vec<Id>,
-    ) -> Result<RegisteredFrame> {
-        match self.prepare_function(callable, FunctionArguments::Bound(slots))? {
-            RegisteredCall::Native(frame) => Ok(frame),
-            _ => unreachable!("bound slots require a native entry"),
-        }
-    }
-
-    fn prepare_function_call(
-        &mut self,
-        callable: Id,
-        args: Vec<Id>,
-        kwargs: Vec<(String, Id)>,
-        variadic: Option<Id>,
-    ) -> Result<RegisteredCall> {
-        self.prepare_function(
-            callable,
-            FunctionArguments::Call {
-                args,
-                kwargs,
-                variadic,
-            },
-        )
-    }
-
     /// Read a default selected by the Python argument binder from the function's live storage.
     pub(super) fn bound_default(
         &self,
@@ -9215,10 +9170,12 @@ impl Context {
         }
     }
 
-    fn prepare_function(
+    fn prepare_function_call(
         &mut self,
         callable: Id,
-        arguments: FunctionArguments,
+        args: Vec<Id>,
+        kwargs: Vec<(String, Id)>,
+        variadic: Option<Id>,
     ) -> Result<RegisteredCall> {
         let Value::Function {
             ref fields,
@@ -9230,14 +9187,11 @@ impl Context {
             ..
         } = *self.heap.get(callable)
         else {
-            return Err(invalid_bound_call());
+            unreachable!("registered Python function");
         };
         let parameters = self.code_object(code).parameters;
         let name = self.copy_name(fields.qualname)?;
         if parameters == NONE {
-            let FunctionArguments::Call { args, kwargs, .. } = arguments else {
-                return Err(invalid_bound_call());
-            };
             if let Some((key, _)) = kwargs.first() {
                 return Err(Error::new(
                     "TypeError",
@@ -9258,12 +9212,8 @@ impl Context {
             return self.prepare_namespace_code(code, globals, None, Some(callable), "exec", None);
         }
         // Root the scope, packed arguments, keyword names, and returning value.
-        let keyword_count = match &arguments {
-            FunctionArguments::Call { kwargs, .. } => kwargs.len(),
-            FunctionArguments::Bound(_) => 0,
-        };
         self.heap
-            .reserve_temporaries(keyword_count.saturating_add(4))?;
+            .reserve_temporaries(kwargs.len().saturating_add(4))?;
         let module = copy_label(&self.scope_data(scope).module)?;
         let local = allocator_api2::boxed::Box::try_new(Scope::new(module, Some(scope)))
             .map_err(|_| Error::new("MemoryError", ""))?;
@@ -9284,68 +9234,45 @@ impl Context {
         }
 
         let shape = sig.shape();
-        match arguments {
-            FunctionArguments::Call {
-                args,
-                kwargs,
-                variadic,
-            } => {
-                let pos = &sig.positional;
-                let num_defaults = self.tuple_elements(defaults).map_or(0, <[_]>::len);
-                let keys = kwargs.iter().map(|(key, _)| key.as_str());
-                let binding = shape.bind(&name, args.len(), keys, num_defaults, |n| {
-                    self.dict_named_item(kwdefaults, n).is_some()
-                })?;
-                for (n, &v) in pos.iter().zip(&args) {
-                    self.bind_argument(local, n, v)?;
-                }
-                if let Some(n) = sig.varargs.as_deref() {
-                    let extra = if pos.is_empty() {
-                        args
-                    } else {
-                        copy_ids(args.get(pos.len()..).unwrap_or_default())?
-                    };
-                    let extra = self.alloc(Value::Tuple(extra));
-                    self.bind_argument(local, n, extra)?;
-                }
-                let mut extra = Vec::new();
-                for ((key, value), slot) in kwargs.into_iter().zip(binding.keywords) {
-                    if let Some(slot) = slot {
-                        self.bind_argument(local, shape.parameter(slot), value)?;
-                    } else {
-                        let k = self.text(key);
-                        extra.push((k, value));
-                    }
-                }
-                if let Some(n) = sig.kwargs.as_deref() {
-                    let v = variadic.unwrap_or_else(|| self.dict(extra));
-                    self.bind_argument(local, n, v)?;
-                }
-                let supplied_types = self.check_supplied_types(callable, &sig, &name, |param| {
-                    self.scope_data(local).names.get(param).copied()
-                });
-                for slot in binding.defaults {
-                    let value = self.bound_default(&shape, slot, defaults, kwdefaults);
-                    self.bind_argument(local, shape.parameter(slot), value)?;
-                }
-                supplied_types?;
-            }
-            FunctionArguments::Bound(slots) => {
-                if !matches!(self.code_object(code).body, value::Body::Native(_, NONE))
-                    || sig.varargs.is_some()
-                    || sig.kwargs.is_some()
-                    || slots.len() != sig.positional.len() + sig.keyword_only.len()
-                {
-                    return Err(invalid_bound_call());
-                }
-                for (name, id) in sig.positional.iter().chain(&sig.keyword_only).zip(slots) {
-                    self.bind_argument(local, name, id)?;
-                }
-                self.check_supplied_types(callable, &sig, &name, |param| {
-                    self.scope_data(local).names.get(param).copied()
-                })?;
+        let pos = &sig.positional;
+        let num_defaults = self.tuple_elements(defaults).map_or(0, <[_]>::len);
+        let keys = kwargs.iter().map(|(key, _)| key.as_str());
+        let binding = shape.bind(&name, args.len(), keys, num_defaults, |n| {
+            self.dict_named_item(kwdefaults, n).is_some()
+        })?;
+        for (n, &v) in pos.iter().zip(&args) {
+            self.bind_argument(local, n, v)?;
+        }
+        if let Some(n) = sig.varargs.as_deref() {
+            let extra = if pos.is_empty() {
+                args
+            } else {
+                copy_ids(args.get(pos.len()..).unwrap_or_default())?
+            };
+            let extra = self.alloc(Value::Tuple(extra));
+            self.bind_argument(local, n, extra)?;
+        }
+        let mut extra = Vec::new();
+        for ((key, value), slot) in kwargs.into_iter().zip(binding.keywords) {
+            if let Some(slot) = slot {
+                self.bind_argument(local, shape.parameter(slot), value)?;
+            } else {
+                let k = self.text(key);
+                extra.push((k, value));
             }
         }
+        if let Some(n) = sig.kwargs.as_deref() {
+            let v = variadic.unwrap_or_else(|| self.dict(extra));
+            self.bind_argument(local, n, v)?;
+        }
+        let supplied_types = self.check_supplied_types(callable, &sig, &name, |param| {
+            self.scope_data(local).names.get(param).copied()
+        });
+        for slot in binding.defaults {
+            let value = self.bound_default(&shape, slot, defaults, kwdefaults);
+            self.bind_argument(local, shape.parameter(slot), value)?;
+        }
+        supplied_types?;
         let Value::Scope(frame) = self.heap.get_mut(local) else {
             unreachable!()
         };
