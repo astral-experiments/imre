@@ -3186,14 +3186,7 @@ mod tests {
         );
         let mut graph = crate::modules::SourceGraph::single(source).unwrap();
         graph.registered_startup = true;
-        let diagnostic = crate::frontend::lower_with_owners(&mut graph)
-            .err()
-            .unwrap();
-        assert!(
-            diagnostic
-                .to_string()
-                .contains("iteration requires a concrete container")
-        );
+        let _ = crate::checked_lower(&mut graph).unwrap();
         let table = graph.registered_functions();
         let body = &table[&graph.entry][&TextSize::default()];
         crate::verify::registered(body.region()).unwrap();

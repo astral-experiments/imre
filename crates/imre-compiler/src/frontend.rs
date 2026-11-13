@@ -5246,9 +5246,11 @@ impl<'a> Checker<'a> {
                     .iteration_element(value.ty, false)
                     .or_else(|| self.types.cursor_element(value.ty))
                     .or_else(|| {
-                        self.types
-                            .fields(value.ty)
-                            .and_then(|fields| self.types.tuple_iteration_element(&fields))
+                        self.types.fields(value.ty).map(|fields| {
+                            self.types
+                                .tuple_iteration_element(&fields)
+                                .unwrap_or(Type::PythonObject)
+                        })
                     })
                     .ok_or_else(|| {
                         error(
@@ -5258,13 +5260,7 @@ impl<'a> Checker<'a> {
                         )
                     })?
             };
-            let input = registered::cursor_input(
-                value,
-                Type::PythonObject,
-                Some(expression.range()),
-                None,
-                |ty, _| self.hidden(ty),
-            );
+            let input = self.python_cursor(value, expression.range());
             // The private item owns the Python handle returned by next(). Its
             // checked element type belongs to the subsequent target binding.
             if element != Type::PythonObject {
@@ -5300,6 +5296,13 @@ impl<'a> Checker<'a> {
         self.iteration_source(expression)
     }
 
+    /// Acquire the live Python iterator and own each item until the next pull.
+    fn python_cursor(&mut self, value: Expr, range: TextRange) -> pipelines::Prepared {
+        registered::cursor_input(value, Type::PythonObject, Some(range), None, |ty, _| {
+            self.hidden(ty)
+        })
+    }
+
     /// Prepare cursors and generators for pulling while preserving concrete container iteration.
     fn iteration_value(
         &mut self,
@@ -5310,13 +5313,7 @@ impl<'a> Checker<'a> {
         if iterable.ty == Type::PythonObject && self.graph.modules[self.module].is_program_source()
         {
             self.require_registered_operation(node)?;
-            return Ok(Iteration::Prepared(registered::cursor_input(
-                iterable,
-                Type::PythonObject,
-                Some(node.range()),
-                None,
-                |ty, _| self.hidden(ty),
-            )));
+            return Ok(Iteration::Prepared(self.python_cursor(iterable, node.range())));
         }
         if let Some(prepared) = self.record_iteration(&iterable, node)? {
             return Ok(Iteration::Prepared(prepared));
