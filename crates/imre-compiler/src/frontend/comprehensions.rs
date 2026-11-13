@@ -1068,11 +1068,17 @@ impl Checker<'_> {
         if self.comprehension_key(ty) {
             Ok(())
         } else {
-            Err(error(
+            let failure = error(
                 self.source,
                 site,
                 "dictionary keys must be int, str, bytes, Path, or immutable scalar tuples",
-            ))
+            );
+            // A parsed value can be a Python key even when its native view has no hash layout.
+            Err(if matches!(ty, Type::JsonRoot | Type::JsonValue) {
+                failure.classify(Kind::UnsupportedRepresentation)
+            } else {
+                failure
+            })
         }
     }
 

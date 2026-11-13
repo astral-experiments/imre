@@ -552,6 +552,35 @@ fn fixed_file_selects_its_product_for_the_requested_startup() {
 }
 
 #[test]
+fn parsed_json_key_preserves_a_later_declared_argument_diagnostic() {
+    let project = tempfile::tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    let source = r#"import json
+
+def report(source: str) -> None:
+    content = json.loads(source)
+    packages = {package["id"]: package for package in content["packages"]}
+    print(len(packages))
+
+def take(value: int) -> int:
+    return value
+
+def measure() -> int:
+    return take('x')
+
+report('{"packages": [{"id": "a"}]}')
+print(measure())
+"#;
+    std::fs::write(&entry, source).unwrap();
+    assert_source_refusal(
+        &entry,
+        &entry,
+        ":12:17: Imre: expected int, got str; annotations are enforced contracts",
+        &[CompileOptions::default()],
+    );
+}
+
+#[test]
 fn required_object_call_keeps_its_admission_reason() {
     let project = tempfile::tempdir().unwrap();
     let path = project.path().join("app.py");
