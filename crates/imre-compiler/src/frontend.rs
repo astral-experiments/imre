@@ -7419,15 +7419,16 @@ impl<'a> Checker<'a> {
         self.finally_scope = outer_finally;
         let (finalbody, final_falls) = final_result?;
         self.explicit_return |= final_falls && protected_returns;
+        let deleted = narrowing::deleted_names(&try_.finalbody);
         if final_falls && let Some(mut pending) = pending_breaks {
             let final_state = self.local_state();
             let written = narrowing::assigned_names(&try_.finalbody)
                 .into_iter()
                 .filter_map(|name| self.names.get(&name).copied())
                 .collect::<HashSet<_>>();
-            let deleted = narrowing::deleted_names(&try_.finalbody)
-                .into_iter()
-                .filter_map(|name| self.names.get(&name).copied())
+            let deleted = deleted
+                .iter()
+                .filter_map(|name| self.names.get(name).copied())
                 .collect::<HashSet<_>>();
             for slot in &deleted {
                 pending.assigned.remove(slot);
@@ -7449,7 +7450,7 @@ impl<'a> Checker<'a> {
             self.assigned = normal_assigned;
             self.narrowed = normal_facts;
         } else {
-            for name in narrowing::deleted_names(&try_.finalbody) {
+            for name in deleted {
                 if let Some(slot) = self.names.get(&name) {
                     normal_assigned.remove(slot);
                 }
