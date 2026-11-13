@@ -927,11 +927,11 @@ pub(super) fn new_context<S: Into<crate::Str>>(
     if let Some(depth @ 1..=65535) = config["tracemalloc"].as_u64() {
         heap.allocation_traces.start_at_startup(depth as usize);
     }
-    new_context_with_heap(config, args, heap, None)
+    new_context_with_heap(Arc::new(config), args, heap, None)
 }
 
 pub(super) fn new_context_with_heap<S: Into<crate::Str>>(
-    config: serde_json::Value,
+    config: Arc<serde_json::Value>,
     args: impl IntoIterator<Item = S>,
     heap: Heap,
     worker_interpreter: Option<InterpreterState>,

@@ -225,7 +225,8 @@ pub(crate) struct Context {
     threads: lowlevel_threads::Workers,
     workers: thread_worker::Registry,
     heap: Heap,
-    config: serde_json::Value,
+    // Startup finishes applying environment overrides before any context can read this config.
+    config: Arc<serde_json::Value>,
     executable: PathBuf,
     interpreter_layout: Result<imre_ast::layout::InterpreterLayout>,
     helper_executable: String,
