@@ -1304,6 +1304,7 @@ impl RegisteredSuite {
         self.operands.is_empty() && self.suites.is_empty()
     }
 
+    #[cfg(test)]
     pub(crate) fn child_suite(&self, body: &[Statement]) -> Option<&RegisteredSuite> {
         let [
             Statement::Expr(Expr {

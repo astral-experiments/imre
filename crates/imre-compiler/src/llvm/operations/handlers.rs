@@ -97,7 +97,7 @@ impl CheckedBody<'_, '_, '_, '_> {
     ) {
         if handlers.is_empty() && native_exit.is_none() {
             // The registered finally already installed its landing pad.
-            self.handler_suite(body);
+            self.emit_block(body);
             return;
         }
         let dispatch = self.block_name();
@@ -148,13 +148,6 @@ impl CheckedBody<'_, '_, '_, '_> {
         }
     }
 
-    fn handler_suite(&mut self, suite: &[Statement]) {
-        match &mut self.0 {
-            Entry::Native(code) => code.block(suite),
-            Entry::Registered(frame) => frame.emit_handler_suite(suite),
-        }
-    }
-
     /// Errors in the try suite enter its handler. The else suite runs with the
     /// enclosing target restored, including its fixed-frame cleanup depth.
     fn protected_suites(
@@ -174,14 +167,14 @@ impl CheckedBody<'_, '_, '_, '_> {
             };
             (previous, depth)
         });
-        self.handler_suite(body);
+        self.emit_block(body);
         if let Some((previous, depth)) = enclosing {
             *self.handler_target() = previous;
             if let Some(depth) = depth {
                 self.fixed().handler_depth = depth;
             }
         }
-        self.handler_suite(otherwise);
+        self.emit_block(otherwise);
     }
 
     fn matches_exception(&mut self, exception: &str, matcher: &ExceptionMatcher) -> Option<String> {
@@ -221,7 +214,7 @@ impl CheckedBody<'_, '_, '_, '_> {
             }
             Caught::Registered(exception) => self.python().bind_handler_name(handler, exception),
         };
-        self.handler_suite(&handler.body);
+        self.emit_block(&handler.body);
         if !self.body().terminated {
             self.jump_from_regions(done.to_owned(), depth);
         }
