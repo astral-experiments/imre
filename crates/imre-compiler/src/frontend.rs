@@ -8582,6 +8582,20 @@ impl<'a> Checker<'a> {
                 {
                     return Err(self.scoped_builtin_error("datetime class value", expression));
                 }
+                Intrinsic::Callable => {
+                    return Err(self.scoped_builtin_error("the Callable object", expression));
+                }
+                Intrinsic::NamedHash(
+                    "blake2b" | "blake2s" | "sha3_224" | "sha3_256" | "sha3_384" | "sha3_512"
+                    | "shake_128" | "shake_256",
+                ) => {
+                    self.graph.needs_object_runtime.set(true);
+                    return Err(self.classified_error(
+                        Kind::Object,
+                        expression,
+                        "a hash constructor used as a type requires native object dispatch",
+                    ));
+                }
                 Intrinsic::CachedProperty => {
                     return Err(self.object_runtime_export("functools.cached_property", expression));
                 }
@@ -8866,33 +8880,6 @@ impl<'a> Checker<'a> {
             ast::Expr::Named(value) => return self.named_expression(value, None),
             ast::Expr::If(value) => return self.conditional(value, None),
             ast::Expr::NoneLiteral(_) => (Type::None, ExprKind::None),
-            ast::Expr::Name(_) | ast::Expr::Attribute(_)
-                if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::Callable)) =>
-            {
-                return Err(self.scoped_builtin_error("the Callable object", expression));
-            }
-            ast::Expr::Name(_) | ast::Expr::Attribute(_)
-                if matches!(
-                    self.resolve(expression),
-                    Some(Binding::Intrinsic(Intrinsic::NamedHash(
-                        "blake2b"
-                            | "blake2s"
-                            | "sha3_224"
-                            | "sha3_256"
-                            | "sha3_384"
-                            | "sha3_512"
-                            | "shake_128"
-                            | "shake_256"
-                    )))
-                ) =>
-            {
-                self.graph.needs_object_runtime.set(true);
-                return Err(self.classified_error(
-                    Kind::Object,
-                    expression,
-                    "a hash constructor used as a type requires native object dispatch",
-                ));
-            }
             ast::Expr::Name(name)
                 if let Some(value) = debug_operand(name, self.graph.python_optimization()) =>
             {
