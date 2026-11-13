@@ -64,7 +64,7 @@ pub(crate) enum AnnotationScope<'a> {
     Plain,
     Method(&'a ClassBindings),
     Class {
-        globals: &'a BTreeSet<String>,
+        bindings: &'a ClassBindings,
         conditional: bool,
     },
 }
@@ -1067,7 +1067,7 @@ impl<'p> RegisteredFrame<'_, 'p> {
         self.op("annotation_format", &[&format]);
         let (local, result) = match self.annotation_scope {
             AnnotationScope::Class {
-                globals,
+                bindings,
                 conditional,
             } => {
                 if conditional {
@@ -1075,10 +1075,7 @@ impl<'p> RegisteredFrame<'_, 'p> {
                 }
                 let dict = self.lookup("__classdict__");
                 let local = self.op("class_annotation_locals", &[&self.scope.clone(), &dict]);
-                for name in globals {
-                    let name = self.code_name(name);
-                    self.op("declare_global", &[&local, &name]);
-                }
+                self.use_class_annotation_names(bindings);
                 let result = self.op("dict", &[]);
                 (local, result)
             }

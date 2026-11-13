@@ -222,6 +222,15 @@ pub(super) struct DecodeState {
 }
 
 impl Error {
+    pub(super) fn unbound_local(name: &str) -> Self {
+        Self::new(
+            "UnboundLocalError",
+            format!(
+                "cannot access local variable '{name}' where it is not associated with a value"
+            ),
+        )
+    }
+
     pub fn new(kind: &str, message: impl Into<String>) -> Self {
         Self {
             kind: if kind == "MemoryError" {
@@ -1115,7 +1124,7 @@ pub(super) struct ClassNamespace {
     pub layout_descriptors_cleared: bool,
     /// Closure cell shared by method annotation providers.
     pub annotation_dict_cell: Option<Id>,
-    /// The eager field dictionary and private conditional index set while the class body runs.
+    /// The eager field dictionary and private conditional index cell while the class body runs.
     pub annotation_scratch: Option<(Id, Option<Id>)>,
     /// Class annotation attributes are served by the installed provider.
     pub provider_annotations: bool,
@@ -1152,6 +1161,10 @@ pub(super) struct Scope {
 }
 
 impl Scope {
+    pub(super) fn conditional_annotation_cell(&self) -> Option<Id> {
+        self.class_namespace.as_ref()?.annotation_scratch?.1
+    }
+
     pub(super) fn new(module: String, parent: Option<Id>) -> Self {
         Self {
             in_class_body: false,

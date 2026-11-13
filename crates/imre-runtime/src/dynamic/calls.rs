@@ -10113,8 +10113,9 @@ impl Context {
         } else {
             NONE
         };
-        let active = if bindings.conditional_annotations {
-            Some(self.op("set", NONE, NONE, NONE)?)
+        let conditional_cell = if bindings.conditional_annotations {
+            let active = self.op("set", NONE, NONE, NONE)?;
+            Some(self.alloc(Value::Cell(Some(active))))
         } else {
             None
         };
@@ -10122,7 +10123,7 @@ impl Context {
             frame
                 .class_namespace
                 .get_or_insert_with(Default::default)
-                .annotation_scratch = Some((annotations, active));
+                .annotation_scratch = Some((annotations, conditional_cell));
         }
         self.execute(code, scope, FrameOwner::Function(body))?;
         if (bindings.needs_class_cell || self.scope_name(scope, "__classcell__").is_some())

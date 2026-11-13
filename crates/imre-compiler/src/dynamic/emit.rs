@@ -1066,7 +1066,7 @@ impl SourceMap<'_> {
                     &prefix,
                     in_function,
                     &prepared.annotations,
-                    globals,
+                    &class.bindings,
                     start.expect("class definition site"),
                 );
             }
@@ -1458,7 +1458,7 @@ impl LexicalDefinitions<'_, '_> {
         }
         if let Body::Namespace(class, scope) = &body {
             signature["postponed_annotations"] = json!(class.annotations.postponed);
-            if class.annotations.conditional_count != 0 {
+            if class.annotations.conditional_count != 0 || scope.needs_conditional_cell {
                 signature["conditional_annotations"] = json!(true);
             }
             scope.write_signature(&mut signature);
@@ -1597,7 +1597,7 @@ impl SourceMap<'_> {
         prefix: &str,
         in_function: bool,
         plan: &crate::frontend::ClassAnnotations,
-        globals: &std::collections::BTreeSet<String>,
+        bindings: &ClassBindings,
         class_start: TextSize,
     ) {
         let Some(body) = &plan.body else {
@@ -1611,7 +1611,7 @@ impl SourceMap<'_> {
             "code_flags": self.function_flags(in_function, false),
         });
         let scope = AnnotationScope::Class {
-            globals,
+            bindings,
             conditional: plan.conditional_count != 0,
         };
         let compiled = self.annotation_provider(
