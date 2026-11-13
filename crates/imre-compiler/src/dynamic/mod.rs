@@ -1345,6 +1345,7 @@ pub(crate) fn compile(
     let mut ordinary_registrations = None;
     let python_optimization = startup.map_or(0, |(flags, _)| flags.optimize);
     let mut literals = LiteralImports::default();
+    let mut literal_sites = Default::default();
     literals.register(0, &mut first, false, true, ImportOrigin::File);
     let keep_docstrings = python_optimization < 2;
     // Standalone shipped module checks can release their syntax immediately. Application
@@ -1453,15 +1454,7 @@ pub(crate) fn compile(
                 if !selected_work.is_empty() || !work.is_empty() || literals.forest.has_pending() {
                     continue;
                 }
-                for (unit, sites) in
-                    std::mem::take(&mut literals.forest).finish(session, python_optimization)
-                {
-                    registrations
-                        .checked_units
-                        .entry(unit)
-                        .or_default()
-                        .literal_sites = sites;
-                }
+                literal_sites = std::mem::take(&mut literals.forest).finish(session, python_optimization);
             }
             named_registrations = Some(selected_sources.len());
         }
@@ -2660,6 +2653,7 @@ pub(crate) fn compile(
         (&sources, &builtins),
         prepare::SourceInputs {
             entry_source: file_source,
+            literal_sites,
             scanned_modules,
             shipped_checks,
         },

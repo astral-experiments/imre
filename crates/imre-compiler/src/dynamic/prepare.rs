@@ -1,6 +1,6 @@
 //! Prepare the registered source units selected by import resolution.
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 use super::ModuleSyntaxError;
@@ -17,6 +17,7 @@ pub(super) enum Shipped<'a> {
 
 #[derive(Default)]
 pub(super) struct SourceInputs<'a> {
+    pub(super) literal_sites: BTreeMap<usize, super::literal::LiteralSites>,
     pub(super) entry_source: Option<ParsedModule<'a, 'a>>,
     pub(super) scanned_modules: HashMap<usize, super::ScannedModule>,
     pub(super) shipped_checks: HashMap<usize, Shipped<'a>>,
@@ -59,6 +60,7 @@ pub(super) fn units<'a>(
     (files, builtins): (&'a [ModuleSource<'a>], &'a [ModuleSource<'a>]),
     SourceInputs {
         mut entry_source,
+        mut literal_sites,
         mut scanned_modules,
         mut shipped_checks,
     }: SourceInputs<'a>,
@@ -84,6 +86,7 @@ pub(super) fn units<'a>(
         .map(move |(unit, (original, builtin))| {
             let (name, path, source) = original;
             let checked = checked_units.get(&unit);
+            let literals = literal_sites.remove(&unit);
             let discovered = entry_source.take().or_else(|| registrations.parsed(unit));
             let zip = archive_members.get(path);
             let physical = physical_files.get(path).filter(|_| !builtin);
@@ -102,6 +105,7 @@ pub(super) fn units<'a>(
                 && zip.is_none()
                 && discovered.is_none()
                 && checked.is_none()
+                && literals.is_none()
                 && types.is_none();
             let initializer = if !builtin && let Some(error) = module_errors.get(path) {
                 Err(error.as_ref())
@@ -173,9 +177,7 @@ pub(super) fn units<'a>(
                     (module, normalized),
                     python_optimization,
                     origin,
-                    checked
-                        .map(|unit| unit.literal_sites.clone())
-                        .unwrap_or_default(),
+                    literals.unwrap_or_default(),
                     (types, checked_source),
                 )?;
                 if let Some(module) = checked.and_then(|unit| unit.prompt_module) {
