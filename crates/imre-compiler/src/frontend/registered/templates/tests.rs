@@ -192,14 +192,17 @@ fn template_default_and_body_suspend_in_their_defining_frames() {
         };
         let mut body = parsed.into_syntax().body;
         let names = imre_ast::lower(&mut body);
-        let mut sites = LexicalOperands::default();
+        let mut sites = LexicalOperands {
+            expressions: Some(Default::default()),
+            ..Default::default()
+        };
         crate::frontend::function_scope::ScopeFacts::prepare(
             &body,
             &names,
             |_, _| {},
             |site| sites.prepare(site, source, names.string_annotations),
         );
-        sites.expressions
+        sites.expressions.unwrap()
     };
     let mut sites: Vec<_> = templates.templates().collect();
     sites.sort_by_key(|(range, _)| range.start());
@@ -282,7 +285,10 @@ fn unavailable_template_child_is_reported_at_its_own_range() {
         .as_tuple_expr()
         .unwrap();
     for complete in [false, true] {
-        let mut sites = LexicalOperands::default();
+        let mut sites = LexicalOperands {
+            expressions: Some(Default::default()),
+            ..Default::default()
+        };
         crate::frontend::function_scope::ScopeFacts::prepare(
             &module.body,
             &Default::default(),
@@ -298,7 +304,7 @@ fn unavailable_template_child_is_reported_at_its_own_range() {
                 }
             },
         );
-        let sites = sites.expressions;
+        let sites = sites.expressions.unwrap();
         for template in &templates.elts {
             let (_, result) = sites
                 .templates()
