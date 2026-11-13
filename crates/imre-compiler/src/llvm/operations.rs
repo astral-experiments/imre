@@ -15,7 +15,7 @@ use ruff_python_ast::UnaryOp;
 use super::records;
 use super::{Binary, Builtin, CallArgs, Expr, ExprKind, Statement, Type};
 use super::{Emitter, Value, none, small};
-use crate::llvm::registered::{Frame as CheckedFrame, FrameEmitter};
+use crate::llvm::registered::Frame as CheckedFrame;
 use ruff_text_size::TextRange;
 
 use super::{Operand, Ownership, body::FunctionBody};
@@ -878,21 +878,23 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                     Entry::Native(emitter) => {
                         CheckedValue::owned(emitter.native_sequence(expr.ty, items, false))
                     }
-                    Entry::Registered(frame) => frame.sequence(
+                    Entry::Registered(frame) => CheckedValue::handle(frame.sequence(
                         items,
                         if tuple {
                             DisplayKind::Tuple
                         } else {
                             DisplayKind::List
                         },
-                    ),
+                    )),
                 }
             }
             ExprKind::Set { values, .. } => match &mut self.0 {
                 Entry::Native(emitter) => {
                     CheckedValue::owned(emitter.native_sequence(expr.ty, values, false))
                 }
-                Entry::Registered(frame) => frame.sequence(values, DisplayKind::Set),
+                Entry::Registered(frame) => {
+                    CheckedValue::handle(frame.sequence(values, DisplayKind::Set))
+                }
             },
             ExprKind::Compare(values, ops) => {
                 let truth = matches!(self.0, Entry::Native(_));

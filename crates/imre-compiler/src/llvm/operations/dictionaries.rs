@@ -1,7 +1,6 @@
 use super::sequences::{self, STACK_USE_GUIDELINE};
 use super::{CheckedBody, CheckedValue, Entry};
 use crate::ir::{Builtin, DictEntry, Expr, ExprKind, Type};
-use crate::llvm::registered::FrameEmitter;
 use crate::llvm::{Value, representation_kind};
 
 impl CheckedBody<'_, '_, '_, '_> {

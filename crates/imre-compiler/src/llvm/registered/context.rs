@@ -1,7 +1,7 @@
 //! Registered context-manager protocol, roots and exceptional control flow.
 
 use super::frame::SourcePosition;
-use super::{Frame, FrameEmitter, RegisteredFrame};
+use super::{Frame, RegisteredFrame};
 use crate::ir::{ContextBinding, ContextSite, Expr, Statement};
 use crate::llvm::{Completion, finally::Finalbody};
 use ruff_text_size::TextRange;

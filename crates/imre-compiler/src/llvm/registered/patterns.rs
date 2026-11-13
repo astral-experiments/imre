@@ -1,5 +1,5 @@
 //! Native structural matching on semantic operands in the live registered namespace.
-use super::{Frame, FrameEmitter, RegisteredFrame};
+use super::{Frame, RegisteredFrame};
 use crate::ir::{Expr, MatchCase, MatchTest};
 use crate::llvm::operations::{CheckedBody, CheckedValue};
 use imre_ast::{SequencePatternItems, SequencePatternPlan};

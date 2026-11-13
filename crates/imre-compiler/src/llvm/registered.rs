@@ -12,12 +12,11 @@ use crate::frontend::{
     ExpressionSelection, LocalBinding, PhysicalOperand, RegisteredBody, RegisteredFunction,
     RegisteredOperand, RegisteredRegion, RegisteredSuite,
 };
-use crate::ir::DisplayKind;
 use crate::ir::{self, Builtin, Expr, ExprKind, Statement, Type};
 use crate::llvm::LoopTarget;
 use crate::llvm::body::FunctionBody;
 pub(crate) use abi::{ABI, CallArguments, Output, permanent};
-pub(crate) use frame::{AnnotationScope, FrameEmitter, RegisteredFrame, SourcePositions};
+pub(crate) use frame::{AnnotationScope, RegisteredFrame, SourcePositions};
 use ruff_python_ast::CmpOp;
 use ruff_python_ast::UnaryOp;
 use sites::CheckedSites;
@@ -554,12 +553,6 @@ impl<'f> Frame<'f, '_, '_> {
         self.with_operand_source(expr, |code| code.evaluate_handle(expr))
     }
 
-    pub(crate) fn sequence(&mut self, values: &[Expr], display: DisplayKind) -> CheckedValue {
-        CheckedValue::handle(self.checked_sequence(values, display, |code, operand| {
-            code.evaluate_handle(operand)
-        }))
-    }
-
     pub(super) fn bound_condition(&mut self, expr: &Expr) -> Option<String> {
         let ExprKind::Builtin(Builtin::RegisteredInput(index), _) = &expr.kind else {
             return None;
@@ -1071,7 +1064,7 @@ impl<'f> Frame<'f, '_, '_> {
                 .lit(4, &[real.to_le_bytes(), imag.to_le_bytes()].concat()),
             (Builtin::RegisteredString(points), []) => self.code.linked_string(points.clone()),
             (Builtin::RegisteredTemplate(segments), fields) => {
-                let strings = self.code.emit_string_tuple(segments.to_vec());
+                let strings = self.emit_string_tuple(segments.to_vec());
                 let parts = self.code.op("list", &[]);
                 for field in fields {
                     let value = self.evaluate_handle(field);
@@ -1143,18 +1136,13 @@ impl<'f> Frame<'f, '_, '_> {
                         (decorators, defaults, None)
                     }
                 };
-                let decorators = self.decorator_operands(decorators, |code, value| {
-                    code.evaluate_eager_handle(value)
-                });
+                let decorators = self.decorator_operands(decorators);
                 let defaults = defaults
                     .iter()
                     .map(|value| self.evaluate_eager_handle(value))
                     .collect::<Vec<_>>();
-                let class_arguments = arguments.map(|(layout, operands)| {
-                    self.class_arguments(layout, |code, index| {
-                        code.evaluate_handle(&operands[index])
-                    })
-                });
+                let class_arguments =
+                    arguments.map(|(layout, operands)| self.pack_arguments(layout, operands, None));
                 if matches!(site, ir::DefinitionSite::Class { .. })
                     && !self
                         .code
@@ -1180,9 +1168,7 @@ impl<'f> Frame<'f, '_, '_> {
                 };
                 code.scope = code.op("class_base_scope", &[&scope, &outer]);
                 code.set_source_range(None);
-                let arguments = self.class_arguments(layout, |frame, index| {
-                    frame.evaluate_handle(&operands[index])
-                });
+                let arguments = self.pack_arguments(layout, operands, None);
                 let (code, sites) = self.code.frame_and_sites();
                 code.scope = scope;
                 sites.class_namespaces[site]
@@ -1321,20 +1307,19 @@ impl<'f> Frame<'f, '_, '_> {
                 fallback,
                 owner,
             } => {
-                let frame = &mut self.code;
-                let native = frame.name("box_int");
-                let done = frame.name("handle");
-                let exact = frame.value(&format!("icmp ne i64 {word}, 0"));
+                let native = self.name("box_int");
+                let done = self.name("handle");
+                let exact = self.value(&format!("icmp ne i64 {word}, 0"));
                 let mut join = crate::llvm::operations::ValueJoin::default();
-                frame.flush_check();
-                join.incoming(&mut frame.body, CheckedValue::handle(fallback.clone()));
-                frame.branch(&exact, &native, &done);
-                frame.label(&native);
-                let boxed = frame.move_integer(*owner, word);
-                frame.flush_check();
-                join.jump(&mut frame.body, &done, CheckedValue::handle(boxed));
-                frame.label(&done);
-                let Some(CheckedValue::Handle { id, .. }) = join.finish(&mut frame.body) else {
+                self.flush_check();
+                join.incoming(&mut self.body, CheckedValue::handle(fallback.clone()));
+                self.branch(&exact, &native, &done);
+                self.label(&native);
+                let boxed = self.move_integer(*owner, word);
+                self.flush_check();
+                join.jump(&mut self.body, &done, CheckedValue::handle(boxed));
+                self.label(&done);
+                let Some(CheckedValue::Handle { id, .. }) = join.finish(&mut self.body) else {
                     unreachable!("both conversion edges hold Python handles")
                 };
                 id
@@ -1342,14 +1327,14 @@ impl<'f> Frame<'f, '_, '_> {
             CheckedValue::Native(value, owner) => {
                 let (word, small) = value.int_word(owner.is_some());
                 if let Some(slot) = owner {
-                    return self.code.move_integer(*slot, word);
+                    return self.move_integer(*slot, word);
                 }
                 // A native producer registered the integer ABI before creating this value.
                 if !small {
                     self.code
                         .line(&format!("call void @imre_int_retain(i64 {word})"));
                 }
-                self.code.take_integer(word)
+                self.take_integer(word)
             }
         }
     }
@@ -1469,13 +1454,14 @@ impl RegisteredFrame<'_, '_> {
         self.op("append", &[&metadata, spec]);
         self.op("template_interpolation", &[value, &expression, &metadata])
     }
+}
 
+impl Frame<'_, '_, '_> {
     fn emit_string_tuple(&mut self, segments: Vec<Vec<u8>>) -> String {
         let slot = self.constant_slot(ir::Constant::Tuple(
             segments.iter().cloned().map(ir::Constant::Text).collect(),
         ));
-        let mut frame = self;
-        frame.cached_tuple(&slot, |code| {
+        self.cached_tuple(&slot, |code| {
             let values = segments
                 .into_iter()
                 .map(|segment| code.linked_string(segment))
@@ -1483,9 +1469,7 @@ impl RegisteredFrame<'_, '_> {
             code.build_sequence(&values, true, Some(&slot))
         })
     }
-}
 
-impl RegisteredFrame<'_, '_> {
     /// The heap takes the reference even if adding its temporary root fails.
     fn move_integer(&mut self, slot: usize, word: &str) -> String {
         self.line(&format!("store i64 1, ptr %int_owner{slot}"));
@@ -1504,8 +1488,7 @@ impl RegisteredFrame<'_, '_> {
         let hit = self.value(&format!("and i1 {immediate}, {fits}"));
         let first = permanent::FIRST_SMALL_INT;
         let id = self.value(&format!("add i64 {offset}, {first}"));
-        let mut frame = self;
-        frame.cached_handle_or(&hit, &id, |frame| {
+        self.cached_handle_or(&hit, &id, |frame| {
             frame.checked(&format!(
                 "call i64 @imre_dyn_take_int(ptr %ctx, i64 {word})"
             ))

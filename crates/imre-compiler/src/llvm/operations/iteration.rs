@@ -1,5 +1,5 @@
 //! Shared traversal of loop and unpacking IR for fixed and registered entries.
-use super::{CheckedBody, CheckedValue, Entry, Expr, ExprKind, FrameEmitter, Statement};
+use super::{CheckedBody, CheckedValue, Entry, Expr, ExprKind, Statement};
 use crate::ir::{Binary, Compare, ItemUpdate, IterNextKind};
 use crate::llvm::{Cleanup, Emitter, LoopTarget, NativeLoop, small};
 

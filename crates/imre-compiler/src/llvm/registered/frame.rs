@@ -1298,7 +1298,7 @@ impl RegisteredFrame<'_, '_> {
 }
 
 /// Builds the positional and keyword containers while the caller evaluates each operand.
-pub(crate) struct ArgumentPack<'a> {
+struct ArgumentPack<'a> {
     layout: &'a ir::PackedArguments,
     callable: Option<&'a str>,
     positional: String,
@@ -1307,7 +1307,7 @@ pub(crate) struct ArgumentPack<'a> {
     deferred: Option<String>,
 }
 
-pub(crate) enum ArgumentSlot<'a> {
+enum ArgumentSlot<'a> {
     Positional,
     Spread(String),
     Deferred,
@@ -1322,7 +1322,7 @@ pub(crate) enum ArgumentSlot<'a> {
 }
 
 impl<'a> ArgumentPack<'a> {
-    pub(crate) fn new(
+    fn new(
         frame: &mut RegisteredFrame<'_, '_>,
         layout: &'a ir::PackedArguments,
         callable: Option<&'a str>,
@@ -1345,11 +1345,7 @@ impl<'a> ArgumentPack<'a> {
         }
     }
 
-    pub(crate) fn prepare(
-        &mut self,
-        frame: &mut RegisteredFrame<'_, '_>,
-        index: usize,
-    ) -> ArgumentSlot<'a> {
+    fn prepare(&mut self, frame: &mut RegisteredFrame<'_, '_>, index: usize) -> ArgumentSlot<'a> {
         if let Some(starred) = self.layout.starred.get(index) {
             return if self.deferred.is_some() {
                 ArgumentSlot::Deferred
@@ -1381,12 +1377,7 @@ impl<'a> ArgumentPack<'a> {
         }
     }
 
-    pub(crate) fn insert(
-        &mut self,
-        frame: &mut RegisteredFrame<'_, '_>,
-        slot: ArgumentSlot<'_>,
-        value: &str,
-    ) {
+    fn insert(&mut self, frame: &mut RegisteredFrame<'_, '_>, slot: ArgumentSlot<'_>, value: &str) {
         match slot {
             ArgumentSlot::Positional => {
                 frame.op("append", &[&self.positional, value]);
@@ -1422,7 +1413,7 @@ impl<'a> ArgumentPack<'a> {
         frame.pack_operand(operation, &[&self.keywords, value, callable]);
     }
 
-    pub(crate) fn finish(self, frame: &mut RegisteredFrame<'_, '_>) -> (String, String) {
+    fn finish(self, frame: &mut RegisteredFrame<'_, '_>) -> (String, String) {
         let positional = if let Some(mark) = self.deferred {
             let values = frame.pack_operand(
                 "spread_arguments",
@@ -1437,52 +1428,55 @@ impl<'a> ArgumentPack<'a> {
     }
 }
 
-/// Share operand ordering and unwind edges while each caller supplies its own operand emitter.
-pub(crate) trait FrameEmitter<'a, 'p>:
-    std::ops::DerefMut<Target = RegisteredFrame<'a, 'p>> + Sized
-{
+impl<'a, 'p> super::Frame<'_, 'a, 'p> {
     /// Each decorator call consumes the operands from before its callable was evaluated.
-    fn decorator_operands<T>(
-        &mut self,
-        decorators: &[T],
-        mut evaluate: impl FnMut(&mut Self, &T) -> String,
-    ) -> Vec<(String, String)> {
+    pub(super) fn decorator_operands(&mut self, decorators: &[Expr]) -> Vec<(String, String)> {
         decorators
             .iter()
             .map(|expr| {
                 let mark = self.temporary_mark();
-                (mark, evaluate(self, expr))
+                (mark, self.evaluate_eager_handle(expr))
             })
             .collect()
     }
 
-    /// Class argument expansion is interleaved with the next Python operand.
-    fn class_arguments(
+    /// Expand each argument before evaluating the next, preserving a call's deferred lone star.
+    pub(super) fn pack_arguments(
         &mut self,
         layout: &ir::PackedArguments,
-        mut operand: impl FnMut(&mut Self, usize) -> String,
+        operands: &[Expr],
+        callable: Option<&str>,
     ) -> (String, String) {
-        let mut pack = ArgumentPack::new(self, layout, None);
-        for index in 0..layout.starred.len() + layout.keywords.len() {
+        let mut pack = ArgumentPack::new(self, layout, callable);
+        for (index, operand) in operands.iter().enumerate() {
             let slot = pack.prepare(self, index);
-            let value = operand(self, index);
+            let value = self.evaluate_handle(operand);
             pack.insert(self, slot, &value);
         }
         pack.finish(self)
     }
 
-    fn discard_operand(&mut self, evaluate: impl FnOnce(&mut Self) -> String) {
+    pub(super) fn discard_operand(&mut self, evaluate: impl FnOnce(&mut Self) -> String) {
         let mark = self.temporary_mark();
         evaluate(self);
         self.discard_truth(&mark);
     }
 
-    fn raise_operand_at(&mut self, exception: &str, cause: Option<&str>, statement: TextRange) {
+    pub(in crate::llvm) fn raise_operand_at(
+        &mut self,
+        exception: &str,
+        cause: Option<&str>,
+        statement: TextRange,
+    ) {
         self.replace_position(SourcePosition::Expression(statement));
         self.raise(exception, cause, false);
     }
 
-    fn with_operand_source<T>(&mut self, expr: &ir::Expr, emit: impl FnOnce(&mut Self) -> T) -> T {
+    pub(super) fn with_operand_source<T>(
+        &mut self,
+        expr: &ir::Expr,
+        emit: impl FnOnce(&mut Self) -> T,
+    ) -> T {
         if let ir::ExprKind::Builtin(ir::Builtin::RegisteredLocation(range, ..), _) = &expr.kind {
             self.with_source_range(*range, emit)
         } else {
@@ -1490,14 +1484,21 @@ pub(crate) trait FrameEmitter<'a, 'p>:
         }
     }
 
-    fn with_source_range<T>(&mut self, range: TextRange, emit: impl FnOnce(&mut Self) -> T) -> T {
+    pub(super) fn with_source_range<T>(
+        &mut self,
+        range: TextRange,
+        emit: impl FnOnce(&mut Self) -> T,
+    ) -> T {
         let previous = self.replace_position(SourcePosition::Expression(range));
         let result = emit(self);
         self.leave_expression(previous);
         result
     }
 
-    fn test_with_temporaries(&mut self, test: impl FnOnce(&mut Self) -> String) -> String {
+    pub(super) fn test_with_temporaries(
+        &mut self,
+        test: impl FnOnce(&mut Self) -> String,
+    ) -> String {
         let mark = self.temporary_mark();
         let condition = test(self);
         self.discard_truth(&mark);
@@ -1506,7 +1507,7 @@ pub(crate) trait FrameEmitter<'a, 'p>:
 
     /// Acquire the cursor at the iterable's source position. A suspended activation
     /// releases its operands once the cursor owns everything needed for the first pull.
-    fn acquire_iterator(
+    pub(super) fn acquire_iterator(
         &mut self,
         op: ir::IteratorOp,
         evaluate: impl FnOnce(&mut Self) -> String,
@@ -1546,12 +1547,20 @@ pub(crate) trait FrameEmitter<'a, 'p>:
         result
     }
 
-    fn unwind_operands<T>(&mut self, mark: &str, body: impl FnOnce(&mut Self) -> T) -> T {
+    pub(in crate::llvm) fn unwind_operands<T>(
+        &mut self,
+        mark: &str,
+        body: impl FnOnce(&mut Self) -> T,
+    ) -> T {
         self.unwind_with(|f| f.discard_truth(mark), body)
     }
 
     /// Release incomplete operands in evaluation-stack order before entering the handler.
-    fn unwind_stack_operands<T>(&mut self, mark: &str, body: impl FnOnce(&mut Self) -> T) -> T {
+    pub(in crate::llvm) fn unwind_stack_operands<T>(
+        &mut self,
+        mark: &str,
+        body: impl FnOnce(&mut Self) -> T,
+    ) -> T {
         self.unwind_with(
             |frame| {
                 frame.line(&format!(
@@ -1562,7 +1571,7 @@ pub(crate) trait FrameEmitter<'a, 'p>:
         )
     }
 
-    fn suspend_value(
+    pub(super) fn suspend_value(
         &mut self,
         kind: crate::ir::SuspendValue,
         range: TextRange,
@@ -1588,11 +1597,11 @@ pub(crate) trait FrameEmitter<'a, 'p>:
         })
     }
 
-    fn slice_object(&mut self, [start, stop, step]: [String; 3]) -> String {
+    pub(super) fn slice_object(&mut self, [start, stop, step]: [String; 3]) -> String {
         self.op("slice_object", &[&start, &stop, &step])
     }
 
-    fn read_slice(
+    pub(super) fn read_slice(
         &mut self,
         base: &str,
         start: &str,
@@ -1609,7 +1618,7 @@ pub(crate) trait FrameEmitter<'a, 'p>:
         }
     }
 
-    fn inplace(&mut self, op: &str, left: &str, right: &str) -> String {
+    pub(in crate::llvm) fn inplace(&mut self, op: &str, left: &str, right: &str) -> String {
         self.op(&format!("inplace:{op}"), &[left, right])
     }
 
@@ -1617,16 +1626,16 @@ pub(crate) trait FrameEmitter<'a, 'p>:
         self.op("delitem", &[receiver, key])
     }
 
-    fn put_item(&mut self, receiver: &str, index: &str, value: &str) -> String {
+    pub(in crate::llvm) fn put_item(&mut self, receiver: &str, index: &str, value: &str) -> String {
         self.op("put", &[receiver, index, value])
     }
 
-    fn begin_unary(&mut self) -> (String, (String, String)) {
+    pub(in crate::llvm) fn begin_unary(&mut self) -> (String, (String, String)) {
         (self.temporary_mark(), self.begin_operand_scope())
     }
 
     /// Consume an evaluated operand using the temporary roots established before its evaluation.
-    fn finish_unary(
+    pub(in crate::llvm) fn finish_unary(
         &mut self,
         (mark, edge): (String, (String, String)),
         op: UnaryOp,
@@ -1670,15 +1679,10 @@ pub(crate) trait FrameEmitter<'a, 'p>:
         result
     }
 
-    fn checked_sequence(
-        &mut self,
-        values: &[Expr],
-        display: DisplayKind,
-        evaluate: impl FnMut(&mut Self, &Expr) -> String,
-    ) -> String {
+    pub(in crate::llvm) fn sequence(&mut self, values: &[Expr], display: DisplayKind) -> String {
         let tuple = display == DisplayKind::Tuple;
         if display == DisplayKind::Set {
-            return self.sequence_display(values, display, None, evaluate);
+            return self.sequence_display(values, display, None);
         }
         if values.is_empty() {
             return if tuple {
@@ -1711,15 +1715,18 @@ pub(crate) trait FrameEmitter<'a, 'p>:
             let count = handles.len();
             return self.checked(&format!("call i64 @imre_dyn_build_sequence(ptr %ctx, ptr {data}, i64 {count}, i1 true, i1 {tuple}, ptr {slot})"));
         }
-        let build =
-            |code: &mut Self| code.sequence_display(values, display, slot.as_deref(), evaluate);
+        let build = |code: &mut Self| code.sequence_display(values, display, slot.as_deref());
         let Some(slot) = slot.as_deref() else {
             return build(self);
         };
         self.cached_tuple(slot, build)
     }
 
-    fn cached_tuple(&mut self, slot: &str, build: impl FnOnce(&mut Self) -> String) -> String {
+    pub(super) fn cached_tuple(
+        &mut self,
+        slot: &str,
+        build: impl FnOnce(&mut Self) -> String,
+    ) -> String {
         // A loaded tuple is a constant of the code unit. Reuse it before evaluating
         // any literal loaders or allocating a temporary container.
         let cached = self.value(&format!(
@@ -1729,7 +1736,7 @@ pub(crate) trait FrameEmitter<'a, 'p>:
         self.cached_handle_or(&hit, &cached, build)
     }
 
-    fn cached_handle_or(
+    pub(super) fn cached_handle_or(
         &mut self,
         hit: &str,
         cached: &str,
@@ -1755,7 +1762,6 @@ pub(crate) trait FrameEmitter<'a, 'p>:
         items: &[Expr],
         display: DisplayKind,
         slot: Option<&str>,
-        mut evaluate: impl FnMut(&mut Self, &Expr) -> String,
     ) -> String {
         let tuple = display == DisplayKind::Tuple;
         let mark = self.temporary_mark();
@@ -1783,7 +1789,7 @@ pub(crate) trait FrameEmitter<'a, 'p>:
                 code.checked(&format!("call i64 @imre_dyn_display_item(ptr %ctx, i64 {list}, i64 {value}, i64 {mark}, i1 {extend})"));
             };
             let (mut result, complete) = crate::llvm::operations::sequences::build(
-                code, items, crate::llvm::operations::sequences::STACK_USE_GUIDELINE, Expr::spread_operand, &mut evaluate, initial, append,
+                code, items, crate::llvm::operations::sequences::STACK_USE_GUIDELINE, Expr::spread_operand, Self::evaluate_handle, initial, append,
             );
             if !complete && tuple {
                 let operation = if slot.is_some() { "constant_tuple" } else { "tuple" };
@@ -1796,14 +1802,7 @@ pub(crate) trait FrameEmitter<'a, 'p>:
             result
         })
     }
-}
 
-impl<'a, 'p, T> FrameEmitter<'a, 'p> for T where
-    T: std::ops::DerefMut<Target = RegisteredFrame<'a, 'p>>
-{
-}
-
-impl super::Frame<'_, '_, '_> {
     pub(crate) fn object_operation(&mut self, op: &Builtin, operands: &[Expr]) -> CheckedValue {
         let (target, args) = operands
             .split_first()
@@ -1913,13 +1912,7 @@ impl super::Frame<'_, '_, '_> {
                 }
             }
             RegisteredArguments::Packed(pack) => self.unwind_operands(&mark, |f| {
-                let mut values = ArgumentPack::new(f, pack, Some(&callable));
-                for (index, arg) in args.enumerate() {
-                    let slot = values.prepare(f, index);
-                    let value = f.evaluate_handle(arg);
-                    values.insert(f, slot, &value);
-                }
-                let (args, kwargs) = values.finish(f);
+                let (args, kwargs) = f.pack_arguments(pack, args.as_slice(), Some(&callable));
                 CallArguments::Packed { args, kwargs }
             }),
         };
