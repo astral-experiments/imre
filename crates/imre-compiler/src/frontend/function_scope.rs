@@ -363,6 +363,9 @@ impl FunctionScope {
     }
 }
 
+/// Function-local declarations in lexical source order. These borrows end before emission.
+pub(crate) type FunctionChildren<'a> = Vec<&'a ast::Stmt>;
+
 #[derive(Default)]
 pub(crate) struct ScopeFacts<'p> {
     pub(crate) module_annotations: bool,
@@ -386,9 +389,11 @@ impl<'p> ScopeFacts<'p> {
         names: &imre_ast::Names,
         alias_site: impl FnMut(&'a ast::StmtTypeAlias, Option<TextSize>),
         expression: impl FnMut(LexicalSite<'a, '_>),
-    ) -> Self {
+    ) -> (Self, FunctionChildren<'a>) {
         let mut scopes = Self::default();
+        let mut children = Vec::new();
         Collector {
+            children: &mut children,
             scopes: &mut scopes,
             names,
             scope: Scope::Module,
@@ -399,7 +404,7 @@ impl<'p> ScopeFacts<'p> {
             expression,
         }
         .visit_body(body);
-        scopes
+        (scopes, children)
     }
 }
 
@@ -429,7 +434,8 @@ impl Scope {
     }
 }
 
-struct Collector<'s, 'p, A, G> {
+struct Collector<'s, 'p, 'a, A, G> {
+    children: &'s mut FunctionChildren<'a>,
     scopes: &'s mut ScopeFacts<'p>,
     names: &'s imre_ast::Names,
     scope: Scope,
@@ -440,7 +446,7 @@ struct Collector<'s, 'p, A, G> {
     expression: G,
 }
 
-impl<'a, A, G> Visitor<'a> for Collector<'_, '_, A, G>
+impl<'a, A, G> Visitor<'a> for Collector<'_, '_, 'a, A, G>
 where
     A: FnMut(&'a ast::StmtTypeAlias, Option<TextSize>),
     G: FnMut(LexicalSite<'a, '_>),
@@ -448,6 +454,11 @@ where
     fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
         let strings = self.names.string_annotations;
         let parent_yields = self.yields;
+        if matches!(self.scope, Scope::Function { .. })
+            && matches!(stmt, ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_))
+        {
+            self.children.push(stmt);
+        }
         match stmt {
             ast::Stmt::FunctionDef(def) => {
                 self.suite_scope = Some(Scope::Function {
