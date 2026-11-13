@@ -1929,14 +1929,13 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
         )
     }
 
-    /// Execute a descriptor operation at the original target, using the same live receiver
+    /// Mutate a descriptor at the original target, using the same live receiver
     /// for both halves of augmented assignment. A mutation releases its operand window on
     /// success and unwinds it before transferring an exception to the handler.
-    pub(in crate::llvm) fn attribute_operation<'e>(
+    pub(in crate::llvm) fn mutate_attribute<'e>(
         &mut self,
         operation: &ir::Builtin,
         mut operands: impl Iterator<Item = &'e Expr>,
-        usage: crate::llvm::operations::ValueUse,
     ) -> String {
         use ir::AttributeAction;
         let ir::Builtin::RegisteredAttribute {
@@ -1949,24 +1948,6 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
         };
         let (action, range) = (*action, *range);
         let first = operands.next().expect("attribute operand");
-        if action == AttributeAction::Load {
-            let owned;
-            let mark = if let crate::llvm::operations::ValueUse::CallOperand(mark, _) = usage {
-                mark
-            } else {
-                owned = self.temporary_mark();
-                &owned
-            };
-            return self.unwind_operands(mark, |code| {
-                let receiver = code.evaluate_handle(first);
-                let value = code.attribute_value(&receiver, name, range);
-                let next = code.keep_operands(mark, &value, "0");
-                if let crate::llvm::operations::ValueUse::CallOperand(_, retained) = usage {
-                    retained.set(next).expect("one result per call operand");
-                }
-                value
-            });
-        }
         let mark = self.temporary_mark();
         self.unwind_operands(&mark, |code| {
             match action {
