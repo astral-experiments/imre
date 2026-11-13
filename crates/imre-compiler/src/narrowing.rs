@@ -267,13 +267,19 @@ impl<'a> Visitor<'a> for Assignments<'_> {
 /// invalidate a binding that existed on entry.
 /// An outer handler cannot assume such a local survived the protected body.
 pub(crate) fn deleted_names(body: &[ast::Stmt]) -> HashSet<String> {
-    struct Deletions(HashSet<String>);
+    protected_deletions(body).0
+}
+
+pub(crate) fn protected_deletions(body: &[ast::Stmt]) -> (HashSet<String>, bool) {
+    struct Deletions(HashSet<String>, bool);
     impl<'a> Visitor<'a> for Deletions {
         // A Python expression cannot contain a del statement or an exception handler.
         fn visit_expr(&mut self, _expression: &'a ast::Expr) {}
 
         fn visit_stmt(&mut self, statement: &'a ast::Stmt) {
-            if let ast::Stmt::Delete(delete) = statement {
+            if statement.is_raise_stmt() {
+                self.1 = true;
+            } else if let ast::Stmt::Delete(delete) = statement {
                 self.0.extend(
                     delete
                         .targets
@@ -296,9 +302,9 @@ pub(crate) fn deleted_names(body: &[ast::Stmt]) -> HashSet<String> {
             walk_except_handler(self, handler);
         }
     }
-    let mut visitor = Deletions(HashSet::new());
+    let mut visitor = Deletions(HashSet::new(), false);
     for statement in body {
         visitor.visit_stmt(statement);
     }
-    visitor.0
+    (visitor.0, visitor.1)
 }

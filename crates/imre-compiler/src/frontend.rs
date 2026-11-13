@@ -7231,7 +7231,7 @@ impl<'a> Checker<'a> {
         } else {
             try_.body.as_slice()
         };
-        let mut deleted = narrowing::deleted_names(protected_prefix);
+        let (mut deleted, raises) = narrowing::protected_deletions(protected_prefix);
         for name in &deleted {
             if let Some(slot) = self.names.get(name) {
                 handler_assigned.remove(slot);
@@ -7353,7 +7353,7 @@ impl<'a> Checker<'a> {
                 self.caught_exceptions.push(CaughtException {
                     slot,
                     builtin_class: Self::directly_raised_builtin(&body, kinds),
-                    fields: processes::process_error_view(&try_.body, &body, self.types, kinds),
+                    fields: processes::process_error_view(raises, &body, self.types, kinds),
                 });
             }
             let (handler_body, falls) = self.block(&handler.body)?;
