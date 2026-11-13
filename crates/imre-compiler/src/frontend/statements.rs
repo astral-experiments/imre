@@ -85,15 +85,20 @@ pub(super) trait StatementLowering {
         &mut self,
         stmt: &ast::Stmt,
         module: bool,
-    ) -> StdResult<Block, Self::Error> {
+        body: &mut Vec<Statement>,
+    ) -> StdResult<bool, Self::Error> {
+        let append = |body: &mut Vec<Statement>, (statements, continues)| {
+            append_block(body, statements);
+            continues
+        };
         let (statement, continues) = match stmt {
-            ast::Stmt::Assign(assign) => return self.assignment(assign),
-            ast::Stmt::If(branch) => return self.branch(branch),
+            ast::Stmt::Assign(assign) => return Ok(append(body, self.assignment(assign)?)),
+            ast::Stmt::If(branch) => return Ok(append(body, self.branch(branch)?)),
             ast::Stmt::FunctionDef(def) => (self.definition(def)?, true),
             ast::Stmt::Expr(expr) => self.effect(&expr.value)?,
             ast::Stmt::Return(ret) if !module => (Some(self.returned(ret)?), false),
             ast::Stmt::For(loop_) if !loop_.is_async || self.async_iteration() => {
-                return self.for_loop(loop_);
+                return Ok(append(body, self.for_loop(loop_)?));
             }
             ast::Stmt::Raise(raise) => (
                 Some(raised(raise, |value| self.raised_value(raise, value))?),
@@ -102,10 +107,11 @@ pub(super) trait StatementLowering {
             ast::Stmt::Pass(_) => (self.position_only(stmt.range()), true),
             _ => match loop_transfer(stmt) {
                 Some(transfer) if self.record_loop_transfer(&transfer) => (Some(transfer), false),
-                _ => return self.other_statement(stmt),
+                _ => return Ok(append(body, self.other_statement(stmt)?)),
             },
         };
-        Ok((statement.into_iter().collect(), continues))
+        body.extend(statement);
+        Ok(continues)
     }
 }
 

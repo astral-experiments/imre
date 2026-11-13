@@ -5842,6 +5842,8 @@ impl<'a> Checker<'a> {
         let mut previous_sum = false;
         let mut length_guard = None;
         let mut fallthrough_field = None;
+        // Checking an unplaced body still needs the current statement for narrowing.
+        let mut discarded = Vec::new();
         for (index, statement) in statements.iter().enumerate() {
             let mut fresh = None;
             if let ast::Stmt::Assign(assignment) = statement
@@ -5898,61 +5900,54 @@ impl<'a> Checker<'a> {
                 .fixed_sites
                 .as_mut()
                 .and_then(|sites| sites.enter(statement.range()));
-            let (mut lowered, continues) = if !self.module_scope
+            let emitting = output.is_some();
+            let body = output.as_deref_mut().unwrap_or(&mut discarded);
+            let start = body.len();
+            if emitting && self.registered.is_some() && !statement.is_assert_stmt() {
+                body.push(registered::checkpoint(statement));
+            }
+            let ops = body.len();
+            let continues = if !self.module_scope
                 && self.block_depth == 1
                 && fresh.is_some()
                 && let Some((target, parser)) = self
                     .saved_datetime_parser(statement, calendar::ParserBinding::Local(statements))
             {
-                let mut suite = Vec::with_capacity(1);
-                self.assign(target, parser, Some(&mut suite))?;
-                (suite, true)
+                self.assign(target, parser, Some(body))?;
+                true
             } else {
                 let depth = self.present_fields.len();
                 self.guard_return_field(std::slice::from_ref(statement), fallthrough_field);
-                let result = self.statement(statement);
+                let result = self.statement(statement, body);
                 self.present_fields.truncate(depth);
                 result?
             };
-            fallthrough_field = records::fallthrough_field(&lowered);
+            let lowered = &mut body[ops..];
+            fallthrough_field = records::fallthrough_field(lowered);
             self.fixed_tuple = enclosing_tuple;
             if !self.module_scope
                 && let Some((name, rhs)) = fresh
             {
-                self.widen_reassigned_text(name, rhs, &mut lowered, &statements[index + 1..])?;
+                self.widen_reassigned_text(name, rhs, lowered, &statements[index + 1..])?;
             }
             length_guard = self
                 .list_length_guard(statement)
-                .or_else(|| length_guard.filter(|guard| fixed_tuples::preserves(*guard, &lowered)));
-            self.remember_regex_assignment(statement, &mut lowered, &statements[index + 1..]);
+                .or_else(|| length_guard.filter(|guard| fixed_tuples::preserves(*guard, lowered)));
+            self.remember_regex_assignment(statement, body, ops, &statements[index + 1..]);
             if let Some(flag) =
                 unbound_locals::assigned(statement).and_then(|n| self.bound_flags.get(n))
             {
-                lowered.push(Statement::Assign(*flag, Expr::boolean(true)));
+                body.push(Statement::Assign(*flag, Expr::boolean(true)));
+            }
+            if emitting && self.registered.is_none() && body.len() > ops && self.fault_enabled() {
+                body.insert(start, self.fault_line(statement));
             }
             self.leave_fixed_site(parent);
-            if self.placement_only
-                && self.block_depth == 1
-                && self.fixed_sites.is_none()
-                && let Some(body) = output.take()
-            {
+            if !emitting {
+                body.clear();
+            } else if self.placement_only && self.block_depth == 1 && self.fixed_sites.is_none() {
                 *body = Vec::new();
-            }
-            if let Some(body) = output.as_deref_mut() {
-                if self.registered.is_some() {
-                    // Assertions own the test checkpoint and disappear under Python optimization.
-                    if !statement.is_assert_stmt() {
-                        body.push(registered::checkpoint(statement));
-                    }
-                } else if !lowered.is_empty() && self.fault_enabled() {
-                    body.push(self.fault_line(statement));
-                }
-                // The final statement can already own the entire checked suite.
-                if index + 1 == statements.len() && body.capacity() == 0 && !lowered.is_empty() {
-                    *body = lowered;
-                } else {
-                    body.extend(lowered);
-                }
+                output = None;
             }
             falls_through &= continues;
         }
@@ -6030,15 +6025,20 @@ impl<'a> Checker<'a> {
             .then_some(self.module)
     }
 
-    fn statement(&mut self, statement: &ast::Stmt) -> Result<(Vec<Statement>, bool), String> {
+    fn statement(
+        &mut self,
+        statement: &ast::Stmt,
+        body: &mut Vec<Statement>,
+    ) -> Result<bool, String> {
         if self.bound_function_imports
             && self.graph.session.sole_local_import(self.module, statement)
         {
-            let (body, falls_through) = self.lower_statement(statement)?;
+            let start = body.len();
+            let falls_through = self.lower_statement(statement, body)?;
             // A native intrinsic may have consumed the import without producing its
             // Python namespace operation. Keep its original prepared function in that case.
             if !matches!(
-                body.as_slice(),
+                &body[start..],
                 [Statement::Expr(Expr {
                     kind: ExprKind::Builtin(Builtin::RegisteredImport(_), _),
                     ..
@@ -6046,7 +6046,7 @@ impl<'a> Checker<'a> {
             ) {
                 self.require_registered_operation(statement)?;
             }
-            return Ok((body, falls_through));
+            return Ok(falls_through);
         }
         if self.registered.is_some() {
             // Fixed layouts can erase Python stores (for example, a local += becomes +).
@@ -6090,7 +6090,7 @@ impl<'a> Checker<'a> {
             &mut self.unhighlighted_call,
             imre_ast::unhighlighted_call(statement),
         );
-        let result = self.lower_statement(statement);
+        let result = self.lower_statement(statement, body);
         self.unhighlighted_call = enclosing;
         if let Err(error) = &result {
             // A boxed operation in a checked source file must not hide a bad call in
@@ -6115,10 +6115,10 @@ impl<'a> Checker<'a> {
                     if !matches!(*blocked, Some(Failure::PendingSignature { .. })) {
                         *blocked = Some(error.clone());
                     }
-                    return Ok((Vec::new(), true));
+                    return Ok(true);
                 }
                 ast::Stmt::Expr(_) | ast::Stmt::Assert(_) if self.missing_operation(error) => {
-                    return Ok((Vec::new(), true));
+                    return Ok(true);
                 }
                 ast::Stmt::Assign(assign)
                     if let [ast::Expr::Name(target)] = assign.targets.as_slice()
@@ -6133,7 +6133,7 @@ impl<'a> Checker<'a> {
                         .map_or(Type::PythonObject, |&slot| self.locals[slot]);
                     let slot = self.declare(name, ty, target)?;
                     self.assigned_value(slot, &Expr::unrepresented());
-                    return Ok((Vec::new(), true));
+                    return Ok(true);
                 }
                 _ => {}
             }
@@ -6141,29 +6141,35 @@ impl<'a> Checker<'a> {
         result.map_err(|error| error.in_entry_statement(entry, statement.start()))
     }
 
-    fn lower_statement(&mut self, statement: &ast::Stmt) -> Result<(Vec<Statement>, bool), String> {
+    fn lower_statement(
+        &mut self,
+        statement: &ast::Stmt,
+        body: &mut Vec<Statement>,
+    ) -> Result<bool, String> {
         if self.graph.local_static_import(self.module, statement) {
-            return Ok((Vec::new(), true));
+            return Ok(true);
         }
         if let ast::Stmt::ImportFrom(import) = statement
             && let Some(bindings) = self.local_sys_import(import)?
         {
-            return Ok((bindings, true));
+            statements::append_block(body, bindings);
+            return Ok(true);
         }
         if self.bound_function_imports
             && let Some(import) = registered::registered_import(statement, None)
         {
-            return Ok((vec![Statement::Expr(import)], true));
+            body.push(Statement::Expr(import));
+            return Ok(true);
         }
         if self.module_scope && local_functions::type_variable(self.graph, self.module, statement) {
-            return Ok((Vec::new(), true));
+            return Ok(true);
         }
         // Fixed parser schemas absorb their declarations. A recovered Python frame needs
         // the live parser binding and each registration in source order.
         if self.registered_local_start.is_none()
             && self.classes.parsers.declaration(self.module, statement)
         {
-            return Ok((Vec::new(), true));
+            return Ok(true);
         }
         let module = &self.graph.modules[self.module];
         if let ast::Stmt::Global(global) = statement
@@ -6172,7 +6178,7 @@ impl<'a> Checker<'a> {
                     if first.module == self.module && module.rebound_values.contains(&first.statement))
             })
         {
-            return Ok((Vec::new(), true));
+            return Ok(true);
         }
         if let Some(first) = module.rebound_target(self.module, statement)
             && (self.module_scope
@@ -6180,7 +6186,8 @@ impl<'a> Checker<'a> {
                     self.graph.session.explicitly_global(self.module, target)
                 }))
         {
-            return Ok((vec![self.replace_global(first, statement)?], true));
+            body.push(self.replace_global(first, statement)?);
+            return Ok(true);
         }
         // A refused representation still contributes argument and receiver facts to inference.
         // finish_region discards its body after the remaining operands have been checked.
@@ -6210,9 +6217,9 @@ impl<'a> Checker<'a> {
                     ));
                 }
             }
-            return Ok((Vec::new(), true));
+            return Ok(true);
         }
-        statements::StatementLowering::source_statement(self, statement, self.module_scope)
+        statements::StatementLowering::source_statement(self, statement, self.module_scope, body)
     }
 
     fn specialized_statement(
