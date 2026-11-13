@@ -79,6 +79,7 @@ pub(crate) enum FixedNode {
     Integer(i64),
     Constant(ir::Constant),
     Binary(Binary, Type),
+    Text(ir::TextOperation, usize, Type),
     Builtin(std::mem::Discriminant<Builtin>, usize, Type),
 }
 
@@ -124,6 +125,9 @@ impl FixedNode {
                     Self::indexed(&expr.kind, slot, expr.ty)
                 }
                 ExprKind::Binary(op, _, _) => Self::Binary(op, expr.ty),
+                ExprKind::Builtin(Builtin::Text(op), ref operands) => {
+                    Self::Text(op, operands.len(), expr.ty)
+                }
                 ExprKind::Builtin(ref op, ref operands) => {
                     Self::Builtin(std::mem::discriminant(op), operands.len(), expr.ty)
                 }
@@ -259,19 +263,18 @@ impl SourceSites {
         &mut self,
         call: &ast::ExprCall,
         field: &ast::ExprAttribute,
-        op: &Builtin,
-        result: Type,
+        value: &Expr,
     ) {
-        if let Some(site) = self.site_at(call.range()) {
+        if let Some(site) = self.site_at(call.range())
+            && let ExprKind::Builtin(_, operands) = &value.kind
+            && operands.len() == 1 + call.arguments.args.len()
+            && let Some(node) = FixedNode::checked(&ir::Node::Expression(value))
+        {
             self.python_operation(
                 site,
                 field.attr.start(),
                 registered::values::bound_method_operation(call, field),
-                FixedNode::Builtin(
-                    std::mem::discriminant(op),
-                    1 + call.arguments.args.len(),
-                    result,
-                ),
+                node,
             );
         }
     }
@@ -390,6 +393,42 @@ mod tests {
         no.insert(0, yes.remove(0));
         assert_eq!(function.body.as_ptr(), body);
         assert!(source.place(function).is_err());
+    }
+
+    #[test]
+    fn a_text_site_keeps_its_selected_operation() {
+        use ir::{TextOperation, TextPredicate};
+        for (original, changed, ty) in [
+            (
+                TextOperation::Predicate(TextPredicate::Upper),
+                TextOperation::Predicate(TextPredicate::Lower),
+                Type::Bool,
+            ),
+            (
+                TextOperation::Split(false),
+                TextOperation::Split(true),
+                Type::List(0),
+            ),
+        ] {
+            let text = |operation| Expr {
+                kind: ExprKind::Builtin(Builtin::Text(operation), {
+                    let mut operands = vec![Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Local(0),
+                    }];
+                    if matches!(operation, TextOperation::Split(_)) {
+                        operands.extend([Expr::absent(Type::Optional(0)), Expr::integer(-1)]);
+                    }
+                    operands
+                }),
+                ty,
+            };
+            let original = text(original);
+            let changed = text(changed);
+            let original = FixedNode::checked(&ir::Node::Expression(&original)).unwrap();
+            let changed = FixedNode::checked(&ir::Node::Expression(&changed)).unwrap();
+            assert!(original != changed);
+        }
     }
 
     #[test]

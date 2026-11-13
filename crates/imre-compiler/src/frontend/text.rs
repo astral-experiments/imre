@@ -346,6 +346,24 @@ impl Checker<'_> {
         })
     }
 
+    /// A receiver-only text operation can bind the same operand in a Python frame.
+    pub(super) fn bound_text_result(
+        &mut self,
+        call: &ast::ExprCall,
+        field: &ast::ExprAttribute,
+        value: Expr,
+    ) -> Expr {
+        if call.arguments.is_empty()
+            && matches!(&value.kind, ExprKind::Builtin(Builtin::Text(_), args) if args.len() == 1)
+        {
+            self.live_protocol_parameters = true;
+            if let Some(sites) = &mut self.fixed_sites {
+                sites.method(call, field, &value);
+            }
+        }
+        value
+    }
+
     /// Bind splitlines and no-argument string methods after evaluating the receiver; an explicit
     /// keepends uses Python truth, including its fallible source-class protocol.
     pub(super) fn splitlines_or_unary_text(

@@ -13166,11 +13166,12 @@ impl<'a> Checker<'a> {
                     | "isupper"
             ) && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
             {
-                return self.splitlines_or_unary_text(
+                let value = self.splitlines_or_unary_text(
                     Self::string_value(receiver),
                     attribute.attr.as_str(),
                     call,
-                );
+                )?;
+                return Ok(self.bound_text_result(call, attribute, value));
             }
             if attribute.attr.as_str() == "expandtabs"
                 && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
@@ -13180,11 +13181,9 @@ impl<'a> Checker<'a> {
             if matches!(attribute.attr.as_str(), "lower" | "upper" | "capitalize")
                 && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
             {
-                return self.text_method(
-                    Self::string_value(receiver),
-                    attribute.attr.as_str(),
-                    call,
-                );
+                let value =
+                    self.text_method(Self::string_value(receiver), attribute.attr.as_str(), call)?;
+                return Ok(self.bound_text_result(call, attribute, value));
             }
             if matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
                 && let Some(method) = stdlib::registered_string_method(call)
@@ -13636,15 +13635,16 @@ impl<'a> Checker<'a> {
                     ));
                 }
             };
-            if matches!(builtin, Builtin::Append)
-                && let Some(sites) = &mut self.fixed_sites
-            {
-                sites.method(call, attribute, &builtin, ty);
-            }
-            return Ok(Expr {
+            let value = Expr {
                 ty,
                 kind: ExprKind::Builtin(builtin, args),
-            });
+            };
+            if matches!(value.kind, ExprKind::Builtin(Builtin::Append, _))
+                && let Some(sites) = &mut self.fixed_sites
+            {
+                sites.method(call, attribute, &value);
+            }
+            return Ok(value);
         }
         let ast::Expr::Name(name) = &*call.func else {
             return Err(error(
