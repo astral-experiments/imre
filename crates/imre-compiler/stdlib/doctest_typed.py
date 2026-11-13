@@ -2,18 +2,6 @@ class DocTestCase(_DocTestCase):
     pass
 
 
-# Checked debug exceptions retain their message. Their native records do not
-# expose a Python traceback or carry the DocTest and Example in exception args.
-def _set_exception_info(failure: UnexpectedException, test: DocTest, example: Example,
-                        exc_info: object) -> None:
-    pass
-
-
-def _set_failure_output(failure: DocTestFailure, test: DocTest, example: Example, got: str,
-                        exc_info: object) -> None:
-    pass
-
-
 def _execute_case(case: _DocTestCase, debug: bool) -> None:
     test = case._dt_test
     if not debug:
