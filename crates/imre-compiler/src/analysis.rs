@@ -2985,12 +2985,11 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<CheckedEr
     let file = checked.file(db);
     let checks = checked.checks(db);
     let full = matches!(checks, FileChecks::Full | FileChecks::DeclaredSignatures);
-    if !full {
-        let parsed =
-            ruff_db::parsed::parsed_module(db, db.program_file(file).python_file(db)).load(db);
-        if fallback_data_module(&parsed) {
-            return Vec::new();
-        }
+    let parse =
+        || ruff_db::parsed::parsed_module(db, db.program_file(file).python_file(db)).load(db);
+    let fallback = (!full).then(parse);
+    if fallback.as_ref().is_some_and(fallback_data_module) {
+        return Vec::new();
     }
     #[cfg(test)]
     FILE_CHECKS.with_borrow_mut(|checks| {
@@ -3004,14 +3003,15 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<CheckedEr
         .iter()
         .filter(|diagnostic| {
             diagnostic.severity() >= Severity::Error
-                && (full
-                    || diagnostic.id().as_str() != "invalid-assignment"
-                    || checked.first_party(db)
-                        && diagnostic
-                            .primary_span()
-                            .and_then(|span| span.range())
-                            .and_then(|range| scalar_initializer(db, file, range))
-                            .is_some())
+                && fallback.as_ref().is_none_or(|parsed| {
+                    diagnostic.id().as_str() != "invalid-assignment"
+                        || checked.first_party(db)
+                            && diagnostic
+                                .primary_span()
+                                .and_then(|span| span.range())
+                                .and_then(|range| scalar_initializer(db, file, parsed, range))
+                                .is_some()
+                })
                 && !diagnostic
                     .primary_span()
                     .and_then(|span| span.range())
@@ -3058,7 +3058,8 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<CheckedEr
                     parameter
                 }
                 Some(sources) if diagnostic.id().is_lint_named("invalid-assignment") => {
-                    let scalar = range.and_then(|range| scalar_initializer(db, file, range));
+                    let scalar =
+                        range.and_then(|range| scalar_initializer(db, file, &parse(), range));
                     if scalar.is_none()
                         && !has_declared_nominal_target(
                             db,
@@ -3098,11 +3099,14 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<CheckedEr
 }
 
 /// Literal initializers of scalar names are independent of the operation that required boxing.
-fn scalar_initializer(db: &dyn Db, file: File, range: TextRange) -> Option<TextRange> {
+fn scalar_initializer(
+    db: &dyn Db,
+    file: File,
+    parsed: &ParsedModuleRef,
+    range: TextRange,
+) -> Option<TextRange> {
     use ruff_python_ast::{AnyNodeRef, find_node::covering_node};
 
-    let file = db.program_file(file);
-    let parsed = ruff_db::parsed::parsed_module(db, file.python_file(db)).load(db);
     let nodes = covering_node(parsed.syntax().into(), range);
     let mut ancestors = nodes.ancestors();
     let assignment = ancestors.find_map(|node| match node {
@@ -3135,7 +3139,7 @@ fn scalar_initializer(db: &dyn Db, file: File, range: TextRange) -> Option<TextR
     {
         return None;
     }
-    let model = SemanticModel::new(db, file);
+    let model = SemanticModel::new(db, db.program_file(file));
     let declared = annotation_type(db, &model, &assignment.annotation)?;
     concrete_scalar(db, &model.program_environment(), declared)
         .then(|| assignment.annotation.range())
