@@ -426,7 +426,7 @@ pub(crate) fn check_registered_project<'a>(
         Session::with_storage(root, extension_roots, salsa::Storage::default(), true)?;
     let mut paths = Vec::with_capacity(sources.len());
     for (path, source) in declarations {
-        session.add(path, source, crate::SourceKind::File)?;
+        session.register_file(path, source, crate::SourceKind::File)?;
         paths.push((path.to_owned(), false, None));
     }
     // Static SDK declarations can type an import even though there is no Python
@@ -439,7 +439,7 @@ pub(crate) fn check_registered_project<'a>(
                 && module.path.extension().is_some_and(|ext| ext == "pyi")
                 && !replaced.contains(module.name.as_str())
             {
-                session.add(&module.path, &module.source, crate::SourceKind::File)?;
+                session.register_file(&module.path, &module.source, crate::SourceKind::File)?;
                 paths.push((module.path.clone(), false, None));
             }
         }
@@ -460,7 +460,6 @@ pub(crate) fn check_registered_project<'a>(
         };
         let source = crate::normalize_source(source, kind)
             .map_err(|error| format!("{}: {error}", path.display()))?;
-        session.add(&path, &source, kind)?;
         let original = winner.checked_module.filter(|&id| {
             winner.declares_signatures
                 && is_program
@@ -471,6 +470,20 @@ pub(crate) fn check_registered_project<'a>(
                         && module.original_source() == winner.source
                 })
         });
+        if let Some((graph, id)) = checked.zip(original)
+            && (kind == crate::SourceKind::Command) == (graph.virtual_command && id == graph.entry)
+        {
+            // The loader checked these original bytes under the same form-feed rules.
+            // The selected declarations need their own file even if inference rewrote the graph.
+            let input = imre_ast::indentation::prepare(&source);
+            let file = session.write_file(
+                path.to_str().ok_or("module paths must be valid UTF-8")?,
+                &input.text,
+            )?;
+            session.files.push(file);
+        } else {
+            session.register_file(&path, &source, kind)?;
+        }
         paths.push((path, is_program, original));
     }
     let contracts = session.check_closed_program(&paths, None, &[], refusal);
@@ -1311,14 +1324,24 @@ impl Session {
         source: &str,
         kind: crate::SourceKind,
     ) -> Result<ParsedModuleRef, String> {
+        let (parsed, spreads) = self.register_file(path, source, kind)?;
+        self.tuple_spreads.push(spreads);
+        Ok(parsed)
+    }
+
+    fn register_file(
+        &mut self,
+        path: &Path,
+        source: &str,
+        kind: crate::SourceKind,
+    ) -> Result<(ParsedModuleRef, HashMap<TextSize, usize>), String> {
         let path = path.to_str().ok_or("module paths must be valid UTF-8")?;
         let input = imre_ast::indentation::prepare(source);
         check_source_complexity(&input.text).map_err(|error| format!("{path}: {error}"))?;
         let file = self.write_file(path, &input.text)?;
-        let (parsed, spreads) = self.checked_parse(file, path, source, &input, kind)?;
+        let checked = self.checked_parse(file, path, source, &input, kind)?;
         self.files.push(file);
-        self.tuple_spreads.push(spreads);
-        Ok(parsed)
+        Ok(checked)
     }
 
     fn checked_parse(
