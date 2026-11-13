@@ -77,7 +77,7 @@ impl Context {
         })
     }
 
-    pub(super) fn file_sources(&self, name: &str) -> impl Iterator<Item = &SourceModule> {
+    pub(super) fn file_sources(&self, name: &str) -> impl Iterator<Item = &SourceModule> + Clone {
         self.sources
             .get(name)
             .into_iter()
