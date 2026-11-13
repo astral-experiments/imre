@@ -13168,7 +13168,18 @@ impl<'a> Checker<'a> {
                     "replace" => return self.replace_call(receiver, call),
                     "split" | "rsplit" | "strip" | "lstrip" | "rstrip" | "startswith"
                     | "endswith" | "find" | "partition" => {
-                        return self.text_method(receiver, attribute.attr.as_str(), call);
+                        let value = self.text_method(receiver, attribute.attr.as_str(), call)?;
+                        if let Some(sites) = &mut self.fixed_sites
+                            && let ExprKind::Builtin(
+                                op @ Builtin::Text(ir::TextOperation::Find),
+                                args,
+                            ) = &value.kind
+                            && !calls::has_unpacking(call)
+                            && args.len() == 1 + call.arguments.len()
+                        {
+                            sites.method(call, attribute, op, value.ty);
+                        }
+                        return Ok(value);
                     }
                     _ => {}
                 }
