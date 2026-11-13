@@ -760,33 +760,17 @@ impl Checker<'_> {
         })
     }
 
-    /// Return the sealed converter and its checked iterable. Eager integer consumers
-    /// can use the input directly and perform the conversion while pulling.
-    pub(super) fn builtin_map_input<'e>(
-        &mut self,
+    /// Select a converter and its input at a consumer that accepts this builtin.
+    pub(super) fn map_converter_input<'e>(
+        &self,
         call: &'e ast::ExprCall,
-        eager_int: bool,
-    ) -> Result<Option<(&'e str, Iteration)>, String> {
+        accepts: impl FnOnce(&str) -> bool,
+    ) -> Option<(&'e str, &'e ast::Expr)> {
         let [converter @ ast::Expr::Name(name), source] = call.arguments.args.as_ref() else {
-            return Ok(None);
+            return None;
         };
         let name = name.id.as_str();
-        if !self.unshadowed_builtin(&call.func, "map")
-            || !matches!(name, "tuple" | "int" | "str" | "ord")
-            || (eager_int && name != "int")
-            || !self.unshadowed_builtin(converter, name)
-        {
-            return Ok(None);
-        }
-        if eager_int && !call.arguments.keywords.is_empty() {
-            return Err(error(
-                self.source,
-                call,
-                "map requires the builtin int converter and one concrete iterable",
-            ));
-        }
-        self.reject_builtin_keywords(call)?;
-        Ok(Some((name, self.expansion_input(source, None)?)))
+        (accepts(name) && self.unshadowed_builtin(converter, name)).then_some((name, source))
     }
 
     /// Recognizes only sealed constructor syntax at a direct consumer boundary.
@@ -925,11 +909,15 @@ impl Checker<'_> {
                 input
             }
             "map" if self.unshadowed_builtin(&call.func, "map") => {
-                let Some((name, source)) = self.builtin_map_input(call, false)? else {
+                let Some((name, source)) = self.map_converter_input(call, |name| {
+                    matches!(name, "tuple" | "int" | "str" | "ord")
+                }) else {
                     return Ok(Some(Iteration::Prepared(
                         self.callback_input(call, element, false)?,
                     )));
                 };
+                self.reject_builtin_keywords(call)?;
+                let source = self.expansion_input(source, None)?;
                 let mut input = self.prepare_iteration(source, call, false)?;
                 let item = self.local(input.value);
                 let converted = if name == "tuple" {

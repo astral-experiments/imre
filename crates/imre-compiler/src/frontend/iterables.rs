@@ -479,9 +479,18 @@ impl Checker<'_> {
         element: Option<Type>,
     ) -> Result<(Iteration, bool), String> {
         if let ast::Expr::Call(call) = expression
-            && let Some((_, input)) = self.builtin_map_input(call, true)?
+            && let Some((_, source)) = self.map_converter_input(call, |name| {
+                name == "int" && self.unshadowed_builtin(&call.func, "map")
+            })
         {
-            return Ok((input, true));
+            if !call.arguments.keywords.is_empty() {
+                return Err(error(
+                    self.source,
+                    call,
+                    "map requires the builtin int converter and one concrete iterable",
+                ));
+            }
+            return Ok((self.expansion_input(source, None)?, true));
         }
         Ok((self.expansion_input(expression, element)?, false))
     }
