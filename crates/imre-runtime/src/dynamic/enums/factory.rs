@@ -42,7 +42,7 @@ impl Context {
             unreachable!()
         };
         fields.enum_namespace = Some(namespace);
-        fields.class_body = Some(Vec::new());
+        fields.in_class_body = true;
         self.bind(scope, "__qualname__", name);
         self.bind(scope, "__doc__", NONE);
         let iter = self.iterator(members)?;

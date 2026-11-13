@@ -3087,7 +3087,7 @@ impl Context {
         if frame.parent.is_none() && !frame.closure.cleared {
             return self.module_globals(scope);
         }
-        if frame.class_body.is_some() {
+        if frame.in_class_body {
             return Ok(self.active_class_namespace(scope));
         }
         let mut bindings = Vec::new();

@@ -1898,7 +1898,7 @@ pub(super) fn declared_pack(ctx: &mut Context, name: Id) -> Id {
 /// Create the lexical scope for a declaration's type parameters.
 pub(super) fn parameter_scope(ctx: &mut Context, outer: Id, names: Id, class: bool) -> Result<Id> {
     let enclosing = ctx.scope_data(outer);
-    let in_class = enclosing.class_body.is_some();
+    let in_class = enclosing.in_class_body;
     let parent = if in_class {
         enclosing.parent.unwrap_or(outer)
     } else {
@@ -1930,7 +1930,7 @@ fn capture_parameter_class(ctx: &mut Context, scope: Id, outer: Id) {
 /// Bind the declared parameters directly in the compiled generic class header's activation.
 pub(super) fn class_parameter_frame(ctx: &mut Context, scope: Id, names: Id) -> Result<Id> {
     let outer = ctx.scope_data(scope).parent.expect("generic class header");
-    if ctx.scope_data(outer).class_body.is_some() {
+    if ctx.scope_data(outer).in_class_body {
         let parent = ctx.scope_data(outer).parent;
         let Value::Scope(frame) = ctx.heap.get_mut(scope) else {
             unreachable!()

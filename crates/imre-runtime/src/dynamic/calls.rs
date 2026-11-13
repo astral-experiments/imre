@@ -9687,7 +9687,8 @@ impl Context {
         let Value::Scope(class_scope) = self.heap.get_mut(scope) else {
             unreachable!()
         };
-        let body = class_scope.class_body.take().unwrap();
+        debug_assert!(class_scope.in_class_body);
+        class_scope.in_class_body = false;
         let dictionary = class_scope
             .class_namespace
             .as_ref()
@@ -9713,13 +9714,7 @@ impl Context {
             }
             self.set_class_member_names(class, members, |_, key| key)
         } else {
-            let members = body
-                .into_iter()
-                .map(|name| {
-                    let value = class_scope.names[name.as_str()];
-                    (name, value)
-                })
-                .collect();
+            let members = class_scope.class_namespace_entries(false);
             self.set_class_member_names(class, members, Self::text)
         }
     }
@@ -10062,7 +10057,7 @@ impl Context {
         let Value::Scope(body_scope) = self.heap.get_mut(scope) else {
             unreachable!()
         };
-        body_scope.class_body = Some(Vec::new());
+        body_scope.in_class_body = true;
         body_scope.closure.nonlocals = bindings.scope_nonlocals;
         body_scope.enum_namespace = enum_namespace;
         body_scope.class_cell = Some(cell);

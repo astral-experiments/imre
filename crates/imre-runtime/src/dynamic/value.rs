@@ -1135,7 +1135,7 @@ pub(super) enum ComprehensionKind {
 
 #[derive(Clone)]
 pub(super) struct Scope {
-    pub class_body: Option<Vec<String>>,
+    pub in_class_body: bool,
     pub enum_namespace: Option<Box<super::enums::auto::EnumNamespace>>,
     pub is_abstract: bool,
     pub comprehension: Option<ComprehensionKind>,
@@ -1154,7 +1154,7 @@ pub(super) struct Scope {
 impl Scope {
     pub(super) fn new(module: String, parent: Option<Id>) -> Self {
         Self {
-            class_body: None,
+            in_class_body: false,
             enum_namespace: None,
             is_abstract: false,
             comprehension: None,
@@ -1171,15 +1171,24 @@ impl Scope {
         }
     }
 
+    /// Snapshot names in binding order. The finished type keeps its qualified name as metadata.
+    pub(super) fn class_namespace_entries(&self, building: bool) -> Vec<(crate::Str, Id)> {
+        self.names
+            .iter()
+            .filter(|(name, _)| building || name.as_str() != "__qualname__")
+            .map(|(name, &value)| (name.clone(), value))
+            .collect()
+    }
+
     /// The class body's live dictionary, once exposed through Python code.
     pub(super) fn class_body_mapping(&self) -> Option<Id> {
-        self.class_body.as_ref().and(self.namespace)
+        self.namespace.filter(|_| self.in_class_body)
     }
 
     /// type.__qualname__ lives outside the finished class dictionary.
     pub(super) fn binding_namespace(&self, name: &str) -> Option<Id> {
         self.namespace.filter(|_| {
-            name != "__qualname__" || self.class_namespace.is_none() || self.class_body.is_some()
+            name != "__qualname__" || self.class_namespace.is_none() || self.in_class_body
         })
     }
 }
@@ -4855,7 +4864,7 @@ impl Heap {
         {
             let coroutine_released = check_coroutines
                 && scope.parent.is_some()
-                && scope.class_body.is_none()
+                && !scope.in_class_body
                 && scope
                     .names
                     .values()
@@ -4867,7 +4876,7 @@ impl Heap {
             if weak_released || finalizer_released || coroutine_released {
                 // A normal function allocates its scope in the caller before entering.
                 // Once it returns, only an escaped closure or frame can keep that scope alive.
-                if scope.parent.is_some() && scope.class_body.is_none() {
+                if scope.parent.is_some() && !scope.in_class_body {
                     self.release_scope_temporary(frame.scope);
                 }
                 // Recheck the surviving weak roots after publishing the caller's temporaries.

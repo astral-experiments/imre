@@ -463,37 +463,34 @@ impl Context {
             ..Default::default()
         };
         let scope = self.namespace_scope(&module_text, class_namespace, cell);
-        for (key_id, value) in entries {
-            let key = self.str_value(key_id)?.to_owned();
-            if matches!(key.as_str(), "__classcell__" | "__classdictcell__") {
-                self.delete_item(namespace, key_id)?;
-                continue;
+        for (key, value) in entries {
+            match self.str_value(key)? {
+                "__classcell__" | "__classdictcell__" => self.delete_item(namespace, key)?,
+                "__qualname__" if self.string_storage(value).is_none() => {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!(
+                            "type __qualname__ must be a str, not {}",
+                            self.type_name(value)
+                        ),
+                    ));
+                }
+                "__new__" if matches!(self.heap.get(value), Value::Function { .. }) => {
+                    let wrapped = super::method_decorator::static_method(self, value)?;
+                    self.bind_local(scope, "__new__", wrapped);
+                }
+                _ => {}
             }
-            if key == "__qualname__" && self.string_storage(value).is_none() {
-                return Err(Error::new(
-                    "TypeError",
-                    format!(
-                        "type __qualname__ must be a str, not {}",
-                        self.type_name(value)
-                    ),
-                ));
-            }
-            let value =
-                if key == "__new__" && matches!(self.heap.get(value), Value::Function { .. }) {
-                    super::method_decorator::static_method(self, value)?
-                } else {
-                    value
-                };
-            self.bind_local(scope, &key, value);
         }
         if self.scope_name(scope, "__module__").is_none()
             && let Some(module) = module
         {
             self.bind_local(scope, "__module__", module);
         }
-        if self.scope_name(scope, "__qualname__").is_none() {
+        let qualname = self.scope_name(scope, "__qualname__").unwrap_or_else(|| {
             self.bind_local(scope, "__qualname__", name);
-        }
+            name
+        });
         self.enable_class_annotation_provider(scope);
         let ancestors = self.linearized_bases(&bases, false)?;
         let class =
@@ -501,8 +498,13 @@ impl Context {
         if self.scope_name(scope, "__doc__").is_none() {
             self.bind_local(scope, "__doc__", NONE);
         }
-        let qualname = self.heap.code_name("__qualname__");
-        self.delete_item(namespace, qualname)?;
+        // type.__qualname__ lives outside the published class dictionary.
+        let key = self.heap.code_name("__qualname__");
+        self.delete_item(namespace, key)?;
+        let Value::Scope(frame) = self.heap.get_mut(scope) else {
+            unreachable!()
+        };
+        frame.names.insert("__qualname__".into(), qualname);
         let Value::Class {
             metaclass: class_meta,
             ..
@@ -544,8 +546,10 @@ impl Context {
         let Value::Scope(frame) = self.heap.get_mut(scope) else {
             unreachable!()
         };
-        frame.class_body = Some(Vec::new());
+        frame.in_class_body = true;
         frame.class_cell = Some(cell);
+        // type.__new__ has already copied the supplied mapping into the type's own dictionary.
+        frame.namespace = layout.dictionary;
         frame.class_namespace = Some(Box::new(layout));
         scope
     }
