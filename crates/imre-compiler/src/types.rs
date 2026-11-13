@@ -1455,13 +1455,18 @@ impl Types {
         Type::Callable(self.intern(Shape::Callable(params, returns)))
     }
 
-    pub(crate) fn plain_callable_signature(&self, ty: Type) -> Option<(Vec<Type>, Type)> {
+    /// Inspect the synchronous positional signature that a Python frame can call directly.
+    pub(crate) fn with_callback_signature<T>(
+        &self,
+        ty: Type,
+        read: impl FnOnce(&[Type], Type) -> T,
+    ) -> Option<T> {
         let Type::Callable(id) = ty else { return None };
         let shapes = self.0.borrow();
         let Shape::Callable(params, returns) = &shapes.shapes[id] else {
             return None;
         };
-        Some((params.clone(), *returns))
+        (!matches!(returns, Type::Coroutine(_))).then(|| read(params, *returns))
     }
 
     /// A subscription method accepts booleans in its first positional integer slot.

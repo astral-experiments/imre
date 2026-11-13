@@ -1449,7 +1449,7 @@ fn lower_graph(
                     .all(|p| p.ty.is_format_scalar() || p.ty == Type::Path)
                 && signature.parameter_declarations.iter().all(Option::is_some))
                 || (definition.returns.is_none()
-                    && inference.has_inferred_sequence_argument(signature, &types)))
+                    && inference.has_inferred_protocol_argument(signature, &types)))
         {
             registered::place_checked_definition(&checker, definition, signature, &inference)
                 .map(|body| (body, Default::default()))

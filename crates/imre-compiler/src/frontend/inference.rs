@@ -539,8 +539,8 @@ impl Inference {
         self.pending.borrow().len()
     }
 
-    /// A caller-supplied sequence keeps its live iteration protocol in the Python frame.
-    pub(super) fn has_inferred_sequence_argument(
+    /// A caller-supplied sequence or callable keeps its live Python protocol in this frame.
+    pub(super) fn has_inferred_protocol_argument(
         &self,
         signature: &Signature,
         types: &Types,
@@ -552,7 +552,11 @@ impl Inference {
                 .inferred_params
                 .iter()
                 .zip(&signature.params)
-                .any(|(&inferred, param)| inferred && types.indexed_element(param.ty).is_some())
+                .any(|(&inferred, param)| {
+                    inferred
+                        && (types.with_callback_signature(param.ty, |_, _| ()).is_some()
+                            || types.indexed_element(param.ty).is_some())
+                })
     }
 
     pub(super) fn used_as_value(&self, id: usize) -> bool {
