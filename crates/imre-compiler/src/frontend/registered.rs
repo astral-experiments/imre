@@ -2227,6 +2227,11 @@ impl<'a> SuitePreparation<'a> {
         selection: SuiteSelection,
         suspended: bool,
     ) -> RegisteredSuite {
+        // A disabled body has no entry or declarations. The parent already owns the
+        // loop checkpoint, and the else suite supplies its own fallthrough.
+        if disabled_while(loop_) {
+            return self.physical_suite(&loop_.orelse, kind, selection, suspended);
+        }
         let mut region = self.region(kind);
         let test = match loop_.test.as_ref() {
             ast::Expr::BooleanLiteral(literal) => Expr::boolean(literal.value),
@@ -2235,19 +2240,11 @@ impl<'a> SuitePreparation<'a> {
                 Type::Bool,
             ),
         };
-        // A dead body has no resume entry, even when its syntax declares a generator.
-        let disabled = ir::control::boolean_literal(&test) == Some(false);
-        let body = if disabled {
-            Vec::new()
-        } else {
-            region.child(self.physical_suite(&loop_.body, kind, selection, suspended))
-        };
+        let body = region.child(self.physical_suite(&loop_.body, kind, selection, suspended));
         let otherwise = if loop_.orelse.is_empty() {
             Vec::new()
         } else {
-            let suite = self.physical_suite(&loop_.orelse, kind, selection, suspended);
-            region.falls_through = !disabled || suite.falls_through;
-            region.child(suite)
+            region.child(self.physical_suite(&loop_.orelse, kind, selection, suspended))
         };
         region
             .checked
@@ -2336,9 +2333,7 @@ impl<'a> SuitePreparation<'a> {
             scope.refusal = None;
             let lowered = match select {
                 SuiteSelection::All => scope.statement(stmt, &mut body.statements),
-                SuiteSelection::Physical => {
-                    scope.physical_statement(stmt, &mut body.statements, self)
-                }
+                SuiteSelection::Physical => scope.physical_statement(stmt, &mut body, self),
             };
             if let Ok(continues) = lowered {
                 if !continues {
@@ -3256,6 +3251,10 @@ impl<'a> SourceScope<'a> {
     }
 }
 
+fn disabled_while(loop_: &ast::StmtWhile) -> bool {
+    matches!(&*loop_.test, ast::Expr::BooleanLiteral(literal) if !literal.value)
+}
+
 /// Which control transfers a checked region can handle inside a physical frame.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum PhysicalRegion {
@@ -3358,20 +3357,12 @@ impl SourceScope<'_> {
         self.with_suspending_operands(lower)
     }
 
-    fn physical_statement(
-        &mut self,
-        stmt: &ast::Stmt,
-        body: &mut Vec<Statement>,
-        preparation: &SuitePreparation<'_>,
-    ) -> StdResult<bool, ()> {
+    fn checked_physical_statement(&self, stmt: &ast::Stmt) -> bool {
         if let ast::Stmt::Assign(assign) = stmt {
             // The physical frame owns an assignment that yields or awaits its value.
-            if ir::SuspendValue::operand(&assign.value).is_some() {
-                return Err(());
-            }
-            return self.statement(stmt, body);
+            return ir::SuspendValue::operand(&assign.value).is_none();
         }
-        if self.operations.contains_key(&stmt.range())
+        self.operations.contains_key(&stmt.range())
             || matches!(
                 stmt,
                 ast::Stmt::Pass(_) | ast::Stmt::Global(_) | ast::Stmt::Nonlocal(_)
@@ -3387,7 +3378,16 @@ impl SourceScope<'_> {
             || stmt.is_aug_assign_stmt()
             || stmt.is_raise_stmt()
             || stmt.is_function_def_stmt()
-        {
+    }
+
+    fn physical_statement(
+        &mut self,
+        stmt: &ast::Stmt,
+        suite: &mut SuiteBody,
+        preparation: &SuitePreparation<'_>,
+    ) -> StdResult<bool, ()> {
+        let body = &mut suite.statements;
+        if self.checked_physical_statement(stmt) {
             return self.statement(stmt, body);
         }
         if !matches!(self.kind, RegisteredScope::Function { .. }) {
@@ -3425,6 +3425,22 @@ impl SourceScope<'_> {
             return Ok(continues);
         }
         if !region.accepts(checked) {
+            // A disabled loop selects only its else. If every statement there uses
+            // ordinary checked lowering in both frames, keep the one prepared block.
+            if let ast::Stmt::While(loop_) = stmt
+                && disabled_while(loop_)
+                && loop_
+                    .orelse
+                    .iter()
+                    .all(|stmt| self.checked_physical_statement(stmt))
+                && let Some(Statement::While(_, _, otherwise)) = body.pop()
+            {
+                suite.check_run(preparation);
+                suite.statements.extend(otherwise);
+                suite.falls_through &= continues;
+                suite.check_run(preparation);
+                return Ok(continues);
+            }
             body.truncate(begin);
             return Err(());
         }
