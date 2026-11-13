@@ -191,7 +191,7 @@ pub(crate) fn validate_names(
     body: &[ast::Stmt],
     private_names: &imre_ast::Names,
 ) -> Result<(), String> {
-    if source.contains("nonlocal") {
+    if private_names.nonlocal_in_generic_class {
         super::function_scope::check_nonlocals(source, body)
             .map_err(|error| format!("{}:{error}", path.display()))?;
     }

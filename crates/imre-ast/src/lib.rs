@@ -392,6 +392,7 @@ pub fn repeated_keyword(node: ast::AnyNodeRef<'_>) -> Option<&ast::Keyword> {
 pub struct Names {
     pub string_annotations: bool,
     pub duplicate_type_parameter: Option<Identifier>,
+    pub nonlocal_in_generic_class: bool,
     original: HashMap<TextSize, Name>,
     import_roots: HashSet<TextSize>,
 }
@@ -510,6 +511,7 @@ pub fn lower_in(body: &mut [ast::Stmt], owner: &str, string_annotations: bool) -
         names: &names,
         string_annotations,
         only_parameters: None,
+        in_generic_class: false,
     }
     .visit_body(body);
     names.into_inner()
@@ -520,6 +522,7 @@ struct Mangler<'a> {
     names: &'a RefCell<Names>,
     string_annotations: bool,
     only_parameters: Option<&'a HashSet<Name>>,
+    in_generic_class: bool,
 }
 
 fn private_name(owner: &str, name: &str) -> Option<Name> {
@@ -588,6 +591,7 @@ impl Transformer for Mangler<'_> {
                 let body = Mangler {
                     owner: owner.as_str(),
                     only_parameters: None,
+                    in_generic_class: self.in_generic_class || class.type_params.is_some(),
                     ..*self
                 };
                 if let Some(params) = &mut class.type_params {
@@ -627,6 +631,9 @@ impl Transformer for Mangler<'_> {
                 }
             }
             ast::Stmt::Nonlocal(nonlocal) => {
+                if self.in_generic_class {
+                    self.names.borrow_mut().nonlocal_in_generic_class = true;
+                }
                 for name in &mut nonlocal.names {
                     self.rename(&mut name.id);
                 }
