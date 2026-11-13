@@ -10,7 +10,9 @@ use std::collections::HashMap;
 /// String methods exposed by the boxed runtime's native method descriptors.
 pub const STR_METHODS: &[&str] = &[
     "__add__",
+    "__contains__",
     "__eq__",
+    "__getitem__",
     "__hash__",
     "__str__",
     "__format__",
