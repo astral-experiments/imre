@@ -869,10 +869,7 @@ fn worker_target(ctx: &Context, target: Id, args: Id, kwargs: Id) -> Result<(Ope
             return Ok((operation, super::concat_ids(roots, pos)?));
         }
     }
-    Err(Error::new(
-        "NotImplementedError",
-        "this thread target cannot run independently of the boxed Python heap",
-    ))
+    Err(super::thread_callback::unsupported_target())
 }
 
 /// The worker registration roots the receiver, which owns its Python thread handle.
