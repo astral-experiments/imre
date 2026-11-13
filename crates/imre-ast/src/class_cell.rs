@@ -3,17 +3,32 @@ use crate::comprehension::{Output, Plan};
 use ast::visitor::{self, Visitor};
 use ruff_python_ast as ast;
 
-const CLASS: &str = "__class__";
-const DICT: &str = "__classdict__";
+// The same lexical walk resolves the two cells independently.
+const CLASS: u8 = 1;
+const DICT: u8 = 2;
 
-/// Only free references from a child scope create a cell in the declaring class.
-pub fn needed(body: &[ast::Stmt], string_annotations: bool) -> bool {
-    needed_for(body, string_annotations, CLASS)
+fn cell(name: &str) -> u8 {
+    match name {
+        "__class__" => CLASS,
+        "__classdict__" => DICT,
+        _ => 0,
+    }
 }
 
-/// Annotation scopes created by a class suite can also close over the namespace.
-pub fn dict_needed(body: &[ast::Stmt], string_annotations: bool) -> bool {
-    needed_for(body, string_annotations, DICT)
+fn cells<'a>(names: impl Iterator<Item = &'a str>) -> u8 {
+    names.fold(0, |found, name| found | cell(name))
+}
+
+/// Return the class and namespace cells required by the class body, in that order.
+pub fn required(body: &[ast::Stmt], string_annotations: bool) -> (bool, bool) {
+    let mut scope = Scope {
+        class: true,
+        string_annotations,
+        ..Scope::default()
+    };
+    scope.visit_body(body);
+    let needed = scope.nested | (scope.annotation & (!scope.shadows | scope.nonlocal));
+    (needed & CLASS != 0, needed & DICT != 0)
 }
 
 /// Whether the function body reads a free __class__, including through zero-argument super.
@@ -24,7 +39,7 @@ pub fn function_needed(
 ) -> bool {
     let mut scope = function_scope(parameters, string_annotations);
     scope.visit_body(body);
-    scope.free()
+    scope.free() & CLASS != 0
 }
 
 /// Apply the same lexical rules to the body of a lambda.
@@ -35,67 +50,54 @@ pub fn expression_needed(
 ) -> bool {
     let mut scope = function_scope(parameters, string_annotations);
     scope.visit_expr(body);
-    scope.free()
+    scope.free() & CLASS != 0
 }
 
 fn function_scope(parameters: Option<&ast::Parameters>, string_annotations: bool) -> Scope {
     Scope {
-        name: CLASS,
         string_annotations,
-        shadows: parameters.is_some_and(|p| p.iter().any(|arg| arg.name().as_str() == CLASS)),
+        shadows: parameters.map_or(0, |params| {
+            cells(params.iter().map(|arg| arg.name().as_str()))
+        }),
         ..Scope::default()
     }
 }
 
-fn needed_for(body: &[ast::Stmt], string_annotations: bool, name: &'static str) -> bool {
-    let mut s = Scope {
-        name,
-        class: true,
-        string_annotations,
-        ..Scope::default()
-    };
-    s.visit_body(body);
-    s.nested || (s.annotation && (!s.shadows || s.nonlocal))
-}
-
 #[derive(Default)]
 struct Scope {
-    name: &'static str,
     class: bool,
     string_annotations: bool,
-    shadows: bool,
-    direct: bool,
-    nonlocal: bool,
-    walrus: bool,
-    nested: bool,
+    shadows: u8,
+    direct: u8,
+    nonlocal: u8,
+    walrus: u8,
+    nested: u8,
     // Lazy annotations consult the class namespace before taking a free variable.
-    annotation: bool,
+    annotation: u8,
 }
 
 impl Scope {
     fn child(&self) -> Self {
         Self {
-            name: self.name,
             string_annotations: self.string_annotations,
             ..Self::default()
         }
     }
-    fn free(&self) -> bool {
-        self.nonlocal
-            || (!self.shadows && (self.direct || (!self.class && (self.nested || self.annotation))))
+    fn free(&self) -> u8 {
+        let reads = if self.class {
+            self.direct
+        } else {
+            self.direct | self.nested | self.annotation
+        };
+        self.nonlocal | (reads & !self.shadows)
     }
     fn add_annotation(&mut self, child: Self) {
-        if !child.shadows {
-            self.annotation |= child.direct || child.annotation;
-            self.nested |= child.nested;
-        }
+        self.annotation |= (child.direct | child.annotation) & !child.shadows;
+        self.nested |= child.nested & !child.shadows;
     }
     fn type_params(&self, params: &ast::TypeParams) -> Self {
         let mut child = self.child();
-        child.shadows = params
-            .type_params
-            .iter()
-            .any(|p| p.name().as_str() == self.name);
+        child.shadows = cells(params.type_params.iter().map(|p| p.name().as_str()));
         child.visit_type_params(params);
         child
     }
@@ -113,27 +115,26 @@ impl Scope {
 }
 impl<'a> Visitor<'a> for Scope {
     fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
-        if self.class && self.name == DICT {
+        if self.class {
             // Even an unannotated method gets an annotation scope in Python 3.14.
-            self.annotation |= match stmt {
+            if match stmt {
                 ast::Stmt::FunctionDef(f) => !self.string_annotations || f.type_params.is_some(),
                 ast::Stmt::AnnAssign(_) => !self.string_annotations,
                 ast::Stmt::ClassDef(c) => c.type_params.is_some(),
                 ast::Stmt::TypeAlias(_) => true,
                 _ => false,
-            };
+            } {
+                self.annotation |= DICT;
+            }
         }
         match stmt {
             ast::Stmt::FunctionDef(f) => {
-                self.shadows |= f.name.as_str() == self.name;
+                self.shadows |= cell(f.name.as_str());
                 for decorator in &f.decorator_list {
                     self.visit_decorator(decorator);
                 }
                 let mut method = self.child();
-                method.shadows = f
-                    .parameters
-                    .iter()
-                    .any(|arg| arg.name().as_str() == self.name);
+                method.shadows = cells(f.parameters.iter().map(|arg| arg.name().as_str()));
                 method.visit_body(&f.body);
                 for default in f
                     .parameters
@@ -156,7 +157,7 @@ impl<'a> Visitor<'a> for Scope {
                 }
             }
             ast::Stmt::ClassDef(c) => {
-                self.shadows |= c.name.as_str() == self.name;
+                self.shadows |= cell(c.name.as_str());
                 for decorator in &c.decorator_list {
                     self.visit_decorator(decorator);
                 }
@@ -186,7 +187,9 @@ impl<'a> Visitor<'a> for Scope {
                     annotation.visit_expr(&a.annotation);
                     // The symbol table still analyzes nested scopes within an unevaluated
                     // function-local annotation, but ignores its own name references.
-                    annotation.direct &= self.class;
+                    if !self.class {
+                        annotation.direct = 0;
+                    }
                     self.add_annotation(annotation);
                 }
             }
@@ -199,22 +202,20 @@ impl<'a> Visitor<'a> for Scope {
                 alias.visit_expr(&a.value);
                 self.add_annotation(alias);
             }
-            ast::Stmt::Global(g) => self.shadows |= g.names.iter().any(|n| n.as_str() == self.name),
-            ast::Stmt::Nonlocal(n) => {
-                self.nonlocal |= n.names.iter().any(|n| n.as_str() == self.name)
-            }
+            ast::Stmt::Global(g) => self.shadows |= cells(g.names.iter().map(|n| n.as_str())),
+            ast::Stmt::Nonlocal(n) => self.nonlocal |= cells(n.names.iter().map(|n| n.as_str())),
             _ => visitor::walk_stmt(self, stmt),
         }
     }
     fn visit_alias(&mut self, a: &'a ast::Alias) {
         self.shadows |= a.asname.as_ref().map_or_else(
-            || a.name.as_str().split('.').next() == Some(self.name),
-            |n| n.as_str() == self.name,
+            || a.name.as_str().split('.').next().map_or(0, cell),
+            |n| cell(n.as_str()),
         );
     }
     fn visit_except_handler(&mut self, handler: &'a ast::ExceptHandler) {
         let ast::ExceptHandler::ExceptHandler(h) = handler;
-        self.shadows |= h.name.as_ref().is_some_and(|n| n.as_str() == self.name);
+        self.shadows |= h.name.as_ref().map_or(0, |n| cell(n.as_str()));
         visitor::walk_except_handler(self, handler);
     }
     fn visit_pattern(&mut self, p: &'a ast::Pattern) {
@@ -224,7 +225,7 @@ impl<'a> Visitor<'a> for Scope {
             ast::Pattern::MatchMapping(p) => p.rest.as_ref(),
             _ => None,
         };
-        self.shadows |= name.is_some_and(|n| n.as_str() == self.name);
+        self.shadows |= name.map_or(0, |n| cell(n.as_str()));
         visitor::walk_pattern(self, p);
     }
     fn visit_annotation(&mut self, expr: &'a ast::Expr) {
@@ -237,19 +238,23 @@ impl<'a> Visitor<'a> for Scope {
     fn visit_expr(&mut self, expr: &'a ast::Expr) {
         match expr {
             ast::Expr::Name(n) if n.ctx == ast::ExprContext::Load => {
-                self.direct |= n.id.as_str() == self.name
-                    || (self.name == CLASS && !self.class && n.id.as_str() == "super");
+                self.direct |= cell(n.id.as_str());
+                if !self.class && n.id.as_str() == "super" {
+                    self.direct |= CLASS;
+                }
             }
-            ast::Expr::Name(n) => self.shadows |= n.id.as_str() == self.name,
+            ast::Expr::Name(n) => self.shadows |= cell(n.id.as_str()),
             ast::Expr::Named(n) => {
-                self.walrus |= matches!(&*n.target, ast::Expr::Name(target) if target.id.as_str() == self.name);
+                if let ast::Expr::Name(target) = &*n.target {
+                    self.walrus |= cell(target.id.as_str());
+                }
                 visitor::walk_expr(self, expr);
             }
             ast::Expr::Lambda(f) => {
                 let mut child = self.child();
                 if let Some(params) = &f.parameters {
                     self.visit_parameters(params);
-                    child.shadows = params.iter().any(|a| a.name().as_str() == self.name);
+                    child.shadows = cells(params.iter().map(|a| a.name().as_str()));
                 }
                 child.visit_expr(&f.body);
                 self.nested |= child.free();
