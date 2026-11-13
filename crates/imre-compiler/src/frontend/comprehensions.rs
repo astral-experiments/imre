@@ -652,8 +652,15 @@ impl Checker<'_> {
             ));
         }
         let input = self.input(&display.clauses[0])?;
-        let writes = narrowing::expression_assignments(expression);
-        if matches!(input, Iteration::Prepared(_))
+        let prepared = matches!(input, Iteration::Prepared(_));
+        // A prepared iterator stays inline and may be empty. Its writes only
+        // matter here when they can invalidate an enclosing narrowing.
+        let writes = if prepared && self.narrowed.is_empty() {
+            HashSet::new()
+        } else {
+            narrowing::expression_assignments(expression)
+        };
+        if prepared
             // A typed await uses the enclosing coroutine's task and frame.
             || display.body_suspends()
             || !writes.is_empty()
