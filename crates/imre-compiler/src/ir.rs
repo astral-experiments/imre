@@ -1671,6 +1671,10 @@ pub(crate) enum Constant {
 }
 
 impl Constant {
+    pub(crate) fn slice(bounds: [Self; 3]) -> Self {
+        Self::Slice(Box::new(bounds))
+    }
+
     pub(crate) fn text(text: &str) -> Self {
         Self::Text(
             text.chars()
