@@ -203,7 +203,8 @@ impl Matcher {
 
 /// A required iteration may be empty. Only consecutive optional iterations need the check.
 fn can_stall(repeat: &Repetition) -> bool {
-    repeat.sub.properties().minimum_len() == Some(0)
+    // An unreachable alternative can hide the minimum width of its siblings.
+    repeat.sub.properties().minimum_len().unwrap_or(0) == 0
         && repeat.max.is_none_or(|max| max - repeat.min > 1)
 }
 

@@ -40,6 +40,7 @@ def current():
     ):
         match = re.match(pattern, subject)
         assert (match.lastindex, match.lastgroup) == want
+    assert re.search(r"(.*?b|.*?a)(.*)", "ab").groups() == ("ab", "")
     data = bytearray(b"!abz")
     match = re.compile(br"(?P<outer>(a))(b)$").search(data, 1, 3)
     data[:] = b""
