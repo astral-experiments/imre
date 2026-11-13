@@ -1729,6 +1729,9 @@ impl Session {
                     let f = def.node(&parsed);
                     crate::frontend::fixed_frame_entry(f)
                         && f.parameters.kwonlyargs.is_empty()
+                        && f.parameters
+                            .iter_non_variadic_params()
+                            .all(|p| p.default.is_none())
                         && parsed
                             .syntax()
                             .body
