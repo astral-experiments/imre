@@ -454,24 +454,12 @@ fn retain_generator_body(
 }
 
 pub(super) fn lower_definition(
-    mut checker: Checker<'_>,
+    checker: Checker<'_>,
     definition: &ast::StmtFunctionDef,
     signature: &Signature,
 ) -> Result<RegisteredFunction, String> {
-    checker.registered = Some(checker.graph.modules[checker.module].registered_values());
     let source = checker.source;
-    let helpers = checker.helpers;
-    let first_helper = helpers.len();
-    let mut local_names = HashMap::new();
-    let (body, _) = lower_function(checker, definition, signature, Some(&mut local_names))?;
-    if !body.calls.is_empty() || helpers.len() != first_helper {
-        return Err(error(
-            source,
-            definition,
-            "the registered frame requires a callable with a Python binding",
-        )
-        .classify(Kind::ScopedObject));
-    }
+    let (body, local_names) = checked_definition(checker, definition, signature)?;
     RegisteredFunction::from_checked_body(body.function, local_names, body.frame_arguments)
         .ok_or_else(|| {
             error(
@@ -481,6 +469,74 @@ pub(super) fn lower_definition(
             )
             .classify(Kind::ScopedObject)
         })
+}
+
+/// Keep the Python entry's physical operations and return their existing facts to the graph.
+pub(super) fn place_checked_definition(
+    original: &Checker<'_>,
+    definition: &ast::StmtFunctionDef,
+    signature: &Signature,
+    inference: &inference::Inference,
+) -> Option<LoweredBody> {
+    let graph = original.graph;
+    let module = original.module;
+    let helpers = Helpers::new(inference.len());
+    let values = ModuleValues::default();
+    let mut checker = Checker::new(
+        graph,
+        module,
+        original.functions,
+        original.classes,
+        original.types,
+        &helpers,
+        &values,
+    );
+    checker.nonreturning_functions = original.nonreturning_functions;
+    checker.checked_call_contracts = true;
+    checker.registered_local_start = Some(signature.params.len());
+    let (body, frame) = graph.try_registered_body(module, || {
+        let (mut body, names) = checked_definition(checker, definition, signature).ok()?;
+        let input = ir::Function {
+            params: body.function.params.clone(),
+            returns: body.function.returns,
+            locals: body.function.locals.clone(),
+            body: std::mem::take(&mut body.function.body),
+        };
+        let frame =
+            RegisteredFunction::from_checked_body(input, names, body.frame_arguments)?;
+        Some((body, frame))
+    })?;
+    if !inference
+        .source_checks
+        .accepts(graph, module, definition.range())
+    {
+        return None;
+    }
+    graph.register_function(module, definition.start(), frame);
+    Some(body)
+}
+
+fn checked_definition(
+    mut checker: Checker<'_>,
+    definition: &ast::StmtFunctionDef,
+    signature: &Signature,
+) -> Result<(LoweredBody, HashMap<usize, LocalBinding>), String> {
+    checker.registered = Some(checker.graph.modules[checker.module].registered_values());
+    let source = checker.source;
+    let source_calls = checker.checked_call_contracts;
+    let helpers = checker.helpers;
+    let first_helper = helpers.len();
+    let mut local_names = HashMap::new();
+    let (body, _) = lower_function(checker, definition, signature, Some(&mut local_names))?;
+    if !source_calls && !body.calls.is_empty() || helpers.len() != first_helper {
+        return Err(error(
+            source,
+            definition,
+            "the registered frame requires a callable with a Python binding",
+        )
+        .classify(Kind::ScopedObject));
+    }
+    Ok((body, local_names))
 }
 
 /// A registered body can supply an unresolved calling convention only if its other

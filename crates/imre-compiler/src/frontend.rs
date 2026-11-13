@@ -1416,9 +1416,27 @@ fn lower_graph(
             && signature.physical_frame)
             .then(|| fixed_body_source::SourceSites::new(python_method));
         checker.placement_only = (named || unavailable.is_some()) && cache.is_none();
-        let result = match cache.as_deref_mut() {
-            Some(cache) if signature.method.is_none() => cache.body(checker, definition, signature),
-            _ => lower_body(checker, definition, signature),
+        let result = if named
+            && cache.is_none()
+            && unavailable.is_none()
+            && signature.physical_frame
+            && signature.method.is_none()
+            && signature.returns == Type::None
+            && definition.returns.is_some()
+            && !signature.params.is_empty()
+            && signature
+                .params
+                .iter()
+                .all(|p| p.ty.is_format_scalar() && p.default.is_none() && !p.sign_only)
+            && signature.parameter_declarations.iter().all(Option::is_some)
+        {
+            registered::place_checked_definition(&checker, definition, signature, &inference)
+                .map(|body| (body, Default::default()))
+                .map_or_else(|| lower_body(checker, definition, signature), Ok)
+        } else if let Some(cache) = cache.as_deref_mut().filter(|_| signature.method.is_none()) {
+            cache.body(checker, definition, signature)
+        } else {
+            lower_body(checker, definition, signature)
         };
         let (body, sums) = match checked_region(
             result,
@@ -3219,6 +3237,8 @@ struct Checker<'a> {
     fixed_sites: Option<fixed_body_source::SourceSites>,
     /// After a layout refusal the outer fixed body can only be used with its source sites.
     placement_only: bool,
+    /// The graph keeps this physical function's declaration and first-party call edges.
+    checked_call_contracts: bool,
     /// During physical method recovery, forward completed attribute operations to the live frame.
     settled_attributes: Option<&'a mut HashMap<TextRange, FixedAttribute>>,
     nonreturning_functions: &'a HashSet<usize>,
@@ -3325,6 +3345,7 @@ impl<'a> Checker<'a> {
             wrapper_link: Default::default(),
             fixed_sites: None,
             placement_only: false,
+            checked_call_contracts: false,
             settled_attributes: None,
             nonreturning_functions: &classes.nonreturning_functions,
             registered: None,
@@ -4212,7 +4233,7 @@ impl<'a> Checker<'a> {
         let mut concrete = self.types.payload(expected).unwrap_or(expected);
         // An empty list gets its element type from its destination in either frame.
         if self.registered.is_some()
-            && !(matches!(expression, ast::Expr::List(list) if list.elts.is_empty())
+            && !(matches!(expression, ast::Expr::List(list) if list.elts.is_empty() || self.checked_call_contracts)
                 && self.types.element(concrete).is_some())
         {
             let concrete_display = match expression {
