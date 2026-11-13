@@ -554,12 +554,12 @@ impl<'f> Frame<'f, '_, '_> {
         self.code.simple_call = simple;
     }
 
-    pub(super) fn located_value(
+    pub(super) fn at_expression<T>(
         &mut self,
         range: TextRange,
         position: TextSize,
-        emit: impl FnOnce(&mut Self) -> CheckedValue,
-    ) -> CheckedValue {
+        emit: impl FnOnce(&mut Self) -> T,
+    ) -> T {
         let previous_range = std::mem::replace(&mut self.code.current_range, range);
         let previous_line = self.code.enter_expression(range, position);
         let result = emit(self);

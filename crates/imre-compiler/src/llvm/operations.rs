@@ -772,7 +772,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         {
             let attribute = frame.fixed_attribute(range);
             let position = attribute.map_or(range.start(), |field| field.position);
-            return frame.located_value(range, position, |frame| {
+            return frame.at_expression(range, position, |frame| {
                 if let Some(field) = attribute {
                     let operands = match &expr.kind {
                         ExprKind::Field(receiver, _) => std::slice::from_ref(receiver.as_ref()),
@@ -799,7 +799,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
     ) -> CheckedValue {
         match &expr.kind {
             ExprKind::Builtin(Builtin::RegisteredLocation(range, position, ..), operands) => {
-                self.python().located_value(*range, *position, |frame| {
+                self.python().at_expression(*range, *position, |frame| {
                     CheckedBody::registered(frame.reborrow()).emit_operation(
                         &operands[0],
                         OperationSite::Registered(*range),

@@ -193,10 +193,11 @@ impl CheckedBody<'_, '_, '_, '_> {
             &expr.kind
             && let ExprKind::Compare(values, ops) = &operands[0].kind
         {
-            let previous = self.python().enter_test(*range, *position);
-            let bit = self.comparisons(values, ops, true).into_condition();
-            self.python().leave_test(previous);
-            return bit;
+            return self.python().at_expression(*range, *position, |frame| {
+                CheckedBody::registered(frame.reborrow())
+                    .comparisons(values, ops, true)
+                    .into_condition()
+            });
         }
         if matches!(self.0, Entry::Registered(_))
             && let ExprKind::Compare(values, ops) = &expr.kind
@@ -225,10 +226,13 @@ impl CheckedBody<'_, '_, '_, '_> {
             && let ExprKind::Builtin(Builtin::RegisteredLocation(range, anchor, ..), args) =
                 &expr.kind
         {
-            let previous = frame.enter_test(*range, *anchor);
-            let bit = self.operand_truth(&args[0], value, Some(*range));
-            self.python().leave_test(previous);
-            return bit;
+            return frame.at_expression(*range, *anchor, |frame| {
+                CheckedBody::registered(frame.reborrow()).operand_truth(
+                    &args[0],
+                    value,
+                    Some(*range),
+                )
+            });
         }
         match (&mut self.0, value) {
             (Entry::Native(emitter), CheckedValue::Native(input, None)) => {
