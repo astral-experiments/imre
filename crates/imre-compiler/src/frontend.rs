@@ -1135,7 +1135,10 @@ fn lower_graph(
         !registered_generators.is_empty() || signatures.values().any(Signature::registered_frame);
     if needs_registered_entry {
         checked_bodies.retain(|&id| {
-            let (module, definition, _) = &definitions[id];
+            let (module, definition, signature) = &definitions[id];
+            if signature.method.is_some() {
+                return registered::physical_method(signature, definition, &classes).is_some();
+            }
             graph.modules[*module].parsed.syntax().body[callable_definitions[id].statement]
                 .as_function_def_stmt()
                 == Some(definition)
@@ -1149,11 +1152,17 @@ fn lower_graph(
             registered::capture(
                 graph,
                 &signatures,
+                &definitions,
+                &callable_definitions,
                 &classes,
                 &types,
                 inference,
                 needs_registered_entry.then_some(&checked_bodies),
-                [],
+                definitions.iter().filter_map(|(_, _, signature)| {
+                    (!signature.registered_frame()
+                        && (signature.method.is_none() || checked_bodies.contains(&signature.id)))
+                    .then_some(signature.id)
+                }),
             );
         }
     };

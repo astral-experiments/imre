@@ -383,8 +383,6 @@ pub(super) struct Inference {
     document_fields: RefCell<HashSet<(usize, usize)>>,
     /// Source contract checks shared by discovery, recovery and final body lowering.
     pub(super) source_checks: registered::SourceChecks,
-    /// Physical first-party definitions still awaiting a recoverable checked body.
-    pub(super) pending_bodies: RefCell<Option<Vec<DefinitionId>>>,
     revision: Cell<usize>,
     widened: Cell<bool>,
 }
@@ -1039,7 +1037,7 @@ impl Inference {
                         && diagnostic.is_representation()
                         && graph.modules[*module].is_program_source()
                     {
-                        staged_returns.push(owners[signature.id]);
+                        staged_returns.push(signature.id);
                     }
                     // An invalid operand does not give a procedure a different return type.
                     // Let the ordinary binder report the same body as an explicit -> None.
@@ -1206,11 +1204,13 @@ impl Inference {
                         registered::capture(
                             graph,
                             signatures,
+                            definitions,
+                            owners,
                             classes,
                             types,
                             self,
                             Some(&checked_bodies),
-                            staged_returns,
+                            checked_bodies.iter().copied().chain(staged_returns),
                         );
                     }
                     let primary = reports.remove(index);
@@ -1257,7 +1257,17 @@ impl Inference {
                 let mut reports = reports.into_iter();
                 if let Some(primary) = reports.next() {
                     if primary.kind.is_object() && !retries_failed_layout(graph) {
-                        registered::capture(graph, signatures, classes, types, self, None, []);
+                        registered::capture(
+                            graph,
+                            signatures,
+                            definitions,
+                            owners,
+                            classes,
+                            types,
+                            self,
+                            None,
+                            signatures.values().map(|signature| signature.id),
+                        );
                     }
                     return Err(primary.with_following(reports));
                 }
@@ -1276,7 +1286,17 @@ impl Inference {
                         && (unresolved.kind.is_object()
                             || matches!(unresolved.kind, Kind::UnresolvedParameter(..)))
                     {
-                        registered::capture(graph, signatures, classes, types, self, None, []);
+                        registered::capture(
+                            graph,
+                            signatures,
+                            definitions,
+                            owners,
+                            classes,
+                            types,
+                            self,
+                            None,
+                            signatures.values().map(|signature| signature.id),
+                        );
                     }
                     return Err(unresolved);
                 }
@@ -1288,15 +1308,9 @@ impl Inference {
         for (_, _, signature) in definitions.iter_mut() {
             self.update(signature);
         }
-        let mut pending_bodies = Vec::new();
-        for (&owner, signature) in signatures.iter_mut() {
+        for signature in signatures.values_mut() {
             self.update(signature);
-            // The ordinary definition pass owns registered argument frames.
-            if !signature.registered_frame() && graph.modules[owner.module].is_program_source() {
-                pending_bodies.push(owner);
-            }
         }
-        self.pending_bodies.replace(Some(pending_bodies));
         for methods in classes.methods.iter_mut().chain(&mut classes.setters) {
             for signature in methods.values_mut() {
                 self.update(signature);

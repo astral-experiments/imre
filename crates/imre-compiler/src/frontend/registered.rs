@@ -176,6 +176,7 @@ impl RegisteredOperand {
 }
 
 pub(crate) enum FrameSite {
+    Method(Arc<ast::StmtFunctionDef>),
     Lambda(TextSize),
     Generator(TextRange),
 }
@@ -506,36 +507,58 @@ impl FixedFunctions {
     }
 }
 
+/// Return the class member whose unchanged syntax supplied this checked signature.
+pub(super) fn physical_method<'a>(
+    signature: &Signature,
+    checked: &ast::StmtFunctionDef,
+    classes: &'a ClassInfo,
+) -> Option<&'a Arc<ast::StmtFunctionDef>> {
+    let method = signature.method?;
+    let declaration =
+        &classes.declarations.definitions[method.class].methods[method.index].function;
+    (signature.physical_frame && std::ptr::eq(checked, declaration.as_ref())).then_some(declaration)
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a recovery attempt borrows the graph's current signature and inference tables"
+)]
 pub(super) fn capture(
     graph: &SourceGraph,
     signatures: &HashMap<DefinitionId, Signature>,
+    definitions: &[FunctionDefinition<'_>],
+    owners: &[DefinitionId],
     classes: &ClassInfo,
     types: &Types,
     inference: &inference::Inference,
     checked_bodies: Option<&HashSet<usize>>,
-    staged_returns: impl IntoIterator<Item = DefinitionId>,
+    candidates: impl IntoIterator<Item = usize>,
 ) {
-    let mut pending = inference.pending_bodies.borrow_mut();
-    let owners = pending.get_or_insert_with(|| {
-        // An unrelated diagnostic can leave individual source contracts complete.
-        signatures
-            .iter()
-            .filter(|(owner, signature)| {
-                graph.modules[owner.module].is_program_source()
-                    && checked_bodies.is_none_or(|checked| checked.contains(&signature.id))
-            })
-            .map(|(&owner, _)| owner)
-            .collect()
-    });
-    owners.extend(staged_returns);
-    owners.retain(|&owner| {
-        let signature = &signatures[&owner];
-        let id = owner.module;
-        let module = &graph.modules[id];
-        // Use the original definition. The registered binder retains its names, defaults and frame.
-        let Some(function) = module.parsed.syntax().body[owner.statement].as_function_def_stmt()
-        else {
-            return false;
+    // Methods under the same class share a module definition, but have separate signature slots.
+    for slot in candidates {
+        let (id, checked, signature) = &definitions[slot];
+        let id = *id;
+        if !graph.modules[id].is_program_source() {
+            continue;
+        }
+        let owner = owners[slot];
+        let method = physical_method(signature, checked, classes);
+        let function = match method {
+            Some(physical) if checked_bodies.is_some_and(|ids| ids.contains(&slot)) => {
+                physical.as_ref()
+            }
+            None if signatures
+                .get(&owner)
+                .is_some_and(|original| original.id == slot) =>
+            {
+                let Some(function) =
+                    graph.modules[id].parsed.syntax().body[owner.statement].as_function_def_stmt()
+                else {
+                    continue;
+                };
+                function
+            }
+            _ => continue,
         };
         // Recovery may follow an owning definition that has already checked this site.
         if graph
@@ -543,19 +566,19 @@ pub(super) fn capture(
             .get(&id)
             .is_some_and(|bodies| bodies.contains_key(&function.start()))
         {
-            return false;
+            continue;
         }
         let Some(mut signature) = inference.checked_signature(signature) else {
-            return true;
+            continue;
         };
         if signature.registered_frame() {
-            return true;
+            continue;
         }
         // The fixed-layout checker owns the return contract. The registered activation returns a handle.
         signature.returns = Type::PythonObject;
         let contract = SourceChecks::cached(graph, id, function);
         if contract == Some(false) {
-            return false;
+            continue;
         }
         let helpers = Helpers::new(inference.len());
         // A solved definition reads names from the Python namespace. Its trial
@@ -567,7 +590,7 @@ pub(super) fn capture(
             checked_bodies.is_some_and(|checked| checked.contains(&signature.id));
         let body =
             graph.try_registered_body(id, || lower_definition(checker, function, &signature).ok());
-        if let Some(body) = body
+        if let Some(mut body) = body
             && contract.unwrap_or_else(|| {
                 let checks = &inference.source_checks;
                 // No unresolved caller can depend on a solved frame's ABI. The fixed sibling
@@ -582,11 +605,18 @@ pub(super) fn capture(
                 }
             })
         {
+            if let Some(declaration) = method {
+                // The writer must retain the method's lexical names when binding the live receiver.
+                let FrameInputs::Protocol { sites } = &mut body.inputs else {
+                    continue;
+                };
+                let mut required = std::mem::take(sites).into_vec();
+                required.push(FrameSite::Method(Arc::clone(declaration)));
+                *sites = required.into_boxed_slice();
+            }
             graph.register_function(id, function.start(), body);
-            return false;
         }
-        true
-    });
+    }
 }
 
 pub(super) fn checkpoint(stmt: &ast::Stmt) -> Statement {
@@ -1548,6 +1578,7 @@ impl<'a> SuitePreparation<'a> {
         let checked = checked.filter(|body| match &body.inputs {
             FrameInputs::Checked => true,
             FrameInputs::Protocol { sites } => sites.iter().all(|site| match site {
+                FrameSite::Method(declaration) => declaration.as_ref() == def,
                 FrameSite::Lambda(start) => self
                     .source
                     .lambdas
