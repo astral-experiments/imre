@@ -610,10 +610,10 @@ pub(super) fn capture(
     types: &Types,
     inference: &inference::Inference,
     checked_bodies: Option<&HashSet<usize>>,
-    candidates: impl IntoIterator<Item = usize>,
+    candidates: impl IntoIterator<Item = (usize, Option<RegisteredFunction>)>,
 ) {
     // Methods under the same class share a module definition, but have separate signature slots.
-    for slot in candidates {
+    for (slot, prepared) in candidates {
         let (id, checked, signature) = &definitions[slot];
         let id = *id;
         if !graph.modules[id].is_program_source() {
@@ -663,7 +663,10 @@ pub(super) fn capture(
         // A revision can invalidate a physical method's last check. Check its settled
         // signature before trying the registered return convention.
         let mut attributes = HashMap::new();
-        let placed = if method.is_some() && !checked {
+        let recover_method = method.is_some() && !checked;
+        let placed = if let Some(body) = prepared.filter(|_| recover_method) {
+            Some(body)
+        } else if recover_method {
             let mut fixed = checker();
             fixed.fixed_sites = Some(fixed_body_source::SourceSites::new(true));
             fixed.settled_attributes = Some(&mut attributes);

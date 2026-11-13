@@ -1111,6 +1111,7 @@ fn lower_graph(
     let entry_statements = graph.modules[graph.entry].executable_statements();
     let inference::Solution {
         registered_parameters,
+        method_returns,
         mut checked_bodies,
         registered_generators,
         needs_registered_entry,
@@ -1145,9 +1146,9 @@ fn lower_graph(
     }
     // Fixed FILE compilations need no secondary body. A registered launch or an
     // actual representation failure can still use functions whose signatures solved.
-    let captured = std::cell::Cell::new(false);
+    let pending_capture = std::cell::RefCell::new(Some(method_returns));
     let capture = || {
-        if !captured.replace(true) {
+        if let Some(mut method_returns) = pending_capture.take() {
             registered::capture(
                 graph,
                 &signatures,
@@ -1158,7 +1159,8 @@ fn lower_graph(
                 inference,
                 needs_registered_entry.then_some(&checked_bodies),
                 definitions.iter().filter_map(|(_, _, signature)| {
-                    (!signature.registered_frame()).then_some(signature.id)
+                    (!signature.registered_frame())
+                        .then(|| (signature.id, method_returns.remove(&signature.id)))
                 }),
             );
         }
@@ -1482,7 +1484,7 @@ fn lower_graph(
             // Entry checking has finished. An object refusal discards the fixed graph, so
             // its completed functions can move to the Python binder before ordinary recovery.
             if !named {
-                if failure.is_object() && !captured.get() {
+                if failure.is_object() && pending_capture.borrow().is_some() {
                     register(std::mem::take(&mut completed), &owners);
                 }
                 capture_on_object(failure);
@@ -1978,29 +1980,7 @@ fn lower_function(
         }
     } else if module.archive.is_none() {
         checker.fault_frame(&mut body, definition.name.as_str(), definition.start());
-        source = checker.fixed_sites.and_then(|sites| {
-            let method = match signature.method {
-                Some(_) => Some(registered::physical_method(signature, definition, classes)?),
-                // A free fixed frame binds scalar payloads before any Python operand runs.
-                // Keep its Python entry on the live binder when an operation needs it.
-                None if checker.live_protocol_parameters
-                    && signature
-                        .params
-                        .iter()
-                        .any(|param| param.ty.builtin_scalar_name().is_some()) =>
-                {
-                    return None;
-                }
-                None => None,
-            };
-            sites.finish(
-                definition.body.len(),
-                &body,
-                checker.names,
-                &checker.locals,
-                method,
-            )
-        });
+        source = checker.fixed_body_source(definition, signature, &body);
     }
     Ok((
         LoweredBody {
@@ -3369,6 +3349,40 @@ impl<'a> Checker<'a> {
                 }
                 _ => false,
             }
+    }
+
+    fn fixed_body_source(
+        &mut self,
+        definition: &ast::StmtFunctionDef,
+        signature: &Signature,
+        body: &[Statement],
+    ) -> Option<FixedBodySource> {
+        let sites = self.fixed_sites.take()?;
+        let method = match signature.method {
+            Some(_) => Some(registered::physical_method(
+                signature,
+                definition,
+                self.classes,
+            )?),
+            // A free fixed frame binds scalar payloads before any Python operand runs.
+            // Keep its Python entry on the live binder when an operation needs it.
+            None if self.live_protocol_parameters
+                && signature
+                    .params
+                    .iter()
+                    .any(|param| param.ty.builtin_scalar_name().is_some()) =>
+            {
+                return None;
+            }
+            None => None,
+        };
+        sites.finish(
+            definition.body.len(),
+            body,
+            std::mem::take(&mut self.names),
+            &self.locals,
+            method,
+        )
     }
 
     /// Bind the declared parameter slots in native ABI order for inference and final lowering.
