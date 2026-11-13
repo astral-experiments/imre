@@ -291,13 +291,17 @@ impl Callback {
                 crate::source_arguments::Error::Type(_) => refused(),
             })?;
         let count = shape.positional.len() + shape.keyword_only.len();
-        let mut bound = Vec::new();
-        bound
-            .try_reserve_exact(count)
+        // Bind directly in the creator's root array. The worker receives only the
+        // transferable values selected by these slots.
+        let mut retained = Vec::new();
+        retained
+            .try_reserve_exact(roots.len() + count)
             .map_err(|_| Error::new("MemoryError", ""))?;
-        bound.extend(receiver);
-        bound.extend_from_slice(pos);
-        bound.resize(count, NONE);
+        retained.extend_from_slice(roots);
+        retained.extend(receiver);
+        retained.extend_from_slice(pos);
+        retained.resize(roots.len() + count, NONE);
+        let bound = &mut retained[roots.len()..];
         for (&(_, value), slot) in kw.iter().zip(binding.keywords) {
             bound[slot.expect("nonvariadic keyword")] = value;
         }
@@ -308,7 +312,7 @@ impl Callback {
         values
             .try_reserve_exact(count)
             .map_err(|_| Error::new("MemoryError", ""))?;
-        for &id in &bound {
+        for &id in bound.iter() {
             let value = match ctx.heap.get(id) {
                 Value::PrimitiveLock(lock) => Argument::Lock(Arc::clone(lock)),
                 Value::HandlerLock(lock) => Argument::RLock(Arc::clone(lock)),
@@ -335,9 +339,8 @@ impl Callback {
             };
             values.push(value);
         }
-        let roots = super::concat_ids(roots, &bound)?;
         let callback = Self::from_code(ctx, code, scope, entry, values)?;
-        Ok(Some((Operation::Python(Box::new(callback)), roots)))
+        Ok(Some((Operation::Python(Box::new(callback)), retained)))
     }
 
     fn from_code(
