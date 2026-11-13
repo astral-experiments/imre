@@ -47,11 +47,11 @@ impl RegisteredFrame<'_, '_> {
         (end_line == line).then_some([line, start, anchor, end])
     }
 
-    fn exit_sync(&mut self, exit: &ContextRegion, exception: Option<&str>) -> String {
+    fn exit_sync(&mut self, exit: &ContextRegion, exception: &str) -> String {
         self.set_source_range(Some(exit.site.range));
         let result = self.op_at(
             "exit_context",
-            &[&exit.callable, exception.unwrap_or("0"), &exit.caught],
+            &[&exit.callable, exception, &exit.caught],
             self.context_span(exit.site),
         );
         self.set_source_range(None);
@@ -89,10 +89,7 @@ impl RegisteredFrame<'_, '_> {
         (exit, value, above_exit)
     }
 
-    fn exit_context(&mut self, context: &ContextRegion, exception: Option<&str>) -> String {
-        if !context.site.is_async {
-            return self.exit_sync(context, exception);
-        }
+    fn exit_async(&mut self, context: &ContextRegion, exception: Option<&str>) -> String {
         let args = [
             context.callable.as_str(),
             exception.unwrap_or("0"),
@@ -133,15 +130,13 @@ impl RegisteredFrame<'_, '_> {
         }
     }
 
-    fn exceptional_exit(&mut self, region: &ContextRegion, failed: &str, done: &str) {
-        let exception = self.take_context_error(failed, &region.callable);
-        let result = self.exit_context(region, Some(&exception));
+    fn propagate_unless_suppressed(&mut self, exception: &str, result: &str, done: &str) {
         // Sync exit and resumed async exit have already tested the result under the body exception.
         let suppress = self.value(&format!("icmp eq i64 {result}, {}", super::permanent::TRUE));
         let propagate = self.name("b");
         self.branch(&suppress, done, &propagate);
         self.label(&propagate);
-        self.raise(&exception, None, true);
+        self.raise(exception, None, true);
     }
 }
 
@@ -262,7 +257,7 @@ impl Frame<'_, '_, '_> {
         let failed = self.name("b");
         let done = self.name("b");
         self.live.push(context.callable.clone());
-        let (region, _) = self.protected_exits(&failed, &done, |frame| {
+        let (mut region, _) = self.protected_exits(&failed, &done, |frame| {
             if let Some(binding) = binding {
                 frame.store_private(binding.entered, &value);
                 frame.emit_suite(&binding.body);
@@ -274,11 +269,31 @@ impl Frame<'_, '_, '_> {
         });
         self.live.pop();
 
-        self.exceptional_exit(&context, &failed, &done);
-        self.finish_exits(region, |frame, _| {
-            frame.exit_context(&context, None);
-            None
-        });
+        let raised = self.take_context_error(&failed, &context.callable);
+        if site.is_async {
+            let result = self.exit_async(&context, Some(&raised));
+            self.propagate_unless_suppressed(&raised, &result, &done);
+            self.finish_exits(
+                region,
+                |frame, _| frame.exit_async(&context, None),
+                |_, _| unreachable!("exceptional async exit already resumed"),
+            );
+        } else {
+            region.enter(
+                &mut self.body,
+                Completion::Error,
+                Some((raised, context.caught.clone())),
+            );
+            self.finish_exits(
+                region,
+                |frame, region| {
+                    let error = region.pending_error(frame);
+                    let result = frame.exit_sync(&context, &error);
+                    (error, result)
+                },
+                |frame, (error, result)| frame.propagate_unless_suppressed(error, result, &done),
+            );
+        }
         self.label(&done);
     }
 }
