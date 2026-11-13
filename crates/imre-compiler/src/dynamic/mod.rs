@@ -1346,7 +1346,6 @@ pub(crate) fn compile(
     let mut ordinary_registrations = None;
     let python_optimization = startup.map_or(0, |(flags, _)| flags.optimize);
     let mut literals = LiteralImports::default();
-    let mut literal_sites = Default::default();
     literals.register(0, &mut first, false, true, ImportOrigin::File);
     let keep_docstrings = python_optimization < 2;
     // Standalone shipped module checks can release their syntax immediately. Application
@@ -1455,7 +1454,6 @@ pub(crate) fn compile(
                 if !selected_work.is_empty() || !work.is_empty() || literals.forest.has_pending() {
                     continue;
                 }
-                literal_sites = std::mem::take(&mut literals.forest).finish(session, python_optimization);
             }
             named_registrations = Some(selected_sources.len());
         }
@@ -2362,6 +2360,15 @@ pub(crate) fn compile(
             registrations.python_providers.insert(id);
         }
     }
+    // A nested literal belongs to the same source slot as its outermost caller.
+    let literal_sites = syntax.as_ref().map_or_else(Default::default, |session| {
+        literals.forest.finish(session, python_optimization, |unit| {
+            let (name, path, _) = &sources[unit];
+            registrations
+                .origin(unit, path.starts_with(bundled_root))
+                .python_annotations(name)
+        })
+    });
     let sdk_runpy = sources
         .iter()
         .any(|(name, path, _)| name == "runpy" && path.starts_with(bundled_root))

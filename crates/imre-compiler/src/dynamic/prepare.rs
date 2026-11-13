@@ -74,7 +74,6 @@ pub(super) fn units<'a>(
         checked_units,
         physical_files,
         archive_members,
-        python_providers,
         ..
     } = registrations;
     let modules = files
@@ -91,16 +90,7 @@ pub(super) fn units<'a>(
             let zip = archive_members.get(path);
             let physical = physical_files.get(path).filter(|_| !builtin);
             let types = layouts.iter_mut().find_map(|facts| facts.take(unit));
-            let bundled = path.starts_with(bundled_root);
-            let origin = if bundled {
-                ModuleOrigin::Bundled
-            } else if python_providers.contains(&unit) {
-                ModuleOrigin::Provider
-            } else {
-                ModuleOrigin::Program(
-                    checked.and_then(|unit| registrations.functions.get(&unit.module?)),
-                )
-            };
+            let origin = registrations.origin(unit, path.starts_with(bundled_root));
             let standalone = unit != 0
                 && matches!(origin, ModuleOrigin::Bundled)
                 && physical.is_none()

@@ -246,6 +246,9 @@ def check_module_search_root(imre, root, run):
     (app / "wheel_module.py").write_text(
         "def twice(n: int) -> int: return n * 2\n"
         "def unused() -> int: return twice('x')\n"
+        "scope = {}\n"
+        "exec('def echo(n: int): return n', scope)\n"
+        "assert scope['echo']('text') == 'text'\n"
     )
     distribution = app / "wheel_module-1.dist-info"
     distribution.mkdir()
