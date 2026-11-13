@@ -474,6 +474,8 @@ fn raw_pattern(pattern: &str, ascii: bool, flags: i64) -> Option<(String, bool, 
     let mut in_class = false;
     while let Some(c) = chars.next() {
         if c != '\\' {
+            // The Python translator keeps a backtrackable prefix inside its ordered alternative.
+            prefer_translation |= c == '|' && !in_class;
             if c == '(' && !in_class && chars.peek() == Some(&'?') {
                 let mut group = chars.clone();
                 group.next();
