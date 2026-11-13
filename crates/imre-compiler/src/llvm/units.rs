@@ -328,13 +328,12 @@ impl<'units> Output<'units> {
         ranges: &RangeFacts<'_>,
         sanitize: bool,
         program: NativeProgram,
-    ) -> Result<(), Unsupported> {
-        emit_program(module, ranges, sanitize, &mut self, program)?;
+    ) {
+        emit_program(module, ranges, sanitize, &mut self, program);
         for (integers, unit) in self.integers.into_iter().zip(self.units.iter_mut()) {
             integers.write(&mut unit.llvm_ir, false);
             unit.llvm_ir.insert_str(0, &self.common);
         }
-        Ok(())
     }
 }
 
@@ -344,8 +343,8 @@ impl crate::ProgramOutput {
         graph: &crate::modules::SourceGraph,
         fixed: &mut crate::FixedProgram,
         sanitize: bool,
-    ) -> Result<(), Unsupported> {
-        let program = analyze_program(&fixed.ir.0)?;
+        program: NativeProgram,
+    ) {
         fixed.prepare_native_sources(graph);
         let (module, owners) = &fixed.ir;
         let split = matches!(self.layout, crate::CodegenLayout::Split);
@@ -359,8 +358,8 @@ impl crate::ProgramOutput {
         } else {
             (std::slice::from_ref(source), (0, "__main__"), &[][..])
         };
-        self.emit_sources(
-            sources.iter().map(Ok),
+        let Ok(()) = self.emit_sources(
+            sources.iter().map(Ok::<_, std::convert::Infallible>),
             entry,
             split,
             program,
@@ -368,10 +367,10 @@ impl crate::ProgramOutput {
             |program, units, entry| {
                 let output = Output::new(owners.iter().copied(), units, entry, split);
                 let ranges = crate::ranges::analyze(module);
-                output.emit(module, &ranges, sanitize, program)?;
+                output.emit(module, &ranges, sanitize, program);
                 Ok(None)
             },
-        )
+        );
     }
 }
 
