@@ -7,7 +7,7 @@ use crate::frontend::function_scope::ClassBindings;
 use crate::frontend::module_source::SourceFile;
 use crate::frontend::push_codepoints;
 use crate::ir;
-use crate::ir::{Builtin, Constant, DisplayKind, Expr};
+use crate::ir::{Constant, DisplayKind, Expr};
 use crate::llvm::body::{FunctionBody, write_definition};
 use crate::llvm::operations::CheckedValue;
 use indexmap::IndexSet;
@@ -1600,10 +1600,6 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
         self.op(&format!("inplace:{op}"), &[left, right])
     }
 
-    fn delete_item(&mut self, receiver: &str, key: &str) -> String {
-        self.op("delitem", &[receiver, key])
-    }
-
     pub(in crate::llvm) fn put_item(&mut self, receiver: &str, index: &str, value: &str) -> String {
         self.op("put", &[receiver, index, value])
     }
@@ -1778,37 +1774,14 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
         })
     }
 
-    pub(crate) fn object_operation(&mut self, op: &Builtin, operands: &[Expr]) -> CheckedValue {
-        let (target, args) = operands
-            .split_first()
-            .expect("checked object operation has a target");
-        let handle = match op {
-            Builtin::RegisteredDeleteItem => {
-                let mark = self.temporary_mark();
-                let targets = self.begin_operand_scope();
-                let receiver = self.evaluate_handle(target);
-                let key_mark = self.keep_operands(&mark, &receiver, "0");
-                let key = self.evaluate_handle(args.first().expect("indexed deletion key"));
-                self.keep_operands(&key_mark, &key, "0");
-                let result = self.delete_item(&receiver, &key);
-                self.finish_unwind(targets, |frame| frame.release_owned_operands(&mark));
-                self.release_owned_operands(&mark);
-                result
-            }
-            Builtin::RegisteredCall(call) => self.call_value(call, target, args),
-            Builtin::RegisteredAttribute {
-                action,
-                name,
-                range,
-            } => self.attribute_operation(*action, name, *range, operands.iter()),
-            _ => unreachable!("selected Python object operation"),
-        };
-        CheckedValue::handle(handle)
-    }
-
     /// Evaluate the callable before its arguments. A lone *iterable is converted
     /// at invocation, after the keywords; a mixed positional list expands each * in place.
-    fn call_value(&mut self, call: &ir::RegisteredCall, target: &Expr, args: &[Expr]) -> String {
+    pub(super) fn call_value(
+        &mut self,
+        call: &ir::RegisteredCall,
+        target: &Expr,
+        args: &[Expr],
+    ) -> String {
         use ir::{RegisteredArguments, RegisteredCallTarget};
         let exec = self.exec_literal_at(call.range);
         let mut args = args.iter();
@@ -1906,7 +1879,7 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
     /// Execute a descriptor operation at the original target, using the same live receiver
     /// for both halves of augmented assignment. A mutation releases its operand window on
     /// success and unwinds it before transferring an exception to the handler.
-    fn attribute_operation<'e>(
+    pub(super) fn attribute_operation<'e>(
         &mut self,
         action: ir::AttributeAction,
         name: &str,

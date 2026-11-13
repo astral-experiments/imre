@@ -2793,11 +2793,7 @@ pub(super) fn attribute_effects(stmt: &ast::Stmt) -> Option<Vec<AttributeEffect<
 }
 
 pub(crate) fn delete_item(receiver: Expr, key: Expr) -> Expr {
-    operation(
-        Builtin::RegisteredDeleteItem,
-        Type::None,
-        vec![receiver, key],
-    )
+    operation(Builtin::DeleteItem, Type::None, vec![receiver, key])
 }
 
 pub(super) fn raised_value<E>(
@@ -3075,7 +3071,7 @@ fn deletion(target: &ast::Expr) -> (Builtin, impl Iterator<Item = TargetInput<'_
             [Some(Receiver(&field.value)), None],
         ),
         ast::Expr::Subscript(sub) => (
-            Builtin::RegisteredDeleteItem,
+            Builtin::DeleteItem,
             [Some(Receiver(&sub.value)), Some(Index(&sub.slice))],
         ),
         _ => unreachable!("validated deletion target"),
@@ -4803,7 +4799,7 @@ else:
         }
         assert_eq!(evaluated, ["rhs", "recv", "lo", "hi", "keys"]);
         assert!(
-            matches!(&deletion.kind, ExprKind::Builtin(Builtin::RegisteredDeleteItem, inputs) if inputs.len()==2)
+            matches!(&deletion.kind, ExprKind::Builtin(Builtin::DeleteItem, inputs) if inputs.len()==2)
         );
     }
 

@@ -250,10 +250,7 @@ pub(crate) fn frame_inputs(
             }
             ExprKind::Builtin(Builtin::RegisteredIndexConstant(_), args) => args.len() == 1,
             ExprKind::Builtin(Builtin::RegisteredSlice, args) => matches!(args.len(), 2 | 3),
-            ExprKind::Builtin(
-                Builtin::RegisteredDeleteItem | Builtin::RegisteredInPlace(_),
-                args,
-            ) => {
+            ExprKind::Builtin(Builtin::DeleteItem | Builtin::RegisteredInPlace(_), args) => {
                 uses_python_protocol = true;
                 args.len() == 2
             }
@@ -974,7 +971,7 @@ impl<'f> Frame<'f, '_, '_> {
                         action: ir::AttributeAction::Delete | ir::AttributeAction::InPlace(_),
                         ..
                     }
-                    | Builtin::RegisteredDeleteItem,
+                    | Builtin::DeleteItem,
                 _
             )
         ) {
@@ -1013,14 +1010,17 @@ impl<'f> Frame<'f, '_, '_> {
 
     pub(crate) fn builtin(&mut self, op: &Builtin, operands: &[Expr]) -> CheckedValue {
         let handle = match (op, operands) {
-            (
-                Builtin::RegisteredCall(_)
-                | Builtin::RegisteredAttribute { .. }
-                | Builtin::RegisteredDeleteItem,
-                _,
-            ) => {
-                return self.object_operation(op, operands);
+            (Builtin::RegisteredCall(call), [target, args @ ..]) => {
+                self.call_value(call, target, args)
             }
+            (
+                Builtin::RegisteredAttribute {
+                    action,
+                    name,
+                    range,
+                },
+                _,
+            ) => self.attribute_operation(*action, name, *range, operands.iter()),
             (Builtin::RegisteredInput(index), []) => self.registered_input(*index),
             (op, args) if let Some(iteration) = op.iteration_operands(args) => {
                 use ir::IterationOperands::*;

@@ -51,7 +51,7 @@ impl ClassInfo<'_> {
             ir::walk_expressions(&function.body, &mut |expr| {
                 if let ExprKind::Builtin(
                     Builtin::DictGet
-                    | Builtin::DictDelete
+                    | Builtin::DeleteItem
                     | Builtin::DictPop
                     | Builtin::ChainMapGetItem,
                     args,

@@ -735,7 +735,6 @@ impl Builtin {
             | Self::RegisteredSubscript(..)
             | Self::RegisteredIndexConstant(_)
             | Self::RegisteredSlice
-            | Self::RegisteredDeleteItem
             | Self::RegisteredEllipsis
             | Self::RegisteredComplex(..)
             | Self::FormatConversion(_)
@@ -770,7 +769,7 @@ impl Builtin {
             | Self::DequeCopy
             | Self::DequeExtendSource
             | Self::NamespaceDelete
-            | Self::DictDelete
+            | Self::DeleteItem
             | Self::ChainMapGetItem
             | Self::ChainMapSetItem
             | Self::ChainMapGet(_)

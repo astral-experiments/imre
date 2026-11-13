@@ -6560,10 +6560,7 @@ impl<'a> Checker<'a> {
                     let key = self.expr_expected(&target.slice, key)?;
                     self.graph
                         .checked_dict_deletion(self.module, target.range());
-                    statements.push(Statement::Expr(Expr {
-                        ty: Type::None,
-                        kind: ExprKind::Builtin(Builtin::DictDelete, vec![receiver, key]),
-                    }));
+                    statements.push(Statement::Expr(registered::delete_item(receiver, key)));
                 }
                 return Ok((statements, true));
             }
