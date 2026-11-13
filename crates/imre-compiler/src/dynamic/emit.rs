@@ -1944,7 +1944,7 @@ mod tests {
                 ..Default::default()
             },
             python_optimization,
-            (bundled_root, None),
+            bundled_root,
             module_errors,
             registrations,
             Vec::new(),

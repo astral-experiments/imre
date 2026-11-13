@@ -16,16 +16,38 @@ const STDLIB_NAMES: &str = include_str!("../../../imre-runtime/native/stdlib-mod
 
 pub(crate) fn write(directory: &Path) -> Result<(), String> {
     fs::create_dir_all(directory).map_err(|err| err.to_string())?;
-    let write_module = |name: &str,
-                        file: &str,
-                        source: &str,
-                        pending: Option<&mut VecDeque<String>>|
+    let mut syntax = None;
+    let mut write_module = |name: &str,
+                            file: &str,
+                            source: &str,
+                            pending: Option<&mut VecDeque<String>>|
      -> io::Result<()> {
-        let path = Path::new("<imre stdlib>").join(file);
+        let module = (
+            name.to_owned(),
+            Path::new(super::BUNDLED_SOURCE_ROOT).join(file),
+            source.into(),
+        );
+        let path = &module.1;
+        let checked = crate::analysis::check_native_syntax(
+            Path::new("/"),
+            &mut syntax,
+            None,
+            &module,
+            true,
+            |_| false,
+            &mut Default::default(),
+        )
+        .ok()
+        .flatten();
         let discovered = pending.and_then(|pending| {
-            let (imports, input) =
-                scan_imports_for_preparation(source, SourceKind::File, None, None, Some(source))
-                    .ok()?;
+            let (imports, input) = scan_imports_for_preparation(
+                source,
+                SourceKind::File,
+                checked.as_deref().filter(|_| !source.contains('\r')),
+                None,
+                Some(source),
+            )
+            .ok()?;
             let package = crate::modules::import_package(name, path.ends_with("__init__.py"));
             for (level, imported) in imports.names {
                 if let Some(resolved) = crate::modules::resolve_import(package, level, &imported) {
@@ -36,13 +58,20 @@ pub(crate) fn write(directory: &Path) -> Result<(), String> {
         });
         let compiled = discovered
             .map_or_else(
-                || ParsedModule::parse(&path, source.into()).map(Into::into),
+                || match checked.as_deref() {
+                    Some(parsed) => Ok(ParsedModule {
+                        text: source.into(),
+                        parsed: std::borrow::Cow::Borrowed(parsed),
+                    }
+                    .into()),
+                    None => ParsedModule::parse(path, source.into()).map(Into::into),
+                },
                 Ok,
             )
             .and_then(|module| {
                 emit::PreparedBody::from_parsed(
                     name,
-                    &path,
+                    path,
                     module,
                     0,
                     emit::ModuleOrigin::Bundled,
@@ -59,7 +88,9 @@ pub(crate) fn write(directory: &Path) -> Result<(), String> {
             // The launcher emits entries for statement-free modules in its own unit.
             Ok(None) => Ok(()),
             Ok(Some((symbol, mut ir))) => {
-                super::provider_archive::seal(&mut ir, &symbol, name, &path, source);
+                if checked.is_some() {
+                    super::provider_archive::seal(&mut ir, &symbol, name, path, source);
+                }
                 fs::write(directory.join(format!("{symbol}.ll")), ir)
             }
             Err(reason) => {
