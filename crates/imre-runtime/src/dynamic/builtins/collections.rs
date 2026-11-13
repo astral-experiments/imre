@@ -682,7 +682,7 @@ pub(super) fn construct(
         && let [source] = args
         && let Some(list) = ctx.list_from_int_character_map(*source)
     {
-        return Ok(list);
+        return list;
     }
     // list() consults the cursor's signed length hint before pulling an item.
     if name == "list"
