@@ -357,7 +357,7 @@ fn emit_physical_operand<'a, 'p>(
 impl<'p> RegisteredBody<'p> {
     pub(crate) fn emit(self, code: &mut dyn PreparedSuiteEmitter<'_, 'p>) {
         let (checked, suite, inputs) = match self {
-            Self::Function(checked) => (checked, None, &[][..]),
+            Self::Function(checked) | Self::Prepared(checked) => (checked, None, &[][..]),
             Self::Suite(suite) => (&suite.checked, Some(suite), suite.operands.as_slice()),
         };
         let Some(enclosing) =
