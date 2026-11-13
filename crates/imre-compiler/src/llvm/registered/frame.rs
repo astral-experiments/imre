@@ -1688,19 +1688,14 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
             })
             .flatten()
             .map(|keys| self.constant_slot(Constant::Tuple(keys)));
-        if let Some(handles) = values
-            .iter()
-            .map(permanent_handle)
-            .collect::<Option<Vec<_>>>()
-        {
-            let data = self.output.data(
-                &handles
-                    .iter()
-                    .flat_map(|id| id.to_le_bytes())
-                    .collect::<Vec<_>>(),
-            );
+        let handles = values.iter().try_fold(Vec::new(), |mut bytes, value| {
+            bytes.extend_from_slice(&permanent_handle(value)?.to_le_bytes());
+            Some(bytes)
+        });
+        if let Some(handles) = handles {
+            let data = self.output.data(&handles);
             let slot = slot.as_deref().unwrap_or("null");
-            let count = handles.len();
+            let count = values.len();
             return self.checked(&format!("call i64 @imre_dyn_build_sequence(ptr %ctx, ptr {data}, i64 {count}, i1 true, i1 {tuple}, ptr {slot})"));
         }
         let build = |code: &mut Self| code.sequence_display(values, display, slot.as_deref());
