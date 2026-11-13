@@ -14,7 +14,7 @@ use crate::ir::{Binary, Builtin, Expr, ExprKind, Module, Statement, Type, contai
 /// Unknown calls and mutations retain the original arbitrary-precision path.
 pub(crate) fn specialize(module: &mut Module) {
     for function in module.functions.iter_mut().chain([&mut module.entry]) {
-        if function.expression_rebound().into_iter().any(|value| value) {
+        if function.has_expression_bindings() {
             continue;
         }
         let private_cursors = crate::ir::private_string_cursors(function);

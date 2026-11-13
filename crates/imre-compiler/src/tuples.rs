@@ -81,11 +81,7 @@ fn scalarize_function(
 ) {
     // Named bindings can replace a tuple midway through another expression.
     // Retain aggregate ownership until the projection pass models those writes.
-    if function
-        .expression_rebound()
-        .into_iter()
-        .any(|written| written)
-    {
+    if function.has_expression_bindings() {
         return;
     }
     let mut candidates = function
