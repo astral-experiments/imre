@@ -1348,30 +1348,24 @@ fn lower_graph(
     let mut call_graph = Vec::new();
     let mut class_reads = Vec::new();
     let mut recursion_errors = Vec::new();
+    let mut body_reports = Vec::new();
     for (module_id, definition, signature) in &definitions {
         let definition = definition.as_ref();
         let module = &graph.modules[*module_id];
         let mut checker = checker_for(*module_id);
         checker.nonreturning_functions = &completed_calls;
-        // Both calling conventions can diagnose the same body. Named startup uses the
-        // ordinary binder to check which physical function the entry actually calls.
-        let called_body = |mut report: Diagnostic| {
-            let id = callable_definitions[signature.id];
-            if graph.registered_startup
-                && module.is_program_source()
-                && signature.method.is_none()
-                && let Some(operand) = report.exact_operand()
-                && let Some(function) =
-                    module.parsed.syntax().body[id.statement].as_function_def_stmt()
-                && function.decorator_list.is_empty()
-                && !function.is_async
-                && graph
-                    .session
-                    .unconditional_function_operand(*module_id, function, operand)
-            {
-                report.in_function(*module_id, function.range());
+        // A refusal in a named body leaves other definitions available to the launcher.
+        let mut refused = |mut report: Diagnostic| {
+            if signature.method.is_none() {
+                report.in_function(
+                    graph,
+                    callable_definitions[signature.id],
+                    phase::BodyCheck::Lowering,
+                );
             }
-            report
+            let check_siblings = !body_reports.is_empty() || report.function_site().is_some();
+            body_reports.push(report);
+            check_siblings
         };
         let original = registered_parameters.get(&signature.id);
         if registered_generators.contains(&signature.id) {
@@ -1401,9 +1395,9 @@ fn lower_graph(
                 }
                 Err(error) if error.is_object() => {}
                 Err(error) => {
-                    place_completed(&mut completed, &owners);
-                    let report = error.terminal_in(graph, *module_id);
-                    return Err(called_body(report));
+                    if !refused(error.terminal_in(graph, *module_id)) {
+                        break;
+                    }
                 }
             }
             continue;
@@ -1481,10 +1475,15 @@ fn lower_graph(
             Ok(Some(body)) => body,
             Ok(None) => continue,
             Err(report) => {
-                place_completed(&mut completed, &owners);
-                return Err(called_body(report));
+                if refused(report) {
+                    continue;
+                }
+                break;
             }
         };
+        if !body_reports.is_empty() {
+            continue;
+        }
         if body.cannot_return && completed_calls.insert(signature.id) && !needs_registered_entry {
             body_checks = None;
         }
@@ -1545,6 +1544,11 @@ fn lower_graph(
         call_graph.push(calls);
         class_reads.push(reads);
         recursion_errors.push(recursion_error);
+    }
+    let mut reports = body_reports.into_iter();
+    if let Some(primary) = reports.next() {
+        place_completed(&mut completed, &owners);
+        return Err(primary.with_following(reports));
     }
     let mut factories = Vec::with_capacity(record_factories.len());
     for class in record_factories {

@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use ruff_text_size::{Ranged, TextRange, TextSize};
 
-use crate::modules::{ModuleId, SourceGraph};
+use crate::modules::{DefinitionId, ModuleId, SourceGraph};
 
 pub(crate) type Result<T, M = String> = std::result::Result<T, Failure<M>>;
 
@@ -42,10 +42,16 @@ pub(super) struct TypeDeclaration {
     pub(super) annotation: TextRange,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum BodyCheck {
+    Inference,
+    Lowering,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum CheckedSite {
     Entry(EntryOperand),
-    Function(ModuleId, TextRange),
+    Function(ModuleId, TextRange, BodyCheck),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -121,19 +127,48 @@ impl<M> Diagnostic<M> {
         (self.kind == Kind::ExactType).then_some(self.position.as_ref()?.range)
     }
 
-    pub(super) fn in_function(&mut self, module: ModuleId, range: TextRange) {
-        if let Some(position) = &mut self.position {
-            position.checked_site = Some(Box::new(CheckedSite::Function(module, range)));
+    /// Attach the original declaration to a refused operand in its synchronous body.
+    pub(super) fn in_function(
+        &mut self,
+        graph: &SourceGraph,
+        owner: DefinitionId,
+        check: BodyCheck,
+    ) {
+        let module = &graph.modules[owner.module];
+        if graph.registered_startup
+            && module.is_program_source()
+            && let Some(operand) = self.exact_operand()
+            && let Some(function) =
+                module.parsed.syntax().body[owner.statement].as_function_def_stmt()
+            && function.decorator_list.is_empty()
+            && !function.is_async
+            && function.range().contains_range(operand)
+            && graph
+                .session
+                .unconditional_function_operand(owner.module, function, operand)
+            && let Some(position) = &mut self.position
+        {
+            position.checked_site = Some(Box::new(CheckedSite::Function(
+                owner.module,
+                function.range(),
+                check,
+            )));
         }
     }
 
     pub(crate) fn function_site(&self) -> Option<(ModuleId, TextRange)> {
-        let CheckedSite::Function(module, range) =
+        let CheckedSite::Function(module, range, _) =
             self.position.as_ref()?.checked_site.as_deref()?
         else {
             return None;
         };
         Some((*module, *range))
+    }
+
+    pub(crate) fn function_reports(&self) -> impl Iterator<Item = ((ModuleId, TextRange), &Self)> {
+        std::iter::once(self)
+            .chain(self.following.iter())
+            .filter_map(|report| Some((report.function_site()?, report)))
     }
 
     pub(crate) fn with_path(mut self, path: &std::path::Path) -> Self {
@@ -153,8 +188,13 @@ impl<M> Diagnostic<M> {
     where
         M: fmt::Display,
     {
-        // A named function's refused operand belongs to the selected initializer call.
-        if self.function_site().is_none()
+        // Lowering delegates a named body to startup. Inference's existing
+        // declaration check still applies when the report also carries an owner.
+        let site = self
+            .position
+            .as_ref()
+            .and_then(|p| p.checked_site.as_deref());
+        if !matches!(site, Some(CheckedSite::Function(_, _, BodyCheck::Lowering)))
             && self.kind == Kind::ExactType
             && self
                 .position

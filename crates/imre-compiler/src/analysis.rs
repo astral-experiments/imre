@@ -352,11 +352,21 @@ pub(crate) fn check_registered_project<'a>(
             )
         })
     });
-    let called_body = checked.zip(refusal).and_then(|(graph, report)| {
-        let (id, range) = report.function_site()?;
-        let module = &graph.modules[id];
-        Some((&module.path, module.original_source(), range, report))
-    });
+    let called_bodies: Vec<_> = checked
+        .zip(refusal)
+        .into_iter()
+        .flat_map(|(graph, report)| {
+            report.function_reports().map(|((id, range), report)| {
+                let module = &graph.modules[id];
+                (
+                    module.path.as_path(),
+                    module.original_source(),
+                    range,
+                    report,
+                )
+            })
+        })
+        .collect();
     if let Some(graph) = checked
         && !graph.has_checked_only_import
         // This result belongs to the checked adapter, before a native declaration won.
@@ -399,7 +409,7 @@ pub(crate) fn check_registered_project<'a>(
                 winners.clone(),
                 has_file_body,
                 entry_operand,
-                called_body,
+                &called_bodies,
                 Some(graph),
             )?;
             return Ok(RegisteredLayouts::from_winners(
@@ -470,7 +480,7 @@ pub(crate) fn check_registered_project<'a>(
         winners.clone(),
         has_file_body,
         entry_operand,
-        called_body,
+        &called_bodies,
         None,
     )?;
     Ok(RegisteredLayouts::from_winners(|| session, winners))
@@ -763,12 +773,7 @@ impl Session {
         sources: impl Iterator<Item = (usize, crate::dynamic::RegisteredSource<'a>)> + Clone,
         has_file_body: Option<&dyn Fn(&str) -> bool>,
         entry_operand: Option<(usize, &str, &crate::frontend::phase::Diagnostic)>,
-        called_body: Option<(
-            &std::path::PathBuf,
-            &str,
-            TextRange,
-            &crate::frontend::phase::Diagnostic,
-        )>,
+        called_bodies: &[(&Path, &str, TextRange, &crate::frontend::phase::Diagnostic)],
         original: Option<&crate::modules::SourceGraph>,
     ) -> Result<(), String> {
         let mut captures = execution::CapturedImports::default();
@@ -838,15 +843,17 @@ impl Session {
                 }
                 return Err(error.to_string());
             }
-            if let Some((path, source, range, report)) = called_body
-                && let Some((id, function)) = initializer.entered_function
-                && function == range
-                && sources.clone().any(|(owner, winner)| {
-                    owner == id
-                        && winner.declares_signatures
-                        && winner.path == path
-                        && winner.source == source
-                })
+            if let Some((id, function)) = initializer.entered_function
+                && let Some((_, _, _, report)) =
+                    called_bodies.iter().find(|&&(path, source, range, _)| {
+                        function == range
+                            && sources.clone().any(|(owner, winner)| {
+                                owner == id
+                                    && winner.declares_signatures
+                                    && winner.path == path
+                                    && winner.source == source
+                            })
+                    })
             {
                 contracts?;
                 return Err(report.to_string());
