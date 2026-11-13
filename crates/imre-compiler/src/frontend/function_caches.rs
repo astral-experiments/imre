@@ -320,8 +320,9 @@ impl Checker<'_> {
     pub(super) fn cache_constructor(
         &mut self,
         call: &ast::ExprCall,
+        binding: Option<Binding>,
     ) -> phase::Result<Option<Expr>, String> {
-        let policy = match self.resolve(&call.func) {
+        let policy = match binding {
             Some(Binding::Intrinsic(Intrinsic::FunctionCache)) => Policy {
                 capacity: -1,
                 typed: false,

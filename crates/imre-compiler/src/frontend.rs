@@ -11169,7 +11169,7 @@ impl<'a> Checker<'a> {
         if let Some(tuple) = self.fixed_tuple.filter(|proof| proof.at == call.range()) {
             return Ok(self.materialize_fixed_tuple(tuple));
         }
-        if let Some(value) = self.cache_constructor(call)? {
+        if let Some(value) = self.cache_constructor(call, binding)? {
             return Ok(value);
         }
         if let Some(value) = self.cache_control(call, receiver.as_ref())? {
