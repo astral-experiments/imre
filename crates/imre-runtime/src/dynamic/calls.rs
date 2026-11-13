@@ -255,16 +255,32 @@ fn invalid_bound_call() -> Error {
 pub(super) enum RegisteredCall {
     Returned(Id),
     Native(RegisteredFrame),
+    /// The entered frame roots bare code and its namespace through the callback.
+    Code {
+        entry: Code,
+        module: bool,
+        discard: bool,
+    },
 }
 
 impl RegisteredCall {
     /// # Safety
     /// A prepared frame belongs to the exclusively executing context that pushed it.
+    #[inline]
     pub(super) unsafe fn run(self, context: *mut Context) -> Result<Id> {
         match self {
             Self::Returned(value) => Ok(value),
             // SAFETY: the owner keeps the context and its linked code live through the call.
             Self::Native(frame) => unsafe { frame.run(context) },
+            Self::Code {
+                entry,
+                module,
+                discard,
+            } => {
+                // SAFETY: the prepared code frame is active in its owning context.
+                let result = unsafe { Context::run_code_frame(context, entry, module) }?;
+                Ok(if discard { NONE } else { result })
+            }
         }
     }
 }
@@ -9113,7 +9129,7 @@ impl Context {
     ) -> Result<RegisteredFrame> {
         match self.prepare_function(callable, FunctionArguments::Bound(slots))? {
             RegisteredCall::Native(frame) => Ok(frame),
-            RegisteredCall::Returned(_) => unreachable!("bound slots require a native entry"),
+            _ => unreachable!("bound slots require a native entry"),
         }
     }
 
@@ -9193,9 +9209,7 @@ impl Context {
                 ));
             }
             let globals = self.module_globals(scope)?;
-            return self
-                .exec_source(code, globals, None, Some(callable))
-                .map(RegisteredCall::Returned);
+            return self.prepare_namespace_code(code, globals, None, Some(callable), "exec", None);
         }
         // Root the scope, packed arguments, keyword names, and returning value.
         let keyword_count = match &arguments {

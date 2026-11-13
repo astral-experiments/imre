@@ -2940,7 +2940,7 @@ impl Context {
                 ModuleInitializer::Native(entry),
                 std::path::Path::new("<string>"),
             )?;
-            return self.execute_namespace_code(code, globals, Some(locals), None, "eval", None);
+            return self.eval_namespace_code(code, globals, locals);
         }
         if crate::objects::python_isidentifier(source)
             && !ruff_python_stdlib::keyword::is_keyword(source)
@@ -2976,17 +2976,17 @@ impl Context {
                 return Err(error);
             }
         };
-        self.execute_namespace_code(code, globals, Some(locals), None, "eval", None)
+        self.eval_namespace_code(code, globals, locals)
     }
 
-    /// Run eval or exec with explicit namespaces or the active Python frame.
-    pub(super) fn call_eval_exec(
+    /// Prepare eval or exec with explicit namespaces or the active Python frame.
+    pub(super) fn prepare_eval_exec(
         &mut self,
         scope: Id,
         name: &str,
         args: &[Id],
         kwargs: &[(String, Id)],
-    ) -> Result<Id> {
+    ) -> Result<calls::RegisteredCall> {
         let Some(&source) = args.first() else {
             return Err(Error::new(
                 "TypeError",
@@ -3017,8 +3017,7 @@ impl Context {
             Some(globals) => globals,
             None => self.module_globals(scope)?,
         };
-        let value = self.execute_namespace_code(source, globals, locals, None, name, closure)?;
-        Ok(if name == "exec" { NONE } else { value })
+        self.prepare_namespace_code(source, globals, locals, None, name, closure)
     }
 
     /// Resolve the caller's namespace, copying bindings only for optimized frames.
@@ -3136,15 +3135,10 @@ impl Context {
         Ok(names)
     }
 
-    pub(super) fn exec_source(
-        &mut self,
-        source: Id,
-        globals: Id,
-        locals: Option<Id>,
-        function: Option<Id>,
-    ) -> Result<Id> {
-        self.execute_namespace_code(source, globals, locals, function, "exec", None)
-            .map(|_| NONE)
+    fn eval_namespace_code(&mut self, code: Id, globals: Id, locals: Id) -> Result<Id> {
+        let call = self.prepare_namespace_code(code, globals, Some(locals), None, "eval", None)?;
+        // SAFETY: this synchronous caller owns the context that prepared the code.
+        unsafe { call.run(self) }
     }
 
     pub(super) fn namespace_builtins(&mut self, globals: Id, function: Option<Id>) -> Result<Id> {
@@ -3167,7 +3161,7 @@ impl Context {
         Ok(builtins)
     }
 
-    fn execute_namespace_code(
+    pub(super) fn prepare_namespace_code(
         &mut self,
         source: Id,
         globals: Id,
@@ -3175,7 +3169,7 @@ impl Context {
         function: Option<Id>,
         mode: &str,
         closure: Option<Id>,
-    ) -> Result<Id> {
+    ) -> Result<calls::RegisteredCall> {
         if self.dict_storage(globals).is_none() {
             let ty = self.type_name(globals);
             return Err(Error::new(
@@ -3276,21 +3270,25 @@ impl Context {
         let code = self.code_object(code_id);
         if code.parameters != NONE {
             // A complete layout can bind even a nested body without its defining frame.
-            if code.closure_supported || closure.is_some() {
+            let function = if code.closure_supported || closure.is_some() {
                 let cells = closure.unwrap_or(NONE);
                 let name = code.name;
-                let function =
-                    self.function_with_closure(code_id, scope, cells, (name, name), NONE, NONE);
-                return self.call(function, Vec::new(), Vec::new());
-            }
-            if !code.module_definition {
-                return Err(unsupported(
-                    "exec of a prelinked function with an enclosing scope",
-                ));
-            }
-            let defaults = self.dict(Vec::new());
-            let function = self.source_function(code_id, scope, defaults)?;
-            self.call(function, Vec::new(), Vec::new())
+                self.function_with_closure(code_id, scope, cells, (name, name), NONE, NONE)
+            } else {
+                if !code.module_definition {
+                    return Err(unsupported(
+                        "exec of a prelinked function with an enclosing scope",
+                    ));
+                }
+                let defaults = self.dict(Vec::new());
+                self.source_function(code_id, scope, defaults)?
+            };
+            let result = self.call(function, Vec::new(), Vec::new())?;
+            Ok(calls::RegisteredCall::Returned(if mode == "exec" {
+                NONE
+            } else {
+                result
+            }))
         } else {
             // Definitions retain the global frame. The module alone sees the separate mapping.
             let module = if let Some(locals) = locals {
@@ -3307,7 +3305,7 @@ impl Context {
                 || FrameOwner::Module(self.function_module(scope)),
                 FrameOwner::Function,
             );
-            self.execute(code_id, module, owner)
+            self.prepare_execution(code_id, module, owner, mode == "exec")
         }
     }
 

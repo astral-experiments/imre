@@ -1521,8 +1521,8 @@ impl Context {
                     return self.prepare_call_in_scope(scope, target, args, kwargs);
                 }
                 "len" => call(self, "len", &args, &kwargs),
-                "eval" => self.call_eval_exec(scope, "eval", &args, &kwargs),
-                "exec" => self.call_eval_exec(scope, "exec", &args, &kwargs),
+                "eval" => return self.prepare_eval_exec(scope, "eval", &args, &kwargs),
+                "exec" => return self.prepare_eval_exec(scope, "exec", &args, &kwargs),
                 "locals" | "vars" if args.is_empty() && kwargs.is_empty() => {
                     self.frame_locals(scope)
                 }
@@ -2768,7 +2768,11 @@ pub(super) fn call(
             ctx.make_super(args)
         }
         "compile" => compile(ctx, args, kwargs, false),
-        "eval" | "exec" => ctx.call_eval_exec(ctx.heap.current_scope(), name, args, kwargs),
+        "eval" | "exec" => {
+            let call = ctx.prepare_eval_exec(ctx.heap.current_scope(), name, args, kwargs)?;
+            // SAFETY: this synchronous caller owns the context that prepared the code.
+            unsafe { call.run(ctx) }
+        }
         "bin" | "hex" | "oct" => {
             let value = one_positional_arg(name, args, kwargs)?;
             let number = ctx.index_integer(value)?;
