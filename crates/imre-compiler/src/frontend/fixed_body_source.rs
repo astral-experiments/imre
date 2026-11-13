@@ -36,6 +36,7 @@ pub(crate) enum FixedNode {
     Effect,
     Store(usize),
     Read(usize, Type),
+    ModuleRead(usize, Type),
     Integer(i64),
     Field(usize, Type),
     Binary(Binary, Type),
@@ -60,6 +61,9 @@ impl FixedNode {
                 ExprKind::Int(ref text) => Self::Integer(text.parse().ok()?),
                 ExprKind::Local(slot) => Self::Read(slot, expr.ty),
                 ExprKind::Field(_, slot) => Self::Field(slot, expr.ty),
+                ExprKind::Builtin(Builtin::GlobalGet(slot), ref args) if args.is_empty() => {
+                    Self::ModuleRead(slot, expr.ty)
+                }
                 ExprKind::Binary(op, _, _) => Self::Binary(op, expr.ty),
                 ExprKind::Builtin(ref op, _) => Self::Builtin(std::mem::discriminant(op), expr.ty),
                 _ => return None,
@@ -126,15 +130,26 @@ impl SourceSites {
         }
     }
 
+    pub(super) fn module_read(&mut self, name: &ast::ExprName, slot: usize, ty: Type) {
+        if let Some(site) = self.site_at(name.range()) {
+            self.python_operation(
+                site,
+                name.start(),
+                Builtin::RegisteredName(name.id.to_string()),
+                FixedNode::ModuleRead(slot, ty),
+            );
+        }
+    }
+
     pub(super) fn field(&mut self, field: &ast::ExprAttribute, slot: usize, result: Type) {
         // Private names require the registered class's lexical mangling.
         if self.wrapper_fields
             && !ruff_python_stdlib::identifiers::is_mangled_private(field.attr.as_str())
             && let Some(site) = self.site_at(field.range())
         {
-            self.attribute(
+            self.python_operation(
                 site,
-                field,
+                field.attr.start(),
                 registered::values::attribute_load(field),
                 FixedNode::Field(slot, result),
             );
@@ -151,19 +166,19 @@ impl SourceSites {
         result: Type,
     ) {
         if let Some(site) = self.site_at(call.range()) {
-            self.attribute(
+            self.python_operation(
                 site,
-                field,
+                field.attr.start(),
                 registered::values::bound_method_operation(call, field),
                 FixedNode::Builtin(std::mem::discriminant(op), result),
             );
         }
     }
 
-    fn attribute(
+    fn python_operation(
         &mut self,
         site: PendingSite,
-        field: &ast::ExprAttribute,
+        position: TextSize,
         operation: Builtin,
         native: FixedNode,
     ) {
@@ -171,7 +186,7 @@ impl SourceSites {
             site.range,
             FixedAttribute {
                 operation: Box::new(operation),
-                position: field.attr.start(),
+                position,
             },
         );
         self.commit(site, native);

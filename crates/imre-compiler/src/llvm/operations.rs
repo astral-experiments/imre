@@ -766,7 +766,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                         ExprKind::Builtin(_, args) => args,
                         _ => unreachable!("placed attribute has its checked operands"),
                     };
-                    return frame.object_operation(&field.operation, operands);
+                    return frame.builtin(&field.operation, operands);
                 }
                 CheckedBody::registered(frame.reborrow()).emit_operation(
                     expr,
@@ -934,12 +934,6 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 }
             },
             ExprKind::Invoke { callable, args } => self.invoke(callable, args, expr.ty),
-            ExprKind::Builtin(
-                op @ (Builtin::RegisteredCall(_)
-                | Builtin::RegisteredAttribute { .. }
-                | Builtin::RegisteredDeleteItem),
-                args,
-            ) => self.python().object_operation(op, args),
             ExprKind::Unary(op, value) => self.unary_expression(*op, value, expr),
             ExprKind::Scope { body, value, clear } => self.scoped_expression(body, value, clear),
             ExprKind::Dict(entries) => self.dictionary(expr.ty, entries),
