@@ -1683,6 +1683,9 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
             let data = self.output.data(&handles);
             let slot = slot.as_deref().unwrap_or("null");
             let count = values.len();
+            if let Some((_, next)) = self.fixed_sites {
+                next.set(next.get() + count);
+            }
             return self.checked(&format!("call i64 @imre_dyn_build_sequence(ptr %ctx, ptr {data}, i64 {count}, i1 true, i1 {tuple}, ptr {slot})"));
         }
         let build = |code: &mut Self| code.sequence_display(values, display, slot.as_deref());
