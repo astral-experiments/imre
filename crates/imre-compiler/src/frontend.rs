@@ -9771,8 +9771,9 @@ impl<'a> Checker<'a> {
                     ));
                 }
                 let list = Self::enum_text(self.expr(&subscript.value)?);
-                if list.ty == Type::PythonObject && !subscript.slice.is_slice_expr() {
-                    let key = self.expr(&subscript.slice)?;
+                if list.ty == Type::PythonObject {
+                    let key =
+                        registered::values::index_key(&subscript.slice, &mut |key| self.expr(key))?;
                     return Ok(registered::values::located(
                         expression.range(),
                         expression.start(),
