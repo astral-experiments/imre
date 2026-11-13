@@ -3263,10 +3263,10 @@ impl Context {
 
     /// Read a native sequence directly once Python's subscription slots have been resolved.
     pub(super) fn sequence_subscript(&mut self, obj: Id, key: Id) -> Result<Id> {
-        let storage = self.scalar_value(obj);
         if let Value::Slice(parts) = *self.heap.get(key) {
             return self.slice(obj, parts);
         }
+        let storage = self.scalar_value(obj);
         let kind = match self.heap.get(storage) {
             Value::List(_) => "list",
             Value::Tuple(_) | Value::NamedTuple { .. } => "tuple",
