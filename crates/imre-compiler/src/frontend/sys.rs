@@ -408,9 +408,13 @@ impl Checker<'_> {
         }
     }
 
-    pub(super) fn sys_call(&mut self, call: &ast::ExprCall) -> Result<Option<Expr>, String> {
+    pub(super) fn sys_call(
+        &mut self,
+        call: &ast::ExprCall,
+        binding: Option<Binding>,
+    ) -> Result<Option<Expr>, String> {
         if matches!(&*call.func, ast::Expr::Name(name) if name.id == "hasattr" && !self.names.contains_key("hasattr"))
-            && self.resolve(&call.func).is_none()
+            && binding.is_none()
             && call.arguments.keywords.is_empty()
             && let [module, ast::Expr::StringLiteral(name)] = call.arguments.args.as_slice()
             && self.resolve(module)
@@ -425,7 +429,7 @@ impl Checker<'_> {
             }));
         }
         if matches!(&*call.func, ast::Expr::Name(name) if name.id == "hasattr" && !self.names.contains_key("hasattr"))
-            && self.resolve(&call.func).is_none()
+            && binding.is_none()
             && call.arguments.keywords.is_empty()
             && let [module, ast::Expr::StringLiteral(attr)] = call.arguments.args.as_slice()
             && let Some(Binding::IntrinsicModule(namespace @ crate::modules::IntrinsicModule::Sys)) =
@@ -442,7 +446,7 @@ impl Checker<'_> {
         {
             return Ok(Some(Expr::boolean(true)));
         }
-        match self.resolve(&call.func) {
+        match binding {
             Some(Binding::Intrinsic(Intrinsic::SysDisplayHook)) => {
                 if !call.arguments.keywords.is_empty() {
                     return self
