@@ -5354,6 +5354,9 @@ impl<'a> Checker<'a> {
             self.require_registered_operation(node)?;
             return Ok(Iteration::Prepared(self.python_cursor(iterable, node.range())));
         }
+        if let Some(element) = self.types.cursor_element(iterable.ty) {
+            return Ok(Iteration::Prepared(self.prepare_cursor(iterable, element)));
+        }
         if let Some(prepared) = self.record_iteration(&iterable, node)? {
             return Ok(Iteration::Prepared(prepared));
         }

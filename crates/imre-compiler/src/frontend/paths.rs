@@ -1004,7 +1004,7 @@ impl Checker<'_> {
 
     /// Construct the iterator at the call site. Globs bind and validate their pattern
     /// now, but defer every directory scan until the consumer first requests a path.
-    pub(super) fn path_iterator(
+    fn path_iterator(
         &mut self,
         receiver: Expr,
         call: &ast::ExprCall,

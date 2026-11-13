@@ -1719,8 +1719,7 @@ pub(super) fn cursor_input(
         Some(op) => operation(Builtin::RegisteredIter(op), Type::PythonObject, vec![value]),
         None => value,
     };
-    let kind = pull.map_or(ir::IterNextKind::Generic, ir::IterNextKind::Async);
-    pipelines::Prepared::pull_cursor(cursor, element, kind, hidden)
+    pipelines::Prepared::pull_cursor(cursor, element, pull, hidden)
 }
 
 #[derive(Clone, Copy)]
