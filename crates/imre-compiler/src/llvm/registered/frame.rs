@@ -722,7 +722,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
     /// Pop owned operands from the top, including the elements of a last-owned sequence.
     pub(in crate::llvm) fn release_owned_operands(&mut self, mark: &str) {
         self.line(&format!(
-            "call void @imre_dyn_unwind_display(ptr %ctx, i64 {mark})"
+            "call void @imre_dyn_unwind_operands(ptr %ctx, i64 {mark})"
         ));
     }
 
@@ -1556,14 +1556,7 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
         mark: &str,
         body: impl FnOnce(&mut Self) -> T,
     ) -> T {
-        self.unwind_with(
-            |frame| {
-                frame.line(&format!(
-                    "call void @imre_dyn_unwind_operands(ptr %ctx, i64 {mark})"
-                ));
-            },
-            body,
-        )
+        self.unwind_with(|frame| frame.release_owned_operands(mark), body)
     }
 
     pub(super) fn suspend_value(
@@ -1760,8 +1753,7 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
     ) -> String {
         let tuple = display == DisplayKind::Tuple;
         let mark = self.temporary_mark();
-        let unwind = |code: &mut RegisteredFrame<'a, 'p>| code.release_owned_operands(&mark);
-        self.unwind_with(unwind, |code| {
+        self.unwind_stack_operands(&mark, |code| {
             let initial = |code: &mut Self, values: Vec<String>, complete| {
                 let slot = if complete { slot } else { None };
                 let container = if display == DisplayKind::Set {
