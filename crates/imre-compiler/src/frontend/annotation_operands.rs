@@ -106,7 +106,12 @@ pub(super) fn annotation_operand<R>(
         } else {
             &text
         };
-        annotation_expression(expression).and_then(|parsed| prepare_child(expression, &parsed))
+        crate::normalize_source(expression, crate::SourceKind::Command)
+            .ok()
+            .and_then(|source| {
+                let parsed = annotation_expression(&source)?;
+                prepare_child(&source, &parsed)
+            })
     };
     let kind = if let Some(child) = body {
         children.insert(expr.start(), child);
