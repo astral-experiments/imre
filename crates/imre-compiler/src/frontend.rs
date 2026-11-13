@@ -5584,7 +5584,7 @@ impl<'a> Checker<'a> {
         });
         let mut body = Vec::new();
         let mut cleanup = vec![captured];
-        let (item, test, pull) = if let Some(cursor) = cursor {
+        let (item, pull) = if let Some(cursor) = cursor {
             output.push(Statement::Assign(cursor, Expr::integer(0)));
             cleanup.push(cursor);
             (
@@ -5601,19 +5601,6 @@ impl<'a> Checker<'a> {
                             Builtin::ListGet(None)
                         },
                         vec![self.local(captured), self.local(cursor)],
-                    ),
-                },
-                Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Compare(
-                        vec![
-                            self.local(cursor),
-                            Expr {
-                                ty: Type::Int,
-                                kind: ExprKind::Builtin(Builtin::Len, vec![self.local(captured)]),
-                            },
-                        ],
-                        vec![CmpOp::Lt],
                     ),
                 },
                 None,
@@ -5666,7 +5653,7 @@ impl<'a> Checker<'a> {
             } else {
                 self.local(key)
             };
-            (item, Expr::boolean(true), Some((ready, key, value)))
+            (item, Some((ready, key, value)))
         };
         let mut facts = self.narrowed.clone();
         let before = self.assigned.clone();
@@ -5720,6 +5707,17 @@ impl<'a> Checker<'a> {
         let (orelse, falls) = self.loop_else(orelse, breaks, true)?;
         cleanup.extend(counter);
         output.extend(before_iteration);
+        let test = match cursor {
+            Some(cursor) => pipelines::compare(
+                Compare::Less,
+                self.local(cursor),
+                Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Builtin(Builtin::Len, vec![self.local(captured)]),
+                },
+            ),
+            None => Expr::boolean(true),
+        };
         let output = pipelines::scoped_loop(output, cleanup, orelse, |orelse| {
             Statement::While(test, body, orelse)
         });
