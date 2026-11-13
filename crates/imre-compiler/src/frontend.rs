@@ -7231,14 +7231,16 @@ impl<'a> Checker<'a> {
         } else {
             try_.body.as_slice()
         };
-        for name in narrowing::deleted_names(protected_prefix) {
-            if let Some(slot) = self.names.get(&name) {
+        let mut deleted = narrowing::deleted_names(protected_prefix);
+        for name in &deleted {
+            if let Some(slot) = self.names.get(name) {
                 handler_assigned.remove(slot);
             }
         }
         let mut handler_facts = before_facts.clone();
-        for name in narrowing::assigned_names(&try_.body) {
-            if let Some(slot) = self.names.get(&name) {
+        let mut assigned = narrowing::assigned_names(&try_.body);
+        for name in &assigned {
+            if let Some(slot) = self.names.get(name) {
                 handler_facts.remove_mut(slot);
                 handler_assigned.set_type_source(*slot, self.declared_slots.get(slot).copied());
             }
@@ -7397,11 +7399,15 @@ impl<'a> Checker<'a> {
         }
         self.assigned = before;
         self.narrowed = before_facts;
-        let mut protected = try_.body.to_vec();
-        protected.extend(try_.orelse.iter().cloned());
+        deleted.extend(narrowing::deleted_names(
+            &try_.body[protected_prefix.len()..],
+        ));
+        assigned.extend(narrowing::assigned_names(&try_.orelse));
+        deleted.extend(narrowing::deleted_names(&try_.orelse));
         for handler in &try_.handlers {
             let ast::ExceptHandler::ExceptHandler(handler) = handler;
-            protected.extend(handler.body.iter().cloned());
+            assigned.extend(narrowing::assigned_names(&handler.body));
+            deleted.extend(narrowing::deleted_names(&handler.body));
             if let Some(name) = &handler.name
                 && let Some(slot) = self.names.get(name.as_str())
             {
@@ -7409,12 +7415,12 @@ impl<'a> Checker<'a> {
                 self.narrowed.remove_mut(slot);
             }
         }
-        for name in narrowing::deleted_names(&protected) {
+        for name in deleted {
             if let Some(slot) = self.names.get(&name) {
                 self.assigned.remove(slot);
             }
         }
-        for name in narrowing::assigned_names(&protected) {
+        for name in assigned {
             if let Some(slot) = self.names.get(&name) {
                 self.narrowed.remove_mut(slot);
                 self.assigned
