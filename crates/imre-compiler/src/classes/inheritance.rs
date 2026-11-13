@@ -8,6 +8,7 @@ pub(super) fn resolve<'syntax>(
     nodes: &[(DefinitionId, Cow<'syntax, ast::StmtClassDef>)],
     ids: &mut HashMap<DefinitionId, usize>,
     exceptions: &exceptions::Declarations,
+    first_layout: Option<&mut Option<Diagnostic>>,
 ) -> Result<(Vec<Class<'syntax>>, HashSet<DefinitionId>), Diagnostic> {
     struct Layouts<'syntax> {
         fixed: Vec<Option<Class<'syntax>>>,
@@ -246,10 +247,24 @@ pub(super) fn resolve<'syntax>(
     };
     let mut path = Vec::new();
     for id in 0..nodes.len() {
-        build(id, graph, nodes, ids, exceptions, &mut layouts, &mut path)?;
+        if let Err(error) = build(id, graph, nodes, ids, exceptions, &mut layouts, &mut path) {
+            if error.kind == Kind::ClassLayout
+                && graph.class_layout_error.borrow().is_none()
+                && let Some(first_layout) = first_layout
+                // Exception identities and their descendants share the complete payload layouts.
+                && exceptions.layouts.iter().all(|owner| {
+                    layouts.registered.contains(owner)
+                        || ids.get(owner).is_some_and(|&id| layouts.fixed[id].is_some())
+                })
+            {
+                *first_layout = Some(error);
+                break;
+            }
+            return Err(error);
+        }
     }
     let mut fixed = layouts.fixed.into_iter().flatten().collect::<Vec<_>>();
-    if !layouts.registered.is_empty() {
+    if fixed.len() != nodes.len() {
         ids.clear();
         ids.extend(
             fixed

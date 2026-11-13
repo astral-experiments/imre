@@ -234,8 +234,17 @@ impl<'syntax> Classes<'syntax> {
         }
     }
 
-    /// Assigns nominal identities in module and source order, independently of imports' aliases.
+    #[cfg(test)]
     pub(crate) fn collect(graph: &'syntax SourceGraph) -> Result<Self, Diagnostic> {
+        Self::collect_layouts(graph, None)
+    }
+
+    /// Assigns nominal identities in module and source order. A registered binder may
+    /// retain completed declarations when a fixed layout reports its first error.
+    pub(crate) fn collect_layouts(
+        graph: &'syntax SourceGraph,
+        first_layout: Option<&mut Option<Diagnostic>>,
+    ) -> Result<Self, Diagnostic> {
         let resolved = exceptions::collect(graph)?;
         let mut source_nodes = Vec::new();
         let mut ids = HashMap::new();
@@ -316,7 +325,7 @@ impl<'syntax> Classes<'syntax> {
             }
         }
         let (definitions, mut registered_classes) =
-            inheritance::resolve(graph, &source_nodes, &mut ids, &resolved)?;
+            inheritance::resolve(graph, &source_nodes, &mut ids, &resolved, first_layout)?;
         registered_classes.extend(resolved.registered);
         // An inner class uses the object runtime, but every fixed class must validate first.
         if let Some(error) = graph.class_layout_error.borrow().as_ref() {

@@ -1280,7 +1280,7 @@ impl Inference {
                             classes,
                             types,
                             self,
-                            Some(&checked_bodies),
+                            registered::Capture::Solved(Some(&checked_bodies)),
                             checked_bodies
                                 .iter()
                                 .copied()
@@ -1345,7 +1345,7 @@ impl Inference {
                             classes,
                             types,
                             self,
-                            None,
+                            registered::Capture::Solved(None),
                             signatures
                                 .values()
                                 .map(|signature| (signature.id, None))
@@ -1377,7 +1377,7 @@ impl Inference {
                             classes,
                             types,
                             self,
-                            None,
+                            registered::Capture::Solved(None),
                             signatures
                                 .values()
                                 .map(|signature| (signature.id, None))

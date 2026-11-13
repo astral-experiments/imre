@@ -591,6 +591,13 @@ pub(super) fn physical_method<'a>(
     (signature.physical_frame && std::ptr::eq(checked, declaration.as_ref())).then_some(declaration)
 }
 
+/// A declaration without fixed callers uses the live Python argument binder.
+#[derive(Clone, Copy)]
+pub(super) enum Capture<'a> {
+    Declared,
+    Solved(Option<&'a HashSet<usize>>),
+}
+
 #[expect(
     clippy::too_many_arguments,
     reason = "a recovery attempt borrows the graph's current signature and inference tables"
@@ -603,7 +610,7 @@ pub(super) fn capture(
     classes: &ClassInfo,
     types: &Types,
     inference: &inference::Inference,
-    checked_bodies: Option<&HashSet<usize>>,
+    source: Capture,
     candidates: impl IntoIterator<Item = (usize, Option<RegisteredFunction>)>,
 ) {
     // Methods under the same class share a module definition, but have separate signature slots.
@@ -647,7 +654,7 @@ pub(super) fn capture(
         // must not establish a native caller or consume a missing binding.
         let private = ModuleValues::default();
         let checker = || Checker::new(graph, id, signatures, classes, types, &helpers, &private);
-        let checked = checked_bodies.is_some_and(|ids| ids.contains(&slot));
+        let checked = matches!(source, Capture::Solved(Some(ids)) if ids.contains(&slot));
         // A revision can invalidate a physical method's last check. Check its settled
         // signature before trying the registered return convention.
         let mut attributes = HashMap::new();
@@ -676,11 +683,17 @@ pub(super) fn capture(
         };
         let body = placed.or_else(|| {
             let mut signature = signature.clone();
+            if matches!(source, Capture::Declared) {
+                for parameter in &mut signature.params {
+                    parameter.ty = Type::PythonObject;
+                }
+            }
             signature.returns = Type::PythonObject;
             let mut checker = checker();
             checker.registered_local_start = Some(signature.params.len());
             checker.settled_attributes = (!attributes.is_empty()).then_some(&mut attributes);
             checker.checked_callback_effects = checked;
+            checker.live_protocol_parameters = matches!(source, Capture::Declared);
             let mut body = graph
                 .try_registered_body(id, || lower_definition(checker, function, &signature).ok())?;
             if let Some(method) = method {
@@ -698,7 +711,7 @@ pub(super) fn capture(
                 let checks = &inference.source_checks;
                 // No unresolved caller can depend on a solved frame's ABI. The fixed sibling
                 // placement only checks occupancy for the same physical source range.
-                if checked_bodies.is_none()
+                if matches!(source, Capture::Solved(None))
                     && let Some(solved) = &checks.solved
                 {
                     solved.borrow_mut().push((id, function.range()));
