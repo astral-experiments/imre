@@ -701,7 +701,7 @@ impl Session {
         )
     }
 
-    /// A call can complete without executing an explicit return in this function.
+    /// Whether the callable body selected by the frontend can complete without a return.
     pub(crate) fn call_may_return_implicitly(
         &self,
         module: usize,
@@ -717,7 +717,6 @@ impl Session {
             return true;
         };
         function.is_async
-            || !function.decorator_list.is_empty()
             || scope.is_generator_function(index)
             || index.use_def_map(scope).end_of_scope_reachability()
                 != ScopedReachabilityConstraintId::ALWAYS_FALSE
