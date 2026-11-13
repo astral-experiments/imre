@@ -142,7 +142,7 @@ pub(crate) fn validate<'a>(
         let error = super::diagnostic_message(source, &range, &format!("SyntaxError: {reason}"));
         return Err(format!("{}:{error}", path.display()));
     }
-    if checked.is_none() {
+    if checked.is_none_or(|module| !std::ptr::eq(&*module.parsed, parsed)) {
         crate::analysis::check_scope_syntax(source, parsed.syntax())
             .map_err(|error| format!("{}:{error}", path.display()))?;
     }
@@ -209,6 +209,16 @@ mod tests {
             error.ends_with(":2:5: Imre: surrogate string escapes are unsupported in docstrings")
         );
         assert_eq!(validate(Some(module), true).unwrap_err(), error);
+        let layout = ParsedModule::parse(&module.path, module.source.as_str().into()).unwrap();
+        let borrowed = super::validate(
+            &module.path,
+            &layout.text,
+            &layout.parsed,
+            Some(module),
+            false,
+        )
+        .unwrap();
+        assert!(matches!(borrowed, Cow::Borrowed(borrowed) if std::ptr::eq(borrowed, map)));
     }
 
     #[test]
