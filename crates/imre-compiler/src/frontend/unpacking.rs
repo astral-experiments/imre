@@ -484,8 +484,9 @@ impl Checker<'_> {
             let start = output.len();
             self.store_value(target, value, value_site, Some(output))?;
             if let Some(sites) = &mut self.fixed_sites
-                && local.is_some()
+                && let Some(name) = target.as_name_expr()
                 && let [Statement::Assign(slot, _)] = &output[start..]
+                && self.names.get(name.id.as_str()) == Some(slot)
             {
                 sites.statement(assignment.value.range(), FixedNode::Store(*slot));
             }
