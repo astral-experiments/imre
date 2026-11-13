@@ -1370,10 +1370,11 @@ fn lower_graph(
         }
         // A bound wrapper with an unknown owner may need the method's Python
         // frame. Keep the operand sites until its specialized layout is known.
+        let python_method = graph.registered_startup || has_wrapper_link;
         checker.fixed_sites = (!needs_registered_entry
-            && (signature.method.is_none() || has_wrapper_link)
+            && (signature.method.is_none() || python_method)
             && signature.physical_frame)
-            .then(|| fixed_body_source::SourceSites::new(has_wrapper_link));
+            .then(|| fixed_body_source::SourceSites::new(python_method));
         let result = match cache.as_deref_mut() {
             Some(cache) if signature.method.is_none() => cache.body(checker, definition, signature),
             _ => lower_body(checker, definition, signature),
@@ -8179,6 +8180,15 @@ impl<'a> Checker<'a> {
             .as_mut()
             .and_then(|sites| sites.enter(expression.range()));
         let value = lower(self)?;
+        if let Some(sites) = &mut self.fixed_sites
+            && matches!(
+                expression,
+                ast::Expr::StringLiteral(_) | ast::Expr::BooleanLiteral(_)
+            )
+            && let Some(constant) = ir::Constant::from_expr(&value)
+        {
+            sites.expression(expression.range(), FixedNode::Constant(constant));
+        }
         self.leave_fixed_site(parent);
         Ok(value)
     }
