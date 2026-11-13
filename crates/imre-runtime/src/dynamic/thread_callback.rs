@@ -33,7 +33,7 @@ pub(super) struct Callback {
     finalizing: Arc<std::sync::atomic::AtomicBool>,
 }
 
-fn unsupported() -> Error {
+pub(super) fn unsupported() -> Error {
     Error::new(
         "NotImplementedError",
         "this thread callback requires the boxed Python heap",
@@ -48,35 +48,20 @@ impl Callback {
         kwargs: Option<Id>,
     ) -> Result<Option<(Operation, Vec<Id>)>> {
         // _thread.start_new_thread owns the original argument containers through the call.
-        let roots = match kwargs {
-            Some(kwargs) => super::copy_ids(&[target, args, kwargs]),
-            None => super::copy_ids(&[target, args]),
-        }?;
+        let containers = [target, args, kwargs.unwrap_or(NONE)];
+        let roots = if kwargs.is_some() {
+            &containers[..]
+        } else {
+            &containers[..2]
+        };
         let pos = ctx.tuple_elements(args).expect("validated thread arguments");
         Self::capture_checked(ctx, target, roots, pos, kwargs, false)
     }
 
-    /// Thread.run cannot invoke its parent's excepthook, so only certified lock operations qualify.
-    pub(super) fn capture_for_thread(
+    pub(super) fn capture_checked(
         ctx: &Context,
         target: Id,
-        args: Id,
-        kwargs: Id,
-    ) -> Result<Option<(Operation, Vec<Id>)>> {
-        let (Value::Tuple(pos) | Value::List(pos)) = ctx.heap.get(args) else {
-            return Err(unsupported());
-        };
-        if !matches!(ctx.heap.get(kwargs), Value::Dict(_)) {
-            return Err(unsupported());
-        }
-        let roots = super::thread_worker::expanded_call_roots(ctx, target, args)?;
-        Self::capture_checked(ctx, target, roots, pos, Some(kwargs), true)
-    }
-
-    fn capture_checked(
-        ctx: &Context,
-        target: Id,
-        mut roots: Vec<Id>,
+        roots: &[Id],
         pos: &[Id],
         kwargs: Option<Id>,
         high_level: bool,
@@ -148,7 +133,7 @@ impl Callback {
             };
             // The lookup is bound before startup returns. The worker owns the native
             // lock and the parent retains the original method and Python lock wrapper.
-            super::thread_worker::extend_call_roots(&mut roots, &[operand])?;
+            let roots = super::concat_ids(roots, &[operand])?;
             return Ok(Some((
                 Operation::Acquire {
                     lock: Arc::clone(lock),
@@ -183,7 +168,7 @@ impl Callback {
                 Value::HandlerLock(lock) if !high_level => Argument::RLock(Arc::clone(lock)),
                 _ => return Ok(None),
             };
-            super::thread_worker::extend_call_roots(&mut roots, &[id])?;
+            let roots = super::concat_ids(roots, &[id])?;
             let mut callback = Self::from_code(ctx, code, scope, entry, Vec::new())?;
             callback.receiver = Some((copy_label(name)?, receiver));
             return Ok(Some((Operation::Python(Box::new(callback)), roots)));
@@ -233,7 +218,7 @@ impl Callback {
                 }
                 // The prefix has been consumed when the parent resumes. Only the final
                 // receiver must outlive a subsequent replacement of its closure cell.
-                super::thread_worker::extend_call_roots(&mut roots, &[id])?;
+                let roots = super::concat_ids(roots, &[id])?;
                 return Ok(Some((
                     Operation::Acquire {
                         lock: Arc::clone(lock),
@@ -318,7 +303,7 @@ impl Callback {
         values
             .try_reserve_exact(count)
             .map_err(|_| Error::new("MemoryError", ""))?;
-        for id in bound {
+        for &id in &bound {
             let value = match ctx.heap.get(id) {
                 Value::PrimitiveLock(lock) => Argument::Lock(Arc::clone(lock)),
                 Value::HandlerLock(lock) => Argument::RLock(Arc::clone(lock)),
@@ -343,9 +328,9 @@ impl Callback {
                 }
                 _ => return Err(unsupported()),
             };
-            super::thread_worker::extend_call_roots(&mut roots, &[id])?;
             values.push(value);
         }
+        let roots = super::concat_ids(roots, &bound)?;
         let callback = Self::from_code(ctx, code, scope, entry, values)?;
         Ok(Some((Operation::Python(Box::new(callback)), roots)))
     }

@@ -175,12 +175,8 @@ pub(super) fn call(
         &[*function, *positional, keyword.unwrap_or(super::NONE)],
     )?;
     super::thread_worker::check_start(ctx)?;
-    let Some((callback, roots)) = Callback::capture(ctx, *function, *positional, keyword)?
-    else {
-        return Err(Error::new(
-            "NotImplementedError",
-            "this thread callback requires the boxed Python heap",
-        ));
+    let Some((callback, roots)) = Callback::capture(ctx, *function, *positional, keyword)? else {
+        return Err(super::thread_callback::unsupported());
     };
     if let Some(sys) = ctx.threads.system_module
         && let Value::Module { scope, .. } = ctx.heap.get(sys)
