@@ -75,7 +75,6 @@ impl Context {
             unreachable!()
         };
         frame.class_cell = class_cell;
-        frame.first_argument = Some(".0".to_owned());
         self.bind(scope, ".0", iter);
         self.new_suspended(code, scope, FrameOwner::Function(function))
     }

@@ -9289,11 +9289,6 @@ impl Context {
         let Value::Scope(frame) = self.heap.get_mut(local) else {
             unreachable!()
         };
-        frame.first_argument = sig
-            .positional
-            .first()
-            .map(|name| copy_label(name))
-            .transpose()?;
         if sig.class_cell {
             frame.class_cell = class_cell;
         }
