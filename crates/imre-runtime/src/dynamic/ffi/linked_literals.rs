@@ -14,7 +14,7 @@ pub(super) unsafe extern "C" fn imre_dyn_cached_handle(ctx: *const Context, slot
         .unwrap_or(NONE)
 }
 
-/// Return the source unit's immutable string, loading UTF-8 or original Python code points on a miss.
+/// Return the source unit's immutable Python literal, decoding its linked bytes on a miss.
 ///
 /// # Safety
 /// The caller supplies a live context, a distinct linked slot, and `len` immutable bytes.

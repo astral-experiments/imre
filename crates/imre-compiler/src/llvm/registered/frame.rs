@@ -2186,8 +2186,7 @@ impl RegisteredFrame<'_, '_> {
             push_codepoints(&mut points, text, None);
             points
         });
-        let data = self.output.data(text.as_bytes());
-        self.cached_string(1, data, text.len(), points)
+        self.linked_literal(1, text.as_bytes(), Constant::Text(points))
     }
 
     pub(crate) fn linked_string(&mut self, points: Vec<u8>) -> String {
@@ -2201,17 +2200,23 @@ impl RegisteredFrame<'_, '_> {
             return self.source_text(&text, Some(points));
         }
         let data = self.output.data(&points);
-        self.cached_string(7, data, points.len(), points)
+        self.linked_literal_data(7, data, points.len(), Constant::Text(points))
     }
 
-    pub(crate) fn cached_string(
+    /// Load an immutable scalar through its code unit's per-interpreter constant slot.
+    pub(crate) fn linked_literal(&mut self, kind: i32, bytes: &[u8], key: Constant) -> String {
+        let data = self.output.data(bytes);
+        self.linked_literal_data(kind, data, bytes.len(), key)
+    }
+
+    fn linked_literal_data(
         &mut self,
         kind: i32,
         data: String,
         len: usize,
-        points: Vec<u8>,
+        key: Constant,
     ) -> String {
-        let slot = self.constant_slot(Constant::Text(points));
+        let slot = self.constant_slot(key);
         self.take_matching_check();
         self.checked(&format!(
             "call i64 @imre_dyn_linked_string(ptr %ctx, ptr {slot}, i32 {kind}, ptr {data}, i64 {len})"

@@ -18,7 +18,7 @@ def nested_operands(first, second, third):
 
 
 def constants():
-    return ["two words 🐍"], ("two words 🐍", -0.0, (None, -1))
+    return ["two words 🐍", b"two bytes", 1.25, 7j], ("two words 🐍", -0.0, (None, -1))
 
 
 def current():
@@ -41,7 +41,8 @@ def current():
     first, a = constants()
     second, b = constants()
     assert first is not second and a is b
-    assert first[0] is second[0] is a[0]
+    assert all(x is y for x, y in zip(first, second))
+    assert first[0] is a[0]
 
     released = []
 

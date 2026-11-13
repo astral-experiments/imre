@@ -901,11 +901,19 @@ impl<'f> Frame<'f, '_, '_> {
     }
 
     pub(crate) fn float(&mut self, value: f64) -> CheckedValue {
-        CheckedValue::handle(self.code.lit(3, &value.to_le_bytes()))
+        CheckedValue::handle(self.code.linked_literal(
+            3,
+            &value.to_le_bytes(),
+            ir::Constant::Float(value.to_bits()),
+        ))
     }
 
     pub(crate) fn bytes(&mut self, value: &[u8]) -> CheckedValue {
-        CheckedValue::handle(self.code.lit(2, value))
+        CheckedValue::handle(self.code.linked_literal(
+            2,
+            value,
+            ir::Constant::Bytes(value.to_vec()),
+        ))
     }
 
     pub(crate) fn boolean(&mut self, value: bool) -> CheckedValue {
@@ -1072,9 +1080,11 @@ impl<'f> Frame<'f, '_, '_> {
                 self.suspend_value(*kind, *range, |code| code.evaluate_handle(value))
             }
             (Builtin::RegisteredEllipsis, []) => permanent::ELLIPSIS.to_string(),
-            (Builtin::RegisteredComplex(real, imag), []) => self
-                .code
-                .lit(4, &[real.to_le_bytes(), imag.to_le_bytes()].concat()),
+            (Builtin::RegisteredComplex(real, imag), []) => self.code.linked_literal(
+                4,
+                &[real.to_le_bytes(), imag.to_le_bytes()].concat(),
+                ir::Constant::Complex(real.to_bits(), imag.to_bits()),
+            ),
             (Builtin::RegisteredString(points), []) => self.code.linked_string(points.clone()),
             (Builtin::RegisteredTemplate, [strings, fields]) => {
                 let strings = self.evaluate_handle(strings);
