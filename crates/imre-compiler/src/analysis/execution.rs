@@ -5,7 +5,6 @@ use crate::dynamic::literal::{LiteralSite, ParsedLiteral};
 use crate::frontend::phase::Diagnostic;
 use ruff_db::files::File;
 use ruff_db::parsed::ParsedModuleRef;
-use ruff_db::system::SystemVirtualPath;
 use ruff_python_ast::visitor::{Visitor, walk_expr, walk_stmt};
 use ruff_python_ast::{Expr, ExprCall, Stmt, StmtFunctionDef};
 use ruff_text_size::{Ranged, TextRange, TextSize};
@@ -1063,19 +1062,7 @@ impl Session {
         identity.update(&u32::from(site).to_le_bytes());
         identity.update(text.as_bytes());
         let key = format!("imre/exec/{}.py", identity.finalize().to_hex());
-        let key = SystemVirtualPath::new(&key);
-        let file = self
-            .db
-            .files
-            .try_virtual_file(key)
-            .unwrap_or_else(|| {
-                self.db
-                    .system
-                    .fs()
-                    .write_virtual_file(key, input.text.as_bytes());
-                self.db.files.virtual_file(&self.db, key)
-            })
-            .file();
+        let file = self.virtual_source(&key, &input.text);
         let (parsed, _) =
             self.checked_parse(file, "<string>", &text, &input, crate::SourceKind::Command)?;
         Ok(ParsedLiteral::new(

@@ -413,16 +413,8 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "_imre_socketserver_reader.py",
             include_str!("../stdlib/_socketserver_reader.py"),
         )),
-        // The checked graph compiles cleandoc directly. Keep that definition in
-        // the same module namespace when compiling the full object provider.
-        "inspect" => Some((
-            "inspect.py",
-            concat!(
-                include_str!("../stdlib/inspect_cleandoc.py"),
-                "\n",
-                include_str!("../stdlib/inspect.py")
-            ),
-        )),
+        "inspect" => bundled_source!("inspect.py"),
+        "dataclasses" => bundled_source!("dataclasses.py"),
         "itertools" => bundled_source!("itertools.py"),
         "signal" if cfg!(unix) => bundled_source!("signal.py"),
         "typing" => bundled_source!("typing.py"),
@@ -4586,7 +4578,6 @@ const LOGGING_HANDLER_CLASSES: &str = "__imre_logging_handler_classes__";
 pub(crate) const CONTEXTLIB_ABSTRACT: &str = "__imre_contextlib_abstract__";
 const CONTEXTLIB_EXIT_STACK: &str = "__imre_contextlib_exit_stack__";
 const METADATA_VERSION: &str = "__imre_metadata_version__";
-const INSPECT_CLEANDOC: &str = include_str!("../stdlib/inspect_cleandoc.py");
 const INSPECT_FUNCTIONS: &str = "__imre_inspect_functions__";
 const TEMPFILE_SPOOL: &str = "__imre_tempfile_spool__";
 const TEXTWRAP_FUNCTIONS: &str = "__imre_textwrap_functions__";
@@ -4607,17 +4598,22 @@ enum StdlibMiss {
     Unclaimed,
 }
 
+fn checked_stdlib_owner(module: IntrinsicModule, name: &str) -> Option<&'static str> {
+    match (module, name) {
+        (IntrinsicModule::Dataclasses, "MISSING" | "_MISSING_TYPE") => Some("dataclasses"),
+        (IntrinsicModule::Inspect, "cleandoc") => Some("inspect"),
+        _ => None,
+    }
+}
+
 /// A selected checked interface owns its misses as well as its public definitions.
 fn stdlib_symbol(
     modules: &[SourceModule],
     module: IntrinsicModule,
     name: &str,
 ) -> Result<Binding, StdlibMiss> {
-    if module == IntrinsicModule::Dataclasses
-        && matches!(name, "MISSING" | "_MISSING_TYPE")
-        && let Some(source) = modules
-            .iter()
-            .find(|source| source.is_bundled("dataclasses"))
+    if let Some(owner) = checked_stdlib_owner(module, name)
+        && let Some(source) = modules.iter().find(|source| source.is_bundled(owner))
     {
         return source.export(name).ok_or(StdlibMiss::Sealed);
     }
@@ -4637,7 +4633,6 @@ fn stdlib_symbol(
         IntrinsicModule::Contextlib if name == "AbstractContextManager" => CONTEXTLIB_ABSTRACT,
         IntrinsicModule::Contextlib if name == "ExitStack" => CONTEXTLIB_EXIT_STACK,
         IntrinsicModule::ImportlibMetadata if name == "version" => METADATA_VERSION,
-        IntrinsicModule::Inspect if name == "cleandoc" => INSPECT_FUNCTIONS,
         IntrinsicModule::Tempfile if name == "SpooledTemporaryFile" => TEMPFILE_SPOOL,
         IntrinsicModule::Logging => (!name.starts_with('_'))
             .then_some(LOGGING_CLASSES)
@@ -4661,7 +4656,7 @@ fn stdlib_symbol(
             matches!(b, Binding::Definition(d) if d.module == id &&
                 matches!((module, &source.parsed.syntax().body[d.statement]),
                     (IntrinsicModule::Calendar | IntrinsicModule::Fractions | IntrinsicModule::Contextlib, ast::Stmt::ClassDef(_))
-                    | (IntrinsicModule::ImportlibMetadata | IntrinsicModule::Inspect, ast::Stmt::FunctionDef(_))
+                    | (IntrinsicModule::ImportlibMetadata, ast::Stmt::FunctionDef(_))
                     | (IntrinsicModule::Tempfile, ast::Stmt::ClassDef(_))
                     | (IntrinsicModule::Logging, ast::Stmt::ClassDef(_) | ast::Stmt::FunctionDef(_))
                     | (IntrinsicModule::LoggingHandlers, ast::Stmt::ClassDef(_))
@@ -6151,11 +6146,11 @@ impl<'a> Loader<'a> {
                 })
             });
         }
-        if module == Some(IntrinsicModule::Dataclasses)
+        if let Some(owner @ (IntrinsicModule::Dataclasses | IntrinsicModule::Inspect)) = module
             && imports.is_none_or(|names| {
                 names
                     .iter()
-                    .any(|a| matches!(a.name.as_str(), "MISSING" | "_MISSING_TYPE"))
+                    .any(|a| checked_stdlib_owner(owner, a.name.as_str()).is_some())
             })
         {
             self.load_module(name)?;
@@ -6226,9 +6221,6 @@ impl<'a> Loader<'a> {
                         .any(|a| a.name.as_str() == "SpooledTemporaryFile")
                 }))
             .then_some((TEMPFILE_SPOOL, include_str!("../stdlib/tempfile/spool.py"))),
-            (module == Some(IntrinsicModule::Inspect)
-                && imports.is_none_or(|names| names.iter().any(|a| a.name.as_str() == "cleandoc")))
-            .then_some((INSPECT_FUNCTIONS, INSPECT_CLEANDOC)),
             (name.split('.').next() == Some("logging") && module.is_some()).then_some((
                 LOGGING_CLASSES,
                 concat!(
@@ -6266,18 +6258,23 @@ impl<'a> Loader<'a> {
             if self.by_name.contains_key(implementation) {
                 continue;
             }
-            let path = self.root.join(format!("{implementation}.py"));
-            if self.fs.exists(&path) {
-                return Err(format!(
-                    "standard-library shadowing is unsupported: {implementation:?}"
-                ));
-            }
-            self.inputs.missing.push(path.clone());
+            let path = self.private_implementation_path(implementation)?;
             let id = self.add(path.clone(), path, implementation.into(), false, source)?;
             self.modules[id].bundled = true;
             self.scan(id)?;
         }
         Ok(module)
+    }
+
+    fn private_implementation_path(&mut self, implementation: &str) -> Result<PathBuf, String> {
+        let path = self.root.join(format!("{implementation}.py"));
+        if self.fs.exists(&path) {
+            return Err(format!(
+                "standard-library shadowing is unsupported: {implementation:?}"
+            ));
+        }
+        self.inputs.missing.push(path.clone());
+        Ok(path)
     }
 
     /// Whether a physical application package or module owns this top-level import.
@@ -6434,12 +6431,18 @@ impl<'a> Loader<'a> {
                 None
             }
             "stat" => stat_mode_source().map(|source| ("stat.py", source)),
-            // Keep the checked definition behind inspect's complete stdlib type stub.
-            "inspect" => Some(("<imre stdlib>/inspect.py", INSPECT_CLEANDOC)),
-            // Keep the public typeshed decorator signatures available alongside this singleton.
+            // Keep these checked definitions behind the complete public typeshed interfaces.
+            "inspect" => {
+                // Preserve the typed function's filename and its reserved-name diagnostic.
+                self.private_implementation_path(INSPECT_FUNCTIONS)?;
+                Some((
+                    "__imre_inspect_functions__.py",
+                    self.session.checked_shipped_prefix(name, "cleandoc")?,
+                ))
+            }
             "dataclasses" => Some((
                 "<imre stdlib>/dataclasses.py",
-                include_str!("../stdlib/dataclasses_missing.py"),
+                self.session.checked_shipped_prefix(name, "MISSING")?,
             )),
             "socketserver" => Some(("socketserver.py", include_str!("../stdlib/socketserver.py"))),
             "_imre_socketserver_reader" => Some((
