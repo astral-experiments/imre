@@ -2107,6 +2107,19 @@ mod tests {
         }
     }
 
+    fn assert_checked_call(body: &[crate::ir::Statement], source: &str, spelling: &str) {
+        use crate::ir::{Builtin, ExprKind, Statement};
+
+        let [Statement::Expr(mark), Statement::Expr(call)] = body else {
+            panic!("expected a statement checkpoint and call for {spelling}");
+        };
+        let ExprKind::Builtin(Builtin::RegisteredStatement(range, _), _) = &mark.kind else {
+            panic!("expected the source position of {spelling}");
+        };
+        assert_eq!(&source[*range], spelling);
+        assert!(call.without_location().is_registered_invoke(), "{spelling}");
+    }
+
     fn input_statements(
         suite: &crate::frontend::RegisteredSuite,
     ) -> impl Iterator<Item = (usize, &crate::ir::Statement)> {
@@ -4776,18 +4789,19 @@ mod tests {
         let [branch] = prepared.initializer().suites.as_slice() else {
             panic!("expected a prepared conditional");
         };
-        assert!(matches!(branch.checked.function.body.as_slice(),
-            [_, Statement::If(_, _, no)] if matches!(no.as_slice(), [Statement::If(..)])
-        ));
+        let [_, Statement::If(_, first, no)] = branch.checked.function.body.as_slice() else {
+            panic!("expected a conditional");
+        };
+        let [Statement::If(_, middle, last)] = no.as_slice() else {
+            panic!("expected the elif and else arms");
+        };
+        assert_checked_call(first, source, "accepted()");
+        assert_checked_call(last, source, "declined()");
+        assert!(!branch.child_suite(middle).unwrap().fully_checked());
         assert!(matches!(
             branch.operands.as_slice(),
             [PhysicalOperand::Checked(_), PhysicalOperand::Residual(_)]
         ));
-        let [first, middle, last] = branch.suites.as_slice() else {
-            panic!("expected three ordered suites");
-        };
-        assert!(first.fully_checked() && last.fully_checked());
-        assert!(!middle.fully_checked());
         let original = prepared.standalone().unwrap();
         prepared.syntax.as_mut().unwrap().to_mut().clear();
         assert_eq!(prepared.standalone().unwrap(), original);
@@ -4812,7 +4826,9 @@ mod tests {
         region(&mut prepared).operands[1] = saved;
         assert_eq!(prepared.standalone().unwrap(), original);
 
-        let middle = &mut region(&mut prepared).suites[1];
+        let [middle] = region(&mut prepared).suites.as_mut_slice() else {
+            panic!("expected the arm with the residual operand");
+        };
         assert!(middle.refusal.is_none());
         let [operand @ PhysicalOperand::Residual(_)] = middle.operands.as_mut_slice() else {
             panic!("expected only the call to need its source operand");
@@ -4841,7 +4857,7 @@ mod tests {
         let load = "load i64, ptr %ir_slot0";
         assert!(scoped.1.matches(load).count() > changed_child.1.matches(load).count());
 
-        // Removing the checked If disconnects all three still-bound child suites.
+        // Removing the checked If disconnects all three arms.
         let Some(Statement::Scope { body, .. }) =
             region(&mut prepared).checked.function.body.last_mut()
         else {
@@ -5069,8 +5085,8 @@ mod tests {
                 crate::frontend::PhysicalOperand::Checked(_)
             ]
         ));
-        assert!(region.suites[0].fully_checked());
-        let mixed = &region.suites[1];
+        assert_checked_call(&cases[0].body, source, "keep(item)");
+        let mixed = region.child_suite(&cases[1].body).unwrap();
         assert!(mixed.refusal.is_none());
         let positions: Vec<_> = input_statements(mixed).map(|(at, _)| at).collect();
         assert!(
@@ -5968,7 +5984,11 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             [PhysicalOperand::Residual(_)]
         ));
         assert!(!child(body).fully_checked());
-        assert!(child(orelse).fully_checked());
+        assert_checked_call(orelse, source, "record('clear')");
+        assert_eq!(
+            region.checked.local_names[&handlers[0].name.unwrap()].name,
+            "caught"
+        );
         assert!(!child(finalbody).fully_checked());
         let original = module.standalone().unwrap();
         let function = module.syntax.as_mut().unwrap().to_mut()[0]
