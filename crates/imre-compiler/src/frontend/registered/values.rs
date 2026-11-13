@@ -1476,8 +1476,9 @@ impl Checker<'_> {
                     && let Some(module) = field.value.as_name_expr()
                     && !self.names.contains_key(module.id.as_str())
                     && let Some(FixedAttribute::Call(saved)) = sites.remove(&call.range())
-                    && saved.1.suspended_name.is_none()
-                    && saved.1.callee_end == call.func.end()
+                    && matches!(&saved.1.call.target, ir::RegisteredCallTarget::Callable {
+                        end, suspended_name: None,
+                    } if *end == call.func.end())
                     && operands.is_original_operand(&call.func)
                 {
                     callee = Some((call.func.as_ref(), saved.0));
