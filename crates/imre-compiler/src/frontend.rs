@@ -1306,7 +1306,7 @@ fn lower_graph(
         let called_body = |report: Diagnostic| {
             let id = callable_definitions[signature.id];
             if graph.registered_startup
-                && module.checks_source_contracts()
+                && module.is_program_source()
                 && signature.method.is_none()
                 && let Some(operand) = report.exact_operand()
                 && let Some(function) =
