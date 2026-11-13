@@ -1315,29 +1315,34 @@ impl Checker<'_> {
                 kind: ExprKind::Builtin(operation, arguments.values),
             };
         }
-        let mut body = Vec::new();
-        let mut clear = Vec::new();
-        for value in arguments.values {
-            let slot = self.hidden(value.ty);
-            body.push(Statement::Assign(slot, value));
-            clear.push(slot);
-        }
+        let mut scope = ArgumentScope::default();
+        let values: Vec<_> = arguments
+            .values
+            .into_iter()
+            .map(|value| {
+                // Singleton and tagged constants need no owner while the other operands run.
+                let immediate = match &value.kind {
+                    ExprKind::Bool(_) | ExprKind::None => true,
+                    ExprKind::Absent(inner) => matches!(inner.kind, ExprKind::None),
+                    ExprKind::Int(_) => value.tagged_integer_literal().is_some(),
+                    _ => false,
+                };
+                if immediate {
+                    value
+                } else {
+                    scope.hold(self, value)
+                }
+            })
+            .collect();
         let args = arguments
             .order
-            .iter()
-            .map(|&index| self.local(clear[index]))
+            .into_iter()
+            .map(|index| values[index].clone())
             .collect();
-        Expr {
+        scope.finish(Expr {
             ty: returns,
-            kind: ExprKind::Scope {
-                body,
-                value: Box::new(Expr {
-                    ty: returns,
-                    kind: ExprKind::Builtin(operation, args),
-                }),
-                clear,
-            },
-        }
+            kind: ExprKind::Builtin(operation, args),
+        })
     }
 
     pub(super) fn reject_builtin_keywords(&self, call: &ast::ExprCall) -> Result<(), String> {
