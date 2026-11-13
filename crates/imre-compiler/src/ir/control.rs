@@ -47,31 +47,29 @@ pub(crate) enum Target {
     Yes,
     No,
 }
-/// Successors of each operand, in reverse execution order. The leaves stay
-/// with the caller and are never evaluated while planning.
-pub(crate) struct Edges(pub(crate) Vec<(Target, Target)>);
+/// Checked operands and their truth successors, in reverse execution order.
+pub(crate) struct Steps<'a>(pub(crate) Vec<Step<'a>>);
 
-/// The expression to evaluate and, when needed, its specialized truth operation.
-pub(crate) struct Input<'a> {
+pub(crate) struct Step<'a> {
     pub(crate) value: &'a Expr,
     pub(crate) predicate: Option<&'a TruthPredicate>,
+    pub(crate) yes: Target,
+    pub(crate) no: Target,
 }
 
-pub(crate) fn edges(expr: &Expr, context: Context, depth: Depth) -> (Edges, Vec<Input<'_>>) {
-    let mut plan = Edges(Vec::new());
-    let mut inputs = Vec::new();
+pub(crate) fn steps(expr: &Expr, context: Context, depth: Depth) -> Steps<'_> {
+    let mut plan = Steps(Vec::new());
     plan.lower(
-        &mut inputs,
-        Input {
+        Step {
             value: expr,
             predicate: None,
+            yes: Target::Yes,
+            no: Target::No,
         },
         context,
         depth,
-        Target::Yes,
-        Target::No,
     );
-    (plan, inputs)
+    plan
 }
 
 /// Typed boolean operands already lower to i1 and retain their own specializations.
@@ -81,38 +79,33 @@ pub(crate) enum Depth {
     All,
 }
 
-impl Edges {
-    fn leaf<'a>(
-        &mut self,
-        inputs: &mut Vec<Input<'a>>,
-        input: Input<'a>,
-        yes: Target,
-        no: Target,
-    ) -> Target {
-        let index = inputs.len();
-        inputs.push(input);
-        self.0.push((yes, no));
+impl<'a> Steps<'a> {
+    fn leaf(&mut self, step: Step<'a>) -> Target {
+        let index = self.0.len();
+        self.0.push(step);
         Target::Step(index)
     }
 
-    fn lower<'a>(
-        &mut self,
-        inputs: &mut Vec<Input<'a>>,
-        input: Input<'a>,
-        context: Context,
-        depth: Depth,
-        yes: Target,
-        no: Target,
-    ) -> Target {
-        let predicate = input.predicate;
+    fn lower(&mut self, step: Step<'a>, context: Context, depth: Depth) -> Target {
+        let Step {
+            value,
+            predicate,
+            yes,
+            no,
+        } = step;
         let mut child = |value, yes, no, predicate| {
-            let input = Input { value, predicate };
+            let step = Step {
+                value,
+                predicate,
+                yes,
+                no,
+            };
             match depth {
-                Depth::Root => self.leaf(inputs, input, yes, no),
-                Depth::All => self.lower(inputs, input, context, depth, yes, no),
+                Depth::Root => self.leaf(step),
+                Depth::All => self.lower(step, context, depth),
             }
         };
-        match &context.operand(input.value).kind {
+        match &context.operand(value).kind {
             ExprKind::Boolean(and, operands) => {
                 let (last, prefix) = operands.split_last().expect("nonempty boolean expression");
                 let mut next = child(last, yes, no, predicate);
@@ -142,33 +135,23 @@ impl Edges {
                 // The then arm jumps over it with a materialized result.
                 let yes_arm = match context {
                     Context::Condition => child(body, yes, no, predicate),
-                    Context::Value => self.leaf(
-                        inputs,
-                        Input {
-                            value: body,
-                            predicate,
-                        },
-                        yes,
-                        no,
-                    ),
+                    Context::Value => self.leaf(Step {
+                        value: body,
+                        ..step
+                    }),
                 };
-                let condition = Input {
+                let condition = Step {
                     value: test,
                     predicate: None,
+                    yes: yes_arm,
+                    no: no_arm,
                 };
                 match depth {
-                    Depth::Root => self.leaf(inputs, condition, yes_arm, no_arm),
-                    Depth::All => self.lower(
-                        inputs,
-                        condition,
-                        Context::Condition,
-                        depth,
-                        yes_arm,
-                        no_arm,
-                    ),
+                    Depth::Root => self.leaf(condition),
+                    Depth::All => self.lower(condition, Context::Condition, depth),
                 }
             }
-            _ => self.leaf(inputs, input, yes, no),
+            _ => self.leaf(step),
         }
     }
 }

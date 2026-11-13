@@ -1,11 +1,10 @@
 //! Branch plans and ownership transfers shared by fixed-layout values and Python frame entries.
 use super::{CheckedBody, CheckedValue, Entry, Value, ValueJoin};
-use crate::ir::control::{Context, Depth, Edges, Input, Target, edges, needs_truth_plan};
+use crate::ir::control::{Context, Depth, Step, Steps, Target, needs_truth_plan, steps};
 use crate::ir::{Builtin, Expr, ExprKind, TruthPredicate, Type};
 
 /// A logical plan owns the short-circuit edges and the selected value join.
 struct Logical {
-    edges: Edges,
     labels: Vec<String>,
     result: ResultEdges,
 }
@@ -20,52 +19,48 @@ enum ResultEdges {
 }
 
 impl Logical {
-    fn new(body: &mut super::FunctionBody, edges: Edges, result: ResultEdges) -> Self {
-        let labels = (1..edges.0.len()).map(|_| body.name("logical")).collect();
-        Self {
-            edges,
-            labels,
-            result,
-        }
-    }
-
-    fn branch(body: &mut super::FunctionBody, edges: Edges, yes: &str, no: &str) -> Self {
-        Self::new(
-            body,
-            edges,
+    fn branch(code: &mut CheckedBody, steps: Steps<'_>, yes: &str, no: &str) {
+        Self::emit(
+            code,
+            steps,
             ResultEdges::Branch(yes.to_owned(), no.to_owned()),
-        )
+        );
     }
 
-    fn value(body: &mut super::FunctionBody, edges: Edges, result_type: Type) -> Self {
-        let done = body.name("logical");
-        Self::new(
-            body,
-            edges,
+    fn value(code: &mut CheckedBody, steps: Steps<'_>, result_type: Type) -> CheckedValue {
+        let done = code.body().name("logical");
+        Self::emit(
+            code,
+            steps,
             ResultEdges::Value {
                 done,
                 join: ValueJoin::default(),
                 result_type,
             },
         )
+        .expect("a selected operand reaches the join")
     }
 
     /// Request each input on its own CFG edge. The last operand in value context
     /// is returned directly, without a truth callback.
-    fn emit(mut self, code: &mut CheckedBody, inputs: &[Input<'_>]) -> Option<CheckedValue> {
-        let context = match self.result {
+    fn emit(code: &mut CheckedBody, steps: Steps<'_>, result: ResultEdges) -> Option<CheckedValue> {
+        let body = code.body();
+        let labels = (1..steps.0.len()).map(|_| body.name("logical")).collect();
+        let context = match result {
             ResultEdges::Branch(..) => Context::Condition,
             ResultEdges::Value { .. } => Context::Value,
         };
-        for (i, leaf) in inputs.iter().enumerate().rev() {
-            let tested = context == Context::Value && !self.final_value(i);
-            if let Some(block) = self.labels.get(i) {
+        let mut logical = Self { labels, result };
+        for (i, step) in steps.0.iter().enumerate().rev() {
+            let tested = context == Context::Value
+                && (matches!(step.yes, Target::Step(_)) || matches!(step.no, Target::Step(_)));
+            if let Some(block) = logical.labels.get(i) {
                 code.body().start(block);
             }
             let mark = if tested { code.root_mark() } else { None };
-            self.accept(code, i, leaf, mark);
+            logical.accept(code, step, mark);
         }
-        match self.result {
+        match logical.result {
             ResultEdges::Branch(..) => None,
             ResultEdges::Value { done, join, .. } => {
                 let body = code.body();
@@ -75,21 +70,8 @@ impl Logical {
         }
     }
 
-    fn final_value(&self, i: usize) -> bool {
-        let (yes, no) = self.edges.0[i];
-        matches!(self.result, ResultEdges::Value { .. })
-            && !matches!(yes, Target::Step(_))
-            && !matches!(no, Target::Step(_))
-    }
-
-    fn accept(
-        &mut self,
-        code: &mut CheckedBody,
-        i: usize,
-        input: &Input<'_>,
-        mark: Option<String>,
-    ) {
-        let (t, f) = self.edges.0[i];
+    fn accept(&mut self, code: &mut CheckedBody, input: &Step<'_>, mark: Option<String>) {
+        let (t, f) = (input.yes, input.no);
         let label = |target, yes, no| match target {
             Target::Step(i) => self.labels[i].as_str(),
             Target::Yes => yes,
@@ -358,8 +340,7 @@ impl CheckedBody<'_, '_, '_, '_> {
             Entry::Native(_) => Self::logical_depth(expr),
             Entry::Registered(_) => Depth::All,
         };
-        let (edges, inputs) = edges(expr, Context::Condition, depth);
-        Logical::branch(self.body(), edges, yes, no).emit(self, &inputs);
+        Logical::branch(self, steps(expr, Context::Condition, depth), yes, no);
     }
 
     fn logical_operand(
@@ -394,10 +375,11 @@ impl CheckedBody<'_, '_, '_, '_> {
     }
 
     fn logical_value(&mut self, expr: &Expr) -> CheckedValue {
-        let (edges, inputs) = edges(expr, Context::Value, Self::logical_depth(expr));
-        Logical::value(self.body(), edges, expr.ty)
-            .emit(self, &inputs)
-            .expect("a selected operand reaches the join")
+        Logical::value(
+            self,
+            steps(expr, Context::Value, Self::logical_depth(expr)),
+            expr.ty,
+        )
     }
 
     pub(super) fn conditional_value(&mut self, test: &Expr, yes: &Expr, no: &Expr) -> CheckedValue {
