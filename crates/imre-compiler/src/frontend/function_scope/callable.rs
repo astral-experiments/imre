@@ -66,7 +66,7 @@ impl NamedFunction<'_> {
     pub(super) fn prepare(
         def: &ast::StmtFunctionDef,
         names: &imre_ast::Names,
-        lexical: FunctionScope,
+        lexical: &mut FunctionScope,
         suspension_flags: u32,
     ) -> Self {
         Self {
@@ -79,8 +79,8 @@ impl NamedFunction<'_> {
                 .map(|d| d.expression.start())
                 .collect(),
             doc: crate::frontend::docstring(&def.body),
-            metadata: CallableMetadata::new(Some(&def.parameters), &lexical, suspension_flags),
-            globals: lexical.names.globals,
+            metadata: CallableMetadata::new(Some(&def.parameters), lexical, suspension_flags),
+            globals: std::mem::take(&mut lexical.names.globals),
             annotations: None,
             generic: def.type_params.is_some(),
             type_params: Vec::new(),

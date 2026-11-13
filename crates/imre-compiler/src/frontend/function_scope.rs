@@ -56,7 +56,33 @@ impl ClosureNames {
         self.reads.extend(self.nonlocals.iter().cloned());
     }
 
-    /// A nested function's external reads propagate through its enclosing function.
+    /// Propagate a completed child's free names, including its lazy annotation scope.
+    fn read_child_function(&mut self, f: &ast::StmtFunctionDef, child: ClosureNames) {
+        self.incomplete |= child.incomplete;
+        let mut reads = child.reads;
+        let mut annotations = if self.string_annotations {
+            Vec::new()
+        } else {
+            crate::frontend::parameter_annotations(&f.parameters, f.returns.as_deref())
+        };
+        if let Some(params) = &f.type_params {
+            annotations.extend(
+                params
+                    .iter()
+                    .flat_map(imre_ast::TypeParameterField::expressions)
+                    .map(|(_, expr)| ("", expr)),
+            );
+        }
+        reads.extend(class_metadata::annotation_reads(&annotations, None, false));
+        if let Some(params) = &f.type_params {
+            for param in params.iter() {
+                reads.remove(param.name().as_str());
+            }
+        }
+        self.cell_reads.extend(reads.iter().cloned());
+        self.reads.extend(reads);
+    }
+
     fn child_reads(
         &mut self,
         parameters: Option<&ast::Parameters>,
@@ -84,33 +110,8 @@ impl<'a> Visitor<'a> for ClosureNames {
         match stmt {
             ast::Stmt::FunctionDef(f) => {
                 self.locals.insert(f.name.to_string());
-                if self.include_nested_reads {
-                    // The child body and its lazy annotations see type parameters. Only
-                    // the body sees the child's parameters and local bindings.
-                    let mut reads =
-                        self.child_reads(Some(&f.parameters), |child| child.visit_body(&f.body));
-                    let mut annotations = if self.string_annotations {
-                        Vec::new()
-                    } else {
-                        crate::frontend::parameter_annotations(&f.parameters, f.returns.as_deref())
-                    };
-                    if let Some(params) = &f.type_params {
-                        annotations.extend(
-                            params
-                                .iter()
-                                .flat_map(imre_ast::TypeParameterField::expressions)
-                                .map(|(_, expr)| ("", expr)),
-                        );
-                    }
-                    reads.extend(class_metadata::annotation_reads(&annotations, None, false));
-                    if let Some(params) = &f.type_params {
-                        for param in params.iter() {
-                            reads.remove(param.name().as_str());
-                        }
-                    }
-                    self.cell_reads.extend(reads.iter().cloned());
-                    self.reads.extend(reads);
-                } else {
+                // The declaration collector has already propagated this child's reads.
+                if !self.include_nested_reads {
                     self.incomplete = true;
                 }
                 for expr in imre_ast::function_definition_expressions(f) {
@@ -309,18 +310,17 @@ impl FunctionScope {
 
     fn function(
         def: &ast::StmtFunctionDef,
-        string_annotations: bool,
+        mut names: ClosureNames,
         may_capture_class: bool,
     ) -> Self {
-        let mut names = ClosureNames {
-            include_nested_reads: true,
-            string_annotations,
-            ..Default::default()
-        };
         names.visit_body(&def.body);
         let parameters = Some(def.parameters.as_ref());
         let captures_class = may_capture_class
-            && imre_ast::class_cell::function_needed(&def.body, parameters, string_annotations);
+            && imre_ast::class_cell::function_needed(
+                &def.body,
+                parameters,
+                names.string_annotations,
+            );
         Self::new(names, parameters, captures_class)
     }
 
@@ -391,6 +391,7 @@ impl<'p> ScopeFacts<'p> {
         let mut children = Vec::new();
         Collector {
             children: &mut children,
+            function_names: ClosureNames::default(),
             scopes: &mut scopes,
             names,
             scope: Scope::Module,
@@ -433,6 +434,8 @@ impl Scope {
 
 struct Collector<'s, 'p, 'a, A, G> {
     children: &'s mut FunctionChildren<'a>,
+    // Nested declarations finish before the enclosing function binds its own body.
+    function_names: ClosureNames,
     scopes: &'s mut ScopeFacts<'p>,
     names: &'s imre_ast::Names,
     scope: Scope,
@@ -458,6 +461,14 @@ where
         }
         match stmt {
             ast::Stmt::FunctionDef(def) => {
+                let parent_names = std::mem::replace(
+                    &mut self.function_names,
+                    ClosureNames {
+                        include_nested_reads: true,
+                        string_annotations: strings,
+                        ..Default::default()
+                    },
+                );
                 self.suite_scope = Some(Scope::Function {
                     is_async: def.is_async,
                 });
@@ -485,8 +496,13 @@ where
                         Scope::Class(site) => self.scopes.classes[&site].needs_class_cell,
                         Scope::Function { .. } | Scope::Lambda => true,
                     };
-                let lexical = FunctionScope::function(def, strings, may_capture_class);
-                let header = NamedFunction::prepare(def, self.names, lexical, suspension_flags);
+                let names = std::mem::replace(&mut self.function_names, parent_names);
+                let mut lexical = FunctionScope::function(def, names, may_capture_class);
+                let header =
+                    NamedFunction::prepare(def, self.names, &mut lexical, suspension_flags);
+                if matches!(self.scope, Scope::Function { .. }) {
+                    self.function_names.read_child_function(def, lexical.names);
+                }
                 self.scopes.functions.insert(start, header);
                 return;
             }
