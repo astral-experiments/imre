@@ -220,7 +220,7 @@ impl Context {
         self.mark_annotation(active, index)
     }
 
-    pub(super) fn mark_annotation(&mut self, active: Id, index: Id) -> Result<()> {
+    pub(in crate::dynamic) fn mark_annotation(&mut self, active: Id, index: Id) -> Result<()> {
         let set = self.scalar_value(active);
         if !matches!(self.heap.get(set), Value::Set { frozen: false, .. }) {
             return Err(Error::new("TypeError", "expected a set"));

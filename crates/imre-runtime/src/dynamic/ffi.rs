@@ -597,7 +597,7 @@ impl Context {
                 super::typing::parameter_scope(self, a, b, op == "class_parameter_scope")
             }
             "class_parameter_frame" => super::typing::class_parameter_frame(self, a, b),
-            "class_annotation_environment" => self.class_annotation_environment(a, b),
+            "class_annotation_environment" => Ok(self.class_annotation_environment(a)),
             "class_annotation_locals" => {
                 let parent = self.scope_data(a).parent.expect("annotation globals");
                 let local = self.scope("", Some(parent));
@@ -635,6 +635,7 @@ impl Context {
                 self.mark_module_annotation(a, b)?;
                 Ok(NONE)
             }
+            "mark_class_annotation" => self.record_class_annotation(a, b, c),
             "setup_module_string_annotations" | "setup_module_annotations" => {
                 self.setup_module_annotations(a, op == "setup_module_string_annotations")?;
                 Ok(NONE)
@@ -2750,20 +2751,6 @@ unsafe fn scoped_call(
     // emitter supplied no highlight for the traceback printer.
     finish_operand_position(ctx, &mut result, Some(value::TracebackAnchor::Hidden));
     finish_at(ctx, result, span)
-}
-
-/// Record a class annotation only when its statement executes.
-#[unsafe(no_mangle)]
-pub(super) unsafe extern "C" fn imre_dyn_mark_class_annotation(
-    ctx: *mut Context,
-    scope: Id,
-    name: Id,
-    offset: u32,
-) -> Id {
-    // SAFETY: the compiler passes the active context and handles from the current class body.
-    let ctx = unsafe { &mut *ctx };
-    let result = ctx.record_class_annotation(scope, name, offset);
-    finish(ctx, result)
 }
 
 /// Definition sites carry either an ordinary entry or a coroutine resume entry.

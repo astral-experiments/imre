@@ -1501,16 +1501,9 @@ pub(crate) struct AnnotationField {
 
 #[derive(Clone)]
 pub(crate) enum NamespaceAnnotation {
-    Module {
-        index: usize,
-    },
-    Class {
-        site: ruff_text_size::TextSize,
-        name: String,
-    },
-    String {
-        name: String,
-    },
+    Module { index: usize },
+    Class { index: Option<usize>, name: String },
+    String { name: String },
 }
 
 /// Acquisition and adaptation are separate when a generator stores its Python iterator in `.0`.
