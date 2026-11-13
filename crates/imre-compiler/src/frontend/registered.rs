@@ -3297,7 +3297,7 @@ impl SourceScope<'_> {
             .filter(|_| ir::control::boolean_literal(&test) != Some(true))
             .map(|message| self.frame_value(message).ok_or(()))
             .transpose()?;
-        Ok(assertion_statements(stmt, truth(test), message))
+        Ok(assertion_statements(stmt, test, message))
     }
 
     fn statement(&mut self, stmt: &ast::Stmt, body: &mut Vec<Statement>) -> StdResult<bool, ()> {
