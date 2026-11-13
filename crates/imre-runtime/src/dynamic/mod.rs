@@ -991,7 +991,7 @@ impl Context {
             },
             Value::Bytes(bytes) | Value::ByteArray(bytes) => Ok(bytes),
             _ => {
-                let name = self.type_name(id);
+                let name = stdlib::diagnostic_type_name(self, id);
                 let name = &name[..name.floor_char_boundary(100)];
                 Err(Error::new(
                     "TypeError",
