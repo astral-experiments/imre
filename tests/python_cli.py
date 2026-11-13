@@ -24,6 +24,15 @@ def check_registered_entry_operand(imre, root, run):
         "def publish(a: int, b: int, send):\n    send(a + b)\n"
         "def report(value):\n    print(value)\n"
     )
+    (root / "checked_result.py").write_text(
+        "def stop() -> int: print(input()); raise SystemExit(13)\n"
+        "def replacement() -> int: return 2\n"
+        "def compute(value: int) -> int:\n    if value: return stop()\n    return value\n"
+    )
+    entry.write_text("import checked_result as m\nm.stop = m.replacement\nprint(m.compute(1))\n")
+    result = run(imre, "-m", entry.stem, stdin=b"hello\n")
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"2\n", b""), result
+
     entry.write_text(
         "def model() -> int:\n"
         "    items: list[int] = [3]\n"

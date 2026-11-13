@@ -326,7 +326,9 @@ impl StatementLowering for Checker<'_> {
             }
             ret.value.as_deref()
         };
-        let statement = if terminates {
+        // A live Python replacement may return even when the selected fixed definition cannot.
+        // Keep the written return whenever its value already has the function's return type.
+        let statement = if terminates && value.ty != self.returns {
             Statement::Expr(value)
         } else {
             Statement::Return(value)
