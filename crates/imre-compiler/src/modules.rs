@@ -86,24 +86,22 @@ fn stat_mode_source() -> Option<&'static str> {
     }
 }
 
-/// Register a bundled Python file under its path in the standard library.
+/// Borrow a packaged input only when it has the fixed registration's physical origin.
 macro_rules! bundled_source {
-    ($path:literal, from $package:literal) => {
-        Some((
+    ($path:tt, from $package:tt) => {
+        $crate::zip_entry::packaged_fixed!(($path $package), Some((
             $path,
             include_str!(concat!(
-                "../../../benchmarks/cpython_stdlib/full/",
-                $package,
-                "/upstream/Lib/",
-                $path
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../benchmarks/cpython_stdlib/full/", $package, "/upstream/Lib/", $path
             )),
-        ))
+        )))
     };
-    ($path:literal) => {
-        Some((
+    ($path:tt) => {
+        $crate::zip_entry::packaged_fixed!(($path), Some((
             $path,
             include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/stdlib/", $path)),
-        ))
+        )))
     };
 }
 pub(crate) use bundled_source;

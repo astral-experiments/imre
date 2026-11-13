@@ -2251,7 +2251,12 @@ pub(crate) fn compile(
                             let Some(entry) = archive.module(&prefix) else {
                                 continue;
                             };
-                            (entry.path, entry.source, entry.package, Some(entry.digest))
+                            (
+                                entry.path,
+                                Cow::Owned(entry.source),
+                                entry.package,
+                                Some(entry.digest),
+                            )
                         } else {
                             use sha2::{Digest, Sha256};
                             let shipped = crate::zip_entry::installed_source(member)?;
@@ -2259,7 +2264,7 @@ pub(crate) fn compile(
                             let digest = root.map(|_| Sha256::digest(shipped.as_bytes()).into());
                             (
                                 root.unwrap_or(Path::new(bundled_root)).join(member),
-                                shipped,
+                                Cow::Borrowed(shipped),
                                 member.ends_with("/__init__.py"),
                                 digest,
                             )
@@ -2306,7 +2311,7 @@ pub(crate) fn compile(
                     } else {
                         bundled_imports.push_back(((prefix.clone(), package, imports), false));
                     }
-                    sources.push((prefix.clone(), path, source.into()));
+                    sources.push((prefix.clone(), path, source));
                 }
             }
         }
@@ -2714,7 +2719,7 @@ pub(crate) fn compile(
     let config = serde_json::json!({
         "bundled_root":bundled_root,
         "stdlib_fallback":stdlib_fallback,
-        "stdlib_members":include_str!(concat!(env!("OUT_DIR"), "/imre-stdlib-members.txt")),
+        "stdlib_members":crate::zip_entry::PACKAGED_MEMBERS,
         "sitecustomize":options.sitecustomize || options.stdlib_sitecustomize,"user_site_pth":options.user_site_pth,"after_user_site":after_user_site,"path0":path0_len != 0,
         "bundle_entry":bundle_entry,
         "python_version":crate::PYTHON_VERSION.to_string(),
@@ -3021,7 +3026,7 @@ pub(crate) fn bundled_module_source(
 ) -> Option<(&'static str, std::borrow::Cow<'static, str>)> {
     let (file, source) = if standalone && name == "_pydecimal" {
         // Standalone executables can run without the Python launcher's installed stdlib ZIP.
-        ("_pydecimal.py", include_str!("../../stdlib/_pydecimal.py"))
+        crate::modules::bundled_source!("_pydecimal.py")?
     } else if name == "dataclasses" {
         (
             "dataclasses.py",
