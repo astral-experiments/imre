@@ -1691,11 +1691,18 @@ impl Session {
         module: usize,
         function: &ruff_python_ast::StmtFunctionDef,
     ) -> bool {
-        let index =
-            ty_python_core::semantic_index(&self.db, self.db.program_file(self.files[module]));
+        self.indexed_generator(self.files[module], function) == Some(true)
+    }
+
+    fn indexed_generator(
+        &self,
+        file: File,
+        function: &ruff_python_ast::StmtFunctionDef,
+    ) -> Option<bool> {
+        let index = ty_python_core::semantic_index(&self.db, self.db.program_file(file));
         index
             .try_node_scope(ty_python_core::scope::NodeWithScopeRef::Function(function))
-            .is_some_and(|scope| scope.is_generator_function(index))
+            .map(|scope| scope.is_generator_function(index))
     }
 
     /// Whether this definition needs Python argument binding in a suspended generator frame.
