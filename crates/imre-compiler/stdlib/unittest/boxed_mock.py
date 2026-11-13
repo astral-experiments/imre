@@ -98,11 +98,7 @@ class _Call(tuple):
         # Let the expected arguments' comparison hooks run first.
         return (args, kwargs) == (self.args, self.kwargs)
 
-    def __ne__(self, other):
-        equal = _Call.__eq__(self, other)
-        if equal is NotImplemented:
-            return NotImplemented
-        return not equal
+    __ne__ = object.__ne__
 
     def __call__(self, /, *args, **kwargs):
         name = self._mock_name
@@ -631,7 +627,7 @@ class NonCallableMock(_FixedMock):
         cause = None
         if observed is not None:
             match = self._call_matcher(expected)
-            if self._call_matcher(observed) == match:
+            if not (self._call_matcher(observed) != match):
                 return
             if isinstance(match, Exception):
                 cause = match
