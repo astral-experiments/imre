@@ -1942,24 +1942,33 @@ impl<'a> SuitePreparation<'a> {
         selection: SuiteSelection,
         suspended: bool,
     ) -> PhysicalOperand {
-        let value = self.selected_operand(expr, kind, selection, suspended);
-        self.refusal = self.refusal.or_else(|| self.operand_refusal(&value));
-        value
+        self.owned_operand(expr, kind, suspended, |scope| {
+            scope.selected_operand(expr, selection)
+        })
     }
 
-    fn selected_operand(
-        &self,
+    /// Prepare the operand in the scope that already owns its consuming operation.
+    fn region_operand(
+        &mut self,
         expr: &ast::Expr,
-        kind: RegisteredScope,
+        scope: &mut SourceScope<'_>,
+        operands: &mut Vec<PhysicalOperand>,
         selection: SuiteSelection,
         suspended: bool,
-    ) -> PhysicalOperand {
-        let operand =
-            RegisteredOperand::prepare_with(self.source, kind, |scope| match (kind, selection) {
-                (RegisteredScope::Function { .. }, SuiteSelection::Physical) => scope.operand(expr),
-                _ => scope.ordinary_operand(expr),
-            });
-        self.retain_operand(expr, kind, suspended, operand)
+    ) -> Expr {
+        let start = scope.locals.len();
+        let value = scope.selected_operand(expr, selection);
+        scope.refusal = None;
+        if let Some(value) = value {
+            self.refusal = self
+                .refusal
+                .or_else(|| self.literal_refusal(RegionRoot::Operand(&value)));
+            return value;
+        }
+        scope.truncate_locals(start);
+        let value = self.retain_operand(expr, scope.kind, suspended, None);
+        self.refusal = self.refusal.or_else(|| self.operand_refusal(&value));
+        bind_operand(operands, value, Type::PythonObject)
     }
 
     fn owned_operand(
@@ -2155,7 +2164,6 @@ impl<'a> SuitePreparation<'a> {
             self.operations,
             self.sites.omit_assertions,
         );
-        scope.report_child_refusals = true;
         let mut operands = Vec::new();
         let mut statements = vec![Statement::Expr(operation(
             Builtin::RegisteredStatement(stmt.range(), None),
@@ -2165,11 +2173,16 @@ impl<'a> SuitePreparation<'a> {
         let mut protected = &mut statements;
         let mut refused_binding = None;
         for item in &stmt.items {
-            let input = self.selected_operand(&item.context_expr, kind, selection, suspended);
-            self.refusal = self.refusal.or_else(|| self.operand_refusal(&input));
+            let manager = self.region_operand(
+                &item.context_expr,
+                &mut scope,
+                &mut operands,
+                selection,
+                suspended,
+            );
             let site = context_site(self.source.text, &item.context_expr, stmt.is_async);
-            let manager = bind_operand(&mut operands, input, Type::PythonObject);
             let manager = values::located(site.range, site.anchor, manager);
+            scope.report_child_refusals = true;
             let binding = match scope.with_binding(item) {
                 Ok(binding) => {
                     self.refusal = self.refusal.or_else(|| {
@@ -2182,6 +2195,7 @@ impl<'a> SuitePreparation<'a> {
                     None
                 }
             };
+            scope.report_child_refusals = false;
             protected = contexts::enter_python(protected, site, manager, binding);
             if refused_binding.is_some() {
                 break;
@@ -2242,15 +2256,15 @@ impl<'a> SuitePreparation<'a> {
         selection: SuiteSelection,
         suspended: bool,
     ) -> StdResult<RegisteredSuite, OperandRefusal> {
-        let iterable = self.physical_operand(&loop_.iter, kind, selection, suspended);
         let mut operands = Vec::new();
-        let iterable = bind_operand(&mut operands, iterable, Type::PythonObject);
         let mut scope = SourceScope::new(
             kind,
             self.source,
             self.operations,
             self.sites.omit_assertions,
         );
+        let iterable =
+            self.region_operand(&loop_.iter, &mut scope, &mut operands, selection, suspended);
         let mut input = cursor_input(
             iterable,
             Type::PythonObject,
@@ -3636,6 +3650,13 @@ impl SourceScope<'_> {
             })
             .collect::<StdResult<_, _>>()?;
         Ok(values::lambda_binding(lambda, defaults))
+    }
+
+    fn selected_operand(&mut self, expr: &ast::Expr, selection: SuiteSelection) -> Option<Expr> {
+        match (self.kind, selection) {
+            (RegisteredScope::Function { .. }, SuiteSelection::Physical) => self.operand(expr),
+            _ => self.ordinary_operand(expr),
+        }
     }
 
     fn ordinary_operand(&mut self, expr: &ast::Expr) -> Option<Expr> {
