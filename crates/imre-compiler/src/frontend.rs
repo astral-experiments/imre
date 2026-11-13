@@ -5282,9 +5282,9 @@ impl<'a> Checker<'a> {
         } else if let Some(input) = self.unpacked_list_enumeration(loop_)? {
             input
         } else {
-            self.iteration_input(&loop_.iter, self.split_guard(loop_))?
+            let input = self.iteration_input(&loop_.iter, self.split_guard(loop_))?;
+            self.fuse_split(input)
         };
-        input = self.fuse_split(input);
         if let Iteration::Container {
             iterable,
             items: false,
