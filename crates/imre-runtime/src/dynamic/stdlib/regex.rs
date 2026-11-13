@@ -1409,7 +1409,7 @@ pub(super) fn module_call(
     let pattern = compiled(ctx, pattern.ok_or_else(|| missing("pattern"))?, flags)?;
     match name.strip_prefix("re.") {
         Some(method @ ("match" | "fullmatch" | "search" | "finditer" | "findall")) => {
-            search(ctx, method, &[pattern, string], &[])
+            search_pattern(ctx, method, pattern, string, None, None)
         }
         _ => Err(Error::new(
             "AttributeError",
@@ -1732,7 +1732,6 @@ impl SearchSubject {
     }
 }
 
-/// Convert the Python character bounds before searching the original UTF-8 text.
 pub(super) fn search(
     ctx: &mut Context,
     method: &str,
@@ -1753,6 +1752,18 @@ pub(super) fn search(
             format!("{method}() missing required argument 'string' (pos 1)"),
         )
     })?;
+    search_pattern(ctx, method, receiver, string, pos, endpos)
+}
+
+/// Convert the Python character bounds before searching the original UTF-8 text.
+fn search_pattern(
+    ctx: &mut Context,
+    method: &str,
+    receiver: Id,
+    string: Id,
+    pos: Option<Id>,
+    endpos: Option<Id>,
+) -> Result<Id> {
     let mut index = |arg| -> Result<usize> {
         let value = ctx
             .index_integer(arg)?
