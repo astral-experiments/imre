@@ -18,8 +18,7 @@ use crate::frontend::{
 use crate::ir::RegisteredTypeParameter;
 use crate::llvm::ModuleLauncher;
 use crate::llvm::registered::sites::{
-    CheckedSites, CompiledAlias, CompiledDefinition, CompiledGenerator, CompiledTypeParameters,
-    Declaration,
+    CheckedSites, CompiledAlias, CompiledDefinition, CompiledTypeParameters, Declaration,
 };
 use crate::llvm::registered::{
     ABI, AnnotationScope, Output, RegisteredFrame, SourcePositions, sites,
@@ -1264,12 +1263,9 @@ impl<'p> sites::SiteDefinitions<'p> for LexicalDefinitions<'_, 'p> {
         (namespace, parameters, class.range)
     }
 
-    fn generator(&mut self, site: TextRange) -> CompiledGenerator {
+    fn generator(&mut self, site: TextRange) -> CompiledDefinition {
         let body = &self.source.generators[&site];
-        CompiledGenerator {
-            function: self.compile_callable(site.start(), Callable::Generator(body)),
-            acquire: body.acquire,
-        }
+        self.compile_callable(site.start(), Callable::Generator(body))
     }
 
     fn type_alias(&mut self, site: TextSize) -> Result<CompiledAlias, String> {
@@ -5397,7 +5393,9 @@ mod tests {
         let mut references = Vec::new();
         let mut caller_names = Vec::new();
         crate::ir::walk_operand_expressions(&template.value, &mut |expr| match &expr.kind {
-            ExprKind::Builtin(Builtin::RegisteredGenerator(range, _), _) => references.push(*range),
+            ExprKind::Builtin(Builtin::RegisteredGenerator(range, ..), _) => {
+                references.push(*range)
+            }
             ExprKind::Builtin(Builtin::RegisteredName(name), _) => caller_names.push(name.as_str()),
             _ => {}
         });

@@ -2284,9 +2284,8 @@ pub(crate) enum Builtin {
     /// Bind the prepared lambda at this site. An explicit lexical scope, when present,
     /// precedes the default values in Python parameter order.
     RegisteredLambda(ruff_text_size::TextSize, bool),
-    /// Instantiate a prepared generator child. Its acquired outer cursor follows any
-    /// explicit comprehension scope in the operands.
-    RegisteredGenerator(ruff_text_size::TextRange, bool),
+    /// Evaluate the outer iterable after any explicit scope and acquire the child's cursor.
+    RegisteredGenerator(ruff_text_size::TextRange, bool, IteratorOp),
     /// Construct a lazy alias whose value callable was checked at this declaration site.
     RegisteredTypeAlias(ruff_text_size::TextSize),
     RegisteredImport(NamespaceImport),
