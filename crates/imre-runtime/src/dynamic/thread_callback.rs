@@ -399,10 +399,12 @@ impl Callback {
     }
 
     pub(super) fn load(self) -> Result<(Context, Id, Vec<Id>)> {
-        let mut heap = super::Heap::with_worker_stack(Some(self.frames));
-        heap.allocation_traces = self.allocation_traces;
+        let heap = super::Heap::with_worker_stack(
+            Some(self.frames),
+            self.gc_settings,
+            self.allocation_traces,
+        );
         let mut ctx = ffi::new_context_with_heap(self.config, std::iter::empty::<String>(), heap);
-        ctx.heap.gc_settings = self.gc_settings;
         ctx.socket_default_timeout = self.socket_default_timeout;
         ctx.finalizing = self.finalizing;
         let globals = ctx.scope(&self.module, None);

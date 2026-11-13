@@ -5,6 +5,7 @@ mod weak_roots;
 
 use text_positions::TextPosition;
 
+use super::allocation_traces::AllocationTraces;
 use super::gc_schedule::{GcSchedule, GcSettings};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -3694,7 +3695,7 @@ enum FinalizerBindingSlot {
 pub(super) struct Heap {
     root_trace: RootTrace,
     slots: Vec<Slot>,
-    pub(super) allocation_traces: super::allocation_traces::AllocationTraces,
+    pub(super) allocation_traces: AllocationTraces,
     pub(super) loading_linked_constant: bool,
     // Keep the collector's links contiguous so it can scan marks without loading every Value.
     traces: Vec<Cell<usize>>,
@@ -3936,10 +3937,14 @@ impl Heap {
     }
 
     pub fn new() -> Self {
-        Self::with_worker_stack(None)
+        Self::with_worker_stack(None, Arc::default(), AllocationTraces::default())
     }
 
-    pub(super) fn with_worker_stack(reserved: Option<WorkerStack>) -> Self {
+    pub(super) fn with_worker_stack(
+        reserved: Option<WorkerStack>,
+        gc_settings: Arc<GcSettings>,
+        allocation_traces: AllocationTraces,
+    ) -> Self {
         let mut slots = vec![
             Slot::new(Value::None),
             Slot::new(Value::Bool(false)),
@@ -3964,7 +3969,7 @@ impl Heap {
                 })
                 .collect(),
             slots,
-            allocation_traces: Default::default(),
+            allocation_traces,
             loading_linked_constant: false,
             gc_order: GcOrder::EMPTY,
             full_collection: None,
@@ -3990,7 +3995,7 @@ impl Heap {
             fault_workers: RefCell::new(None),
             next_collection: FIRST_DYNAMIC_SLOT + 4096,
             byte_buffer_allowance: BYTE_BUFFER_FLOOR,
-            gc_settings: Arc::default(),
+            gc_settings,
             gc_schedule: GcSchedule::default(),
             weak: HashMap::new(),
             weak_roots: Default::default(),
@@ -7371,6 +7376,29 @@ impl Heap {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn worker_bootstrap_uses_its_interpreters_gc_and_tracing_settings() {
+        let parent = Heap::new();
+        let independent = Heap::new();
+        parent.set_gc_thresholds(&[1]);
+        parent.allocation_traces.start(3);
+        let heap = Heap::with_worker_stack(
+            Some(WorkerStack::reserve().unwrap()),
+            Arc::clone(&parent.gc_settings),
+            parent.allocation_traces.worker(),
+        );
+        let worker = crate::dynamic::ffi::new_context_with_heap(
+            serde_json::json!({}),
+            std::iter::empty::<String>(),
+            heap,
+        );
+        assert!(worker.heap.gc_schedule.requested());
+        assert!(worker.heap.allocation_traces.get(worker.argv).is_some());
+        assert!(parent.allocation_traces.get(worker.argv).is_none());
+        assert!(!independent.allocation_traces.is_tracing());
+        assert_ne!(independent.gc_thresholds()[0], 1);
+    }
 
     #[test]
     fn forwarded_yield_releases_only_published_or_retained_handles() {
