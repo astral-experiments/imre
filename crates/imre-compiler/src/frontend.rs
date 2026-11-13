@@ -8357,6 +8357,7 @@ impl<'a> Checker<'a> {
                     (expression, &value.kind),
                     (ast::Expr::StringLiteral(_), ExprKind::Str(_))
                         | (ast::Expr::BooleanLiteral(_), ExprKind::Bool(_))
+                        | (ast::Expr::NoneLiteral(_), ExprKind::None)
                         | (ast::Expr::List(_), ExprKind::List(_))
                         | (ast::Expr::Tuple(_), ExprKind::Tuple(_))
                         | (
