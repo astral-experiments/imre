@@ -1073,6 +1073,7 @@ pub(crate) struct FunctionSite<'a> {
     pub(crate) annotations: Option<Box<ParameterAnnotations>>,
     pub(crate) parameters: Option<Vec<ir::RegisteredTypeParameter<ParameterEvaluator>>>,
     pub(crate) prepare_entry: bool,
+    module_scope: bool,
     pub(crate) thread_entry: Option<imre_ast::ThreadEntry>,
 }
 
@@ -1280,6 +1281,7 @@ pub(super) fn collect_sites<'a>(
                                 })
                             }),
                             prepare_entry: !unprepared || worker,
+                            module_scope: matches!(self.scope, RegisteredScope::Module),
                             thread_entry,
                         }));
                     if worker {
@@ -1790,7 +1792,6 @@ impl<'a> SuitePreparation<'a> {
         let def = site.def;
         header.type_params = site.parameters.unwrap_or_default();
         header.annotations = site.annotations;
-        header.prepare_signature(def, site.thread_entry, python_annotations);
         // A checked frame can reference lexical activations prepared at this definition.
         let checked = checked.filter(|body| match &body.inputs {
             FrameInputs::Checked => true,
@@ -1831,6 +1832,17 @@ impl<'a> SuitePreparation<'a> {
             let refusal = suite.refusal;
             (NamedBody::from_suite(suite), refusal)
         };
+        // Only a module-level function with checked parameters fixes a scalar
+        // argument. Other functions bind through their live annotation references.
+        let fixed_parameters = match body.as_ref() {
+            RegisteredBody::Function(frame)
+                if site.module_scope && matches!(frame.inputs, FrameInputs::Checked) =>
+            {
+                Some(frame)
+            }
+            _ => None,
+        };
+        header.prepare_signature(def, site.thread_entry, python_annotations, fixed_parameters);
         header.body = Some(body);
         if let Some(refusal) = refusal {
             self.declaration_refusals.insert(def.start(), refusal);
