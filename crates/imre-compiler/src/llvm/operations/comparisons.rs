@@ -1,7 +1,7 @@
 //! Source-ordered comparison links, with an early exit for each false middle result.
 use super::super::{Compare, Expr, Type, Value, read_only_field_operand};
 use super::{CheckedBody, CheckedValue, Entry, ValueJoin};
-use crate::llvm::registered::permanent;
+use crate::llvm::registered::{permanent, permanent_handle};
 use ruff_python_ast::CmpOp;
 
 impl CheckedValue {
@@ -50,12 +50,18 @@ impl<'f, 'a, 'p, 'm> CheckedBody<'f, 'a, 'p, 'm> {
             {
                 return self.comparison_result(CheckedValue::handle(result), truth);
             }
+            // An identity test cannot run Python, and a permanent right operand has no root to release.
+            let right_scope = (chain.root.is_some()
+                && chain.left.is_some()
+                && !(matches!(chain.ops.first(), Some(CmpOp::Is | CmpOp::IsNot))
+                    && permanent_handle(expr).is_some()))
+            .then(|| self.python().compare_scope());
             let value = if immediate {
                 CheckedValue::native(self.fixed().immediate_receiver(expr))
             } else {
                 self.store_operand(expr)
             };
-            if let Some(result) = chain.push(self, value) {
+            if let Some(result) = chain.push(self, value, right_scope) {
                 return result;
             }
         }
@@ -112,7 +118,6 @@ struct ComparisonChain<'a> {
     ops: &'a [CmpOp],
     truth: bool,
     root: Option<(String, (String, String))>,
-    right_scope: Option<(String, (String, String))>,
     left: Option<CheckedValue>,
     done: String,
     join: ValueJoin,
@@ -132,7 +137,6 @@ impl<'a> ComparisonChain<'a> {
             ops,
             root,
             truth,
-            right_scope: None,
             left: None,
             done: code.body().name("compare_end"),
             join: ValueJoin::default(),
@@ -144,9 +148,10 @@ impl<'a> ComparisonChain<'a> {
         &mut self,
         code: &mut CheckedBody<'_, '_, '_, '_>,
         right: CheckedValue,
+        right_scope: Option<(String, (String, String))>,
     ) -> Option<CheckedValue> {
         let Some(left) = self.left.take() else {
-            self.prepare_right(code, right);
+            self.left = Some(right);
             return None;
         };
         let (&op, remaining) = self.ops.split_first().expect("checked comparison link");
@@ -156,7 +161,6 @@ impl<'a> ComparisonChain<'a> {
         let root = &self.root;
         let done = &self.done;
         let join = &mut self.join;
-        let right_scope = self.right_scope.take();
         let value = code.compare_pair(op, &left, &right);
         let handle = match &value {
             CheckedValue::Handle { id, .. } => Some(id.as_str()),
@@ -170,7 +174,7 @@ impl<'a> ComparisonChain<'a> {
         if last {
             if let Some((mark, _)) = root {
                 // Release right before left; a rich comparison result may alias either.
-                for boundary in [right_mark.as_ref().unwrap(), mark] {
+                for boundary in right_mark.iter().chain([mark]) {
                     if let Some(id) = handle {
                         code.python().keep_operands(boundary, id, "0");
                     } else {
@@ -243,12 +247,7 @@ impl<'a> ComparisonChain<'a> {
             code.python().discard_truth(middle.as_ref().unwrap());
         }
         self.branched = true;
-        self.prepare_right(code, right);
+        self.left = Some(right);
         None
-    }
-
-    fn prepare_right(&mut self, code: &mut CheckedBody<'_, '_, '_, '_>, left: CheckedValue) {
-        self.left = Some(left);
-        self.right_scope = self.root.as_ref().map(|_| code.python().compare_scope());
     }
 }
