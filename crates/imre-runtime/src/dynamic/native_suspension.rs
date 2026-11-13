@@ -81,7 +81,7 @@ impl Saved {
             (*activation).context = std::ptr::null_mut();
             (*activation).input = None;
             let step = (*activation).step.take();
-            if let Some(error) = ctx.pending.take() {
+            if let Some(error) = ctx.heap.execution.pending.take() {
                 return Err(error);
             }
             step.ok_or_else(|| Error::new("SystemError", "compiled coroutine returned no result"))
@@ -254,12 +254,12 @@ impl Context {
         let value = match completed {
             Ok(value) => value,
             Err(error) => {
-                self.pending = Some(error);
+                self.heap.execution.pending = Some(error);
                 NONE
             }
         };
-        self.leave_frame(value, self.pending.is_none());
-        if let Some(error) = self.pending.take() {
+        self.leave_frame(value, self.heap.execution.pending.is_none());
+        if let Some(error) = self.heap.execution.pending.take() {
             return Err(error);
         }
         match value {
@@ -332,7 +332,7 @@ pub(super) unsafe extern "C" fn imre_dyn_coro_alloc(
         return memory.as_ptr().cast();
     }
     // SAFETY: resume installed the active Context for the duration of this entry.
-    unsafe { &mut *data.context }.pending = Some(crate::Error::allocation().into());
+    unsafe { &mut *data.context }.heap.execution.pending = Some(crate::Error::allocation().into());
     std::ptr::null_mut()
 }
 
@@ -371,7 +371,7 @@ pub(super) unsafe extern "C" fn imre_dyn_suspend_operands(
         3 => Step::YieldFrom(value, mark),
         _ => {
             // SAFETY: this callback runs within the activation that borrowed the Context.
-            unsafe { &mut *data.context }.pending =
+            unsafe { &mut *data.context }.heap.execution.pending =
                 Some(Error::new("SystemError", "invalid suspension operation"));
             return;
         }

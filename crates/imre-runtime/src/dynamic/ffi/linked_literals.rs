@@ -28,7 +28,7 @@ pub(super) unsafe extern "C" fn imre_dyn_linked_string(
 ) -> Id {
     // SAFETY: the caller passes the active frame's context.
     let ctx = unsafe { &mut *ctx };
-    if ctx.pending.is_some() {
+    if ctx.heap.execution.pending.is_some() {
         return NONE;
     }
     let key = ConstantSlot::Linked(slot.addr());
@@ -39,7 +39,7 @@ pub(super) unsafe extern "C" fn imre_dyn_linked_string(
     // SAFETY: the emitter places the exact length of immutable data in this code unit.
     let bytes = unsafe { std::slice::from_raw_parts(data, len) };
     let value = ctx.linked_constant(|ctx| load_linked_literal(ctx, kind, bytes));
-    if ctx.pending.is_some() {
+    if ctx.heap.execution.pending.is_some() {
         return NONE;
     }
     // The ordinary literal loader has already rooted the result in this frame.

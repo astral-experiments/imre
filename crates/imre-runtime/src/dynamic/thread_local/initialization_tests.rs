@@ -35,7 +35,7 @@ unsafe extern "C" fn init(raw: *mut Context, scope: Id) -> Id {
         Ok(result) => result,
         Err(mut error) => {
             ctx.record_exception_frame(&mut error, None);
-            ctx.pending = Some(error);
+            ctx.heap.execution.pending = Some(error);
             NONE
         }
     }

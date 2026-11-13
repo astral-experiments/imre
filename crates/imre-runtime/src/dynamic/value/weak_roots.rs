@@ -346,6 +346,7 @@ impl RootPaths {
         !self.nodes.is_empty()
             && self.anchors.iter().all(|&(origin, root)| match origin {
                 Root::Frame(index) => heap
+                    .execution
                     .frames
                     .get(index)
                     .is_some_and(|frame| frame.scope == root),
@@ -380,7 +381,7 @@ impl RootPaths {
             .into_iter()
             .enumerate()
             .map(|(i, id)| (id, Root::Global(i)));
-        if !wanted.is_empty() && (full_frame_search || !heap.frames.is_empty()) {
+        if !wanted.is_empty() && (full_frame_search || !heap.execution.frames.is_empty()) {
             // Small weak-reference cohorts may have frame-held targets without a finalizer.
             // Reserve the rest of the search for paths through global modules.
             let reserved_nodes = if full_frame_search {
@@ -396,6 +397,7 @@ impl RootPaths {
             nodes_left -= reserved_nodes;
             edges_left -= reserved_edges;
             let roots = heap
+                .execution
                 .frames
                 .iter()
                 .enumerate()
@@ -696,8 +698,9 @@ impl Heap {
             return false;
         };
         last_owner == owner
-            && (frame + 1 < self.frames.len() || operand < retained_current)
+            && (frame + 1 < self.execution.frames.len() || operand < retained_current)
             && self
+                .execution
                 .frames
                 .get(frame)
                 .and_then(|f| f.live.get(operand))
@@ -711,12 +714,17 @@ impl Heap {
 
     /// Search published caller operands and the surviving prefix of the active frame.
     fn find_finalizer_operand(&self, owner: Id, retained_current: usize) -> bool {
-        let Some(active) = self.frames.len().checked_sub(1) else {
+        let Some(active) = self.execution.frames.len().checked_sub(1) else {
             return false;
         };
         const MAX_CALLER_OPERANDS: usize = 192;
-        let active_limit = self.frames[active].live.len().min(retained_current).min(8);
+        let active_limit = self.execution.frames[active]
+            .live
+            .len()
+            .min(retained_current)
+            .min(8);
         let mut operands = self
+            .execution
             .frames
             .iter()
             .enumerate()
