@@ -807,7 +807,7 @@ mod tests {
                     functions: module.functions,
                     frames: fixed.frame_sources,
                 }
-                .register(&graph, &owners, |module, range, _| {
+                .register(&graph, &owners, |module, range| {
                     checks.accepts(&graph, module, range)
                 });
             } else {

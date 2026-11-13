@@ -3350,7 +3350,12 @@ impl SourceGraph {
             .insert(start, body);
     }
 
-    pub(crate) fn defer_registered_function(&self, module: ModuleId, start: TextSize) {
+    pub(crate) fn defer_registered_function(
+        &self,
+        module: ModuleId,
+        start: TextSize,
+        use_lexical_body: bool,
+    ) {
         let mut functions = self.registered_functions.borrow_mut();
         let entries = functions
             .admitted
@@ -3360,9 +3365,10 @@ impl SourceGraph {
         if entries.is_empty() {
             functions.admitted.remove(&module);
         }
-        // A fixed method carries its own placement proof. Its failed source check
+        // A fixed body carries its own placement proof. Its failed source check
         // cannot authorize that placement at a later Python call.
-        if !matches!(body.inputs, crate::frontend::FrameInputs::Protocol { .. }) {
+        if use_lexical_body && !matches!(body.inputs, crate::frontend::FrameInputs::Protocol { .. })
+        {
             functions.lexical.push((module, start, body));
         }
     }

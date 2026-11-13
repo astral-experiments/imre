@@ -354,7 +354,7 @@ mod tests {
             functions: fixed.ir.0.functions,
             frames: fixed.frame_sources,
         }
-        .register(&graph, &fixed.ir.1, |module, range, _| {
+        .register(&graph, &fixed.ir.1, |module, range| {
             checked.push((module, range.start()));
             true
         });
