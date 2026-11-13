@@ -1685,7 +1685,7 @@ impl Program {
                     names.push(s.module.map_or_else(ast::name::Name::empty, |name| name.id));
                     for alias in s.names {
                         let name = alias.name.id;
-                        let local = alias.asname.map_or_else(|| name.clone(), |alias| alias.id);
+                        let asname = alias.asname.map(|alias| alias.id);
                         if name.as_str() == "*" {
                             if function || self.class_scope {
                                 return Err(Error::new(
@@ -1694,10 +1694,11 @@ impl Program {
                                 ));
                             }
                         } else {
-                            self.locals.insert(local.to_string());
+                            self.locals
+                                .insert(asname.as_ref().unwrap_or(&name).to_string());
                         }
                         names.push(name);
-                        names.push(local);
+                        names.extend(asname);
                     }
                     SourceItem::Names(names)
                 }
