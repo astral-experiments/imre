@@ -7351,7 +7351,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         };
         assert!(matches!(
             value.kind,
-            crate::ir::ExprKind::Builtin(crate::ir::Builtin::RegisteredDeleteItem, _)
+            crate::ir::ExprKind::Builtin(crate::ir::Builtin::DeleteItem, _)
         ));
         assert!(*at > 0 && *at + 1 < suite.checked.function.body.len());
         branch.cases[0].body[0]
@@ -7393,7 +7393,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         };
         assert_eq!(*at + 1, suite.checked.function.body.len());
         assert!(
-            matches!(&value.kind, crate::ir::ExprKind::Builtin(crate::ir::Builtin::RegisteredDeleteItem, slots)
+            matches!(&value.kind, crate::ir::ExprKind::Builtin(crate::ir::Builtin::DeleteItem, slots)
             if slots.len() == 2)
         );
         let [

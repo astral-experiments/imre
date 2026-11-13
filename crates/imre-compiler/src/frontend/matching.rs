@@ -838,7 +838,7 @@ impl Checker<'_> {
         pattern.body.extend(keys.into_iter().map(|key| {
             Statement::Expr(builtin(
                 Type::None,
-                Builtin::DictDelete,
+                Builtin::DeleteItem,
                 vec![self.local(result), key],
             ))
         }));

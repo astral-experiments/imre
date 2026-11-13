@@ -2338,8 +2338,6 @@ pub(crate) enum Builtin {
     /// Two bounds represent a simple slice. A third operand is its explicit stride.
     RegisteredSlice,
     RegisteredIndexConstant(Constant),
-    /// Multiple subscript arguments form one tuple key. Markers identify starred inputs.
-    RegisteredDeleteItem,
     RegisteredEllipsis,
     RegisteredComplex(f64, f64),
     /// Little-endian Python code points preserve non-scalar values and linked literal identity.
@@ -2598,7 +2596,8 @@ pub(crate) enum Builtin {
     DictTryPop(Type),
     /// Arguments are key then dictionary, matching membership evaluation order.
     DictContains,
-    DictDelete,
+    /// Delete the evaluated key from its receiver. Each entry uses its native storage.
+    DeleteItem,
     DictClear,
     DictUpdate,
     /// False visits keys; true visits key/value pairs without an intermediate tuple.

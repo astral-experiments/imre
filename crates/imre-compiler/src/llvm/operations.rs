@@ -578,6 +578,46 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         }
     }
 
+    /// Keep the receiver alive across key evaluation and release both operands after deletion.
+    fn delete_item(&mut self, receiver: &Expr, key: &Expr) -> CheckedValue {
+        let roots = match &mut self.0 {
+            Entry::Registered(frame) => Some((frame.temporary_mark(), frame.begin_operand_scope())),
+            Entry::Native(_) => None,
+        };
+        let mut next_mark = None;
+        let [receiver, key] = [receiver, key].map(|expr| {
+            let value = self.rooted_operand(expr);
+            if let Some((mark, _)) = &roots {
+                next_mark = Some(self.python().keep_operands(
+                    next_mark.as_deref().unwrap_or(mark),
+                    value.rooted_handle(),
+                    "0",
+                ));
+            }
+            value
+        });
+        if let Some((mark, failure)) = roots {
+            let frame = self.python();
+            let result = frame.op("delitem", &[receiver.rooted_handle(), key.rooted_handle()]);
+            frame.finish_unwind(failure, |frame| frame.release_owned_operands(&mark));
+            frame.release_owned_operands(&mark);
+            return CheckedValue::handle(result);
+        }
+        let receiver = receiver.into_native();
+        let key = key.into_native();
+        self.fixed()
+            .at_builtin_origin(&Builtin::DeleteItem, |code| {
+                let word = code.key_word(&key.value);
+                code.checked_line(format!(
+                    "call void @imre_dict_delete(ptr {}, i64 {word})",
+                    receiver.value.operand
+                ));
+                code.release_operand(&receiver);
+                code.release_operand(&key);
+            });
+        CheckedValue::owned(none())
+    }
+
     fn subscript(&mut self, op: &Builtin, operands: &[Expr], returns: Type) -> CheckedValue {
         let [base, key] = operands else {
             unreachable!("checked subscript operands")
@@ -947,6 +987,12 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 | Builtin::RegisteredSubscript(..)),
                 args,
             ) => self.subscript(op, args, expr.ty),
+            ExprKind::Builtin(Builtin::DeleteItem, args) => {
+                let [receiver, key] = args.as_slice() else {
+                    unreachable!("checked deletion operands")
+                };
+                self.delete_item(receiver, key)
+            }
             ExprKind::Builtin(op @ (Builtin::Append | Builtin::SetAdd), args) => {
                 self.insert(op, args)
             }

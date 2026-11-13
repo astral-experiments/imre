@@ -4509,7 +4509,7 @@ impl Emitter<'_, '_> {
             | Builtin::RegisteredSpread
             | Builtin::RegisteredIndexConstant(_)
             | Builtin::RegisteredSlice
-            | Builtin::RegisteredDeleteItem
+            | Builtin::DeleteItem
             | Builtin::RegisteredEllipsis
             | Builtin::RegisteredComplex(..)
             | Builtin::FormatConversion(_)
@@ -8728,14 +8728,6 @@ impl Emitter<'_, '_> {
                 for source in &args[1..] {
                     self.void_call("imre_dict_update", &[&args[0].value, &source.value]);
                 }
-                none()
-            }
-            Builtin::DictDelete => {
-                let key = self.key_word(&args[1].value);
-                self.checked_line(format!(
-                    "call void @imre_dict_delete(ptr {}, i64 {key})",
-                    args[0].value.operand
-                ));
                 none()
             }
             Builtin::DictIter(items) => Value {
