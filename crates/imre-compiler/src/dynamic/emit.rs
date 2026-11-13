@@ -463,7 +463,6 @@ impl<'a> PreparedBody<'a> {
                 crate::frontend::literal_replacements(source, tokens),
             ),
         };
-        let template_fields = imre_ast::strings::template_fields(source, tokens, syntax);
         let docs = if keep_docstrings && name == "collections" && bundled {
             crate::modules::doctest::sealed(crate::modules::IntrinsicModule::Collections)
         } else {
@@ -478,6 +477,11 @@ impl<'a> PreparedBody<'a> {
             },
             |values| values.has_templates,
         );
+        let template_fields = if has_templates {
+            imre_ast::strings::template_fields(source, tokens, syntax)
+        } else {
+            HashMap::new()
+        };
         // The launcher already emits the module prologue, including its docstring,
         // for units without a separate executable body.
         let has_body_statements =

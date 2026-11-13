@@ -224,11 +224,9 @@ pub fn template_fields<'a>(
         tokens,
         fields: HashMap::new(),
     };
-    if tokens.iter().any(|t| t.kind() == TokenKind::TStringStart) {
-        match syntax.into() {
-            ast::ModRef::Module(module) => fields.visit_body(&module.body),
-            ast::ModRef::Expression(expr) => fields.visit_expr(&expr.body),
-        }
+    match syntax.into() {
+        ast::ModRef::Module(module) => fields.visit_body(&module.body),
+        ast::ModRef::Expression(expr) => fields.visit_expr(&expr.body),
     }
     fields.fields
 }
