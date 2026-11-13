@@ -54,6 +54,8 @@ impl ClassScope {
         let bindings = ClassBindings::from_names(&declarations);
         let (frame_reads, method_reads) =
             class_metadata::capture(&mut declarations, class, string_annotations);
+        let (needs_class_cell, needs_dict_cell) =
+            imre_ast::class_cell::required(body, string_annotations);
         Self {
             enclosing_class,
             bindings,
@@ -68,8 +70,8 @@ impl ClassScope {
                 false,
             ),
             frame_reads,
-            needs_class_cell: imre_ast::class_cell::needed(body, string_annotations),
-            needs_dict_cell: imre_ast::class_cell::dict_needed(body, string_annotations),
+            needs_class_cell,
+            needs_dict_cell,
             static_attributes: imre_ast::class_attributes::static_attributes(body, names),
         }
     }
