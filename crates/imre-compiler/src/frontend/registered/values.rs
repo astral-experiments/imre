@@ -464,7 +464,7 @@ fn call_arguments<E>(
         .collect()
 }
 
-/// Bounded keywords carry their checked names and values on the same invocation as positional calls.
+/// Keep the evaluated callable and its argument layout together on the invocation.
 fn bound_call(
     call: &ast::ExprCall,
     selection: ir::RegisteredCallTarget,
@@ -476,9 +476,7 @@ fn bound_call(
         ir::RegisteredCallTarget::Callable { .. } => registered_argument_layout(&call.arguments),
     };
     let invoke = match selection {
-        ir::RegisteredCallTarget::Callable { .. } => {
-            target.ty == Type::PythonObject && !matches!(layout, ir::RegisteredArguments::Packed(_))
-        }
+        ir::RegisteredCallTarget::Callable { .. } => target.ty == Type::PythonObject,
         ir::RegisteredCallTarget::Method { .. } => {
             matches!(layout, ir::RegisteredArguments::Keywords { .. })
         }
@@ -1743,18 +1741,18 @@ mod tests {
             .collect();
         assert_eq!(names, ["obj", "value", "arg"]);
         let call = calls.next().unwrap();
-        let (Builtin::RegisteredCall(call), operands, _) = operation_and_position(&call) else {
-            panic!("expected a complete packed call");
+        let (ExprKind::Invoke { callable, args }, _) = value_and_position(&call) else {
+            panic!("expected a checked packed invocation");
         };
         assert_eq!(
-            call.arguments,
+            args.site.python().unwrap().call.arguments,
             ir::RegisteredArguments::Packed(ir::PackedArguments {
                 starred: vec![true],
                 keywords: vec![Some("first".into()), None, Some("last".into())],
             })
         );
-        let names: Vec<_> = operands
-            .iter()
+        let names: Vec<_> = std::iter::once(callable.as_ref())
+            .chain(&args.values)
             .map(|operand| match operation_and_position(operand).0 {
                 Builtin::RegisteredName(name) => name.as_str(),
                 _ => panic!("expected named operand"),
@@ -1855,20 +1853,23 @@ mod tests {
             let value = registered_value(&stmt.value, source).unwrap();
             match value_and_position(&value).0 {
                 ExprKind::Invoke { args, .. } => {
-                    assert!((30..=64).contains(&count));
+                    assert!(count >= 30);
                     assert_eq!(args.values.len(), count);
-                }
-                ExprKind::Builtin(Builtin::RegisteredCall(call), operands) => {
-                    assert!(!(30..=64).contains(&count));
-                    assert_eq!(operands.len(), count + 1);
                     assert_eq!(
-                        matches!(call.target, ir::RegisteredCallTarget::Method { .. }),
-                        count < 30
-                    );
-                    assert_eq!(
-                        matches!(call.arguments, ir::RegisteredArguments::Packed(_)),
+                        matches!(
+                            args.site.python().unwrap().call.arguments,
+                            ir::RegisteredArguments::Packed(_)
+                        ),
                         count > 64
                     );
+                }
+                ExprKind::Builtin(Builtin::RegisteredCall(call), operands) => {
+                    assert!(count < 30);
+                    assert_eq!(operands.len(), count + 1);
+                    assert!(matches!(
+                        call.target,
+                        ir::RegisteredCallTarget::Method { .. }
+                    ));
                 }
                 _ => panic!("expected a Python call"),
             }

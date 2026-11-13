@@ -162,7 +162,7 @@ pub(crate) fn registered(frame: crate::frontend::RegisteredRegion<'_>) -> Result
                 ),
                 ExprKind::Invoke { .. } => require(
                     value.is_registered_invoke(),
-                    "registered invocation needs a Python callable, call position and fixed argument layout",
+                    "registered invocation needs a Python callable, call position and matching argument layout",
                 ),
                 ExprKind::Builtin(Builtin::RegisteredLocation(..), args) => match args.as_slice() {
                     [inner] => same(value.ty, inner.ty),

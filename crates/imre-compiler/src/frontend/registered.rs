@@ -5038,24 +5038,25 @@ else:
                 assert_eq!(expr.ty, rhs.ty);
                 binds.push(suite.local_names[slot].name.as_str());
             }
-            ExprKind::Builtin(Builtin::RegisteredCall(call), operands) => match &call.target {
-                ir::RegisteredCallTarget::Method { name, .. } => {
-                    assert_eq!(call.arguments, ir::RegisteredArguments::Positional);
-                    assert_eq!(operands.len(), 2);
-                    calls.push(name.as_str());
-                }
-                ir::RegisteredCallTarget::Callable { .. } => {
-                    assert_eq!(operands.len(), 3);
-                    assert_eq!(
-                        call.arguments,
-                        ir::RegisteredArguments::Packed(ir::PackedArguments {
-                            starred: vec![true],
-                            keywords: vec![None],
-                        })
-                    );
-                    calls.push("packed");
-                }
-            },
+            ExprKind::Builtin(Builtin::RegisteredCall(call), operands) => {
+                let ir::RegisteredCallTarget::Method { name, .. } = &call.target else {
+                    panic!("expected the positional method");
+                };
+                assert_eq!(call.arguments, ir::RegisteredArguments::Positional);
+                assert_eq!(operands.len(), 2);
+                calls.push(name.as_str());
+            }
+            ExprKind::Invoke { args, .. } => {
+                assert_eq!(args.values.len(), 2);
+                assert_eq!(
+                    args.site.python().unwrap().call.arguments,
+                    ir::RegisteredArguments::Packed(ir::PackedArguments {
+                        starred: vec![true],
+                        keywords: vec![None],
+                    })
+                );
+                calls.push("packed");
+            }
             _ => {}
         });
         assert_eq!(binds, ["outer", "inner"]);
@@ -6244,6 +6245,11 @@ publish(5, callback)
                     matches!(&site.call.target, ir::RegisteredCallTarget::Callable { end, .. } if *end == range.end())
                 );
                 let kind = match &callee[0].kind {
+                    ExprKind::Local(_)
+                        if matches!(site.call.arguments, ir::RegisteredArguments::Packed(_)) =>
+                    {
+                        "packed"
+                    }
                     ExprKind::Local(_) => "local",
                     ExprKind::Invoke { .. } => "result",
                     ExprKind::Conditional(..) => "conditional",
@@ -6257,7 +6263,6 @@ publish(5, callback)
                         ir::RegisteredCallTarget::Method { .. },
                         ir::RegisteredArguments::Positional,
                     ) => "method",
-                    (_, ir::RegisteredArguments::Packed(_)) => "packed",
                     _ => panic!("unexpected registered call"),
                 };
                 calls.push((&source[site.range], kind));
@@ -7450,8 +7455,8 @@ publish(5, callback)
         ir::walk_expressions(
             &functions[&TextSize::default()].function.body,
             &mut |expr| {
-                if let ExprKind::Builtin(Builtin::RegisteredCall(call), _) = &expr.kind {
-                    calls.push(&call.arguments);
+                if let ExprKind::Invoke { args, .. } = &expr.kind {
+                    calls.push(&args.site.python().unwrap().call.arguments);
                 }
             },
         );
