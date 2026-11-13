@@ -1,6 +1,6 @@
 //! Prepare interpolated string literals and checked template operands before code generation.
 use super::*;
-use imre_ast::strings::{TemplateFieldText, interpolation_conversion};
+use imre_ast::strings::interpolation_conversion;
 
 impl RegisteredSource<'_> {
     pub(crate) fn formatted_literal(self, literal: &ast::InterpolatedStringLiteralElement) -> Expr {
@@ -34,30 +34,6 @@ fn literal_points(
     values::push_codepoints(buffer, &literal.value, replacements.as_deref());
 }
 
-fn template_segments(
-    template: &ast::ExprTString,
-    source: RegisteredSource<'_>,
-    fields: &HashMap<TextSize, TemplateFieldText>,
-) -> Option<Vec<Vec<u8>>> {
-    let mut strings = Vec::new();
-    let mut segment = Vec::new();
-    for element in template.value.elements() {
-        match element {
-            ast::InterpolatedStringElement::Literal(literal) => {
-                literal_points(source, literal, &mut segment)
-            }
-            ast::InterpolatedStringElement::Interpolation(field) => {
-                if let Some(prefix) = &fields.get(&field.start())?.debug_prefix {
-                    values::push_codepoints(&mut segment, prefix, None);
-                }
-                strings.push(std::mem::take(&mut segment));
-            }
-        }
-    }
-    strings.push(segment);
-    Some(strings)
-}
-
 impl RegisteredSource<'_> {
     /// Bind every field through the caller so names, calls and compiler-owned slots
     /// observe the same lexical scope as siblings in the enclosing expression.
@@ -68,16 +44,43 @@ impl RegisteredSource<'_> {
         mut operand: impl FnMut(&ast::Expr) -> Option<Expr>,
     ) -> Option<Expr> {
         let fields = self.template_fields?;
-        let segments = template_segments(template, self, fields)?;
-        let mut captures = Vec::new();
-        for field in template
-            .value
-            .iter()
-            .flat_map(|part| part.elements.interpolations())
-        {
-            captures.push(self.interpolation(field, &mut operand)?);
+        let mut strings = Vec::new();
+        let mut interpolations = Vec::new();
+        let mut segment = Vec::new();
+        let string = |points| object(Builtin::RegisteredString(points), vec![]);
+        for element in template.value.elements() {
+            match element {
+                ast::InterpolatedStringElement::Literal(literal) => {
+                    literal_points(self, literal, &mut segment);
+                }
+                ast::InterpolatedStringElement::Interpolation(field) => {
+                    let spelling = fields.get(&field.start())?;
+                    if let Some(prefix) = &spelling.debug_prefix {
+                        values::push_codepoints(&mut segment, prefix, None);
+                    }
+                    strings.push(string(std::mem::take(&mut segment)));
+                    interpolations.push(object(
+                        Builtin::RegisteredInterpolation {
+                            expression: spelling.expression.clone(),
+                            conversion: interpolation_conversion(field),
+                        },
+                        vec![
+                            operand(&field.expression)?,
+                            self.template_spec(field, &mut operand)?,
+                        ],
+                    ));
+                }
+            }
         }
-        let value = object(Builtin::RegisteredTemplate(segments), captures);
+        strings.push(string(segment));
+        let tuple = |items| Expr {
+            ty: Type::PythonObject,
+            kind: ExprKind::Tuple(items),
+        };
+        let value = object(
+            Builtin::RegisteredTemplate,
+            vec![tuple(strings), tuple(interpolations)],
+        );
         if !in_function {
             // A context-free template plan cannot suspend in an unknown activation.
             let mut suspends = false;
@@ -92,28 +95,6 @@ impl RegisteredSource<'_> {
             }
         }
         Some(value)
-    }
-
-    fn interpolation(
-        self,
-        field: &ast::InterpolatedElement,
-        mut operand: impl FnMut(&ast::Expr) -> Option<Expr>,
-    ) -> Option<Expr> {
-        let expression = self
-            .template_fields?
-            .get(&field.start())?
-            .expression
-            .clone();
-        Some(object(
-            Builtin::RegisteredInterpolation {
-                expression,
-                conversion: interpolation_conversion(field),
-            },
-            vec![
-                operand(&field.expression)?,
-                self.template_spec(field, &mut operand)?,
-            ],
-        ))
     }
 
     fn template_spec(

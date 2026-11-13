@@ -295,10 +295,10 @@ pub(crate) fn frame_inputs(
                 | Builtin::RegisteredComplex(..),
                 operands,
             ) => operands.is_empty(),
-            ExprKind::Builtin(Builtin::RegisteredTemplate(segments), fields) => {
-                segments.len() == fields.len() + 1
-            }
-            ExprKind::Builtin(Builtin::RegisteredInterpolation { .. }, args) => args.len() == 2,
+            ExprKind::Builtin(
+                Builtin::RegisteredTemplate | Builtin::RegisteredInterpolation { .. },
+                args,
+            ) => args.len() == 2,
             _ => false,
         };
     });
@@ -1045,9 +1045,9 @@ impl<'f> Frame<'f, '_, '_> {
                 .code
                 .lit(4, &[real.to_le_bytes(), imag.to_le_bytes()].concat()),
             (Builtin::RegisteredString(points), []) => self.code.linked_string(points.clone()),
-            (Builtin::RegisteredTemplate(segments), fields) => {
-                let strings = self.emit_string_tuple(segments.to_vec());
-                let fields = self.sequence(fields, ir::DisplayKind::Tuple);
+            (Builtin::RegisteredTemplate, [strings, fields]) => {
+                let strings = self.evaluate_handle(strings);
+                let fields = self.evaluate_handle(fields);
                 self.code.op("build_template", &[&strings, &fields])
             }
             (
@@ -1436,19 +1436,6 @@ impl RegisteredFrame<'_, '_> {
 }
 
 impl Frame<'_, '_, '_> {
-    fn emit_string_tuple(&mut self, segments: Vec<Vec<u8>>) -> String {
-        let slot = self.constant_slot(ir::Constant::Tuple(
-            segments.iter().cloned().map(ir::Constant::Text).collect(),
-        ));
-        self.cached_tuple(&slot, |code| {
-            let values = segments
-                .into_iter()
-                .map(|segment| code.linked_string(segment))
-                .collect::<Vec<_>>();
-            code.build_sequence(&values, true, Some(&slot))
-        })
-    }
-
     /// The heap takes the reference even if adding its temporary root fails.
     fn move_integer(&mut self, slot: usize, word: &str) -> String {
         self.line(&format!("store i64 1, ptr %int_owner{slot}"));
