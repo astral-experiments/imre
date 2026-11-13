@@ -419,36 +419,23 @@ impl Context {
 impl RegisteredThread {
     /// Complete default Thread.run cleanup on the creator heap before releasing its bound operands.
     fn clear_target(&self, heap: &mut Heap) -> bool {
+        let Value::Instance { namespace, .. } = *heap.get(self.owner) else {
+            unreachable!("a registered Thread owns its original instance")
+        };
+        let dictionary = namespace.and_then(|dict| heap.dict_storage(dict));
         for name in ["_target", "_args", "_kwargs"] {
-            let Value::Instance {
-                fields, namespace, ..
-            } = heap.get_mut(self.owner)
-            else {
-                unreachable!("a registered Thread owns its original instance")
-            };
-            let namespace = *namespace;
-            if let Some(value) = fields.shift_remove(name) {
-                heap.weak_edge_removed(value);
-            }
-            if let Some(dict) = namespace.and_then(|dict| heap.dict_storage(dict))
+            heap.remove_instance_field(self.owner, name);
+            if let Some(dict) = dictionary
                 && let Some(position) = heap.dict_entries(dict).and_then(|items| {
                     items.iter().position(
                         |&(key, _)| matches!(heap.get(key), Value::Str(text) if text == name),
                     )
                 })
+                // The first removal may need to allocate iterator positions. Keep the
+                // registration intact so the next checkpoint can finish the cleanup.
+                && heap.remove_table_entry(dict, position).is_err()
             {
-                let (Value::Dict(entries) | Value::DefaultDict { entries, .. }) =
-                    heap.get_mut(dict)
-                else {
-                    unreachable!("dictionary payload")
-                };
-                // Deletion may need the dictionary's first set of iterator positions.
-                // Keep the owner and its operands for a retry at the next checkpoint.
-                let Ok((key, value)) = entries.remove(position) else {
-                    return false;
-                };
-                heap.weak_edge_removed(key);
-                heap.weak_edge_removed(value);
+                return false;
             }
         }
         true

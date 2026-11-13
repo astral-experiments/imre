@@ -6546,13 +6546,9 @@ impl Context {
                 if layout.declared_slot && !layout.active_slot {
                     return Err(self.missing_attribute(obj, name));
                 }
-                let Value::Instance { fields, .. } = self.heap.get_mut(obj) else {
-                    unreachable!()
-                };
-                let value = fields
-                    .shift_remove(name)
-                    .ok_or_else(|| self.missing_attribute(obj, name))?;
-                self.heap.weak_edge_removed(value);
+                if !self.heap.remove_instance_field(obj, name) {
+                    return Err(self.missing_attribute(obj, name));
+                }
                 self.finish_binding_release();
                 Ok(())
             }

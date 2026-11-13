@@ -624,7 +624,7 @@ pub(super) fn call(
                 };
                 if reference.target.is_none() {
                     // A second key lookup could call Python and replace the dead reference.
-                    super::builtins::remove_table_entry(ctx, dict, index)?;
+                    ctx.heap.remove_table_entry(dict, index)?;
                     ctx.finalize_removed_dict_value(value);
                 }
             }

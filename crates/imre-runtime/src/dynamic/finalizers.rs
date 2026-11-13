@@ -10,7 +10,7 @@ impl Context {
             matches!(self.heap.get(key), Value::Str(name) if name == "__main__")
                 && matches!(self.heap.get(module), Value::Module { name, .. } if name == "__main__")
         }) {
-            super::builtins::remove_table_entry(self, self.modules, index)?;
+            self.heap.remove_table_entry(self.modules, index)?;
         }
         self.collect_generation(2)?;
         Ok(())
