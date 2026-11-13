@@ -829,8 +829,8 @@ impl Checker<'_> {
                 "a regex match supports group(), start(), end(), span(), groups(), and groupdict()",
             ));
         }
-        let mut selector = if let [arg] = args {
-            calls::scalar_literal(arg, self.source)
+        let (selector, index) = if let [arg] = args {
+            let mut selector = calls::scalar_literal(arg, self.source)
                 .ok()
                 .filter(|value| matches!(value.ty, Type::Int | Type::Str))
                 .ok_or_else(|| {
@@ -839,30 +839,32 @@ impl Checker<'_> {
                         arg,
                         "regex groups require a literal integer index or string name",
                     )
-                })?
+                })?;
+            if let ExprKind::Unary(UnaryOp::USub, inner) = &selector.kind
+                && matches!(&inner.kind, ExprKind::Int(value) if value == "0")
+            {
+                selector.kind = ExprKind::Int("0".into());
+            }
+            let index = Self::capture_index(layout.as_ref(), &mut selector);
+            (Some(selector), index)
         } else {
-            Expr::integer(0)
+            (None, Some(0))
         };
-        if let ExprKind::Unary(UnaryOp::USub, inner) = &selector.kind
-            && matches!(&inner.kind, ExprKind::Int(value) if value == "0")
-        {
-            selector.kind = ExprKind::Int("0".into());
-        }
-        let index = Self::capture_index(layout.as_ref(), &mut selector);
+        let capture = |operation, ty, receiver, selector: Option<Expr>| Expr {
+            ty,
+            kind: ExprKind::Builtin(
+                Builtin::RegexCapture {
+                    operation,
+                    known: index.is_some(),
+                },
+                std::iter::once(receiver).chain(selector).collect(),
+            ),
+        };
         if method == "span" {
             let slot = self.hidden(match_type);
             let bounds = [RegexCapture::Start, RegexCapture::End]
                 .into_iter()
-                .map(|operation| Expr {
-                    ty: Type::Int,
-                    kind: ExprKind::Builtin(
-                        Builtin::RegexCapture {
-                            operation,
-                            known: index.is_some(),
-                        },
-                        vec![self.local(slot), selector.clone()],
-                    ),
-                })
+                .map(|operation| capture(operation, Type::Int, self.local(slot), selector.clone()))
                 .collect();
             let ty = self.types.tuple(vec![Type::Int, Type::Int]);
             return Ok(Expr {
@@ -897,16 +899,7 @@ impl Checker<'_> {
                 Type::Int,
             )
         };
-        Ok(Expr {
-            ty,
-            kind: ExprKind::Builtin(
-                Builtin::RegexCapture {
-                    operation,
-                    known: index.is_some(),
-                },
-                vec![receiver, selector],
-            ),
-        })
+        Ok(capture(operation, ty, receiver, selector))
     }
 }
 
