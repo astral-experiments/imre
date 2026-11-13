@@ -5297,6 +5297,7 @@ impl Heap {
             scope,
             unoptimized_locals,
             class_proxy_scope,
+            back,
             ..
         } = *self.get(value)
         else {
@@ -5319,18 +5320,20 @@ impl Heap {
                 "cannot clear an executing frame",
             ));
         }
-        if let Some((id, offset)) = self
-            .slots
-            .iter()
-            .enumerate()
-            .find_map(|(id, slot)| match &slot.value {
-                Some(Value::Generator {
-                    frame: Some(frame),
-                    offset: Some(offset),
-                    ..
-                }) if *frame == value => Some((id as Id, *offset)),
-                _ => None,
-            })
+        // Ordinary frames retain their caller and cannot be owned by a parked generator.
+        if back.is_none()
+            && let Some((id, offset)) =
+                self.slots
+                    .iter()
+                    .enumerate()
+                    .find_map(|(id, slot)| match &slot.value {
+                        Some(Value::Generator {
+                            frame: Some(frame),
+                            offset: Some(offset),
+                            ..
+                        }) if *frame == value => Some((id as Id, *offset)),
+                        _ => None,
+                    })
         {
             if offset != 0 {
                 return Err(Error::new("RuntimeError", "cannot clear a suspended frame"));
