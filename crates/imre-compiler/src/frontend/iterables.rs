@@ -489,6 +489,11 @@ impl Checker<'_> {
                     "map requires the builtin int converter and one concrete iterable",
                 ));
             }
+            // This consumer keeps only the iterable. A Python call needs the loaded
+            // map and converter too. Method recovery can still use its field reads.
+            if self.settled_attributes.is_none() {
+                self.fixed_sites = None;
+            }
             return Ok((self.expansion_input(source, None)?, true));
         }
         Ok((self.expansion_input(expression, element)?, false))
