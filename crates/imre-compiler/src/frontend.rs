@@ -992,11 +992,11 @@ fn lower_graph(
                 context,
                 classes.declarations,
             );
-            // Ordinary methods are the physical class members. Inherited copies,
-            // property aliases and synthesized initializers have separate native slots.
+            // A synthesized initializer has the class statement's range. Only declared
+            // methods have their own source site for a Python entry.
             let physical_entry = kind == crate::classes::MethodKind::Instance
                 && class.method_origins[index] == class.definition
-                && !context.generated_initializer(classes.declarations)
+                && method.start() != class.node.start()
                 && class.forwarder.is_none()
                 && module.is_program_source()
                 && defaults.forwarded.is_none()
