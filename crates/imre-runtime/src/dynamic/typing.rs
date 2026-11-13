@@ -2563,8 +2563,7 @@ pub(super) fn call(
             ) {
                 ctx.encode_utf8_codepoints(*text, false, "strict")?;
             }
-            imre_ast::forward_refs::parse(ctx.str_value(*text)?)
-                .map_err(|message| Error::new("SyntaxError", message))?;
+            ctx.check_annotation(*text, false)?;
             Ok(NONE)
         }
         ("_starred_forward_ref", [original, rendered]) => {
@@ -2597,31 +2596,7 @@ pub(super) fn call(
             ) {
                 return Ok(NONE);
             }
-            let source = ctx.str_value(*text)?;
-            let parsed = imre_ast::forward_refs::parse(source)
-                .map_err(|message| Error::new("SyntaxError", message))?;
-            if let Err(error) = imre_ast::forward_refs::validate(&parsed) {
-                return Err(match error {
-                    imre_ast::forward_refs::Error::Syntax(message) => {
-                        Error::new("SyntaxError", message)
-                    }
-                    imre_ast::forward_refs::Error::InvalidScope(error) => {
-                        let (span, message) = super::source_code::SyntaxSpan::scope_error(error);
-                        let lines = super::source_code::line_starts(
-                            source.match_indices(['\r', '\n']).filter_map(|(i, c)| {
-                                (c == "\n" || source.as_bytes().get(i + 1) != Some(&b'\n'))
-                                    .then_some(i + 1)
-                            }),
-                        )?;
-                        let filename = ctx.text("<string>");
-                        ctx.located_syntax_error(&message, span, filename, &lines)?
-                    }
-                    imre_ast::forward_refs::Error::Scope => Error::new(
-                        "NotImplementedError",
-                        "forward reference requires scope validation",
-                    ),
-                });
-            }
+            ctx.check_annotation(*text, true)?;
             Ok(NONE)
         }
         // Read the base type descriptor directly, bypassing a custom metaclass's

@@ -4623,6 +4623,7 @@ for name in ("md4", "ripemd160"):
             "boxed_cmp_to_key.py",
             "boxed_lru_insert_eviction.py",
             "boxed_lru_insert_same.py",
+            "boxed_forward_ref_syntax.py",
             "boxed_annotationlib_refs.py",
             "boxed_class_annotation_sites.py",
             "boxed_future_module_annotations.py",

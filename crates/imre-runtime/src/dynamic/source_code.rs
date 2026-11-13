@@ -906,8 +906,43 @@ pub(super) fn original_points(
     Ok(Some(points))
 }
 
+/// Normalize physical line endings before parsing and measuring offsets.
+fn normalized_source(source: &str) -> Cow<'_, str> {
+    if source.contains('\r') {
+        Cow::Owned(imre_ast::source_encoding::universal_newlines(
+            source.to_owned(),
+        ))
+    } else {
+        Cow::Borrowed(source)
+    }
+}
+
+/// Convert a parser byte range in normalized source to Python grammar-error fields.
+fn parser_location(
+    source: &str,
+    lines: &[usize],
+    range: TextRange,
+    ensure_newline: bool,
+) -> ([i64; 4], String) {
+    let position = |offset: ruff_text_size::TextSize| {
+        let byte = offset.to_usize();
+        let row = lines.partition_point(|&start| start <= byte);
+        let column = source[lines[row - 1]..byte].chars().count() + 1;
+        (row, column)
+    };
+    let (row, column) = position(range.start());
+    let (end_row, end_column) = position(range.end());
+    let end = lines.get(row).copied().unwrap_or(source.len());
+    let mut text = source[lines[row - 1]..end].to_owned();
+    if ensure_newline && !text.ends_with('\n') {
+        text.push('\n');
+    }
+    ([row, end_row, column, end_column].map(|n| n as i64), text)
+}
+
 /// Collect source line offsets before constructing code or AST nodes.
-pub(super) fn line_starts(offsets: impl Iterator<Item = usize> + Clone) -> Result<Vec<usize>> {
+pub(super) fn line_starts(source: &str) -> Result<Vec<usize>> {
+    let offsets = source.match_indices('\n').map(|(offset, _)| offset + 1);
     let mut starts = Vec::new();
     starts
         .try_reserve_exact(1 + offsets.clone().count())
@@ -2133,6 +2168,49 @@ impl Context {
         )
     }
 
+    /// Validate annotation text without resolving its names or compiling its body.
+    pub(super) fn check_annotation(&mut self, spelling: Id, check_scope: bool) -> Result<()> {
+        use imre_ast::forward_refs::{self, ParseError};
+        let source = normalized_source(self.str_value(spelling)?);
+        let parsed = match forward_refs::parse(&source) {
+            Ok(parsed) => parsed,
+            Err(error) => {
+                let (range, detail, prefix_filename) = match error {
+                    ParseError::Token(message) => return Err(Error::new("SyntaxError", message)),
+                    ParseError::Grammar(error) => (error.location, format!(": {error}"), true),
+                    ParseError::Syntax(range, message) => (range, message.to_owned(), false),
+                };
+                let lines = line_starts(&source)?;
+                let (position, text) = parser_location(&source, &lines, range, false);
+                let filename = self.text("<string>");
+                return Err(self.parser_syntax_error(
+                    filename,
+                    "<string>",
+                    &detail,
+                    prefix_filename,
+                    position,
+                    text,
+                )?);
+            }
+        };
+        if check_scope && let Err(error) = forward_refs::validate(&parsed) {
+            return Err(match error {
+                forward_refs::Error::Syntax(message) => Error::new("SyntaxError", message),
+                forward_refs::Error::InvalidScope(error) => {
+                    let (span, message) = SyntaxSpan::scope_error(error);
+                    let lines = line_starts(&source)?;
+                    let filename = self.text("<string>");
+                    self.located_syntax_error(&message, span, filename, &lines)?
+                }
+                forward_refs::Error::Scope => Error::new(
+                    "NotImplementedError",
+                    "forward reference requires scope validation",
+                ),
+            });
+        }
+        Ok(())
+    }
+
     pub(super) fn parser_syntax_error(
         &mut self,
         filename: Id,
@@ -2380,13 +2458,8 @@ impl Context {
         } else {
             &source
         };
-        let normalized;
-        let source = if source.contains('\r') {
-            normalized = source.replace("\r\n", "\n").replace('\r', "\n");
-            normalized.as_str()
-        } else {
-            source
-        };
+        let normalized = normalized_source(source);
+        let source = normalized.as_ref();
         let input = if parser_mode == Mode::Module {
             imre_ast::indentation::prepare(source)
         } else {
@@ -2415,7 +2488,7 @@ impl Context {
             return IndentationDiagnostic::from_issue(source, issue, mode == "exec")
                 .raise(self, filename_id);
         }
-        let lines = line_starts(source.match_indices('\n').map(|(offset, _)| offset + 1))?;
+        let lines = line_starts(source)?;
         let parse_error = parsed
             .errors()
             .first()
@@ -2425,26 +2498,14 @@ impl Context {
                     .map(|(range, reason)| (range, reason.to_owned(), false))
             });
         if let Some((range, detail, prefix_filename)) = parse_error {
-            let position = |offset: ruff_text_size::TextSize| {
-                let byte = offset.to_usize();
-                let row = lines.partition_point(|&start| start <= byte);
-                let column = source[lines[row - 1]..byte].chars().count() + 1;
-                (row, column)
-            };
-            let (row, column) = position(range.start());
-            let (end_row, end_column) = position(range.end());
-            let end = lines.get(row).copied().unwrap_or(source.len());
-            let mut text = source[lines[row - 1]..end].to_owned();
-            if mode == "exec" && !text.ends_with('\n') {
-                text.push('\n');
-            }
+            let (position, text) = parser_location(source, &lines, range, mode == "exec");
             let display = display.into_owned();
             return Err(self.parser_syntax_error(
                 filename_id,
                 &display,
                 &detail,
                 prefix_filename,
-                [row as i64, end_row as i64, column as i64, end_column as i64],
+                position,
                 text,
             )?);
         }
@@ -2960,26 +3021,8 @@ impl Context {
         }
         let filename = self.text("<string>");
         let mode = self.text("eval");
-        let code = match self.compile_source_with_flags(
-            text,
-            filename,
-            mode,
-            self.inherited_compile_flags(),
-        ) {
-            Ok(code) => code,
-            Err(error) => {
-                // Preserve the forward-reference diagnostic for invalid grammar, while
-                // keeping errors from scope checking or allocation as originally raised.
-                let source = self.str_value(text)?;
-                if ruff_python_parser::parse_expression(source).is_err() {
-                    return Err(Error::new(
-                        "SyntaxError",
-                        format!("Forward reference must be an expression -- got {source:?}"),
-                    ));
-                }
-                return Err(error);
-            }
-        };
+        let code =
+            self.compile_source_with_flags(text, filename, mode, self.inherited_compile_flags())?;
         self.eval_namespace_code(code, globals, locals)
     }
 
