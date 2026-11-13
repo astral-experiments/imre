@@ -285,8 +285,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 .as_deref()
                 .map(|expr| frame.kept_call_value(expr, &mut next));
             let target = callable(frame, &mut next);
-            let values = frame.kept_call_values(args, next);
-            let (array, count) = frame.fixed_call_arguments(&target, values, exec);
+            let (array, count) = frame.kept_call_arguments(&target, args, next, exec);
             let positional = super::registered::CallArguments::Positional {
                 array,
                 count,

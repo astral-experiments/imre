@@ -1759,14 +1759,18 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
 
     /// Keep each supplied value alive and release its intermediate owners before
     /// evaluating the next argument. A permanent literal needs no temporary root.
-    pub(in crate::llvm) fn kept_call_values(
+    pub(in crate::llvm) fn kept_call_arguments(
         &mut self,
+        callable: &str,
         args: &[Expr],
         mut next: String,
-    ) -> Vec<String> {
-        args.iter()
+        exec: Option<super::sites::CompiledExec>,
+    ) -> (&'static str, usize) {
+        let values = args
+            .iter()
             .map(|expr| self.kept_call_value(expr, &mut next))
-            .collect()
+            .collect();
+        self.fixed_call_arguments(callable, values, exec)
     }
 
     /// A producer that releases its own intermediates can place its result
@@ -1879,8 +1883,7 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
                 }
             }
             RegisteredArguments::Keywords { positional, names } => {
-                let values = self.kept_call_values(args.as_slice(), next);
-                let (array, _) = self.fixed_call_arguments(&callable, values, exec);
+                let (array, _) = self.kept_call_arguments(&callable, args.as_slice(), next, exec);
                 let operands = CallArguments::FixedKeywords {
                     array,
                     positional: *positional,
