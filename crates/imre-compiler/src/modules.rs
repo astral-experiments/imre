@@ -29,7 +29,7 @@ mod ordered_imports;
 mod os;
 pub(crate) use os::credential_arity;
 mod reachability;
-pub(crate) use reachability::{definition_effect, http_command_key};
+pub(crate) use reachability::{definition_effect, http_command_key, inert_literal};
 mod type_aliases;
 
 pub(crate) type ModuleId = usize;
