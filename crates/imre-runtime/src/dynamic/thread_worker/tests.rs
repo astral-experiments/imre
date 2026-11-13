@@ -9,6 +9,28 @@ fn context() -> Context {
 }
 
 #[test]
+fn bound_release_signals_the_selected_native_waiter() {
+    let mut ctx = context();
+    let gate = Arc::<PrimitiveLock>::default();
+    assert!(gate.acquire(false, None));
+    let waiter = ctx.alloc(Value::PrimitiveLock(Arc::clone(&gate)));
+    let release = ctx.lookup_attr(waiter, "release").unwrap();
+    let call = ctx.prepare_call(release, vec![], vec![]).unwrap();
+    let crate::dynamic::calls::RegisteredCall::Release(selected) = call else {
+        panic!("bound lock release was not prepared");
+    };
+    assert!(gate.locked());
+    thread::scope(|scope| {
+        scope.spawn(move || assert!(selected.release().is_ok()));
+        assert!(gate.acquire(true, Some(Duration::from_secs(5))));
+    });
+    assert_eq!(ctx.call(release, vec![], vec![]).unwrap(), NONE);
+    let error = ctx.call(release, vec![], vec![]).unwrap_err();
+    assert_eq!(error.kind, "RuntimeError");
+    assert_eq!(error.message, "release unlocked lock");
+}
+
+#[test]
 fn owned_registered_entry_roots_bound_slots_and_restores_its_frame() {
     unsafe extern "C" fn entry(raw: *mut Context, scope: Id) -> Id {
         // SAFETY: the worker owns its Context until the registered frame returns.
