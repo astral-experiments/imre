@@ -196,25 +196,14 @@ impl<'a> Visitor<'a> for ClosureNames {
                     self.incomplete = true;
                 }
             }
-            ast::Stmt::Match(_) => {
-                self.incomplete = true;
-                self.locals_incomplete = true;
-                visitor::walk_stmt(self, stmt);
-            }
             _ => visitor::walk_stmt(self, stmt),
         }
     }
     fn visit_pattern(&mut self, pattern: &'a ast::Pattern) {
-        let capture = match pattern {
-            ast::Pattern::MatchAs(p) => p.name.as_ref(),
-            ast::Pattern::MatchStar(p) => p.name.as_ref(),
-            ast::Pattern::MatchMapping(p) => p.rest.as_ref(),
-            _ => None,
-        };
-        if let Some(name) = capture {
+        visitor::walk_pattern(self, pattern);
+        if let Some(name) = imre_ast::executable::capture_name(pattern) {
             self.locals.insert(name.to_string());
         }
-        visitor::walk_pattern(self, pattern);
     }
 
     fn visit_except_handler(&mut self, handler: &'a ast::ExceptHandler) {
