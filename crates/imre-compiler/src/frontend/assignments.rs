@@ -586,9 +586,9 @@ impl ModuleNamespace {
 
 impl Checker<'_> {
     pub(super) fn live_module_binding(&self, expr: &ast::Expr) -> Option<Expr> {
-        let name = expr.as_name_expr()?.id.as_str();
+        let name = &expr.as_name_expr()?.id;
         self.live_module_name(name)
-            .then(|| registered::values::name_binding(name))
+            .then(|| registered::values::name_binding(name.clone()))
     }
 
     pub(super) fn live_module_name(&self, name: &str) -> bool {

@@ -265,10 +265,10 @@ impl RegisteredSource<'_> {
     }
 }
 
-pub(in crate::frontend) fn name_binding(id: &str) -> Expr {
+pub(in crate::frontend) fn name_binding(id: impl Into<ast::name::Name>) -> Expr {
     Expr {
         ty: Type::PythonObject,
-        kind: ExprKind::Builtin(Builtin::RegisteredName(id.to_owned()), vec![]),
+        kind: ExprKind::Builtin(Builtin::RegisteredName(id.into()), vec![]),
     }
 }
 
@@ -1079,7 +1079,7 @@ pub(super) fn operation<E>(
         {
             value
         }
-        ast::Expr::Name(name) => return Ok(Some(name_binding(&name.id))),
+        ast::Expr::Name(name) => return Ok(Some(name_binding(name.id.clone()))),
         ast::Expr::NumberLiteral(lit) => number_literal(&lit.value, false),
         ast::Expr::StringLiteral(lit) => {
             return Ok(Some(

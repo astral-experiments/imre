@@ -2347,7 +2347,7 @@ pub(crate) enum Builtin {
     RegisteredDeleteName(String, ruff_text_size::TextRange),
     RegisteredCall(RegisteredCall),
     /// Resolve the code name in the live registered Python scope.
-    RegisteredName(String),
+    RegisteredName(ruff_python_ast::name::Name),
     /// Apply Python's in-place protocol to the previously loaded target and the RHS.
     RegisteredInPlace(&'static str),
     /// Store evaluates the RHS before the receiver; in-place retains the receiver across the RHS.
