@@ -190,7 +190,7 @@ fn rewrite_loop(statement: &mut Statement, locals: &mut Vec<Type>, private_curso
     } else {
         fast_body.push(fast);
     }
-    let fallback = std::mem::replace(statement, Statement::Break);
+    let fallback = std::mem::replace(statement, Statement::Break(None));
     *statement = Statement::If(
         Expr {
             ty: Type::Bool,
@@ -346,8 +346,8 @@ impl Plan<'_> {
                 }
                 Statement::Match(..) => return false,
                 Statement::Position(..)
-                | Statement::Break
-                | Statement::Continue
+                | Statement::Break(_)
+                | Statement::Continue(_)
                 | Statement::Exhaust => {}
                 // An exact string cursor cannot call Python or resize a list.
                 Statement::IterNext {

@@ -126,8 +126,8 @@ impl RequiredSite {
                     if matches!(
                         stmt,
                         Statement::Return(_)
-                            | Statement::Break
-                            | Statement::Continue
+                            | Statement::Break(_)
+                            | Statement::Continue(_)
                             | Statement::Exhaust
                     ) {
                         return false;

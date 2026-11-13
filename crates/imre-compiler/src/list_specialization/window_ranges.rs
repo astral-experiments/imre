@@ -322,7 +322,7 @@ fn visit_successful_pulls(body: &[Statement], ready: usize, mut visit: impl FnMu
                     if matches!(value.kind, ExprKind::Local(slot) if slot == ready)
                         && matches!(
                             yes.as_slice(),
-                            [Statement::Exhaust | Statement::Break | Statement::Continue]
+                            [Statement::Exhaust | Statement::Break(_) | Statement::Continue(_)]
                         )
                         && no.is_empty() =>
                 {

@@ -3085,17 +3085,19 @@ mod tests {
             range: TextRange,
         ) -> &mut crate::ir::Statement {
             use crate::ir::Statement;
-            let [.., Statement::Position(site, _), transfer] =
-                suite.checked.function.body.as_mut_slice()
-            else {
-                panic!("expected a source checkpoint and a loop transfer");
+            let (transfer, preceding) = suite.checked.function.body.split_last_mut().unwrap();
+            assert!(
+                !matches!(preceding.last(), Some(Statement::Position(site, _)) if *site == range)
+            );
+            let (Statement::Break(Some(site)) | Statement::Continue(site)) = transfer else {
+                panic!("expected a source-positioned loop transfer");
             };
             assert_eq!(*site, range);
             transfer
         }
         assert!(matches!(
             transfer(suite, stop_range),
-            crate::ir::Statement::Break
+            crate::ir::Statement::Break(_)
         ));
         let [branch] = suite.suites.as_mut_slice() else {
             panic!("expected the if at the start of the while body");
@@ -3108,8 +3110,8 @@ mod tests {
         };
         assert_eq!(*site, branch_range);
         let op = transfer(&mut branch.suites[0], skip_range);
-        assert!(matches!(op, crate::ir::Statement::Continue));
-        *op = crate::ir::Statement::Break;
+        assert!(matches!(op, crate::ir::Statement::Continue(_)));
+        *op = crate::ir::Statement::Break(Some(skip_range));
         assert_ne!(module.standalone().unwrap(), original);
     }
 

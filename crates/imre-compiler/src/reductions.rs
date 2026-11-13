@@ -88,7 +88,7 @@ fn rewrite(body: &mut [Statement], initial: &mut [Initial], ranges: &IntegerFact
                     invalidate(std::slice::from_ref(statement), initial);
                 }
                 if let Some((guard, fast)) = replacement {
-                    let fallback = std::mem::replace(statement, Statement::Break);
+                    let fallback = std::mem::replace(statement, Statement::Break(None));
                     *statement = Statement::If(guard, vec![fast], vec![fallback]);
                 } else {
                     crate::ir::statement_children_mut(statement, |child| {
@@ -360,7 +360,7 @@ pub(crate) fn count_writes(body: &[Statement], writes: &mut [usize]) {
 pub(crate) fn contains_continue(body: &[Statement]) -> bool {
     fn statements(body: &[Statement]) -> bool {
         body.iter().any(|statement| match statement {
-            Statement::Continue => true,
+            Statement::Continue(_) => true,
             Statement::Scope { body, .. } => statements(body),
             Statement::If(_, yes, no) => statements(yes) || statements(no),
             _ => false,

@@ -500,8 +500,8 @@ impl Verifier<'_> {
             Statement::Raise(None)
             | Statement::Expr(_)
             | Statement::Position(..)
-            | Statement::Break
-            | Statement::Continue
+            | Statement::Break(_)
+            | Statement::Continue(_)
             | Statement::Exhaust => Ok(()),
         }
     }

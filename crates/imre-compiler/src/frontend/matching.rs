@@ -827,7 +827,11 @@ impl Checker<'_> {
                         value: Some(item),
                         ready,
                     },
-                    Statement::If(not(self.local(ready)), vec![Statement::Break], Vec::new()),
+                    Statement::If(
+                        not(self.local(ready)),
+                        vec![Statement::Break(None)],
+                        Vec::new(),
+                    ),
                     Statement::assign_item(self.local(result), self.local(key), self.local(item)),
                     Statement::Clear(key),
                     Statement::Clear(item),

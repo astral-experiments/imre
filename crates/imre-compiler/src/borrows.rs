@@ -991,12 +991,12 @@ def total(rows: list[Row], fail: bool) -> int:
         let read = Statement::Expr(sequence_read(0, 2, ty));
         let inner = Statement::While(
             Expr::local(1, Type::Bool),
-            vec![read.clone(), Statement::Break],
+            vec![read.clone(), Statement::Break(None)],
             Vec::new(),
         );
         let outer = Statement::While(
             Expr::local(1, Type::Bool),
-            vec![read.clone(), inner, Statement::Break],
+            vec![read.clone(), inner, Statement::Break(None)],
             Vec::new(),
         );
         module.functions.push(function(
@@ -1030,12 +1030,12 @@ def total(rows: list[Row], fail: bool) -> int:
         let read = Statement::Expr(length(0, Type::ListInt));
         let inner = Statement::While(
             Expr::local(1, Type::Bool),
-            vec![read.clone(), Statement::Break],
+            vec![read.clone(), Statement::Break(None)],
             Vec::new(),
         );
         let outer = Statement::While(
             Expr::local(1, Type::Bool),
-            vec![read.clone(), inner, Statement::Break],
+            vec![read.clone(), inner, Statement::Break(None)],
             Vec::new(),
         );
         let function = function(
@@ -1073,7 +1073,7 @@ def total(rows: list[Row], fail: bool) -> int:
                             reset,
                             Statement::Expr(length(1, ty)),
                             Statement::Expr(sequence_read(1, 3, ty)),
-                            Statement::Break,
+                            Statement::Break(None),
                         ],
                         Vec::new(),
                     ),

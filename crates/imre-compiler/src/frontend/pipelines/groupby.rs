@@ -195,7 +195,7 @@ impl Checker<'_> {
                 ty: Type::Bool,
                 kind: ExprKind::Boolean(false, vec![not(self.local(have_group)), boundary.clone()]),
             },
-            vec![Statement::Break],
+            vec![Statement::Break(None)],
             Vec::new(),
         ));
         input.next = vec![Statement::If(
@@ -264,7 +264,11 @@ impl Checker<'_> {
                     ),
                 })];
                 drain.append(&mut pull);
-                drain.push(Statement::If(boundary, vec![Statement::Break], Vec::new()));
+                drain.push(Statement::If(
+                    boundary,
+                    vec![Statement::Break(None)],
+                    Vec::new(),
+                ));
                 body.push(Statement::Scope {
                     body: vec![
                         Statement::Assign(

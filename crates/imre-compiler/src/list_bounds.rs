@@ -234,8 +234,8 @@ impl Analysis<'_> {
                     }
                 }
                 Statement::Position(..)
-                | Statement::Break
-                | Statement::Continue
+                | Statement::Break(_)
+                | Statement::Continue(_)
                 | Statement::Exhaust => {}
             }
         }
@@ -547,8 +547,8 @@ pub(crate) fn block_readonly(body: &[Statement]) -> bool {
         Statement::Move(..)
         | Statement::Clear(_)
         | Statement::Position(..)
-        | Statement::Break
-        | Statement::Continue
+        | Statement::Break(_)
+        | Statement::Continue(_)
         | Statement::Exhaust => true,
         _ => false,
     })

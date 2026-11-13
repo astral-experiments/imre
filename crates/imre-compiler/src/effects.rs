@@ -79,8 +79,8 @@ fn block(body: &[Statement], functions: &[bool], targets: Context<'_>) -> bool {
         Statement::Move(..)
         | Statement::Clear(_)
         | Statement::Position(..)
-        | Statement::Break
-        | Statement::Continue
+        | Statement::Break(_)
+        | Statement::Continue(_)
         | Statement::Exhaust => false,
         Statement::Scope { body, .. } => block(body, functions, targets),
         Statement::SetItem(..) => true,
