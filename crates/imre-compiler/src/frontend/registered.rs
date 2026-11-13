@@ -6118,7 +6118,7 @@ publish(5, callback)
             "from pathlib import Path\n",
             "target = Path('output')\n",
             "def notify(value: int, sink):\n    sink(value)\n",
-            "def write(label: str) -> None:\n    target.write_text(f'<{label}>')\n",
+            "def write(label: str) -> None:\n    target.write_text(f'<{label}:{label:>4}>')\n",
         );
         let graph = SourceGraph::single(source).unwrap();
         let _ = super::super::lower(&graph);
@@ -6135,10 +6135,17 @@ publish(5, callback)
             ExprKind::Builtin(Builtin::RegisteredName(name), _) if name == "target" => {
                 operations.push("target");
             }
-            ExprKind::Builtin(Builtin::FormatField(_), _) => operations.push("format"),
+            ExprKind::Builtin(Builtin::FormatField(_), args) => match &args[1].kind {
+                ExprKind::None => operations.push("default format"),
+                ExprKind::Str(spec) if spec == ">4" => operations.push("explicit format"),
+                _ => panic!("unexpected format specification"),
+            },
             _ => {}
         });
-        assert_eq!(operations, ["write_text", "target", "format"]);
+        assert_eq!(
+            operations,
+            ["write_text", "target", "default format", "explicit format"]
+        );
     }
 
     #[test]

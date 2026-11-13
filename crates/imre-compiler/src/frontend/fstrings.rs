@@ -84,11 +84,16 @@ impl<C, E> Fields<C, E> {
                 if let Some(flag) = conversion.to_char() {
                     value = (self.conversion)(&self.context, value, flag);
                 }
-                let mut spec = Parts::default();
-                if let Some(elements) = &field.format_spec {
-                    self.elements(&mut spec, &elements.elements, raw)?;
-                }
-                let spec = self.finish(spec)?;
+                let spec = match &field.format_spec {
+                    Some(elements) => {
+                        let mut spec = Parts::default();
+                        self.elements(&mut spec, &elements.elements, raw)?;
+                        self.finish(spec)?
+                    }
+                    // The Python format operation accepts an omitted specification.
+                    None if self.result == Type::PythonObject => Expr::none(),
+                    None => (self.literal)(&mut self.context, &[])?,
+                };
                 let op = (self.format)(&mut self.context, field, value.ty, spec.ty);
                 self.operation(op, vec![value, spec])
             }
