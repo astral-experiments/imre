@@ -12265,7 +12265,7 @@ impl<'a> Checker<'a> {
                 });
             }
             Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport("itertools.accumulate")))
-                if self.is_accumulate(call) =>
+                if self.is_accumulate(call, binding) =>
             {
                 let args = self.accumulate_args(call)?;
                 if args.function.ty != Type::None

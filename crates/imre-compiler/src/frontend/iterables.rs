@@ -22,18 +22,20 @@ impl Checker<'_> {
                 "list accepts zero or one positional iterable",
             ));
         };
-        if let ast::Expr::Call(view) = source
+        let call_input = source.as_call_expr();
+        let binding = call_input.and_then(|call| self.resolve(&call.func));
+        if let Some(view) = call_input
             && let ast::Expr::Attribute(method) = &*view.func
             && method.attr.as_str() == "keys"
-            && self.resolve(&view.func).is_none()
+            && binding.is_none()
         {
             // The same non-escaping view as a key union, exhausted immediately.
             let (value, _) = self.union_operand(source)?;
             let input = self.iteration_value(value, false, source)?;
             return self.collect_list(input, false, element, call);
         }
-        if let ast::Expr::Call(scan) = source
-            && self.is_accumulate(scan)
+        if let Some(scan) = call_input
+            && self.is_accumulate(scan, binding)
         {
             let args = self.accumulate_args(scan)?;
             if let Some(expected) = element {
@@ -62,7 +64,10 @@ impl Checker<'_> {
                 kind: ExprKind::Builtin(Builtin::CollectIntCursor, vec![cursor]),
             });
         }
-        if let Some(diff) = self.materialize_ndiff(source)? {
+        if let Some(call) = call_input
+            && binding == Some(Binding::Intrinsic(Intrinsic::Ndiff))
+        {
+            let diff = self.materialize_ndiff(call)?;
             if let Some(element) = element {
                 self.expect(element, Type::Str, source)?;
             }
@@ -161,13 +166,7 @@ impl Checker<'_> {
     }
 
     /// Materializes the default line differ where the caller immediately exhausts it.
-    pub(super) fn materialize_ndiff(&mut self, source: &ast::Expr) -> Result<Option<Expr>, String> {
-        let ast::Expr::Call(call) = source else {
-            return Ok(None);
-        };
-        if self.resolve(&call.func) != Some(Binding::Intrinsic(Intrinsic::Ndiff)) {
-            return Ok(None);
-        }
+    fn materialize_ndiff(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         self.reject_builtin_keywords(call)?;
         let [before, after] = call.arguments.args.as_ref() else {
             return Err(error(
@@ -179,10 +178,10 @@ impl Checker<'_> {
         let ty = self.types.list(Type::Str);
         let before = self.expr_expected(before, ty)?;
         let after = self.expr_expected(after, ty)?;
-        Ok(Some(Expr {
+        Ok(Expr {
             ty,
             kind: ExprKind::Builtin(Builtin::Ndiff, vec![before, after]),
-        }))
+        })
     }
 
     /// `map` acquires its source iterator before `start` is evaluated, but
