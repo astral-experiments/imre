@@ -760,6 +760,18 @@ impl Checker<'_> {
         })
     }
 
+    /// A namespace store can replace either callable before this pipeline starts.
+    pub(super) fn fixed_map(&self, call: &ast::ExprCall) -> bool {
+        self.unshadowed_builtin(&call.func, "map")
+            && !self.live_module_name("map")
+            && !call
+                .arguments
+                .args
+                .first()
+                .and_then(ast::Expr::as_name_expr)
+                .is_some_and(|name| self.live_module_name(name.id.as_str()))
+    }
+
     /// Select a converter and its input at a consumer that accepts this builtin.
     pub(super) fn map_converter_input<'e>(
         &self,
@@ -908,7 +920,7 @@ impl Checker<'_> {
                 input.evaluate.append(&mut input.acquire);
                 input
             }
-            "map" if self.unshadowed_builtin(&call.func, "map") => {
+            "map" if self.fixed_map(call) => {
                 let Some((name, source)) = self.map_converter_input(call, |name| {
                     matches!(name, "tuple" | "int" | "str" | "ord")
                 }) else {
