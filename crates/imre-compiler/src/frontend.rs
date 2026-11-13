@@ -3929,10 +3929,12 @@ impl<'a> Checker<'a> {
         }
         let target = self.types.payload(expected).unwrap_or(expected);
         if matches!(value.ty, Type::JsonValue | Type::JsonRoot)
-            && (matches!(
-                target,
-                Type::JsonObject | Type::Int | Type::Str | Type::Bool | Type::Float
-            ) || self.types.element(target) == Some(Type::JsonObject))
+            && (target == value.ty
+                || matches!(
+                    target,
+                    Type::JsonObject | Type::Int | Type::Str | Type::Bool | Type::Float
+                )
+                || self.types.element(target) == Some(Type::JsonObject))
         {
             return Ok(json::select(value, expected, None, None));
         }
@@ -4009,10 +4011,6 @@ impl<'a> Checker<'a> {
                     ty: expected,
                     kind: ExprKind::Builtin(Builtin::UnionInject, vec![value]),
                 });
-            }
-            // A decoded JSON null has a view handle until the selector projects it.
-            if payload == Type::JsonValue && value.ty == payload {
-                return Ok(json::select(value, expected, None, None));
             }
             let kind = if value.ty == Type::None {
                 ExprKind::Absent(Box::new(value))
