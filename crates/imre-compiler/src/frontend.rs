@@ -4372,6 +4372,7 @@ impl<'a> Checker<'a> {
             });
         }
         if let ast::Expr::Call(call) = expression
+            && self.is_defaultdict_constructor(&call.func)
             && let Some(raised) = self.defaultdict_factory_error(call, expected)?
         {
             return Ok(raised);
@@ -11189,6 +11190,8 @@ impl<'a> Checker<'a> {
             return self.apply_wraps(config, call);
         }
         if receiver.is_none()
+            && binding == Some(Binding::Intrinsic(Intrinsic::DefaultDict))
+            && !self.local_collection_root(&call.func)
             && let Some(raised) = self.defaultdict_factory_error(call, Type::None)?
         {
             return Ok(raised);
