@@ -10137,12 +10137,12 @@ impl<'a> Checker<'a> {
                 if let Some(text) = self.testcase_class_text(attribute)? {
                     return Ok(text);
                 }
-                if self.resolve(&attribute.value) == Some(Binding::Intrinsic(Intrinsic::StructTime))
-                {
+                let receiver_binding = self.resolve(&attribute.value);
+                if receiver_binding == Some(Binding::Intrinsic(Intrinsic::StructTime)) {
                     return self.struct_time_class_field(attribute);
                 }
                 if matches!(
-                    (self.resolve(&attribute.value), attribute.attr.as_str()),
+                    (receiver_binding, attribute.attr.as_str()),
                     (
                         Some(Binding::Intrinsic(Intrinsic::SplitResult { bytes: false })),
                         "_encoded_counterpart"
@@ -10155,7 +10155,7 @@ impl<'a> Checker<'a> {
                         self.scoped_builtin_error("urllib.parse result counterpart", attribute)
                     );
                 }
-                if let Some((origin, declaration)) = self.namedtuple_factory(&attribute.value) {
+                if let Some((origin, declaration)) = self.namedtuple_factory(receiver_binding) {
                     if matches!(origin, crate::types::TupleOrigin::Declaration(_))
                         && declaration
                             .fields
@@ -10171,20 +10171,20 @@ impl<'a> Checker<'a> {
                 if let Some(method) = ir::StrDescriptor::named(attribute.attr.as_str())
                     && matches!(&*attribute.value, ast::Expr::Name(n) if n.id == "str")
                     && !self.names.contains_key("str")
-                    && self.resolve(&attribute.value).is_none()
+                    && receiver_binding.is_none()
                 {
                     return Ok(inspect::descriptor(method));
                 }
                 if attribute.attr.as_str() == "join"
                     && matches!(&*attribute.value, ast::Expr::Name(n) if n.id == "str")
                     && !self.names.contains_key("str")
-                    && self.resolve(&attribute.value).is_none()
+                    && receiver_binding.is_none()
                 {
                     return Ok(self.string_join_value(None, attribute));
                 }
                 if let Some(Binding::Intrinsic(
                     stream @ (Intrinsic::Stdin | Intrinsic::OriginalStdout | Intrinsic::Stderr),
-                )) = self.resolve(&attribute.value)
+                )) = receiver_binding
                     && matches!(attribute.attr.as_str(), "encoding" | "errors")
                 {
                     let descriptor = match stream {
@@ -11312,7 +11312,7 @@ impl<'a> Checker<'a> {
         key_view: Option<&mut bool>,
         receiver: Option<Expr>,
     ) -> Result<Expr, String> {
-        if let Some((origin, declaration)) = self.namedtuple_factory(&call.func) {
+        if let Some((origin, declaration)) = self.namedtuple_factory(self.resolve(&call.func)) {
             return self.namedtuple_call(origin, &declaration, call);
         }
         if self.collection_binding(&call.func) == Some(Binding::Intrinsic(Intrinsic::NamedTuple)) {
@@ -13825,7 +13825,7 @@ impl<'a> Checker<'a> {
             let target = &call.arguments.args[0];
             if self.unshadowed_builtin(target, "tuple")
                 || matches!(
-                    self.namedtuple_factory(target),
+                    self.namedtuple_factory(self.resolve(target)),
                     Some((crate::types::TupleOrigin::Declaration(_), _))
                 )
             {

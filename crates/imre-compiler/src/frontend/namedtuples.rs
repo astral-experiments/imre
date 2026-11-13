@@ -90,9 +90,9 @@ impl Checker<'_> {
     /// Resolve the same declaration for a namedtuple constructor and its class attributes.
     pub(super) fn namedtuple_factory(
         &self,
-        expr: &ast::Expr,
+        binding: Option<Binding>,
     ) -> Option<(TupleOrigin, Rc<NamedTuple>)> {
-        let origin = match self.resolve(expr)? {
+        let origin = match binding? {
             Binding::Definition(id) => TupleOrigin::Declaration(id),
             Binding::Intrinsic(Intrinsic::CacheInfo) => CACHE_INFO,
             Binding::Intrinsic(Intrinsic::SplitResult { bytes: false }) => {
@@ -116,7 +116,7 @@ impl Checker<'_> {
             let declared = match receiver {
                 Some(ty) => self.types.namedtuple_definition(ty).is_some(),
                 None => matches!(
-                    self.namedtuple_factory(&attribute.value),
+                    self.namedtuple_factory(self.resolve(&attribute.value)),
                     Some((TupleOrigin::Declaration(_), _))
                 ),
             };
