@@ -192,12 +192,6 @@ impl StatementLowering for Checker<'_> {
         }
         if let ast::Expr::Call(call) = expr {
             match self.resolve(&call.func) {
-                Some(Binding::Intrinsic(Intrinsic::SubprocessRun))
-                    if call.arguments.find_keyword("stdout").is_some()
-                        && !processes::boxed_launch_keywords(call) =>
-                {
-                    return Ok((Some(Statement::Expr(self.process_run(call, true)?)), true));
-                }
                 Some(Binding::Intrinsic(Intrinsic::AssertNever)) => {
                     return Ok((Some(self.assert_never(call, false)?), false));
                 }
@@ -212,7 +206,29 @@ impl StatementLowering for Checker<'_> {
         {
             return Ok((Some(Statement::Expr(value)), true));
         }
-        let value = self.expr(expr)?;
+        let mut value = self.expr(expr)?;
+        // A discarded run forwarding stdout to stderr needs only its exit status.
+        // The checked call already holds the command before permuting its keywords.
+        if let ExprKind::Scope { value: result, .. } = &mut value.kind
+            && let ExprKind::Builtin(
+                Builtin::Process(op @ ir::ProcessOperation::Run { streams: 4, .. }),
+                args,
+            ) = &mut result.kind
+            && args[0].ty == self.types.list(Type::Str)
+            && let ast::Expr::Call(call) = expr
+            && call
+                .arguments
+                .keywords
+                .iter()
+                .all(|kw| matches!(kw.arg.as_deref(), Some("stdout" | "check")))
+        {
+            *op = ir::ProcessOperation::Call {
+                streams: 4,
+                fixed_check: None,
+            };
+            result.ty = Type::Int;
+            value.ty = Type::Int;
+        }
         // Only a direct call selects one implementation; a dispatched override may return.
         let continues = !self.terminating_call(&value);
         Ok((
