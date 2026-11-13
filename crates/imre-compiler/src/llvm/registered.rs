@@ -114,6 +114,12 @@ pub(crate) fn frame_inputs(
                             .is_none_or(|binding| uses_slot(&binding.entered, true))
                     }
                     Statement::SetItem(_, receiver, _, _)
+                        if matches!(receiver.ty, Type::ListInt | Type::List(_)) =>
+                    {
+                        uses_python_protocol = true;
+                        true
+                    }
+                    Statement::SetItem(_, receiver, _, _)
                     | Statement::AugmentItem(receiver, _, ir::ItemUpdate::Protocol(_), _) => {
                         uses_python_protocol |= receiver.ty == Type::PythonObject;
                         matches!(receiver.ty, Type::Dict(_) | Type::PythonObject)
