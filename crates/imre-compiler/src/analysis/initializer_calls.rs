@@ -14,6 +14,8 @@ use ty_python_semantic::{Db, HasType, SemanticModel, types::Type};
 pub(crate) struct InitializerCheck {
     pub(crate) error: Option<Diagnostic>,
     pub(crate) read_import_binding: bool,
+    /// First non-passive function body known to start on this initializer.
+    pub(super) entered_function: Option<(usize, TextRange)>,
 }
 
 impl InitializerCheck {
@@ -131,6 +133,7 @@ struct InitializerStatement<'a, 'db> {
     guard_start: TextSize,
     imports: &'a [(TextRange, usize)],
     progress: &'a HashMap<usize, Option<TextSize>>,
+    entered_function: &'a std::cell::Cell<Option<(usize, TextRange)>>,
 }
 
 impl Session {
@@ -207,7 +210,8 @@ impl Session {
         // layout queries should retain a hint session for subsequent compilations.
         let hints = self.hint_reads.get();
         let read_import_binding = std::cell::Cell::new(false);
-        let error = self.reached_initializer_error(entry, captures, |name| {
+        let entered_function = std::cell::Cell::new(None);
+        let error = self.reached_initializer_error(entry, captures, &entered_function, |name| {
             read_import_binding.set(true);
             if name == "__main__" {
                 runs_as_main.then(|| InitializerSource::application(entry))
@@ -219,6 +223,7 @@ impl Session {
         InitializerCheck {
             error,
             read_import_binding: read_import_binding.get(),
+            entered_function: entered_function.get(),
         }
     }
 
@@ -226,6 +231,7 @@ impl Session {
         &self,
         entry: (usize, &'a Path),
         mut captures: Option<&mut super::execution::CapturedImports>,
+        entered_function: &std::cell::Cell<Option<(usize, TextRange)>>,
         selected_module: impl Fn(&str) -> Option<InitializerSource<'a>>,
     ) -> Option<Diagnostic> {
         // A suspended initializer exposes the declarations preceding its import.
@@ -318,6 +324,7 @@ impl Session {
                     guard_start,
                     imports: &imports,
                     progress: &progress,
+                    entered_function,
                 };
                 let call = match stmt {
                     Stmt::For(loop_) if !loop_.is_async => loop_.iter.as_call_expr(),
@@ -327,11 +334,25 @@ impl Session {
                         _ => None,
                     },
                 };
-                if let Some(call) = call
-                    && let Some(Err(error)) =
-                        self.initializer_call(&statement, call, stmt.is_for_stmt())
+                if let Some(call) = call {
+                    match self.initializer_call(&statement, call, stmt.is_for_stmt()) {
+                        Some(Err(error)) => return Some(error),
+                        Some(Ok(_)) if stmt.is_expr_stmt() => continue,
+                        _ => {}
+                    }
+                }
+                // Copying a function bound on this passive prefix does not invoke it.
+                // Resolve subsequent calls at their own load, after any redefinition.
+                if let Stmt::Assign(assign) = stmt
+                    && assign.targets.iter().all(Expr::is_name_expr)
+                    && assign.value.is_name_expr()
+                    && self
+                        .reaching_binding(module, &assign.value)
+                        .is_some_and(|def| {
+                            matches!(def.kind(&self.db), DefinitionKind::Function(_))
+                        })
                 {
-                    return Some(error);
+                    continue;
                 }
                 if !passive(stmt) {
                     return None;
@@ -360,33 +381,6 @@ impl Session {
 
     fn passive_initializer(&self, module: usize) -> bool {
         self.parsed(self.files[module]).suite().iter().all(passive)
-    }
-
-    pub(crate) fn passive_selected_import(
-        &self,
-        entry: usize,
-        statement: &Stmt,
-        owner: usize,
-        module_name: &str,
-        path: &Path,
-    ) -> bool {
-        let model = SemanticModel::new(&self.db, self.db.program_file(self.files[entry]));
-        if statement
-            .as_import_stmt()
-            .is_some_and(|import| import.names.len() != 1)
-        {
-            return false;
-        }
-        self.initializer_import(statement, 0, &model, entry, &|name| {
-            (name == module_name).then(|| InitializerSource::application((owner, path)))
-        })
-        .is_some()
-            && (owner == entry || self.passive_initializer(owner))
-            && self.passive_import_binding(
-                statement,
-                owner,
-                (owner == entry).then_some(statement.start()),
-            )
     }
 
     fn initializer_import<'a>(
@@ -577,9 +571,24 @@ impl Session {
             })
             && !generator()?
         {
-            return Some(Ok(ret.unwrap_or_else(|| {
-                Type::none(&self.db, &owner_model.program_environment())
-            })));
+            let value =
+                ret.unwrap_or_else(|| Type::none(&self.db, &owner_model.program_environment()));
+            // A returned literal can still fail the function's declared return contract.
+            if let Some(annotation) = &function.returns {
+                let expected = super::annotation_type(&self.db, &owner_model, annotation)?;
+                if !value.is_assignable_to(&self.db, &owner_model.program_environment(), expected) {
+                    return None;
+                }
+            }
+            return Some(Ok(value));
+        }
+        if !iterated
+            && !function.is_async
+            && !generator()?
+            && self.unconditional_module_operand(module, site.guard_start, call.range())
+        {
+            site.entered_function
+                .set(Some((owner_module, function.range())));
         }
         // Read the body only after the real initializer and its passive arguments have
         // selected this function. Literal guards above are also checked for scalar contracts.

@@ -334,25 +334,10 @@ pub(crate) fn check_registered_project<'a>(
         if site.module != graph.entry {
             return None;
         }
-        let reached = match site.checked_callee {
-            Some(body) if body != site.module => {
-                let callee = &graph.modules[body];
-                sources.clone().any(|winner| {
-                    winner.declares_signatures
-                        && winner.name == callee.name
-                        && winner.source == callee.original_source()
-                        && winner
-                            .checked_module
-                            .map_or(winner.path == callee.path, |id| id == body)
-                })
-            }
-            Some(_) => true,
-            None => graph.session.unconditional_module_operand(
-                site.module,
-                site.statement,
-                site.operand,
-            ),
-        };
+        let reached =
+            graph
+                .session
+                .unconditional_module_operand(site.module, site.statement, site.operand);
         reached.then(|| {
             (
                 site.module,
@@ -360,6 +345,11 @@ pub(crate) fn check_registered_project<'a>(
                 report,
             )
         })
+    });
+    let called_body = checked.zip(refusal).and_then(|(graph, report)| {
+        let (id, range) = report.function_site()?;
+        let module = &graph.modules[id];
+        Some((&module.path, module.original_source(), range, report))
     });
     if let Some(graph) = checked
         && !graph.has_checked_only_import
@@ -403,6 +393,7 @@ pub(crate) fn check_registered_project<'a>(
                 winners.clone(),
                 has_file_body,
                 entry_operand,
+                called_body,
                 Some(graph),
             )?;
             return Ok(RegisteredLayouts::from_winners(
@@ -473,6 +464,7 @@ pub(crate) fn check_registered_project<'a>(
         winners.clone(),
         has_file_body,
         entry_operand,
+        called_body,
         None,
     )?;
     Ok(RegisteredLayouts::from_winners(|| session, winners))
@@ -714,16 +706,6 @@ impl Session {
             .any(|ret| !excluded.iter().any(|r| r.range.contains_range(ret.range())))
     }
 
-    /// A known argument call that cannot return never enters the enclosing callee.
-    pub(crate) fn function_may_return(
-        &self,
-        module: usize,
-        function: &ruff_python_ast::StmtFunctionDef,
-    ) -> bool {
-        self.call_may_return_implicitly(module, function)
-            || self.has_reachable_return(module, &explicit_returns(function))
-    }
-
     pub(crate) fn unconditional_function_operand(
         &self,
         module: usize,
@@ -775,6 +757,12 @@ impl Session {
         sources: impl Iterator<Item = (usize, crate::dynamic::RegisteredSource<'a>)> + Clone,
         has_file_body: Option<&dyn Fn(&str) -> bool>,
         entry_operand: Option<(usize, &str, &crate::frontend::phase::Diagnostic)>,
+        called_body: Option<(
+            &std::path::PathBuf,
+            &str,
+            TextRange,
+            &crate::frontend::phase::Diagnostic,
+        )>,
         original: Option<&crate::modules::SourceGraph>,
     ) -> Result<(), String> {
         let mut captures = execution::CapturedImports::default();
@@ -809,9 +797,10 @@ impl Session {
                     && start.source == module.original_source())
                 .then_some(closed)
             });
-            let error = if let Some(closed) = closed {
+            let checked;
+            let initializer = if let Some(closed) = closed {
                 // No import was queried on this prefix, so no imported function was captured.
-                closed.error.clone()
+                closed
             } else {
                 let selected: HashMap<_, _> = sources
                     .clone()
@@ -826,15 +815,15 @@ impl Session {
                         )
                     })
                     .collect();
-                self.checked_initializer_calls(
+                checked = self.checked_initializer_calls(
                     (entry, start.path),
                     start.main_body,
                     |name| selected.get(name).copied(),
                     Some(&mut captures),
-                )
-                .error
+                );
+                &checked
             };
-            if let Some(error) = error {
+            if let Some(error) = &initializer.error {
                 if !matches!(
                     error.kind,
                     crate::frontend::phase::Kind::ExecutionOperand(_)
@@ -842,6 +831,19 @@ impl Session {
                     contracts?;
                 }
                 return Err(error.to_string());
+            }
+            if let Some((path, source, range, report)) = called_body
+                && let Some((id, function)) = initializer.entered_function
+                && function == range
+                && sources.clone().any(|(owner, winner)| {
+                    owner == id
+                        && winner.declares_signatures
+                        && winner.path == path
+                        && winner.source == source
+                })
+            {
+                contracts?;
+                return Err(report.to_string());
             }
             if let Some((owner, original, error)) = entry_operand
                 && start.main_body

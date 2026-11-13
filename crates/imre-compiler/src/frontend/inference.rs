@@ -1360,82 +1360,6 @@ impl Inference {
 }
 
 impl Checker<'_> {
-    /// Check the callable at Python's lookup point, before argument evaluation
-    /// can replace it. Only successfully bound calls record this site.
-    fn observed_entry_call(
-        &self,
-        call: &ast::ExprCall,
-        signature: &Signature,
-    ) -> Option<(TextSize, ruff_text_size::TextRange)> {
-        let seen = self.observed_definition.as_ref()?;
-        let imported = seen.definition.module != self.module;
-        let valid_target = call.func.is_name_expr()
-            || imported
-                && call.func.as_attribute_expr().is_some_and(|attr| {
-                    !attr.attr.starts_with("__")
-                        && self.resolve(&attr.value)
-                            == Some(Binding::Module(seen.definition.module))
-                });
-        if seen.entry_site.is_some()
-            || self.ordinary_entry().is_none()
-            || !self.module_namespace.is_unexposed()
-            || !valid_target
-            || self.graph.deferred_object_error.borrow().is_some()
-            || self
-                .functions
-                .get(&seen.definition)
-                .is_none_or(|selected| selected.id != signature.id)
-            || self.resolve(&call.func) != Some(Binding::Definition(seen.definition))
-        {
-            return None;
-        }
-        let module = &self.graph.modules[self.module];
-        let mut executable = module.executable.iter().copied().peekable();
-        let mut passive_prefix = true;
-        let mut loaded = !imported;
-        for (index, statement) in module.parsed.syntax().body.iter().enumerate() {
-            let checked = executable.next_if_eq(&index).is_some();
-            if statement.range().contains_range(call.range()) {
-                let (_, start) = self
-                    .graph
-                    .session
-                    .guarded_call_statement(self.module, statement);
-                return (loaded
-                    && checked
-                    && self.graph.session.unconditional_module_operand(
-                        self.module,
-                        start,
-                        call.range(),
-                    ))
-                .then_some((start, call.range()));
-            }
-            if crate::analysis::inert_declaration(statement) {
-                continue;
-            }
-            if imported && (statement.is_import_stmt() || statement.is_import_from_stmt()) {
-                let owner = &self.graph.modules[seen.definition.module];
-                if !passive_prefix
-                    || !self.graph.session.passive_selected_import(
-                        self.module,
-                        statement,
-                        seen.definition.module,
-                        &owner.name,
-                        &owner.path,
-                    )
-                {
-                    return None;
-                }
-                loaded = true;
-            } else {
-                if !checked && !self.globals.checked_entry_stores.borrow().contains(&index) {
-                    return None;
-                }
-                passive_prefix = false;
-            }
-        }
-        None
-    }
-
     /// A call can supply a value only if its checked body has a normal exit.
     pub(super) fn checked_call_cannot_return(
         &self,
@@ -1473,38 +1397,6 @@ impl Checker<'_> {
         self.terminating_call(value)
     }
 
-    fn call_operand_returns(&self, value: &Expr) -> bool {
-        if self.terminating_call(value) {
-            return false;
-        }
-        if let ExprKind::Call(callee, _) = &value.kind {
-            return self.source_function_may_return(*callee);
-        }
-        self.globals.invoked_functions(value).is_none_or(|targets| {
-            targets.is_empty()
-                || targets
-                    .iter()
-                    .any(|&id| self.source_function_may_return(id))
-        })
-    }
-
-    fn source_function_may_return(&self, callee: usize) -> bool {
-        let Some((definition, _)) = self
-            .functions
-            .iter()
-            .find(|(_, signature)| signature.id == callee)
-        else {
-            return true;
-        };
-        let statement =
-            &self.graph.modules[definition.module].parsed.syntax().body[definition.statement];
-        statement.as_function_def_stmt().is_none_or(|function| {
-            self.graph
-                .session
-                .function_may_return(definition.module, function)
-        })
-    }
-
     pub(super) fn source_call(
         &mut self,
         call: &ast::ExprCall,
@@ -1519,7 +1411,6 @@ impl Checker<'_> {
                 "cached calls currently require a positional key",
             ));
         }
-        let entry_site = self.observed_entry_call(call, signature);
         let mut scope = calls::ArgumentScope::default();
         let direct = self.registered.is_none() && receiver.is_none() && skip == 0;
         let args = self.source_arguments(
@@ -1540,11 +1431,6 @@ impl Checker<'_> {
             ControlFlow::Break(stop) => return Ok(scope.finish(stop)),
         };
         let ty = self.enter_source_call(call, signature)?;
-        let entry_site =
-            entry_site.filter(|_| args.values.iter().all(|arg| self.call_operand_returns(arg)));
-        if let (Some(site), Some(seen)) = (entry_site, &mut self.observed_definition) {
-            seen.entry_site.get_or_insert(site);
-        }
         // A successfully bound source call can enter the definition's registered body.
         self.globals
             .missing_bindings

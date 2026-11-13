@@ -31,8 +31,6 @@ pub(crate) enum Kind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct EntryOperand {
     pub(crate) module: ModuleId,
-    /// Set by the entry binder after proving this call reaches its physical callee.
-    pub(crate) checked_callee: Option<ModuleId>,
     pub(crate) statement: TextSize,
     pub(crate) operand: TextRange,
 }
@@ -45,9 +43,15 @@ pub(super) struct TypeDeclaration {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+enum CheckedSite {
+    Entry(EntryOperand),
+    Function(ModuleId, TextRange),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct Position {
     range: TextRange,
-    entry_statement: Option<Box<EntryOperand>>,
+    checked_site: Option<Box<CheckedSite>>,
     expected_from: Option<TypeDeclaration>,
     line: usize,
     column: usize,
@@ -92,7 +96,7 @@ impl<M> Diagnostic<M> {
         Self {
             position: Some(Box::new(Position {
                 range,
-                entry_statement: None,
+                checked_site: None,
                 expected_from: None,
                 line,
                 column,
@@ -107,29 +111,29 @@ impl<M> Diagnostic<M> {
     }
 
     pub(crate) fn entry_operand(&self) -> Option<EntryOperand> {
-        let entry = *self.position.as_ref()?.entry_statement.as_deref()?;
-        (self.kind == Kind::ExactType).then_some(entry)
+        let CheckedSite::Entry(entry) = self.position.as_ref()?.checked_site.as_deref()? else {
+            return None;
+        };
+        (self.kind == Kind::ExactType).then_some(*entry)
     }
 
     pub(super) fn exact_operand(&self) -> Option<TextRange> {
         (self.kind == Kind::ExactType).then_some(self.position.as_ref()?.range)
     }
 
-    pub(super) fn reached_in_entry(
-        &mut self,
-        module: ModuleId,
-        body: ModuleId,
-        statement: TextSize,
-        call: TextRange,
-    ) {
+    pub(super) fn in_function(&mut self, module: ModuleId, range: TextRange) {
         if let Some(position) = &mut self.position {
-            position.entry_statement = Some(Box::new(EntryOperand {
-                module,
-                checked_callee: Some(body),
-                statement,
-                operand: call,
-            }));
+            position.checked_site = Some(Box::new(CheckedSite::Function(module, range)));
         }
+    }
+
+    pub(crate) fn function_site(&self) -> Option<(ModuleId, TextRange)> {
+        let CheckedSite::Function(module, range) =
+            self.position.as_ref()?.checked_site.as_deref()?
+        else {
+            return None;
+        };
+        Some((*module, *range))
     }
 
     pub(crate) fn with_path(mut self, path: &std::path::Path) -> Self {
@@ -149,7 +153,9 @@ impl<M> Diagnostic<M> {
     where
         M: fmt::Display,
     {
-        if self.kind == Kind::ExactType
+        // A named function's refused operand belongs to the selected initializer call.
+        if self.function_site().is_none()
+            && self.kind == Kind::ExactType
             && self
                 .position
                 .as_ref()
@@ -293,13 +299,12 @@ impl Failure {
             && report.kind == Kind::ExactType
             && let Some(position) = &mut report.position
         {
-            position.entry_statement.get_or_insert_with(|| {
-                Box::new(EntryOperand {
+            position.checked_site.get_or_insert_with(|| {
+                Box::new(CheckedSite::Entry(EntryOperand {
                     module,
-                    checked_callee: None,
                     statement,
                     operand: position.range,
-                })
+                }))
             });
         }
         self

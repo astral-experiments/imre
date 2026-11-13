@@ -13,8 +13,6 @@ pub(super) struct ModuleValues {
     /// A reached initializer may still be waiting for a callee during this inference round.
     waiting: RefCell<HashMap<DefinitionId, Failure>>,
     pub(super) registered_initializers: bool,
-    /// Ordered first stores whose checked RHS kept the live entry namespace intact.
-    pub(super) checked_entry_stores: RefCell<HashSet<usize>>,
     /// A concrete source read supplies the registered function's ordinary Python binding.
     pub(super) missing_bindings: RefCell<std::collections::BTreeMap<usize, Diagnostic>>,
     pub(super) class_data: RefCell<class_data::Storage>,
@@ -605,18 +603,6 @@ impl Checker<'_> {
         }
         if let Some(groups) = self.globals.regex_groups(&value) {
             self.globals.regex_globals.borrow_mut().insert(slot, groups);
-        }
-        if self.graph.registered_startup
-            && self.module == self.graph.entry
-            && self.inference.is_none()
-            && self.module_namespace.is_unexposed()
-            && self.unrepresented.borrow().is_none()
-            && self.graph.deferred_object_error.borrow().is_none()
-        {
-            self.globals
-                .checked_entry_stores
-                .borrow_mut()
-                .insert(definition.statement);
         }
         if let Some(body) = body {
             body.push(Statement::store_global(slot, value));

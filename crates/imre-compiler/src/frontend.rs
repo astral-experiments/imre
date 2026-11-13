@@ -1292,7 +1292,6 @@ fn lower_graph(
         }
     };
     let mut has_wrapper_link = false;
-    let mut refused_body = None;
     let mut completed_calls = classes.nonreturning_functions.clone();
     let mut body_checks = Some(&checked_bodies);
     let mut zip_sums = Vec::new();
@@ -1307,7 +1306,7 @@ fn lower_graph(
         checker.nonreturning_functions = &completed_calls;
         // Both calling conventions can diagnose the same body. Named startup uses the
         // ordinary binder to check which physical function the entry actually calls.
-        let called_body = |report: Diagnostic| {
+        let called_body = |mut report: Diagnostic| {
             let id = callable_definitions[signature.id];
             if graph.registered_startup
                 && module.is_program_source()
@@ -1321,10 +1320,9 @@ fn lower_graph(
                     .session
                     .unconditional_function_operand(*module_id, function, operand)
             {
-                Ok((id, report))
-            } else {
-                Err(report)
+                report.in_function(*module_id, function.range());
             }
+            report
         };
         let original = registered_parameters.get(&signature.id);
         if registered_generators.contains(&signature.id) {
@@ -1356,8 +1354,7 @@ fn lower_graph(
                 Err(error) => {
                     place_completed(&mut completed, &owners);
                     let report = error.terminal_in(graph, *module_id);
-                    refused_body = Some(called_body(report)?);
-                    break;
+                    return Err(called_body(report));
                 }
             }
             continue;
@@ -1395,8 +1392,7 @@ fn lower_graph(
             Ok(None) => continue,
             Err(report) => {
                 place_completed(&mut completed, &owners);
-                refused_body = Some(called_body(report)?);
-                break;
+                return Err(called_body(report));
             }
         };
         if body.cannot_return && completed_calls.insert(signature.id) && !needs_registered_entry {
@@ -1461,21 +1457,19 @@ fn lower_graph(
         recursion_errors.push(recursion_error);
     }
     let mut factories = Vec::with_capacity(record_factories.len());
-    if refused_body.is_none() {
-        for class in record_factories {
-            let module = classes.declarations.definitions[class].definition.module;
-            let checker = checker_for(module);
-            let body = checked_region(
-                checker.record_factory_body(class),
-                graph,
-                module,
-                &mut unavailable,
-                request_recovery,
-            )
-            .inspect_err(|_| place_completed(&mut completed, &owners))?;
-            if let Some(helper) = body {
-                factories.push(helper);
-            }
+    for class in record_factories {
+        let module = classes.declarations.definitions[class].definition.module;
+        let checker = checker_for(module);
+        let body = checked_region(
+            checker.record_factory_body(class),
+            graph,
+            module,
+            &mut unavailable,
+            request_recovery,
+        )
+        .inspect_err(|_| place_completed(&mut completed, &owners))?;
+        if let Some(helper) = body {
+            factories.push(helper);
         }
     }
     let mut startup = Vec::new();
@@ -1484,23 +1478,6 @@ fn lower_graph(
         let mut checker = checker_for(module_id);
         checker.module_scope = true;
         checker.nonreturning_functions = &completed_calls;
-        if let Some((definition, mut report)) = refused_body.take() {
-            // The normal entry binder can establish that this physical definition
-            // is called. Its diagnostic remains the ordinary result on every exit.
-            checker.observed_definition = Some(Box::new(CalledDefinition {
-                definition,
-                entry_site: None,
-            }));
-            let _ = graph.try_registered_body(module_id, || {
-                checker.lower_block(&entry_statements, None).ok().map(drop)
-            });
-            if let Some((statement, call)) =
-                checker.observed_definition.and_then(|seen| seen.entry_site)
-            {
-                report.reached_in_entry(module_id, definition.module, statement, call);
-            }
-            return Err(report);
-        }
         let mut fixed_entry = (!needs_registered_entry).then(Vec::new);
         let result = checker.lower_block(&entry_statements, fixed_entry.as_mut());
         let result = checker.finish_region(result);
@@ -3166,11 +3143,6 @@ enum Iteration {
     Prepared(pipelines::Prepared),
 }
 
-struct CalledDefinition {
-    definition: DefinitionId,
-    entry_site: Option<(TextSize, ruff_text_size::TextRange)>,
-}
-
 /// Materialize the physical filename only when a checked operation needs a traceback.
 enum LexicalFrame {
     Named(ast::name::Name),
@@ -3198,7 +3170,6 @@ struct Checker<'a> {
     fixed_sites: Option<fixed_body_source::SourceSites>,
     /// During physical method recovery, forward completed attribute operations to the live frame.
     settled_attributes: Option<&'a mut HashMap<TextRange, FixedAttribute>>,
-    observed_definition: Option<Box<CalledDefinition>>,
     nonreturning_functions: &'a HashSet<usize>,
     /// Locals in this body are bound in an existing Python activation.
     registered: Option<&'a registered::values::ModuleSource>,
@@ -3303,7 +3274,6 @@ impl<'a> Checker<'a> {
             wrapper_link: Default::default(),
             fixed_sites: None,
             settled_attributes: None,
-            observed_definition: None,
             nonreturning_functions: &classes.nonreturning_functions,
             registered: None,
             bound_function_imports: false,
