@@ -518,6 +518,13 @@ impl<'f, 'a, 'p> Frame<'f, 'a, 'p> {
 }
 
 impl<'f> Frame<'f, '_, '_> {
+    /// A source callee carries its own positions. Keep the native site cursor on its first argument.
+    pub(super) fn source_callee(&mut self, expr: &Expr, next: &mut String) -> String {
+        let mut frame = self.reborrow();
+        frame.fixed_sites = None;
+        frame.kept_call_value(expr, next)
+    }
+
     pub(super) fn next_fixed_site(&self) -> Option<TextRange> {
         let (function, next) = self.fixed_sites?;
         let i = next.get();

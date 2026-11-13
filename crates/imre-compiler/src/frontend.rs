@@ -14741,9 +14741,17 @@ impl<'a> Checker<'a> {
             && let Some(name) = call.func.as_name_expr()
             && self.namespace.is_none()
             && !self.names.contains_key(name.id.as_str())
+            && !ruff_python_stdlib::identifiers::is_mangled_private(name.id.as_str())
+            && call.start() == name.start()
             && self.source.get(name.range().to_std_range()) == Some(name.id.as_str())
         {
-            sites.named_call(call, name, value);
+            sites.positional_call(call, value, || {
+                Some(registered::values::located(
+                    name.range(),
+                    name.start(),
+                    registered::values::name_binding(&name.id),
+                ))
+            });
         }
     }
 

@@ -1516,12 +1516,18 @@ impl Checker<'_> {
         let attribute = self.settled_attributes.as_deref_mut().and_then(|sites| {
             let field = node.as_attribute_expr()?;
             // A rewritten operand can inherit the physical range under a different name.
-            let site = sites.remove(&field.range())?;
-            (site.position == field.attr.start()
-                && matches!(&*site.operation, Builtin::RegisteredAttribute {
+            let FixedAttribute::Operation {
+                operation,
+                position,
+            } = sites.remove(&field.range())?
+            else {
+                return None;
+            };
+            (position == field.attr.start()
+                && matches!(&*operation, Builtin::RegisteredAttribute {
                     action: ir::AttributeAction::Load, name, ..
                 } if name == field.attr.as_str()))
-            .then_some(site.operation)
+            .then_some(operation)
         });
         let Some(mut value) = operation(
             node,

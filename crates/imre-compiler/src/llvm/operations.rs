@@ -814,40 +814,30 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             && let Some(range) = frame.next_fixed_site()
         {
             let attribute = frame.fixed_attribute(range);
-            let position = attribute
-                .filter(|field| !matches!(*field.operation, Builtin::RegisteredName(_)))
-                .map_or(range.start(), |op| op.position);
+            use crate::frontend::FixedAttribute;
+            let position = match attribute {
+                Some(FixedAttribute::Operation { position, .. }) => *position,
+                _ => range.start(),
+            };
             return frame.at_expression(range, position, |frame| {
-                if let Some(field) = attribute {
-                    if let Builtin::RegisteredName(name) = &*field.operation
-                        && let Some(args) = expr.named_call_arguments()
-                    {
-                        let name_range = TextRange::new(range.start(), field.position);
-                        let site = ir::InvokeSite {
-                            range,
-                            callee_end: name_range.end(),
-                            suspended_name: Some(name_range),
-                            scope: None,
-                        };
-                        return CheckedBody::registered(frame.reborrow()).python_invoke(
-                            &site,
-                            args,
-                            |frame, next| {
-                                let target =
-                                    frame.at_expression(name_range, name_range.start(), |frame| {
-                                        frame.lookup(name)
-                                    });
-                                *next = frame.keep_operands(next, &target, "0");
-                                target
-                            },
-                        );
-                    }
+                if let Some(FixedAttribute::Call(call)) = attribute {
+                    let (target, site) = call.as_ref();
+                    let args = expr
+                        .named_call_arguments()
+                        .expect("placed call has its written operands");
+                    return CheckedBody::registered(frame.reborrow()).python_invoke(
+                        site,
+                        args,
+                        |frame, next| frame.source_callee(target, next),
+                    );
+                }
+                if let Some(FixedAttribute::Operation { operation, .. }) = attribute {
                     let operands = match &expr.kind {
                         ExprKind::Field(receiver, _) => std::slice::from_ref(receiver.as_ref()),
                         ExprKind::Builtin(_, args) => args,
                         _ => unreachable!("placed attribute has its checked operands"),
                     };
-                    return frame.builtin(&field.operation, operands, usage);
+                    return frame.builtin(operation, operands, usage);
                 }
                 CheckedBody::registered(frame.reborrow()).emit_operation(
                     expr,

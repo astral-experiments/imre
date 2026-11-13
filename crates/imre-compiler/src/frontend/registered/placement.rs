@@ -34,8 +34,10 @@ mod tests {
         let positions: Vec<_> = body.fixed_sites.iter().map(|range| &text[*range]).collect();
         assert_eq!(positions, ["return self.name", "self.name", "self"]);
         let attributes = body.fixed_attributes.as_ref().unwrap();
-        assert!(matches!(&*attributes[&body.fixed_sites[1]].operation,
-            Builtin::RegisteredAttribute { name, .. } if name == "name"));
+        assert!(
+            matches!(&attributes[&body.fixed_sites[1]], FixedAttribute::Operation { operation, .. }
+            if matches!(&**operation, Builtin::RegisteredAttribute { name, .. } if name == "name"))
+        );
         assert!(matches!(&body.inputs, FrameInputs::Protocol { sites }
             if matches!(sites.as_ref(), [FrameSite::Method(method)]
                 if method.start() == start && method.name.as_str() == "pretty")));
@@ -64,7 +66,8 @@ mod tests {
         assert_eq!(&text[statement], "return Key");
         assert_eq!(&text[name], "Key");
         let read = &body.fixed_attributes.as_ref().unwrap()[&name];
-        assert!(matches!(&*read.operation, Builtin::RegisteredName(key) if key == "Key"));
+        assert!(matches!(read, FixedAttribute::Operation { operation, .. }
+            if matches!(&**operation, Builtin::RegisteredName(key) if key == "Key")));
         let binding = FixedNode::checked(&ir::Node::Expression(value)).unwrap();
         for kind in [
             ExprKind::Builtin(Builtin::GlobalGet(slot + 1), vec![]),
@@ -198,11 +201,12 @@ mod tests {
         assert_eq!(attributes.len(), 1);
         let (range, attribute) = attributes.iter().next().unwrap();
         assert_eq!(&text[*range], "events.append(mark)");
-        assert!(
-            matches!(&*attribute.operation, Builtin::RegisteredCall(call)
+        let FixedAttribute::Operation { operation, .. } = attribute else {
+            panic!("expected bound method")
+        };
+        assert!(matches!(&**operation, Builtin::RegisteredCall(call)
             if matches!(&call.target, ir::RegisteredCallTarget::Method { name, attribute, .. }
-                if name == "append" && &text[*attribute] == "events.append"))
-        );
+                if name == "append" && &text[*attribute] == "events.append")));
     }
 
     #[test]
