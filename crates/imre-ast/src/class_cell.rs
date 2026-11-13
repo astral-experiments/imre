@@ -1,4 +1,5 @@
 //! Identify the implicit class and class-namespace cells before the class body executes.
+use crate::comprehension::{Output, Plan};
 use ast::visitor::{self, Visitor};
 use ruff_python_ast as ast;
 
@@ -98,31 +99,14 @@ impl Scope {
         child.visit_type_params(params);
         child
     }
-    fn comprehension<'a>(
-        &mut self,
-        generators: &'a [ast::Comprehension],
-        terms: impl IntoIterator<Item = &'a ast::Expr>,
-        generator_expression: bool,
-    ) {
+    fn comprehension(&mut self, plan: Plan<'_>) {
+        self.visit_expr(plan.outer);
         let mut child = self.child();
-        for (index, generator) in generators.iter().enumerate() {
-            if index == 0 {
-                self.visit_expr(&generator.iter);
-            } else {
-                child.visit_expr(&generator.iter);
-            }
-            child.visit_expr(&generator.target);
-            for condition in &generator.ifs {
-                child.visit_expr(condition);
-            }
-        }
-        for term in terms {
-            child.visit_expr(term);
-        }
+        plan.visit_body(|expr| child.visit_expr(expr));
         self.walrus |= child.walrus;
         self.shadows |= child.walrus;
         // CPython drops a free __class__ when inlining eager comprehensions into classes.
-        if generator_expression || !self.class {
+        if matches!(plan.output, Output::Generator(_)) || !self.class {
             self.nested |= child.free();
         }
     }
@@ -270,14 +254,7 @@ impl<'a> Visitor<'a> for Scope {
                 child.visit_expr(&f.body);
                 self.nested |= child.free();
             }
-            ast::Expr::Generator(g) => self.comprehension(&g.generators, [g.elt.as_ref()], true),
-            ast::Expr::ListComp(g) => self.comprehension(&g.generators, [g.elt.as_ref()], false),
-            ast::Expr::SetComp(g) => self.comprehension(&g.generators, [g.elt.as_ref()], false),
-            ast::Expr::DictComp(g) => self.comprehension(
-                &g.generators,
-                g.key.as_deref().into_iter().chain([g.value.as_ref()]),
-                false,
-            ),
+            expr if let Some(plan) = Plan::from_expr(expr) => self.comprehension(plan),
             _ => visitor::walk_expr(self, expr),
         }
     }
