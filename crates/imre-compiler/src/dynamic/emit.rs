@@ -79,10 +79,10 @@ pub(super) enum ModuleOrigin<'a> {
 }
 
 impl crate::ProgramOutput {
-    /// Emit the checked initializers after preparation of the entire registration succeeds.
-    pub(super) fn emit_registered(
+    /// Write the initializers in registration order, releasing each body after emission.
+    pub(super) fn emit_registered<'a>(
         &mut self,
-        units_to_emit: Vec<PreparedUnit<'_>>,
+        units_to_emit: impl Iterator<Item = Result<PreparedUnit<'a>, String>>,
         config: &str,
         python_optimization: i32,
         providers: &HashSet<String>,
@@ -1940,8 +1940,7 @@ mod tests {
             module_errors,
             registrations,
             Vec::new(),
-        )
-        .collect::<Result<Vec<_>, _>>()?;
+        );
         let mut output = crate::ProgramOutput::new(layout);
         let used_archive = output.emit_registered(units, config, python_optimization, providers)?;
         Ok((output.compilation.units, used_archive, output.whole))

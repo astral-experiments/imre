@@ -360,7 +360,7 @@ impl crate::ProgramOutput {
             (std::slice::from_ref(source), (0, "__main__"), &[][..])
         };
         self.emit_sources(
-            sources,
+            sources.iter().map(Ok),
             entry,
             split,
             program,
