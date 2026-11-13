@@ -9255,7 +9255,9 @@ impl Context {
                     let v = variadic.unwrap_or_else(|| self.dict(extra));
                     self.bind_argument(local, n, v)?;
                 }
-                let supplied_types = self.check_supplied_types(callable, local, &sig, &name);
+                let supplied_types = self.check_supplied_types(callable, &sig, &name, |param| {
+                    self.scope_data(local).names.get(param).copied()
+                });
                 for slot in binding.defaults {
                     let value = self.bound_default(&shape, slot, defaults, kwdefaults);
                     self.bind_argument(local, shape.parameter(slot), value)?;
@@ -9273,7 +9275,9 @@ impl Context {
                 for (name, id) in sig.positional.iter().chain(&sig.keyword_only).zip(slots) {
                     self.bind_argument(local, name, id)?;
                 }
-                self.check_supplied_types(callable, local, &sig, &name)?;
+                self.check_supplied_types(callable, &sig, &name, |param| {
+                    self.scope_data(local).names.get(param).copied()
+                })?;
             }
         }
         let Value::Scope(frame) = self.heap.get_mut(local) else {
@@ -9349,16 +9353,16 @@ impl Context {
     }
 
     /// Check scalar annotations on values that were explicitly bound by this call.
-    fn check_supplied_types(
+    pub(super) fn check_supplied_types(
         &self,
         function: Id,
-        local: Id,
         sig: &CallParameters,
         name: &str,
+        supplied: impl Fn(&str) -> Option<Id>,
     ) -> Result<()> {
         if let Some(types) = sig.types.as_object() {
             for (param, expected) in types {
-                if let Some(&id) = self.scope_data(local).names.get(param.as_str()) {
+                if let Some(id) = supplied(param) {
                     let builtin = expected.get("builtin").and_then(serde_json::Value::as_str);
                     let target = builtin.and_then(|name| {
                         let Value::Function { scope, .. } = self.heap.get(function) else {
