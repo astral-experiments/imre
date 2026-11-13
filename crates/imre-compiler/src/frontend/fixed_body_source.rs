@@ -41,6 +41,7 @@ pub(crate) enum FixedNode {
     Store(usize),
     /// The operation keeps its checked slot or operand count, and its native type.
     Indexed(std::mem::Discriminant<ExprKind>, usize, Type),
+    NamedCall(usize, usize, Type),
     ModuleRead(usize, Type),
     Integer(i64),
     Constant(ir::Constant),
@@ -77,6 +78,12 @@ impl FixedNode {
                     Self::indexed(&expr.kind, items.len(), expr.ty)
                 }
                 ExprKind::Int(ref text) => Self::Integer(text.parse().ok()?),
+                ExprKind::Call(id, ref args)
+                    if !args.exhaustive_enum_match
+                        && args.order.iter().copied().eq(0..args.values.len()) =>
+                {
+                    Self::NamedCall(id, args.values.len(), expr.ty)
+                }
                 ExprKind::Local(slot) | ExprKind::Field(_, slot) => {
                     Self::indexed(&expr.kind, slot, expr.ty)
                 }
@@ -165,6 +172,25 @@ impl SourceSites {
                 name.start(),
                 Builtin::RegisteredName(name.id.to_string()),
                 FixedNode::ModuleRead(slot, ty),
+            );
+        }
+    }
+
+    /// A Python caller loads the live name and supplies only the written arguments.
+    pub(super) fn named_call(&mut self, call: &ast::ExprCall, name: &ast::ExprName, value: &Expr) {
+        if let Some(site) = self.site_at(call.range())
+            && call.start() == name.start()
+            && !ruff_python_stdlib::identifiers::is_mangled_private(name.id.as_str())
+            && let ExprKind::Call(_, args) = &value.kind
+            && args.values.len() == call.arguments.args.len()
+            && registered::values::fixed_positional_arguments(call)
+            && let Some(node) = FixedNode::checked(&ir::Node::Expression(value))
+        {
+            self.python_operation(
+                site,
+                name.end(),
+                Builtin::RegisteredName(name.id.to_string()),
+                node,
             );
         }
     }

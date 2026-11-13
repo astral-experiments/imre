@@ -12703,7 +12703,16 @@ impl<'a> Checker<'a> {
                     "generator functions require direct iteration",
                 ));
             }
-            return self.source_call(call, &signature, None, 0);
+            let value = self.source_call(call, &signature, None, 0)?;
+            if let Some(sites) = &mut self.fixed_sites
+                && let Some(name) = call.func.as_name_expr()
+                && self.namespace.is_none()
+                && !self.names.contains_key(name.id.as_str())
+                && self.source.get(name.range().to_std_range()) == Some(name.id.as_str())
+            {
+                sites.named_call(call, name, &value);
+            }
+            return Ok(value);
         }
         if matches!(&*call.func, ast::Expr::Name(name) if self.names.contains_key(name.id.as_str()))
             || !matches!(&*call.func, ast::Expr::Name(_) | ast::Expr::Attribute(_))
