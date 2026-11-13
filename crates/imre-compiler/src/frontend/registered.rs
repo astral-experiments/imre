@@ -610,7 +610,7 @@ pub(super) fn capture(
     for (slot, prepared) in candidates {
         let (id, checked, signature) = &definitions[slot];
         let id = *id;
-        if !graph.modules[id].is_program_source() {
+        if signature.registered_frame() || !graph.modules[id].is_program_source() {
             continue;
         }
         let owner = owners[slot];
@@ -638,12 +638,6 @@ pub(super) fn capture(
         {
             continue;
         }
-        let Some(mut signature) = inference.checked_signature(signature) else {
-            continue;
-        };
-        if signature.registered_frame() {
-            continue;
-        }
         let contract = SourceChecks::cached(graph, id, function.range());
         if contract == Some(false) {
             continue;
@@ -665,7 +659,7 @@ pub(super) fn capture(
             fixed.fixed_sites = Some(fixed_body_source::SourceSites::new(true));
             fixed.settled_attributes = Some(&mut attributes);
             let Some((body, _)) =
-                graph.try_registered_body(id, || lower_body(fixed, function, &signature).ok())
+                graph.try_registered_body(id, || lower_body(fixed, function, signature).ok())
             else {
                 continue;
             };
@@ -681,6 +675,7 @@ pub(super) fn capture(
             None
         };
         let body = placed.or_else(|| {
+            let mut signature = signature.clone();
             signature.returns = Type::PythonObject;
             let mut checker = checker();
             checker.registered_local_start = Some(signature.params.len());

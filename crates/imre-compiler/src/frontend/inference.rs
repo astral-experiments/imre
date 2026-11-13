@@ -335,6 +335,10 @@ struct Pending {
 }
 
 impl Pending {
+    fn is_resolved(&self) -> bool {
+        self.returns.is_some() && self.params.iter().all(Option::is_some)
+    }
+
     fn unresolved(
         &self,
         graph: &SourceGraph,
@@ -535,18 +539,6 @@ impl Inference {
         self.pending.borrow().len()
     }
 
-    /// The registered binder has real Python objects even when fixed callers cannot infer a layout.
-    pub(super) fn checked_signature(&self, signature: &Signature) -> Option<Signature> {
-        let pending = self.pending.borrow();
-        let value = &pending[signature.id];
-        if value.returns.is_none() || value.params.iter().any(Option::is_none) {
-            return None;
-        }
-        let mut signature = signature.clone();
-        self.update(&mut signature);
-        Some(signature)
-    }
-
     pub(super) fn used_as_value(&self, id: usize) -> bool {
         self.pending.borrow()[id].used_as_value
     }
@@ -555,7 +547,7 @@ impl Inference {
         self.pending
             .borrow()
             .iter()
-            .any(|value| value.returns.is_none() || value.params.iter().any(Option::is_none))
+            .any(|value| !value.is_resolved())
     }
 
     fn update(&self, signature: &mut Signature) {
@@ -1235,6 +1227,8 @@ impl Inference {
             };
             self.apply_document_fields(classes);
             if self.revision.get() == before {
+                // Recovery can borrow the unchanged round's signatures for its resolved slots.
+                let resolved = |(slot, _): &(usize, _)| self.pending.borrow()[*slot].is_resolved();
                 // Reproduce the canonical diagnostic pass if discovery stalls.
                 if skipped && self.unresolved() {
                     self.revisit_checked_returns();
@@ -1295,7 +1289,8 @@ impl Inference {
                                         .into_iter()
                                         .filter(|&slot| definitions[slot].2.method.is_none()),
                                 )
-                                .map(|slot| (slot, None)),
+                                .map(|slot| (slot, None))
+                                .filter(resolved),
                         );
                     }
                     let primary = reports.remove(index);
@@ -1351,7 +1346,10 @@ impl Inference {
                             types,
                             self,
                             None,
-                            signatures.values().map(|signature| (signature.id, None)),
+                            signatures
+                                .values()
+                                .map(|signature| (signature.id, None))
+                                .filter(resolved),
                         );
                     }
                     return Err(primary.with_following(reports));
@@ -1380,7 +1378,10 @@ impl Inference {
                             types,
                             self,
                             None,
-                            signatures.values().map(|signature| (signature.id, None)),
+                            signatures
+                                .values()
+                                .map(|signature| (signature.id, None))
+                                .filter(resolved),
                         );
                     }
                     return Err(unresolved);
