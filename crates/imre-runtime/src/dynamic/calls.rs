@@ -262,6 +262,7 @@ pub(super) enum RegisteredCall {
         discard: bool,
     },
     Join(thread_worker::Join),
+    Acquire(thread_lock::Acquire),
 }
 
 impl RegisteredCall {
@@ -284,6 +285,7 @@ impl RegisteredCall {
             }
             // SAFETY: the interrupted caller remains rooted in this exclusively executing context.
             Self::Join(join) => unsafe { join.run(context) },
+            Self::Acquire(wait) => Ok(wait.run()),
         }
     }
 }
@@ -8208,8 +8210,18 @@ impl Context {
                     args = method_arguments(receiver, args)?;
                     callable = target;
                 }
-                Value::Native(ref name) if name == "_thread._ThreadHandle.join" => {
-                    return thread_handle::prepare_join(self, &args, &kwargs);
+                Value::Native(ref name) => {
+                    let method = match name.as_str() {
+                        "_thread._ThreadHandle.join" => {
+                            return thread_handle::prepare_join(self, &args, &kwargs);
+                        }
+                        "_thread.lock.acquire" => "acquire",
+                        "_thread.lock.__enter__" => "__enter__",
+                        _ => break,
+                    };
+                    return thread_lock::Acquire::prepare(self, method, &args, &kwargs)
+                        .map(RegisteredCall::Acquire)
+                        .map_err(|error| stdlib::io::qualify_error(self, error, None));
                 }
                 _ => break,
             }
