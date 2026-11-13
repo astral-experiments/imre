@@ -2892,6 +2892,15 @@ impl Checker<'_> {
         Ok((Expr { ty: returns, kind }, captured))
     }
 
+    /// A pull can replace bindings established by a later consumer argument.
+    pub(super) fn forget_pull_writes(&mut self, input: &Prepared) {
+        for slot in &input.writes {
+            self.narrowed.remove_mut(slot);
+            self.assigned
+                .set_type_source(*slot, self.declared_slots.get(slot).copied());
+        }
+    }
+
     /// A source loop owns its complete pipeline across break, return, and error.
     /// Normal exhaustion drops the iterator before the user-visible else suite.
     pub(super) fn lower_prepared_iteration(
@@ -2902,13 +2911,7 @@ impl Checker<'_> {
         before_iteration: Vec<Statement>,
         lower_body: impl FnOnce(&mut Self, &mut Vec<Statement>) -> Result<(), String>,
     ) -> Result<(Vec<Statement>, bool), String> {
-        // A later consumer argument or zip constructor argument may have
-        // established new facts since this lazy body was checked.
-        for slot in &input.writes {
-            self.narrowed.remove_mut(slot);
-            self.assigned
-                .set_type_source(*slot, self.declared_slots.get(slot).copied());
-        }
+        self.forget_pull_writes(&input);
         let before = self.assigned.clone();
         let mut facts = self.narrowed.clone();
         let binding = input.bind_loop_target(self, target, true)?;
