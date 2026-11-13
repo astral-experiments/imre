@@ -462,10 +462,9 @@ impl<'ast> Escape<'ast, '_> {
         let capture = capture.filter(|capture| capture.name == function.name.as_str());
         let captured = capture.is_some();
         let bound = crate::frontend::fixed_call_arguments(call, &function.parameters)?;
-        if !call
-            .arguments
-            .iter_source_order()
-            .all(|arg| self.argument_can_return(arg.value()))
+        if !bound
+            .iter()
+            .all(|(_, argument)| self.argument_can_return(argument))
         {
             return None;
         }
