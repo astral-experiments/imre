@@ -5,6 +5,8 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicU8, AtomicUsize,
 use std::thread::ThreadId;
 
 const LIMIT: usize = std::mem::size_of::<libc::sigset_t>() * 8 + 1;
+// A wakeup-fd report can reenter Python while an outer scan still owns later signals.
+static SIGNALS_PENDING: AtomicBool = AtomicBool::new(false);
 static PENDING: [AtomicBool; LIMIT] = [const { AtomicBool::new(false) }; LIMIT];
 // A worker can request delivery without reading the main interpreter's Python heap.
 const FOREIGN: u8 = 0;
@@ -101,7 +103,7 @@ fn write_wakeup_byte(target: i64, number: i32) {
 extern "C" fn trip(number: libc::c_int) {
     if let Some(bit) = PENDING.get(number as usize) {
         bit.store(true, Ordering::Relaxed);
-        TRIPPED.store(true, Ordering::Release);
+        resume_signals();
         // A selector draining this byte must already be able to see the pending handler.
         wake_selector(number);
     }
@@ -261,6 +263,7 @@ pub(crate) fn clear_pending_after_fork() {
     for bit in &PENDING {
         bit.store(false, Ordering::Relaxed);
     }
+    SIGNALS_PENDING.store(false, Ordering::Release);
     TRIPPED.store(false, Ordering::Release);
 }
 
@@ -268,8 +271,21 @@ pub(crate) fn begin_dispatch() -> bool {
     TRIPPED.load(Ordering::Acquire) && is_main() && TRIPPED.swap(false, Ordering::AcqRel)
 }
 
+pub(crate) fn begin_signal_dispatch() -> bool {
+    SIGNALS_PENDING.load(Ordering::Acquire)
+        && is_main()
+        && SIGNALS_PENDING.swap(false, Ordering::AcqRel)
+}
+
+pub(crate) fn resume_signals() {
+    // Multiple threads can publish different signal numbers before the main thread scans them.
+    SIGNALS_PENDING.fetch_or(true, Ordering::Release);
+    resume_dispatch();
+}
+
 pub(crate) fn resume_dispatch() {
-    TRIPPED.store(true, Ordering::Release);
+    // Carry each publisher's signal or wakeup error into the same acquiring checkpoint.
+    TRIPPED.fetch_or(true, Ordering::Release);
 }
 pub(crate) fn take(number: i32) -> bool {
     PENDING[number as usize].swap(false, Ordering::AcqRel)
@@ -278,8 +294,14 @@ pub(crate) fn take_interrupt() -> bool {
     if !begin_dispatch() {
         return false;
     }
-    let interrupted = take(libc::SIGINT);
-    if has_wakeup_errors() || PENDING.iter().any(|bit| bit.load(Ordering::Acquire)) {
+    let interrupted = begin_signal_dispatch() && {
+        let interrupt = take(libc::SIGINT);
+        if PENDING.iter().any(|bit| bit.load(Ordering::Acquire)) {
+            resume_signals();
+        }
+        interrupt
+    };
+    if has_wakeup_errors() {
         resume_dispatch();
     }
     interrupted
