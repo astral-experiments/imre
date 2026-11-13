@@ -4,7 +4,6 @@ use std::collections::BTreeSet;
 
 use ruff_python_ast as ast;
 use ruff_python_ast::visitor::Visitor;
-use ruff_text_size::TextSize;
 
 use super::{ClassBindings, ClosureNames};
 
@@ -33,7 +32,7 @@ impl ParameterReads {
 
 #[derive(Default)]
 pub(crate) struct ClassAnnotations {
-    pub(crate) conditional_offsets: Vec<TextSize>,
+    pub(crate) conditional_count: usize,
     pub(crate) body: Option<Box<crate::frontend::AnnotationProvider>>,
     pub(crate) reads: BTreeSet<String>,
     pub(crate) incomplete: bool,
@@ -56,7 +55,7 @@ impl ClassAnnotations {
             self.reads
                 .retain(|name| !bindings.locals.contains(name) && !bindings.globals.contains(name));
             self.reads.insert("__classdict__".into());
-            if !self.conditional_offsets.is_empty() {
+            if self.conditional_count != 0 {
                 self.reads.insert("__conditional_annotations__".into());
             }
         }

@@ -3,11 +3,7 @@ use super::{Context, Error, Id, NONE, Result, Value};
 
 impl Context {
     /// Capture the live class dictionary and the conditional declarations that ran.
-    pub(super) fn class_annotation_environment(
-        &mut self,
-        class_scope: Id,
-        conditional_offsets: Id,
-    ) -> Result<Id> {
+    pub(super) fn class_annotation_environment(&mut self, class_scope: Id) -> Id {
         let parent = self.scope_data(class_scope).parent.expect("class parent");
         let dict_cell = self.class_annotation_dict_cell(class_scope);
         let mut names = vec!["__classdict__".to_owned()];
@@ -16,47 +12,34 @@ impl Context {
             names.push("__class__".to_owned());
             cells.push(cell);
         }
-        if conditional_offsets != NONE {
+        if let Some(active) = self
+            .scope_data(class_scope)
+            .class_namespace
+            .as_ref()
+            .and_then(|ns| ns.annotation_scratch?.1)
+        {
             names.push("__conditional_annotations__".to_owned());
-            let offsets = self.items(conditional_offsets)?;
-            let active = self.op("set", NONE, NONE, NONE)?;
-            for (index, offset) in offsets.into_iter().enumerate() {
-                let offset = self.as_integer(offset)?.try_into().expect("source offset");
-                if self
-                    .scope_data(class_scope)
-                    .class_namespace
-                    .as_ref()
-                    .and_then(|ns| ns.annotation_scratch.as_ref())
-                    .is_some_and(|(_, sites)| sites.contains(&offset))
-                {
-                    let index = self.int(index as i64);
-                    super::builtins::set_add(self, active, index)?;
-                }
-            }
             cells.push(self.alloc(Value::Cell(Some(active))));
         }
-        Ok(self.closure_environment(parent, names, &cells))
+        self.closure_environment(parent, names, &cells)
     }
 
     /// Mark the declaration as executed and record its field name for TypedDict.
-    pub(super) fn record_class_annotation(
-        &mut self,
-        scope: Id,
-        name: Id,
-        offset: u32,
-    ) -> Result<Id> {
-        let Value::Scope(frame) = self.heap.get_mut(scope) else {
-            unreachable!("compiled class scope")
-        };
-        let namespace = frame.class_namespace.get_or_insert_with(Default::default);
-        let Some((fields, sites)) = &mut namespace.annotation_scratch else {
+    pub(super) fn record_class_annotation(&mut self, scope: Id, name: Id, index: Id) -> Result<Id> {
+        let Some((fields, active)) = self
+            .scope_data(scope)
+            .class_namespace
+            .as_ref()
+            .and_then(|ns| ns.annotation_scratch)
+        else {
             return Err(Error::new(
                 "RuntimeError",
                 "annotation outside an executing class body",
             ));
         };
-        sites.insert(offset);
-        let fields = *fields;
+        if index != NONE {
+            self.mark_annotation(active.expect("conditional class annotation set"), index)?;
+        }
         if fields != NONE {
             self.put_item(fields, name, NONE)?;
         }

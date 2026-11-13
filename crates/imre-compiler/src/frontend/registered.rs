@@ -1444,15 +1444,12 @@ pub(super) fn collect_sites<'a>(
                         } else {
                             self.class.plan.read(&ann.annotation);
                             let index = self.class.conditional.then(|| {
-                                let offsets = &mut self.class.plan.conditional_offsets;
-                                offsets.push(ann.start());
-                                offsets.len() - 1
+                                let index = self.class.plan.conditional_count;
+                                self.class.plan.conditional_count += 1;
+                                index
                             });
                             self.class.fields.push((field, index));
-                            ir::NamespaceAnnotation::Class {
-                                site: ann.start(),
-                                name,
-                            }
+                            ir::NamespaceAnnotation::Class { index, name }
                         };
                         (mark, Vec::new())
                     };

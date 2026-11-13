@@ -1479,6 +1479,9 @@ impl LexicalDefinitions<'_, '_> {
         }
         if let Body::Namespace(class, scope) = &body {
             signature["postponed_annotations"] = json!(class.annotations.postponed);
+            if class.annotations.conditional_count != 0 {
+                signature["conditional_annotations"] = json!(true);
+            }
             scope.write_signature(&mut signature);
         } else if let Some(facts) = evaluator_scope {
             facts.write_signature(&mut signature);
@@ -1624,24 +1627,13 @@ impl SourceMap<'_> {
         if frame.body.terminated {
             return;
         }
-        let conditional = !plan.conditional_offsets.is_empty();
-        let offsets = if conditional {
-            let offsets = frame.op("list", &[]);
-            for site in &plan.conditional_offsets {
-                let offset = frame.integer(site.to_u32());
-                frame.op("append", &[&offsets, &offset]);
-            }
-            offsets
-        } else {
-            "0".into()
-        };
         let signature = json!({
             "posonly": ["format"], "scope_complete": !plan.incomplete, "scope_reads": plan.reads,
             "code_flags": self.function_flags(in_function, false),
         });
         let scope = AnnotationScope::Class {
             globals,
-            conditional,
+            conditional: plan.conditional_count != 0,
         };
         let compiled = self.annotation_provider(
             frame.output,
@@ -1651,10 +1643,7 @@ impl SourceMap<'_> {
             signature,
             format!("{prefix}__annotate__"),
         );
-        let environment = frame.op(
-            "class_annotation_environment",
-            &[&frame.scope.clone(), &offsets],
-        );
+        let environment = frame.op("class_annotation_environment", &[&frame.scope.clone()]);
         let function = compiled.bind_defaults(frame, &environment, &[]);
         frame.bind("__annotate_func__", &function);
     }

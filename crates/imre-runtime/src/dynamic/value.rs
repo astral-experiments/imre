@@ -1115,10 +1115,8 @@ pub(super) struct ClassNamespace {
     pub layout_descriptors_cleared: bool,
     /// Closure cell shared by method annotation providers.
     pub annotation_dict_cell: Option<Id>,
-    /// Private closure cell shared by a runtime-source class and its annotation provider.
-    pub conditional_cell: Option<Id>,
-    /// The field dictionary (NONE if unbound) and executed offsets while the class body runs.
-    pub annotation_scratch: Option<(Id, HashSet<u32>)>,
+    /// The eager field dictionary and private conditional index set while the class body runs.
+    pub annotation_scratch: Option<(Id, Option<Id>)>,
     /// Class annotation attributes are served by the installed provider.
     pub provider_annotations: bool,
     /// Run pending instance finalizers after user exit callbacks, while the heap is live.
@@ -2402,9 +2400,9 @@ impl Value {
                     visit.extend(class.name_override);
                     visit.extend(class.original_doc);
                     visit.extend(class.annotation_dict_cell);
-                    visit.extend(class.conditional_cell);
-                    if let Some((fields, _)) = &class.annotation_scratch {
-                        visit.push(*fields);
+                    if let Some((fields, active)) = class.annotation_scratch {
+                        visit.push(fields);
+                        visit.extend(active);
                     }
                     visit.extend(class.dictionary);
                     visit.extend(class.defining_module);

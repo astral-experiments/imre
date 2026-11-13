@@ -1313,12 +1313,15 @@ impl<'f> Frame<'f, '_, '_> {
             }
             (
                 Builtin::RegisteredNamespaceAnnotation(ir::NamespaceAnnotation::Class {
-                    site,
+                    index,
                     name,
                 }),
                 [],
             ) => {
-                self.code.mark_class_annotation(*site, name);
+                let index = index.map_or_else(|| "0".into(), |i| self.code.integer(i));
+                let scope = self.code.scope.clone();
+                self.code
+                    .named_op("mark_class_annotation", &scope, name, &index);
                 "0".to_owned()
             }
             (

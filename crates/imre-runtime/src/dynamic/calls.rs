@@ -10048,6 +10048,8 @@ impl Context {
             needs_dict_cell: bool,
             #[serde(default)]
             postponed_annotations: bool,
+            #[serde(default)]
+            conditional_annotations: bool,
             static_attributes: Option<Vec<String>>,
         }
         let parameters = self.code_object(code).parameters;
@@ -10116,11 +10118,16 @@ impl Context {
         } else {
             NONE
         };
+        let active = if bindings.conditional_annotations {
+            Some(self.op("set", NONE, NONE, NONE)?)
+        } else {
+            None
+        };
         if let Value::Scope(frame) = self.heap.get_mut(scope) {
             frame
                 .class_namespace
                 .get_or_insert_with(Default::default)
-                .annotation_scratch = Some((annotations, Default::default()));
+                .annotation_scratch = Some((annotations, active));
         }
         self.execute(code, scope, FrameOwner::Function(body))?;
         if (bindings.needs_class_cell || self.scope_name(scope, "__classcell__").is_some())
@@ -10207,7 +10214,6 @@ impl Context {
         if let Value::Scope(frame) = self.heap.get_mut(scope) {
             if let Some(namespace) = &mut frame.class_namespace {
                 namespace.annotation_scratch = None;
-                namespace.conditional_cell = None;
             }
             frame.globals.clear();
             frame.closure.nonlocals.clear();

@@ -15,6 +15,8 @@ def current():
             if which == 2:
                 b: mark("second")
             a: mark("last")
+        # The executing class still owns the conditional set until its provider captures it.
+        gc.collect()
 
     assert effects == []
     result = Swapped.__annotations__
