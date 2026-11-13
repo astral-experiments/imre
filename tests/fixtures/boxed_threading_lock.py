@@ -1,4 +1,5 @@
 import _thread
+import os
 import types
 import threading
 from _thread import LockType, error as lock_error
@@ -103,5 +104,25 @@ def current():
     assert observed() is None
 
 
+def reinit_during_acquire():
+    inherited = Lock()
+    inherited.acquire()
+    acquire = inherited.acquire
+
+    class ResetTimeout:
+        def __index__(self):
+            inherited._at_fork_reinit()
+            return 0
+
+    pid = os.fork()
+    if pid == 0:
+        os._exit(0 if acquire(timeout=ResetTimeout()) and inherited.locked() else 1)
+    _, status = os.waitpid(pid, 0)
+    assert status == 0 and inherited.locked()
+    inherited.release()
+
+
 if __name__ == "__main__":
     current()
+    if hasattr(os, "fork"):
+        reinit_during_acquire()

@@ -89,9 +89,12 @@ pub(super) fn method(
             ),
         ));
     };
-    let lock = lock.clone();
     if matches!(name, "acquire" | "__enter__") {
         let (blocking, timeout) = acquire_args(ctx, args, kwargs)?;
+        // Conversion may replace this lock's native backing in a forked child.
+        let Value::PrimitiveLock(lock) = ctx.heap.get(id) else {
+            unreachable!("lock receiver checked above");
+        };
         return Ok(boolean(lock.acquire(blocking, timeout)));
     }
     if !kwargs.is_empty() {
