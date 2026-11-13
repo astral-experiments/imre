@@ -40,40 +40,6 @@ fn unsupported() -> Error {
     )
 }
 
-/// Read an ordinary instance field only when its lookup cannot execute Python.
-fn plain_field(ctx: &Context, receiver: Id, name: &str) -> Option<Id> {
-    let Value::Instance {
-        class,
-        fields,
-        namespace: None,
-        ..
-    } = ctx.heap.get(receiver)
-    else {
-        return None;
-    };
-    let Value::Class {
-        scope, ancestors, ..
-    } = ctx.heap.get(*class)
-    else {
-        return None;
-    };
-    if ancestors
-        .iter()
-        .any(|base| ctx.builtins.get("object") != Some(base))
-        || ctx
-            .scope_data(*scope)
-            .class_namespace
-            .as_ref()
-            .is_some_and(|ns| ns.slot_names.is_some())
-        || ctx.class_attr(*class, "__getattribute__").is_some()
-        || ctx.class_attr(*class, "__getattr__").is_some()
-        || ctx.class_attr(*class, name).is_some()
-    {
-        return None;
-    }
-    fields.get(name).copied()
-}
-
 impl Callback {
     pub(super) fn capture(
         ctx: &Context,
@@ -158,7 +124,7 @@ impl Callback {
             {
                 return Ok(None);
             }
-            let Some(operand) = plain_field(ctx, receiver, field) else {
+            let Some(operand) = ctx.plain_instance_field(receiver, field) else {
                 return Ok(None);
             };
             let Value::PrimitiveLock(lock) = ctx.heap.get(operand) else {
