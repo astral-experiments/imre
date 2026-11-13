@@ -31,7 +31,6 @@ impl Checker<'_> {
             op @ (Intrinsic::DocCaptureStart
             | Intrinsic::DocCaptureTake
             | Intrinsic::DocExceptionName
-            | Intrinsic::DocAscii
             | Intrinsic::DocDisplay),
         )) = binding
         {
@@ -50,13 +49,6 @@ impl Checker<'_> {
                     ExprKind::Builtin(
                         Builtin::ExceptionName,
                         vec![self.expr_expected(exc, Type::Exception)?],
-                    ),
-                ),
-                (Intrinsic::DocAscii, [value]) => (
-                    Type::Str,
-                    ExprKind::Builtin(
-                        Builtin::AsciiEscape,
-                        vec![self.expr_expected(value, Type::Str)?],
                     ),
                 ),
                 (Intrinsic::DocDisplay, [value]) => {

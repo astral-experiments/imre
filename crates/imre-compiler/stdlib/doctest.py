@@ -2,7 +2,7 @@
 
 from collections.abc import Iterator
 from typing import Callable
-from _imre_doctest import ascii_output, exception_name, execute
+from _imre_doctest import exception_name, execute
 import unittest
 
 DONT_ACCEPT_TRUE_FOR_1 = 1
@@ -196,9 +196,13 @@ def _ellipsis(want: str, got: str) -> bool:
 
 
 class OutputChecker:
+    def _toAscii(self, s: str) -> str:
+        """Convert string to hex-escaped ASCII string."""
+        return str(s.encode("ASCII", "backslashreplace"), "ASCII")
+
     def check_output(self, want: str, got: str, optionflags: int) -> bool:
-        got = ascii_output(got)
-        want = ascii_output(want)
+        got = self._toAscii(got)
+        want = self._toAscii(want)
         if want == got:
             return True
         if not optionflags & 1 and ((want == "1\n" and got == "True\n") or
