@@ -89,6 +89,7 @@ impl Callback {
         };
         let Value::Function {
             code: code_id,
+            ref fields,
             scope,
             defaults,
             kwdefaults,
@@ -123,6 +124,21 @@ impl Callback {
                 )
             {
                 return Ok(None);
+            }
+            // This operation executes only the lock acquire. A receiver check that
+            // would raise in the Python frame still requires the worker's exception path.
+            if meta.get("types").is_some() {
+                let sig = ctx.parsed_parameters(code_id)?;
+                let name = ctx.str_value(fields.qualname)?;
+                let checked = ctx.check_supplied_types(function, &sig, name, |param| {
+                    (sig.positional.first()?.as_str() == param).then_some(receiver)
+                });
+                if let Err(error) = checked {
+                    if error.kind == "TypeError" {
+                        return Ok(None);
+                    }
+                    return Err(error);
+                }
             }
             let Some(operand) = ctx.plain_instance_field(receiver, field) else {
                 return Ok(None);
