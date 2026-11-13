@@ -6,9 +6,10 @@ use super::*;
 pub(crate) fn place_fixed_function(
     function: ir::Function,
     source: FixedBodySource,
+    inputs: FrameInputs,
 ) -> RegisteredFunction {
     RegisteredFunction {
-        inputs: FrameInputs::Checked,
+        inputs,
         function,
         local_names: source.local_names,
         fixed_sites: source.positions,
@@ -19,6 +20,44 @@ pub(crate) fn place_fixed_function(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recovering_a_method_keeps_the_checked_field_and_its_python_receiver() {
+        let text = concat!(
+            "import argparse, dataclasses\n",
+            "@dataclasses.dataclass\n",
+            "class Crate:\n",
+            "    name: str\n",
+            "    def pretty(self) -> str:\n",
+            "        return self.name\n",
+            "def options() -> argparse.Namespace:\n",
+            "    return argparse.ArgumentParser().parse_args([])\n",
+            "print(Crate('core').pretty(), options())\n",
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.py");
+        std::fs::write(&path, text).unwrap();
+        let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
+        let (_, lowered) =
+            caller_cache::observe_lowerings(|| crate::checked_lower(&mut graph).unwrap());
+        let functions = graph.registered_functions();
+        let start = TextSize::try_from(text.find("def pretty").unwrap()).unwrap();
+        let body = &functions[&graph.entry][&start];
+        let [Statement::Return(field)] = body.function.body.as_slice() else {
+            panic!("expected the checked field return")
+        };
+        assert!(matches!(&field.kind, ExprKind::Field(receiver, 0)
+            if matches!(receiver.kind, ExprKind::Local(0))));
+        let positions: Vec<_> = body.fixed_sites.iter().map(|range| &text[*range]).collect();
+        assert_eq!(positions, ["return self.name", "self.name", "self"]);
+        let attributes = body.fixed_attributes.as_ref().unwrap();
+        assert!(matches!(&*attributes[&body.fixed_sites[1]].operation,
+            Builtin::RegisteredAttribute { name, .. } if name == "name"));
+        assert!(matches!(&body.inputs, FrameInputs::Protocol { sites }
+            if matches!(sites.as_ref(), [FrameSite::Method(method)]
+                if method.start() == start && method.name.as_str() == "pretty")));
+        assert_eq!(lowered.iter().filter(|name| *name == "pretty").count(), 1);
+    }
 
     #[test]
     fn named_entry_places_the_checked_arithmetic_body() {

@@ -1118,7 +1118,7 @@ impl FixedProgram {
             graph.register_function(
                 owner,
                 start,
-                frontend::place_fixed_function(function, source),
+                frontend::place_fixed_function(function, source, frontend::FrameInputs::Checked),
             );
         }
     }

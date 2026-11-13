@@ -113,7 +113,11 @@ fn placed_field_uses_the_ordinary_descriptor_and_attribute_line() {
     assert!(
         matches!(function.body.as_slice(), [Statement::Return(value)] if matches!(value.kind, ExprKind::Field(_, 0)))
     );
-    let placed = crate::frontend::place_fixed_function(function, placement);
+    let placed = crate::frontend::place_fixed_function(
+        function,
+        placement,
+        crate::frontend::FrameInputs::Checked,
+    );
 
     let values = RegisteredSource {
         python_optimization: 0,
@@ -461,7 +465,11 @@ fn placed_arithmetic_keeps_the_python_operator_and_integer_guards() {
             &value.kind,
             ExprKind::Binary(actual, ..) if *actual == op
         ));
-        let placed = crate::frontend::place_fixed_function(function, frame);
+        let placed = crate::frontend::place_fixed_function(
+            function,
+            frame,
+            crate::frontend::FrameInputs::Checked,
+        );
         let mut output = Output::default();
         let file = output.data(b"combine.py");
         let positions = SourcePositions::new(Path::new("combine.py"), &source, &file);

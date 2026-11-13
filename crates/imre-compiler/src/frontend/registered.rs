@@ -516,7 +516,7 @@ impl FixedFunctions {
                 graph.register_function(
                     owner.module,
                     definition.start(),
-                    place_fixed_function(function, source),
+                    place_fixed_function(function, source, FrameInputs::Checked),
                 );
             }
         }
@@ -600,20 +600,35 @@ pub(super) fn capture(
         let checked = checked_bodies.is_some_and(|ids| ids.contains(&slot));
         // A revision can invalidate a physical method's last check. Check its settled
         // signature before trying the registered return convention.
-        if method.is_some()
-            && !checked
-            && graph
-                .try_registered_body(id, || lower_body(checker(), function, &signature).ok())
-                .is_none()
-        {
-            continue;
-        }
-        signature.returns = Type::PythonObject;
-        let mut checker = checker();
-        checker.registered_local_start = Some(signature.params.len());
-        checker.checked_callback_effects = checked;
-        let body =
-            graph.try_registered_body(id, || lower_definition(checker, function, &signature).ok());
+        let mut method_site = method.map(|declaration| FrameSite::Method(Arc::clone(declaration)));
+        let placed = if method_site.is_some() && !checked {
+            let mut fixed = checker();
+            fixed.fixed_sites = Some(fixed_body_source::SourceSites::new(true));
+            let Some((body, _)) =
+                graph.try_registered_body(id, || lower_body(fixed, function, &signature).ok())
+            else {
+                continue;
+            };
+            body.source
+                .filter(|source| source.matches(&body.function))
+                .and_then(|source| {
+                    // Transfer the lexical site with the matched operations. Their field
+                    // and bound-call operands use the live receiver in the Python frame.
+                    let inputs = FrameInputs::Protocol {
+                        sites: Box::new([method_site.take()?]),
+                    };
+                    Some(place_fixed_function(body.function, source, inputs))
+                })
+        } else {
+            None
+        };
+        let body = placed.or_else(|| {
+            signature.returns = Type::PythonObject;
+            let mut checker = checker();
+            checker.registered_local_start = Some(signature.params.len());
+            checker.checked_callback_effects = checked;
+            graph.try_registered_body(id, || lower_definition(checker, function, &signature).ok())
+        });
         if let Some(mut body) = body
             && contract.unwrap_or_else(|| {
                 let checks = &inference.source_checks;
@@ -629,13 +644,13 @@ pub(super) fn capture(
                 }
             })
         {
-            if let Some(declaration) = method {
+            if let Some(site) = method_site {
                 // The writer must retain the method's lexical names when binding the live receiver.
                 let FrameInputs::Protocol { sites } = &mut body.inputs else {
                     continue;
                 };
                 let mut required = std::mem::take(sites).into_vec();
-                required.push(FrameSite::Method(Arc::clone(declaration)));
+                required.push(site);
                 *sites = required.into_boxed_slice();
             }
             graph.register_function(id, function.start(), body);
