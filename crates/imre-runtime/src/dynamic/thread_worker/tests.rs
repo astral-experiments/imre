@@ -99,6 +99,18 @@ fn while_lock_held<T>(probe: impl FnOnce(&Arc<PrimitiveLock>) -> T) -> T {
     })
 }
 
+fn launch(
+    ctx: &mut Context,
+    operation: Operation,
+    registration: Registration,
+    roots: Vec<Id>,
+) -> Result<(usize, Option<u64>)> {
+    let started = super::launch(ctx, operation, registration, roots)?;
+    let identity = (started.ident, started.native_id);
+    started.publish()?;
+    Ok(identity)
+}
+
 fn registered(handle: &Arc<Handle>, daemon: bool, owner: Option<Id>) -> Registration {
     Registration::Thread(RegisteredThread {
         handle: Arc::clone(handle),
@@ -141,6 +153,67 @@ fn native_start_and_join_publish_the_worker_lifetime() {
     assert!(!handle.alive());
     assert!(!ctx.workers.entries[0].active.load(Ordering::Acquire));
     assert_eq!(ctx.threads.count.load(Ordering::Acquire), 0);
+}
+
+#[test]
+fn worker_waits_for_the_creator_to_publish_its_receiver() {
+    let mut ctx = context();
+    let scope = ctx.scope("worker_test", None);
+    ctx.heap
+        .enter(scope, NONE, crate::dynamic::value::FrameOwner::Module(NONE));
+    let metaclass = ctx.builtin("type");
+    let name = ctx.text("Worker");
+    let bases = ctx.alloc(Value::Tuple(Vec::new()));
+    let namespace = ctx.dict(Vec::new());
+    let class = ctx
+        .call(metaclass, vec![name, bases, namespace], vec![])
+        .unwrap();
+    for cancel in [true, false] {
+        let owner = ctx.instance(class, None);
+        let target = ctx.alloc(Value::List(Vec::new()));
+        ctx.set_attr(owner, "_target", target).unwrap();
+        let handle = Arc::<Handle>::default();
+        let prefix = Arc::<PrimitiveLock>::default();
+        let body = Arc::<PrimitiveLock>::default();
+        assert!(prefix.acquire(false, None));
+        let started = super::launch(
+            &mut ctx,
+            Operation::Acquire {
+                lock: body.clone(),
+                release: Some(prefix.clone()),
+            },
+            registered(&handle, false, Some(owner)),
+            vec![target],
+        )
+        .unwrap();
+        assert_ne!(started.ident, thread_ident());
+        assert!(ctx.workers.roots().any(|id| *id == owner));
+        assert!(prefix.locked());
+        assert!(!body.locked());
+        let ident = started.ident;
+        if cancel {
+            drop(started);
+        } else {
+            started.publish().unwrap();
+        }
+        assert!(handle.wait(Some(Duration::from_secs(5)), State::worker_pending));
+        handle.join(Some(Duration::ZERO)).unwrap();
+        ctx.reap_thread_operands();
+        assert!(ctx.workers.entries.is_empty());
+        assert_eq!(prefix.locked(), cancel);
+        assert_eq!(body.locked(), !cancel);
+        if cancel {
+            assert_eq!(handle.ident(), 0);
+            assert_eq!(ctx.lookup_attr(owner, "_target").unwrap(), target);
+        } else {
+            assert_eq!(handle.ident(), ident);
+            assert_eq!(
+                ctx.lookup_attr(owner, "_target").unwrap_err().kind,
+                "AttributeError"
+            );
+        }
+    }
+    ctx.heap.leave(NONE, false);
 }
 
 #[test]
