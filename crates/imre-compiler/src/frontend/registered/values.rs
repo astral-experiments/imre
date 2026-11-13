@@ -725,6 +725,13 @@ pub(in crate::frontend) fn index_key<E>(
             } else {
                 operand(node)?
             };
+            // A source string already owns its Python literal identity.
+            if matches!(
+                value.without_location().kind,
+                ExprKind::Str(_) | ExprKind::Builtin(Builtin::RegisteredString(_), _)
+            ) {
+                return Ok(located(node.range(), node.start(), value));
+            }
             let Some(key) = ir::Constant::from_expr(&value) else {
                 return Ok(value);
             };
@@ -1904,6 +1911,25 @@ mod index_constant_tests {
             value.kind,
             ExprKind::Builtin(Builtin::RegisteredSubscript(..), _)
         ));
+    }
+
+    #[test]
+    fn subscript_text_retains_the_source_literal_and_its_position() {
+        for source in [r#"x["id"]"#, r#"x["a b"]"#, r#"x["\ud800"]"#] {
+            let graph = SourceGraph::single(source).unwrap();
+            let entry = &graph.modules[graph.entry];
+            let module = ModuleSource::new(entry);
+            let statement = entry.parsed.syntax().body[0].as_expr_stmt().unwrap();
+            let key = &statement.value.as_subscript_expr().unwrap().slice;
+            let value = registered_index_key(key, module.context(source)).unwrap();
+            assert!(matches!(&value.kind,
+                ExprKind::Builtin(Builtin::RegisteredLocation(range, _, _), _)
+                    if *range == key.range()));
+            assert!(matches!(
+                value.without_location().kind,
+                ExprKind::Str(_) | ExprKind::Builtin(Builtin::RegisteredString(_), _)
+            ));
+        }
     }
 
     #[test]
