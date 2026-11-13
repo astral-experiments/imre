@@ -1820,7 +1820,7 @@ mod tests {
         use crate::ir::{Builtin, Expr, ExprKind, Node, Statement};
 
         let path = Path::new("<doctest sample[4]>");
-        let text = "try:\n    for item in source:\n        saved = item; print(saved); None\n        def quiet():\n            record(item)\n        class C:\n            record(item)\n    else:\n        exhausted()\nexcept Error:\n    'handled'\nelse:\n    del item\nfinally:\n    done()\n";
+        let text = "try:\n    for item in (\n        source\n    ):\n        saved = item; print(saved); None\n        def quiet():\n            record(item)\n        class C:\n            record(item)\n    else:\n        exhausted()\nexcept Error:\n    'handled'\nelse:\n    del item\nfinally:\n    done()\n";
         let prepared = PreparedBody::interactive(path, text, 0, 0).unwrap();
         let suite = prepared.initializer();
         assert!(suite.fully_checked());
@@ -1851,7 +1851,7 @@ mod tests {
             checkpoints,
             [
                 "try:",
-                "for item in source:",
+                "source",
                 "saved = item",
                 "print(saved)",
                 "None",
