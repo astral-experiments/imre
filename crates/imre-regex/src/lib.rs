@@ -628,7 +628,27 @@ pub fn translate_pattern_with_line_mode(
     literal_guards: bool,
     multiline: bool,
 ) -> Result<FixedPattern, String> {
-    let translated = tokenize(
+    let parsed = regular_pattern(
+        pattern,
+        verbose,
+        alphabet,
+        dotall,
+        literal_guards,
+        multiline,
+    )?;
+    fixed_pattern(parsed, alphabet == Alphabet::Bytes, multiline)
+}
+
+/// Translate a regular Python pattern, preserving its declared capture slots.
+pub fn regular_pattern(
+    pattern: &str,
+    verbose: bool,
+    alphabet: Alphabet,
+    dotall: bool,
+    literal_guards: bool,
+    multiline: bool,
+) -> Result<TokenizedPattern, String> {
+    let mut parsed = tokenize(
         pattern,
         verbose,
         alphabet,
@@ -637,13 +657,8 @@ pub fn translate_pattern_with_line_mode(
         Grammar::Standard { multiline },
         None,
     )?;
-    analyze(
-        translated.source,
-        translated.groups,
-        translated.verbose,
-        alphabet == Alphabet::Bytes,
-        multiline,
-    )
+    parsed.source = preserve_zero_repeat_groups(parsed.source)?;
+    Ok(parsed)
 }
 
 /// Normalize a text pattern requiring a lookaround without accepting backend-specific syntax.
@@ -1779,16 +1794,31 @@ pub fn fixed_hir(
         .map_err(|e| e.to_string())
 }
 
-fn analyze(
-    output: String,
-    groups: Vec<Option<String>>,
-    verbose: bool,
+impl TokenizedPattern {
+    /// Verify that a matcher's visible captures still have their Python indices and names.
+    pub fn check_capture_names<'a>(
+        &'a self,
+        names: impl Iterator<Item = Option<&'a str>>,
+    ) -> Result<(), String> {
+        if names
+            .filter(|name| *name != Some("imre.eol"))
+            .eq(self.groups.iter().map(Option::as_deref))
+        {
+            Ok(())
+        } else {
+            Err("regex optimization would change the Python capture groups".into())
+        }
+    }
+}
+
+/// Check capture participation and the repetition restrictions of a fixed matcher.
+pub fn fixed_pattern(
+    parsed: TokenizedPattern,
     bytes: bool,
     multiline: bool,
 ) -> Result<FixedPattern, String> {
-    let output = preserve_zero_repeat_groups(output)?;
-    let hir = fixed_hir(&output, bytes, multiline)?;
-    let mut required = vec![false; groups.len()];
+    let hir = fixed_hir(&parsed.source, bytes, multiline)?;
+    let mut required = vec![false; parsed.groups.len()];
     required[0] = true;
     let mut nodes = vec![(&hir, true)];
     while let Some((node, always)) = nodes.pop() {
@@ -1816,23 +1846,18 @@ fn analyze(
     }
     // The checked HIR enforces text boundaries. This builder validates engine size
     // and capture numbering for either alphabet, without observing match offsets.
-    let regex = regex::bytes::RegexBuilder::new(&output)
+    let regex = regex::bytes::RegexBuilder::new(&parsed.source)
         .unicode(!bytes)
         .multi_line(multiline)
         .build()
         .map_err(|e| e.to_string())?;
-    if !regex
-        .capture_names()
-        .filter(|name| *name != Some("imre.eol"))
-        .eq(groups.iter().map(Option::as_deref))
-    {
-        return Err("regex optimization would change the Python capture groups".into());
-    }
+    parsed.check_capture_names(regex.capture_names())?;
     Ok(FixedPattern {
-        verbose,
-        source: output,
+        verbose: parsed.verbose,
+        source: parsed.source,
         may_match_empty: hir.properties().minimum_len() == Some(0),
-        groups: groups
+        groups: parsed
+            .groups
             .into_iter()
             .zip(required)
             .map(|(name, required)| Capture { name, required })
