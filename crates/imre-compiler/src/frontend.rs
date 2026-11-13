@@ -1300,18 +1300,15 @@ fn lower_graph(
     let named = graph.registered_startup && !needs_registered_entry;
     let mut completed = FixedFunctions::default();
     let register = |completed: FixedFunctions, owners: &[ModuleId]| {
-        completed.register(graph, owners, |module, range, inputs| {
+        completed.register(graph, owners, |module, range| {
             let checks = &inference.source_checks;
             if let Some(accepted) = registered::SourceChecks::cached(graph, module, range) {
                 return accepted;
             }
-            if let FrameInputs::Protocol { sites } = inputs
-                && !matches!(sites.as_ref(), [FrameSite::Method(_)])
-                && let Some(solved) = &checks.solved
-            {
-                // Check a placed live function with the other solved ranges. Forcing a
-                // module check here would change the contract of its following siblings.
-                solved.borrow_mut().push((module, range));
+            if let Some(solved) = &checks.solved {
+                solved
+                    .borrow_mut()
+                    .push((module, range, registered::SourceFrame::Fixed));
                 true
             } else {
                 checks.accepts(graph, module, range)

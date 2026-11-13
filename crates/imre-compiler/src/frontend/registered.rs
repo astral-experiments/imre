@@ -404,7 +404,7 @@ pub(super) fn finish_source_checks(
         });
         SourceChecks::accepts_range(errors, range)
     };
-    for (module, range) in checks
+    for (module, range, source) in checks
         .solved
         .into_iter()
         .flat_map(std::cell::RefCell::into_inner)
@@ -415,7 +415,11 @@ pub(super) fn finish_source_checks(
             &mut graph.session,
             graph.registered_source_errors.get_mut(),
         ) {
-            graph.defer_registered_function(module, range.start());
+            graph.defer_registered_function(
+                module,
+                range.start(),
+                matches!(source, SourceFrame::Registered),
+            );
         }
     }
     for owner in checks.unresolved {
@@ -490,10 +494,7 @@ pub(super) fn place_checked_definition(
         return None;
     }
     // A settled signature can use the source check that already owns this module.
-    let deferred = checks
-        .solved
-        .as_ref()
-        .filter(|_| contract.is_none() && original.discarded_function_body());
+    let deferred = checks.solved.as_ref().filter(|_| contract.is_none());
     let helpers = Helpers::new(inference.len());
     let values = ModuleValues::default();
     let mut checker = Checker::new(
@@ -524,7 +525,9 @@ pub(super) fn place_checked_definition(
         Some((body, frame))
     })?;
     if let Some(solved) = deferred {
-        solved.borrow_mut().push((module, definition.range()));
+        solved
+            .borrow_mut()
+            .push((module, definition.range(), SourceFrame::Registered));
     } else if contract.is_none() && !checks.accepts(graph, module, definition.range()) {
         return None;
     }
@@ -555,6 +558,13 @@ fn checked_definition(
     Ok((body, local_names))
 }
 
+/// A rejected fixed placement must fall back to its original source. A registered
+/// body can still serve a Python call when its live argument layout permits it.
+pub(super) enum SourceFrame {
+    Fixed,
+    Registered,
+}
+
 /// A registered body can supply an unresolved calling convention only if its other
 /// operations satisfy the first-party source contract. Cache the check per physical module.
 #[derive(Default)]
@@ -562,7 +572,7 @@ pub(super) struct SourceChecks {
     /// Named startup checks these unresolved definitions for a generator body.
     pub(super) unresolved: Vec<DefinitionId>,
     session: std::cell::OnceCell<Option<crate::analysis::RegisteredBodyChecks>>,
-    pub(super) solved: Option<std::cell::RefCell<Vec<(ModuleId, TextRange)>>>,
+    pub(super) solved: Option<std::cell::RefCell<Vec<(ModuleId, TextRange, SourceFrame)>>>,
 }
 
 impl SourceChecks {
@@ -651,7 +661,7 @@ impl FixedFunctions {
         self,
         graph: &SourceGraph,
         owners: &[ModuleId],
-        mut accepted: impl FnMut(ModuleId, TextRange, &FrameInputs) -> bool,
+        mut accepted: impl FnMut(ModuleId, TextRange) -> bool,
     ) {
         // Frame sources are recorded in slot order. Functions without a physical
         // source (including synthesized helpers) drop with the iterator.
@@ -667,7 +677,7 @@ impl FixedFunctions {
                 .get(&module)
                 .is_some_and(|entries| entries.contains_key(&start))
                 && let Ok(placed) = source.place(function)
-                && accepted(module, definition, &placed.inputs)
+                && accepted(module, definition)
             {
                 graph.register_function(module, start, placed);
             }
@@ -822,7 +832,9 @@ pub(super) fn capture(
                 // No unresolved caller can depend on a solved frame's ABI. The fixed sibling
                 // placement only checks occupancy for the same physical source range.
                 if let Some(solved) = deferred {
-                    solved.borrow_mut().push((id, function.range()));
+                    solved
+                        .borrow_mut()
+                        .push((id, function.range(), SourceFrame::Registered));
                     true
                 } else {
                     checks.accepts(graph, id, function.range())
