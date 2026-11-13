@@ -3393,12 +3393,10 @@ impl SourceGraph {
         for (module, start, mut body) in lexical {
             use crate::frontend::{FrameArguments, FrameInputs};
             match body.inputs {
-                FrameInputs::Deferred {
-                    live_sites: Some(sites),
-                } => {
+                FrameInputs::Deferred { sites, live: true } => {
                     body.inputs = FrameInputs::Protocol { sites };
                 }
-                FrameInputs::Checked => {
+                FrameInputs::Checked { .. } => {
                     // A subsequent registration can replace the provisional body at this site.
                     let Some((inputs, slots)) =
                         crate::llvm::registered::frame_inputs(&body, FrameArguments::Python)

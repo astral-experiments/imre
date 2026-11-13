@@ -32,7 +32,7 @@ use ruff_text_size::{TextRange, TextSize};
 #[cfg(test)]
 pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
     let arguments = match checked.inputs {
-        FrameInputs::Checked => FrameArguments::Checked,
+        FrameInputs::Checked { .. } => FrameArguments::Checked,
         FrameInputs::Deferred { .. } => FrameArguments::Pending,
         FrameInputs::Protocol { .. } => FrameArguments::Python,
     };
@@ -266,9 +266,7 @@ pub(crate) fn frame_inputs(
                 true
             }
             ExprKind::Builtin(Builtin::RegisteredLambda(site, scoped), operands) => {
-                if arguments != FrameArguments::Checked {
-                    sites.push(FrameSite::Lambda(*site));
-                }
+                sites.push(FrameSite::Lambda(*site));
                 uses_python_protocol = true;
                 !scoped || !operands.is_empty()
             }
@@ -364,21 +362,16 @@ pub(crate) fn frame_inputs(
     {
         return None;
     }
-    let live_sites = || {
-        let needs_protocol = object_parameter || has_scalar;
-        (scalar_reads == protocol_reads
-            && (!needs_protocol || uses_python_protocol || uses_scalar_protocol))
-            .then(|| sites.into_boxed_slice())
-    };
+    let needs_protocol = object_parameter || has_scalar;
+    let live = scalar_reads == protocol_reads
+        && (!needs_protocol || uses_python_protocol || uses_scalar_protocol);
+    let sites = sites.into_boxed_slice();
     let inputs = match arguments {
-        FrameArguments::Python => FrameInputs::Protocol {
-            sites: live_sites()?,
-        },
+        FrameArguments::Python if live => FrameInputs::Protocol { sites },
+        FrameArguments::Python => return None,
         _ if object_parameter && !uses_python_protocol => return None,
-        FrameArguments::Pending => FrameInputs::Deferred {
-            live_sites: live_sites(),
-        },
-        FrameArguments::Checked => FrameInputs::Checked,
+        FrameArguments::Pending => FrameInputs::Deferred { sites, live },
+        FrameArguments::Checked => FrameInputs::Checked { sites },
     };
     Some((inputs, private))
 }

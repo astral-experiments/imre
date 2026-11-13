@@ -39,14 +39,14 @@ impl FixedBodySource {
                 Some(method) => FrameInputs::Protocol {
                     sites: Box::new([FrameSite::Method(method)]),
                 },
-                None => FrameInputs::Checked,
+                None => FrameInputs::default(),
             },
             function,
             local_names: self.local_names,
             frame_slots: Default::default(),
             fixed_attributes: (!self.attributes.is_empty()).then(|| Box::new(self.attributes)),
         };
-        if matches!(frame.inputs, FrameInputs::Checked)
+        if matches!(frame.inputs, FrameInputs::Checked { .. })
             && self.arguments == FrameArguments::Python
             && frame
                 .function

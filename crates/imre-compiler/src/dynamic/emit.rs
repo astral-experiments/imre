@@ -2478,33 +2478,40 @@ mod tests {
         let refused = "async def make():\n    return [lambda v=await get(x): v for x in [1, 2]]\n";
         let path = Path::new("example.py");
         let site = TextSize::default();
-        let mut original =
-            PreparedBody::module("example", path, source, 0, ModuleOrigin::Program(None)).unwrap();
-        let mut checked = original.source.take_prepared_function(site);
-        (checked.inputs, checked.frame_slots) =
-            crate::llvm::registered::frame_inputs(&checked, FrameArguments::Python).unwrap();
-        let bodies = HashMap::from([(site, checked)]);
-        for (text, retained) in [(source, true), (refused, false)] {
-            let module = PreparedBody::module(
-                "example",
-                path,
-                text,
-                0,
-                ModuleOrigin::Program(Some(&bodies)),
-            )
-            .unwrap();
-            assert_eq!(
-                std::ptr::eq(
-                    module.source.definition_body(site).checked(),
-                    &bodies[&site]
-                ),
-                retained
-            );
-            if !retained {
+        for arguments in [
+            FrameArguments::Checked,
+            FrameArguments::Pending,
+            FrameArguments::Python,
+        ] {
+            let mut original =
+                PreparedBody::module("example", path, source, 0, ModuleOrigin::Program(None))
+                    .unwrap();
+            let mut checked = original.source.take_prepared_function(site);
+            (checked.inputs, checked.frame_slots) =
+                crate::llvm::registered::frame_inputs(&checked, arguments).unwrap();
+            let bodies = HashMap::from([(site, checked)]);
+            for (text, retained) in [(source, true), (refused, false)] {
+                let module = PreparedBody::module(
+                    "example",
+                    path,
+                    text,
+                    0,
+                    ModuleOrigin::Program(Some(&bodies)),
+                )
+                .unwrap();
                 assert_eq!(
-                    module.standalone().unwrap_err(),
-                    "example.py:2:12: cannot compile this comprehension ahead of time (through 2:54)"
+                    std::ptr::eq(
+                        module.source.definition_body(site).checked(),
+                        &bodies[&site]
+                    ),
+                    retained
                 );
+                if !retained {
+                    assert_eq!(
+                        module.standalone().unwrap_err(),
+                        "example.py:2:12: cannot compile this comprehension ahead of time (through 2:54)"
+                    );
+                }
             }
         }
     }
