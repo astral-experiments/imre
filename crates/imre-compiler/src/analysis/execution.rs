@@ -143,7 +143,9 @@ struct Escape<'a, 'db> {
     unreachable: Vec<TextRange>,
 }
 
-impl<'ast> Escape<'ast, '_> {
+type SourceFunction<'db> = (File, &'db FunctionDefinitionKind);
+
+impl<'ast, 'db> Escape<'ast, 'db> {
     // Follow simple aliases to the value that was actually assigned. A return or
     // parameter annotation alone cannot establish the native entry of a code object.
     fn assigned_value(&self, value: &'ast Expr) -> Option<&'ast Expr> {
@@ -151,10 +153,7 @@ impl<'ast> Escape<'ast, '_> {
             .assigned_value(self.model.file(), self.parsed, value, |_| true)
     }
 
-    fn declared_function(
-        &self,
-        value: &Expr,
-    ) -> Option<(ruff_db::files::File, &FunctionDefinitionKind)> {
+    fn declared_function(&self, value: &Expr) -> Option<SourceFunction<'db>> {
         let db = self.model.db();
         let ty @ Type::FunctionLiteral(_) = value.inferred_type(self.model)? else {
             return None;
@@ -176,13 +175,12 @@ impl<'ast> Escape<'ast, '_> {
         .then_some((file, function))
     }
 
-    fn local_function(&self, value: &Expr) -> Option<&'ast StmtFunctionDef> {
-        let (file, function) = self.declared_function(value)?;
-        if file != self.model.file() {
-            return None;
-        }
-        let node = function.node(self.parsed);
-        node.decorator_list.is_empty().then_some(node)
+    fn local_function(
+        &self,
+        (file, function): SourceFunction<'_>,
+    ) -> Option<&'ast StmtFunctionDef> {
+        (file == self.model.file() && !function.has_decorators())
+            .then(|| function.node(self.parsed))
     }
 
     fn required(
@@ -261,7 +259,8 @@ impl<'ast> Escape<'ast, '_> {
         }
         let Some(function) = expression
             .as_call_expr()
-            .and_then(|call| self.local_function(&call.func))
+            .and_then(|call| self.declared_function(&call.func))
+            .and_then(|target| self.local_function(target))
         else {
             return true;
         };
@@ -446,10 +445,10 @@ impl<'ast> Escape<'ast, '_> {
 
     fn imported_execution(
         &self,
+        (owner, declaration): SourceFunction<'_>,
         capture: Option<CapturedImport<'_>>,
         call: &'ast ExprCall,
     ) -> Option<ExecutionRequirement> {
-        let (owner, declaration) = self.declared_function(&call.func)?;
         let follows_open_source =
             owner != self.model.file() && self.open_providers.contains(&owner);
         let capture = capture.filter(|capture| capture.owner == owner);
@@ -522,7 +521,7 @@ impl<'ast> Escape<'ast, '_> {
             if m.module(db).file(db) == Some(self.model.file()) || m.module(db).name(db).as_str() == "__main__")
     }
 
-    fn update_captured_calls(&mut self, call: &ExprCall) {
+    fn update_captured_calls(&mut self, call: &ExprCall, target: Option<SourceFunction<'_>>) {
         let Some(ty @ (Type::FunctionLiteral(_) | Type::ClassLiteral(_))) =
             call.func.inferred_type(self.model)
         else {
@@ -557,7 +556,7 @@ impl<'ast> Escape<'ast, '_> {
             }
             return;
         }
-        if let Some((file, declaration)) = self.declared_function(&call.func)
+        if let Some((file, declaration)) = target
             && file != self.model.file()
         {
             let parsed = self.session.parsed(file);
@@ -581,19 +580,17 @@ impl<'ast> Escape<'ast, '_> {
         if matches!(value, Expr::Name(_) | Expr::Attribute(_)) {
             return self
                 .declared_function(value)
-                .is_some_and(|(file, function)| {
-                    function
-                        .node(&self.session.parsed(file))
-                        .decorator_list
-                        .is_empty()
-                });
+                .is_some_and(|(_, function)| !function.has_decorators());
         }
         // A closure factory can return a real nested function before its result
         // has a useful inferred type. Require the returned definition itself.
         let Expr::Call(call) = value else {
             return false;
         };
-        let Some(factory) = self.local_function(&call.func) else {
+        let Some(factory) = self
+            .declared_function(&call.func)
+            .and_then(|target| self.local_function(target))
+        else {
             return false;
         };
         let Some((Stmt::Return(ret), definitions)) = factory.body.split_last() else {
@@ -604,7 +601,8 @@ impl<'ast> Escape<'ast, '_> {
             && ret
                 .value
                 .as_deref()
-                .and_then(|v| self.local_function(v))
+                .and_then(|v| self.declared_function(v))
+                .and_then(|target| self.local_function(target))
                 .is_some_and(|returned| {
                     definitions
                         .iter()
@@ -814,8 +812,10 @@ impl<'a> Visitor<'a> for Escape<'a, '_> {
             let operand = argument.value();
             self.visit_expr(operand);
         }
-        if self.first.is_none()
-            && let Some(source_callable) = source_callable
+        if self.first.is_some() {
+            return;
+        }
+        if let Some(source_callable) = source_callable
             && let Some(operand) = call.arguments.args.first()
             && !(source_callable == SourceCallable::Builtin(ExecutionIntrinsic::Exec)
                 && (crate::frontend::exec_source_operand(call)
@@ -833,17 +833,18 @@ impl<'a> Visitor<'a> for Escape<'a, '_> {
             ));
             return;
         }
-        if self.first.is_none() && (capture.is_some() || !self.open_providers.is_empty()) {
-            self.first = self.imported_execution(capture, call);
-            if self.first.is_some() {
-                return;
-            }
+        let target = self.declared_function(&call.func);
+        if let Some(target) = target
+            && (capture.is_some() || !self.open_providers.is_empty())
+            && let Some(requirement) = self.imported_execution(target, capture, call)
+        {
+            self.first = Some(requirement);
+            return;
         }
         if live_import {
-            self.update_captured_calls(call);
+            self.update_captured_calls(call, target);
         }
-        if self.first.is_none()
-            && let Some(Expr::Lambda(lambda)) = self.assigned_value(&call.func)
+        if let Some(Expr::Lambda(lambda)) = self.assigned_value(&call.func)
             && !imre_ast::code_flags::yields_in_expression(&lambda.body)
         {
             self.enter_call(
@@ -855,7 +856,7 @@ impl<'a> Visitor<'a> for Escape<'a, '_> {
         }
         // Synchronous generator frames resume the same linked function body.
         if self.first.is_none()
-            && let Some(node) = self.local_function(&call.func)
+            && let Some(node) = target.and_then(|target| self.local_function(target))
             && !node.is_async
         {
             self.enter_call(call, Some(&node.parameters), node.range(), |visitor| {
