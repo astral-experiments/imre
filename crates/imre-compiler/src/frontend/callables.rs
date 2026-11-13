@@ -767,15 +767,15 @@ impl Checker<'_> {
             return Ok(None);
         };
         let ty = self.locals[slot];
-        let Some((params, returns)) = self.types.plain_callable_signature(ty) else {
-            return Ok(None);
-        };
-        if !self.assigned.contains(&slot)
-            || matches!(returns, Type::Coroutine(_))
-            || !registered::values::fixed_positional_arguments(call)
-        {
+        if !self.assigned.contains(&slot) || !registered::values::fixed_positional_arguments(call) {
             return Ok(None);
         }
+        let Some((params, returns)) = self
+            .types
+            .with_callback_signature(ty, |params, returns| (params.to_vec(), returns))
+        else {
+            return Ok(None);
+        };
         self.positional_invoke(call, self.local(slot), params, returns, Some(expr))
             .map(Some)
     }
