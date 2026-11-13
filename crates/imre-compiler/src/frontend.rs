@@ -6396,12 +6396,12 @@ impl<'a> Checker<'a> {
                         },
                         Ok,
                     )?;
-                    if self.ends_before_assignment(rhs, &value, &[])? {
+                    if self.ends_before_assignment(&value, &[])? {
                         if let Some(old) = replacement {
                             let slot = self.replacement_slot(name.id.as_str(), old, ty);
                             self.bind_declared_type(slot, declaration);
                         }
-                        return Ok((vec![Statement::Expr(value)], false));
+                        return Ok((vec![self.statement_at(rhs, Statement::Expr(value))], false));
                     }
                     if replacement.is_some() {
                         let statements = self.replace_local(name.id.as_str(), slot, ty, value);
@@ -6409,10 +6409,12 @@ impl<'a> Checker<'a> {
                         return Ok((statements, true));
                     }
                     self.assigned_value(slot, &value);
-                    if outer_local && let Some(sites) = &mut self.fixed_sites {
-                        sites.statement(rhs.range(), FixedNode::Store(slot));
-                    }
-                    Some(Statement::Assign(slot, value))
+                    let statement = Statement::Assign(slot, value);
+                    Some(if outer_local {
+                        self.statement_at(rhs, statement)
+                    } else {
+                        statement
+                    })
                 } else {
                     None
                 }
@@ -7801,9 +7803,9 @@ impl<'a> Checker<'a> {
         }
         let body = statements::if_arms(arms, no);
         if let Some(sites) = &mut self.fixed_sites
-            && let [Statement::If(_, yes, no)] = body.as_slice()
+            && let [statement @ Statement::If(..)] = body.as_slice()
         {
-            sites.statement(branch.test.range(), FixedNode::Branch(yes.len(), no.len()));
+            sites.statement(branch.test.range(), statement);
         }
         Ok((body, falls))
     }
@@ -8410,6 +8412,14 @@ impl<'a> Checker<'a> {
             }
             Ok(value)
         })
+    }
+
+    /// Record the operation that an ordinary source operand produced for this statement.
+    fn statement_at(&mut self, operand: &ast::Expr, statement: Statement) -> Statement {
+        if let Some(sites) = &mut self.fixed_sites {
+            sites.statement(operand.range(), &statement);
+        }
+        statement
     }
 
     fn with_fixed_site<T>(

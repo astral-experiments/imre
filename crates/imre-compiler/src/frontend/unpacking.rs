@@ -341,7 +341,6 @@ impl Checker<'_> {
     /// Keep a terminating RHS and any fresh name declarations, without evaluating its targets.
     pub(super) fn ends_before_assignment(
         &mut self,
-        source: &ast::Expr,
         value: &Expr,
         targets: &[ast::Expr],
     ) -> Result<bool, String> {
@@ -358,9 +357,6 @@ impl Checker<'_> {
             {
                 self.declare(name.id.as_str(), value.ty, target)?;
             }
-        }
-        if let Some(sites) = &mut self.fixed_sites {
-            sites.statement(source.range(), FixedNode::Effect);
         }
         Ok(true)
     }
@@ -462,8 +458,8 @@ impl Checker<'_> {
             } else {
                 self.typed_expr(&assignment.value)?
             };
-            if self.ends_before_assignment(&assignment.value, &value, &assignment.targets)? {
-                output.push(Statement::Expr(value));
+            if self.ends_before_assignment(&value, &assignment.targets)? {
+                output.push(self.statement_at(&assignment.value, Statement::Expr(value)));
                 return Ok(false);
             }
             if let Some((name, old)) = previous
@@ -485,16 +481,16 @@ impl Checker<'_> {
             self.store_value(target, value, value_site, Some(output))?;
             if let Some(sites) = &mut self.fixed_sites
                 && let Some(name) = target.as_name_expr()
-                && let [Statement::Assign(slot, _)] = &output[start..]
+                && let [statement @ Statement::Assign(slot, _)] = &output[start..]
                 && self.names.get(name.id.as_str()) == Some(slot)
             {
-                sites.statement(assignment.value.range(), FixedNode::Store(*slot));
+                sites.statement(assignment.value.range(), statement);
             } else if self.class.is_some()
                 && let Some(sites) = &mut self.fixed_sites
                 && let ast::Expr::Attribute(attribute) = target
-                && let [Statement::SetField(_, field, _)] = &output[start..]
+                && let [statement @ Statement::SetField(..)] = &output[start..]
             {
-                sites.store_field(attribute, assignment.value.range(), *field);
+                sites.store_field(attribute, assignment.value.range(), statement);
             }
             return Ok(true);
         }
@@ -512,8 +508,8 @@ impl Checker<'_> {
                 .unwrap_or(&assignment.targets[0]);
             self.unpacking_value(target, &assignment.value)?
         };
-        if self.ends_before_assignment(&assignment.value, &value, &assignment.targets)? {
-            output.push(Statement::Expr(value));
+        if self.ends_before_assignment(&value, &assignment.targets)? {
+            output.push(self.statement_at(&assignment.value, Statement::Expr(value)));
             return Ok(false);
         }
         bind_assignment(self, &assignment.targets, value, output)?;
