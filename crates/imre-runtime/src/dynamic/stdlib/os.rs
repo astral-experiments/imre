@@ -223,7 +223,11 @@ pub(super) fn memfd_create(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id
 /// Audit after signature validation and before any Python fork handlers run.
 #[cfg(target_os = "linux")]
 fn audit_fork(ctx: &mut Context) -> Result<()> {
-    if ctx.finalizing.load(std::sync::atomic::Ordering::Acquire) {
+    if ctx
+        .interpreter
+        .finalizing
+        .load(std::sync::atomic::Ordering::Acquire)
+    {
         return Err(Error::new(
             "PythonFinalizationError",
             "can't fork at interpreter shutdown",

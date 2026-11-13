@@ -84,6 +84,9 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, AtomicUsize};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use crate::objects::exceptions::string_repr;
 use value::{
@@ -207,10 +210,16 @@ struct ExposedClassBody {
     annotation_cell: Option<Id>,
 }
 
-type SocketDefaultTimeout = std::sync::Arc<std::sync::Mutex<Option<std::time::Duration>>>;
+/// Native state shared by the main context and its registered workers.
+#[derive(Clone, Default)]
+struct InterpreterState {
+    worker_count: Arc<AtomicUsize>,
+    socket_default_timeout: Arc<Mutex<Option<Duration>>>,
+    finalizing: Arc<AtomicBool>,
+}
 
 pub(crate) struct Context {
-    socket_default_timeout: SocketDefaultTimeout,
+    interpreter: InterpreterState,
     // Active calls to an overridable socket.send from sendfile. Receivers stay rooted by the call.
     sendfile_writes: Vec<(Id, crate::objects::socket::SendfileIdentity, Id)>,
     threads: lowlevel_threads::Workers,
@@ -233,7 +242,6 @@ pub(crate) struct Context {
     fault_file: Option<Id>,
     fault_user_files: HashMap<i32, Id>,
     exit_callbacks: Vec<Id>,
-    finalizing: std::sync::Arc<std::sync::atomic::AtomicBool>,
     // The active stack roots suspended contexts while Context.run executes native code.
     contexts: Vec<Id>,
     // A buffer export pins its bytearray's size while Python callbacks run.

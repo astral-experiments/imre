@@ -29,7 +29,7 @@ pub(super) fn multiple_threads(ctx: &Context) -> bool {
     !spawn_child::glibc_proves_single_threaded()
         && std::fs::read_dir("/proc/self/task")
             .map(|tasks| tasks.filter_map(std::result::Result::ok).nth(1).is_some())
-            .unwrap_or_else(|_| ctx.threads.count.load(Ordering::Relaxed) > 0)
+            .unwrap_or_else(|_| ctx.interpreter.worker_count.load(Ordering::Relaxed) > 0)
 }
 
 /// A warning hook can run Python, so emit only after the parent handlers release their locks.

@@ -927,13 +927,14 @@ pub(super) fn new_context<S: Into<crate::Str>>(
     if let Some(depth @ 1..=65535) = config["tracemalloc"].as_u64() {
         heap.allocation_traces.start_at_startup(depth as usize);
     }
-    new_context_with_heap(config, args, heap)
+    new_context_with_heap(config, args, heap, None)
 }
 
 pub(super) fn new_context_with_heap<S: Into<crate::Str>>(
     config: serde_json::Value,
     args: impl IntoIterator<Item = S>,
     heap: Heap,
+    worker_interpreter: Option<InterpreterState>,
 ) -> Context {
     let launcher = config["executable"].as_str();
     let helper_executable =
@@ -946,9 +947,12 @@ pub(super) fn new_context_with_heap<S: Into<crate::Str>>(
     let mut ctx = Context {
         heap,
         interpreter_layout,
-        threads: Default::default(),
+        threads: lowlevel_threads::Workers {
+            private_context: worker_interpreter.is_some(),
+            ..Default::default()
+        },
+        interpreter: worker_interpreter.unwrap_or_default(),
         workers: Default::default(),
-        socket_default_timeout: Default::default(),
         sendfile_writes: Vec::new(),
         config,
         executable,
@@ -963,7 +967,6 @@ pub(super) fn new_context_with_heap<S: Into<crate::Str>>(
         fault_file: None,
         fault_user_files: HashMap::new(),
         exit_callbacks: Vec::new(),
-        finalizing: Default::default(),
         contexts: Vec::new(),
         buffer_exports: Vec::new(),
         repr_ancestors: Vec::new(),
@@ -1331,7 +1334,8 @@ fn register_source(
 pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
     // SAFETY: main transfers its unique allocation from imre_dyn_new exactly once.
     let mut ctx = unsafe { Box::from_raw(ctx) };
-    let _publication = crate::fault_handler::FramePublication::enter(ctx.finalizing.clone());
+    let _publication =
+        crate::fault_handler::FramePublication::enter(ctx.interpreter.finalizing.clone());
     let mark = ctx.heap.temporary_mark();
     let mut failed_site = false;
     // With unfrozen modules, importing site can execute a filesystem replacement for stat.
@@ -1462,7 +1466,8 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
         crate::signals::disable_wakeup();
     }
     // Exit callbacks run before Python enters its finalization phase.
-    ctx.finalizing
+    ctx.interpreter
+        .finalizing
         .store(true, std::sync::atomic::Ordering::Release);
     ctx.heap.discarded_shutdown_write = Some(false);
     ctx.heap.release_temporaries_since(mark);

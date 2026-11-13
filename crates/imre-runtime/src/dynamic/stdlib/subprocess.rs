@@ -463,7 +463,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
     } else {
         os::c_int(ctx, umask)?
     };
-    if preexec_fn != NONE && ctx.finalizing.load(Ordering::Acquire) {
+    if preexec_fn != NONE && ctx.interpreter.finalizing.load(Ordering::Acquire) {
         return Err(Error::new(
             "PythonFinalizationError",
             "preexec_fn not supported at interpreter shutdown",

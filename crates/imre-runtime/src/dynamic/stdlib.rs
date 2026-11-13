@@ -1580,7 +1580,9 @@ pub(super) fn call(
         }
         if name == "sys.is_finalizing" {
             return Ok(builtins::boolean(
-                ctx.finalizing.load(std::sync::atomic::Ordering::Acquire),
+                ctx.interpreter
+                    .finalizing
+                    .load(std::sync::atomic::Ordering::Acquire),
             ));
         }
         return Ok(ctx.int(i64::from(crate::sys::recursion_limit())));
@@ -1728,7 +1730,7 @@ pub(super) fn call(
                 ctx.int(i64::from(ctx.threads.coroutine_origin_depth))
             }
             "_socket.getdefaulttimeout" => {
-                let timeout = *ctx.socket_default_timeout.lock().unwrap();
+                let timeout = *ctx.interpreter.socket_default_timeout.lock().unwrap();
                 timeout.map_or(NONE, |d| ctx.alloc(Value::Float(d.as_secs_f64())))
             }
             #[cfg(target_os = "linux")]

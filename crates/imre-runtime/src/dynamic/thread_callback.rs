@@ -28,9 +28,8 @@ pub(super) struct Callback {
     receiver: Option<(String, Argument)>,
     config: serde_json::Value,
     gc_settings: Arc<super::gc_schedule::GcSettings>,
-    socket_default_timeout: super::SocketDefaultTimeout,
+    interpreter: super::InterpreterState,
     allocation_traces: super::allocation_traces::AllocationTraces,
-    finalizing: Arc<std::sync::atomic::AtomicBool>,
 }
 
 pub(super) fn unsupported() -> Error {
@@ -61,7 +60,9 @@ impl Callback {
         } else {
             &containers[..2]
         };
-        let pos = ctx.tuple_elements(args).expect("validated thread arguments");
+        let pos = ctx
+            .tuple_elements(args)
+            .expect("validated thread arguments");
         Self::capture_checked(ctx, target, roots, pos, kwargs, false)
     }
 
@@ -370,9 +371,8 @@ impl Callback {
             receiver: None,
             config: ctx.config.clone(),
             gc_settings: ctx.heap.gc_settings.clone(),
-            socket_default_timeout: ctx.socket_default_timeout.clone(),
+            interpreter: ctx.interpreter.clone(),
             allocation_traces: ctx.heap.allocation_traces.worker(),
-            finalizing: ctx.finalizing.clone(),
         })
     }
 
@@ -382,9 +382,12 @@ impl Callback {
             self.gc_settings,
             self.allocation_traces,
         );
-        let mut ctx = ffi::new_context_with_heap(self.config, std::iter::empty::<String>(), heap);
-        ctx.socket_default_timeout = self.socket_default_timeout;
-        ctx.finalizing = self.finalizing;
+        let mut ctx = ffi::new_context_with_heap(
+            self.config,
+            std::iter::empty::<String>(),
+            heap,
+            Some(self.interpreter),
+        );
         let globals = ctx.scope(&self.module, None);
         // The worker owns this cell and its selected lock before it reports readiness.
         let scope = if let Some((name, receiver)) = self.receiver {

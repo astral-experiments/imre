@@ -149,7 +149,7 @@ fn native_start_and_join_publish_the_worker_lifetime() {
         handle.join(Some(Duration::ZERO)).unwrap();
         assert!(handle.alive());
         assert!(ctx.workers.entries[0].handle.awaiting_exit());
-        assert_eq!(ctx.threads.count.load(Ordering::Acquire), 1);
+        assert_eq!(ctx.interpreter.worker_count.load(Ordering::Acquire), 1);
         assert_eq!(ident, handle.ident());
         assert_ne!(ident, thread_ident());
         #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -164,7 +164,7 @@ fn native_start_and_join_publish_the_worker_lifetime() {
     handle.join(None).unwrap();
     assert!(!handle.alive());
     assert!(!ctx.workers.entries[0].handle.awaiting_exit());
-    assert_eq!(ctx.threads.count.load(Ordering::Acquire), 0);
+    assert_eq!(ctx.interpreter.worker_count.load(Ordering::Acquire), 0);
 }
 
 #[test]

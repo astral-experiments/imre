@@ -242,7 +242,7 @@ impl Handle {
             State::Running if self.ident() == thread_ident() => {
                 return Err(Error::new("RuntimeError", "Cannot join current thread"));
             }
-            State::Running if ctx.finalizing.load(Ordering::Acquire) => {
+            State::Running if ctx.interpreter.finalizing.load(Ordering::Acquire) => {
                 return Err(Error::new(
                     "PythonFinalizationError",
                     "cannot join thread at interpreter shutdown",
@@ -607,7 +607,7 @@ pub(super) fn shutdown(ctx: &mut Context) {
 
 /// Reject new work before binding or moving its Python callback operands.
 pub(super) fn check_start(ctx: &Context) -> Result<()> {
-    if ctx.finalizing.load(Ordering::Acquire) {
+    if ctx.interpreter.finalizing.load(Ordering::Acquire) {
         return Err(Error::new(
             "PythonFinalizationError",
             "can't create new thread at interpreter shutdown",
@@ -694,11 +694,13 @@ fn launch(
     } else {
         (None, None)
     };
-    let count = Arc::clone(&ctx.threads.count);
+    let count = Arc::clone(&ctx.interpreter.worker_count);
     let starting = Arc::clone(&handle);
     let fault_workers =
         matches!(operation, Operation::Python(_)).then(|| ctx.heap.begin_fault_worker());
-    let interpreter = fault_workers.as_ref().map(|_| ctx.finalizing.clone());
+    let interpreter = fault_workers
+        .as_ref()
+        .map(|_| ctx.interpreter.finalizing.clone());
     handle.spawn(move |exit| {
         let _publication = interpreter.map(crate::fault_handler::FramePublication::enter);
         // A failed bootstrap publishes no identity and contributes nothing to the live count.
@@ -706,12 +708,10 @@ fn launch(
         let mut update = None;
         let (python, acquire) = match operation {
             Operation::Python(callback) => match callback.load() {
-                Ok((mut worker, function, slots)) => {
+                Ok((worker, function, slots)) => {
                     worker
                         .heap
                         .observe_fault_workers(fault_workers.as_ref().expect("Python worker"));
-                    worker.threads.count = Arc::clone(&count);
-                    worker.threads.private_context = true;
                     (Some((worker, function, slots)), None)
                 }
                 Err(error) => {
