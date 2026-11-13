@@ -1361,16 +1361,22 @@ fn bind_operand(operands: &mut Vec<PhysicalOperand>, value: PhysicalOperand, ty:
 
 /// The graph lends its checked function. Source preparation owns either a complete
 /// lexical function or a suite with additional operands and child frames.
-pub(crate) enum RegisteredBody<'p, S = &'p RegisteredSuite, P = &'p RegisteredFunction> {
-    Function(&'p RegisteredFunction),
-    Prepared(P),
-    Suite(S),
+pub(crate) enum NamedBody<'p> {
+    Borrowed(&'p RegisteredFunction),
+    Owned(Box<RegisteredFunction>),
+    Suite(Box<RegisteredSuite>),
 }
 
-impl RegisteredBody<'_, Box<RegisteredSuite>, Box<RegisteredFunction>> {
+/// LLVM receives the same function body regardless of which frontend owns it.
+pub(crate) enum RegisteredBody<'p> {
+    Function(&'p RegisteredFunction),
+    Suite(&'p RegisteredSuite),
+}
+
+impl NamedBody<'_> {
     pub(crate) fn from_suite(suite: RegisteredSuite) -> Self {
         if suite.fully_checked() {
-            Self::Prepared(Box::new(suite.checked))
+            Self::Owned(Box::new(suite.checked))
         } else {
             Self::Suite(Box::new(suite))
         }
@@ -1378,8 +1384,8 @@ impl RegisteredBody<'_, Box<RegisteredSuite>, Box<RegisteredFunction>> {
 
     pub(crate) fn as_ref(&self) -> RegisteredBody<'_> {
         match self {
-            Self::Function(body) => RegisteredBody::Function(body),
-            Self::Prepared(body) => RegisteredBody::Prepared(body),
+            Self::Borrowed(body) => RegisteredBody::Function(body),
+            Self::Owned(body) => RegisteredBody::Function(body),
             Self::Suite(suite) => RegisteredBody::Suite(suite),
         }
     }
@@ -1693,7 +1699,7 @@ impl<'a> SuitePreparation<'a> {
         });
         let (body, refusal) = if let Some(checked) = checked {
             (
-                RegisteredBody::Function(checked),
+                NamedBody::Borrowed(checked),
                 self.checked_declaration_refusal(&checked.function.body),
             )
         } else {
@@ -1707,7 +1713,7 @@ impl<'a> SuitePreparation<'a> {
                 site.prepare_entry,
             );
             let refusal = suite.refusal;
-            (RegisteredBody::from_suite(suite), refusal)
+            (NamedBody::from_suite(suite), refusal)
         };
         header.body = Some(body);
         if let Some(refusal) = refusal {

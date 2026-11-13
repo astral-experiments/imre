@@ -947,14 +947,14 @@ struct TypeAliasDefinition {
 impl<'a> RegisteredBody<'a> {
     fn fully_checked(&self) -> bool {
         match self {
-            Self::Function(_) | Self::Prepared(_) => true,
+            Self::Function(_) => true,
             Self::Suite(suite) => suite.fully_checked(),
         }
     }
 
     fn checked(&self) -> &'a crate::frontend::RegisteredFunction {
         match self {
-            Self::Function(checked) | Self::Prepared(checked) => checked,
+            Self::Function(checked) => checked,
             Self::Suite(suite) => &suite.checked,
         }
     }
@@ -1786,6 +1786,7 @@ mod tests {
     mod declaration_sites;
     use super::super::prepare::{self, ModuleSource};
     use super::*;
+    use crate::frontend::NamedBody;
     use crate::llvm::registered::permanent;
 
     #[test]
@@ -2069,7 +2070,7 @@ mod tests {
             site: TextSize,
         ) -> crate::frontend::RegisteredFunction {
             let body = self.scopes.functions.get_mut(&site).unwrap().body.take();
-            let Some(RegisteredBody::Prepared(checked)) = body else {
+            let Some(NamedBody::Owned(checked)) = body else {
                 panic!("expected an owned complete function");
             };
             *checked
@@ -2080,7 +2081,7 @@ mod tests {
             site: TextSize,
         ) -> &mut crate::frontend::RegisteredFunction {
             let body = &mut self.scopes.functions.get_mut(&site).unwrap().body;
-            let Some(RegisteredBody::Prepared(checked)) = body else {
+            let Some(NamedBody::Owned(checked)) = body else {
                 panic!("expected an owned complete function");
             };
             checked
@@ -2093,7 +2094,7 @@ mod tests {
         body: crate::frontend::RegisteredSuite,
     ) {
         source.scopes.functions.get_mut(&def.start()).unwrap().body =
-            Some(RegisteredBody::from_suite(body));
+            Some(NamedBody::from_suite(body));
     }
 
     fn test_function_suite<'s>(
@@ -2109,7 +2110,7 @@ mod tests {
             .as_mut()
             .unwrap()
         {
-            RegisteredBody::Suite(suite) => suite,
+            NamedBody::Suite(suite) => suite,
             _ => panic!("expected a prepared suite with residual operands or children"),
         }
     }
@@ -3534,7 +3535,7 @@ mod tests {
         assert_eq!(bindings, [start(method)]);
         assert!(matches!(
             module.source.scopes.functions[&start(method)].body.as_ref(),
-            Some(RegisteredBody::Prepared(_))
+            Some(NamedBody::Owned(_))
         ));
     }
 
@@ -3735,7 +3736,10 @@ mod tests {
         let suite = prepared.source.definition_body(def.start());
         crate::verify::registered(suite.checked().region()).unwrap();
         assert!(suite.fully_checked());
-        assert!(matches!(suite, RegisteredBody::Prepared(_)));
+        assert!(matches!(
+            prepared.source.scopes.functions[&def.start()].body.as_ref(),
+            Some(NamedBody::Owned(_))
+        ));
         for name in ["selected", "suspended"] {
             assert!(
                 suite
