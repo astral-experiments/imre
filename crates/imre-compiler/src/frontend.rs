@@ -702,7 +702,9 @@ fn lower_current(
         let mut inference = inference::Inference::default();
         inference.source_checks.solved = defer_solved.then(Default::default);
         inference.source_checks.unresolved = unresolved;
-        let result = lower_graph(graph, cache, key_reprs, &mut inference);
+        let mut layout_error = None;
+        let result = lower_graph(graph, cache, key_reprs, &mut inference, &mut layout_error);
+        let result = layout_error.map_or(result, Err);
         (result, inference.source_checks)
     };
     graph.float_components.set(FloatComponents::Native);
@@ -765,12 +767,14 @@ fn lower_graph(
     mut cache: Option<&mut CallerCache>,
     key_reprs: &mut HashSet<DefinitionId>,
     inference: &mut inference::Inference,
+    layout_error: &mut Option<Diagnostic>,
 ) -> StdResult<crate::CheckedProgram, Diagnostic> {
     graph.clear_registered_functions();
     let types = Types::default();
     typing::collect_sites(graph, &types);
     namedtuples::collect(graph, &types)?;
-    let mut declarations = Classes::collect(graph)?;
+    let can_bind = graph.command_startup.is_some() && !retries_failed_layout(graph);
+    let mut declarations = Classes::collect_layouts(graph, can_bind.then_some(&mut *layout_error))?;
     let (mut classes, mut initializer_defaults) = ClassInfo::new(graph, &types, &mut declarations)?;
     dataclass_values::validate(&classes, graph, &types)?;
     let mut signatures = HashMap::new();
@@ -834,6 +838,22 @@ fn lower_graph(
                     if !graph.includes(owner) {
                         continue;
                     }
+                    if layout_error.is_some()
+                        && !(module.is_program_source()
+                            && fixed_frame_entry(function)
+                            && function
+                                .parameters
+                                .iter_non_variadic_params()
+                                .all(|p| p.default.is_none())
+                            && graph.session.function_uses_fixed_names(
+                                module_id,
+                                function,
+                                false,
+                                |_| false,
+                            ))
+                    {
+                        continue;
+                    }
                     let cached = function_caches::policy(graph, module_id, function)?;
                     let physical_entry = (can_transfer_frames
                         || graph.registered_startup
@@ -871,7 +891,7 @@ fn lower_graph(
                     } else {
                         keyword_forwarding::prepare(graph, module_id, &mut function)
                     };
-                    let mut signature = signature(
+                    let mut signature = match signature(
                         &function,
                         graph,
                         defaults,
@@ -879,8 +899,13 @@ fn lower_graph(
                         &types,
                         None,
                         inference,
-                    )
-                    .map_err(|error| format!("{}:{error}", module.path.display()))?;
+                    ) {
+                        Ok(signature) => signature,
+                        Err(_) if layout_error.is_some() => continue,
+                        Err(error) => {
+                            return Err(format!("{}:{error}", module.path.display()).into());
+                        }
+                    };
                     // Rewriting a top-level function takes ownership of its declaration.
                     signature.physical_frame =
                         physical_entry && matches!(function, Cow::Borrowed(_));
@@ -917,6 +942,22 @@ fn lower_graph(
                 _ => {}
             }
         }
+    }
+    if let Some(error) = layout_error.take() {
+        registered::capture(
+            graph,
+            &signatures,
+            &definitions,
+            &callable_definitions,
+            &classes,
+            &types,
+            inference,
+            registered::Capture::Declared,
+            definitions.iter().filter_map(|(_, _, signature)| {
+                signature.physical_frame.then_some((signature.id, None))
+            }),
+        );
+        return Err(error);
     }
     for (class_id, class) in classes.declarations.definitions.iter().enumerate() {
         let module_id = class.definition.module;
@@ -1157,7 +1198,7 @@ fn lower_graph(
                 &classes,
                 &types,
                 inference,
-                needs_registered_entry.then_some(&checked_bodies),
+                registered::Capture::Solved(needs_registered_entry.then_some(&checked_bodies)),
                 definitions
                     .iter()
                     .map(|(_, _, signature)| (signature.id, method_returns.remove(&signature.id))),
