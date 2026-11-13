@@ -306,6 +306,11 @@ impl Checker<'_> {
         clear.extend(&input.clear);
 
         let (callback, reverse) = self.sort_options(call, element, &mut body, &mut clear)?;
+        if callback.is_none() {
+            // The surrounding check can continue after a refused sort.
+            self.sortable_key(element, call)
+                .inspect_err(|_| self.forget_pull_writes(&input))?;
+        }
         let result_type = self.types.list(element);
         let result = self.hidden(result_type);
         clear.push(result);
@@ -492,6 +497,7 @@ impl Checker<'_> {
                 })],
             });
         } else {
+            self.sortable_key(element, call)?;
             self.sort_values(call, target, callback, reverse, &mut body, &mut clear)?;
         }
         Ok(Expr {
@@ -611,7 +617,6 @@ impl Checker<'_> {
             )?);
             keys
         } else {
-            self.sortable_key(element, call)?;
             result
         };
         body.push(Statement::Expr(Expr {
