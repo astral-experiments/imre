@@ -16,8 +16,7 @@ impl RegisteredLambda {
     ) -> Option<RegisteredFunction> {
         let expr = &lambda.body;
         let operations = HashMap::new();
-        let sites = StatementSites::default();
-        let mut scope = SourceScope::new(RegisteredScope::Lambda, source, &operations, &sites);
+        let mut scope = SourceScope::new(RegisteredScope::Lambda, source, &operations, false);
         let value = scope.operand(expr)?;
         Some(scope.finish(RegisteredFunction::returning(expr.range(), value)))
     }
@@ -32,8 +31,7 @@ impl RegisteredLambda {
         let body = Self::body(lambda, source);
         let binding = if body.is_some() {
             let operations = HashMap::new();
-            let sites = StatementSites::default();
-            let mut scope = SourceScope::new(owner, source, &operations, &sites);
+            let mut scope = SourceScope::new(owner, source, &operations, false);
             scope.report_child_refusals = true;
             match scope.with_suspending_operands(|scope| scope.lambda_binding(lambda)) {
                 Ok(value) if scope.locals.is_empty() => ExpressionSelection::Checked(value),
