@@ -670,12 +670,13 @@ pub unsafe extern "C" fn imre_str_int_list(value: *const Str) -> *const List {
     // SAFETY: the caller keeps this immutable string rooted throughout conversion.
     let text = unsafe { &*value };
     let list = string_integer_values(text)
+        .map_err(|(_, error)| error)
         .and_then(|values| crate::try_new_list(values).map_err(|_| Error::allocation()));
     finish(list.map(crate::ListOwner::into_raw), std::ptr::null())
 }
 
-/// Convert the characters of an exact string before publishing the result or an error.
-pub(crate) fn string_integer_values(text: &str) -> Result<Vec<Int>> {
+/// Convert an exact string, reporting the consumed UTF-8 bytes on failure.
+pub(crate) fn string_integer_values(text: &str) -> std::result::Result<Vec<Int>, (usize, Error)> {
     let ascii = text.is_ascii();
     let length = if ascii {
         text.len()
@@ -683,38 +684,37 @@ pub(crate) fn string_integer_values(text: &str) -> Result<Vec<Int>> {
         text.chars().count()
     };
     let mut values = crate::take_list_buffer(length);
-    if values.try_reserve_exact(length).is_err() {
-        return Err(Error::allocation());
-    }
+    values
+        .try_reserve_exact(length)
+        .map_err(|_| (0, Error::allocation()))?;
+    let slots = &mut values.spare_capacity_mut()[..length];
     if ascii {
-        let mut invalid = false;
-        for (slot, &byte) in values.spare_capacity_mut()[..length]
-            .iter_mut()
-            .zip(text.as_bytes())
+        for (chunk, (slots, bytes)) in slots
+            .chunks_mut(32)
+            .zip(text.as_bytes().chunks(32))
+            .enumerate()
         {
-            let digit = byte.wrapping_sub(b'0');
-            invalid |= digit > 9;
-            slot.write(Int::small(i64::from(digit)).unwrap());
-        }
-        if invalid {
-            let index = text
-                .as_bytes()
-                .iter()
-                .position(|byte| !byte.is_ascii_digit())
-                .unwrap();
-            return Err(crate::integer_text::invalid_literal(
-                &text[index..index + 1],
-            ));
+            let mut invalid = false;
+            for (slot, &byte) in slots.iter_mut().zip(bytes) {
+                let digit = byte.wrapping_sub(b'0');
+                invalid |= digit > 9;
+                slot.write(Int::small(i64::from(digit)).unwrap());
+            }
+            if invalid {
+                let index = chunk * 32 + bytes.iter().position(|b| !b.is_ascii_digit()).unwrap();
+                return Err((
+                    index + 1,
+                    crate::integer_text::invalid_literal(&text[index..index + 1]),
+                ));
+            }
         }
     } else {
-        for (slot, character) in values.spare_capacity_mut()[..length]
-            .iter_mut()
-            .zip(text.chars())
-        {
+        for (slot, (offset, character)) in slots.iter_mut().zip(text.char_indices()) {
+            let end = offset + character.len_utf8();
             let Some(digit) = crate::integer_text::decimal_digit(character) else {
-                let mut encoded = [0; 4];
-                return Err(crate::integer_text::invalid_literal(
-                    character.encode_utf8(&mut encoded),
+                return Err((
+                    end,
+                    crate::integer_text::invalid_literal(&text[offset..end]),
                 ));
             };
             slot.write(Int::small(i64::from(digit)).unwrap());

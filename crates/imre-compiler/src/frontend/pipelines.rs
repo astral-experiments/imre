@@ -760,6 +760,35 @@ impl Checker<'_> {
         })
     }
 
+    /// Return the sealed converter and its checked iterable. Eager integer consumers
+    /// can use the input directly and perform the conversion while pulling.
+    pub(super) fn builtin_map_input<'e>(
+        &mut self,
+        call: &'e ast::ExprCall,
+        eager_int: bool,
+    ) -> Result<Option<(&'e str, Iteration)>, String> {
+        let [converter @ ast::Expr::Name(name), source] = call.arguments.args.as_ref() else {
+            return Ok(None);
+        };
+        let name = name.id.as_str();
+        if !self.unshadowed_builtin(&call.func, "map")
+            || !matches!(name, "tuple" | "int" | "str" | "ord")
+            || (eager_int && name != "int")
+            || !self.unshadowed_builtin(converter, name)
+        {
+            return Ok(None);
+        }
+        if eager_int && !call.arguments.keywords.is_empty() {
+            return Err(error(
+                self.source,
+                call,
+                "map requires the builtin int converter and one concrete iterable",
+            ));
+        }
+        self.reject_builtin_keywords(call)?;
+        Ok(Some((name, self.expansion_input(source, None)?)))
+    }
+
     /// Recognizes only sealed constructor syntax at a direct consumer boundary.
     pub(super) fn pipeline_input(
         &mut self,
@@ -896,21 +925,11 @@ impl Checker<'_> {
                 input
             }
             "map" if self.unshadowed_builtin(&call.func, "map") => {
-                let [ast::Expr::Name(converter), source] = call.arguments.args.as_ref() else {
+                let Some((name, source)) = self.builtin_map_input(call, false)? else {
                     return Ok(Some(Iteration::Prepared(
                         self.callback_input(call, element, false)?,
                     )));
                 };
-                let name = converter.id.as_str();
-                if !matches!(name, "tuple" | "int" | "str" | "ord")
-                    || !self.unshadowed_builtin(&call.arguments.args[0], name)
-                {
-                    return Ok(Some(Iteration::Prepared(
-                        self.callback_input(call, element, false)?,
-                    )));
-                }
-                self.reject_builtin_keywords(call)?;
-                let source = self.expansion_input(source, None)?;
                 let mut input = self.prepare_iteration(source, call, false)?;
                 let item = self.local(input.value);
                 let converted = if name == "tuple" {
@@ -921,9 +940,9 @@ impl Checker<'_> {
                             "map(tuple, ...) requires concrete iterable elements",
                         )
                     })?
-                } else if converter.id == "ord" {
+                } else if name == "ord" {
                     self.ordinal(item, call)?
-                } else if converter.id == "int" {
+                } else if name == "int" {
                     self.consumer_value(item, true, call)?
                 } else {
                     match item.ty {

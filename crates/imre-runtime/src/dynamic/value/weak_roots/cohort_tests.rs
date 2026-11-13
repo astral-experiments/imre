@@ -506,7 +506,7 @@ fn generator_ownership_tracks_live_iterator_inputs_and_scope_bindings() {
     let owner = ctx.alloc(generator_value(NONE));
     let parent = ctx.alloc(generator_value(scope));
     let root = ctx.alloc(Value::Map {
-        function: crate::dynamic::zip::MapFunction::Python(NONE),
+        function: NONE,
         inputs: [parent].into(),
         strict: false,
     });
@@ -549,7 +549,7 @@ fn iterator_paths_recheck_the_suspended_operands() {
     });
     let wrapper = heap.alloc(Value::CoroutineWrapper(coroutine));
     let mapped = heap.alloc(Value::Map {
-        function: crate::dynamic::zip::MapFunction::Python(NONE),
+        function: NONE,
         inputs: [wrapper].into(),
         strict: false,
     });

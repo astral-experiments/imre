@@ -1,36 +1,10 @@
 use super::value::{Error, Id, Result, Value};
 use super::{Context, NONE};
 
-/// Keep the original callable for tracing and for rows that need Python dispatch.
-#[derive(Clone, Copy)]
-pub(super) enum MapFunction {
-    Python(Id),
-    IntCharacters(Id),
-}
-
-impl MapFunction {
-    pub(super) fn callable(self) -> Id {
-        match self {
-            Self::Python(id) | Self::IntCharacters(id) => id,
-        }
-    }
-
-    fn apply(self, ctx: &mut Context, values: Vec<Id>) -> Result<Id> {
-        if let Self::IntCharacters(_) = self
-            && let [value] = values.as_slice()
-            && let Value::Str(character) = ctx.heap.get(*value)
-            && let Some(digit) = crate::integer_text::single_decimal_digit(character)
-        {
-            return Ok(ctx.int(i64::from(digit)));
-        }
-        ctx.call(self.callable(), values, Vec::new())
-    }
-}
-
 /// One in-progress row of a possibly nested zip or map.
 struct PendingRow {
     inputs: std::rc::Rc<[Id]>,
-    function: Option<MapFunction>,
+    function: Option<Id>,
     strict: bool,
     index: usize,
     values: Vec<Id>,
@@ -115,15 +89,7 @@ impl Context {
         let inputs = inputs.into();
         let cursor = match function {
             Some(function) => Value::Map {
-                function: if class == base
-                    && let [source] = sources
-                    && matches!(self.heap.get(*source), Value::Str(_))
-                    && self.builtins.get("int") == Some(&function)
-                {
-                    MapFunction::IntCharacters(function)
-                } else {
-                    MapFunction::Python(function)
-                },
+                function,
                 inputs,
                 strict,
             },
@@ -133,38 +99,48 @@ impl Context {
         Ok(self.with_subclass_storage(class, base, storage))
     }
 
-    /// Materialize digits only after map has captured the original int and an exact string.
-    /// On failure, leave its iterator untouched so normal pulls raise at the offending character.
-    pub(super) fn list_from_int_character_map(&mut self, map: Id) -> Option<Id> {
+    /// Materialize the remaining digits of a forward text cursor mapped by the original int.
+    /// A rejected character consumes its own UTF-8 bytes and leaves the remaining cursor live.
+    pub(super) fn list_from_int_character_map(&mut self, map: Id) -> Option<Result<Id>> {
         let Value::Map {
-            function: MapFunction::IntCharacters(_),
-            inputs,
-            ..
+            function, inputs, ..
         } = self.heap.get(map)
         else {
             return None;
         };
+        if self.builtins.get("int") != Some(function) {
+            return None;
+        }
         let &[input] = inputs.as_ref() else {
             return None;
         };
         let super::IteratorSlice::Text(text) = self.iterator_remaining(input).ok()? else {
             return None;
         };
-        let width = text.len();
-        let digits = crate::objects::string_integer_values(text).ok()?;
-        let items = digits
-            .into_iter()
-            .map(|digit| self.alloc(Value::Int(digit)))
-            .collect();
+        let digits = crate::objects::string_integer_values(text);
+        let consumed = match &digits {
+            Ok(_) => text.len(),
+            Err((0, _)) => return None, // A failed bulk reservation consumed no input.
+            Err((consumed, _)) => *consumed,
+        };
         let Value::Iterator {
             offset, sequence, ..
         } = self.heap.get_mut(input)
         else {
             unreachable!()
         };
-        *offset += width;
-        *sequence = None;
-        Some(self.alloc(Value::List(items)))
+        *offset += consumed;
+        match digits {
+            Ok(digits) => {
+                *sequence = None;
+                let items = digits
+                    .into_iter()
+                    .map(|digit| self.alloc(Value::Int(digit)))
+                    .collect();
+                Some(Ok(self.alloc(Value::List(items))))
+            }
+            Err((_, error)) => Some(Err(error.into())),
+        }
     }
 
     /// Pull one row, preserving source errors and the strict mismatch probe order.
@@ -223,7 +199,15 @@ impl Context {
                 result = if row.exhausted {
                     Ok(None)
                 } else if let Some(function) = row.function {
-                    function.apply(self, row.values).map(Some)
+                    if let [value] = row.values.as_slice()
+                        && let Value::Str(character) = self.heap.get(*value)
+                        && matches!(self.heap.get(function), Value::Native(name) if name == "int")
+                        && let Some(digit) = crate::integer_text::single_decimal_digit(character)
+                    {
+                        Ok(Some(self.int(i64::from(digit))))
+                    } else {
+                        self.call(function, row.values, Vec::new()).map(Some)
+                    }
                 } else {
                     Ok(Some(self.alloc(Value::Tuple(row.values))))
                 };
