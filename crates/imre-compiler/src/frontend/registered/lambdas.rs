@@ -125,7 +125,7 @@ async def factory(seed, rows, mark):
         assert_eq!(
             checked
                 .metadata
-                .signature(imre_ast::code_flags::NESTED, false, None)["scope_reads"],
+                .signature(imre_ast::code_flags::NESTED, false)["scope_reads"],
             json!(["seed"])
         );
 
