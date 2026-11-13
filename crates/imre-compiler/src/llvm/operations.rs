@@ -8,7 +8,7 @@ pub(crate) use iteration::LoopEdges;
 pub(crate) mod branches;
 mod join;
 pub(crate) mod sequences;
-use crate::ir::DisplayKind;
+use crate::ir::{self, DisplayKind};
 pub(crate) use join::ValueJoin;
 use ruff_python_ast::UnaryOp;
 
@@ -256,6 +256,15 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             return CheckedValue::owned(native.native_call(target, args, values, returns));
         };
 
+        self.python_invoke(site, args, |frame| frame.evaluate_handle(callable))
+    }
+
+    fn python_invoke(
+        &mut self,
+        site: &ir::InvokeSite,
+        args: &CallArgs,
+        callable: impl FnOnce(&mut CheckedFrame<'_, '_, '_>) -> String,
+    ) -> CheckedValue {
         let frame = self.python();
         let exec = frame.exec_literal_at(site.range);
         let mark = frame.temporary_mark();
@@ -268,13 +277,16 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             // Each evaluation leaves just its result above the previous operands.
             // Release intermediate owners before the next argument can run Python.
             let mut next = mark.clone();
-            let mut evaluate = |expr: &Expr| {
-                let value = frame.evaluate_handle(expr);
+            let mut keep = |value: String, frame: &mut CheckedFrame<'_, '_, '_>| {
                 next = frame.keep_operands(&next, &value, "0");
                 value
             };
-            let scope = site.scope.as_deref().map(&mut evaluate);
-            let (target, values) = args.capture_invoke(callable, evaluate);
+            let scope = site
+                .scope
+                .as_deref()
+                .map(|expr| keep(frame.evaluate_handle(expr), frame));
+            let target = keep(callable(frame), frame);
+            let values = args.capture(|expr| keep(frame.evaluate_handle(expr), frame));
             let (array, count) = frame.fixed_call_arguments(&target, values, exec);
             let positional = super::registered::CallArguments::Positional {
                 array,
@@ -753,9 +765,31 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             && let Some(range) = frame.next_fixed_site()
         {
             let attribute = frame.fixed_attribute(range);
-            let position = attribute.map_or(range.start(), |field| field.position);
+            let position = attribute
+                .filter(|_| !matches!(expr.kind, ExprKind::Call(_, _)))
+                .map_or(range.start(), |op| op.position);
             return frame.at_expression(range, position, |frame| {
                 if let Some(field) = attribute {
+                    if let (Builtin::RegisteredName(name), ExprKind::Call(_, args)) =
+                        (&*field.operation, &expr.kind)
+                    {
+                        let name_range = TextRange::new(range.start(), field.position);
+                        let site = ir::InvokeSite {
+                            range,
+                            callee_end: name_range.end(),
+                            suspended_name: Some(name_range),
+                            scope: None,
+                        };
+                        return CheckedBody::registered(frame.reborrow()).python_invoke(
+                            &site,
+                            args,
+                            |frame| {
+                                frame.at_expression(name_range, name_range.start(), |frame| {
+                                    frame.lookup(name)
+                                })
+                            },
+                        );
+                    }
                     let operands = match &expr.kind {
                         ExprKind::Field(receiver, _) => std::slice::from_ref(receiver.as_ref()),
                         ExprKind::Builtin(_, args) => args,
