@@ -183,6 +183,20 @@ def check_registered_entry_operand(imre, root, run):
     assert result.returncode == 1 and b"LookupError: argument stopped" in result.stderr, result
 
 
+    # Replacing a published annotation must still let a Python method receiver reach its body.
+    entry.write_text(
+        "START = 'a'\nEND = 'b'\n"
+        "def pair(readme: str) -> int:\n"
+        "    start = readme.find(START)\n    return readme.find(END, start)\n"
+        "print(pair('ab'))\n"
+        "def startup(source: str) -> None: exec(source)\n"
+        "exec(\"pair.__annotations__ = {'readme': int}\\ntry: pair(12)\\n"
+        "except Exception as exc: print(type(exc).__name__)\")\n"
+    )
+    result = run(imre, "-m", entry.stem)
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"1\nAttributeError\n", b""), result
+
+
 def check_module_search_root(imre, root, run):
     app = root / "application"
     app.mkdir()
