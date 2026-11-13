@@ -419,17 +419,10 @@ pub(crate) fn analyze_program(module: &Module) -> Result<NativeProgram, Unsuppor
     let callable_targets = targets.finish();
     let cached = |id| module.types.cache_adapter(id).is_some();
     const SIGNATURE: &str = "Imre: wrapper links require a callable signature with known native functions or source methods";
-    if function_link_types.iter().any(|&ty| {
-        let targets = callable_targets.get(ty);
-        module.types.dispatcher(ty).is_some()
-            || targets.is_empty()
-            || targets.iter().any(|target| {
-                let function = &module.functions[target.function];
-                target.bound
-                    && !cached(target.function)
-                    && !matches!(function.locals[function.params[0]], Type::Class(_))
-            })
-    }) {
+    if function_link_types
+        .iter()
+        .any(|&ty| module.types.dispatcher(ty).is_some() || callable_targets.get(ty).is_empty())
+    {
         return Err(Unsupported(SIGNATURE, crate::LoweringKind::Object));
     }
     let linked_functions = function_link_types
@@ -478,21 +471,34 @@ pub(crate) fn analyze_program(module: &Module) -> Result<NativeProgram, Unsuppor
             });
         }
     }
-    for (id, mut owners) in link_owners {
+    link_owners.retain(|&id, owners| {
         let function = module.functions.get(id).unwrap_or(&module.entry);
         let inputs = direct_inputs.get(&id).map_or(&[][..], Vec::as_slice);
-        ir::retain_unknown_link_owners(function, &mut owners, inputs, |operand| {
+        ir::retain_unknown_link_owners(function, owners, inputs, |operand| {
             matches!(operand.kind, ExprKind::Callable { function, receiver: None }
                 if !cached(function)
                     && module.types.constructor_base(operand.ty).is_none()
                     && linked_functions.contains(&function))
         });
-        if !owners.is_empty() {
-            return Err(Unsupported(
-                "Imre: native wrapper links require a plain function as their owner",
-                crate::LoweringKind::ScopedObject,
-            ));
-        }
+        !owners.is_empty()
+    });
+    // Only the owner needs link storage. A plain function can wrap a bound
+    // builtin, even when the two callables have the same signature.
+    if link_owners.values().flatten().any(|owner| {
+        callable_targets.get(owner.ty).iter().any(|target| {
+            let function = &module.functions[target.function];
+            target.bound
+                && !cached(target.function)
+                && !matches!(function.locals[function.params[0]], Type::Class(_))
+        })
+    }) {
+        return Err(Unsupported(SIGNATURE, crate::LoweringKind::Object));
+    }
+    if !link_owners.is_empty() {
+        return Err(Unsupported(
+            "Imre: native wrapper links require a plain function as their owner",
+            crate::LoweringKind::ScopedObject,
+        ));
     }
     Ok(NativeProgram {
         callable_targets,
