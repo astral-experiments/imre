@@ -6209,13 +6209,12 @@ impl<'a> Checker<'a> {
                     annotation: assign.annotation.range(),
                 };
                 // A dominating new annotation evaluates its RHS against the previous binding.
-                let replacement = self.names.get(name.id.as_str()).copied().filter(|&old| {
-                    !self.module_scope
-                        && self.block_depth == 1
-                        && self.local_functions.is_empty()
-                        && self.locals[old] != ty
-                        && assign.value.is_some()
-                });
+                let outer_local =
+                    !self.module_scope && self.block_depth == 1 && self.local_functions.is_empty();
+                let replacement =
+                    self.names.get(name.id.as_str()).copied().filter(|&old| {
+                        outer_local && self.locals[old] != ty && assign.value.is_some()
+                    });
                 let slot = if let Some(old) = replacement {
                     old
                 } else {
@@ -6254,6 +6253,9 @@ impl<'a> Checker<'a> {
                         return Ok((statements, true));
                     }
                     self.assigned_value(slot, &value);
+                    if outer_local && let Some(sites) = &mut self.fixed_sites {
+                        sites.statement(rhs.range(), FixedNode::Store(slot));
+                    }
                     Some(Statement::Assign(slot, value))
                 } else {
                     None
