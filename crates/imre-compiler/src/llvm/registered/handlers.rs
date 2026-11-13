@@ -226,7 +226,7 @@ impl<'f, 'p> Frame<'f, '_, 'p> {
                 self.code.bind(name, &matched);
             }
             let outer = std::mem::replace(&mut self.body.error_target, failed.clone());
-            self.emit_handler_suite(&handler.body);
+            self.emit_suite(&handler.body);
             self.body.error_target = outer;
             if !self.body.terminated
                 && let Some(name) = name
@@ -278,17 +278,6 @@ impl<'f, 'p> Frame<'f, '_, 'p> {
             .name
             .map(|slot| self.names.expect("registered scope")[&slot].name.as_str())
     }
-
-    pub(in crate::llvm) fn emit_handler_suite(&mut self, body: &[Statement]) {
-        // Module providers retain annotation sites even in an unentered else.
-        if self.body.terminated
-            && let Some(child) = self.prepared_child(body)
-        {
-            super::RegisteredBody::Suite(child).emit(self.code);
-        } else {
-            self.emit_suite(body);
-        }
-    }
 }
 
 impl RegisteredFrame<'_, '_> {
@@ -315,11 +304,7 @@ pub(super) fn supported(handlers: &[ExceptHandler], finalbody: &[Statement]) -> 
         })
 }
 
-impl<'p> Frame<'_, '_, 'p> {
-    fn prepared_child(&self, body: &[Statement]) -> Option<&'p crate::frontend::RegisteredSuite> {
-        self.suite?.child_suite(body)
-    }
-
+impl Frame<'_, '_, '_> {
     pub(crate) fn emit_suite(&mut self, suite: &[Statement]) {
         CheckedBody::registered(self.reborrow()).emit_block(suite);
     }
