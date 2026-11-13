@@ -3308,6 +3308,14 @@ impl Emitter<'_, '_> {
     }
 
     fn binary(&mut self, op: Binary, left: &Value, right: &Value) -> Value {
+        if op == Binary::Divide && left.ty.is_path() {
+            let name = if right.ty.is_path() {
+                "imre_path_join_object"
+            } else {
+                "imre_path_join"
+            };
+            return self.call(name, left.ty, &[left, right]);
+        }
         if left.ty == Type::Float || right.ty == Type::Float {
             let left = self.promote_int_to_float(left);
             let right = self.promote_int_to_float(right);

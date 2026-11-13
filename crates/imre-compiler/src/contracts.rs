@@ -246,8 +246,6 @@ impl Builtin {
                 match operation {
                     PathOperation::ContextExit
                     | PathOperation::PureNew(_)
-                    | PathOperation::Join
-                    | PathOperation::JoinObject
                     | PathOperation::Parent
                     | PathOperation::IsRelativeTo
                     | PathOperation::AsPosix
