@@ -229,7 +229,7 @@ mod tests {
 
     #[test]
     fn quoted_children_use_their_own_literal_parts() {
-        let text = r#"def f(a: "call" "(x)", b: "keep" "\ud800"): pass
+        let text = r#"def f(a: "call" "(x)", b: "keep" "\ud800", c: r"'\ud800'"): pass
 def dormant(): return f"\ud801{1}", t"{x}"
 "#;
         let parsed = ruff_python_parser::parse_module(text).unwrap();
@@ -248,8 +248,10 @@ def dormant(): return f"\ud801{1}", t"{x}"
         };
         let sites = observe(&parsed.syntax().body, source, false, false);
         let site = TextSize::try_from(text.find(r#""call""#).unwrap()).unwrap();
-        assert_eq!(sites.children.len(), 1);
+        assert_eq!(sites.children.len(), 2);
         assert!(sites.children.contains_key(&site));
+        let quoted = TextSize::try_from(text.find("r\"").unwrap()).unwrap();
+        assert!(sites.children.contains_key(&quoted));
         assert!(matches!(
             &sites.values[&site].kind,
             ExprKind::Builtin(Builtin::BindAnnotationExpression { spelling, .. }, _) if spelling == "call(x)"
