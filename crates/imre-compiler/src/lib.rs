@@ -510,6 +510,9 @@ fn object_fallback(
     let (mut refusal, graph) = match loaded {
         Ok(Some(mut graph)) => {
             graph.registered_startup = boxed_startup;
+            if registered_initializer && !incremental {
+                graph.session.use_registered_body_rules();
+            }
             site_probes.record(&mut graph.inputs);
             let initializer = check_initializer(&graph, registered_initializer);
             let call_error = initializer

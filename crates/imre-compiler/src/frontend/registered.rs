@@ -615,11 +615,15 @@ impl SourceChecks {
         if let Some(accepted) = Self::cached(graph, module, definition) {
             return accepted;
         }
-        let Some(errors) = self
+        let Some(errors) = graph
             .session
-            .get_or_init(|| graph.session.registered_body_checks().ok())
-            .as_ref()
-            .and_then(|checks| checks.source_error_ranges(&graph.session, module))
+            .current_registered_source_errors(module)
+            .or_else(|| {
+                self.session
+                    .get_or_init(|| graph.session.registered_body_checks().ok())
+                    .as_ref()
+                    .and_then(|checks| checks.source_error_ranges(&graph.session, module))
+            })
         else {
             return false;
         };
