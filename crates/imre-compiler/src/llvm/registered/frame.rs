@@ -1445,7 +1445,7 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
     }
 
     /// Expand each argument before evaluating the next, preserving a call's deferred lone star.
-    pub(super) fn pack_arguments(
+    pub(in crate::llvm) fn pack_arguments(
         &mut self,
         layout: &ir::PackedArguments,
         operands: &[Expr],
@@ -1771,13 +1771,21 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
     pub(in crate::llvm) fn kept_call_arguments(
         &mut self,
         callable: &str,
+        receiver: Option<String>,
         args: &[Expr],
         mut next: String,
         exec: Option<super::sites::CompiledExec>,
     ) -> (&'static str, usize) {
-        let values = args
-            .iter()
-            .map(|expr| self.kept_call_value(expr, &mut next))
+        if receiver.is_some() && args.is_empty() {
+            // Lookup initialized slot zero and no argument can have reused it.
+            return self.write_handles_at(1, &[] as &[&str]);
+        }
+        let values = receiver
+            .into_iter()
+            .chain(
+                args.iter()
+                    .map(|expr| self.kept_call_value(expr, &mut next)),
+            )
             .collect();
         self.fixed_call_arguments(callable, values, exec)
     }
@@ -1798,132 +1806,22 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
         value
     }
 
-    /// Evaluate the callable before its arguments. A lone *iterable is converted
-    /// at invocation, after the keywords; a mixed positional list expands each * in place.
-    pub(super) fn call_value(
+    /// Resolve the written attribute at its own position before any argument runs.
+    pub(in crate::llvm) fn call_method_target(
         &mut self,
-        call: &ir::RegisteredCall,
-        target: &Expr,
-        args: &[Expr],
-    ) -> String {
-        use ir::{RegisteredArguments, RegisteredCallTarget};
-        let exec = self.exec_literal_at(call.range);
-        let mut args = args.iter();
-
-        let mark = self.temporary_mark();
-        let edge = self.begin_operand_scope();
-        if self.native_suspension
-            && let RegisteredCallTarget::Callable {
-                suspended_name: Some(name),
-                ..
-            } = &call.target
-        {
-            self.call_position(*name);
-        }
-        let keyword_call = matches!(call.arguments, RegisteredArguments::Keywords { .. });
-        let mut next = mark.clone();
-        let (scope, target) = if call.explicit_scope {
-            let scope = if keyword_call {
-                self.kept_call_value(target, &mut next)
-            } else {
-                self.evaluate_handle(target)
-            };
-            (Some(scope), args.next().expect("scoped call has a target"))
+        receiver: &str,
+        name: &str,
+        attribute: TextRange,
+        direct: bool,
+    ) -> (String, Option<String>) {
+        if let SourcePosition::Expression(active) = self.position {
+            let lookup = TextRange::new(active.start().max(attribute.start()), attribute.end());
+            self.with_source_range(lookup, |frame| {
+                frame.method_target(receiver, name, lookup, direct)
+            })
         } else {
-            (None, target)
-        };
-        let (callable, receiver, callee_end) = match &call.target {
-            RegisteredCallTarget::Callable { end, .. } => {
-                let target = if keyword_call {
-                    self.kept_call_value(target, &mut next)
-                } else {
-                    self.evaluate_handle(target)
-                };
-                (target, None, *end)
-            }
-            RegisteredCallTarget::Method {
-                name, attribute, ..
-            } => {
-                let receiver = self.evaluate_handle(target);
-                let direct = matches!(call.arguments, RegisteredArguments::Positional);
-                let (callee, bound) = if let SourcePosition::Expression(active) = self.position {
-                    let lookup =
-                        TextRange::new(active.start().max(attribute.start()), attribute.end());
-                    self.with_source_range(lookup, |f| {
-                        f.method_target(&receiver, name, lookup, direct)
-                    })
-                } else {
-                    self.method_target(&receiver, name, *attribute, direct)
-                };
-                next = self.keep_operands(&next, &callee, bound.as_deref().unwrap_or("0"));
-                (callee, bound, attribute.end())
-            }
-        };
-        let operands = match &call.arguments {
-            RegisteredArguments::Positional => {
-                let receiver_slot = receiver.is_some();
-                let (array, count) =
-                    if receiver_slot && args.as_slice().is_empty() && exec.is_none() {
-                        // Method lookup initialized slot zero and no argument can reuse it.
-                        self.write_handles_at(1, &[] as &[&str])
-                    } else {
-                        let values = receiver
-                            .into_iter()
-                            .chain(args.map(|a| self.evaluate_handle(a)))
-                            .collect();
-                        self.fixed_call_arguments(&callable, values, exec)
-                    };
-                if let Some((index, range)) = call.partition_field {
-                    let span = self.expression_range_span(range, call.range.end(), b'[');
-                    let get_position =
-                        span.map_or_else(|| "null".into(), |span| self.output.position(span));
-                    debug_assert!(receiver_slot && count == 2);
-                    CallArguments::PartitionField {
-                        array,
-                        index,
-                        get_position,
-                    }
-                } else {
-                    CallArguments::Positional {
-                        array,
-                        count,
-                        receiver_slot,
-                    }
-                }
-            }
-            RegisteredArguments::Keywords { positional, names } => {
-                let (array, _) = self.kept_call_arguments(&callable, args.as_slice(), next, exec);
-                let operands = CallArguments::FixedKeywords {
-                    array,
-                    positional: *positional,
-                    keywords: names.len(),
-                    names: self.output.data(names.join("\0").as_bytes()),
-                };
-                let value = self.positioned_call(
-                    &callable,
-                    operands,
-                    &mark,
-                    call.range,
-                    callee_end,
-                    scope.as_deref(),
-                );
-                self.finish_unwind(edge, |frame| frame.release_owned_operands(&mark));
-                return value;
-            }
-            RegisteredArguments::Packed(pack) => {
-                let (args, kwargs) = self.pack_arguments(pack, args.as_slice(), Some(&callable));
-                CallArguments::Packed { args, kwargs }
-            }
-        };
-        self.finish_unwind(edge, |frame| frame.release_owned_operands(&mark));
-        self.positioned_call(
-            &callable,
-            operands,
-            &mark,
-            call.range,
-            callee_end,
-            scope.as_deref(),
-        )
+            self.method_target(receiver, name, attribute, direct)
+        }
     }
 
     /// Mutate a descriptor at the original target, using the same live receiver
