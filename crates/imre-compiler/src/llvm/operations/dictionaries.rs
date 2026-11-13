@@ -62,7 +62,7 @@ impl CheckedBody<'_, '_, '_, '_> {
             |_| None,
             |body, entry| {
                 let key = entry.key.as_ref().expect("explicit dictionary entry");
-                (body.store_operand(key), body.store_operand(&entry.value))
+                (body.rooted_operand(key), body.rooted_operand(&entry.value))
             },
             |body, pending, _| {
                 let dict = body.new_dictionary(ty);
@@ -109,7 +109,7 @@ impl CheckedBody<'_, '_, '_, '_> {
             while let Some((entry, tail)) = remaining.split_first() {
                 if entry.key.is_none() {
                     let dict = result.get_or_insert_with(|| body.new_dictionary(ty));
-                    let mapping = body.store_operand(&entry.value);
+                    let mapping = body.rooted_operand(&entry.value);
                     body.python()
                         .op("update", &[dict.rooted_handle(), mapping.rooted_handle()]);
                     body.python()

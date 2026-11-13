@@ -69,7 +69,7 @@ impl<'f, 'a, 'p, 'm> CheckedBody<'f, 'a, 'p, 'm> {
             let value = if immediate {
                 CheckedValue::native(self.fixed().immediate_receiver(expr))
             } else {
-                self.store_operand(expr)
+                self.rooted_operand(expr)
             };
             if let Some(result) = chain.push(self, value, right_scope, integer_pair) {
                 return result;

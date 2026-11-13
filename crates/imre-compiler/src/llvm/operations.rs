@@ -525,9 +525,12 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
 
     /// Root a Python handle before evaluating another operand that could replace its owner.
     fn rooted_operand(&mut self, expr: &Expr) -> CheckedValue {
+        let value = self.operand_for(expr, ValueUse::PythonHandle);
         match &mut self.0 {
-            Entry::Native(emitter) => CheckedValue::native(emitter.operand(expr)),
-            Entry::Registered(frame) => CheckedValue::handle(frame.evaluate_handle(expr)),
+            Entry::Registered(frame) if !matches!(value, CheckedValue::Handle { .. }) => {
+                CheckedValue::handle(frame.materialize_owned(value))
+            }
+            _ => value,
         }
     }
 
