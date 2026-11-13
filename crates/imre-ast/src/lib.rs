@@ -297,11 +297,11 @@ pub fn direct_method<'a>(
     let args = &call.arguments;
     // CPython's method call path is limited to fewer than 30 stack entries.
     (args.args.len() + args.keywords.len() + usize::from(!args.keywords.is_empty()) < 30
-        && !args.args.iter().any(|arg| matches!(arg, ast::Expr::Starred(_)))
-        && args.keywords.iter().all(|arg| arg.arg.is_some())
         && !matches!(field.value.as_ref(), ast::Expr::Name(name) if imports.contains(
             spellings.and_then(|names| names.original.get(&name.start())).unwrap_or(&name.id).as_str()
-        )))
+        ))
+        && !args.args.iter().any(ast::Expr::is_starred_expr)
+        && args.keywords.iter().all(|arg| arg.arg.is_some()))
     .then_some(field)
 }
 

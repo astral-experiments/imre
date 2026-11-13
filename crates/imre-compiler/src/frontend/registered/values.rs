@@ -272,19 +272,25 @@ pub(in crate::frontend) fn registered_argument_layout(
         && !args.args.iter().any(ast::Expr::is_starred_expr)
         && args.keywords.iter().all(|key| key.arg.is_some())
     {
-        if args.keywords.is_empty() {
-            return ir::RegisteredArguments::Positional;
-        }
-        return ir::RegisteredArguments::Keywords {
-            positional,
+        fixed_argument_layout(args)
+    } else {
+        ir::RegisteredArguments::Packed(packed_arguments(args))
+    }
+}
+
+fn fixed_argument_layout(args: &ast::Arguments) -> ir::RegisteredArguments {
+    if args.keywords.is_empty() {
+        ir::RegisteredArguments::Positional
+    } else {
+        ir::RegisteredArguments::Keywords {
+            positional: args.args.len(),
             names: args
                 .keywords
                 .iter()
                 .map(|key| key.arg.as_ref().unwrap().to_string())
                 .collect(),
-        };
+        }
     }
-    ir::RegisteredArguments::Packed(packed_arguments(args))
 }
 
 pub(crate) fn packed_arguments(args: &ast::Arguments) -> ir::PackedArguments {
@@ -454,7 +460,11 @@ fn bound_call(
     target: Expr,
     mut arguments: Vec<Expr>,
 ) -> Expr {
-    let layout = registered_argument_layout(&call.arguments);
+    let layout = match selection {
+        // A direct method target already established the bounded, unexpanded arguments.
+        ir::RegisteredCallTarget::Method { .. } => fixed_argument_layout(&call.arguments),
+        ir::RegisteredCallTarget::Callable { .. } => registered_argument_layout(&call.arguments),
+    };
     if target.ty == Type::PythonObject
         && matches!(layout, ir::RegisteredArguments::Positional)
         && let ir::RegisteredCallTarget::Callable {
