@@ -2031,32 +2031,10 @@ impl<'a> Visitor<'a> for SelfUse<'a, '_> {
         }
         // A comprehension target named self is distinct from the incomplete
         // receiver. Its leftmost iterable still belongs to the enclosing scope.
-        let clauses = match expression {
-            ast::Expr::ListComp(value) => Some(value.generators.as_slice()),
-            ast::Expr::SetComp(value) => Some(value.generators.as_slice()),
-            ast::Expr::DictComp(value) => Some(value.generators.as_ref()),
-            ast::Expr::Generator(value) => Some(value.generators.as_slice()),
-            _ => None,
-        };
-        fn binds_self(target: &ast::Expr, receiver: &str) -> bool {
-            match target {
-                ast::Expr::Name(name) => name.id == receiver,
-                ast::Expr::Tuple(value) => {
-                    value.elts.iter().any(|target| binds_self(target, receiver))
-                }
-                ast::Expr::List(value) => {
-                    value.elts.iter().any(|target| binds_self(target, receiver))
-                }
-                ast::Expr::Starred(value) => binds_self(&value.value, receiver),
-                _ => false,
-            }
-        }
-        if let Some(clauses) = clauses
-            && clauses
-                .iter()
-                .any(|clause| binds_self(&clause.target, self.0))
+        if let Some(plan) = imre_ast::comprehension::Plan::from_expr(expression)
+            && plan.binds_name(self.0)
         {
-            self.visit_expr(&clauses[0].iter);
+            self.visit_expr(plan.outer);
             return;
         }
         if matches!(expression, ast::Expr::Name(name) if name.id == self.0) {

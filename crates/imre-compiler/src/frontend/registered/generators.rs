@@ -1,7 +1,7 @@
 //! Prepare the hidden activation of a generator expression.
 
 use super::*;
-use crate::frontend::comprehensions::EagerDisplay;
+use crate::frontend::comprehensions::ClauseLowering;
 use crate::frontend::function_scope::{CallableMetadata, FunctionScope, LexicalSite};
 use imre_ast::comprehension::Plan;
 

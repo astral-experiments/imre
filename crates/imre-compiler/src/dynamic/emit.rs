@@ -3642,6 +3642,68 @@ mod tests {
     }
 
     #[test]
+    fn async_stream_caller_emits_its_prepared_generator_and_display() {
+        use crate::ir::{Builtin, ExprKind, IterNextKind, Statement, SuspendValue};
+
+        let source = concat!(
+            "async def read_response(response):\n",
+            "    chunks = (piece async for piece in response.aiter_bytes(chunk_size=7))\n",
+            "    print('chunks', [piece async for piece in chunks], flush=True)\n",
+        );
+        let mut module = PreparedBody::module_with_syntax(
+            "stream",
+            Path::new("stream.py"),
+            source,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let caller = module.source.definition_body(0.into());
+        assert!(caller.fully_checked());
+        let generators = &module.source.generators;
+        assert_eq!(generators.len(), 1);
+        let (site, child) = generators.iter().next().unwrap();
+        let caller = &caller.checked().function.body;
+        let child = &child.body.function.body;
+        for body in [caller, child] {
+            let mut pulls = 0;
+            crate::ir::walk_statements(body, &mut |stmt| {
+                if matches!(
+                    stmt,
+                    Statement::IterNext {
+                        kind: IterNextKind::Async(_),
+                        ..
+                    }
+                ) {
+                    pulls += 1;
+                }
+            });
+            assert_eq!(pulls, 1);
+        }
+        let mut children = Vec::new();
+        crate::ir::walk_expressions(caller, &mut |expr| {
+            if let ExprKind::Builtin(Builtin::RegisteredGenerator(site, ..), _) = expr.kind {
+                children.push(site);
+            }
+        });
+        assert_eq!(children, [*site]);
+        let mut yields = 0;
+        crate::ir::walk_expressions(child, &mut |expr| {
+            if matches!(
+                expr.kind,
+                ExprKind::Builtin(Builtin::RegisteredSuspend(SuspendValue::Yield, _), _)
+            ) {
+                yields += 1;
+            }
+        });
+        assert_eq!(yields, 1);
+
+        let before = module.standalone().unwrap();
+        assert!(module.syntax.take().is_some());
+        assert_eq!(module.standalone().unwrap(), before);
+    }
+
+    #[test]
     fn prepared_format_literals_emit_without_lexical_replacements() {
         let mut prepared = PreparedBody::module(
             "example",

@@ -5,7 +5,6 @@
 use ruff_python_ast::UnaryOp;
 use std::cell::{Cell, RefCell};
 
-pub(crate) use imre_ast::comprehension::collect_target_names as target_names;
 use imre_ast::comprehension::{Output, Plan};
 use ruff_python_ast::visitor::{Visitor, walk_stmt};
 
@@ -137,11 +136,12 @@ pub(super) enum Collector {
     IntegerSum,
 }
 
-/// Translate the structured plan once, with each frontend supplying its operand
-/// and target types. The outer iterator is already acquired when the first target binds.
-pub(super) trait EagerDisplay: Sized {
+/// The enclosing frame supplies the first iterator. Each target scope checks its filters
+/// before opening an inner iterator or checking the result of the last clause.
+pub(super) trait ClauseLowering: Sized {
     type Input;
     type Error;
+    type Body;
 
     fn before_pull(&mut self, _plan: &Plan<'_>, _depth: usize) {}
     fn input(&mut self, clause: &ast::Comprehension) -> StdResult<Self::Input, Self::Error>;
@@ -150,9 +150,39 @@ pub(super) trait EagerDisplay: Sized {
         target: &ast::Expr,
         input: Self::Input,
         output: Output<'_>,
-        body: impl FnOnce(&mut Self) -> StdResult<Vec<Statement>, Self::Error>,
-    ) -> StdResult<Vec<Statement>, Self::Error>;
+        body: impl FnOnce(&mut Self) -> StdResult<(Vec<Expr>, Self::Body), Self::Error>,
+    ) -> StdResult<Self::Body, Self::Error>;
     fn filter(&mut self, test: &ast::Expr) -> StdResult<Expr, Self::Error>;
+
+    fn comprehension_loop<'p>(
+        &mut self,
+        plan: &Plan<'p>,
+        depth: usize,
+        input: Self::Input,
+        emit: &mut impl FnMut(&mut Self, Output<'p>, &[Expr]) -> StdResult<Self::Body, Self::Error>,
+    ) -> StdResult<Self::Body, Self::Error> {
+        let clause = &plan.clauses[depth];
+        self.with_target(&clause.target, input, plan.output, |scope| {
+            let conditions = clause
+                .ifs
+                .iter()
+                .map(|test| scope.filter(test))
+                .collect::<StdResult<Vec<_>, _>>()?;
+            let body = if let Some(inner) = plan.clauses.get(depth + 1) {
+                let input = scope.input(inner)?;
+                scope.before_pull(plan, depth + 1);
+                stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
+                    scope.comprehension_loop(plan, depth + 1, input, emit)
+                })?
+            } else {
+                emit(scope, plan.output, &conditions)?
+            };
+            Ok((conditions, body))
+        })
+    }
+}
+
+pub(super) trait EagerDisplay: ClauseLowering<Body = Vec<Statement>> {
     fn collection_locals(&self) -> &[Type];
     fn collection_guard(_: &[Expr]) -> Option<(usize, usize)> {
         None
@@ -171,10 +201,6 @@ pub(super) trait EagerDisplay: Sized {
         key: Option<&Expr>,
         guarded: Option<(usize, usize)>,
     ) -> StdResult<Expr, Self::Error>;
-
-    fn eager_filters(&mut self, clause: &ast::Comprehension) -> StdResult<Vec<Expr>, Self::Error> {
-        clause.ifs.iter().map(|test| self.filter(test)).collect()
-    }
 
     /// Seed the accumulator before its first pull and update it only after the filters pass.
     fn comprehension_body(
@@ -262,27 +288,6 @@ pub(super) trait EagerDisplay: Sized {
         }
         Ok(self.collection_locals()[result])
     }
-
-    fn comprehension_loop<'p>(
-        &mut self,
-        plan: &Plan<'p>,
-        depth: usize,
-        input: Self::Input,
-        emit: &mut impl FnMut(&mut Self, Output<'p>, &[Expr]) -> StdResult<Vec<Statement>, Self::Error>,
-    ) -> StdResult<Vec<Statement>, Self::Error> {
-        let clause = &plan.clauses[depth];
-        self.with_target(&clause.target, input, plan.output, |lower| {
-            let conditions = lower.eager_filters(clause)?;
-            let body = if let Some(inner) = plan.clauses.get(depth + 1) {
-                let input = lower.input(inner)?;
-                lower.before_pull(plan, depth + 1);
-                lower.comprehension_loop(plan, depth + 1, input, emit)?
-            } else {
-                emit(lower, plan.output, &conditions)?
-            };
-            Ok(filter_suite(conditions, body))
-        })
-    }
 }
 
 /// A rejected filter skips the remaining predicates and the whole accepted suite,
@@ -301,9 +306,10 @@ pub(super) fn async_pull(clause: &ast::Comprehension) -> Option<ir::AsyncPull> {
     })
 }
 
-impl EagerDisplay for Checker<'_> {
+impl ClauseLowering for Checker<'_> {
     type Input = Iteration;
     type Error = Failure;
+    type Body = Vec<Statement>;
 
     fn before_pull(&mut self, plan: &Plan<'_>, depth: usize) {
         self.forget_comprehension_writes(plan, depth)
@@ -335,10 +341,11 @@ impl EagerDisplay for Checker<'_> {
         target: &ast::Expr,
         input: Iteration,
         _: Output<'_>,
-        body: impl FnOnce(&mut Self) -> Result<Vec<Statement>, String>,
+        body: impl FnOnce(&mut Self) -> Result<(Vec<Expr>, Vec<Statement>), String>,
     ) -> Result<Vec<Statement>, String> {
         self.lower_iteration(target, input, &[], |checker, output| {
-            statements::append_block(output, body(checker)?);
+            let (conditions, body) = body(checker)?;
+            statements::append_block(output, filter_suite(conditions, body));
             Ok(())
         })
         .map(|(body, _)| body)
@@ -349,7 +356,9 @@ impl EagerDisplay for Checker<'_> {
         self.apply_facts(test, true);
         Ok(condition)
     }
+}
 
+impl EagerDisplay for Checker<'_> {
     fn collection_locals(&self) -> &[Type] {
         &self.locals
     }
