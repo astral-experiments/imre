@@ -267,9 +267,9 @@ pub(crate) struct FunctionScope {
 }
 
 impl FunctionScope {
-    pub(super) fn parameter(expr: &ast::Expr, class: Option<&ClassBindings>) -> Self {
+    pub(super) fn parameter(reads: ParameterReads, class: Option<&ClassBindings>) -> Self {
         let mut names = ClosureNames {
-            reads: class_metadata::annotation_reads(&[("", expr)], class, false),
+            reads: reads.resolve(class),
             ..ClosureNames::default()
         };
         if class.is_some() {

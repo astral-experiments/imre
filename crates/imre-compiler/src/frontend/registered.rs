@@ -15,11 +15,11 @@ mod templates;
 pub(super) mod values;
 
 /// Prepare the bindings installed by the existing type-parameter frame constructor.
-pub(crate) fn registered_type_parameters<F>(
+fn registered_type_parameters(
     params: &ast::TypeParams,
     private_names: &imre_ast::Names,
-    mut prepare: impl FnMut(&ast::Expr) -> F,
-) -> Vec<ir::RegisteredTypeParameter<F>> {
+    source: values::RegisteredSource<'_>,
+) -> Vec<ir::RegisteredTypeParameter<ParameterEvaluator>> {
     params
         .iter()
         .map(|param| {
@@ -34,7 +34,7 @@ pub(crate) fn registered_type_parameters<F>(
                 name: private_names.definition(binding).to_owned(),
                 kind,
                 fields: imre_ast::TypeParameterField::expressions(param)
-                    .map(|(field, rhs)| (field, prepare(rhs)))
+                    .map(|(field, rhs)| (field, ParameterEvaluator::prepare(rhs, source)))
                     .collect(),
             }
         })
@@ -938,7 +938,7 @@ pub(crate) fn type_alias_body(
 
 pub(crate) struct ParameterEvaluator {
     pub(crate) range: TextRange,
-    pub(crate) scope: super::function_scope::FunctionScope,
+    reads: super::function_scope::ParameterReads,
     pub(crate) body: Option<AnnotationCode>,
 }
 
@@ -958,16 +958,19 @@ pub(crate) fn parameter_evaluator_body(
 }
 
 impl ParameterEvaluator {
-    pub(crate) fn prepare(
-        rhs: &ast::Expr,
-        source: values::RegisteredSource<'_>,
-        class: Option<&super::function_scope::ClassBindings>,
-    ) -> Self {
+    fn prepare(rhs: &ast::Expr, source: values::RegisteredSource<'_>) -> Self {
         Self {
             range: rhs.range(),
-            scope: super::function_scope::FunctionScope::parameter(rhs, class),
+            reads: super::function_scope::parameter_reads(&[("", rhs)], false),
             body: parameter_evaluator_body(rhs, source),
         }
+    }
+
+    pub(crate) fn scope(
+        &self,
+        class: Option<&super::function_scope::ClassBindings>,
+    ) -> super::function_scope::FunctionScope {
+        super::function_scope::FunctionScope::parameter(self.reads.clone(), class)
     }
 }
 
@@ -1244,13 +1247,9 @@ impl TypeParameterValues {
         names: &imre_ast::Names,
         source: values::RegisteredSource<'_>,
         enclosing_class: Option<TextSize>,
-        scopes: &super::function_scope::ScopeFacts<'_>,
     ) -> Self {
-        let class = enclosing_class.map(|site| &scopes.classes[&site].bindings);
         Self {
-            declarations: registered_type_parameters(params, names, |rhs| {
-                ParameterEvaluator::prepare(rhs, source, class)
-            }),
+            declarations: registered_type_parameters(params, names, source),
             enclosing_class,
         }
     }
@@ -1393,9 +1392,7 @@ pub(super) fn collect_sites<'a>(
                         self.names.string_annotations,
                     );
                     let parameters = def.type_params.as_deref().map_or_else(Vec::new, |params| {
-                        registered_type_parameters(params, self.names, |rhs| {
-                            ParameterEvaluator::prepare(rhs, self.source, None)
-                        })
+                        registered_type_parameters(params, self.names, self.source)
                     });
                     let thread_entry = imre_ast::thread_entry(def);
                     let worker = thread_entry.is_some();
@@ -1798,7 +1795,6 @@ impl<'a> SuitePreparation<'a> {
                 names,
                 self.source,
                 scopes.classes[&start].enclosing_class,
-                scopes,
             );
             let mut scope = SourceScope::new(
                 RegisteredScope::Function { is_async: false },
