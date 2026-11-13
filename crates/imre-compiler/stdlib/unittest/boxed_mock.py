@@ -61,7 +61,7 @@ _tuple_call_names = {
 
 
 def _format_recorded_call(value, name):
-    return _format_call_signature(name, _format_call_args(value.args), value.kwargs)
+    return _format_call_signature(name, *value)
 
 
 class _Call(tuple):
@@ -126,11 +126,18 @@ class _Call(tuple):
         if not self._mock_from_kall:
             name = self._mock_name or "call"
             return "call" + name if name.startswith("()") else name
-        name = self[0] if len(self) == 3 else ""
-        if not name:
-            return _format_recorded_call(self, "call")
-        prefix = "call" if name.startswith("()") else "call."
-        return _format_recorded_call(self, prefix + name)
+        if len(self) == 2:
+            name = "call"
+            args, kwargs = self
+        else:
+            name, args, kwargs = self
+            if not name:
+                name = "call"
+            elif name.startswith("()"):
+                name = "call%s" % name
+            else:
+                name = "call.%s" % name
+        return _format_call_signature(name, args, kwargs)
 
     def call_list(self):
         calls = []

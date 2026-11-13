@@ -10,7 +10,7 @@ class _Call:
     def __init__(self, args: list[_Arg], kwargs: dict[str, _Arg]) -> None:
         self._args = args
         self._kwargs = kwargs
-        self._text = _format_call_signature("call", _format_call_args(args), kwargs)
+        self._text = _format_call_signature("call", args, kwargs)
 
     @staticmethod
     def _represent(value: _Call | None) -> str:
