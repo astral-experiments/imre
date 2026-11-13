@@ -299,11 +299,9 @@ impl Checker<'_> {
             }
         }
         let input = self.capture_consumer_input(input, &mut body, &mut clear);
-        let mut input = self.prepare_iteration(input, call, false)?;
+        let input = self.prepare_iteration(input, call, false)?;
         self.hint_empty_iteration(&input, Some(element.unwrap_or(Type::Int)));
         let element = self.locals[input.value];
-        body.append(&mut input.evaluate);
-        clear.extend(&input.clear);
 
         let (callback, reverse) = self.sort_options(call, element, &mut body, &mut clear)?;
         if callback.is_none() {
