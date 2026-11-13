@@ -39,6 +39,7 @@ pub(crate) enum FixedNode {
     Return,
     Effect,
     Store(usize),
+    Branch(usize, usize),
     /// The operation keeps its checked slot or operand count, and its native type.
     Indexed(std::mem::Discriminant<ExprKind>, usize, Type),
     NamedCall(usize, usize, Type),
@@ -64,6 +65,7 @@ impl FixedNode {
 
     pub(crate) fn checked(node: &ir::Node<'_>) -> Option<Self> {
         Some(match node {
+            ir::Node::Statement(Statement::If(_, yes, no)) => Self::Branch(yes.len(), no.len()),
             ir::Node::Statement(Statement::Return(_)) => Self::Return,
             ir::Node::Statement(Statement::Expr(_)) => Self::Effect,
             ir::Node::Statement(Statement::Assign(slot, _)) => Self::Store(*slot),
@@ -112,7 +114,6 @@ pub(super) struct SourceSites {
     sites: Vec<(TextRange, Option<FixedNode>)>,
     current: Option<PendingSite>,
     next_index: usize,
-    statements: usize,
 }
 
 impl SourceSites {
@@ -258,7 +259,6 @@ impl SourceSites {
             && *range == operand
         {
             self.commit(site, node);
-            self.statements += 1;
         }
     }
 
@@ -271,8 +271,7 @@ impl SourceSites {
         method: Option<&Arc<ast::StmtFunctionDef>>,
     ) -> Option<FixedBodySource> {
         if self.current.is_some()
-            || self.statements != source_statements
-            || self.statements != body.len()
+            || source_statements != body.len()
             || names.len() != locals.len()
             || !matches!(body.last(), Some(Statement::Return(_)))
         {
@@ -348,6 +347,19 @@ mod tests {
         };
         assert!(matches(&original));
         assert!(!matches(&body(changed)));
+    }
+
+    #[test]
+    fn moving_a_checked_statement_to_the_other_arm_invalidates_its_site() {
+        let test = ir::Expr::boolean(true);
+        let first = Statement::Return(ir::Expr::boolean(false));
+        let second = Statement::Return(ir::Expr::boolean(true));
+        let original = Statement::If(test.clone(), vec![first.clone()], vec![second.clone()]);
+        let moved = Statement::If(test, Vec::new(), vec![first, second]);
+        let original = ir::Node::Statement(&original);
+        let sites = [(TextRange::default(), FixedNode::checked(&original))];
+        assert!(FixedNode::consume(Some(&sites), &original).is_some());
+        assert!(FixedNode::consume(Some(&sites), &ir::Node::Statement(&moved)).is_none());
     }
 
     #[test]
