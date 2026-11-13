@@ -133,26 +133,20 @@ impl ClauseLowering for GeneratorClauses<'_, '_> {
 }
 
 impl Prepared {
-    pub(super) fn cursor(
-        cursor: Expr,
-        element: Type,
-        mut hidden: impl FnMut(Type) -> usize,
-    ) -> Self {
-        let kind = match cursor.kind {
-            ExprKind::Builtin(Builtin::SplitByteIter(_) | Builtin::SortedSplitByteIter(_), _) => {
-                crate::ir::IterNextKind::SplitField
-            }
-            _ => crate::ir::IterNextKind::Generic,
-        };
-        Self::pull_cursor(cursor, element, kind, |ty, _| hidden(ty))
-    }
-
     pub(super) fn pull_cursor(
         cursor: Expr,
         element: Type,
-        kind: ir::IterNextKind,
+        pull: Option<ir::AsyncPull>,
         mut hidden: impl FnMut(Type, Option<ir::IterNextKind>) -> usize,
     ) -> Self {
+        let kind = match (pull, &cursor.kind) {
+            (Some(site), _) => ir::IterNextKind::Async(site),
+            (
+                None,
+                ExprKind::Builtin(Builtin::SplitByteIter(_) | Builtin::SortedSplitByteIter(_), _),
+            ) => ir::IterNextKind::SplitField,
+            _ => ir::IterNextKind::Generic,
+        };
         let iterator = hidden(cursor.ty, Some(kind));
         let value = hidden(element, None);
         let ready = hidden(Type::Bool, None);
@@ -348,9 +342,6 @@ impl Checker<'_> {
         if value.ty == Type::Range {
             let cursor = self.range_cursor(value.clone());
             return Ok(Some(self.prepare_cursor(cursor, Type::Int)));
-        }
-        if let Some(element) = self.types.cursor_element(value.ty) {
-            return Ok(Some(self.prepare_cursor(value.clone(), element)));
         }
         let mut evaluate = Vec::new();
         let mut roots = Vec::new();
@@ -890,10 +881,7 @@ impl Checker<'_> {
             ))
         ) {
             let cursor = self.call(call)?;
-            let element = self.types.cursor_element(cursor.ty).unwrap();
-            return Ok(Some(Iteration::Prepared(
-                self.prepare_cursor(cursor, element),
-            )));
+            return self.iteration_value(cursor, false, call).map(Some);
         }
         if binding == Some(Binding::Intrinsic(Intrinsic::Chain)) {
             return Ok(Some(Iteration::Prepared(self.chain_input(call, element)?)));
@@ -951,22 +939,20 @@ impl Checker<'_> {
             && self.class_reference(&attribute.value).is_none()
         {
             let receiver = self.expr(&attribute.value)?;
-            if receiver.ty == Type::Path {
-                let iterator = self.path_iterator(receiver, call, attribute.attr.as_str())?;
-                let item = self.types.cursor_element(iterator.ty).unwrap();
-                return Ok(Some(Iteration::Prepared(
-                    self.prepare_cursor(iterator, item),
-                )));
-            }
-            if let Type::Class(class) = receiver.ty {
-                let iterable = self.iteration_method_call(call, attribute, class, receiver)?;
-                return self.iteration_value(iterable, false, call).map(Some);
-            }
-            return Err(error(
-                self.source,
-                call,
-                "directory iteration requires pathlib.Path",
-            ));
+            let iterable = match receiver.ty {
+                Type::Path => self.path_method(receiver, attribute, call)?,
+                Type::Class(class) => {
+                    self.iteration_method_call(call, attribute, class, receiver)?
+                }
+                _ => {
+                    return Err(error(
+                        self.source,
+                        call,
+                        "directory iteration requires pathlib.Path",
+                    ));
+                }
+            };
+            return self.iteration_value(iterable, false, call).map(Some);
         }
         let ast::Expr::Name(name) = &*call.func else {
             return Ok(None);
@@ -1493,7 +1479,7 @@ impl Checker<'_> {
     }
 
     pub(super) fn prepare_cursor(&mut self, cursor: Expr, element: Type) -> Prepared {
-        Prepared::cursor(cursor, element, |ty| self.hidden(ty))
+        Prepared::pull_cursor(cursor, element, None, |ty, _| self.hidden(ty))
     }
 
     pub(super) fn prepare_csv_reader(&mut self, reader: Expr) -> Prepared {
