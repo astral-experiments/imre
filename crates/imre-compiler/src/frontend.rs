@@ -11380,7 +11380,8 @@ impl<'a> Checker<'a> {
         if let Some(copy) = self.dataclass_copy(call)? {
             return Ok(copy);
         }
-        match self.resolve(&call.func) {
+        let binding = self.resolve(&call.func);
+        match binding {
             Some(Binding::Intrinsic(Intrinsic::Partial)) => return self.partial(call),
             Some(Binding::Intrinsic(Intrinsic::LoggingShutdown)) => {
                 return self.logging_shutdown(call);
@@ -11391,7 +11392,7 @@ impl<'a> Checker<'a> {
             _ => {}
         }
         if calls::starred(call) {
-            match self.resolve(&call.func) {
+            match binding {
                 Some(Binding::Intrinsic(Intrinsic::Credential(name))) => {
                     return self.credential_call(call, name);
                 }
@@ -11407,13 +11408,13 @@ impl<'a> Checker<'a> {
                 }
                 _ => {}
             }
-            if let Some(Binding::Definition(definition)) = self.resolve(&call.func)
+            if let Some(Binding::Definition(definition)) = binding
                 && let Some(signature) = self.functions.get(&definition)
             {
                 return self.source_call(call, &signature.clone(), None, 0);
             }
             if let ast::Expr::Attribute(method) = &*call.func
-                && self.resolve(&call.func).is_none()
+                && binding.is_none()
             {
                 if let Some(class) = self.class_reference(&method.value) {
                     return self.class_method_call(call, method, class, None);
@@ -11434,7 +11435,7 @@ impl<'a> Checker<'a> {
                 {
                     return self.class_method_call(call, method, class, Some(object));
                 }
-            } else if self.resolve(&call.func).is_none() {
+            } else if binding.is_none() {
                 let callable = self.expr(&call.func)?;
                 if callable.ty == Type::PythonObject {
                     return self.invoke(call, callable);
@@ -11446,24 +11447,24 @@ impl<'a> Checker<'a> {
                 "argument unpacking requires a source-defined function or method",
             ));
         }
-        if let Some(Binding::Intrinsic(Intrinsic::CachePath { reverse })) = self.resolve(&call.func)
-        {
-            return self.cache_path_call(call, reverse);
-        }
-        if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::ModuleSpec)) {
-            return self.module_spec(call);
-        }
-        if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::SimpleNamespace)) {
-            return self.simple_namespace(call);
+        match binding {
+            Some(Binding::Intrinsic(Intrinsic::CachePath { reverse })) => {
+                return self.cache_path_call(call, reverse);
+            }
+            Some(Binding::Intrinsic(Intrinsic::ModuleSpec)) => return self.module_spec(call),
+            Some(Binding::Intrinsic(Intrinsic::SimpleNamespace)) => {
+                return self.simple_namespace(call);
+            }
+            _ => {}
         }
         if calls::has_unpacking(call)
-            && !matches!(self.resolve(&call.func), Some(Binding::Definition(id))
+            && !matches!(binding, Some(Binding::Definition(id))
                 if self.functions.get(&id).is_some_and(|s| calls::rest_keywords(call, &s.params).1.is_some() || calls::named_mapping(call, &s.params).is_some()))
         {
             calls::reject_unpacking(call, self.source)?;
         }
         if matches!(&*call.func, ast::Expr::Name(name) if name.id == "dict" && !self.names.contains_key(name.id.as_str()))
-            && self.resolve(&call.func).is_none()
+            && binding.is_none()
             && call.arguments.args.is_empty()
             && !call.arguments.keywords.is_empty()
         {
@@ -11589,7 +11590,7 @@ impl<'a> Checker<'a> {
             )?;
             return self.counter(call, None, Some(ty));
         }
-        match self.resolve(&call.func) {
+        match binding {
             Some(Binding::Intrinsic(Intrinsic::ForwardRef)) => return self.forward_ref(call),
             binding if typing::is_dummy(self.graph, binding) => {
                 return self.invoke(call, typing::dummy());
