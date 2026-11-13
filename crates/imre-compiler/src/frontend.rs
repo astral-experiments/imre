@@ -4506,7 +4506,9 @@ impl<'a> Checker<'a> {
                 })?;
                 self.lambda_value(lambda, Some(params), Some(returns))?
             }
-            ast::Expr::Named(value) => self.named_expression(value, Some(expected))?,
+            ast::Expr::Named(named) => self.with_expression_site(expression, |checker| {
+                checker.named_expression(named, Some(expected))
+            })?,
             ast::Expr::If(value) => self.conditional(value, Some(expected))?,
             ast::Expr::BoolOp(value) => self.boolean_value(value, Some(expected))?,
             ast::Expr::Subscript(subscript)
@@ -8375,6 +8377,7 @@ impl<'a> Checker<'a> {
                         | (ast::Expr::NoneLiteral(_), ExprKind::None)
                         | (ast::Expr::List(_), ExprKind::List(_))
                         | (ast::Expr::Tuple(_), ExprKind::Tuple(_))
+                        | (ast::Expr::Named(_), ExprKind::Bind(_, _))
                         | (
                             ast::Expr::FString(_),
                             ExprKind::Builtin(Builtin::FormatJoin, _)
