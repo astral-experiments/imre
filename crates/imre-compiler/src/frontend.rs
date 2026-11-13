@@ -14093,7 +14093,7 @@ impl<'a> Checker<'a> {
         }
         keywords?;
         if name == "str" && args.len() == 1 {
-            return self.checked_string(args.into_iter().next().unwrap(), call);
+            return self.checked_string(args.into_iter().next().unwrap(), call, true);
         }
         if self.unshadowed_builtin(&call.func, "str")
             && call.arguments.keywords.is_empty()
