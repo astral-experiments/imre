@@ -1,3 +1,4 @@
+from functools import partial as _partial
 from importlib.metadata import PackageNotFoundError
 from pathlib import Path
 from textwrap import dedent
@@ -37,18 +38,11 @@ def _first_header(text: str, name: str) -> str | None:
     return None
 
 
-def _distribution_text(root: str, key: str, archive: ZipFile | None) -> str:
-    if archive is not None:
-        try:
-            return archive.read(key).decode('utf-8').replace('\r\n', '\n').replace('\r', '\n')
-        except KeyError:
-            return ''
-    path = _join(root, key)
-    return _read_text(path) if _is_file(path) else ''
-
-
-def _join(root: str, entry: str) -> str:
-    return str(Path(root) / entry)
+def _zip_read(archive: ZipFile, key: str) -> bytes | None:
+    try:
+        return archive.read(key)
+    except KeyError:
+        return None
 
 
 def _basename(root: str) -> str:
@@ -59,8 +53,14 @@ def _is_file(path: str) -> bool:
     return Path(path).is_file()
 
 
-def _read_text(path: str) -> str:
-    return Path(path).read_text(encoding='utf-8')
+def _resource_text(directory: str, entry: str, archive: ZipFile | None, filename: str) -> str | None:
+    if archive is None:
+        try:
+            return _path_text(Path(directory) / entry, filename)
+        except (FileNotFoundError, IsADirectoryError, NotADirectoryError, PermissionError, KeyError):
+            return None
+    key = str(Path(entry) / filename) if filename else entry
+    return _zip_text(archive, key)
 
 
 def version(distribution_name: str) -> str:
@@ -82,13 +82,11 @@ def version(distribution_name: str) -> str:
             entries = []
         try:
             for entry in _matching_entries(directory, entries, name, legacy_name):
-                for key in [_join(entry, 'METADATA'), _join(entry, 'PKG-INFO'), entry]:
-                    text = _distribution_text(directory, key, archive)
-                    if text:
-                        value = _first_header(text, 'Version')
-                        if value is not None:
-                            return value
-                        break
+                text = _metadata_text(_partial(_resource_text, directory, entry, archive))
+                if text:
+                    value = _first_header(text, 'Version')
+                    if value is not None:
+                        return value
                 raise NotImplementedError('distribution metadata without a Version header')
         finally:
             if archive is not None:

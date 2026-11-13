@@ -73,7 +73,7 @@ class Distribution(DeprecatedNonAbstract):
     @property
     def metadata(self):
         from importlib.metadata._adapters import Message
-        text = self.read_text('METADATA') or self.read_text('PKG-INFO') or self.read_text('')
+        text = _metadata_text(lambda filename: self.read_text(filename))
         return Message(text or '')
 
     @property
@@ -140,7 +140,7 @@ class PathDistribution(Distribution):
 
     def read_text(self, filename):
         try:
-            return self._path.joinpath(filename).read_text(encoding='utf-8')
+            return _path_text(self._path, filename)
         except (FileNotFoundError, IsADirectoryError, NotADirectoryError, PermissionError, KeyError):
             return None
 
@@ -179,10 +179,7 @@ class _ZipDistribution(PathDistribution):
 
     def read_text(self, filename):
         key = _join(self._path, fspath(filename)) if filename else self._path
-        data = _zip_read(self._archive, key)
-        if data is not None:
-            return data.decode('utf-8').replace('\r\n', '\n').replace('\r', '\n')
-        return None
+        return _zip_text(self._archive, key)
 
 
 class DistributionFinder(MetaPathFinder):

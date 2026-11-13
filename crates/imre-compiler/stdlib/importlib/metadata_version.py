@@ -1,5 +1,21 @@
 """Find installed distributions and read their metadata headers."""
 import re
+from typing import Callable as _Callable
+
+
+def _metadata_text(read_text: _Callable[[str], str | None]):
+    return read_text('METADATA') or read_text('PKG-INFO') or read_text('')
+
+
+def _path_text(path, filename):
+    return path.joinpath(filename).read_text(encoding='utf-8')
+
+
+def _zip_text(archive, key: str):
+    data = _zip_read(archive, key)
+    if data is None:
+        return None
+    return data.decode('utf-8').replace('\r\n', '\n').replace('\r', '\n')
 
 
 def _normalize_separators(name: str) -> str:
