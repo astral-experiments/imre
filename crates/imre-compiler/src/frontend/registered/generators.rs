@@ -8,7 +8,6 @@ use imre_ast::comprehension::Plan;
 pub(crate) struct RegisteredGenerator {
     pub(crate) body: RegisteredFunction,
     pub(crate) metadata: CallableMetadata,
-    pub(crate) acquire: ir::IteratorOp,
 }
 
 #[derive(Default)]
@@ -122,11 +121,6 @@ impl RegisteredGenerator {
         Some(Self {
             body,
             metadata: CallableMetadata::generator(scope_facts, is_async),
-            acquire: if pull.is_some() {
-                ir::IteratorOp::Async(outer.iter.range())
-            } else {
-                ir::IteratorOp::Get(outer.iter.range())
-            },
         })
     }
 }
@@ -208,9 +202,6 @@ mod tests {
             panic!("expected one prepared generator");
         };
         assert!(child.is_async());
-        assert!(
-            matches!(child.acquire, ir::IteratorOp::Async(range) if &module.source[range] == "rows")
-        );
         assert_eq!(child.metadata.parameter_names().collect::<Vec<_>>(), [".0"]);
         let argument = iterator_parameter(child);
         let body = &child.body.function.body;
@@ -259,9 +250,6 @@ mod tests {
             panic!("expected one prepared generator");
         };
         assert!(child.is_async());
-        assert!(
-            matches!(child.acquire, ir::IteratorOp::Get(range) if &module.source[range] == "rows")
-        );
         let mut awaits = 0;
         let mut yields = 0;
         let mut adapted = 0;
@@ -297,7 +285,7 @@ mod tests {
         let parent = sites.values().find(|child| !child.is_async()).unwrap();
         let mut references = Vec::new();
         ir::walk_expressions(&parent.body.function.body, &mut |expr| {
-            if let ExprKind::Builtin(Builtin::RegisteredGenerator(range, _), _) = &expr.kind {
+            if let ExprKind::Builtin(Builtin::RegisteredGenerator(range, ..), _) = &expr.kind {
                 references.push(range);
             }
         });
@@ -340,7 +328,7 @@ mod tests {
         assert_eq!(inner.start(), outer.start());
         let mut references = Vec::new();
         ir::walk_expressions(&sites[outer].body.function.body, &mut |expr| {
-            if let ExprKind::Builtin(Builtin::RegisteredGenerator(range, _), _) = &expr.kind {
+            if let ExprKind::Builtin(Builtin::RegisteredGenerator(range, ..), _) = &expr.kind {
                 references.push(*range);
             }
         });

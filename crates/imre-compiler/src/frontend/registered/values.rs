@@ -1111,14 +1111,19 @@ pub(super) fn operation<E>(
     }))
 }
 
-/// The defining frame supplies the iterable. Its checked generator site owns acquisition.
+/// The defining frame evaluates the outer iterable and acquires the cursor handed to the child.
 fn generator_binding<E>(
     generator: &ast::ExprGenerator,
     mut operand: impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
 ) -> StdResult<Expr, E> {
     let outer = imre_ast::comprehension::outer_clause(&generator.generators);
+    let acquire = if outer.is_async {
+        ir::IteratorOp::Async(outer.iter.range())
+    } else {
+        ir::IteratorOp::Get(outer.iter.range())
+    };
     Ok(super::operation(
-        Builtin::RegisteredGenerator(generator.range(), false),
+        Builtin::RegisteredGenerator(generator.range(), false, acquire),
         Type::PythonObject,
         vec![operand(&outer.iter)?],
     ))
@@ -1259,7 +1264,7 @@ pub(super) fn in_namespace(value: &mut Expr, namespace: Expr) {
             call.explicit_scope = true;
         }
         ExprKind::Builtin(
-            Builtin::RegisteredLambda(_, scoped) | Builtin::RegisteredGenerator(_, scoped),
+            Builtin::RegisteredLambda(_, scoped) | Builtin::RegisteredGenerator(_, scoped, _),
             args,
         ) => {
             args.insert(0, namespace);

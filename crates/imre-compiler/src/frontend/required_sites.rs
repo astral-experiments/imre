@@ -30,7 +30,7 @@ fn visit_expression_site(
                 Builtin::RegisteredDefinition(site) => RequiredSite::definition(site, operands),
                 Builtin::RegisteredClassNamespace(site, _) => RequiredSite::ClassNamespace(*site),
                 Builtin::RegisteredLambda(site, scoped) => RequiredSite::Lambda(*site, *scoped),
-                Builtin::RegisteredGenerator(site, _) => RequiredSite::Generator(*site),
+                Builtin::RegisteredGenerator(site, ..) => RequiredSite::Generator(*site),
                 Builtin::RegisteredTypeAlias(site) => RequiredSite::Alias(*site),
                 Builtin::BindAnnotationExpression { site, .. } => {
                     RequiredSite::AnnotationString(*site)

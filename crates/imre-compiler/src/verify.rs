@@ -181,7 +181,7 @@ pub(crate) fn registered(frame: crate::frontend::RegisteredRegion<'_>) -> Result
                         "registered spread needs one operand in a Python collection",
                     )
                 }
-                ExprKind::Builtin(Builtin::RegisteredGenerator(_, scoped), args) => {
+                ExprKind::Builtin(Builtin::RegisteredGenerator(_, scoped, _), args) => {
                     ir::generator_operands(*scoped, args)
                         .map(|_| ())
                         .map_err(str::to_owned)

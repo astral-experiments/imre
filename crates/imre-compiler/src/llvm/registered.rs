@@ -205,7 +205,7 @@ pub(crate) fn frame_inputs(
                 uses_python_protocol = true;
                 !scoped || !operands.is_empty()
             }
-            ExprKind::Builtin(Builtin::RegisteredGenerator(range, scoped), operands) => {
+            ExprKind::Builtin(Builtin::RegisteredGenerator(range, scoped, _), operands) => {
                 if live_parameters {
                     sites.push(FrameSite::Generator(*range));
                 }
@@ -1108,7 +1108,7 @@ impl<'f> Frame<'f, '_, '_> {
                 let (code, sites) = self.code.frame_and_sites();
                 sites.bind_lambda(code, *site, &scope, &defaults)
             }
-            (Builtin::RegisteredGenerator(site, scoped), operands) => {
+            (Builtin::RegisteredGenerator(site, scoped, acquire), operands) => {
                 self.code.place_site(RequiredSite::Generator(*site));
                 let (scope, iterable) =
                     ir::generator_operands(*scoped, operands).expect("checked generator operands");
@@ -1117,9 +1117,8 @@ impl<'f> Frame<'f, '_, '_> {
                     .unwrap_or_else(|| self.code.scope.clone());
                 let mark = self.temporary_mark();
                 self.unwind_operands(&mark, |frame| {
-                    let acquire = frame.code.frame_and_sites().1.generators[site].acquire;
                     let iterable = frame.evaluate_handle(iterable);
-                    let cursor = frame.acquire_iterator(acquire, &iterable);
+                    let cursor = frame.acquire_iterator(*acquire, &iterable);
                     frame.keep_operands(&mark, &cursor, "0");
                     let (code, sites) = frame.code.frame_and_sites();
                     let result = sites.bind_generator(code, *site, &scope, &cursor);

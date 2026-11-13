@@ -152,19 +152,29 @@ async def factory(seed, rows, mark):
         let (sync_generator, async_generator) = (&defaults[2], &defaults[3]);
         let stream = parameters.posonlyargs[2].default.as_deref().unwrap();
         let deferred = parameters.kwonlyargs[1].default.as_deref().unwrap();
-        for (value, site, is_async) in [
-            (sync_generator, stream.range(), false),
-            (async_generator, deferred.range(), true),
+        for (value, expression, is_async) in [
+            (sync_generator, stream, false),
+            (async_generator, deferred, true),
         ] {
             let mut children = Vec::new();
             ir::walk_operand_expressions(value, &mut |node| {
-                if let ExprKind::Builtin(Builtin::RegisteredGenerator(range, false), _) = &node.kind
+                if let ExprKind::Builtin(Builtin::RegisteredGenerator(site, false, acquire), _) =
+                    &node.kind
                 {
-                    children.push(*range);
+                    children.push((*site, *acquire));
                 }
             });
-            assert_eq!(children, [site]);
-            assert_eq!(lexical.generators[&site].is_async(), is_async);
+            let outer = &expression.as_generator_expr().unwrap().generators[0];
+            let [(site, acquire)] = children.as_slice() else {
+                panic!("expected one generator binding");
+            };
+            assert_eq!(*site, expression.range());
+            assert!(match acquire {
+                ir::IteratorOp::Get(range) => !outer.is_async && *range == outer.iter.range(),
+                ir::IteratorOp::Async(range) => outer.is_async && *range == outer.iter.range(),
+                _ => false,
+            });
+            assert_eq!(lexical.generators[site].is_async(), is_async);
         }
         // A missing child is diagnosed at its original site before LLVM.
         assert!(sites.get_mut(&thunk.start()).unwrap().body.take().is_some());

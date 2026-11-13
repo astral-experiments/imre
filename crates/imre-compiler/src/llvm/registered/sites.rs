@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use super::RegisteredFrame;
 use crate::frontend::RequiredSite;
-use crate::ir::{self, RegisteredTypeParameter, TypeParameterKind};
+use crate::ir::{RegisteredTypeParameter, TypeParameterKind};
 
 /// The body's identity is compiled once. Defaults, decorators and the defining scope
 /// are the current activation's handles each time the declaration executes.
@@ -19,11 +19,6 @@ pub(crate) struct CompiledDefinition {
     pub(crate) default_names: std::sync::Arc<[String]>,
     pub(crate) format_evaluator: bool,
     pub(crate) class_header: Option<TextRange>,
-}
-
-pub(crate) struct CompiledGenerator {
-    pub(crate) function: CompiledDefinition,
-    pub(crate) acquire: ir::IteratorOp,
 }
 
 pub(crate) struct DefinitionOperands {
@@ -203,7 +198,7 @@ pub(crate) trait SiteDefinitions<'p> {
         &mut self,
         site: TextSize,
     ) -> (CompiledDefinition, CompiledTypeParameters, TextRange);
-    fn generator(&mut self, site: TextRange) -> CompiledGenerator;
+    fn generator(&mut self, site: TextRange) -> CompiledDefinition;
     fn type_alias(&mut self, site: TextSize) -> Result<CompiledAlias, String>;
     fn annotation_string(&mut self, site: TextSize) -> String;
 }
@@ -216,7 +211,7 @@ pub(crate) struct CheckedSites {
     pub(crate) class_namespaces:
         HashMap<TextSize, (CompiledDefinition, CompiledTypeParameters, TextRange)>,
     pub(crate) lambdas: HashMap<TextSize, CompiledDefinition>,
-    pub(crate) generators: HashMap<TextRange, CompiledGenerator>,
+    pub(crate) generators: HashMap<TextRange, CompiledDefinition>,
     pub(crate) aliases: HashMap<TextSize, Result<CompiledAlias, String>>,
 }
 
@@ -288,9 +283,7 @@ impl CheckedSites {
         scope: &str,
         cursor: &str,
     ) -> String {
-        let function = self.generators[&site]
-            .function
-            .bind_defaults(frame, scope, &[]);
+        let function = self.generators[&site].bind_defaults(frame, scope, &[]);
         frame.op("generator", &[&function, cursor])
     }
 
