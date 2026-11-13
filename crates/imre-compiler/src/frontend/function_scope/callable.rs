@@ -217,6 +217,13 @@ impl CallableMetadata {
         self.flags & (code_flags::GENERATOR | code_flags::COROUTINE | code_flags::ASYNC_GENERATOR)
     }
 
+    pub(crate) fn local_names(&self) -> &[Value] {
+        self.layout["scope_locals"]
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+    }
+
     fn non_variadic_parameter_names(&self) -> impl Iterator<Item = &str> {
         ["posonly", "positional", "kwonly"]
             .into_iter()
