@@ -3652,7 +3652,15 @@ impl SourceScope<'_> {
             values::operation(
                 expr,
                 self.source,
-                |_, _, _| class,
+                |method, _, value| {
+                    class
+                        || value.ty == Type::Str
+                            && method
+                                .and_then(ast::Expr::as_attribute_expr)
+                                .is_some_and(|field| {
+                                    imre_ast::strings::STR_METHODS.contains(&field.attr.as_str())
+                                })
+                },
                 ir::control::boolean_literal,
                 |_| true,
                 |child| {
@@ -4700,6 +4708,36 @@ mod tests {
             }
         });
         assert_eq!(headers, 1);
+    }
+
+    #[test]
+    fn checked_string_methods_keep_the_evaluated_receiver() {
+        let text = "f'<{value}>'.encode(), f'{value}'.encode()\nf'<{value}>'.enocde(),\n";
+        let graph = SourceGraph::single(text).unwrap();
+        let module = &graph.modules[graph.entry];
+        let source = values::ModuleSource::new(module);
+        let prepare = |index: usize| {
+            let stmt = module.parsed.syntax().body[index].as_expr_stmt().unwrap();
+            inline_operand(
+                &stmt.value,
+                source.context(text),
+                RegisteredScope::Function { is_async: false },
+                false,
+            )
+        };
+        let operand = prepare(0).unwrap().unwrap();
+        crate::verify::registered(operand.region()).unwrap();
+        let mut receivers = Vec::new();
+        ir::walk_operand_expressions(&operand.value, &mut |expr| {
+            if let ExprKind::Builtin(Builtin::RegisteredCall(call), args) = &expr.kind {
+                assert!(
+                    matches!(&call.target, ir::RegisteredCallTarget::Method { name, .. } if name == "encode")
+                );
+                receivers.push(args[0].ty);
+            }
+        });
+        assert_eq!(receivers, [Type::Str, Type::PythonObject]);
+        assert!(prepare(1).is_err());
     }
 
     #[test]
