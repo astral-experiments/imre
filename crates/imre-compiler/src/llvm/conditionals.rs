@@ -78,7 +78,7 @@ slow:
 
 define internal i64 @int_abs_slow(i64 %value) cold noinline {
 entry:
-  %order = call i32 @compare_int(i64 %value, i64 1)
+  %order = call i32 @imre_int_compare(i64 %value, i64 1)
   %below = icmp slt i32 %order, 0
   br i1 %below, label %negate, label %retain
 negate:
@@ -128,7 +128,7 @@ mod tests {
         assert!(helper[checked..selected].contains("br i1 %overflow, label %slow, label %select"));
         assert!(helper[selected..].contains("select i1 %negative, i64 %negated, i64 %value"));
         assert!(helper.contains("call i64 @int_abs_slow(i64 %value)"));
-        assert!(!helper.contains("call i32 @compare_int("));
+        assert!(!helper.contains("call i32 @imre_int_compare("));
         let slow = output
             .split_once("define internal i64 @int_abs_slow(i64 %value) cold noinline {")
             .unwrap()
@@ -136,6 +136,7 @@ mod tests {
             .split_once("\n}")
             .unwrap()
             .0;
+        assert!(slow.contains("call i32 @imre_int_compare(i64 %value, i64 1)"));
         assert!(slow.contains("call i64 @imre_int_binary(i64 1, i64 %value, i32 1)"));
         assert!(slow.contains("call void @retain_int_nonzero(i64 %value)"));
     }
