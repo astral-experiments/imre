@@ -237,26 +237,21 @@ impl<'a> Visitor<'a> for Assignments<'_> {
         if matches!(expression, ast::Expr::Lambda(_)) {
             return;
         }
-        // Comprehensions and generators own iteration targets, but assignment expressions
-        // write in the enclosing non-comprehension scope.
-        let clauses = match expression {
-            ast::Expr::ListComp(value) => Some(value.generators.as_slice()),
-            ast::Expr::SetComp(value) => Some(value.generators.as_slice()),
-            ast::Expr::DictComp(value) => Some(value.generators.as_ref()),
-            ast::Expr::Generator(value) => Some(value.generators.as_slice()),
-            _ => None,
-        };
-        if let Some(clauses) = clauses {
-            self.0.extend(expression_assignments(expression));
-            self.visit_expr(&clauses[0].iter);
-            return;
-        }
         if let ast::Expr::Name(name) = expression
             && name.ctx == ast::ExprContext::Store
         {
             self.0.insert(name.id.to_string());
         }
         walk_expr(self, expression);
+    }
+
+    fn visit_comprehension(&mut self, clause: &'a ast::Comprehension) {
+        // Iteration targets are local to the comprehension. Named expressions in
+        // the iterable, filters and element still write to the enclosing scope.
+        self.visit_expr(&clause.iter);
+        for condition in &clause.ifs {
+            self.visit_expr(condition);
+        }
     }
 
     fn visit_except_handler(&mut self, handler: &'a ast::ExceptHandler) {
