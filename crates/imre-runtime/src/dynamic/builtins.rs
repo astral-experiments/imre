@@ -21,7 +21,7 @@ mod text;
 mod translation;
 pub(super) use collections::{
     clear_container, copy_dict, hashable, list_extend, remove_dict_item, remove_dict_item_hashed,
-    remove_table_entry, set_add, set_member, sort_values, update as update_dict, update_set,
+    set_add, set_member, sort_values, update as update_dict, update_set,
 };
 pub(super) use text::{
     bytes_from_iterable, bytes_percent, format_conversion, format_value, hex_group, hex_separator,

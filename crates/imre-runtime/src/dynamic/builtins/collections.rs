@@ -394,23 +394,7 @@ pub(in super::super) fn remove_dict_item_hashed(
     let Some(index) = ctx.find_dictionary_key(dict, key, hash)?.1 else {
         return Ok(None);
     };
-    Ok(Some(remove_table_entry(ctx, dict, index)?.1))
-}
-
-pub(in super::super) fn remove_table_entry(
-    ctx: &mut Context,
-    receiver: Id,
-    index: usize,
-) -> Result<(Id, Id)> {
-    let (Value::Dict(entries) | Value::DefaultDict { entries, .. } | Value::Set { entries, .. }) =
-        ctx.heap.get_mut(receiver)
-    else {
-        unreachable!("dictionary or set payload")
-    };
-    let (key, value) = entries.remove(index)?;
-    ctx.heap.weak_edge_removed(key);
-    ctx.heap.weak_edge_removed(value);
-    Ok((key, value))
+    Ok(Some(ctx.heap.remove_table_entry(dict, index)?.1))
 }
 
 pub(in super::super) fn set_member(
@@ -1098,7 +1082,7 @@ pub(super) fn method(
                 let message = ctx.text("popitem(): dictionary is empty");
                 return Err(ctx.lookup_error("KeyError", message));
             };
-            let (key, value) = remove_table_entry(ctx, receiver, last)?;
+            let (key, value) = ctx.heap.remove_table_entry(receiver, last)?;
             Ok(ctx.alloc(Value::Tuple(vec![key, value])))
         }
         "dict.copy" => {
@@ -1301,7 +1285,7 @@ pub(super) fn method(
                 let message = ctx.text("pop from an empty set");
                 return Err(ctx.lookup_error("KeyError", message));
             };
-            Ok(remove_table_entry(ctx, receiver, last)?.0)
+            Ok(ctx.heap.remove_table_entry(receiver, last)?.0)
         }
         "set.discard" | "set.remove" => {
             let key = super::one_positional_arg(name, args, kwargs)?;
@@ -1328,7 +1312,7 @@ pub(super) fn method(
                 Err(error) => return Err(error),
             };
             if let Some(index) = index {
-                remove_table_entry(ctx, receiver, index)?;
+                ctx.heap.remove_table_entry(receiver, index)?;
             } else if name == "set.remove" {
                 return Err(ctx.lookup_error("KeyError", key));
             }

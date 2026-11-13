@@ -4069,6 +4069,32 @@ impl Heap {
         self.dictionary_data(dict)?.named_item(self, name)
     }
 
+    /// Remove an occupied table position and publish both lost edges to the collector.
+    pub(super) fn remove_table_entry(&mut self, table: Id, index: usize) -> Result<(Id, Id)> {
+        let (Value::Dict(entries)
+        | Value::DefaultDict { entries, .. }
+        | Value::Set { entries, .. }) = self.get_mut(table)
+        else {
+            unreachable!("dictionary or set payload")
+        };
+        let (key, value) = entries.remove(index)?;
+        self.weak_edge_removed(key);
+        self.weak_edge_removed(value);
+        Ok((key, value))
+    }
+
+    /// Remove one inline instance binding after its owner has selected the storage.
+    pub(super) fn remove_instance_field(&mut self, obj: Id, name: &str) -> bool {
+        let Value::Instance { fields, .. } = self.get_mut(obj) else {
+            unreachable!("instance field storage")
+        };
+        let Some(value) = fields.shift_remove(name) else {
+            return false;
+        };
+        self.weak_edge_removed(value);
+        true
+    }
+
     /// Look up native backing fields on either side of ordinary dictionary materialization.
     pub(super) fn raw_instance_field(&self, obj: Id, name: &str) -> Option<Id> {
         let Value::Instance {
