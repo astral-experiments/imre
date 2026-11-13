@@ -74,7 +74,7 @@ impl<'f, 'p> Frame<'f, '_, 'p> {
         &mut self,
         region: Finalbody<String>,
         cleanup: impl FnOnce(&mut Self, &Finalbody<String>) -> T,
-        mut resume_error: impl FnMut(&mut RegisteredFrame<'_, '_>, &T),
+        mut finish: impl FnMut(&mut RegisteredFrame<'_, '_>, &Completion<()>, &T),
     ) -> bool {
         if region.is_empty() {
             return false;
@@ -103,6 +103,7 @@ impl<'f, 'p> Frame<'f, '_, 'p> {
             &tag,
             |body, target| {
                 let frame = body.python();
+                finish(frame, target, &result);
                 match target {
                     Completion::Return(()) => {
                         frame.return_from_regions(returned.as_ref().unwrap().clone())
@@ -110,7 +111,7 @@ impl<'f, 'p> Frame<'f, '_, 'p> {
                     Completion::Jump { label, depth } => {
                         frame.jump_from_regions(label.clone(), *depth)
                     }
-                    Completion::Error => resume_error(frame, &result),
+                    Completion::Error => {}
                 }
             },
         );
@@ -153,7 +154,11 @@ impl<'f, 'p> Frame<'f, '_, 'p> {
                 frame.caught.pop();
                 error
             },
-            |frame, error| frame.raise(error, None, true),
+            |frame, target, error| {
+                if matches!(target, Completion::Error) {
+                    frame.raise(error, None, true);
+                }
+            },
         );
         if normal && resumes {
             self.label(&done);
