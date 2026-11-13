@@ -506,8 +506,8 @@ pub(super) fn place_checked_definition(
             locals: body.function.locals.clone(),
             body: std::mem::take(&mut body.function.body),
         };
-        let frame =
-            RegisteredFunction::from_checked_body(input, names, body.frame_arguments)?;
+        let frame = RegisteredFunction::from_checked_body(input, names, body.frame_arguments)?;
+        body.function.returns = signature.returns;
         Some((body, frame))
     })?;
     if !inference

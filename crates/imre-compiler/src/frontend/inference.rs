@@ -539,6 +539,22 @@ impl Inference {
         self.pending.borrow().len()
     }
 
+    /// A caller-supplied sequence keeps its live iteration protocol in the Python frame.
+    pub(super) fn has_inferred_sequence_argument(
+        &self,
+        signature: &Signature,
+        types: &Types,
+    ) -> bool {
+        let slots = self.pending.borrow();
+        let pending = &slots[signature.id];
+        pending.is_resolved()
+            && pending
+                .inferred_params
+                .iter()
+                .zip(&signature.params)
+                .any(|(&inferred, param)| inferred && types.indexed_element(param.ty).is_some())
+    }
+
     pub(super) fn used_as_value(&self, id: usize) -> bool {
         self.pending.borrow()[id].used_as_value
     }

@@ -44,7 +44,7 @@ impl ParameterKind {
         }
     }
 
-    fn accepts_positional(self) -> bool {
+    pub(super) fn accepts_positional(self) -> bool {
         matches!(self, Self::PositionalOnly | Self::PositionalOrKeyword)
     }
 
