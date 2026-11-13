@@ -168,7 +168,10 @@ pub(crate) fn frame_inputs(
         if let ExprKind::Builtin(operation, operands) = &expr.kind
             && let Builtin::RegisteredCall(call) = match attribute {
                 Some(crate::frontend::FixedAttribute::Operation { operation, .. }) => &**operation,
-                Some(crate::frontend::FixedAttribute::Call(_)) => return false,
+                Some(
+                    crate::frontend::FixedAttribute::ModuleName(_)
+                    | crate::frontend::FixedAttribute::Call(_),
+                ) => return false,
                 None => operation,
             }
         {
@@ -1132,7 +1135,6 @@ impl<'f> Frame<'f, '_, '_> {
                     result
                 })
             }
-            (Builtin::RegisteredName(name), []) => self.code.lookup(name),
             (Builtin::RegisteredName(name), [scope]) => {
                 let scope = self.evaluate_handle(scope);
                 self.code.named_op("lookup", &scope, name, "0")

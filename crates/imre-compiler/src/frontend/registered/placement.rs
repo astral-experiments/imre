@@ -66,8 +66,7 @@ mod tests {
         assert_eq!(&text[statement], "return Key");
         assert_eq!(&text[name], "Key");
         let read = &body.fixed_attributes.as_ref().unwrap()[&name];
-        assert!(matches!(read, FixedAttribute::Operation { operation, .. }
-            if matches!(&**operation, Builtin::RegisteredName(key) if key == "Key")));
+        assert!(matches!(read, FixedAttribute::ModuleName(key) if key == "Key"));
         let binding = FixedNode::checked(&ir::Node::Expression(value)).unwrap();
         for kind in [
             ExprKind::Builtin(Builtin::GlobalGet(slot + 1), vec![]),
@@ -86,7 +85,16 @@ mod tests {
             extension_paths: vec![project.path().to_owned()],
             ..Default::default()
         };
-        crate::compile_file(&entry, None, &options).unwrap();
+        let llvm = crate::compile_file(&entry, None, &options).unwrap().llvm_ir;
+        let key = llvm
+            .lines()
+            .find_map(|line| {
+                line.strip_suffix(r#" = private unnamed_addr constant [4 x i8] c"Key\00""#)
+            })
+            .expect("normalized module binding");
+        assert!(llvm.contains(&format!(
+            "@imre_dyn_lookup(ptr %ctx, i64 %scope, ptr {key}, i64 3)"
+        )));
     }
 
     #[test]

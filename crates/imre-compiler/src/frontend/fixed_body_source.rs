@@ -70,6 +70,8 @@ impl FixedBodySource {
 
 #[derive(Clone)]
 pub(crate) enum FixedAttribute {
+    /// A placed module read retains its native slot in the IR and its Python name here.
+    ModuleName(ast::name::Name),
     Operation {
         operation: Box<Builtin>,
         position: TextSize,
@@ -247,12 +249,9 @@ impl SourceSites {
             && let ExprKind::Builtin(Builtin::GlobalGet(slot), ref args) = value.kind
             && args.is_empty()
         {
-            self.python_operation(
-                site,
-                name.start(),
-                Builtin::RegisteredName(name.id.to_string()),
-                FixedNode::indexed(&value.kind, slot, value.ty),
-            );
+            self.attributes
+                .insert(site.range, FixedAttribute::ModuleName(name.id.clone()));
+            self.commit(site, FixedNode::indexed(&value.kind, slot, value.ty));
         }
     }
 
