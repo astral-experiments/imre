@@ -683,18 +683,20 @@ impl Context {
                 };
                 stdlib::call(self, method, &[a], &[])
             }
-            "neg" | "pos" if let Value::Float(f) = self.heap.get(a) => {
-                Ok(self.alloc(Value::Float(if op == "neg" { -*f } else { *f })))
+            "pos"
+                if matches!(
+                    self.heap.get(a),
+                    Value::Int(_) | Value::Float(_) | Value::Complex(_)
+                ) =>
+            {
+                Ok(a)
             }
-            "neg" | "pos" if let Value::Complex(z) = self.heap.get(a) => {
-                if op == "pos" {
-                    Ok(a)
-                } else {
-                    Ok(self.alloc(Value::Complex(super::complex::Complex {
-                        real: -z.real,
-                        imag: -z.imag,
-                    })))
-                }
+            "neg" if let Value::Float(f) = self.heap.get(a) => Ok(self.alloc(Value::Float(-f))),
+            "neg" if let Value::Complex(z) = self.heap.get(a) => {
+                Ok(self.alloc(Value::Complex(super::complex::Complex {
+                    real: -z.real,
+                    imag: -z.imag,
+                })))
             }
             "neg" | "pos" | "~" => {
                 let (slot, symbol) = match op {

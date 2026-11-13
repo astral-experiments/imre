@@ -7,6 +7,10 @@ def current():
     value = literal_eval(source.replace("_", ""))
     assert type(value) is float and value == 10.5
     assert repr(literal_eval("-0.0")) == "-0.0"
+    for number in (int("257"), float("-0.0"), complex("-2j")):
+        node = ast.UnaryOp(op=ast.UAdd(), operand=ast.Constant(value=number))
+        assert +number is number
+        assert literal_eval(node) is number
     assert literal_eval("'left' 'right'") == "leftright"
     assert literal_eval(r"'\ud800'") == "\ud800"
 

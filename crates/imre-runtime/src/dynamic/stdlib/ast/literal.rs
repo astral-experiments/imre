@@ -1,6 +1,5 @@
 //! Convert the data-only Python AST accepted by ast.literal_eval.
-use super::{Context, Error, Id, NODES, Result, Value, builtins, parse};
-use crate::dynamic::complex::Complex;
+use super::{Context, Error, Id, NODES, NONE, Result, Value, builtins, parse};
 use ruff_python_ast::token::TokenKind;
 use ruff_python_parser::{Mode, ParseError, ParseErrorType};
 
@@ -190,19 +189,12 @@ fn signed_number(ctx: &mut Context, node: Id) -> Result<Id> {
         if is(ctx, op, "ast.UAdd") || is(ctx, op, "ast.USub") {
             let operand = ctx.lookup_attr(node, "operand")?;
             let value = number(ctx, operand)?;
-            if is(ctx, op, "ast.UAdd") {
-                return Ok(value);
-            }
-            let negated = match ctx.heap.get(value) {
-                Value::Int(x) => Value::Int(crate::integer_binary(&crate::Int::from(0), x, 1)?),
-                Value::Float(x) => Value::Float(-x),
-                Value::Complex(z) => Value::Complex(Complex {
-                    real: -z.real,
-                    imag: -z.imag,
-                }),
-                _ => unreachable!(),
+            let operation = if is(ctx, op, "ast.UAdd") {
+                "pos"
+            } else {
+                "neg"
             };
-            return Ok(ctx.alloc(negated));
+            return ctx.op(operation, value, NONE, NONE);
         }
     }
     number(ctx, node)
