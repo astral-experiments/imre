@@ -480,7 +480,7 @@ impl Checker<'_> {
     ) -> Result<(Iteration, bool), String> {
         if let ast::Expr::Call(call) = expression
             && let Some((_, source)) = self.map_converter_input(call, |name| {
-                name == "int" && self.unshadowed_builtin(&call.func, "map")
+                name == "int" && self.fixed_map(call)
             })
         {
             if !call.arguments.keywords.is_empty() {
