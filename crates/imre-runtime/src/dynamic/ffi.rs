@@ -1625,7 +1625,7 @@ fn snapshot_pair(ctx: &mut Context, value: Id, items: &mut [Id; 2]) -> Result<Id
     }
 }
 
-/// Pull from an acquired range iterator or a forward cursor over a live list.
+/// Pull directly from an acquired builtin sequence or range iterator.
 /// Return 1 for an item, 0 for exhaustion or error, and -1 for other iterators.
 ///
 /// # Safety
@@ -1642,39 +1642,17 @@ pub(super) unsafe extern "C" fn imre_dyn_list_cursor_pull(
     if ctx.pending.is_some() {
         return 0;
     }
-    let value = match *ctx.heap.get(iter) {
-        Value::RangeIterator(_) => match ctx.next_result(iter) {
-            Ok(value) => value,
-            Err(error) => {
-                finish(ctx, Err(error));
-                return 0;
-            }
-        },
-        Value::Iterator {
-            sequence: Some(list),
-            offset,
-            reverse: false,
-            context: None,
-            ..
-        } => {
-            let Value::List(values) = ctx.heap.get(list) else {
-                return -1;
-            };
-            let value = values.get(offset).copied();
-            let Value::Iterator {
-                sequence, offset, ..
-            } = ctx.heap.get_mut(iter)
-            else {
-                unreachable!()
-            };
-            if value.is_some() {
-                *offset += 1;
-            } else {
-                *sequence = None;
-            }
-            value
-        }
+    let next = match ctx.heap.get(iter) {
+        Value::Iterator { .. } => ctx.next_builtin_sequence_item(iter),
+        Value::RangeIterator(_) => ctx.next_result(iter),
         _ => return -1,
+    };
+    let value = match next {
+        Ok(value) => value,
+        Err(error) => {
+            finish(ctx, Err(error));
+            return 0;
+        }
     };
     if let Some(value) = value {
         // The loop body can remove this item and collect its former owner.
