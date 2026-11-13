@@ -36,7 +36,7 @@ impl Initial {
 pub(crate) fn specialize(module: &mut Module) {
     let ranges = crate::ranges::analyze(module).into_original_integers();
     for function in module.functions.iter_mut().chain([&mut module.entry]) {
-        if function.expression_rebound().into_iter().any(|value| value) {
+        if function.has_expression_bindings() {
             continue;
         }
         rewrite(

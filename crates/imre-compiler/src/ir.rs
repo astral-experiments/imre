@@ -646,12 +646,22 @@ impl Function {
     /// write into the enclosing source scope.
     pub(crate) fn expression_rebound(&self) -> Vec<bool> {
         let mut rebound = vec![false; self.locals.len()];
+        self.visit_expression_bindings(|slot| rebound[slot] = true);
+        rebound
+    }
+
+    pub(crate) fn has_expression_bindings(&self) -> bool {
+        let mut found = false;
+        self.visit_expression_bindings(|_| found = true);
+        found
+    }
+
+    fn visit_expression_bindings(&self, mut visit: impl FnMut(usize)) {
         walk_expressions(&self.body, &mut |value| {
             if let ExprKind::Bind(slot, _) = value.kind {
-                rebound[slot] = true;
+                visit(slot);
             }
         });
-        rebound
     }
 }
 

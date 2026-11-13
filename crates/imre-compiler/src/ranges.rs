@@ -92,11 +92,7 @@ impl RangeFacts<'_> {
     /// eligibility. Move edges propagate unknown ownership through temporary
     /// chains, while Clear and a Move's source reset only introduce zero.
     pub(crate) fn small_locals(&self, function: &Function) -> Vec<bool> {
-        if function
-            .expression_rebound()
-            .into_iter()
-            .any(|written| written)
-        {
+        if function.has_expression_bindings() {
             return vec![false; function.locals.len()];
         }
         let mut small = function
@@ -500,11 +496,7 @@ impl Analyzer {
         // Named bindings can change source locals during comparison operands.
         // Compiler-owned scopes use explicit state transfers, but user binding
         // expressions retain the conservative generic integer path.
-        if function
-            .expression_rebound()
-            .into_iter()
-            .any(|written| written)
-        {
+        if function.has_expression_bindings() {
             return;
         }
         // Match the emitter's cleanup-safe initial values. Exact integers use
