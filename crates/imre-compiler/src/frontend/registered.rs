@@ -2870,9 +2870,11 @@ impl statements::StatementLowering for SourceScope<'_> {
             .creating_iterable(|scope| scope.iteration_input(&loop_.iter, for_pull(loop_)))
             .ok_or(())?;
         input.bind_loop_target(self, &loop_.target, true)?;
-        let body = self.in_loop(LoopScope::WithCursor, |scope| scope.suite(&loop_.body))?;
+        self.in_loop(LoopScope::WithCursor, |scope| {
+            scope.block_into(&loop_.body, &mut input.next)
+        })?;
         let otherwise = self.suite(&loop_.orelse)?;
-        Ok((input.for_suite(body, otherwise, Vec::new()), true))
+        Ok((input.loop_suite(otherwise, Vec::new()), true))
     }
 
     fn raised_value(
@@ -3588,11 +3590,20 @@ impl SourceScope<'_> {
 
     fn block(&mut self, stmts: &[ast::Stmt]) -> StdResult<statements::Block, ()> {
         let mut body = Vec::new();
+        let falls = self.block_into(stmts, &mut body)?;
+        Ok((body, falls))
+    }
+
+    fn block_into(
+        &mut self,
+        stmts: &[ast::Stmt],
+        body: &mut Vec<Statement>,
+    ) -> StdResult<bool, ()> {
         let mut falls = true;
         for stmt in stmts {
-            falls &= self.statement(stmt, &mut body)?;
+            falls &= self.statement(stmt, body)?;
         }
-        Ok((body, falls))
+        Ok(falls)
     }
 
     fn slot(&mut self, name: &str) -> usize {
