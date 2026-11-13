@@ -94,7 +94,7 @@ pub(super) fn with_items<C, I: IntoIterator, E>(
         I::Item,
         &'s mut Vec<Statement>,
     ) -> StdResult<Protected<'s>, E>,
-    body: impl FnOnce(&mut C) -> StdResult<statements::Block, E>,
+    body: impl FnOnce(&mut C, &mut Vec<Statement>) -> StdResult<bool, E>,
 ) -> StdResult<statements::Block, E> {
     let mut statements = Vec::new();
     let mut protected = &mut statements;
@@ -104,7 +104,7 @@ pub(super) fn with_items<C, I: IntoIterator, E>(
             Protected::Break(falls) => return Ok((statements, falls)),
         };
     }
-    let falls = finish(protected, body(scope)?);
+    let falls = body(scope, protected)?;
     Ok((statements, falls))
 }
 
