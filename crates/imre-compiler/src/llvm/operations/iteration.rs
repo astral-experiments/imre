@@ -357,20 +357,10 @@ impl CheckedBody<'_, '_, '_, '_> {
         self.jump_from_regions(label, depth);
     }
 
-    /// A Python setter needs each real object before the next target callback can run.
-    pub(super) fn store_operand(&mut self, expr: &Expr) -> CheckedValue {
-        let value = self.operand(expr);
-        match &mut self.0 {
-            Entry::Native(_) => value,
-            Entry::Registered(_) if matches!(value, CheckedValue::Handle { .. }) => value,
-            Entry::Registered(frame) => CheckedValue::handle(frame.materialize(&value)),
-        }
-    }
-
     pub(super) fn augment_item(&mut self, table: &Expr, key: &Expr, op: ItemUpdate, rhs: &Expr) {
         let nonnegative = matches!(&self.0, Entry::Native(e) if e.nonnegative_index(key));
-        let table = self.store_operand(table);
-        let key = self.store_operand(key);
+        let table = self.rooted_operand(table);
+        let key = self.rooted_operand(key);
         if let ItemUpdate::Fixed(op) = op
             && self
                 .fixed()
@@ -400,7 +390,7 @@ impl CheckedBody<'_, '_, '_, '_> {
                     .op("get", &[table.rooted_handle(), key.rooted_handle()]),
             ),
         };
-        let right = self.store_operand(rhs);
+        let right = self.rooted_operand(rhs);
         let value = match op {
             ItemUpdate::Fixed(op) => CheckedValue::owned(self.fixed().binary(
                 op,
@@ -443,7 +433,7 @@ impl CheckedBody<'_, '_, '_, '_> {
         let unwind = display.map(|_| self.python().begin_operand_scope());
         let mut next = display.cloned();
         let (table, key, value) = order.evaluate(table, key, value, |expr| {
-            let operand = self.store_operand(expr);
+            let operand = self.rooted_operand(expr);
             if let Some(mark) = &mut next {
                 *mark = self
                     .python()
