@@ -2932,16 +2932,23 @@ impl Context {
             .expect("initialized builtins dictionary"))
     }
 
+    fn linked_expression_code(&mut self, text: Id) -> Result<Option<Id>> {
+        let Some(&LinkedSource::Expression(entry)) = self.heap.linked_sources.get(&text) else {
+            return Ok(None);
+        };
+        self.module_code(
+            ModuleInitializer::Native(entry),
+            std::path::Path::new("<string>"),
+        )
+        .map(Some)
+    }
+
     /// Evaluate one forward-reference expression in its defining Python namespaces.
     pub(super) fn eval_type_expression(&mut self, text: Id, globals: Id, locals: Id) -> Result<Id> {
-        let source = self.str_value(text)?;
-        if let Some(&LinkedSource::Expression(entry)) = self.heap.linked_sources.get(&text) {
-            let code = self.module_code(
-                ModuleInitializer::Native(entry),
-                std::path::Path::new("<string>"),
-            )?;
+        if let Some(code) = self.linked_expression_code(text)? {
             return self.eval_namespace_code(code, globals, locals);
         }
+        let source = self.str_value(text)?;
         if crate::objects::python_isidentifier(source)
             && !ruff_python_stdlib::keyword::is_keyword(source)
         {
@@ -3257,7 +3264,13 @@ impl Context {
                     mode == "eval",
                     self.inherited_compile_flags(),
                 )?;
-                return Err(Self::missing_body_error("<module>", "<string>", 1));
+                if mode == "eval"
+                    && let Some(code) = self.linked_expression_code(source)?
+                {
+                    code
+                } else {
+                    return Err(Self::missing_body_error("<module>", "<string>", 1));
+                }
             }
             _ => {
                 return Err(Error::new(
