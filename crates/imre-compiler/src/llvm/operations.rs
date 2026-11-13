@@ -39,14 +39,15 @@ pub(crate) enum CheckedValue {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum ValueUse {
+pub(super) enum ValueUse<'a> {
     General,
     PythonHandle,
+    CallOperand(&'a str, &'a std::cell::OnceCell<String>),
     IntegerOperand,
     FinalIntegerOperand,
 }
 
-impl ValueUse {
+impl ValueUse<'_> {
     fn needs_integer(self) -> bool {
         matches!(self, Self::IntegerOperand | Self::FinalIntegerOperand)
     }
@@ -91,7 +92,7 @@ impl CheckedValue {
     }
 
     fn frame_integer(value: Value, frame: &mut CheckedFrame<'_, '_, '_>, usage: ValueUse) -> Self {
-        if usage == ValueUse::PythonHandle {
+        if matches!(usage, ValueUse::PythonHandle | ValueUse::CallOperand(..)) {
             return Self::handle(frame.take_integer(&value.operand));
         }
         let owner = frame.own_word(&value.operand);
@@ -256,14 +257,16 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             return CheckedValue::owned(native.native_call(target, args, values, returns));
         };
 
-        self.python_invoke(site, &args.values, |frame| frame.evaluate_handle(callable))
+        self.python_invoke(site, &args.values, |frame, next| {
+            frame.kept_call_value(callable, next)
+        })
     }
 
     fn python_invoke(
         &mut self,
         site: &ir::InvokeSite,
         args: &[Expr],
-        callable: impl FnOnce(&mut CheckedFrame<'_, '_, '_>) -> String,
+        callable: impl FnOnce(&mut CheckedFrame<'_, '_, '_>, &mut String) -> String,
     ) -> CheckedValue {
         let frame = self.python();
         let exec = frame.exec_literal_at(site.range);
@@ -277,15 +280,11 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             // Each evaluation leaves just its result above the previous operands.
             // Release intermediate owners before the next argument can run Python.
             let mut next = mark.clone();
-            let mut keep = |value: String, frame: &mut CheckedFrame<'_, '_, '_>| {
-                next = frame.keep_operands(&next, &value, "0");
-                value
-            };
             let scope = site
                 .scope
                 .as_deref()
-                .map(|expr| keep(frame.evaluate_handle(expr), frame));
-            let target = keep(callable(frame), frame);
+                .map(|expr| frame.kept_call_value(expr, &mut next));
+            let target = callable(frame, &mut next);
             let values = frame.kept_call_values(args, next);
             let (array, count) = frame.fixed_call_arguments(&target, values, exec);
             let positional = super::registered::CallArguments::Positional {
@@ -829,10 +828,13 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                         return CheckedBody::registered(frame.reborrow()).python_invoke(
                             &site,
                             args,
-                            |frame| {
-                                frame.at_expression(name_range, name_range.start(), |frame| {
-                                    frame.lookup(name)
-                                })
+                            |frame, next| {
+                                let target =
+                                    frame.at_expression(name_range, name_range.start(), |frame| {
+                                        frame.lookup(name)
+                                    });
+                                *next = frame.keep_operands(next, &target, "0");
+                                target
                             },
                         );
                     }
@@ -841,7 +843,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                         ExprKind::Builtin(_, args) => args,
                         _ => unreachable!("placed attribute has its checked operands"),
                     };
-                    return frame.builtin(&field.operation, operands);
+                    return frame.builtin(&field.operation, operands, usage);
                 }
                 CheckedBody::registered(frame.reborrow()).emit_operation(
                     expr,
@@ -1019,7 +1021,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             ExprKind::Dict(entries) => self.dictionary(expr.ty, entries),
             ExprKind::Builtin(op, args) => match &mut self.0 {
                 Entry::Native(emitter) => CheckedValue::owned(emitter.builtin(op, args, expr.ty)),
-                Entry::Registered(frame) => frame.builtin(op, args),
+                Entry::Registered(frame) => frame.builtin(op, args, usage),
             },
             // Python handles already represent both the payload and None. Evaluating
             // the original operand also preserves effects of a None-valued call.
