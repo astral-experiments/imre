@@ -73,15 +73,19 @@ impl Checker<'_> {
 
     /// Resolve only a selector whose membership is proved. Unknown names,
     /// negative indices and out-of-range requests still go through IndexError.
-    fn capture_index(layout: Option<&CaptureLayout>, selector: &Expr) -> Option<usize> {
+    fn capture_index(layout: Option<&CaptureLayout>, selector: &mut Expr) -> Option<usize> {
         if matches!(&selector.kind, ExprKind::Int(n) if n == "0") {
             return Some(0);
         }
         let groups = layout?;
         match &selector.kind {
-            ExprKind::Str(name) => groups
-                .iter()
-                .position(|group| group.name.as_deref() == Some(name)),
+            ExprKind::Str(name) => {
+                let index = groups
+                    .iter()
+                    .position(|group| group.name.as_deref() == Some(name))?;
+                *selector = Expr::integer(index);
+                Some(index)
+            }
             ExprKind::Int(index) => index.parse::<usize>().ok().filter(|n| *n < groups.len()),
             _ => None,
         }
@@ -751,7 +755,11 @@ impl Checker<'_> {
                 )),
             };
         }
-        let layout = self.capture_layout(&receiver);
+        // The implicit group zero exists for every match, independently of the pattern.
+        let layout = match (method, args) {
+            ("groups", []) | (_, [_]) => self.capture_layout(&receiver),
+            _ => None,
+        };
         let match_type = self.types.payload(receiver.ty).unwrap_or(receiver.ty);
         let group_type = if match_type == Type::RegexBytesMatch {
             Type::Bytes
@@ -838,10 +846,7 @@ impl Checker<'_> {
         {
             selector.kind = ExprKind::Int("0".into());
         }
-        let index = Self::capture_index(layout.as_ref(), &selector);
-        if let Some(index) = index {
-            selector = Expr::integer(index);
-        }
+        let index = Self::capture_index(layout.as_ref(), &mut selector);
         if method == "span" {
             let slot = self.hidden(match_type);
             let bounds = [RegexCapture::Start, RegexCapture::End]
