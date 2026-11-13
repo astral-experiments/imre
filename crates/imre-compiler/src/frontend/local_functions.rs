@@ -837,10 +837,16 @@ impl Checker<'_> {
                 &format!("asynchronous capture '{name}' may be rebound before the coroutine runs"),
             ));
         }
-        // A caller that already needs the Python frame cannot use a lifted body.
-        // Its signature, captures and diagnostics still come from the same check.
-        let mut body =
-            (self.inference.is_none() && self.unrepresented.borrow().is_none()).then(Vec::new);
+        let python_frame = self.inference.is_none() && self.unrepresented.borrow().is_some();
+        let first_helper = self.helpers.len();
+        if python_frame {
+            helper.registered = Some(self.graph.modules[self.module].registered_values());
+            helper.registered_local_start = Some(signature.params.len());
+            for &slot in &params {
+                helper.locals[slot] = Type::PythonObject;
+            }
+        }
+        let mut body = self.inference.is_none().then(Vec::new);
         let falls = helper.function_body(&definition.body, body.as_mut())?;
         if let Some(mut returns) = helper.inferred_returns.take() {
             if falls || returns.is_empty() {
@@ -875,7 +881,37 @@ impl Checker<'_> {
             && self.graph.layout_hint.get() != crate::modules::LayoutHint::Disabled
             && !signature.asynchronous
             && matches!(captures.as_slice(), [slot] if stable_callbacks.contains(slot));
-        if let Some(mut body) = body {
+        if python_frame && let Some(statements) = body.take() {
+            // The Python binder installs only source parameters. Captured names use the
+            // original closure cells each time the checked body reads or assigns them.
+            params.truncate(signature.params.len());
+            let mut names = helper.namespace_bindings;
+            names.extend(helper.names.into_iter().map(|(name, slot)| {
+                (
+                    slot,
+                    registered::LocalBinding {
+                        name,
+                        namespace: None,
+                    },
+                )
+            }));
+            if helper.calls.is_empty()
+                && self.helpers.len() == first_helper
+                && let Some(function) = registered::RegisteredFunction::from_checked_body(
+                    ir::Function {
+                        params,
+                        returns: signature.returns,
+                        locals: helper.locals,
+                        body: statements,
+                    },
+                    names,
+                    helper.live_protocol_parameters,
+                )
+            {
+                self.graph
+                    .register_function(self.module, definition.start(), function);
+            }
+        } else if let Some(mut body) = body {
             helper.fault_frame(&mut body, definition.name.as_str(), definition.start());
             if bound_capture {
                 params.rotate_right(1);

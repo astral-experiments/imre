@@ -261,6 +261,24 @@ pub(crate) struct RegisteredFunction {
 }
 
 impl RegisteredFunction {
+    pub(super) fn from_checked_body(
+        function: ir::Function,
+        local_names: HashMap<usize, LocalBinding>,
+        live_protocol_parameters: bool,
+    ) -> Option<Self> {
+        let mut checked = Self {
+            inputs: FrameInputs::Checked,
+            frame_slots: FrameSlots::default(),
+            fixed_sites: Vec::new(),
+            fixed_attributes: None,
+            function,
+            local_names,
+        };
+        (checked.inputs, checked.frame_slots) =
+            crate::llvm::registered::frame_inputs(&checked, live_protocol_parameters)?;
+        Some(checked)
+    }
+
     /// Graph admission needs a complete function. The lexical owner prepares residual operands.
     pub(crate) fn from_suite(
         stmts: &[ast::Stmt],
@@ -441,25 +459,15 @@ pub(super) fn lower_definition(
         )
         .classify(Kind::ScopedObject));
     }
-    let mut function = RegisteredFunction {
-        inputs: FrameInputs::Checked,
-        frame_slots: FrameSlots::default(),
-        fixed_sites: Vec::new(),
-        fixed_attributes: None,
-        function: body.function,
-        local_names,
-    };
-    (function.inputs, function.frame_slots) =
-        crate::llvm::registered::frame_inputs(&function, body.live_protocol_parameters)
-            .ok_or_else(|| {
-                error(
-                    source,
-                    definition,
-                    "function body has no checked registered-frame representation",
-                )
-                .classify(Kind::ScopedObject)
-            })?;
-    Ok(function)
+    RegisteredFunction::from_checked_body(body.function, local_names, body.live_protocol_parameters)
+        .ok_or_else(|| {
+            error(
+                source,
+                definition,
+                "function body has no checked registered-frame representation",
+            )
+            .classify(Kind::ScopedObject)
+        })
 }
 
 /// A registered body can supply an unresolved calling convention only if its other

@@ -1004,7 +1004,22 @@ pub(super) fn operation<E>(
                 .iter()
                 .map(&mut child)
                 .collect::<StdResult<Vec<_>, _>>()?;
-            ExprKind::Compare(values, cmp.ops.to_vec())
+            // A chain can return any comparison that ends it. Identity and
+            // membership always return a boolean, including on user-defined objects.
+            let ty = if cmp.ops.iter().all(|op| {
+                matches!(
+                    op,
+                    ast::CmpOp::Is | ast::CmpOp::IsNot | ast::CmpOp::In | ast::CmpOp::NotIn
+                )
+            }) {
+                Type::Bool
+            } else {
+                Type::PythonObject
+            };
+            return Ok(Some(Expr {
+                kind: ExprKind::Compare(values, cmp.ops.to_vec()),
+                ty,
+            }));
         }
         ast::Expr::If(branch) => {
             return Ok(Some(select(
