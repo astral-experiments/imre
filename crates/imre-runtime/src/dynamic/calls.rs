@@ -264,6 +264,7 @@ pub(super) enum RegisteredCall {
     Start(Box<thread_worker::Start>),
     Join(thread_worker::Join),
     Acquire(thread_lock::Acquire),
+    Restore(thread_rlock::Restore),
     Recv(stdlib::socket::Recv),
 }
 
@@ -290,6 +291,7 @@ impl RegisteredCall {
             // SAFETY: the native worker takes no reference into its creator's heap.
             Self::Start(start) => unsafe { start.run(context) },
             Self::Acquire(wait) => Ok(wait.run()),
+            Self::Restore(wait) => Ok(wait.run()),
             // SAFETY: the caller roots the frame and owns the context on this thread.
             Self::Recv(recv) => unsafe { recv.run(context) },
         }
@@ -8234,6 +8236,11 @@ impl Context {
                         }
                         "_thread._ThreadHandle.join" => {
                             return thread_handle::prepare_join(self, &args, &kwargs);
+                        }
+                        "_thread.RLock._acquire_restore" => {
+                            return thread_rlock::Restore::prepare(self, &args, &kwargs)
+                                .map(RegisteredCall::Restore)
+                                .map_err(|error| stdlib::io::qualify_error(self, error, None));
                         }
                         "_thread.lock.acquire" => "acquire",
                         "_thread.lock.__enter__" => "__enter__",

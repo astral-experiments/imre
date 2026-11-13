@@ -1,8 +1,10 @@
 //! Public _thread.RLock backed by the reentrant lock shared with logging handlers.
 use super::builtins::boolean;
 use super::{Context, Error, Id, NONE, Result, Value};
+use crate::objects::logging::HandlerLock;
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
+use std::sync::Arc;
 
 pub(super) const CLASS: &str = "_thread.RLock";
 
@@ -87,12 +89,7 @@ fn saved_state(ctx: &mut Context, arg: Id) -> Result<(usize, usize)> {
     Ok((count as usize, owner))
 }
 
-pub(super) fn method(
-    ctx: &mut Context,
-    name: &str,
-    args: &[Id],
-    kwargs: &[(String, Id)],
-) -> Result<Id> {
+fn receiver_args<'a>(ctx: &Context, name: &str, args: &'a [Id]) -> Result<(Id, &'a [Id])> {
     let Some((&id, args)) = args.split_first() else {
         return Err(Error::new(
             "TypeError",
@@ -109,27 +106,33 @@ pub(super) fn method(
             ),
         ));
     }
-    // Conversion may run Python and reinitialize this receiver in a forked child.
-    let backing = |ctx: &Context| match ctx.heap.get(receiver) {
-        Value::HandlerLock(lock) => lock.clone(),
+    Ok((receiver, args))
+}
+
+// Conversion may run Python and reinitialize this receiver in a forked child.
+fn backing(ctx: &Context, receiver: Id) -> Arc<HandlerLock> {
+    match ctx.heap.get(receiver) {
+        Value::HandlerLock(lock) => Arc::clone(lock),
         _ => unreachable!("RLock receiver checked above"),
-    };
-    if matches!(name, "acquire" | "__enter__") {
-        let (blocking, timeout) = super::thread_lock::acquire_args(ctx, args, kwargs)?;
-        return Ok(boolean(backing(ctx).acquire(blocking, timeout)?));
     }
-    if !kwargs.is_empty() {
-        let label = if matches!(name, "__exit__" | "_acquire_restore") {
-            name.to_owned()
-        } else {
-            format!("RLock.{name}")
-        };
-        return Err(Error::new(
-            "TypeError",
-            format!("{label}() takes no keyword arguments"),
-        ));
-    }
-    if name == "_acquire_restore" {
+}
+
+/// The native condition wait restores the saved owner and depth on the selected lock.
+pub(super) struct Restore {
+    lock: Arc<HandlerLock>,
+    depth: usize,
+    owner: usize,
+}
+
+impl Restore {
+    pub(super) fn prepare(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Self> {
+        let (receiver, args) = receiver_args(ctx, "_acquire_restore", args)?;
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "_acquire_restore() takes no keyword arguments",
+            ));
+        }
         let [arg] = args else {
             return Err(Error::new(
                 "TypeError",
@@ -140,8 +143,43 @@ pub(super) fn method(
             ));
         };
         let (depth, owner) = saved_state(ctx, *arg)?;
-        backing(ctx).acquire_restore(depth, owner);
-        return Ok(NONE);
+        Ok(Self {
+            lock: backing(ctx, receiver),
+            depth,
+            owner,
+        })
+    }
+
+    pub(super) fn run(self) -> Id {
+        self.lock.acquire_restore(self.depth, self.owner);
+        NONE
+    }
+}
+
+pub(super) fn method(
+    ctx: &mut Context,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    if name == "_acquire_restore" {
+        return Ok(Restore::prepare(ctx, args, kwargs)?.run());
+    }
+    let (receiver, args) = receiver_args(ctx, name, args)?;
+    if matches!(name, "acquire" | "__enter__") {
+        let (blocking, timeout) = super::thread_lock::acquire_args(ctx, args, kwargs)?;
+        return Ok(boolean(backing(ctx, receiver).acquire(blocking, timeout)?));
+    }
+    if !kwargs.is_empty() {
+        let label = if name == "__exit__" {
+            name.to_owned()
+        } else {
+            format!("RLock.{name}")
+        };
+        return Err(Error::new(
+            "TypeError",
+            format!("{label}() takes no keyword arguments"),
+        ));
     }
     if !args.is_empty() && name != "__exit__" {
         return Err(Error::new(
@@ -157,7 +195,7 @@ pub(super) fn method(
         crate::objects::logging::HandlerLock::at_fork_reinit(lock);
         return Ok(NONE);
     }
-    let lock = backing(ctx);
+    let lock = backing(ctx, receiver);
     match name {
         "locked" => Ok(boolean(lock.state().is_some())),
         "_is_owned" => Ok(boolean(lock.owned())),
