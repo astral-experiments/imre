@@ -52,25 +52,6 @@ impl Callback {
     pub(super) fn capture(
         ctx: &Context,
         target: Id,
-        args: Id,
-        kwargs: Option<Id>,
-    ) -> Result<Option<(Operation, Vec<Id>)>> {
-        // _thread.start_new_thread owns the original argument containers through the call.
-        let containers = [target, args, kwargs.unwrap_or(NONE)];
-        let roots = if kwargs.is_some() {
-            &containers[..]
-        } else {
-            &containers[..2]
-        };
-        let pos = ctx
-            .tuple_elements(args)
-            .expect("validated thread arguments");
-        Self::capture_checked(ctx, target, roots, pos, kwargs, false)
-    }
-
-    pub(super) fn capture_checked(
-        ctx: &Context,
-        target: Id,
         roots: &[Id],
         pos: &[Id],
         kwargs: Option<Id>,
