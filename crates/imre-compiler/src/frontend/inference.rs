@@ -988,6 +988,7 @@ impl Inference {
                     && matches!(function.body.as_slice(), [ast::Stmt::Return(_)])
                     && !checker.fault_enabled()
                     && registered::physical_method(&signature, function, classes).is_some();
+                checker.placement_only = !keep_return;
                 let mut return_body = keep_return.then(|| {
                     checker.frame = LexicalFrame::Named(function.name.id.clone());
                     checker.fixed_sites = Some(fixed_body_source::SourceSites::new(true));
