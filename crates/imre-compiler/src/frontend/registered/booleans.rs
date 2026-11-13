@@ -362,7 +362,6 @@ fn bound_operation(
         source,
         None,
         |_, _, _| true,
-        ir::control::boolean_literal,
         |_| true,
         |node| Ok::<_, std::convert::Infallible>(child(node)),
     );

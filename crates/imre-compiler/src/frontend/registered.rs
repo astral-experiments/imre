@@ -3830,7 +3830,6 @@ impl SourceScope<'_> {
                                     imre_ast::strings::STR_METHODS.contains(&field.attr.as_str())
                                 })
                 },
-                ir::control::boolean_literal,
                 |_| true,
                 |child| {
                     match expr {
