@@ -346,7 +346,7 @@ impl EagerDisplay for Checker<'_> {
             Type::PythonObject,
             Some(clause.iter.range()),
             Some(pull),
-            |ty| self.hidden(ty),
+            |ty, _| self.hidden(ty),
         )))
     }
 

@@ -196,7 +196,15 @@ pub(crate) fn registered(frame: crate::frontend::RegisteredRegion<'_>) -> Result
             _ => Ok(()),
         };
     });
-    result
+    result?;
+    // Replacing an operation can leave an allocated local unused.
+    require(
+        private.slots().iter().all(|slot| {
+            frame.frame_slots.index(slot).is_some()
+                && frame.frame_slots.cursor(slot) == private.cursor(slot)
+        }),
+        "registered frame storage disagrees with its scoped operations",
+    )
 }
 
 fn require(condition: bool, message: &str) -> Result<(), String> {
