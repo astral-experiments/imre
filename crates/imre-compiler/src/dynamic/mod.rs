@@ -2109,8 +2109,7 @@ pub(crate) fn compile(
                     let mut declaration = None;
                     let imports = if let Some(file) = parsed {
                         retained_imports(file.parsed(modules), None, None)
-                    } else if output.is_none() && winner && alternative.is_none() && !file_alternate
-                    {
+                    } else if winner && alternative.is_none() && !file_alternate {
                         if checked.is_none() && kind == SourceKind::DiskFile {
                             declaration = checked_graph
                                 .and_then(|graph| graph.session.declaration_parser(&path, &src));
