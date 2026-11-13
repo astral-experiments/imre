@@ -168,9 +168,10 @@ impl CheckedBody<'_, '_, '_, '_> {
         expr: &Expr,
         already_rooted: bool,
     ) -> String {
-        if matches!(self.0, Entry::Registered(_))
+        if let Entry::Registered(frame) = &mut self.0
             && let ExprKind::Builtin(Builtin::Bool, args) = &expr.kind
         {
+            frame.next_fixed_site();
             return self.test_operand_in_scope(&args[0], already_rooted);
         }
         let at = match &self.0 {

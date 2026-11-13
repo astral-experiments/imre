@@ -7694,6 +7694,9 @@ impl<'a> Checker<'a> {
             last_test = test;
             self.branch_layouts(body, &clauses[index..])?;
             let condition = self.condition(test)?;
+            if let Some(sites) = &mut self.fixed_sites {
+                sites.branch_test(test, &condition);
+            }
             let known = self.instance_condition(&condition);
             if self.graph.reachable_only()
                 && let Some(taken) = known

@@ -357,6 +357,20 @@ impl SourceSites {
         self.commit(site, native);
     }
 
+    /// The fixed branch converts the written local to bool. Its Python entry tests the same handle.
+    pub(super) fn branch_test(&mut self, source: &ast::Expr, test: &Expr) {
+        if source.is_name_expr()
+            && let ExprKind::Builtin(Builtin::Bool, args) = &test.kind
+            && let [value] = args.as_slice()
+            && matches!(value.kind, ExprKind::Local(_))
+            && let Some(site) = self.statement_site(source.range())
+        {
+            let node = FixedNode::checked(&ir::Node::Expression(test));
+            self.sites.insert(site.index + 1, (source.range(), node));
+            self.next_index += 1;
+        }
+    }
+
     pub(super) fn statement(&mut self, operand: TextRange, node: FixedNode) {
         if let Some(site) = self.statement_site(operand) {
             self.commit(site, node);
