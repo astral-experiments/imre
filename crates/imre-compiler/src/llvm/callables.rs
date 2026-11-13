@@ -389,9 +389,24 @@ impl Emitter<'_, '_> {
         &mut self,
         target: NativeCallTarget,
         args: &CallArgs,
-        mut values: Vec<Operand>,
         returns: Type,
     ) -> Value {
+        // A field reader can borrow a headerless value-struct snapshot directly.
+        if let NativeCallTarget::Function(id) = target
+            && let [arg] = args.values.as_slice()
+            && self.module.types.is_value_struct(arg.ty)
+            && structs::field_reader(&self.module.functions[id])
+            && let Some(snapshot) = self.struct_snapshot(arg)
+        {
+            return self.user_call(
+                id,
+                returns,
+                &[&snapshot],
+                args.exhaustive_enum_match,
+                args.site.fixed(),
+            );
+        }
+        let mut values = self.call_operands(args);
         self.transfer_call_operands(&mut values);
         let inputs: Vec<_> = args
             .order

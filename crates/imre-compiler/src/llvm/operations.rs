@@ -12,6 +12,7 @@ use crate::ir::{self, DisplayKind};
 pub(crate) use join::ValueJoin;
 use ruff_python_ast::UnaryOp;
 
+use super::callables::NativeCallTarget;
 use super::records;
 use super::{Binary, Builtin, CallArgs, Expr, ExprKind, Statement, Type};
 use super::{Emitter, Value, none, small};
@@ -148,20 +149,17 @@ impl CheckedValue {
     }
 }
 
-impl CallArgs {
-    /// Parameter order applies at the ABI boundary, after source-order evaluation.
-    pub(super) fn capture<T>(&self, operand: impl FnMut(&Expr) -> T) -> Vec<T> {
-        self.values.iter().map(operand).collect()
-    }
-
-    fn capture_invoke<T>(
-        &self,
-        callable: &Expr,
-        mut operand: impl FnMut(&Expr) -> T,
-    ) -> (T, Vec<T>) {
-        let callable = operand(callable);
-        (callable, self.capture(operand))
-    }
+/// Capture each written operand once from left to right. A Python method may
+/// supply its already-bound receiver in the first ABI slot.
+pub(super) fn capture_call_operands<T>(
+    args: &[Expr],
+    receiver: Option<T>,
+    operand: impl FnMut(&Expr) -> T,
+) -> Vec<T> {
+    receiver
+        .into_iter()
+        .chain(args.iter().map(operand))
+        .collect()
 }
 
 /// A checked body selects operations from each operand's representation.
@@ -245,17 +243,11 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
     /// Capture the callable before evaluating each argument. A native operand keeps
     /// its checked borrow or owner; a Python argument must already have its rooted
     /// handle before the next argument can call back into the frame.
-    fn invoke(
-        &mut self,
-        callable: &Expr,
-        args: &crate::ir::CallArgs,
-        returns: Type,
-    ) -> CheckedValue {
+    fn invoke(&mut self, callable: &Expr, args: &CallArgs, returns: Type) -> CheckedValue {
         let Some(site) = args.site.python() else {
             let native = self.fixed();
-            let (target, values) = args.capture_invoke(callable, |expr| native.operand(expr));
-            let target = super::callables::NativeCallTarget::Callable(target);
-            return CheckedValue::owned(native.native_call(target, args, values, returns));
+            let target = NativeCallTarget::Callable(native.operand(callable));
+            return CheckedValue::owned(native.native_call(target, args, returns));
         };
 
         self.python_call(site, callable, &args.values, CheckedFrame::kept_call_value)
@@ -1116,9 +1108,11 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             ExprKind::Unwrap(value) => {
                 CheckedValue::owned(self.fixed().unwrap_optional(value, expr.ty))
             }
-            ExprKind::Call(id, args) => {
-                CheckedValue::owned(self.fixed().direct_call(*id, args, expr.ty))
-            }
+            ExprKind::Call(id, args) => CheckedValue::owned(self.fixed().native_call(
+                NativeCallTarget::Function(*id),
+                args,
+                expr.ty,
+            )),
             ExprKind::Callable { function, receiver } => CheckedValue::owned(
                 self.fixed()
                     .callable_value(expr.ty, *function, receiver.as_deref()),
