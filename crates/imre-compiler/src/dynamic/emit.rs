@@ -10,7 +10,7 @@ use ruff_text_size::{Ranged, TextRange, TextSize};
 
 use super::prepare::{Initializer, PreparedUnit};
 use crate::dynamic::literal::LiteralSites;
-use crate::frontend::function_scope::{CallableMetadata, ClassBindings, NamedFunction};
+use crate::frontend::function_scope::{ClassBindings, NamedFunction};
 use crate::frontend::module_source::{self, ParsedModule};
 use crate::frontend::{
     ParameterEvaluator, RegisteredBody, RegisteredGenerator, RegisteredLambda, RequiredSite,
@@ -1149,10 +1149,7 @@ struct LexicalDefinitions<'a, 'p> {
 }
 
 enum Callable<'a> {
-    Lambda {
-        metadata: &'a CallableMetadata,
-        comprehension: bool,
-    },
+    Lambda(&'a RegisteredLambda, bool),
     Named(&'a NamedFunction<'a>),
     Generator(&'a RegisteredGenerator),
 }
@@ -1244,15 +1241,7 @@ impl<'p> sites::SiteDefinitions<'p> for LexicalDefinitions<'_, 'p> {
 
     fn lambda(&mut self, site: TextSize, comprehension: bool) -> CompiledDefinition {
         let lambda = &self.source.lambdas[&site];
-        let body = lambda.body.as_ref().expect("checked lambda body");
-        self.compile_callable(
-            site,
-            Callable::Lambda {
-                metadata: &lambda.metadata,
-                comprehension,
-            },
-            Body::Registered(RegisteredBody::Function(body), None),
-        )
+        self.compile_callable(site, Callable::Lambda(lambda, comprehension))
     }
 
     fn declaration(&mut self, site: TextSize) -> Declaration {
@@ -1269,11 +1258,7 @@ impl<'p> sites::SiteDefinitions<'p> for LexicalDefinitions<'_, 'p> {
                 (definition, &class.decorator_offsets, None)
             } else {
                 let header = &source.scopes.functions[&site];
-                let definition = self.compile_callable(
-                    site,
-                    Callable::Named(header),
-                    Body::Registered(header.body(), Some(&header.globals)),
-                );
+                let definition = self.compile_callable(site, Callable::Named(header));
                 let parameters = (!header.type_params.is_empty())
                     .then(|| self.compile_type_parameters(&header.type_params, self.class_locals));
                 (definition, &header.decorator_offsets, parameters)
@@ -1299,11 +1284,7 @@ impl<'p> sites::SiteDefinitions<'p> for LexicalDefinitions<'_, 'p> {
     fn generator(&mut self, site: TextRange) -> CompiledGenerator {
         let body = &self.source.generators[&site];
         CompiledGenerator {
-            function: self.compile_callable(
-                site.start(),
-                Callable::Generator(body),
-                Body::Registered(RegisteredBody::Function(&body.body), None),
-            ),
+            function: self.compile_callable(site.start(), Callable::Generator(body)),
             acquire: body.acquire,
         }
     }
@@ -1364,68 +1345,57 @@ impl<'p> sites::SiteDefinitions<'p> for LexicalDefinitions<'_, 'p> {
 }
 
 impl LexicalDefinitions<'_, '_> {
-    fn compile_callable(
-        &mut self,
-        site: TextSize,
-        callable: Callable<'_>,
-        body: Body<'_>,
-    ) -> CompiledDefinition {
+    fn compile_callable(&mut self, site: TextSize, callable: Callable<'_>) -> CompiledDefinition {
         let source = self.source;
-        let (name, qualname, doc, metadata, comprehension) = match callable {
-            Callable::Lambda {
-                metadata,
-                comprehension,
-            } => (
+        let (name, metadata, body, header) = match callable {
+            Callable::Named(header) => (
+                header.name.as_str(),
+                &header.metadata,
+                header.body(),
+                Some(header),
+            ),
+            Callable::Lambda(lambda, _) => (
                 "<lambda>",
-                format!("{}<lambda>", self.prefix),
+                &lambda.metadata,
+                RegisteredBody::Function(lambda.body.as_ref().expect("checked lambda body")),
                 None,
-                metadata,
-                comprehension,
             ),
             Callable::Generator(generator) => (
                 "<genexpr>",
-                format!("{}<genexpr>", self.prefix),
-                None,
                 &generator.metadata,
-                false,
+                RegisteredBody::Function(&generator.body),
+                None,
             ),
-            Callable::Named(header) => {
-                let qualname = if self.declared_globals.contains(&header.binding) {
-                    header.name.clone()
-                } else {
-                    format!("{}{}", self.prefix, header.name)
-                };
-                let doc = if self.output.keep_docstrings {
-                    header
-                        .doc
-                        .clone()
-                        .or_else(|| source.bundled_docstring(&qualname))
-                } else {
-                    None
-                };
-                (header.name.as_str(), qualname, doc, &header.metadata, false)
-            }
         };
-        let (generic, class_cell, provider) = match callable {
-            Callable::Named(header) => (
-                header.generic,
-                !header.generic || header.type_params.is_empty(),
-                self.parameter_provider(header, &qualname),
-            ),
-            Callable::Lambda { .. } | Callable::Generator(_) => (false, true, None),
+        let qualname = if header.is_some_and(|h| self.declared_globals.contains(&h.binding)) {
+            name.to_owned()
+        } else {
+            format!("{}{name}", self.prefix)
         };
-        let checked = match (&callable, &body) {
-            (Callable::Named(_), Body::Registered(RegisteredBody::Function(checked), _))
-                if self.prefix.is_empty() && !self.in_function && !self.method_scope =>
+        let doc = header
+            .filter(|_| self.output.keep_docstrings)
+            .and_then(|h| {
+                h.doc
+                    .clone()
+                    .or_else(|| source.bundled_docstring(&qualname))
+            });
+        let provider = header.and_then(|h| self.parameter_provider(h, &qualname));
+        let generic = header.is_some_and(|h| h.generic);
+        let checked = match body {
+            RegisteredBody::Function(checked)
+                if header.is_some()
+                    && self.prefix.is_empty()
+                    && !self.in_function
+                    && !self.method_scope =>
             {
-                Some(*checked)
+                Some(checked)
             }
             _ => None,
         };
         let suspension = metadata.suspension_flags();
         // Several expression regions can place the same lexical lambda.
         let cache = match callable {
-            Callable::Lambda { .. } => Some(&source.callable_code),
+            Callable::Lambda(..) => Some(&source.callable_code),
             Callable::Named(_) | Callable::Generator(_) => None,
         };
         let existing = cache.and_then(|cache| cache.borrow().get(&site).cloned());
@@ -1437,7 +1407,7 @@ impl LexicalDefinitions<'_, '_> {
                 } else {
                     format!("{qualname}.<locals>.")
                 },
-                body,
+                Body::Registered(body, header.map(|h| &h.globals)),
                 true,
                 Some((site, suspension)),
             );
@@ -1447,6 +1417,7 @@ impl LexicalDefinitions<'_, '_> {
             code
         });
         // A lambda inside a display captures the iteration namespace even in a class body.
+        let comprehension = matches!(callable, Callable::Lambda(_, true));
         let method = !comprehension && self.method_scope;
         let mut flags = source.function_flags(
             self.in_function || comprehension || generic,
@@ -1455,6 +1426,7 @@ impl LexicalDefinitions<'_, '_> {
         if doc.is_some() {
             flags |= imre_ast::code_flags::HAS_DOCSTRING;
         }
+        let class_cell = header.is_none_or(|h| !h.generic || h.type_params.is_empty());
         let signature = metadata.signature(flags, method && class_cell, checked);
         if !matches!(callable, Callable::Generator(_)) {
             self.output
