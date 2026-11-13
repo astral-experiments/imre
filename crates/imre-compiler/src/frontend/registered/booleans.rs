@@ -206,16 +206,15 @@ impl PhysicalPreparation<'_, '_> {
                     scope.with_suspending_operands(|scope| scope.operand(node))
                 }) {
                     Some(operand) => Selection::Operand(Box::new(operand)),
-                    None => Selection::Operand(self.slotted_operation(
-                        node,
-                        |slots| {
-                            ir::ExprKind::Builtin(
-                                ir::Builtin::RegisteredSuspend(kind, node.range()),
-                                slots,
-                            )
-                        },
-                        std::iter::once(child),
-                    )),
+                    None => {
+                        let input = self.ordinary_input(child);
+                        let value = super::operation(
+                            ir::Builtin::RegisteredSuspend(kind, node.range()),
+                            ir::Type::PythonObject,
+                            vec![ir::Expr::registered_input(0, ir::Type::PythonObject)],
+                        );
+                        Selection::Operand(self.inputs(node, value, Box::new([input])))
+                    }
                 };
             return Some(selected);
         }
@@ -237,16 +236,9 @@ impl PhysicalPreparation<'_, '_> {
         inputs: &mut Vec<PhysicalOperand>,
     ) -> ir::Expr {
         if ExpressionSites::governs(node) || node.is_compare_expr() {
-            let value = values::operation(
-                node,
-                self.source,
-                None,
-                |_, _, _| false,
-                ir::control::boolean_literal,
-                |_| true,
-                |child| Ok::<_, std::convert::Infallible>(self.logical_operation(child, inputs)),
-            )
-            .unwrap()
+            let value = bound_operation(node, self.source, &mut |child| {
+                self.logical_operation(child, inputs)
+            })
             .expect("a logical or comparison expression has a checked operation");
             return self.source.located(node, value);
         }
@@ -272,34 +264,8 @@ impl PhysicalPreparation<'_, '_> {
                 inputs.into_boxed_slice(),
             )));
         }
-        if let ast::Expr::Compare(cmp) = node {
-            return Some(Selection::Operand(self.slotted_operation(
-                node,
-                |slots| ir::ExprKind::Compare(slots, cmp.ops.to_vec()),
-                cmp.operands.iter(),
-            )));
-        }
         let mut children = Vec::new();
-        let op = if let ast::Expr::UnaryOp(unary) = node {
-            let operand = super::bind_operand(
-                &mut children,
-                self.ordinary_input(&unary.operand),
-                ir::Type::PythonObject,
-            );
-            ir::Expr::unary(unary.op, operand, ir::Type::PythonObject)
-        } else if let ast::Expr::BinOp(binary) = node {
-            let left = super::bind_operand(
-                &mut children,
-                self.ordinary_input(&binary.left),
-                ir::Type::PythonObject,
-            );
-            let right = super::bind_operand(
-                &mut children,
-                self.ordinary_input(&binary.right),
-                ir::Type::PythonObject,
-            );
-            values::binary(binary, ir::Type::PythonObject, left, right, None)
-        } else if let Some(value) = values::index_operation(node, source, |child, ordinary| {
+        let op = if let Some(value) = values::index_operation(node, source, |child, ordinary| {
             let value = ordinary.or_else(|| {
                 self.suspended
                     .then(|| values::suspended_operand(child, source))
@@ -313,49 +279,19 @@ impl PhysicalPreparation<'_, '_> {
         }) {
             value
         } else {
-            let Ok(value) = source.object_operation(
-                node,
-                None,
-                |_, _, _| true,
-                |_| true,
-                |child| {
-                    Ok::<_, std::convert::Infallible>(super::bind_operand(
-                        &mut children,
-                        self.ordinary_input(child),
-                        ir::Type::PythonObject,
-                    ))
-                },
-            );
-            value?
+            bound_operation(node, source, &mut |child| {
+                super::bind_operand(
+                    &mut children,
+                    self.ordinary_input(child),
+                    ir::Type::PythonObject,
+                )
+            })?
         };
         Some(Selection::Operand(self.inputs(
             node,
             op,
             children.into_boxed_slice(),
         )))
-    }
-
-    fn slotted_operation<'n>(
-        &mut self,
-        node: &ast::Expr,
-        operation: impl FnOnce(Vec<ir::Expr>) -> ir::ExprKind,
-        operands: impl Iterator<Item = &'n ast::Expr>,
-    ) -> Box<RegisteredOperand> {
-        let mut children = Vec::new();
-        let slots = operands
-            .map(|child| {
-                super::bind_operand(
-                    &mut children,
-                    self.ordinary_input(child),
-                    ir::Type::PythonObject,
-                )
-            })
-            .collect();
-        let operation = ir::Expr {
-            ty: ir::Type::PythonObject,
-            kind: operation(slots),
-        };
-        self.inputs(node, operation, children.into_boxed_slice())
     }
 
     fn inputs(
@@ -379,6 +315,24 @@ impl PhysicalPreparation<'_, '_> {
             None => PhysicalOperand::Residual(self.occurrence(child, Self::select_remaining)),
         }
     }
+}
+
+/// Bind a physical input at its use in the ordinary Python operation.
+fn bound_operation(
+    node: &ast::Expr,
+    source: RegisteredSource<'_>,
+    child: &mut dyn FnMut(&ast::Expr) -> ir::Expr,
+) -> Option<ir::Expr> {
+    let Ok(value) = values::operation(
+        node,
+        source,
+        None,
+        |_, _, _| false,
+        ir::control::boolean_literal,
+        |_| true,
+        |node| Ok::<_, std::convert::Infallible>(child(node)),
+    );
+    value
 }
 
 /// Checked operations and their irreducible inputs, owned by a plan or borrowed at a site.

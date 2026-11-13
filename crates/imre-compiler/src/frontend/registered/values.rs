@@ -86,7 +86,7 @@ impl RegisteredSource<'_> {
     }
 
     /// Bind the receiver before the arguments, including physical inputs in a mixed expression.
-    pub(super) fn object_operation<E>(
+    fn object_operation<E>(
         self,
         node: &ast::Expr,
         attribute: Option<Box<Builtin>>,
