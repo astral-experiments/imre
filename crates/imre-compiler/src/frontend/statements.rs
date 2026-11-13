@@ -80,7 +80,11 @@ pub(super) trait StatementLowering {
         assign: &ast::StmtAssign,
         body: &mut Vec<Statement>,
     ) -> StdResult<bool, Self::Error>;
-    fn branch(&mut self, branch: &ast::StmtIf) -> StdResult<Block, Self::Error>;
+    fn branch(
+        &mut self,
+        branch: &ast::StmtIf,
+        body: &mut Vec<Statement>,
+    ) -> StdResult<bool, Self::Error>;
     fn definition(
         &mut self,
         def: &ast::StmtFunctionDef,
@@ -116,7 +120,7 @@ pub(super) trait StatementLowering {
         };
         let (statement, continues) = match stmt {
             ast::Stmt::Assign(assign) => return self.assignment(assign, body),
-            ast::Stmt::If(branch) => return Ok(append(body, self.branch(branch)?)),
+            ast::Stmt::If(branch) => return self.branch(branch, body),
             ast::Stmt::FunctionDef(def) => (self.definition(def)?, true),
             ast::Stmt::Expr(expr) => self.effect(&expr.value)?,
             ast::Stmt::Return(ret) if !module => (Some(self.returned(ret)?), false),
@@ -141,8 +145,10 @@ pub(super) trait StatementLowering {
 impl StatementLowering for Checker<'_> {
     type Error = Failure<String>;
 
-    fn branch(&mut self, branch: &ast::StmtIf) -> Result<Block, String> {
-        self.if_chain(branch)
+    fn branch(&mut self, branch: &ast::StmtIf, body: &mut Vec<Statement>) -> Result<bool, String> {
+        let (arms, falls) = self.if_chain(branch)?;
+        append_block(body, arms);
+        Ok(falls)
     }
 
     fn assignment(
