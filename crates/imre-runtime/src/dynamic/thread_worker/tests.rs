@@ -260,6 +260,31 @@ fn worker_waits_for_the_creator_to_publish_its_receiver() {
 }
 
 #[test]
+fn failed_startup_release_skips_the_blocking_acquire() {
+    let mut ctx = context();
+    let object = ctx.builtin("object");
+    let owner = ctx.instance(object, None);
+    let handle = Arc::<Handle>::default();
+    let body = Arc::<PrimitiveLock>::default();
+    let error = launch(
+        &mut ctx,
+        Operation::Acquire {
+            wait: Acquire::blocking(&body),
+            release: Some(Arc::default()),
+        },
+        registered(&handle, false, owner),
+        Vec::new(),
+    )
+    .unwrap_err();
+    assert_eq!(error.kind, "RuntimeError");
+    assert_eq!(error.message, "RuntimeError: release unlocked lock");
+    handle.join(Some(Duration::from_secs(2))).unwrap();
+    assert!(handle.is_done());
+    assert!(!body.locked());
+    assert_eq!(ctx.interpreter.worker_count.load(Ordering::Acquire), 0);
+}
+
+#[test]
 fn bound_hash_worker_owns_expanded_input_while_running() {
     let mut ctx = context();
     let provider = crate::objects::HashState::provider("sha1")
