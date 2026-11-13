@@ -695,7 +695,7 @@ pub(super) fn capture(
     types: &Types,
     inference: &inference::Inference,
     source: Capture,
-    candidates: impl IntoIterator<Item = (usize, Option<RegisteredFunction>)>,
+    candidates: impl IntoIterator<Item = (usize, Option<fixed_body_source::PlacedBody>)>,
 ) {
     // Methods under the same class share a module definition, but have separate signature slots.
     for (slot, prepared) in candidates {
@@ -746,7 +746,10 @@ pub(super) fn capture(
         let checked = matches!(source, Capture::Solved(Some(ids)) if ids.contains(&slot));
         // A revision can invalidate a physical method's last check. Check its settled
         // signature before trying the registered return convention.
-        let mut attributes = HashMap::new();
+        let (prepared, mut attributes) = match prepared.transpose() {
+            Ok(body) => (body, HashMap::new()),
+            Err(attributes) => (None, attributes),
+        };
         let recover_method = method.is_some() && !checked;
         let placed = if let Some(body) = prepared.filter(|_| recover_method) {
             Some(body)

@@ -392,7 +392,7 @@ pub(super) struct Inference {
 }
 
 pub(super) struct Solution {
-    pub(super) method_returns: HashMap<usize, RegisteredFunction>,
+    pub(super) method_returns: HashMap<usize, fixed_body_source::PlacedBody>,
     pub(super) registered_parameters: HashMap<usize, Diagnostic>,
     /// Definitions checked to completion with the final input and return types.
     pub(super) checked_bodies: HashSet<usize>,
@@ -1210,7 +1210,7 @@ impl Inference {
                             body,
                         };
                         if let Ok(placed) = source.place(function) {
-                            method_returns.insert(signature.id, placed);
+                            method_returns.insert(signature.id, Ok(placed));
                         }
                     }
                     if superseded_returns

@@ -11,13 +11,12 @@ pub(crate) struct FixedBodySource {
     pub(crate) local_names: HashMap<usize, registered::LocalBinding>,
 }
 
+pub(super) type PlacedBody = StdResult<RegisteredFunction, HashMap<TextRange, FixedAttribute>>;
+
 impl FixedBodySource {
     /// Place the owned operations only if every physical site still belongs to them.
-    /// A refused method can still use its resolved attributes in the ordinary Python binder.
-    pub(crate) fn place(
-        self,
-        function: ir::Function,
-    ) -> StdResult<RegisteredFunction, HashMap<TextRange, FixedAttribute>> {
+    /// The ordinary Python binder can still use the resolved attributes if placement fails.
+    pub(crate) fn place(self, function: ir::Function) -> PlacedBody {
         if self.local_names.len() != function.locals.len() {
             return Err(self.attributes);
         }
