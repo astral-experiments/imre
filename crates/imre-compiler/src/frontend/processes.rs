@@ -3,7 +3,7 @@
 use super::calls::parameter;
 use super::*;
 use crate::ir::{PathOperation, ProcessCapture, ProcessOperation};
-use ruff_python_ast::visitor::{Visitor, walk_expr, walk_stmt};
+use ruff_python_ast::visitor::{Visitor, walk_expr};
 
 fn operation(operation: ProcessOperation, ty: Type, args: Vec<Expr>) -> Expr {
     Expr {
@@ -146,26 +146,14 @@ fn error_stream(types: &Types, capture: ProcessCapture, stdout: bool, timeout: b
 
 /// Explicit raises, user calls, and task or context resumption can propagate an error from elsewhere.
 pub(super) fn process_error_view(
-    source: &[ast::Stmt],
+    source_raises: bool,
     body: &[Statement],
     types: &Types,
     kinds: &[u32],
 ) -> CapturedFields {
-    struct Raises(bool);
-    impl<'ast> Visitor<'ast> for Raises {
-        fn visit_stmt(&mut self, statement: &'ast ast::Stmt) {
-            if matches!(statement, ast::Stmt::Raise(_)) {
-                self.0 = true;
-            } else if !self.0 {
-                walk_stmt(self, statement);
-            }
-        }
-    }
-    let mut raises = Raises(false);
-    raises.visit_body(source);
     let mut captures = HashSet::new();
     let mut argv = HashSet::new();
-    let mut precise = !raises.0;
+    let mut precise = !source_raises;
     let mut timed = false;
     let mut tree_issue = None;
     let mut other_shutil = false;
