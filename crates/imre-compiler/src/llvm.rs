@@ -8062,17 +8062,33 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
-            Builtin::Slice => self.call(
-                match returns {
-                    Type::Str => "imre_str_slice",
-                    Type::Bytes => "imre_bytes_slice",
-                    Type::ListInt => "imre_list_slice",
-                    Type::List(_) => "imre_seq_slice",
-                    _ => unreachable!("slice receiver was checked"),
-                },
-                returns,
-                &args.iter().map(|arg| &arg.value).collect::<Vec<_>>(),
-            ),
+            Builtin::Slice => {
+                let omitted;
+                let operands = match args.as_slice() {
+                    [base] => {
+                        omitted = Value {
+                            ty: self.module.types.optional(Type::Int),
+                            ..none()
+                        };
+                        [&base.value, &omitted, &omitted, &omitted]
+                    }
+                    [base, lower, upper, step] => {
+                        [&base.value, &lower.value, &upper.value, &step.value]
+                    }
+                    _ => unreachable!("checked slice operands"),
+                };
+                self.call(
+                    match returns {
+                        Type::Str => "imre_str_slice",
+                        Type::Bytes => "imre_bytes_slice",
+                        Type::ListInt => "imre_list_slice",
+                        Type::List(_) => "imre_seq_slice",
+                        _ => unreachable!("slice receiver was checked"),
+                    },
+                    returns,
+                    &operands,
+                )
+            }
             Builtin::DeepCopy => {
                 let source = self.word(&args[0].value);
                 let kind = representation_kind(returns, &self.module.types);

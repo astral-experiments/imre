@@ -780,7 +780,7 @@ fn literal_bound(bound: &ast::Expr, value: Option<&Expr>) -> Option<ir::Constant
     }
 }
 
-fn slice_bounds(slice: &ast::ExprSlice) -> [Option<&ast::Expr>; 3] {
+pub(in crate::frontend) fn slice_bounds(slice: &ast::ExprSlice) -> [Option<&ast::Expr>; 3] {
     [
         slice.lower.as_deref(),
         slice.upper.as_deref(),
@@ -834,7 +834,7 @@ fn slice_key<'a, E>(
     }
     Ok((
         super::operation(Builtin::RegisteredSlice, Type::PythonObject, bounds),
-        constants.map(|keys| C::Slice(Box::new(keys))),
+        constants.map(C::slice),
     ))
 }
 

@@ -139,6 +139,30 @@ mod tests {
     }
 
     #[test]
+    fn named_full_list_slice_places_the_checked_receiver() {
+        let text = "def copy(items: list[str]): return items[:]\nprint('ready')\n";
+        let mut graph = SourceGraph::single(text).unwrap();
+        graph.registered_startup = true;
+        crate::checked_lower(&mut graph).unwrap();
+        let functions = graph.registered_functions();
+        let placed = &functions[&graph.entry][&TextSize::default()];
+        let sites: Vec<_> = placed
+            .fixed_sites
+            .iter()
+            .map(|range| &text[*range])
+            .collect();
+        assert_eq!(sites, ["return items[:]", "items[:]", "items"]);
+        let [Statement::Return(value)] = &placed.function.body[..] else {
+            panic!("expected the original checked return")
+        };
+        assert!(
+            matches!(&value.kind, ExprKind::Builtin(Builtin::Slice, args)
+            if matches!(args.as_slice(), [Expr { kind: ExprKind::Local(slot), .. }]
+                if placed.local_names[slot].name == "items"))
+        );
+    }
+
+    #[test]
     fn late_registered_entry_places_only_existing_frames() {
         let text = "def scale(x: int) -> int: return x + x\ndef startup(source: str) -> None: exec(source)\nprint(scale(3))\n";
         let mut graph = SourceGraph::single(text).unwrap();

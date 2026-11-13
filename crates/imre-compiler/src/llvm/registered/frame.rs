@@ -1579,23 +1579,6 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
         self.op("slice_object", &[&start, &stop, &step])
     }
 
-    pub(super) fn read_slice(
-        &mut self,
-        base: &str,
-        start: &str,
-        stop: &str,
-        slot: Option<&str>,
-        span: Option<[usize; 4]>,
-    ) -> String {
-        self.take_matching_check();
-        let position = span.map_or_else(|| "null".into(), |span| self.output.position(span));
-        if let Some(slot) = slot {
-            self.checked(&format!("call i64 @imre_dyn_get_linked_slice_at(ptr %ctx, i64 {base}, i64 {start}, i64 {stop}, ptr {slot}, ptr {position})"))
-        } else {
-            self.checked(&format!("call i64 @imre_dyn_get_slice_at(ptr %ctx, i64 {base}, i64 {start}, i64 {stop}, ptr {position})"))
-        }
-    }
-
     pub(in crate::llvm) fn inplace(&mut self, op: &str, left: &str, right: &str) -> String {
         self.op(&format!("inplace:{op}"), &[left, right])
     }

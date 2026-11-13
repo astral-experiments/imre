@@ -4428,11 +4428,11 @@ impl<'a> Checker<'a> {
                     && (matches!(concrete, Type::Str | Type::Bytes)
                         || self.types.element(concrete).is_some()) =>
             {
-                let receiver = self.expr_expected(&subscript.value, concrete)?;
-                let ast::Expr::Slice(slice) = &*subscript.slice else {
-                    unreachable!("slice guard checked the node");
-                };
-                self.slice(receiver, slice)?
+                self.with_expression_site(expression, |checker| {
+                    let receiver = checker.expr_expected(&subscript.value, concrete)?;
+                    let slice = subscript.slice.as_slice_expr().expect("checked slice");
+                    checker.slice(receiver, slice, subscript.range())
+                })?
             }
             ast::Expr::ListComp(_) | ast::Expr::DictComp(_) | ast::Expr::SetComp(_) => {
                 self.comprehension(expression, Some(concrete))?
@@ -4754,7 +4754,12 @@ impl<'a> Checker<'a> {
 
     /// Captures the receiver before ordered bounds. Nullable integer operands
     /// preserve omitted bounds without allocating a general slice object.
-    fn slice(&mut self, receiver: Expr, slice: &ast::ExprSlice) -> Result<Expr, String> {
+    fn slice(
+        &mut self,
+        receiver: Expr,
+        slice: &ast::ExprSlice,
+        range: TextRange,
+    ) -> Result<Expr, String> {
         if let Some(fields) = self.types.fields(receiver.ty) {
             return self.fixed_tuple_slice(receiver, &fields, slice);
         }
@@ -4769,8 +4774,21 @@ impl<'a> Checker<'a> {
         }
         let ty = receiver.ty;
         let mut args = vec![receiver];
+        // A full slice of a general list has only one source operand. The fixed
+        // ABI supplies its omitted bounds when the receiver is emitted.
+        let bounds = registered::values::slice_bounds(slice);
+        if matches!(ty, Type::List(_)) && bounds.iter().all(Option::is_none) {
+            let value = Expr {
+                ty,
+                kind: ExprKind::Builtin(Builtin::Slice, args),
+            };
+            if let Some(sites) = &mut self.fixed_sites {
+                sites.checked_expression(range, &value);
+            }
+            return Ok(value);
+        }
         let index_type = self.types.optional(Type::Int);
-        for bound in [&slice.lower, &slice.upper, &slice.step] {
+        for bound in bounds {
             args.push(if let Some(bound) = bound {
                 self.expr_expected(bound, index_type)?
             } else {
@@ -9975,7 +9993,7 @@ impl<'a> Checker<'a> {
                     ));
                 }
                 if let ast::Expr::Slice(slice) = &*subscript.slice {
-                    return self.slice(list, slice);
+                    return self.slice(list, slice, subscript.range());
                 }
                 if matches!(list.ty, Type::Str | Type::Bytes) {
                     let index = self.expr_expected(&subscript.slice, Type::Int)?;

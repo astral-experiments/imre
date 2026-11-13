@@ -1278,6 +1278,16 @@ impl<'f> Frame<'f, '_, '_> {
                 return CheckedValue::handle("0".into());
             }
             (Builtin::RegisteredIndexConstant(key), [value]) => self.index_constant(key, value),
+            (Builtin::Slice, [receiver]) => {
+                let end = self
+                    .operand_range(receiver)
+                    .expect("placed slice receiver")
+                    .end();
+                let op = Builtin::RegisteredSubscript(self.code.current_range, end);
+                let base = self.evaluate_handle(receiver);
+                let key = ir::Constant::slice([const { ir::Constant::None }; 3]);
+                return self.read_slice(&op, &base, "0", "0", Some(key));
+            }
             (Builtin::RegisteredSlice, bounds) => {
                 let bounds = [bounds.first(), bounds.get(1), bounds.get(2)].map(|value| {
                     value.map_or_else(|| "0".into(), |value| self.evaluate_handle(value))
@@ -1399,13 +1409,30 @@ impl<'f> Frame<'f, '_, '_> {
             {
                 let start = self.evaluate_handle(lower);
                 let stop = self.evaluate_handle(upper);
-                let slot = constant.map(|value| self.constant_slot(value.clone()));
-                return Some(self.subscript_at(op, |frame, span| {
-                    frame.read_slice(base, &start, &stop, slot.as_deref(), span)
-                }));
+                return Some(self.read_slice(op, base, &start, &stop, constant.cloned()));
             }
         }
         None
+    }
+
+    fn read_slice(
+        &mut self,
+        op: &Builtin,
+        base: &str,
+        start: &str,
+        stop: &str,
+        constant: Option<ir::Constant>,
+    ) -> CheckedValue {
+        let slot = constant.map(|key| self.constant_slot(key));
+        self.subscript_at(op, |frame, span| {
+            frame.take_matching_check();
+            let position = span.map_or_else(|| "null".into(), |span| frame.output.position(span));
+            if let Some(slot) = slot {
+                frame.checked(&format!("call i64 @imre_dyn_get_linked_slice_at(ptr %ctx, i64 {base}, i64 {start}, i64 {stop}, ptr {slot}, ptr {position})"))
+            } else {
+                frame.checked(&format!("call i64 @imre_dyn_get_slice_at(ptr %ctx, i64 {base}, i64 {start}, i64 {stop}, ptr {position})"))
+            }
+        })
     }
 
     pub(super) fn read_index(
