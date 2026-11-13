@@ -274,6 +274,9 @@ impl<'a> Visitor<'a> for Assignments<'_> {
 pub(crate) fn deleted_names(body: &[ast::Stmt]) -> HashSet<String> {
     struct Deletions(HashSet<String>);
     impl<'a> Visitor<'a> for Deletions {
+        // A Python expression cannot contain a del statement or an exception handler.
+        fn visit_expr(&mut self, _expression: &'a ast::Expr) {}
+
         fn visit_stmt(&mut self, statement: &'a ast::Stmt) {
             if let ast::Stmt::Delete(delete) = statement {
                 self.0.extend(
