@@ -618,7 +618,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
     }
 
     fn subscript(&mut self, op: &Builtin, operands: &[Expr], returns: Type) -> CheckedValue {
-        let [base, key] = operands else {
+        let [base_expr, key_expr] = operands else {
             unreachable!("checked subscript operands")
         };
         if let Entry::Native(emitter) = &mut self.0
@@ -627,22 +627,27 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             return CheckedValue::owned(value);
         }
         // A receiver that came from Python must already be rooted before the key can call back.
-        let base = self.rooted_operand(base);
+        let base = self.rooted_operand(base_expr);
         if let (Entry::Registered(frame), Builtin::RegisteredSubscript(..)) = (&mut self.0, op)
-            && let Some(value) = frame.slice_subscript(op, base.rooted_handle(), key)
+            && let Some(value) = frame.slice_subscript(op, base.rooted_handle(), key_expr)
         {
             return value;
         }
-        let key = self.operand(key);
+        let key = self.operand(key_expr);
         match &mut self.0 {
             Entry::Native(emitter) => CheckedValue::owned(emitter.at_builtin_origin(op, |e| {
-                e.prepared_builtin(
-                    op,
-                    operands,
-                    returns,
-                    vec![base.into_native(), key.into_native()],
-                    Vec::new(),
-                )
+                let base = base.into_native();
+                let key = key.into_native();
+                let result = if let Some(slot) = e.fixed_int_buffer_slot(base_expr) {
+                    e.fixed_int_get(slot, &key.value)
+                } else {
+                    let nonnegative = matches!(op, Builtin::ListGet(_) | Builtin::BytesGet)
+                        && e.nonnegative_index(key_expr);
+                    e.get_item(&base.value, &key.value, returns, nonnegative)
+                };
+                e.release_operand(&base);
+                e.release_operand(&key);
+                result
             })),
             Entry::Registered(frame) => frame.subscript_at(op, |frame, span| {
                 frame.read_index(base.rooted_handle(), &key, span)

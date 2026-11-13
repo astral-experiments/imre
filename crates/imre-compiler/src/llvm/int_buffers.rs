@@ -174,6 +174,18 @@ impl Emitter<'_, '_> {
         }
     }
 
+    /// Return the stable backing storage selected for a local integer list.
+    pub(super) fn fixed_int_buffer_slot(&self, source: &Expr) -> Option<usize> {
+        match source.kind {
+            ExprKind::Local(slot)
+                if self.fixed_int_lists[slot] && self.int_buffers.contains_key(&slot) =>
+            {
+                Some(slot)
+            }
+            _ => None,
+        }
+    }
+
     pub(super) fn remember_int_buffer(&mut self, slot: usize, list: &Value) {
         let count = self.entry_alloca("i64");
         let data = self.instruction(format!(

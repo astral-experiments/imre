@@ -415,15 +415,11 @@ impl CheckedBody<'_, '_, '_, '_> {
                 if e.copy_item(table, key, value) {
                     return;
                 }
-                let slot = match table.kind {
-                    ExprKind::Local(slot)
-                        if e.fixed_int_lists[slot] && e.int_buffers.contains_key(&slot) =>
-                    {
-                        Some(slot)
-                    }
-                    _ => None,
-                };
-                (slot, e.nonnegative_index(key), None)
+                (
+                    e.fixed_int_buffer_slot(table),
+                    e.nonnegative_index(key),
+                    None,
+                )
             }
             Entry::Registered(f) => (None, false, Some(f.temporary_mark())),
         };

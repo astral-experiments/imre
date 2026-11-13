@@ -4519,6 +4519,12 @@ impl Emitter<'_, '_> {
             | Builtin::RegisteredLocation(..) => {
                 unreachable!("registered operation in fixed calling convention")
             }
+            Builtin::TupleGet
+            | Builtin::TupleIndex
+            | Builtin::ListGet(_)
+            | Builtin::StringGet
+            | Builtin::BytesGet
+            | Builtin::DictGet => unreachable!("the checked body emits subscript reads"),
             Builtin::FormatJoin => unreachable!("the checked body emits string joins"),
             Builtin::PairTable(ir::PairTableOp::ViewLen(slot)) => {
                 let count = self.instruction(format!(
@@ -7559,31 +7565,6 @@ impl Emitter<'_, '_> {
                     )
                 }
             }
-            Builtin::TupleGet => {
-                let tuple = &args[0].value;
-                let index = &args[1].value;
-                let len = self.module.types.fields(tuple.ty).unwrap().len();
-                let offset = self.checked_instruction(format!(
-                    "call i64 @imre_tuple_index(i64 {}, i64 {len})",
-                    index.operand
-                ));
-                // Every fixed tuple field occupies one word. Check before forming the inbounds pointer.
-                let ptr = self.instruction(format!(
-                    "getelementptr inbounds {}, ptr {}, i64 {offset}",
-                    storage_type(returns),
-                    tuple.operand
-                ));
-                let selected = self.field_value(&ptr, returns);
-                self.retain(&selected);
-                selected
-            }
-            Builtin::ListGet(_) if matches!(expressions[0].kind, ExprKind::Local(slot) if self.fixed_int_lists[slot] && self.int_buffers.contains_key(&slot)) =>
-            {
-                let ExprKind::Local(slot) = expressions[0].kind else {
-                    unreachable!()
-                };
-                self.fixed_int_get(slot, &args[1].value)
-            }
             Builtin::ListGetStable(_) => self
                 .guarded_owned_integer(&expressions[0], &args[0].value, &args[1].value, false)
                 .unwrap_or_else(|| {
@@ -7594,12 +7575,6 @@ impl Emitter<'_, '_> {
                         self.nonnegative_index(&expressions[1]),
                     )
                 }),
-            Builtin::ListGet(_) => self.get_item(
-                &args[0].value,
-                &args[1].value,
-                returns,
-                self.nonnegative_index(&expressions[1]),
-            ),
             Builtin::SequenceGetInBounds if self.module.types.is_value_struct(returns) => {
                 let native = self.instruction(format!("lshr i64 {}, 1", args[1].value.operand));
                 let word = self.checked_instruction(format!(
@@ -7851,33 +7826,6 @@ impl Emitter<'_, '_> {
                 ));
                 none()
             }
-            Builtin::StringGet => {
-                self.call("imre_str_get", Type::Str, &[&args[0].value, &args[1].value])
-            }
-            Builtin::BytesGet => {
-                // Successful bytes are canonical tagged integers in 1..=511;
-                // zero uniquely signals failure, so no pending-state poll is needed.
-                let nonnegative = self.nonnegative_index(&expressions[1]);
-                let index = self.index_word(&args[1].value, nonnegative);
-                let function = if nonnegative {
-                    "imre_bytes_get_index"
-                } else {
-                    "imre_bytes_get"
-                };
-                let operand = self.instruction(format!(
-                    "call i64 @{function}(ptr {}, i64 {index})",
-                    args[0].value.operand
-                ));
-                let failed = self.instruction(format!("icmp eq i64 {operand}, 0"));
-                self.check_failed(&failed);
-                let bounded = self.instruction(format!("icmp ule i64 {operand}, 511"));
-                self.line(format!("call void @llvm.assume(i1 {bounded})"));
-                Value {
-                    ty: Type::Int,
-                    operand,
-                    small_integer: true,
-                }
-            }
             Builtin::Progression { bounded: false } if args[0].value.ty == Type::Float => {
                 let step = &args[1].value;
                 let kind = representation_kind(step.ty, &self.module.types);
@@ -7924,13 +7872,6 @@ impl Emitter<'_, '_> {
                     operand,
                     small_integer: false,
                 }
-            }
-            Builtin::TupleIndex => {
-                let word = self.checked_instruction(format!(
-                    "call i64 @imre_tuple_get(ptr {}, i64 {})",
-                    args[0].value.operand, args[1].value.operand
-                ));
-                self.unpack_word(word, returns)
             }
             Builtin::IterableTuple => {
                 let source = &args[0].value;
@@ -8248,7 +8189,6 @@ impl Emitter<'_, '_> {
                 &[&args[0].value, &args[1].value],
             ),
             Builtin::OrderedDict => self.call("imre_ordered_dict", returns, &[&args[0].value]),
-            Builtin::DictGet => self.get_item(&args[0].value, &args[1].value, returns, false),
             Builtin::ChainMapNew => self.call("imre_chainmap_new", returns, &[&args[0].value]),
             Builtin::ChainMapMaps => self.call("imre_chainmap_maps", returns, &[&args[0].value]),
             Builtin::ChainMapGetItem => {
@@ -9866,49 +9806,107 @@ impl Emitter<'_, '_> {
         }
     }
 
-    fn get_item(&mut self, list: &Value, index: &Value, returns: Type, nonnegative: bool) -> Value {
-        if matches!(list.ty, Type::Deque(_)) {
-            let word = self.checked_instruction(format!(
-                "call i64 @imre_deque_get(ptr {}, i64 {})",
-                list.operand, index.operand
-            ));
-            return self.unpack_word(word, returns);
-        }
-        if matches!(list.ty, Type::Dict(_)) {
-            if let Some(tag) = self.enum_key_for_int(list.ty, index) {
-                let word = self.checked_instruction(format!(
-                    "call i64 @imre_dict_get_enum_int(ptr {}, i64 {tag}, i64 {})",
-                    list.operand, index.operand
+    /// Read the indexed value using the receiver's checked storage.
+    fn get_item(
+        &mut self,
+        table: &Value,
+        index: &Value,
+        returns: Type,
+        nonnegative: bool,
+    ) -> Value {
+        match table.ty {
+            Type::Tuple(_) => {
+                let len = self.module.types.fields(table.ty).unwrap().len();
+                let offset = self.checked_instruction(format!(
+                    "call i64 @imre_tuple_index(i64 {}, i64 {len})",
+                    index.operand
                 ));
-                return self.unpack_word(word, returns);
+                // Every fixed tuple field occupies one word. Check before forming the inbounds pointer.
+                let ptr = self.instruction(format!(
+                    "getelementptr inbounds {}, ptr {}, i64 {offset}",
+                    storage_type(returns),
+                    table.operand
+                ));
+                let selected = self.field_value(&ptr, returns);
+                self.retain(&selected);
+                selected
             }
-            let key = self.key_word(index);
-            let lookup = format!("call i64 @imre_dict_get(ptr {}, i64 {key})", list.operand);
-            // A missing Counter key returns immediate zero. Default-list
-            // factories insert a new entry and can fail to reserve it.
-            let word = if self.module.types.is_counter(list.ty) {
-                self.instruction(lookup)
-            } else {
-                self.checked_instruction(lookup)
-            };
-            return self.unpack_word(word, returns);
+            Type::VarTuple(_) => {
+                let word = self.checked_instruction(format!(
+                    "call i64 @imre_tuple_get(ptr {}, i64 {})",
+                    table.operand, index.operand
+                ));
+                self.unpack_word(word, returns)
+            }
+            Type::Str => self.call("imre_str_get", Type::Str, &[table, index]),
+            Type::Bytes => {
+                // Successful bytes are canonical tagged integers in 1..=511;
+                // zero uniquely signals failure, so no pending-state poll is needed.
+                let index = self.index_word(index, nonnegative);
+                let function = if nonnegative {
+                    "imre_bytes_get_index"
+                } else {
+                    "imre_bytes_get"
+                };
+                let operand = self.instruction(format!(
+                    "call i64 @{function}(ptr {}, i64 {index})",
+                    table.operand
+                ));
+                let failed = self.instruction(format!("icmp eq i64 {operand}, 0"));
+                self.check_failed(&failed);
+                let bounded = self.instruction(format!("icmp ule i64 {operand}, 511"));
+                self.line(format!("call void @llvm.assume(i1 {bounded})"));
+                Value {
+                    ty: Type::Int,
+                    operand,
+                    small_integer: true,
+                }
+            }
+            Type::Deque(_) => {
+                let word = self.checked_instruction(format!(
+                    "call i64 @imre_deque_get(ptr {}, i64 {})",
+                    table.operand, index.operand
+                ));
+                self.unpack_word(word, returns)
+            }
+            Type::Dict(_) => {
+                if let Some(tag) = self.enum_key_for_int(table.ty, index) {
+                    let word = self.checked_instruction(format!(
+                        "call i64 @imre_dict_get_enum_int(ptr {}, i64 {tag}, i64 {})",
+                        table.operand, index.operand
+                    ));
+                    return self.unpack_word(word, returns);
+                }
+                let key = self.key_word(index);
+                let lookup = format!("call i64 @imre_dict_get(ptr {}, i64 {key})", table.operand);
+                // A missing Counter key returns immediate zero. Default-list
+                // factories insert a new entry and can fail to reserve it.
+                let word = if self.module.types.is_counter(table.ty) {
+                    self.instruction(lookup)
+                } else {
+                    self.checked_instruction(lookup)
+                };
+                self.unpack_word(word, returns)
+            }
+            Type::ListInt => {
+                let word = if nonnegative {
+                    let index = self.native_index(index);
+                    self.runtime_call(&LIST_GET_INDEX, [table, &index])
+                } else {
+                    self.runtime_call(&LIST_GET, [table, index])
+                };
+                word.into_value(self)
+            }
+            _ => {
+                let suffix = if nonnegative { "_index" } else { "" };
+                let index = self.index_word(index, nonnegative);
+                let word = self.checked_instruction(format!(
+                    "call i64 @imre_seq_get{suffix}(ptr {}, i64 {index})",
+                    table.operand
+                ));
+                self.unpack_word(word, returns)
+            }
         }
-        if list.ty == Type::ListInt {
-            let word = if nonnegative {
-                let index = self.native_index(index);
-                self.runtime_call(&LIST_GET_INDEX, [list, &index])
-            } else {
-                self.runtime_call(&LIST_GET, [list, index])
-            };
-            return word.into_value(self);
-        }
-        let suffix = if nonnegative { "_index" } else { "" };
-        let index = self.index_word(index, nonnegative);
-        let word = self.checked_instruction(format!(
-            "call i64 @imre_seq_get{suffix}(ptr {}, i64 {index})",
-            list.operand
-        ));
-        self.unpack_word(word, returns)
     }
 
     fn set_item(&mut self, list: &Value, index: &Value, value: &Value, nonnegative: bool) {
