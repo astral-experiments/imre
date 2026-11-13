@@ -50,7 +50,15 @@ impl<'f, 'a, 'p, 'm> CheckedBody<'f, 'a, 'p, 'm> {
                     self.python()
                         .literal_tuple_membership(id, expr, *op == CmpOp::NotIn)
             {
-                return self.comparison_result(CheckedValue::handle(result), truth);
+                // Membership has already tested each rich comparison and returned a Python bool.
+                return if truth {
+                    let bit = self
+                        .python()
+                        .value(&format!("icmp eq i64 {result}, {}", permanent::TRUE));
+                    CheckedValue::condition(bit)
+                } else {
+                    CheckedValue::handle(result)
+                };
             }
             // An identity test cannot run Python, and a permanent right operand has no root to release.
             let right_scope = (chain.root.is_some()

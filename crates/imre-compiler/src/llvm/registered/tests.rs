@@ -171,7 +171,14 @@ fn a_checked_local_uses_python_membership_alongside_native_multiplication() {
         "        callback(left * right)\n",
     );
     let body = emit_captured_body(source).functions;
-    assert!(body.contains("call i64 @imre_dyn_contains_literal_tuple("));
+    let flag = body
+        .lines()
+        .find(|line| line.contains("call i64 @imre_dyn_contains_literal_tuple("))
+        .unwrap()
+        .split_whitespace()
+        .next()
+        .unwrap();
+    assert!(body.contains(&format!("icmp eq i64 {flag}, {}", super::permanent::TRUE)));
     assert!(body.contains("call i64 @int_mul("));
 }
 
