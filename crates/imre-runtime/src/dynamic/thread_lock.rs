@@ -137,16 +137,7 @@ impl Acquire {
     }
 }
 
-pub(super) fn method(
-    ctx: &mut Context,
-    name: &str,
-    args: &[Id],
-    kwargs: &[(String, Id)],
-) -> Result<Id> {
-    if matches!(name, "acquire" | "__enter__") {
-        return Ok(Acquire::prepare(ctx, name, args, kwargs)?.run());
-    }
-    let (id, lock, args) = receiver_args(ctx, name, args)?;
+fn check_method_args(name: &str, args: &[Id], kwargs: &[(String, Id)]) -> Result<()> {
     if !kwargs.is_empty() {
         let label = if name == "__exit__" {
             name.to_owned()
@@ -164,6 +155,31 @@ pub(super) fn method(
             format!("lock.{name}() takes no arguments ({} given)", args.len()),
         ));
     }
+    Ok(())
+}
+
+/// Keep only the native waiter across notification. Test its state when releasing it.
+pub(super) fn prepare_release(
+    ctx: &Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Arc<PrimitiveLock>> {
+    let (_, lock, args) = receiver_args(ctx, "release", args)?;
+    check_method_args("release", args, kwargs)?;
+    Ok(Arc::clone(lock))
+}
+
+pub(super) fn method(
+    ctx: &mut Context,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    if matches!(name, "acquire" | "__enter__") {
+        return Ok(Acquire::prepare(ctx, name, args, kwargs)?.run());
+    }
+    let (id, lock, args) = receiver_args(ctx, name, args)?;
+    check_method_args(name, args, kwargs)?;
     match name {
         #[cfg(unix)]
         "_at_fork_reinit" => {

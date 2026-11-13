@@ -248,6 +248,8 @@ pub(super) enum RegisteredCall {
     Start(Box<thread_worker::Start>),
     Join(thread_worker::Join),
     Acquire(thread_lock::Acquire),
+    /// Condition.notify has already selected the waiter's bound release method.
+    Release(Arc<crate::objects::locks::PrimitiveLock>),
     Restore(thread_rlock::Restore),
     Recv(stdlib::socket::Recv),
 }
@@ -275,6 +277,10 @@ impl RegisteredCall {
             // SAFETY: the native worker takes no reference into its creator's heap.
             Self::Start(start) => unsafe { start.run(context) },
             Self::Acquire(wait) => Ok(wait.run()),
+            Self::Release(lock) => {
+                lock.release()?;
+                Ok(NONE)
+            }
             Self::Restore(wait) => Ok(wait.run()),
             // SAFETY: the caller roots the frame and owns the context on this thread.
             Self::Recv(recv) => unsafe { recv.run(context) },
@@ -8258,6 +8264,10 @@ impl Context {
                             return thread_rlock::Restore::prepare(self, &args, &kwargs)
                                 .map(RegisteredCall::Restore)
                                 .map_err(|error| stdlib::io::qualify_error(self, error, None));
+                        }
+                        "_thread.lock.release" => {
+                            return thread_lock::prepare_release(self, &args, &kwargs)
+                                .map(RegisteredCall::Release);
                         }
                         "_thread.lock.acquire" => "acquire",
                         "_thread.lock.__enter__" => "__enter__",
