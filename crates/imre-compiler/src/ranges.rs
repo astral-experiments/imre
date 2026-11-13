@@ -512,7 +512,11 @@ impl Analyzer {
                 }
             })
             .collect();
-        self.block(&function.body, State::unknown(function.locals.len()), true);
+        let mut entry = State(self.cleared.clone());
+        for &slot in &function.params {
+            entry.0[slot] = Interval::UNKNOWN;
+        }
+        self.block(&function.body, entry, true);
     }
 
     fn block<'s>(
