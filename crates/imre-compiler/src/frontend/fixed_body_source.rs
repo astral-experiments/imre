@@ -76,7 +76,7 @@ pub(crate) enum FixedNode {
     Branch(usize, usize),
     /// The operation keeps its checked slot or operand count, and its native type.
     Indexed(std::mem::Discriminant<ExprKind>, usize, Type),
-    NamedCall(usize, usize, Type),
+    NamedCall(std::mem::Discriminant<ExprKind>, usize, usize, Type),
     Integer(i64),
     Constant(ir::Constant),
     Binary(Binary, Type),
@@ -115,10 +115,18 @@ impl FixedNode {
                     message: message.is_some(),
                 },
                 ExprKind::Call(id, ref args)
-                    if !args.exhaustive_enum_match
-                        && args.order.iter().copied().eq(0..args.values.len()) =>
+                | ExprKind::Construct {
+                    initializer: id,
+                    ref args,
+                } if !args.exhaustive_enum_match
+                    && args.order.iter().copied().eq(0..args.values.len()) =>
                 {
-                    Self::NamedCall(id, args.values.len(), expr.ty)
+                    Self::NamedCall(
+                        std::mem::discriminant(&expr.kind),
+                        id,
+                        args.values.len(),
+                        expr.ty,
+                    )
                 }
                 ExprKind::Local(slot) | ExprKind::Field(_, slot) => {
                     Self::indexed(&expr.kind, slot, expr.ty)
@@ -429,6 +437,24 @@ mod tests {
         assert!(matches!(operation, Builtin::ListClear));
         *operation = Builtin::DictClear;
         assert!(source.place(placed.function).is_err());
+    }
+
+    #[test]
+    fn a_named_constructor_site_requires_the_original_initializer() {
+        let args = ir::CallArgs::positional(Vec::new());
+        let checked = |kind| {
+            FixedNode::checked(&ir::Node::Expression(&Expr {
+                ty: Type::Class(0),
+                kind,
+            }))
+        };
+        let constructor = |initializer| ExprKind::Construct {
+            initializer,
+            args: args.clone(),
+        };
+        let original = checked(constructor(0)).unwrap();
+        assert!(checked(constructor(1)).as_ref() != Some(&original));
+        assert!(checked(ExprKind::Call(0, args)).as_ref() != Some(&original));
     }
 
     #[test]

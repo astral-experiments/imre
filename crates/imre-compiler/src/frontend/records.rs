@@ -1787,6 +1787,7 @@ impl Checker<'_> {
         }
         let mut scope = calls::ArgumentScope::default();
         let normalization = self.normalized_record_input(class);
+        let source_arguments = materialized.is_none() && normalization.is_none();
         let args = if let Some((field, wrapper, template)) = normalization {
             let params = &signature.params[1..];
             self.arguments_with(call, params, None, |checker, index, value| {
@@ -1812,7 +1813,11 @@ impl Checker<'_> {
             },
         });
         let record = self.register_logging_handler(class, record);
-        Ok(self.wrap_exception_record(class, record))
+        let record = self.wrap_exception_record(class, record);
+        if source_arguments && matches!(record.kind, ExprKind::Construct { .. }) {
+            self.record_named_call(call, &record);
+        }
+        Ok(record)
     }
 
     /// Attach the concrete class and display methods after the complete constructor succeeds.
