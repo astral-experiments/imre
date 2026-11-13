@@ -57,13 +57,13 @@ impl SourcePosition {
     }
 }
 
-#[derive(Default)]
-pub(crate) enum AnnotationScope {
+#[derive(Clone, Copy, Default)]
+pub(crate) enum AnnotationScope<'a> {
     #[default]
     Plain,
-    Method(ClassBindings),
+    Method(&'a ClassBindings),
     Class {
-        globals: BTreeSet<String>,
+        globals: &'a BTreeSet<String>,
         conditional: bool,
     },
 }
@@ -78,11 +78,11 @@ pub(crate) struct RegisteredFrame<'a, 'p> {
     pub(crate) current_range: TextRange,
     pub(super) regions: Vec<super::context::Region>,
     pub(crate) async_generator: bool,
-    pub(crate) class_locals: Option<ClassBindings>,
+    pub(crate) class_locals: Option<&'p ClassBindings>,
     pub(crate) annotation_values: Option<String>,
-    pub(crate) annotation_scope: AnnotationScope,
+    pub(crate) annotation_scope: AnnotationScope<'p>,
     /// Class-scoped evaluators read the live class dictionary before lexical names.
-    annotation_names: Option<(ClassBindings, String)>,
+    annotation_names: Option<(&'p ClassBindings, String)>,
     annotation_active: Option<String>,
     pub(crate) body: FunctionBody,
     id: u32,
@@ -960,7 +960,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
     }
 }
 
-impl RegisteredFrame<'_, '_> {
+impl<'p> RegisteredFrame<'_, 'p> {
     pub(crate) fn text(&mut self, value: &str) -> String {
         if !value.is_empty() && interned_spelling(value) {
             self.output.interned_identifiers.insert(value.to_owned());
@@ -1048,7 +1048,7 @@ impl RegisteredFrame<'_, '_> {
         ))
     }
 
-    pub(crate) fn use_class_annotation_names(&mut self, class: ClassBindings) {
+    pub(crate) fn use_class_annotation_names(&mut self, class: &'p ClassBindings) {
         let scope = self.op("annotation_scope", &[&self.scope.clone()]);
         self.annotation_names = Some((class, scope));
     }
@@ -1057,19 +1057,18 @@ impl RegisteredFrame<'_, '_> {
         // The format argument belongs to this callback, even if the class also defines it.
         let format = self.lookup("format");
         self.op("annotation_format", &[&format]);
-        let (local, result) = match &self.annotation_scope {
+        let (local, result) = match self.annotation_scope {
             AnnotationScope::Class {
                 globals,
                 conditional,
             } => {
-                let globals = globals.clone();
-                if *conditional {
+                if conditional {
                     self.annotation_active = Some(self.lookup("__conditional_annotations__"));
                 }
                 let dict = self.lookup("__classdict__");
                 let local = self.op("class_annotation_locals", &[&self.scope.clone(), &dict]);
                 for name in globals {
-                    let name = self.code_name(&name);
+                    let name = self.code_name(name);
                     self.op("declare_global", &[&local, &name]);
                 }
                 let result = self.op("dict", &[]);
@@ -1077,13 +1076,13 @@ impl RegisteredFrame<'_, '_> {
             }
             scope => {
                 let class = match scope {
-                    AnnotationScope::Method(class) => Some(class.clone()),
+                    AnnotationScope::Method(class) => Some(class),
                     _ => None,
                 };
                 let result = self.op("dict", &[]);
                 let local = self.op("annotation_scope", &[&self.scope.clone()]);
                 if let Some(class) = class {
-                    self.class_locals = Some(class.clone());
+                    self.class_locals = Some(class);
                     self.annotation_names = Some((class, local.clone()));
                 }
                 (local, result)

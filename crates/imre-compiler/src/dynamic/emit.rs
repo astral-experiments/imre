@@ -904,13 +904,13 @@ enum Body<'a> {
         &'a crate::frontend::RegisteredClass,
         &'a crate::frontend::function_scope::classes::ClassScope,
     ),
-    CheckedProvider(&'a crate::frontend::CheckedProvider, AnnotationScope),
+    CheckedProvider(&'a crate::frontend::CheckedProvider, AnnotationScope<'a>),
     /// Named bodies carry their lexical global declarations into the checked frame.
     Registered(RegisteredBody<'a>, Option<&'a BTreeSet<String>>),
     Operand(
         TextRange,
         &'a crate::frontend::RegisteredOperand,
-        Option<crate::frontend::function_scope::ClassBindings>,
+        Option<&'a ClassBindings>,
     ),
 }
 
@@ -1079,7 +1079,7 @@ impl SourceMap<'_> {
             }
             Body::Namespace(prepared, class) => {
                 let frame = &mut function.frame;
-                frame.class_locals = Some(class.bindings.clone());
+                frame.class_locals = Some(&class.bindings);
                 if frame.output.keep_docstrings
                     && let Some(doc) = prepared.doc.as_deref().or_else(|| {
                         self.docs
@@ -1165,7 +1165,7 @@ impl<'p> SourceMap<'p> {
             prefix,
             declared_globals,
             in_function,
-            class_locals: frame.class_locals.as_ref(),
+            class_locals: frame.class_locals,
             method_scope: frame.class_locals.is_some() && frame.annotation_values.is_none(),
         }
     }
@@ -1324,7 +1324,7 @@ impl<'p> sites::SiteDefinitions<'p> for LexicalDefinitions<'_, 'p> {
                     &self.source.scopes.aliases[&site],
                     alias.parameters.is_some(),
                     code,
-                    self.class_locals.cloned(),
+                    self.class_locals,
                 ),
                 parameters: alias
                     .parameters
@@ -1575,7 +1575,7 @@ impl LexicalDefinitions<'_, '_> {
         scope: &crate::frontend::function_scope::FunctionScope,
         type_parameter_scope: bool,
         code: &crate::frontend::AnnotationCode,
-        class: Option<crate::frontend::function_scope::ClassBindings>,
+        class: Option<&ClassBindings>,
     ) -> CompiledDefinition {
         self.compile_definition(
             site,
@@ -1619,7 +1619,7 @@ impl LexicalDefinitions<'_, '_> {
                         &provider.scope,
                         true,
                         body,
-                        class.cloned(),
+                        class,
                     ))
                 })
             })
@@ -1654,9 +1654,7 @@ impl LexicalDefinitions<'_, '_> {
                 }
             }
         }
-        let scope = class
-            .cloned()
-            .map_or(AnnotationScope::Plain, AnnotationScope::Method);
+        let scope = class.map_or(AnnotationScope::Plain, AnnotationScope::Method);
         Some(Box::new(source.annotation_provider(
             self.output,
             &annotations.body,
@@ -1700,7 +1698,7 @@ impl SourceMap<'_> {
             "code_flags": self.function_flags(in_function, false),
         });
         let scope = AnnotationScope::Class {
-            globals: globals.clone(),
+            globals,
             conditional,
         };
         let compiled = self.annotation_provider(
@@ -1723,7 +1721,7 @@ impl SourceMap<'_> {
         &self,
         output: &mut Output,
         body: &crate::frontend::AnnotationProvider,
-        scope: AnnotationScope,
+        scope: AnnotationScope<'_>,
         start: TextSize,
         signature: serde_json::Value,
         qualname: String,
