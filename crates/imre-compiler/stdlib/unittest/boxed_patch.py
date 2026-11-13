@@ -368,11 +368,6 @@ class _BoxedDictionaryPatch(_DictionaryPatch, ContextDecorator):
             for key in values:
                 mapping[key] = values[key]
 
-    def _exit(self):
-        if self._original is not None:
-            self._change(self._original, True)
-        return False
-
     __enter__ = _enter
 
     def __exit__(self, *exc_info):

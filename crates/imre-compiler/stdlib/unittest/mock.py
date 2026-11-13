@@ -18,9 +18,11 @@ def _key(text: str, kind: str) -> str:
     return kind + ":" + text
 
 
-def _change_mapping(target: dict[str, str], values: dict[str, str], clear: bool) -> None:
+def _change_mapping(target: dict[str, str], values: dict[str, str] | None, clear: bool) -> None:
     if clear:
         target.clear()
+    if values is None:
+        raise TypeError("'NoneType' object is not iterable")
     for key in values:
         target[key] = values[key]
 
@@ -42,10 +44,12 @@ class _DictionaryPatch:
         _change_mapping(self.in_dict, self.values, self.clear)
         return self.in_dict
 
+    def _change(self, values: dict[str, str] | None, clear: bool) -> None:
+        _change_mapping(self.in_dict, values, clear)
+
     def _exit(self) -> bool:
-        original = self._original
-        if original is not None:
-            _change_mapping(self.in_dict, original, True)
+        if self._original is not None:
+            self._change(self._original, True)
         return False
 
     def start(self) -> dict[str, str]:
