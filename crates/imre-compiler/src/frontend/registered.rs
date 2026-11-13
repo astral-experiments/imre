@@ -388,7 +388,7 @@ pub(super) fn finish_source_checks(
             &mut graph.session,
             graph.registered_source_errors.get_mut(),
         ) {
-            graph.remove_registered_function(module, range.start());
+            graph.defer_registered_function(module, range.start());
         }
     }
     for owner in checks.unresolved {

@@ -3204,12 +3204,20 @@ pub(crate) struct LoweringBaseline {
     traceback_objects: bool,
 }
 
+#[derive(Default)]
+struct RegisteredFunctions {
+    admitted: HashMap<ModuleId, crate::dynamic::CheckedFunctions>,
+    /// Completed solved bodies which cannot establish graph admission. Lexical
+    /// placement may use them after the selected source passes its own checks.
+    lexical: Vec<(ModuleId, TextSize, crate::frontend::RegisteredFunction)>,
+}
+
 pub(crate) struct SourceGraph {
     /// Fixed at graph construction, in the checked resolver's search order.
     pub(crate) filesystem_roots: Box<[PathBuf]>,
     /// The launcher has already selected a registered module initializer.
     pub(crate) registered_startup: bool,
-    registered_functions: std::cell::RefCell<HashMap<ModuleId, crate::dynamic::CheckedFunctions>>,
+    registered_functions: std::cell::RefCell<RegisteredFunctions>,
     /// Default-rule error ranges for the physical sources shared by every layout attempt.
     pub(crate) registered_source_errors:
         std::cell::RefCell<HashMap<ModuleId, Vec<Option<TextRange>>>>,
@@ -3325,7 +3333,9 @@ impl SourceGraph {
     }
 
     pub(crate) fn clear_registered_functions(&self) {
-        self.registered_functions.borrow_mut().clear();
+        let mut functions = self.registered_functions.borrow_mut();
+        functions.admitted.clear();
+        functions.lexical.clear();
     }
 
     pub(crate) fn register_function(
@@ -3336,32 +3346,59 @@ impl SourceGraph {
     ) {
         self.registered_functions
             .borrow_mut()
+            .admitted
             .entry(module)
             .or_default()
             .insert(start, body);
     }
 
-    pub(crate) fn remove_registered_function(&self, module: ModuleId, start: TextSize) {
+    pub(crate) fn defer_registered_function(&self, module: ModuleId, start: TextSize) {
         let mut functions = self.registered_functions.borrow_mut();
-        let entries = functions.get_mut(&module).expect("captured module");
-        entries.remove(&start);
+        let entries = functions
+            .admitted
+            .get_mut(&module)
+            .expect("captured module");
+        let body = entries.remove(&start).expect("captured definition");
         if entries.is_empty() {
-            functions.remove(&module);
+            functions.admitted.remove(&module);
+        }
+        // A fixed method carries its own placement proof. Its failed source check
+        // cannot authorize that placement at a later Python call.
+        if matches!(body.inputs, crate::frontend::FrameInputs::Checked) {
+            functions.lexical.push((module, start, body));
         }
     }
 
     pub(crate) fn registered_functions(
         &self,
     ) -> std::cell::Ref<'_, HashMap<ModuleId, crate::dynamic::CheckedFunctions>> {
-        self.registered_functions.borrow()
+        std::cell::Ref::map(self.registered_functions.borrow(), |functions| {
+            &functions.admitted
+        })
     }
 
-    /// Source discovery has committed to registration. The selected units borrow
-    /// the frontend's original body tables while the graph finishes diagnostics.
+    /// The selected source contract has succeeded. A solved body's checked
+    /// parameter convention must still be valid with live Python arguments.
     pub(crate) fn take_registered_functions(
         &self,
     ) -> HashMap<ModuleId, crate::dynamic::CheckedFunctions> {
-        self.registered_functions.take()
+        let RegisteredFunctions {
+            mut admitted,
+            lexical,
+        } = self.registered_functions.take();
+        for (module, start, mut body) in lexical {
+            let Some((inputs, slots)) = crate::llvm::registered::frame_inputs(&body, true) else {
+                continue;
+            };
+            body.inputs = inputs;
+            body.frame_slots = slots;
+            admitted
+                .entry(module)
+                .or_default()
+                .entry(start)
+                .or_insert(body);
+        }
+        admitted
     }
 
     /// The fixed adapter displaced when this source supplies the import.

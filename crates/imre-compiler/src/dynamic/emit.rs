@@ -34,10 +34,9 @@ pub(super) struct PhysicalFile {
 /// Frontend inputs for one resolved source slot. Syntax can be shared even if
 /// admission does not attach any checked function bodies.
 #[derive(Default)]
-pub(super) struct CheckedUnit<'a> {
-    pub(super) prompt_module: Option<crate::modules::ModuleId>,
+pub(super) struct CheckedUnit {
+    pub(super) module: Option<crate::modules::ModuleId>,
     pub(super) source: Option<module_source::CheckedFile>,
-    pub(super) functions: Option<&'a super::CheckedFunctions>,
     // A declaration belongs to the selected name and origin, even when another
     // loader registers the same physical file under a different name.
     pub(super) run_path: Option<PathBuf>,
@@ -46,7 +45,8 @@ pub(super) struct CheckedUnit<'a> {
 /// Snapshots and admission facts for the bodies selected by import resolution.
 #[derive(Default)]
 pub(super) struct RegisteredBodies<'a> {
-    pub(super) checked_units: HashMap<usize, CheckedUnit<'a>>,
+    pub(super) checked_units: HashMap<usize, CheckedUnit>,
+    pub(super) functions: HashMap<crate::modules::ModuleId, super::CheckedFunctions>,
     pub(super) modules: &'a [crate::modules::SourceModule],
     // Decoded installed files retain the fingerprint of their original loader bytes.
     pub(super) physical_files: HashMap<PathBuf, PhysicalFile>,

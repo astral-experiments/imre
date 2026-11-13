@@ -97,7 +97,9 @@ pub(super) fn units<'a>(
             } else if python_providers.contains(&unit) {
                 ModuleOrigin::Provider
             } else {
-                ModuleOrigin::Program(checked.and_then(|unit| unit.functions))
+                ModuleOrigin::Program(
+                    checked.and_then(|unit| registrations.functions.get(&unit.module?)),
+                )
             };
             let standalone = unit != 0
                 && matches!(origin, ModuleOrigin::Bundled)
@@ -180,7 +182,9 @@ pub(super) fn units<'a>(
                     literals.unwrap_or_default(),
                     (types, checked_source),
                 )?;
-                if let Some(module) = checked.and_then(|unit| unit.prompt_module) {
+                if python_optimization < 2
+                    && let Some(module) = checked.and_then(|unit| unit.module)
+                {
                     body.prompts = &registrations.modules[module].doctest_prompts;
                 }
                 Ok(Initializer::Checked(Box::new(body)))

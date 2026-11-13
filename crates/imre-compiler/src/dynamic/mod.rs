@@ -2379,9 +2379,6 @@ pub(crate) fn compile(
                 && registrations.physical_files.contains_key(&sources[id].1)
         });
     // Borrow the winners once discovery has finished growing the emitter's source table.
-    let functions = checked_graph
-        .map(crate::modules::SourceGraph::take_registered_functions)
-        .unwrap_or_default();
     let entry_start = if options.sitecustomize || options.stdlib_sitecustomize {
         // With unfrozen startup the physical site module can run before this hook.
         site_initializer
@@ -2400,16 +2397,7 @@ pub(crate) fn compile(
                 && let (Some(graph), Some(module_id)) = (checked_graph, module)
                 && graph.modules[module_id].original_source() == sources[id].2
             {
-                if let Some(bodies) = functions.get(&module_id) {
-                    registrations.checked_units.entry(id).or_default().functions = Some(bodies);
-                }
-                if keep_docstrings && !graph.modules[module_id].doctest_prompts.is_empty() {
-                    registrations
-                        .checked_units
-                        .entry(id)
-                        .or_default()
-                        .prompt_module = Some(module_id);
-                }
+                registrations.checked_units.entry(id).or_default().module = Some(module_id);
             }
             // Emit the selected application's signature. Preserve the existing checker
             // scope: owning a declaration does not prove that a call will reach it.
@@ -2641,6 +2629,9 @@ pub(crate) fn compile(
     inputs.boxed_imports = true;
     // Registration has committed to the selected bodies. Leave the type database
     // and import graph behind before preparing their source initializers.
+    if let Some(graph) = &project {
+        registrations.functions = graph.take_registered_functions();
+    }
     let modules = project
         .take()
         .map(|graph| graph.modules)
