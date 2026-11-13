@@ -2,7 +2,6 @@
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
-use std::rc::Rc;
 
 use ruff_db::{files::File, parsed::ParsedModuleRef};
 use ruff_python_ast::visitor::Visitor;
@@ -29,16 +28,16 @@ pub(super) struct PreparedLiteral {
 
 /// One source slot's checked operands. Different modules named "<string>" have
 /// independent tables, and a live rebinding still receives the original string.
-#[derive(Clone, Default)]
+#[derive(Default)]
 pub(crate) struct LiteralSites {
-    sites: HashMap<TextRange, Result<Rc<PreparedLiteral>, (TextSize, String)>>,
+    sites: HashMap<TextRange, Result<Box<PreparedLiteral>, (TextSize, String)>>,
 }
 
 impl LiteralSites {
     fn insert(&mut self, site: LiteralSite, body: Result<PreparedBody<'static>, String>) {
         let entry = body
             .map(|body| {
-                Rc::new(PreparedLiteral {
+                Box::new(PreparedLiteral {
                     body,
                     text: site.text,
                 })
@@ -236,7 +235,7 @@ impl LiteralForest {
         mut self,
         session: &Session,
         python_optimization: i32,
-    ) -> Vec<(usize, LiteralSites)> {
+    ) -> BTreeMap<usize, LiteralSites> {
         debug_assert!(!self.has_pending());
         while let Some(node) = self.nodes.pop() {
             let module = session
@@ -244,6 +243,6 @@ impl LiteralForest {
                 .and_then(|()| node.source.prepare(python_optimization, node.children));
             self.table(node.parent).insert(node.site, module);
         }
-        self.roots.into_iter().collect()
+        self.roots
     }
 }

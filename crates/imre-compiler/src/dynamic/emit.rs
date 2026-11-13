@@ -38,7 +38,6 @@ pub(super) struct PhysicalFile {
 #[derive(Default)]
 pub(super) struct CheckedUnit<'a> {
     pub(super) prompt_module: Option<crate::modules::ModuleId>,
-    pub(super) literal_sites: LiteralSites,
     pub(super) source: Option<module_source::CheckedFile>,
     pub(super) functions: Option<&'a super::CheckedFunctions>,
     // A declaration belongs to the selected name and origin, even when another
