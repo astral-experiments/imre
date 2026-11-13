@@ -1451,10 +1451,7 @@ fn lower_graph(
             && ((signature.returns == Type::None
                 && definition.returns.is_some()
                 && !signature.params.is_empty()
-                && signature
-                    .params
-                    .iter()
-                    .all(|p| p.ty.is_format_scalar() || p.ty == Type::Path)
+                && signature.parameter_declarations.len() == signature.params.len()
                 && signature.parameter_declarations.iter().all(Option::is_some))
                 || (definition.returns.is_none()
                     && inference.has_inferred_protocol_argument(signature, &types)))
