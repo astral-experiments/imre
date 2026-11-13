@@ -49,6 +49,37 @@ def check():
 check()
 
 
+def check_finalizer_owner():
+    import gc
+
+    finalized = []
+
+    class Owned(Receiver):
+        def __del__(self):
+            finalized.append(_thread.get_native_id())
+
+    gate = _thread.allocate_lock()
+    gate.acquire()
+    worker = threading.Thread(target=Owned(gate).task)
+    try:
+        worker.start()
+    except NotImplementedError:
+        assert worker.ident is None and worker.native_id is None
+        assert not finalized
+        del worker._target
+        gc.collect()
+        assert finalized == [_thread.get_native_id()]
+    else:
+        gate.release()
+        worker.join(3)
+        assert not worker.is_alive()
+        gc.collect()
+        assert finalized == [worker.native_id]
+
+
+check_finalizer_owner()
+
+
 def acquire(self, alias, *, done):
     self.acquire(False)
     if alias.locked():

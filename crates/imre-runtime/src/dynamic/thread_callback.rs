@@ -63,6 +63,11 @@ impl Callback {
             } => (callable, Some(receiver)),
             _ => (target, None),
         };
+        // The worker cannot run Python when it drops this bound method's receiver.
+        // Reaping its last reference on the creator would invoke __del__ there.
+        if receiver.is_some_and(|id| ctx.heap.is_pending_finalizer(id)) {
+            return Ok(None);
+        }
         let Value::Function {
             code: code_id,
             ref fields,
