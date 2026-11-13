@@ -3486,21 +3486,25 @@ impl SourceScope<'_> {
             }
             return Ok(true);
         }
-        let lower = |scope: &mut Self| {
+        let start = body.len();
+        body.push(checkpoint(stmt));
+        let mut lower = |scope: &mut Self| {
             statements::StatementLowering::source_statement(
                 scope,
                 stmt,
                 matches!(scope.kind, RegisteredScope::Module),
+                body,
             )
         };
-        let (lowered, continues) = if stmt.is_aug_assign_stmt() {
+        let result = if stmt.is_aug_assign_stmt() {
             self.with_suspending_operands(lower)
         } else {
             lower(self)
-        }?;
-        body.push(checkpoint(stmt));
-        body.extend(lowered);
-        Ok(continues)
+        };
+        if result.is_err() {
+            body.truncate(start);
+        }
+        result
     }
 
     fn suite(&mut self, stmts: &[ast::Stmt]) -> StdResult<Vec<Statement>, ()> {

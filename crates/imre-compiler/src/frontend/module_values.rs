@@ -897,7 +897,7 @@ impl Initialization {
                     }
                 }
             } else {
-                let (checked, falls_through) = checker.statement(statement)?;
+                let falls_through = checker.statement(statement, &mut body)?;
                 // An imported module's __main__ block must type-check, but it
                 // cannot read definitions that are still being initialized.
                 if checker.module != checker.graph.entry
@@ -905,10 +905,10 @@ impl Initialization {
                     && inactive_main_guard(statement)
                 {
                     checker.class_reads.get_mut().clear();
+                    body.truncate(start);
                     continue;
                 }
                 checker.reachable &= falls_through;
-                body.extend(checked);
             }
             if checker.fault_enabled() && body.len() > start {
                 body.insert(start, checker.fault_line(statement));

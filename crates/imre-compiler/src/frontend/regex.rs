@@ -114,13 +114,14 @@ impl Checker<'_> {
     pub(super) fn remember_regex_assignment(
         &mut self,
         stmt: &ast::Stmt,
-        lowered: &mut Vec<Statement>,
+        body: &mut Vec<Statement>,
+        start: usize,
         later: &[ast::Stmt],
     ) {
         if self.block_depth != 1 || self.module_scope {
             return;
         }
-        let [Statement::Assign(slot, value)] = lowered.as_slice() else {
+        let [Statement::Assign(slot, value)] = &body[start..] else {
             return;
         };
         let dictionary = matches!(value.kind, ExprKind::Builtin(Builtin::RegexGroupDict, _));
@@ -213,7 +214,8 @@ impl Checker<'_> {
         // Repeated reads observe the same captured string. The original match
         // local may be rebound, and this assignment may displace a previous dict.
         captures.extend([Statement::Clear(matched), Statement::Clear(slot)]);
-        *lowered = captures;
+        body.truncate(start);
+        statements::append_block(body, captures);
         self.regex_fields.insert(slot, fields);
     }
 
