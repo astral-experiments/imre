@@ -5712,11 +5712,7 @@ impl Emitter<'_, '_> {
                 )),
                 small_integer: false,
             },
-            Builtin::GlobalGet(slot) => {
-                let value = self.borrow_global(*slot, returns);
-                self.retain(&value);
-                value
-            }
+            Builtin::GlobalGet(_) => unreachable!("the checked body emits name reads"),
             Builtin::GlobalSet(slot) => {
                 let name = self.output.global_ref(format!("module_value_{slot}"));
                 let value = &args[0].value;

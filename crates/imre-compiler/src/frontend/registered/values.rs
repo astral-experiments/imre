@@ -1082,12 +1082,7 @@ pub(super) fn operation<E>(
         {
             value
         }
-        ast::Expr::Name(name) => {
-            return Ok(Some(attribute.map_or_else(
-                || name_binding(&name.id),
-                |op| super::operation(*op, Type::PythonObject, vec![]),
-            )));
-        }
+        ast::Expr::Name(name) => return Ok(Some(name_binding(&name.id))),
         ast::Expr::NumberLiteral(lit) => number_literal(&lit.value, false),
         ast::Expr::StringLiteral(lit) => {
             return Ok(Some(
@@ -1532,9 +1527,7 @@ impl Checker<'_> {
         let class = self.class;
         let mut live_receiver = false;
         let attribute = self.settled_attributes.as_deref_mut().and_then(|sites| {
-            if !matches!(node, ast::Expr::Name(_) | ast::Expr::Attribute(_)) {
-                return None;
-            }
+            let field = node.as_attribute_expr()?;
             let FixedAttribute::Operation {
                 operation,
                 position,
@@ -1543,21 +1536,15 @@ impl Checker<'_> {
                 return None;
             };
             // A rewritten operand can inherit a physical range under a different name.
-            let (token, start, name) = match (node, &*operation) {
-                (ast::Expr::Name(id), Builtin::RegisteredName(name)) => {
-                    (id.id.as_str(), id.start(), name)
-                }
-                (
-                    ast::Expr::Attribute(field),
-                    Builtin::RegisteredAttribute {
-                        action: ir::AttributeAction::Load,
-                        name,
-                        ..
-                    },
-                ) => (field.attr.as_str(), field.attr.start(), name),
-                _ => return None,
+            let Builtin::RegisteredAttribute {
+                action: ir::AttributeAction::Load,
+                name,
+                ..
+            } = &*operation
+            else {
+                return None;
             };
-            (position == start && name == token).then_some(operation)
+            (position == field.attr.start() && name == field.attr.as_str()).then_some(operation)
         });
         let Some(mut value) = operation(
             node,

@@ -850,6 +850,34 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         self.emit_operation(expr, OperationSite::Unlocated, usage)
     }
 
+    /// A fixed module slot and its placed Python spelling describe the same source read.
+    /// Only the native representation can retain the value directly from that slot.
+    fn read_name(&mut self, binding: &Builtin, ty: Type, site: OperationSite) -> CheckedValue {
+        let name = match binding {
+            Builtin::GlobalGet(slot) => match &mut self.0 {
+                Entry::Native(emitter) => {
+                    let value = emitter.borrow_global(*slot, ty);
+                    emitter.retain(&value);
+                    return CheckedValue::owned(value);
+                }
+                Entry::Registered(frame) => {
+                    let OperationSite::Placed(range) = site else {
+                        unreachable!("registered module slot requires a lexical binding")
+                    };
+                    let Some(crate::frontend::FixedAttribute::ModuleName(name)) =
+                        frame.fixed_attribute(range)
+                    else {
+                        unreachable!("placed module slot keeps its spelling")
+                    };
+                    name.as_str()
+                }
+            },
+            Builtin::RegisteredName(name) => name,
+            _ => unreachable!("checked name read"),
+        };
+        CheckedValue::handle(self.python().lookup(name))
+    }
+
     fn emit_operation(
         &mut self,
         expr: &Expr,
@@ -924,6 +952,10 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 Entry::Native(_) => CheckedValue::owned(none()),
                 Entry::Registered(_) => CheckedValue::handle("0".into()),
             },
+            ExprKind::Builtin(
+                binding @ (Builtin::GlobalGet(_) | Builtin::RegisteredName(_)),
+                args,
+            ) if args.is_empty() => self.read_name(binding, expr.ty, site),
             ExprKind::Local(slot) => match &mut self.0 {
                 Entry::Native(emitter) => {
                     CheckedValue::owned(emitter.load(*slot, emitter.ranges.integer(expr).is_some()))
