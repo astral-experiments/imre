@@ -549,12 +549,22 @@ unsafe fn apply_order(values: *const (), element_kind: u32, order: &mut [usize])
     }
 }
 
-fn string_buffer(length: Option<usize>) -> Option<Str> {
-    let buffer = length.and_then(|length| Str::try_with_capacity(length).ok());
-    if buffer.is_none() {
-        super::exceptions::sequence_allocation_failed();
+/// Join validated UTF-8 string payloads in their original order.
+pub(crate) fn join_utf8<'a>(
+    separator: &str,
+    content_bytes: Option<usize>,
+    parts: impl ExactSizeIterator<Item = &'a str>,
+) -> Option<Str> {
+    let separators = separator.len().checked_mul(parts.len().saturating_sub(1))?;
+    let length = separators.checked_add(content_bytes?)?;
+    let mut result = Str::try_with_capacity(length).ok()?;
+    for (index, part) in parts.enumerate() {
+        if index != 0 {
+            result.push_str(separator);
+        }
+        result.push_str(part);
     }
-    buffer
+    Some(result)
 }
 
 /// Joins an exact string sequence, retaining a single item without copying it.
@@ -585,23 +595,17 @@ pub unsafe extern "C" fn imre_str_join(separator: *const Str, values: *const Obj
                 StrOwner::increment_strong_count(value);
                 return value;
             }
-            let length = separator
-                .len()
-                .checked_mul(values.values.len().saturating_sub(1))
-                .and_then(|separators| {
-                    values.values.iter().try_fold(separators, |length, &word| {
-                        length.checked_add((&*(word as *const Str)).len())
-                    })
-                });
-            let Some(mut result) = string_buffer(length) else {
+            let parts = values
+                .values
+                .iter()
+                .map(|&word| (&*(word as *const Str)).as_str());
+            let content_bytes = parts
+                .clone()
+                .try_fold(0usize, |length, part| length.checked_add(part.len()));
+            let Some(result) = join_utf8(separator, content_bytes, parts) else {
+                super::exceptions::sequence_allocation_failed();
                 return std::ptr::null();
             };
-            for (index, &word) in values.values.iter().enumerate() {
-                if index != 0 {
-                    result.push_str(separator);
-                }
-                result.push_str(&*(word as *const Str));
-            }
             StrOwner::try_new(result).map_or_else(
                 |_| Error::memory_error().returning(std::ptr::null()),
                 StrOwner::into_raw,

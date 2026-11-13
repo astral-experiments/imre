@@ -2403,6 +2403,7 @@ fn join_strings(ctx: &mut Context, receiver: Id, values: JoinInput<'_>) -> Resul
             }
         },
     };
+    let mut content_bytes = Some(0usize);
     let mut surrogate = matches!(
         ctx.heap.get(ctx.scalar_value(receiver)),
         Value::SurrogateStr(_)
@@ -2419,7 +2420,11 @@ fn join_strings(ctx: &mut Context, receiver: Id, values: JoinInput<'_>) -> Resul
         if values.len() == 1 {
             return Ok(storage);
         }
-        surrogate |= matches!(ctx.heap.get(storage), Value::SurrogateStr(_));
+        if let Value::Str(text) = ctx.heap.get(storage) {
+            content_bytes = content_bytes.and_then(|length| length.checked_add(text.len()));
+        } else {
+            surrogate = true;
+        }
     }
     if surrogate {
         let sep = ctx.string_codepoints(receiver)?;
@@ -2440,28 +2445,14 @@ fn join_strings(ctx: &mut Context, receiver: Id, values: JoinInput<'_>) -> Resul
         return Ok(ctx.text_codepoints(output));
     }
     let sep = ctx.str_value(receiver)?;
-    let mut length = sep
-        .len()
-        .checked_mul(values.len().saturating_sub(1))
-        .ok_or_else(crate::Error::memory_error)?;
-    for &item in values {
-        length = length
-            .checked_add(ctx.str_value(item)?.len())
-            .ok_or_else(crate::Error::memory_error)?;
-    }
-    if length == 0 && sep.is_empty() {
+    if content_bytes == Some(0) && sep.is_empty() {
         return Ok(ctx.string_storage(receiver).unwrap());
     }
-    let mut output = String::new();
-    output
-        .try_reserve_exact(length)
-        .map_err(|_| crate::Error::memory_error())?;
-    for (index, &item) in values.iter().enumerate() {
-        if index != 0 {
-            output.push_str(sep);
-        }
-        output.push_str(ctx.str_value(item)?);
-    }
+    let parts = values
+        .iter()
+        .map(|&item| ctx.str_value(item).expect("validated UTF-8 string"));
+    let output = crate::objects::join_utf8(sep, content_bytes, parts)
+        .ok_or_else(crate::Error::memory_error)?;
     Ok(ctx.text(output))
 }
 
