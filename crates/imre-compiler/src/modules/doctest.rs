@@ -443,10 +443,10 @@ fn case_program(
     modules: &[SourceModule],
 ) -> Result<String, String> {
     let mut header = String::from(
-        "from doctest import DocTest, _checked_example, _check_example, _optionflags, _exception_line\nfrom _imre_doctest import display as _imre_display, capture_start as _imre_begin, capture_take as _imre_take\n",
+        "from doctest import DocTest, OutputChecker as _imre_OutputChecker, SKIP as _imre_SKIP, REPORT_ONLY_FIRST_FAILURE as _imre_FIRST, FAIL_FAST as _imre_FAIL_FAST, _checked_example, _check_output as _imre_check, _optionflags, _exception_line\nfrom _imre_doctest import display as _imre_display, capture_start as _imre_begin, capture_take as _imre_take\n",
     );
     let mut body = String::from(
-        "\ndef _run_case(_imre_test: DocTest, _imre_debug: bool) -> None:\n    _imre_failures: list[str] = []\n",
+        "\ndef _run_case(_imre_test: DocTest, _imre_debug: bool, _imre_optionflags: int, _imre_checker: _imre_OutputChecker) -> int:\n    _imre_failures: list[str] = []\n    _imre_attempted = 0\n    _imre_flags = _imre_optionflags\n",
     );
     let mut names = HashSet::new();
     let mut imports = Vec::new();
@@ -498,7 +498,7 @@ fn case_program(
             n.starts_with("_imre_")
                 || matches!(
                     n.as_str(),
-                    "_check_example" | "_checked_example" | "_exception_line" | "_optionflags"
+                    "_checked_example" | "_exception_line" | "_optionflags"
                 )
         }) {
             return Err(format!(
@@ -518,21 +518,11 @@ fn case_program(
             serde_json::to_string(source).unwrap()
         )
         .unwrap();
-        let pad = if has_directive {
-            body.push_str("    if not _optionflags(_imre_ex) & 16:\n");
-            "        "
-        } else {
-            "    "
-        };
-        writeln!(
-            body,
-            "{pad}_imre_error = \"\"\n{pad}_imre_begin()\n{pad}try:"
-        )
-        .unwrap();
+        body.push_str("    _imre_quiet = (_imre_flags & _imre_FIRST) != 0 if _imre_failures else False\n    _imre_flags = _optionflags(_imre_ex, _imre_optionflags)\n    if not _imre_flags & _imre_SKIP:\n        _imre_attempted += 1\n        _imre_error = \"\"\n        _imre_begin()\n        try:\n");
         for line in code.lines() {
-            writeln!(body, "{pad}    {line}").unwrap();
+            writeln!(body, "            {line}").unwrap();
         }
-        writeln!(body,"{pad}except Exception as _imre_exc:\n{pad}    _imre_error = _exception_line(_imre_exc)\n{pad}finally:\n{pad}    _imre_got = _imre_take()\n{pad}_check_example(_imre_test, _imre_ex, _imre_got, _imre_error, _imre_failures, _imre_debug)").unwrap();
+        body.push_str("        except Exception as _imre_exc:\n            _imre_error = _exception_line(_imre_exc)\n        finally:\n            _imre_got = _imre_take()\n        _imre_check(_imre_test, _imre_ex, _imre_got, _imre_error, _imre_failures, _imre_debug, _imre_checker, _imre_flags, _imre_quiet)\n        if _imre_failures and _imre_flags & _imre_FAIL_FAST:\n            raise AssertionError(\"\\n\".join(_imre_failures))\n");
     }
     // DocTestFinder starts a case with a shallow copy of its module namespace.
     // Resolve used globals there, including the public owner of a documented
@@ -576,7 +566,7 @@ fn case_program(
         }
     }
     body.push_str(
-        "    if _imre_failures:\n        raise AssertionError(\"\\n\".join(_imre_failures))\n",
+        "    if _imre_failures:\n        raise AssertionError(\"\\n\".join(_imre_failures))\n    return _imre_attempted\n",
     );
     header.push_str(&body);
     Ok(header)
@@ -690,8 +680,8 @@ impl Loader<'_> {
             self.needs_object_imports = true;
             return Ok(targets);
         }
-        let mut source = String::from("from doctest import DocTest\n");
-        let mut body = String::from("\ndef _execute(test: DocTest, debug: bool) -> None:\n");
+        let mut source = String::from("from doctest import DocTest, OutputChecker, SKIP, _optionflags\nfrom unittest import SkipTest\n");
+        let mut body = String::from("\ndef _execute(test: DocTest, debug: bool, optionflags: int = 0, checker: OutputChecker | None = None) -> None:\n    if checker is None:\n        checker = OutputChecker()\n    if not test.examples:\n        attempted = 0\n");
         for (i, (name, (prompts, context))) in cases.into_iter().enumerate() {
             let module = format!("{CASE_PREFIX}{i}");
             let program = case_program(&name, &prompts, context, &self.modules)?;
@@ -700,12 +690,12 @@ impl Loader<'_> {
             writeln!(source, "from {module} import _run_case as _case_{i}").unwrap();
             writeln!(
                 body,
-                "    if test.name == {}:\n        _case_{i}(test, debug)\n        return",
+                "    elif test.name == {}:\n        attempted = _case_{i}(test, debug, optionflags, checker)",
                 serde_json::to_string(&name).unwrap()
             )
             .unwrap();
         }
-        body.push_str("    raise ValueError(\"no native doctest compiled for \" + test.name)\n");
+        body.push_str("    else:\n        for example in test.examples:\n            if not _optionflags(example, optionflags) & SKIP:\n                raise ValueError(\"no native doctest compiled for \" + test.name)\n        attempted = 0\n    if not attempted and not debug:\n        raise SkipTest(\"all examples were skipped\")\n");
         source.push_str(&body);
         self.add_doctest_module(RUNNER_MODULE.into(), &source)?;
         Ok(Vec::new())

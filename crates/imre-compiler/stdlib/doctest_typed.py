@@ -2,17 +2,6 @@ class DocTestCase(_DocTestCase):
     pass
 
 
-def _execute_case(case: _DocTestCase, debug: bool) -> None:
-    test = case._dt_test
-    if not debug:
-        for example in test.examples:
-            if not _optionflags(example) & SKIP:
-                break
-        else:
-            raise unittest.SkipTest("all examples were skipped")
-    execute(test, debug)
-
-
 def _checked_example(test: DocTest, index: int, source: str) -> Example:
     example = test.examples[index]
     if example.source != source:

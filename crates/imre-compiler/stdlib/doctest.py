@@ -277,12 +277,6 @@ def _example_location(test: DocTest, example: Example) -> str:
     return f"Line {example.lineno + 1}, in {test.name}"
 
 
-def _check_example(test: DocTest, example: Example, got: str, error: str,
-                   failures: list[str], debug: bool) -> None:
-    _check_output(test, example, got, error,
-                  failures, debug, OutputChecker(), _optionflags(example))
-
-
 def _strip_exception_details(message: str) -> str:
     return message.partition("\n")[0].partition(":")[0].split(".")[-1]
 
@@ -337,9 +331,14 @@ class _DocTestCase(unittest.TestCase):
     _dt_tearDown = None
     _dt_test: DocTest
     _dt_globs: dict[str, object]
+    _dt_optionflags: int
+    _dt_checker: OutputChecker | None
 
-    def __init__(self, test: DocTest) -> None:
+    def __init__(self, test: DocTest, optionflags: int = 0, *,
+                 checker: OutputChecker | None = None) -> None:
         super().__init__()
+        self._dt_optionflags = optionflags
+        self._dt_checker = checker
         self._dt_test = test
         self._dt_globs = {}
 
@@ -369,9 +368,9 @@ class _DocTestCase(unittest.TestCase):
         return 1
 
     def runTest(self) -> None:
-        _execute_case(self, False)
+        execute(self._dt_test, False, self._dt_optionflags, self._dt_checker)
 
     def debug(self) -> None:
         self.setUp()
-        _execute_case(self, True)
+        execute(self._dt_test, True, self._dt_optionflags, self._dt_checker)
         self.tearDown()

@@ -139,15 +139,9 @@ del _DocTestCase._dt_setUp, _DocTestCase._dt_tearDown
 
 class DocTestCase(_DocTestCase):
     def __init__(self, test, optionflags=0, setUp=None, tearDown=None, checker=None):
-        super().__init__(test)
-        self._dt_optionflags = optionflags
-        self._dt_checker = checker
+        super().__init__(test, optionflags, checker=checker)
         self._dt_setUp = setUp
         self._dt_tearDown = tearDown
-
-
-def _execute_case(case, debug):
-    execute(case._dt_test, debug, case._dt_optionflags, case._dt_checker)
 
 
 class DocFileCase(DocTestCase):
