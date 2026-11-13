@@ -338,8 +338,6 @@ impl Emitter<'_, '_> {
                     PathOperation::Scripts => "imre_sysconfig_scripts",
                     PathOperation::Absolute => "imre_path_absolute",
                     PathOperation::New => "imre_path_new",
-                    PathOperation::Join => "imre_path_join",
-                    PathOperation::JoinObject => "imre_path_join_object",
                     PathOperation::AsPosix => "imre_path_as_posix",
                     PathOperation::Text => "imre_path_text",
                     PathOperation::Info => "imre_path_info",

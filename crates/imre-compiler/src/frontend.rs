@@ -7951,7 +7951,11 @@ impl<'a> Checker<'a> {
             right = Self::string_value(right);
         }
         if binary.op == ast::Operator::Div && (left.ty.is_path() || right.ty.is_path()) {
-            return self.path_join(left, right, binary);
+            let value = self.path_join(left, right, binary)?;
+            if let Some(sites) = &mut self.fixed_sites {
+                sites.checked_expression(binary.range(), &value);
+            }
+            return Ok(value);
         }
         if binary.op == ast::Operator::Add && self.types.element(left.ty).is_some() {
             if matches!(&left.kind, ExprKind::List(items) if items.is_empty())

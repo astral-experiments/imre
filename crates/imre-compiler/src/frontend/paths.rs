@@ -16,6 +16,13 @@ pub(super) fn operation(kind: PathOperation, ty: Type, args: Vec<Expr>) -> Expr 
     }
 }
 
+fn joined(left: Expr, right: Expr) -> Expr {
+    Expr {
+        ty: left.ty,
+        kind: ExprKind::Binary(Binary::Divide, Box::new(left), Box::new(right)),
+    }
+}
+
 /// A raw binary mode contains one access letter, one b and an optional +.
 pub(super) fn is_raw_binary_mode(mode: &str) -> bool {
     let mode = mode.as_bytes();
@@ -198,27 +205,20 @@ impl Checker<'_> {
         } else {
             let first = self.path_text(left, node)?;
             if let Type::PurePath(flavor) = right.ty {
-                operation(
-                    PathOperation::Join,
-                    right.ty,
-                    vec![
-                        operation(PathOperation::PureNew(flavor), right.ty, vec![]),
-                        first,
-                    ],
+                joined(
+                    operation(PathOperation::PureNew(flavor), right.ty, vec![]),
+                    first,
                 )
             } else {
                 operation(PathOperation::New, Type::Path, vec![first])
             }
         };
-        let ty = left.ty;
-        if right.ty.is_path() {
-            return Ok(operation(PathOperation::JoinObject, ty, vec![left, right]));
-        }
-        Ok(operation(
-            PathOperation::Join,
-            ty,
-            vec![left, self.path_text(right, node)?],
-        ))
+        let right = if right.ty.is_path() {
+            right
+        } else {
+            self.path_text(right, node)?
+        };
+        Ok(joined(left, right))
     }
 
     pub(super) fn path_attribute(
@@ -964,7 +964,7 @@ impl Checker<'_> {
                 text
             } else if let Type::PurePath(flavor) = ty {
                 let base = operation(PathOperation::PureNew(flavor), ty, vec![]);
-                operation(PathOperation::Join, ty, vec![base, text])
+                joined(base, text)
             } else {
                 operation(PathOperation::New, Type::Path, vec![text])
             }
