@@ -611,13 +611,16 @@ imre --include-module tests.test_rates -m unittest discover -s tests -t . -p 'te
 
 For a larger suite, repeat `--include-module` for each module that discovery will import by name. Declaring a package links its initializer. Its ordinary imports follow the usual dependency rules.
 
-Use `--extension-path DIRECTORY` to add an import root to `imre check` or `imre build`. For example, if `build/site` contains `packaging/__init__.py` and `packaging/version.py`, build a caller of `packaging.version` with:
+To build an application that uses a pure-Python wheel, install the dependency in a directory and pass that directory to `imre build`. For example, a caller of `packaging.version` can use:
 
 ```sh
+python -m pip install --target build/site packaging
 imre build main.py --extension-path build/site -o app
 ```
 
-The build follows the imported Python modules and links their code into the executable. In this example, the executable can import `packaging.version` after `build/site` is removed. Supply the option again for another root. After the explicit roots, `imre check`, `imre build`, and `imre run` search the directories and ZIP archives on `PYTHONPATH`. A filename launch uses the same search order unless `-E` or `-I` disables the Python environment. For native modules, install the typed declarations and compiled archive from an [Imre extension wheel](extensions.md) in a declared directory.
+The build follows the imports and links the selected Python code into the executable. In this example, the executable can import `packaging.version` after `build/site` is removed. Compiled directory modules retain their build-time origins. When a program changes `sys.path`, the import finder searches the active entries in order. Ship any files the application reads, including package resources and distribution metadata, at the locations its loaders use. For example, HTTPX can use the linked `certifi` package while still requiring `certifi/cacert.pem` under the declared installation directory.
+
+Repeat `--extension-path` for additional roots. After the explicit roots, `imre check`, `imre build`, and `imre run` search the directories and ZIP archives on `PYTHONPATH`. A filename launch uses the same search order unless `-E` or `-I` disables the Python environment. When a wheel archive itself is an import root, the ZIP loader reads its directory and selected Python member at runtime. Keep the archive at its registered path so the loader can match that member's bytes to the compiled code. For native modules, install the typed declarations and compiled archive from an [Imre extension wheel](extensions.md) in a declared directory.
 
 An imported Python module may check its identity before other imports, for example
 `if __name__ != "pkg.helper": raise ValueError("unexpected module name")`.

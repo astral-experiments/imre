@@ -139,7 +139,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `weakref` | Yes | Callback-free proxy for source-defined records, including cached identity, attribute and call forwarding, and ReferenceError after the referent is released. [Evidence](../tests/fixtures/classes/weak_proxy.py) | — | — | — |
 | `xml` | Yes | No API example recorded. | — | — | — |
 | `zipfile` | Yes | Read stored and deflated members and report CRC failures. [Evidence](../benchmarks/cpython_stdlib/native_zip_members.py) | — | — | — |
-| `zipimport` | Yes | Read stored and deflated resources with `zipimporter.get_data()`. Importing Python modules from ZIP paths is unsupported. [Evidence](../tests/fixtures/files/zipimport_resources.py) | — | — | — |
+| `zipimport` | Yes | Read stored and deflated resources with `zipimporter.get_data()`. The Python import loader can run a compiled module when its ZIP origin and source bytes match the build. [Resource test](../tests/fixtures/files/zipimport_resources.py) · [Import tests](../tests/python_cli.py) | — | — | — |
 | `zlib` | Yes | `adler32` computes an unsigned checksum of bytes with an optional integer seed. Compressed-input failures preserve the `error` exception. [Evidence](../tests/fixtures/bytes/zlib_adler32.py) | — | — | — |
 | `zoneinfo` | Yes | No API example recorded. | — | — | — |
 
