@@ -15,6 +15,7 @@ pub(crate) enum Kind {
     Ordinary,
     UnsupportedRepresentation,
     GeneratorSuspension,
+    AsyncComprehension,
     UnresolvedParameter(ModuleId, ruff_text_size::TextSize),
     ExecutionOperand(ModuleId),
     RegisteredExecution,

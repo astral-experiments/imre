@@ -174,13 +174,22 @@ impl Checker<'_> {
         run: bool,
         site: &impl Ranged,
     ) -> Result<Expr, String> {
-        let result = self.types.awaited(value.ty).ok_or_else(|| {
-            error(
-                self.source,
-                site,
-                "await requires a typed coroutine or task",
-            )
-        })?;
+        let python_frame = !run && self.registered_local_start.is_some();
+        let operand = if python_frame { value.checked_operand_type() } else { value.ty };
+        let result = if python_frame && operand == Type::PythonObject {
+            Type::PythonObject
+        } else {
+            self.types.awaited(operand).ok_or_else(|| {
+                error(
+                    self.source,
+                    site,
+                    "await requires a typed coroutine or task",
+                )
+            })?
+        };
+        if python_frame {
+            return Ok(registered::suspend(ir::SuspendValue::Await, site.range(), value));
+        }
         Ok(operation(
             if run { Op::RunLoop } else { Op::Await },
             result,

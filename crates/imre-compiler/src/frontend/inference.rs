@@ -396,7 +396,7 @@ pub(super) struct Solution {
     pub(super) registered_parameters: HashMap<usize, Diagnostic>,
     /// Definitions checked to completion with the final input and return types.
     pub(super) checked_bodies: HashSet<usize>,
-    pub(super) registered_generators: HashSet<usize>,
+    pub(super) suspended_bodies: HashSet<usize>,
     pub(super) needs_registered_entry: bool,
 }
 
@@ -612,13 +612,13 @@ impl Inference {
         self.pending.borrow()[id].params[index]
     }
 
-    pub(super) fn learn_parameter(&self, id: usize, index: usize, ty: Type) {
+    pub(super) fn learn_parameter(&self, id: usize, index: usize, ty: Type) -> Type {
         let mut pending = self.pending.borrow_mut();
         let slot = &mut pending[id].params[index];
-        if slot.is_none() {
-            *slot = Some(ty);
+        *slot.get_or_insert_with(|| {
             self.revision.set(self.revision.get() + 1);
-        }
+            ty
+        })
     }
 
     /// The default None establishes absence, not the payload type of supplied arguments.
@@ -862,7 +862,7 @@ impl Inference {
         }
         let mut registered = HashMap::new();
         let mut checked_bodies = HashSet::new();
-        let mut registered_generators = HashSet::new();
+        let mut suspended_bodies = HashSet::new();
         let mut method_returns = HashMap::new();
         let mut checked_before_registration = HashSet::new();
         let unshadowed_builtin = |module: ModuleId, name: &str| {
@@ -925,6 +925,7 @@ impl Inference {
                 }
             }
             for (module, function, signature) in definitions.iter() {
+                let physical = matches!(function, Cow::Borrowed(_));
                 let function = function.as_ref();
                 if graph.modules[*module].archive.is_some() {
                     continue; // Native declarations must be fully annotated.
@@ -963,7 +964,7 @@ impl Inference {
                     continue;
                 }
                 if (before == self.revision.get() && previous_checks.contains(&signature.id))
-                    || registered_generators.contains(&signature.id)
+                    || suspended_bodies.contains(&signature.id)
                 {
                     checked_bodies.insert(signature.id);
                     continue;
@@ -1093,7 +1094,7 @@ impl Inference {
                     checked_bodies.clear();
                     checked_revision = revision;
                 }
-                if let Err(diagnostic) = checker.finish_region(result) {
+                if let Err(mut diagnostic) = checker.finish_region(result) {
                     // A completed return check can still require Python operations. Only the
                     // registered frame may own that body, after its ordinary source check.
                     if checked_return
@@ -1119,15 +1120,35 @@ impl Inference {
                             self.revision.set(self.revision.get() + 1);
                         }
                     }
-                    if matches!(&diagnostic, Failure::Diagnostic(report) if report.kind == Kind::GeneratorSuspension)
-                        && signature.method.is_none()
-                        && registered::retain_generator(
-                            graph,
-                            owners[signature.id],
-                            &self.source_checks,
-                        )
-                    {
-                        registered_generators.insert(signature.id);
+                    let retained = match &diagnostic {
+                        Failure::Diagnostic(report) if signature.method.is_none() => {
+                            match report.kind {
+                                Kind::GeneratorSuspension => registered::retain_generator(
+                                    graph,
+                                    owners[signature.id],
+                                    &self.source_checks,
+                                ),
+                                Kind::AsyncComprehension
+                                    if graph.modules[*module].is_program_source()
+                                        && physical =>
+                                {
+                                    match registered::place_checked_definition(
+                                        &checker, function, signature, self,
+                                    ) {
+                                        Ok(body) => body.is_some(),
+                                        Err(reason) => {
+                                            diagnostic = reason;
+                                            false
+                                        }
+                                    }
+                                }
+                                _ => false,
+                            }
+                        }
+                        _ => false,
+                    };
+                    if retained {
+                        suspended_bodies.insert(signature.id);
                         checked_bodies.insert(signature.id);
                         if infer_return {
                             self.pending.borrow_mut()[signature.id].returns =
@@ -1443,8 +1464,8 @@ impl Inference {
                 self.update(signature);
             }
         }
-        let needs_registered_entry = !registered_generators.is_empty()
-            || signatures.values().any(Signature::registered_frame);
+        let needs_registered_entry =
+            !suspended_bodies.is_empty() || signatures.values().any(Signature::registered_frame);
         // Registered captures use the complete unchanged round. A failed fixed
         // initializer can keep independent checks. Its callee and wrapper facts
         // must still be published by the ordinary fixed pass.
@@ -1461,7 +1482,7 @@ impl Inference {
             method_returns,
             registered_parameters: registered,
             checked_bodies,
-            registered_generators,
+            suspended_bodies,
             needs_registered_entry,
         })
     }
@@ -1563,7 +1584,7 @@ impl Checker<'_> {
     }
 
     /// The caller needs the return layout only after evaluating its arguments.
-    fn enter_source_call(
+    pub(super) fn enter_source_call(
         &mut self,
         call: &ast::ExprCall,
         signature: &Signature,

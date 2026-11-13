@@ -242,6 +242,10 @@ pub(crate) fn frame_inputs(
                 protocol_reads += values.iter().map(&protocol_parameter).sum::<usize>();
                 true
             }
+            ExprKind::Builtin(Builtin::RegisteredSuspend(ir::SuspendValue::Await, _), args) => {
+                uses_python_protocol = true;
+                args.len() == 1
+            }
             ExprKind::Builtin(Builtin::RegisteredSpread, args) => args.len() == 1,
             ExprKind::Builtin(Builtin::RegisteredAssertionFailure { .. }, args) => {
                 expr.ty == Type::None && args.len() <= 1

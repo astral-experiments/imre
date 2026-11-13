@@ -1154,7 +1154,7 @@ fn lower_graph(
         registered_parameters,
         method_returns,
         mut checked_bodies,
-        registered_generators,
+        suspended_bodies,
         needs_registered_entry,
     } = inference.solve(
         graph,
@@ -1372,7 +1372,7 @@ fn lower_graph(
             check_siblings
         };
         let original = registered_parameters.get(&signature.id);
-        if registered_generators.contains(&signature.id) {
+        if suspended_bodies.contains(&signature.id) {
             continue;
         }
         let accepted = signature.registered_frame()
@@ -1464,6 +1464,8 @@ fn lower_graph(
                     && inference.has_inferred_protocol_argument(signature, &types)))
         {
             registered::place_checked_definition(&checker, definition, signature, &inference)
+                .ok()
+                .flatten()
                 .map(|body| (body, Default::default()))
                 .map_or_else(|| lower_body(checker, definition, signature), Ok)
         } else if named_function
@@ -2072,7 +2074,9 @@ fn lower_function(
                         return false;
                     }
                     placed =
-                        registered::place_checked_definition(cx, definition, signature, inference);
+                        registered::place_checked_definition(cx, definition, signature, inference)
+                            .ok()
+                            .flatten();
                     placed.is_some()
                 }),
             )
