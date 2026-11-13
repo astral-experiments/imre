@@ -1,8 +1,38 @@
 use super::CheckedSites;
-use super::{FrameOwner, Output, RegisteredBody, RegisteredFrame, SourcePositions};
+use super::{Output, PreparedSuiteEmitter, RegisteredBody, RegisteredFrame, SourcePositions};
 use crate::modules::SourceGraph;
 use ruff_text_size::{TextRange, TextSize};
 use std::path::Path;
+
+/// Isolated writer tests supply their completed sites without compiling a source module.
+pub(crate) struct TestFrame<'f, 'a, 'p>(
+    pub(crate) &'f mut RegisteredFrame<'a, 'p>,
+    pub(crate) CheckedSites,
+);
+
+impl<'a, 'p> std::ops::Deref for TestFrame<'_, 'a, 'p> {
+    type Target = RegisteredFrame<'a, 'p>;
+    fn deref(&self) -> &Self::Target {
+        self.0
+    }
+}
+
+impl std::ops::DerefMut for TestFrame<'_, '_, '_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.0
+    }
+}
+
+impl<'a, 'p> PreparedSuiteEmitter<'a, 'p> for TestFrame<'_, 'a, 'p> {
+    fn frame_and_sites(&mut self) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites) {
+        (self.0, &self.1)
+    }
+    fn place_operand(&mut self, _: &crate::ir::Expr) {}
+    fn place_definition(&mut self, _: TextSize) {
+        panic!("source definition requested in isolated writer test")
+    }
+    fn place_statement(&mut self, _: &crate::ir::Statement) {}
+}
 
 #[test]
 fn frame_diagnostics_use_the_original_path_and_byte_columns() {
@@ -31,8 +61,7 @@ fn emit_registered_body(source: &str, function: &crate::frontend::RegisteredFunc
     let file = output.data(b"app.py");
     let positions = SourcePositions::new(Path::new("app.py"), source, &file);
     let mut frame = RegisteredFrame::new(&mut output, &positions, false, 0, 0.into());
-    RegisteredBody::Function(function)
-        .emit_on(FrameOwner::Registered(&mut frame, &CheckedSites::default()));
+    RegisteredBody::Function(function).emit(&mut TestFrame(&mut frame, CheckedSites::default()));
     frame.finish_callable(None);
     output
 }
@@ -437,8 +466,7 @@ fn placed_arithmetic_keeps_the_python_operator_and_integer_guards() {
         let file = output.data(b"combine.py");
         let positions = SourcePositions::new(Path::new("combine.py"), &source, &file);
         let mut frame = RegisteredFrame::new(&mut output, &positions, false, 0, 0.into());
-        RegisteredBody::Function(&placed)
-            .emit_on(FrameOwner::Registered(&mut frame, &CheckedSites::default()));
+        RegisteredBody::Function(&placed).emit(&mut TestFrame(&mut frame, CheckedSites::default()));
         frame.finish_callable(None);
         let operator = output.data(operator.as_bytes());
         let body = &output.functions;
@@ -557,8 +585,8 @@ fn checked_assertion_message_and_raise_use_the_failure_edge() {
         ),
     });
     {
-        let sites = CheckedSites::default();
-        let frame = super::Frame::for_expression(&mut frame, &sites);
+        let mut owner = TestFrame(&mut frame, CheckedSites::default());
+        let frame = super::Frame::for_expression(&mut owner);
         super::CheckedBody::registered(frame).emit_statement(&Statement::If(
             Expr::boolean(false),
             vec![],
@@ -651,8 +679,8 @@ fn inner_handler_preserves_the_enclosing_cursor_slot() {
     let file = output.data(b"stream.py");
     let positions = SourcePositions::new(Path::new("stream.py"), "", &file);
     let mut code = RegisteredFrame::new(&mut output, &positions, true, 0, 0.into());
-    let sites = CheckedSites::default();
-    let mut frame = super::Frame::for_expression(&mut code, &sites);
+    let mut owner = TestFrame(&mut code, CheckedSites::default());
+    let mut frame = super::Frame::for_expression(&mut owner);
     frame.iteration.private_slots = vec![2, 8];
     frame.iteration.first_slot = 3;
     frame.body.error_target = "outer".into();

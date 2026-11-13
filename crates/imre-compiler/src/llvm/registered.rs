@@ -321,11 +321,8 @@ pub(super) struct ExpressionScope {
 pub(crate) trait PreparedSuiteEmitter<'a, 'p>:
     std::ops::DerefMut<Target = RegisteredFrame<'a, 'p>>
 {
-    /// Place any child definitions before borrowing the frame for its operand.
-    fn frame_and_sites(
-        &mut self,
-        operand: Option<&Expr>,
-    ) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites);
+    fn frame_and_sites(&mut self) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites);
+    fn place_operand(&mut self, operand: &Expr);
     fn place_definition(&mut self, site: TextSize);
     fn place_statement(&mut self, statement: &Statement);
 }
@@ -352,8 +349,8 @@ fn emit_physical_operand<'a, 'p>(
             }
         }
     };
-    owner.frame_and_sites(Some(value));
-    let result = FrameOwner::Prepared(owner).with_operand(operand, |frame| {
+    owner.place_operand(value);
+    let result = Frame::with_operand(owner, operand, |frame| {
         if condition {
             frame.test_with_temporaries(|frame| frame.evaluate_test(value, true))
         } else {
@@ -365,11 +362,7 @@ fn emit_physical_operand<'a, 'p>(
 }
 
 impl<'p> RegisteredBody<'p> {
-    pub(crate) fn emit(self, owner: &mut dyn PreparedSuiteEmitter<'_, 'p>) {
-        self.emit_on(FrameOwner::Prepared(owner));
-    }
-
-    fn emit_on(self, mut code: FrameOwner<'_, '_, 'p>) {
+    pub(crate) fn emit(self, code: &mut dyn PreparedSuiteEmitter<'_, 'p>) {
         let (checked, suite, inputs) = match self {
             Self::Function(checked) => (checked, None, &[][..]),
             Self::Suite(suite) => (&suite.checked, Some(suite), suite.operands.as_slice()),
@@ -381,7 +374,7 @@ impl<'p> RegisteredBody<'p> {
         };
         let next = Cell::new(0);
         let frame = Frame {
-            code: code.reborrow(),
+            code,
             names: Some(&checked.local_names),
             inputs,
             suite,
@@ -392,84 +385,51 @@ impl<'p> RegisteredBody<'p> {
     }
 }
 
-/// A checked run borrows its enclosing suite when a return can reach a prepared finally.
-enum FrameOwner<'f, 'a, 'p> {
-    Registered(&'f mut RegisteredFrame<'a, 'p>, &'f CheckedSites),
-    Prepared(&'f mut dyn PreparedSuiteEmitter<'a, 'p>),
-}
-
-impl<'a, 'p> FrameOwner<'_, 'a, 'p> {
+impl<'a, 'p> Frame<'_, 'a, 'p> {
     fn with_operand(
-        &mut self,
+        code: &mut dyn PreparedSuiteEmitter<'a, 'p>,
         operand: Option<&RegisteredOperand>,
         emit: impl FnOnce(&mut Frame<'_, 'a, 'p>) -> String,
     ) -> String {
         let enclosing = if let Some(operand) = operand {
-            let Some(enclosing) = self.enter_checked_slots(operand.region(), None) else {
+            let Some(enclosing) = code.enter_checked_slots(operand.region(), None) else {
                 return "0".into();
             };
             Some(enclosing)
         } else {
             None
         };
-        let first = self.integer_owners;
-        let outer = self.expression_integer_start.replace(first);
+        let first = code.integer_owners;
+        let outer = code.expression_integer_start.replace(first);
         let result = emit(&mut Frame {
-            code: self.reborrow(),
+            code,
             names: operand.map(|operand| &operand.local_names),
             inputs: operand.map_or(&[], |operand| &*operand.inputs),
             suite: None,
             fixed_sites: None,
         });
-        self.expression_integer_start = outer;
+        code.expression_integer_start = outer;
         if let Some(enclosing) = enclosing {
-            self.restore_checked_slots(enclosing);
+            code.restore_checked_slots(enclosing);
         }
         result
     }
 
-    fn reborrow(&mut self) -> FrameOwner<'_, 'a, 'p> {
-        match self {
-            Self::Registered(code, sites) => FrameOwner::Registered(code, sites),
-            Self::Prepared(owner) => FrameOwner::Prepared(&mut **owner),
-        }
-    }
-
-    fn parts(&mut self) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites) {
-        match self {
-            Self::Registered(code, sites) => (code, sites),
-            Self::Prepared(owner) => owner.frame_and_sites(None),
-        }
-    }
-
-    fn prepared_owner(&mut self) -> &mut dyn PreparedSuiteEmitter<'a, 'p> {
-        let Self::Prepared(owner) = self else {
-            unreachable!("prepared operation outside its owning suite")
-        };
-        &mut **owner
-    }
-}
-
-impl<'a, 'p> std::ops::Deref for FrameOwner<'_, 'a, 'p> {
-    type Target = RegisteredFrame<'a, 'p>;
-
-    fn deref(&self) -> &Self::Target {
-        match self {
-            Self::Registered(code, _) => code,
-            Self::Prepared(function) => function,
-        }
-    }
-}
-
-impl std::ops::DerefMut for FrameOwner<'_, '_, '_> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.parts().0
+    /// The evaluator shares the lexical owner that inserts its nested definitions.
+    pub(crate) fn prepared_operand(
+        code: &mut dyn PreparedSuiteEmitter<'a, 'p>,
+        operand: &RegisteredOperand,
+    ) -> String {
+        code.place_operand(&operand.value);
+        Self::with_operand(code, Some(operand), |frame| {
+            frame.evaluate_handle(&operand.value)
+        })
     }
 }
 
 /// The registered binder owns the scope, argument identities and frame.
 pub(crate) struct Frame<'f, 'a, 'p> {
-    code: FrameOwner<'f, 'a, 'p>,
+    code: &'f mut dyn PreparedSuiteEmitter<'a, 'p>,
     names: Option<&'f HashMap<usize, LocalBinding>>,
     inputs: &'f [PhysicalOperand],
     suite: Option<&'p RegisteredSuite>,
@@ -479,31 +439,26 @@ pub(crate) struct Frame<'f, 'a, 'p> {
 impl<'a, 'p> std::ops::Deref for Frame<'_, 'a, 'p> {
     type Target = RegisteredFrame<'a, 'p>;
     fn deref(&self) -> &Self::Target {
-        &self.code
+        self.code
     }
 }
 
 impl std::ops::DerefMut for Frame<'_, '_, '_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.code
+        self.code
     }
 }
 
 impl<'f, 'a, 'p> Frame<'f, 'a, 'p> {
     /// Nested suites place their own operands when the checked emitter enters them.
     pub(super) fn place_statement(&mut self, statement: &Statement) {
-        if let FrameOwner::Prepared(owner) = &mut self.code {
-            owner.place_statement(statement);
-        }
+        self.code.place_statement(statement);
     }
 
     #[cfg(test)]
-    pub(super) fn for_expression(
-        code: &'f mut RegisteredFrame<'a, 'p>,
-        sites: &'f CheckedSites,
-    ) -> Self {
+    pub(super) fn for_expression(code: &'f mut dyn PreparedSuiteEmitter<'a, 'p>) -> Self {
         Self {
-            code: FrameOwner::Registered(code, sites),
+            code,
             names: None,
             fixed_sites: None,
             inputs: &[],
@@ -513,7 +468,7 @@ impl<'f, 'a, 'p> Frame<'f, 'a, 'p> {
 
     pub(super) fn reborrow(&mut self) -> Frame<'_, 'a, 'p> {
         Frame {
-            code: self.code.reborrow(),
+            code: self.code,
             names: self.names,
             fixed_sites: self.fixed_sites,
             inputs: self.inputs,
@@ -578,14 +533,6 @@ impl<'f> Frame<'f, '_, '_> {
         self.materialize(&value)
     }
 
-    fn evaluate_operand(&mut self, expr: &Expr, condition: bool) -> String {
-        if condition {
-            self.evaluate_test(expr, false)
-        } else {
-            self.evaluate_handle(expr)
-        }
-    }
-
     fn evaluate_test(&mut self, expr: &Expr, already_rooted: bool) -> String {
         let inner = expr.without_location();
         if matches!(
@@ -627,15 +574,11 @@ impl<'f> Frame<'f, '_, '_> {
         let ExprKind::Builtin(Builtin::RegisteredInput(index), _) = &expr.kind else {
             return None;
         };
-        Some(emit_physical_operand(
-            self.code.prepared_owner(),
-            &self.inputs[*index],
-            true,
-        ))
+        Some(emit_physical_operand(self.code, &self.inputs[*index], true))
     }
 
     fn registered_input(&mut self, index: usize) -> String {
-        emit_physical_operand(self.code.prepared_owner(), &self.inputs[index], false)
+        emit_physical_operand(self.code, &self.inputs[index], false)
     }
 
     pub(crate) fn lookup_local(&mut self, slot: usize) -> String {
@@ -852,7 +795,7 @@ impl<'f> Frame<'f, '_, '_> {
         if clear.is_empty() || self.code.body.error_target == "failed" {
             return;
         }
-        let frame = &mut *self.code;
+        let frame = &mut **self.code;
         let slots = frame
             .scope_unwinds
             .entry(frame.body.error_target.clone())
@@ -1007,7 +950,7 @@ impl<'f> Frame<'f, '_, '_> {
             let Some(region) = self.suite else {
                 unreachable!("ordered child suite outside its control region")
             };
-            RegisteredBody::Suite(&region.suites[*index]).emit(self.code.prepared_owner());
+            RegisteredBody::Suite(&region.suites[*index]).emit(self.code);
             true
         } else if let ExprKind::Builtin(Builtin::RegisteredStatement(range, simple), _) = &expr.kind
         {
@@ -1176,7 +1119,7 @@ impl<'f> Frame<'f, '_, '_> {
                 let defaults = operands
                     .map(|value| self.evaluate_eager_handle(value))
                     .collect::<Vec<_>>();
-                let (code, sites) = self.code.parts();
+                let (code, sites) = self.code.frame_and_sites();
                 sites.bind_lambda(code, *site, &scope, &defaults)
             }
             (Builtin::RegisteredGenerator(site, scoped), operands) => {
@@ -1187,11 +1130,11 @@ impl<'f> Frame<'f, '_, '_> {
                     .unwrap_or_else(|| self.code.scope.clone());
                 let mark = self.temporary_mark();
                 self.unwind_operands(&mark, |frame| {
-                    let acquire = frame.code.parts().1.generators[site].acquire;
+                    let acquire = frame.code.frame_and_sites().1.generators[site].acquire;
                     let cursor =
                         frame.acquire_iterator(acquire, |frame| frame.evaluate_handle(iterable));
                     frame.keep_operands(&mark, &cursor, "0");
-                    let (code, sites) = frame.code.parts();
+                    let (code, sites) = frame.code.frame_and_sites();
                     let result = sites.bind_generator(code, *site, &scope, &cursor);
                     frame.keep_operands(&mark, &result, "0");
                     result
@@ -1211,7 +1154,7 @@ impl<'f> Frame<'f, '_, '_> {
                         arguments: None, ..
                     } => (header, &[][..], None),
                     ir::DefinitionSite::Function(start) => {
-                        let definition = &self.code.parts().1.definitions[start];
+                        let definition = &self.code.frame_and_sites().1.definitions[start];
                         let (decorators, defaults) =
                             header.split_at(definition.decorator_offsets.len());
                         (decorators, defaults, None)
@@ -1230,29 +1173,41 @@ impl<'f> Frame<'f, '_, '_> {
                     })
                 });
                 if matches!(site, ir::DefinitionSite::Class { .. })
-                    && !self.code.parts().1.definitions.contains_key(&site.start())
+                    && !self
+                        .code
+                        .frame_and_sites()
+                        .1
+                        .definitions
+                        .contains_key(&site.start())
                 {
-                    self.code.prepared_owner().place_definition(site.start());
+                    self.code.place_definition(site.start());
                 }
-                let (code, sites) = self.code.parts();
+                let (code, sites) = self.code.frame_and_sites();
                 sites.definition(code, site.start(), &decorators, &defaults, class_arguments)
             }
             (Builtin::RegisteredClassNamespace(site, layout), operands) => {
-                let (code, sites) = self.code.parts();
-                let mut frame = Frame {
-                    code: FrameOwner::Registered(code, sites),
-                    names: self.names,
-                    inputs: self.inputs,
-                    suite: self.suite,
-                    fixed_sites: self.fixed_sites,
+                let (code, sites) = self.code.frame_and_sites();
+                let (_, parameters, range) = &sites.class_namespaces[site];
+                let range = *range;
+                code.set_source_range(Some(range));
+                let enclosing = code.scope.clone();
+                let outer = code.op("annotation_scope", &[&enclosing]);
+                let Some(scope) = code.bind_type_parameters(&enclosing, parameters, true) else {
+                    return CheckedValue::handle("0".into());
                 };
-                let (namespace, parameters, range) = &sites.class_namespaces[site];
-                namespace.generic_class(&mut frame, parameters, *range, layout, |code, index| {
-                    code.evaluate_handle(&operands[index])
-                })
+                code.scope = code.op("class_base_scope", &[&scope, &outer]);
+                code.set_source_range(None);
+                let arguments = self.class_arguments(layout, |frame, index| {
+                    frame.evaluate_handle(&operands[index])
+                });
+                let (code, sites) = self.code.frame_and_sites();
+                code.scope = scope;
+                sites.class_namespaces[site]
+                    .0
+                    .instantiate_class(code, arguments, Some(range))
             }
             (Builtin::RegisteredTypeAlias(site), []) => {
-                let (code, sites) = self.code.parts();
+                let (code, sites) = self.code.frame_and_sites();
                 match &sites.aliases[site] {
                     Ok(alias) => alias.instantiate(code),
                     Err(error) => {
@@ -1294,7 +1249,7 @@ impl<'f> Frame<'f, '_, '_> {
                 self.code.take_annotation_result()
             }
             (Builtin::BindAnnotationExpression { site, spelling }, []) => {
-                let (code, sites) = self.code.parts();
+                let (code, sites) = self.code.frame_and_sites();
                 sites.annotation_string(code, *site, spelling)
             }
             (
@@ -1345,7 +1300,7 @@ impl<'f> Frame<'f, '_, '_> {
             (Builtin::RegisteredInPlace(op), [left, right]) => {
                 let left = self.evaluate_handle(left);
                 let right = self.evaluate_handle(right);
-                self.code.inplace(op, &left, &right)
+                self.inplace(op, &left, &right)
             }
             _ => unreachable!("unsupported registered operation"),
         };
@@ -1358,7 +1313,12 @@ impl<'f> Frame<'f, '_, '_> {
     }
 
     pub(super) fn exec_literal_at(&mut self, site: TextRange) -> Option<sites::CompiledExec> {
-        self.code.parts().1.exec_literals.get(&site).cloned()
+        self.code
+            .frame_and_sites()
+            .1
+            .exec_literals
+            .get(&site)
+            .cloned()
     }
 
     pub(crate) fn object_operation(&mut self, op: &Builtin, operands: &[Expr]) -> CheckedValue {
@@ -1679,17 +1639,6 @@ impl RegisteredFrame<'_, '_> {
         self.line(&format!("store i64 {value}, ptr %ir_slot{slot}"));
     }
 
-    pub(crate) fn prepared_operand(
-        &mut self,
-        operand: &RegisteredOperand,
-        sites: &CheckedSites,
-        condition: bool,
-    ) -> String {
-        FrameOwner::Registered(self, sites).with_operand(Some(operand), |frame| {
-            frame.evaluate_operand(&operand.value, condition)
-        })
-    }
-
     fn store_item_pair(&mut self, items: [usize; 2]) {
         let key = self.value("load i64, ptr %live");
         let slot = self.value("getelementptr i64, ptr %live, i64 1");
@@ -1700,4 +1649,4 @@ impl RegisteredFrame<'_, '_> {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

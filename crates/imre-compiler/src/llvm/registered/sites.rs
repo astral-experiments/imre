@@ -2,7 +2,7 @@
 use ruff_text_size::{TextRange, TextSize};
 use std::collections::HashMap;
 
-use super::{FrameEmitter, RegisteredFrame};
+use super::RegisteredFrame;
 use crate::frontend::RequiredSite;
 use crate::ir::{self, RegisteredTypeParameter, TypeParameterKind};
 
@@ -60,29 +60,6 @@ impl CompiledDefinition {
             format_evaluator: false,
             class_header: None,
         }
-    }
-
-    /// Evaluate bases in the parameter frame with the enclosing class dictionary
-    /// visible, then bind the namespace to the parameters alone.
-    pub(crate) fn generic_class<'a, 'p, E: FrameEmitter<'a, 'p>>(
-        &self,
-        frame: &mut E,
-        parameters: &CompiledTypeParameters,
-        range: TextRange,
-        layout: &ir::PackedArguments,
-        operand: impl FnMut(&mut E, usize) -> String,
-    ) -> String {
-        frame.set_source_range(Some(range));
-        let enclosing = frame.scope.clone();
-        let outer = frame.op("annotation_scope", &[&enclosing]);
-        let Some(scope) = frame.bind_type_parameters(&enclosing, parameters, true) else {
-            return "0".into();
-        };
-        frame.scope = frame.op("class_base_scope", &[&scope, &outer]);
-        frame.set_source_range(None);
-        let arguments = frame.class_arguments(layout, operand);
-        frame.scope = scope;
-        self.instantiate_class(frame, arguments, Some(range))
     }
 
     pub(crate) fn instantiate_class(

@@ -760,7 +760,6 @@ impl<'a> PreparedBody<'a> {
             unit,
             positions: &positions,
         };
-        let sites = sites::CheckedSites::default();
         if let Some(body) = &self.source.module_annotations {
             location.define_module_annotations(&mut frame, body);
         }
@@ -774,15 +773,10 @@ impl<'a> PreparedBody<'a> {
             frame.op("bind_doctest_module", &[&frame.scope.clone(), &name]);
         }
         let globals = &self.source.scopes.module_globals;
-        let frame = location.emit_body(
-            frame,
-            sites,
-            RegisteredBody::Suite(initializer),
-            globals,
-            "",
-            false,
-        );
-        let code = frame.finish_module();
+        frame.declare_globals(globals);
+        let mut function = location.function(frame, globals, "", false);
+        RegisteredBody::Suite(initializer).emit(&mut function);
+        let code = function.frame.finish_module();
         match output.diagnostic.take() {
             Some(diagnostic) => Err(diagnostic),
             None => Ok(code),
@@ -1005,26 +999,21 @@ impl SourceInfo<'_> {
 }
 
 impl SourceMap<'_> {
-    fn emit_body<'a, 'p>(
+    fn function<'a, 'p, 'scope>(
         &'p self,
-        mut frame: RegisteredFrame<'a, 'p>,
-        sites: CheckedSites,
-        body: RegisteredBody<'p>,
-        globals: &BTreeSet<String>,
-        prefix: &str,
+        frame: RegisteredFrame<'a, 'p>,
+        declared_globals: &'scope BTreeSet<String>,
+        prefix: &'scope str,
         in_function: bool,
-    ) -> RegisteredFrame<'a, 'p> {
-        frame.declare_globals(globals);
-        let mut function = Function {
-            sites,
+    ) -> Function<'a, 'p, 'scope> {
+        Function {
+            sites: CheckedSites::default(),
             frame,
             source: self,
             in_function,
-            declared_globals: globals,
+            declared_globals,
             prefix,
-        };
-        body.emit(&mut function);
-        function.frame
+        }
     }
 
     fn code(
@@ -1045,17 +1034,20 @@ impl SourceMap<'_> {
             self.module_start,
         );
         frame.async_generator = suspension == imre_ast::code_flags::ASYNC_GENERATOR;
-        let mut sites = sites::CheckedSites::default();
-        let frame = match body {
-            Body::Registered(body, globals) => self.emit_body(
-                frame,
-                sites,
-                body,
-                globals.unwrap_or(&BTreeSet::new()),
-                &prefix,
-                in_function,
-            ),
+        let empty = BTreeSet::new();
+        let declared_globals = match &body {
+            Body::Registered(_, Some(globals)) => *globals,
+            Body::Namespace(_, class) => &class.bindings.globals,
+            _ => &empty,
+        };
+        let mut function = self.function(frame, declared_globals, &prefix, in_function);
+        match body {
+            Body::Registered(body, _) => {
+                function.frame.declare_globals(function.declared_globals);
+                body.emit(&mut function);
+            }
             Body::Namespace(prepared, class) => {
+                let frame = &mut function.frame;
                 frame.class_locals = Some(class.bindings.clone());
                 if frame.output.keep_docstrings
                     && let Some(doc) = prepared.doc.as_deref().or_else(|| {
@@ -1068,58 +1060,39 @@ impl SourceMap<'_> {
                     frame.bind("__doc__", &value);
                 }
                 let globals = &class.bindings.globals;
-                let mut frame = self.emit_body(
-                    frame,
-                    sites,
-                    RegisteredBody::Suite(&prepared.body),
-                    globals,
-                    &prefix,
-                    in_function,
-                );
+                frame.declare_globals(globals);
+                RegisteredBody::Suite(&prepared.body).emit(&mut function);
                 self.finish_class_annotations(
-                    &mut frame,
+                    &mut function.frame,
                     &prefix,
                     in_function,
                     &class.annotations,
                     globals,
                     start.expect("class definition site"),
                 );
-                frame
             }
             Body::CheckedProvider(provider, scope) => {
-                frame.annotation_scope = scope;
+                function.frame.annotation_scope = scope;
                 match provider {
-                    Ok(checked) => self.emit_body(
-                        frame,
-                        sites,
-                        RegisteredBody::Function(checked),
-                        &BTreeSet::new(),
-                        &prefix,
-                        in_function,
-                    ),
+                    Ok(checked) => RegisteredBody::Function(checked).emit(&mut function),
                     Err((range, reason)) => {
-                        frame.refuse_at(*range, reason);
-                        frame
+                        function.frame.refuse_at(*range, reason);
                     }
                 }
             }
             Body::Operand(range, operand, class) => {
+                let frame = &mut function.frame;
                 frame.current_range = range;
                 frame.checkpoint(range);
                 if let Some(class) = class {
                     frame.use_class_annotation_names(class);
                 }
-                let globals = BTreeSet::new();
-                sites.place_operand(
-                    &operand.value,
-                    &mut self.definitions(&mut frame, &prefix, &globals, in_function),
-                );
-                let value = frame.prepared_operand(operand, &sites, false);
-                frame.return_value(&value);
-                frame
+                let value =
+                    crate::llvm::registered::Frame::prepared_operand(&mut function, operand);
+                function.frame.return_value(&value);
             }
-        };
-        frame.finish_callable(start)
+        }
+        function.frame.finish_callable(start)
     }
 }
 
@@ -1176,15 +1149,13 @@ impl Function<'_, '_, '_> {
 }
 
 impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<'a, 'p, '_> {
-    fn frame_and_sites(
-        &mut self,
-        operand: Option<&crate::ir::Expr>,
-    ) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites) {
-        if let Some(operand) = operand {
-            let (sites, mut definitions) = self.definitions();
-            sites.place_operand(operand, &mut definitions);
-        }
+    fn frame_and_sites(&mut self) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites) {
         (&mut self.frame, &self.sites)
+    }
+
+    fn place_operand(&mut self, operand: &crate::ir::Expr) {
+        let (sites, mut definitions) = self.definitions();
+        sites.place_operand(operand, &mut definitions);
     }
 
     fn place_definition(&mut self, site: TextSize) {
