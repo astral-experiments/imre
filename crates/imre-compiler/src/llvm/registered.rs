@@ -543,7 +543,7 @@ impl<'f> Frame<'f, '_, '_> {
     pub(crate) fn evaluate_handle(&mut self, expr: &Expr) -> String {
         let value =
             CheckedBody::registered(self.reborrow()).value_for(expr, ValueUse::PythonHandle);
-        self.materialize(&value)
+        self.materialize_owned(value)
     }
 
     fn evaluate_test(&mut self, expr: &Expr, already_rooted: bool) -> String {
@@ -604,7 +604,7 @@ impl<'f> Frame<'f, '_, '_> {
     }
 
     pub(crate) fn assign(&mut self, slot: usize, value: CheckedValue) {
-        let handle = self.materialize(&value);
+        let handle = self.materialize_owned(value);
         if let Some(slot) = self.code.iteration.physical_slot(slot) {
             self.code.store_frame_slot(slot, &handle);
             return;
@@ -656,6 +656,15 @@ impl<'f> Frame<'f, '_, '_> {
         }
     }
 
+    /// Evaluate every operand before writing to scratch space that nested expressions can reuse.
+    pub(crate) fn evaluate_handle_array(&mut self, operands: &[Expr]) -> (&'static str, usize) {
+        let handles: Vec<_> = operands
+            .iter()
+            .map(|operand| self.evaluate_handle(operand))
+            .collect();
+        self.handle_array(&handles)
+    }
+
     /// A short tuple of constants can be searched without materializing the tuple.
     pub(crate) fn literal_tuple_membership(
         &mut self,
@@ -669,11 +678,7 @@ impl<'f> Frame<'f, '_, '_> {
         if items.len() > 8 || !items.iter().all(ir::Constant::is_constant) {
             return None;
         }
-        let items = items
-            .iter()
-            .map(|item| self.evaluate_handle(item))
-            .collect::<Vec<_>>();
-        let (array, count) = self.handle_array(&items);
+        let (array, count) = self.evaluate_handle_array(items);
         let negate = u32::from(negate);
         Some(self.checked(&format!("call i64 @imre_dyn_contains_literal_tuple(ptr %ctx, i64 {needle}, ptr {array}, i64 {count}, i32 {negate})")))
     }
@@ -969,7 +974,7 @@ impl<'f> Frame<'f, '_, '_> {
     }
 
     pub(crate) fn return_result(&mut self, value: CheckedValue) {
-        let value = self.materialize(&value);
+        let value = self.materialize_owned(value);
         self.return_from_regions(value);
     }
 
@@ -1287,6 +1292,14 @@ impl<'f> Frame<'f, '_, '_> {
         self.code
             .line(&format!("store i64 {word}, ptr %int_owner{slot}"));
         slot
+    }
+
+    /// Move an existing Python handle out of a completed operand.
+    pub(crate) fn materialize_owned(&mut self, value: CheckedValue) -> String {
+        match value {
+            CheckedValue::Handle { id, .. } => id,
+            value => self.materialize(&value),
+        }
     }
 
     pub(crate) fn materialize(&mut self, value: &CheckedValue) -> String {

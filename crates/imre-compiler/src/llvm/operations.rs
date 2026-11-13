@@ -366,7 +366,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 emitter.body.end("unreachable");
             }
             Entry::Registered(frame) => {
-                let cause = cause.map(|value| frame.materialize(&value));
+                let cause = cause.map(|value| frame.materialize_owned(value));
                 let exception = frame.live.pop().expect("pending raised exception");
                 frame.raise_operand_at(
                     &exception,
@@ -656,7 +656,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             }
             _ => {
                 let frame = self.python();
-                let operand = frame.materialize(&value);
+                let operand = frame.materialize_owned(value);
                 let name = match op {
                     UnaryOp::UAdd => "pos",
                     UnaryOp::USub => "neg",
@@ -954,8 +954,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 Entry::Registered(frame) => {
                     let mark = frame.temporary_mark();
                     CheckedValue::handle(frame.unwind_stack_operands(&mark, |frame| {
-                        let values: Vec<_> = parts.iter().map(|part| frame.evaluate_handle(part)).collect();
-                        let (values, count) = frame.handle_array(&values);
+                        let (values, count) = frame.evaluate_handle_array(parts);
                         frame.checked(&format!(
                             "call i64 @imre_dyn_format_parts(ptr %ctx, i64 {mark}, ptr {values}, i64 {count})"
                         ))
