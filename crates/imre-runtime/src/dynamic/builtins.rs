@@ -2357,6 +2357,7 @@ pub(super) fn call(
             }
             "float" if method == "as_integer_ratio" => float::as_integer_ratio(ctx, args, kwargs),
             "getset_descriptor" if matches!(method, "__set__" | "__delete__") => {
+                let (descriptor, values) = ctx.getset_receiver(method, args)?;
                 if !kwargs.is_empty() {
                     return Err(type_error(format!(
                         "wrapper {method}() takes no keyword arguments"
@@ -2367,11 +2368,12 @@ pub(super) fn call(
                 } else {
                     (1, "expected 1 argument")
                 };
-                let Some((&descriptor, values)) = args.split_first() else {
-                    return Err(type_error("expected an integer getset descriptor"));
-                };
                 if values.len() != required {
                     return Err(type_error(format!("{message}, got {}", values.len())));
+                }
+                if let Value::LayoutDescriptor(owner, field) = *ctx.heap.get(descriptor) {
+                    ctx.write_layout_descriptor(owner, field, values[0], values.get(1).copied())?;
+                    return Ok(NONE);
                 }
                 let Value::GetSetDescriptor {
                     get,

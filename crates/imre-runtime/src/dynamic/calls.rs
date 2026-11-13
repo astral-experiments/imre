@@ -3020,7 +3020,8 @@ impl Context {
         if let Value::Native(owner) = self.heap.get(obj)
             && matches!(
                 owner.as_str(),
-                super::thread_handle::CLASS
+                "frame"
+                    | super::thread_handle::CLASS
                     | value::ZSTD_COMPRESS_TYPE
                     | value::ZSTD_DECOMPRESS_TYPE
                     | value::BZ2_COMPRESS_TYPE
@@ -3043,7 +3044,8 @@ impl Context {
         }
         if matches!(
             self.heap.get(obj),
-            Value::ThreadHandle(_)
+            Value::PythonFrame { .. }
+                | Value::ThreadHandle(_)
                 | Value::ZstdCompressor(_)
                 | Value::ZstdDecompressor(_)
                 | Value::Bz2Compressor(_)
@@ -3419,7 +3421,6 @@ impl Context {
                 return super::frame_locals::get(self, obj);
             }
             Value::PythonFrame { globals, .. } if name == "f_globals" => return Ok(globals),
-            Value::PythonFrame { builtins, .. } if name == "f_builtins" => return Ok(builtins),
             Value::PythonFrame { code, .. } if name == "f_code" => {
                 if !self.audit_hooks.is_empty() {
                     let attribute = self.text(name);
@@ -3636,12 +3637,9 @@ impl Context {
                     return Ok(self.text(format!("{}.{field}", self.str_value(qualname)?)));
                 }
                 "__get__" | "__set__" | "__delete__" => {
-                    let callable = self.builtin(&format!("weakref.descriptor.{name}"));
-                    return Ok(self.alloc(Value::Method {
-                        callable,
-                        receiver: obj,
-                        explicit: true,
-                    }));
+                    let class = self.builtin("getset_descriptor");
+                    let method = self.own_class_attr(class, name).expect("getset wrapper");
+                    return self.bind_attribute(method, obj, class);
                 }
                 _ => {}
             },
@@ -6683,6 +6681,7 @@ impl Context {
             self.heap.get(obj),
             Value::Method { .. }
                 | Value::Code(_)
+                | Value::PythonFrame { .. }
                 | Value::LzmaDecompressor(_)
                 | Value::Bz2Decompressor(_)
                 | Value::ThreadHandle(_)
@@ -6909,6 +6908,31 @@ impl Context {
         ))
     }
 
+    pub(super) fn getset_receiver<'a>(
+        &self,
+        method: &str,
+        args: &'a [Id],
+    ) -> Result<(Id, &'a [Id])> {
+        let Some((&descriptor, rest)) = args.split_first() else {
+            return Err(Error::new(
+                "TypeError",
+                format!("descriptor '{method}' of 'getset_descriptor' object needs an argument"),
+            ));
+        };
+        if !self.builtin_slot_accepts(descriptor, "getset_descriptor") {
+            let actual = self
+                .builtin_type_name(descriptor)
+                .unwrap_or_else(|| self.type_name(descriptor));
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "descriptor '{method}' requires a 'getset_descriptor' object but received a '{actual}'"
+                ),
+            ));
+        }
+        Ok((descriptor, rest))
+    }
+
     /// A mixed-in Python dictionary getset defers to the native storage base's own getset.
     fn native_dictionary_getset(&self, class: Id) -> Option<(Id, Option<Id>)> {
         let base = self.allocation_base(class)?;
@@ -6943,6 +6967,13 @@ impl Context {
         receiver: Id,
     ) -> Result<Id> {
         match name {
+            "f_builtins" => {
+                self.layout_receiver_class(owner, name, receiver)?;
+                let Value::PythonFrame { builtins, .. } = *self.heap.get(receiver) else {
+                    unreachable!("validated frame receiver")
+                };
+                Ok(builtins)
+            }
             "__code__" => {
                 self.layout_receiver_class(owner, name, receiver)?;
                 let Value::Function { code, .. } = *self.heap.get(receiver) else {
@@ -7024,12 +7055,9 @@ impl Context {
                 self.layout_receiver_class(owner, field, receiver)?;
                 self.write_exception_getset(receiver, field, value)
             }
-            "__text_signature__" => {
+            "f_builtins" | "__text_signature__" => {
                 self.layout_receiver_class(owner, name, receiver)?;
-                Err(Error::new(
-                    "AttributeError",
-                    "attribute '__text_signature__' of 'type' objects is not writable",
-                ))
+                Err(self.readonly_getset_error(self.layout_owner_name(owner), name, receiver))
             }
             "__dict__" => {
                 let class = self.layout_receiver_class(owner, name, receiver)?;

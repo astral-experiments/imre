@@ -280,6 +280,9 @@ impl BuiltinDescriptor {
             Some((owner, attr)) if let Some(kind) = builtins::exception_kind(owner) => {
                 Some((kind.name(), attr, builtins::exception_methods(kind)))
             }
+            Some(("getset_descriptor", attr)) => {
+                Some(("getset_descriptor", attr, super::namedtuple::MEMBER_SLOTS))
+            }
             Some(("member_descriptor", attr)) => {
                 Some(("member_descriptor", attr, super::namedtuple::MEMBER_SLOTS))
             }
@@ -575,7 +578,9 @@ impl BuiltinDescriptor {
                 ctx.heap.get(ctx.scalar_value(receiver)),
                 Value::Struct { .. }
             ),
-            "member_descriptor" => ctx.exact_type(receiver)? == ctx.builtin("member_descriptor"),
+            "member_descriptor" | "getset_descriptor" => {
+                ctx.exact_type(receiver)? == ctx.builtin(self.owner)
+            }
             "method_descriptor" | "wrapper_descriptor" | "classmethod_descriptor" => {
                 ctx.builtin_type_name(receiver) == Some(self.owner)
             }

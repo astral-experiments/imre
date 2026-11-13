@@ -3147,6 +3147,12 @@ impl Context {
         if name == "code" {
             self.install_code_members(value);
         }
+        if name == "frame" {
+            let builtins = self.alloc(Value::LayoutDescriptor(value, "f_builtins"));
+            let key = self.heap.code_name("f_builtins");
+            let dictionary = self.dict(vec![(key, builtins)]);
+            self.native_type_dicts.insert(value, dictionary);
+        }
         if name == thread_handle::CLASS {
             thread_handle::install(self, value);
         }
@@ -3450,6 +3456,7 @@ impl Context {
             }
             "list" => builtins::LIST_METHODS,
             "method_descriptor" | "wrapper_descriptor" | "classmethod_descriptor" => &["__get__"],
+            "getset_descriptor" => namedtuple::MEMBER_SLOTS,
             "tuple" => &[
                 "__repr__",
                 "__getitem__",
@@ -3525,7 +3532,8 @@ impl Context {
             "getset_descriptor" => {
                 let doc = self.descriptor_doc_member("getset_descriptor");
                 let key = self.heap.code_name("__doc__");
-                let dictionary = self.dict(vec![(key, doc)]);
+                entries.push((key, doc));
+                let dictionary = self.dict(entries);
                 self.native_type_dicts.insert(value, dictionary);
             }
             "wrapper_descriptor" => {
