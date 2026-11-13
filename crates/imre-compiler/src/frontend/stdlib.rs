@@ -7,8 +7,8 @@ pub(super) fn registered_string_method(call: &ast::ExprCall) -> Option<&ast::Exp
     let method = call.func.as_attribute_expr()?;
     let args = &call.arguments;
     let supported = match method.attr.as_str() {
-        "removeprefix" => {
-            matches!(args.args.as_slice(), [prefix] if !prefix.is_starred_expr())
+        "removeprefix" | "format_map" => {
+            matches!(args.args.as_slice(), [arg] if !arg.is_starred_expr())
                 && args.keywords.is_empty()
         }
         "format" => {
