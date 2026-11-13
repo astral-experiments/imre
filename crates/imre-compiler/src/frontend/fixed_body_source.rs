@@ -109,7 +109,7 @@ pub(crate) enum FixedNode {
 }
 
 impl FixedNode {
-    pub(super) fn indexed(kind: &ExprKind, index: usize, ty: Type) -> Self {
+    fn indexed(kind: &ExprKind, index: usize, ty: Type) -> Self {
         Self::Indexed(std::mem::discriminant(kind), index, ty)
     }
 
@@ -252,8 +252,10 @@ impl SourceSites {
     }
 
     pub(super) fn checked_expression(&mut self, range: TextRange, value: &Expr) {
-        if let Some(node) = FixedNode::checked(&ir::Node::Expression(value)) {
-            self.record(range, node);
+        if let Some(site) = self.site_at(range)
+            && let Some(node) = FixedNode::checked(&ir::Node::Expression(value))
+        {
+            self.commit(site, node);
         }
     }
 
@@ -308,21 +310,21 @@ impl SourceSites {
         }
     }
 
-    pub(super) fn field(&mut self, field: &ast::ExprAttribute, native: FixedNode) {
+    pub(super) fn field(&mut self, field: &ast::ExprAttribute, value: &Expr) {
         if let Some(site) = self.site_at(field.range()) {
-            self.attribute(site, ir::AttributeAction::Load, field, native);
+            self.attribute(site, field, ir::Node::Expression(value));
         }
     }
 
-    fn attribute(
-        &mut self,
-        site: PendingSite,
-        action: ir::AttributeAction,
-        field: &ast::ExprAttribute,
-        native: FixedNode,
-    ) {
+    fn attribute(&mut self, site: PendingSite, field: &ast::ExprAttribute, value: ir::Node<'_>) {
         // Private names require the registered class's lexical mangling.
-        if !ruff_python_stdlib::identifiers::is_mangled_private(field.attr.as_str()) {
+        if !ruff_python_stdlib::identifiers::is_mangled_private(field.attr.as_str())
+            && let Some(native) = FixedNode::checked(&value)
+        {
+            let action = match value {
+                ir::Node::Expression(_) => ir::AttributeAction::Load,
+                ir::Node::Statement(_) => ir::AttributeAction::Store,
+            };
             self.python_operation(
                 site,
                 field.attr.start(),
@@ -403,9 +405,8 @@ impl SourceSites {
     ) {
         if self.wrapper_fields
             && let Some(site) = self.statement_site(rhs)
-            && let Some(node) = FixedNode::checked(&ir::Node::Statement(statement))
         {
-            self.attribute(site, ir::AttributeAction::Store, field, node);
+            self.attribute(site, field, ir::Node::Statement(statement));
         }
     }
 

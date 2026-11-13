@@ -4921,10 +4921,7 @@ impl<'a> Checker<'a> {
                 ty,
                 kind: ExprKind::Builtin(Builtin::Slice, args),
             };
-            if let Some(sites) = &mut self.fixed_sites {
-                sites.checked_expression(range, &value);
-            }
-            return Ok(value);
+            return Ok(self.expression_at(range, value));
         }
         let index_type = self.types.optional(Type::Int);
         for bound in bounds {
@@ -8078,10 +8075,7 @@ impl<'a> Checker<'a> {
         }
         if binary.op == ast::Operator::Div && (left.ty.is_path() || right.ty.is_path()) {
             let value = self.path_join(left, right, binary)?;
-            if let Some(sites) = &mut self.fixed_sites {
-                sites.checked_expression(binary.range(), &value);
-            }
-            return Ok(value);
+            return Ok(self.expression_at(binary.range(), value));
         }
         if binary.op == ast::Operator::Add && self.types.element(left.ty).is_some() {
             if matches!(&left.kind, ExprKind::List(items) if items.is_empty())
@@ -8152,13 +8146,11 @@ impl<'a> Checker<'a> {
         let left = Self::integer_addend(op, left, right.ty);
         let right = Self::integer_addend(op, right, left.ty);
         let (op, ty) = self.binary_op(op, left.ty, right.ty, node)?;
-        if let Some(sites) = &mut self.fixed_sites {
-            sites.record(node.range(), FixedNode::Binary(op, ty));
-        }
-        Ok(Expr {
+        let value = Expr {
             ty,
             kind: ExprKind::Binary(op, Box::new(left), Box::new(right)),
-        })
+        };
+        Ok(self.expression_at(node.range(), value))
     }
 
     fn binary_op(
@@ -8454,6 +8446,14 @@ impl<'a> Checker<'a> {
             }
             Ok(value)
         })
+    }
+
+    /// Keep the written range on the checked expression that produced it.
+    fn expression_at(&mut self, range: TextRange, value: Expr) -> Expr {
+        if let Some(sites) = &mut self.fixed_sites {
+            sites.checked_expression(range, &value);
+        }
+        value
     }
 
     /// Record the operation that an ordinary source operand produced for this statement.
@@ -9289,10 +9289,7 @@ impl<'a> Checker<'a> {
                     && matches!(value.kind, ExprKind::Local(read) if read == slot)
                     && value.ty == self.locals[slot]
                 {
-                    sites.record(
-                        expression.range(),
-                        FixedNode::indexed(&value.kind, slot, value.ty),
-                    );
+                    sites.checked_expression(expression.range(), &value);
                 }
                 return Ok(value);
             }
@@ -11050,13 +11047,16 @@ impl<'a> Checker<'a> {
                         })),
                     });
                 }
-                let kind = ExprKind::Field(Box::new(receiver), field);
+                let value = Expr {
+                    ty,
+                    kind: ExprKind::Field(Box::new(receiver), field),
+                };
                 if let Some(sites) = &mut self.fixed_sites
                     && sites.wrapper_fields
                 {
-                    sites.field(attribute, FixedNode::indexed(&kind, field, ty));
+                    sites.field(attribute, &value);
                 }
-                (ty, kind)
+                return Ok(value);
             }
             ast::Expr::Call(_) | ast::Expr::BinOp(_) => unreachable!("dispatched by typed_expr"),
             ast::Expr::Generator(_) => {
