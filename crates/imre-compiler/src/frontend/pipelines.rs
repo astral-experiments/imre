@@ -1360,8 +1360,9 @@ impl Checker<'_> {
         attribute: &ast::ExprAttribute,
         raw: Expr,
     ) -> Result<Iteration, String> {
-        if raw.ty == Type::PythonObject {
-            return self.object_method_iteration(call, raw);
+        if raw.ty == Type::PythonObject || (raw.ty == Type::JsonObject && call.arguments.is_empty())
+        {
+            return self.object_method_iteration(call, attribute, raw);
         }
         if let Type::Class(class) = raw.ty {
             let iterable = self.iteration_method_call(call, attribute, class, raw)?;
