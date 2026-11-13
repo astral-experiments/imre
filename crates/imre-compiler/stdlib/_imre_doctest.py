@@ -3,10 +3,6 @@ import sys
 from io import StringIO
 
 
-def ascii_output(text):
-    return text.encode("ascii", "backslashreplace").decode("ascii")
-
-
 def exception_name(exc):
     cls = type(exc)
     name = cls.__qualname__

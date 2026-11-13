@@ -923,7 +923,6 @@ pub(crate) enum Intrinsic {
     DocCaptureStart,
     DocCaptureTake,
     DocDisplay,
-    DocAscii,
     DocExceptionName,
     MockCallList {
         mark: bool,
@@ -2033,7 +2032,6 @@ impl IntrinsicModule {
             (Self::DoctestRuntime, "capture_start") => Intrinsic::DocCaptureStart,
             (Self::DoctestRuntime, "capture_take") => Intrinsic::DocCaptureTake,
             (Self::DoctestRuntime, "display") => Intrinsic::DocDisplay,
-            (Self::DoctestRuntime, "ascii_output") => Intrinsic::DocAscii,
             (Self::DoctestRuntime, "exception_name") => Intrinsic::DocExceptionName,
             (Self::DoctestRuntime, "execute") => Intrinsic::DocExecute,
             (Self::MockRuntime, "mark_call_list") => Intrinsic::MockCallList { mark: true },
