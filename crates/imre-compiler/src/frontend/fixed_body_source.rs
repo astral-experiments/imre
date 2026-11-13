@@ -11,20 +11,46 @@ pub(crate) struct FixedBodySource {
 }
 
 impl FixedBodySource {
-    /// Project the compact source positions for the placed function.
-    pub(crate) fn positions(&self) -> Vec<TextRange> {
-        self.sites.iter().map(|(range, _)| *range).collect()
+    /// Place the owned operations only if every physical site still belongs to them.
+    /// A refused method can still use its resolved attributes in the ordinary Python binder.
+    pub(crate) fn place(
+        self,
+        function: ir::Function,
+    ) -> StdResult<RegisteredFunction, HashMap<TextRange, FixedAttribute>> {
+        self.place_if(function, || true)
     }
 
-    pub(crate) fn matches(&self, function: &ir::Function) -> bool {
+    pub(crate) fn place_if(
+        self,
+        function: ir::Function,
+        accepted: impl FnOnce() -> bool,
+    ) -> StdResult<RegisteredFunction, HashMap<TextRange, FixedAttribute>> {
         if self.local_names.len() != function.locals.len() {
-            return false;
+            return Err(self.attributes);
         }
         let mut remaining = Some(self.sites.as_slice());
         ir::walk_nodes(&function.body, &mut |node, _| {
-            remaining = FixedNode::consume(remaining, &node);
+            remaining = remaining.and_then(|sites| {
+                let ((_, expected), rest) = sites.split_first()?;
+                (FixedNode::checked(&node).as_ref() == Some(expected.as_ref()?)).then_some(rest)
+            });
         });
-        matches!(remaining, Some([]))
+        if !matches!(remaining, Some([])) || !accepted() {
+            return Err(self.attributes);
+        }
+        Ok(RegisteredFunction {
+            fixed_sites: self.sites.into_iter().map(|(range, _)| range).collect(),
+            inputs: match self.method {
+                Some(method) => FrameInputs::Protocol {
+                    sites: Box::new([FrameSite::Method(method)]),
+                },
+                None => FrameInputs::Checked,
+            },
+            function,
+            local_names: self.local_names,
+            frame_slots: Default::default(),
+            fixed_attributes: (!self.attributes.is_empty()).then(|| Box::new(self.attributes)),
+        })
     }
 }
 
@@ -50,7 +76,6 @@ pub(crate) enum FixedNode {
     /// The operation keeps its checked slot or operand count, and its native type.
     Indexed(std::mem::Discriminant<ExprKind>, usize, Type),
     NamedCall(usize, usize, Type),
-    ModuleRead(usize, Type),
     Integer(i64),
     Constant(ir::Constant),
     Binary(Binary, Type),
@@ -58,14 +83,6 @@ pub(crate) enum FixedNode {
 }
 
 impl FixedNode {
-    pub(crate) fn consume<'a>(
-        sites: Option<&'a [(TextRange, Option<Self>)]>,
-        node: &ir::Node<'_>,
-    ) -> Option<&'a [(TextRange, Option<Self>)]> {
-        let ((_, expected), rest) = sites?.split_first()?;
-        (Self::checked(node).as_ref() == Some(expected.as_ref()?)).then_some(rest)
-    }
-
     pub(super) fn indexed(kind: &ExprKind, index: usize, ty: Type) -> Self {
         Self::Indexed(std::mem::discriminant(kind), index, ty)
     }
@@ -104,7 +121,7 @@ impl FixedNode {
                     Self::indexed(&expr.kind, slot, expr.ty)
                 }
                 ExprKind::Builtin(Builtin::GlobalGet(slot), ref args) if args.is_empty() => {
-                    Self::ModuleRead(slot, expr.ty)
+                    Self::indexed(&expr.kind, slot, expr.ty)
                 }
                 ExprKind::Binary(op, _, _) => Self::Binary(op, expr.ty),
                 ExprKind::Builtin(ref op, ref operands) => {
@@ -182,13 +199,16 @@ impl SourceSites {
         }
     }
 
-    pub(super) fn module_read(&mut self, name: &ast::ExprName, slot: usize, ty: Type) {
-        if let Some(site) = self.site_at(name.range()) {
+    pub(super) fn module_read(&mut self, name: &ast::ExprName, value: &Expr) {
+        if let Some(site) = self.site_at(name.range())
+            && let ExprKind::Builtin(Builtin::GlobalGet(slot), ref args) = value.kind
+            && args.is_empty()
+        {
             self.python_operation(
                 site,
                 name.start(),
                 Builtin::RegisteredName(name.id.to_string()),
-                FixedNode::ModuleRead(slot, ty),
+                FixedNode::indexed(&value.kind, slot, value.ty),
             );
         }
     }
@@ -330,16 +350,46 @@ mod tests {
     use super::*;
 
     #[test]
-    fn changing_a_literal_invalidates_the_fixed_operation() {
-        for (value, changed) in [
-            (unpacking::string("same"), unpacking::string("some")),
-            (ir::Expr::boolean(false), ir::Expr::boolean(true)),
-        ] {
-            let node = ir::Node::Expression(&value);
-            let expected = [(TextRange::default(), FixedNode::checked(&node))];
-            assert!(FixedNode::consume(Some(&expected), &node).is_some());
-            assert!(FixedNode::consume(Some(&expected), &ir::Node::Expression(&changed)).is_none());
-        }
+    fn rewriting_the_same_checked_if_declines_its_original_sites() {
+        let text = concat!(
+            "class Receiver:\n    def read(self, value: int) -> int: return value\n",
+            "def pick(flag: bool) -> str:\n",
+            "    if flag:\n        return 'yes'\n    else:\n        return 'no'\n",
+            "print(pick(True))\n",
+        );
+        let mut graph = SourceGraph::single(text).unwrap();
+        let crate::CheckedProgram::Native(fixed) = crate::checked_lower(&mut graph).unwrap() else {
+            panic!("expected a checked function");
+        };
+        let (slot, _, source) = fixed
+            .frame_sources
+            .into_iter()
+            .find(|(id, ..)| *id == 0)
+            .unwrap();
+        let mut function = fixed.ir.0.functions.into_iter().nth(slot).unwrap();
+        let body = function.body.as_ptr();
+        let placed = source.clone().place(function).ok().unwrap();
+        assert_eq!(placed.function.body.as_ptr(), body);
+        assert_eq!(&text[placed.fixed_sites[3]], "'yes'");
+        function = placed.function;
+        let [Statement::If(_, yes, _)] = function.body.as_mut_slice() else {
+            panic!()
+        };
+        let [Statement::Return(value)] = yes.as_mut_slice() else {
+            panic!()
+        };
+        *value = unpacking::string("new");
+        assert!(source.clone().place(function.clone()).is_err());
+        let [Statement::If(_, yes, no)] = function.body.as_mut_slice() else {
+            panic!()
+        };
+        let [Statement::Return(value)] = yes.as_mut_slice() else {
+            panic!()
+        };
+        *value = unpacking::string("yes");
+        no.insert(0, yes.remove(0));
+        assert_eq!(function.body.as_ptr(), body);
+        assert!(source.place(function).is_err());
     }
 
     #[test]
@@ -348,38 +398,28 @@ mod tests {
             ty: Type::ListInt,
             kind: ExprKind::List(items),
         };
-        // Both trees visit four identical list operations in the same preorder.
+        // Both trees have the same types and operation kinds in preorder.
         let empty = || list(Vec::new());
-        let original = list(vec![empty(), list(vec![empty()])]);
-        let changed = list(vec![list(vec![empty()]), empty()]);
-        let body = |value| vec![Statement::Return(value)];
-        let original = body(original);
+        let function = |value| ir::Function {
+            params: vec![],
+            locals: vec![],
+            returns: Type::ListInt,
+            body: vec![Statement::Return(value)],
+        };
+        let original = function(list(vec![empty(), list(vec![empty()])]));
+        let changed = function(list(vec![list(vec![empty()]), empty()]));
         let mut sites = Vec::new();
-        ir::walk_nodes(&original, &mut |node, _| {
+        ir::walk_nodes(&original.body, &mut |node, _| {
             sites.push((TextRange::default(), FixedNode::checked(&node)));
         });
-        let matches = |body: &[Statement]| {
-            let mut remaining = Some(sites.as_slice());
-            ir::walk_nodes(body, &mut |node, _| {
-                remaining = FixedNode::consume(remaining, &node);
-            });
-            matches!(remaining, Some([]))
+        let source = FixedBodySource {
+            method: None,
+            attributes: Default::default(),
+            sites,
+            local_names: Default::default(),
         };
-        assert!(matches(&original));
-        assert!(!matches(&body(changed)));
-    }
-
-    #[test]
-    fn moving_a_checked_statement_to_the_other_arm_invalidates_its_site() {
-        let test = ir::Expr::boolean(true);
-        let first = Statement::Return(ir::Expr::boolean(false));
-        let second = Statement::Return(ir::Expr::boolean(true));
-        let original = Statement::If(test.clone(), vec![first.clone()], vec![second.clone()]);
-        let moved = Statement::If(test, Vec::new(), vec![first, second]);
-        let original = ir::Node::Statement(&original);
-        let sites = [(TextRange::default(), FixedNode::checked(&original))];
-        assert!(FixedNode::consume(Some(&sites), &original).is_some());
-        assert!(FixedNode::consume(Some(&sites), &ir::Node::Statement(&moved)).is_none());
+        assert!(source.clone().place(original).is_ok());
+        assert!(source.place(changed).is_err());
     }
 
     #[test]
@@ -450,7 +490,7 @@ mod tests {
                 .iter()
                 .any(
                     |(id, definition, source)| usize::from(definition.start()) == native
-                        && source.matches(&module.functions[*id])
+                        && source.clone().place(module.functions[*id].clone()).is_ok()
                 )
         );
         let both = text.find("def both").unwrap();
@@ -458,7 +498,7 @@ mod tests {
             .iter()
             .find(|(_, definition, _)| usize::from(definition.start()) == both)
             .unwrap();
-        assert!(source.matches(&module.functions[id]));
+        assert!(source.clone().place(module.functions[id].clone()).is_ok());
         assert_eq!(source.attributes.len(), 2);
         for (range, field) in &source.attributes {
             assert!(
@@ -490,7 +530,7 @@ mod tests {
             };
             *field = slot;
             receiver.ty = owner;
-            assert!(!source.matches(&module.functions[id]));
+            assert!(source.clone().place(module.functions[id].clone()).is_err());
         }
     }
 
@@ -535,7 +575,11 @@ mod tests {
                         method.start(),
                         Arc::as_ptr(method),
                         fixed.ir.0.functions[*slot].body.as_ptr(),
-                        source.positions(),
+                        source
+                            .sites
+                            .iter()
+                            .map(|(range, _)| *range)
+                            .collect::<Vec<_>>(),
                     ))
                 })
                 .collect();

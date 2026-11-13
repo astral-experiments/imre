@@ -9,9 +9,9 @@ pub(crate) use generators::{LexicalOperands, RegisteredGenerator};
 mod lambdas;
 pub(crate) use lambdas::RegisteredLambda;
 pub(super) mod patterns;
+#[cfg(test)]
 mod placement;
 mod templates;
-pub(crate) use placement::place_fixed_function;
 pub(super) mod values;
 
 /// Prepare the bindings installed by the existing type-parameter frame constructor.
@@ -576,10 +576,9 @@ impl FixedFunctions {
                 .registered_functions()
                 .get(&module)
                 .is_some_and(|entries| entries.contains_key(&start))
-                && source.matches(&function)
-                && accepted(module, definition)
+                && let Ok(placed) = source.place_if(function, || accepted(module, definition))
             {
-                graph.register_function(module, start, place_fixed_function(function, source));
+                graph.register_function(module, start, placed);
             }
         }
     }
@@ -675,14 +674,14 @@ pub(super) fn capture(
             else {
                 continue;
             };
-            body.source.and_then(|source| {
-                if source.matches(&body.function) {
-                    Some(place_fixed_function(body.function, source))
-                } else {
-                    attributes = source.attributes;
-                    None
-                }
-            })
+            body.source
+                .and_then(|source| match source.place(body.function) {
+                    Ok(placed) => Some(placed),
+                    Err(settled) => {
+                        attributes = settled;
+                        None
+                    }
+                })
         } else {
             None
         };

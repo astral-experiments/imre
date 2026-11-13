@@ -1194,11 +1194,8 @@ impl Inference {
                             locals: checker.locals,
                             body,
                         };
-                        if source.matches(&function) {
-                            method_returns.insert(
-                                signature.id,
-                                registered::place_fixed_function(function, source),
-                            );
+                        if let Ok(placed) = source.place(function) {
+                            method_returns.insert(signature.id, placed);
                         }
                     }
                     if superseded_returns
