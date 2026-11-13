@@ -1311,7 +1311,6 @@ fn lower_graph(
                     module.parsed.syntax().body[id.statement].as_function_def_stmt()
                 && function.decorator_list.is_empty()
                 && !function.is_async
-                && !imre_ast::code_flags::is_generator(&function.body)
                 && graph
                     .session
                     .unconditional_function_operand(*module_id, function, operand)
