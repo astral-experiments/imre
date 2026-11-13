@@ -183,7 +183,7 @@ pub(in crate::dynamic::stdlib) fn match_expand(
 
 struct Template {
     parts: Vec<ReplacementPart<Id>>,
-    join: Id,
+    bytes_join: Option<Id>,
 }
 
 /// Compile a replacement once, before searching or expanding an existing match.
@@ -277,13 +277,13 @@ fn compile_template(
             }
         })
         .collect();
-    let empty = if replacement_is_bytes {
-        ctx.alloc(Value::Bytes(Vec::new()))
+    let bytes_join = if replacement_is_bytes {
+        let empty = ctx.alloc(Value::Bytes(Vec::new()));
+        Some(ctx.lookup_attr(empty, "join")?)
     } else {
-        ctx.text("")
+        None
     };
-    let join = ctx.lookup_attr(empty, "join")?;
-    Ok(Template { parts, join })
+    Ok(Template { parts, bytes_join })
 }
 
 impl Template {
@@ -300,8 +300,12 @@ impl Template {
                 }
             }
         }
-        let pieces = ctx.alloc(Value::List(pieces));
-        ctx.call(self.join, vec![pieces], Vec::new())
+        if let Some(join) = self.bytes_join {
+            let pieces = ctx.alloc(Value::List(pieces));
+            ctx.call(join, vec![pieces], Vec::new())
+        } else {
+            ctx.join_formatted(&pieces)
+        }
     }
 }
 
