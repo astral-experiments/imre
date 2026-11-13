@@ -181,6 +181,14 @@ impl Prepared {
     ) -> StdResult<&[Statement], B::Error> {
         let row = binder.pattern_local(self.value);
         if row.ty != Type::PythonObject || target.is_name_expr() {
+            // The item is private until a successful pull. Releasing it after binding
+            // leaves this slot empty on every backedge; the scope handles abrupt exits.
+            let release = if matches!(self.next.first(), Some(Statement::Clear(slot)) if *slot == self.value)
+            {
+                self.next.remove(0)
+            } else {
+                Statement::Clear(self.value)
+            };
             self.next
                 .push(Self::exhaust_if_empty(Expr::local(self.ready, Type::Bool)));
             let start = self.next.len();
@@ -188,7 +196,7 @@ impl Prepared {
                 matches!(row.ty, Type::Tuple(_)).then_some(unpacking::Row::Projected(self.value));
             unpacking::bind_input(binder, target, row, projected, &mut self.next)?;
             let end = self.next.len();
-            self.next.push(Statement::Clear(self.value));
+            self.next.push(release);
             return Ok(&self.next[start..end]);
         }
         // The acquired Python cursor and its unadapted one-row pull must still
