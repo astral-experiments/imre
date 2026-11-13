@@ -198,7 +198,8 @@ impl Checker<'_> {
         } else {
             None
         };
-        let Some((module_name, docs)) = documents(&self.graph.modules, target) else {
+        let Some((module_name, docs)) = documents(&self.graph.modules, target, &self.graph.session)
+        else {
             return Ok(None);
         };
         let mut docs: Vec<_> = docs.iter().collect();

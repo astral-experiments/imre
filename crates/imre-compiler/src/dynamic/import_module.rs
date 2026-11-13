@@ -24,15 +24,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
             ),
         )),
         "enum" => bundled_source!("enum.py"),
-        "json" => Some((
-            "json/__init__.py",
-            concat!(
-                "r\"\"\"",
-                include_str!("../../stdlib/docstrings/json.txt"),
-                "\"\"\"\n",
-                include_str!("../../stdlib/json/boxed_init.py"),
-            ),
-        )),
+        "json" => bundled_source!("json/__init__.py"),
         "argparse" => bundled_source!("argparse.py"),
         "_json" => bundled_source!("_json.py"),
         "json.encoder" => bundled_source!("json/encoder.py"),

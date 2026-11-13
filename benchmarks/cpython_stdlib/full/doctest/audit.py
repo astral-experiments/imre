@@ -48,7 +48,12 @@ def audit(test_module):
         if not isinstance(case, doctest.DocTestCase):
             continue
         name = case.id()
-        if (DOCSTRINGS / (name + ".txt")).read_bytes() != case._dt_test.docstring.encode():
+        if name == "json":
+            source = (DOCSTRINGS.parent / "json/__init__.py").read_bytes()
+            bundled = ast.get_docstring(ast.parse(source), clean=False).encode()
+        else:
+            bundled = (DOCSTRINGS / (name + ".txt")).read_bytes()
+        if bundled != case._dt_test.docstring.encode():
             raise AssertionError(f"bundled native docstring differs from CPython: {name}")
         ids.append(name)
         data = examples(case)
