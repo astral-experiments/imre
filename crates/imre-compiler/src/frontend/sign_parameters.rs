@@ -112,7 +112,7 @@ impl Checker<'_> {
                 }
             }
         };
-        let if_none = |v: &Expr, absent: Expr, present: Expr| {
+        fn if_none(v: &Expr, absent: impl FnOnce() -> Expr, present: Expr) -> Expr {
             if v.ty == Type::Int {
                 present
             } else {
@@ -124,12 +124,12 @@ impl Checker<'_> {
                     ty: Type::Int,
                     kind: ExprKind::Conditional(
                         Box::new(test),
-                        Box::new(absent),
+                        Box::new(absent()),
                         Box::new(present),
                     ),
                 }
             }
-        };
+        }
         let error = |l, r| {
             calls::type_error(
                 Type::Int,
@@ -145,12 +145,14 @@ impl Checker<'_> {
                 Box::new(integer(&right)),
             ),
         };
-        let absent = if_none(
-            &right,
-            error("NoneType", "NoneType"),
-            error("NoneType", "int"),
-        );
-        let present = if_none(&right, error("int", "NoneType"), sum);
+        let absent = || {
+            if_none(
+                &right,
+                || error("NoneType", "NoneType"),
+                error("NoneType", "int"),
+            )
+        };
+        let present = if_none(&right, || error("int", "NoneType"), sum);
         scope.finish(if_none(&left, absent, present))
     }
 }
