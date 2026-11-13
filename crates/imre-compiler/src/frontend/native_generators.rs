@@ -35,25 +35,30 @@ pub(super) fn item_type(
     if graph.resolve(module, &result.value) != Some(Binding::Intrinsic(Intrinsic::Iterator)) {
         return Ok(None);
     }
-    let mut yields = Yield(false);
-    yields.visit_body(&function.body);
-    if !yields.0 {
-        return Ok(None);
-    }
     let unsupported = || {
         graph.modules[module].error(
             function,
             "a generator requires a single terminal for loop with a final yield of a value",
         )
     };
+    let without_terminal_yield = || {
+        // An Iterator annotation can also describe an ordinary function.
+        let mut yields = Yield(false);
+        yields.visit_body(&function.body);
+        if yields.0 {
+            Err(unsupported())
+        } else {
+            Ok(None)
+        }
+    };
     let Some((ast::Stmt::For(loop_), prelude)) = function.body.split_last() else {
-        return Err(unsupported());
+        return without_terminal_yield();
     };
     let Some((ast::Stmt::Expr(tail), prefix)) = loop_.body.split_last() else {
-        return Err(unsupported());
+        return without_terminal_yield();
     };
     let ast::Expr::Yield(y) = &*tail.value else {
-        return Err(unsupported());
+        return without_terminal_yield();
     };
     let Some(value) = &y.value else {
         return Err(unsupported());
