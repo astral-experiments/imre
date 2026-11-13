@@ -11,7 +11,7 @@ impl Emitter<'_, '_> {
         let payload = self.module.types.payload(result);
         let concrete = payload.unwrap_or(result);
         let tag = match concrete {
-            Type::JsonValue => 0,
+            Type::JsonRoot | Type::JsonValue => 0,
             Type::JsonObject => 1,
             Type::Str => 2,
             Type::Int => 3,
