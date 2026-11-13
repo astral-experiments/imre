@@ -82,12 +82,14 @@ fn substitute(
     }
     let text = subject_bytes(ctx, string, pattern.bytes)?;
     let mut output = Vec::new();
-    let mut caps = pattern.regex.create_captures();
+    let caps = pattern.regex.capture_buffer(&pattern.captures);
     let mut previous = None;
     let mut cursor = 0;
     let mut substitutions = 0;
     while limit == 0 || substitutions < limit {
-        let span = match split::next_span(&pattern, text, 0, previous, &mut caps) {
+        // Release the match scratch before error construction can re-enter Python.
+        let next = split::next_span(&pattern, text, 0, previous, &mut caps.borrow_mut());
+        let span = match next {
             Ok(Some(span)) => span,
             Ok(None) => break,
             Err(message) => return Err(pattern.match_error(ctx, message)),
