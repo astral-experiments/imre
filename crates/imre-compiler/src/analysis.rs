@@ -737,7 +737,8 @@ impl Session {
         else {
             return false;
         };
-        self.unconditional_operand(module, scope, None, operand)
+        !scope.is_generator_function(index)
+            && self.unconditional_operand(module, scope, None, operand)
     }
 
     fn unconditional_operand(
