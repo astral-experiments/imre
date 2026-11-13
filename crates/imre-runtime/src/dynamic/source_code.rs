@@ -1800,14 +1800,6 @@ impl Program {
                     if let Some(names) = &class_names {
                         child.private_names = Some(Rc::clone(names));
                     }
-                    if s.type_params.is_some()
-                        && let Some((_, reason)) = s
-                            .arguments
-                            .as_deref()
-                            .and_then(imre_ast::generic_class_arguments_error)
-                    {
-                        return Err(Error::new("SyntaxError", reason));
-                    }
                     child.private_names.get_or_insert_with(|| {
                         Rc::new(imre_ast::lower_in(&mut s.body, &child.name, false))
                     });
