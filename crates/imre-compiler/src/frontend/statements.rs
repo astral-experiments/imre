@@ -32,6 +32,25 @@ pub(super) fn raised<E>(
     }
 }
 
+/// A normal exit from the protected region reaches its successor only if cleanup falls through.
+pub(super) fn finish_try(
+    body: Vec<Statement>,
+    handlers: Vec<ir::ExceptHandler>,
+    orelse: Vec<Statement>,
+    normal_exit: bool,
+    (finalbody, final_falls): Block,
+) -> (Statement, bool) {
+    (
+        Statement::Try {
+            body,
+            handlers,
+            orelse,
+            finalbody,
+        },
+        normal_exit && final_falls,
+    )
+}
+
 pub(super) fn if_clauses(
     branch: &ast::StmtIf,
 ) -> impl Iterator<Item = (Option<&ast::Expr>, &[ast::Stmt])> {

@@ -2287,20 +2287,15 @@ impl<'a> SuitePreparation<'a> {
                     .into_child(&mut suites),
             });
         }
-        let (finalbody, final_continues) = if stmt.finalbody.is_empty() {
+        let finalbody = if stmt.finalbody.is_empty() {
             (Vec::new(), true)
         } else {
             let suite = self.physical_suite(&stmt.finalbody, kind, selection, suspended);
             let continues = suite.falls_through;
             (suite.into_child(&mut suites), continues)
         };
-        let falls_through = try_continues(body_continues, !handlers.is_empty(), final_continues);
-        let statement = Statement::Try {
-            body,
-            handlers,
-            orelse,
-            finalbody,
-        };
+        let (statement, falls_through) =
+            registered_try((body, body_continues), handlers, orelse, finalbody);
         RegisteredSuite {
             checked: scope.finish(vec![checkpoint, statement]),
             operands,
@@ -2797,10 +2792,15 @@ pub(super) fn exception_matcher<E>(
     })
 }
 
-/// Registered handler dispatch places a join after all arms, including the exceptional
-/// entry. A terminating final suite closes that edge as well as the body's normal edge.
-fn try_continues(body: bool, has_handlers: bool, finalbody: bool) -> bool {
-    (body || has_handlers) && finalbody
+/// Registered dispatch retains a join after the handlers, including its exceptional entry.
+fn registered_try(
+    (body, body_falls): statements::Block,
+    handlers: Vec<ir::ExceptHandler>,
+    orelse: Vec<Statement>,
+    finalbody: statements::Block,
+) -> (Statement, bool) {
+    let normal_exit = body_falls || !handlers.is_empty();
+    statements::finish_try(body, handlers, orelse, normal_exit, finalbody)
 }
 
 /// A target's Python expression inputs in evaluation order. The receiver is evaluated
@@ -3088,7 +3088,7 @@ impl statements::StatementLowering for SourceScope<'_> {
                 Ok((vec![binding], true))
             }
             ast::Stmt::Try(region) => {
-                let (body, body_continues) = self.block(&region.body)?;
+                let body = self.block(&region.body)?;
                 let mut handlers = Vec::with_capacity(region.handlers.len());
                 for ast::ExceptHandler::ExceptHandler(handler) in &region.handlers {
                     let matcher = exception_matcher(handler, region.is_star, |class, _| {
@@ -3101,18 +3101,9 @@ impl statements::StatementLowering for SourceScope<'_> {
                     });
                 }
                 let orelse = self.suite(&region.orelse)?;
-                let (finalbody, final_continues) = self.block(&region.finalbody)?;
-                let continues =
-                    try_continues(body_continues, !handlers.is_empty(), final_continues);
-                Ok((
-                    vec![Statement::Try {
-                        body,
-                        handlers,
-                        orelse,
-                        finalbody,
-                    }],
-                    continues,
-                ))
+                let finalbody = self.block(&region.finalbody)?;
+                let (statement, falls) = registered_try(body, handlers, orelse, finalbody);
+                Ok((vec![statement], falls))
             }
             ast::Stmt::With(stmt) if !stmt.is_async || self.async_iteration() => Ok((
                 self.with_items(&stmt.items, stmt.is_async, &stmt.body)?,

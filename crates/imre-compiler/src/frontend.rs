@@ -7627,6 +7627,11 @@ impl<'a> Checker<'a> {
         }
 
         let has_normal_exit = normal_exit.is_some();
+        let finish = |finalbody| {
+            let (statement, falls) =
+                statements::finish_try(body, handlers, orelse, has_normal_exit, finalbody);
+            (vec![statement], falls)
+        };
         let (mut normal_assigned, normal_facts) = normal_exit
             .map(|exit| (exit.assigned, exit.narrowed))
             .unwrap_or_default();
@@ -7635,15 +7640,7 @@ impl<'a> Checker<'a> {
             self.assigned = normal_assigned;
             self.narrowed = normal_facts;
             self.explicit_return |= earlier_returns;
-            return Ok((
-                vec![Statement::Try {
-                    body,
-                    handlers,
-                    orelse,
-                    finalbody: Vec::new(),
-                }],
-                has_normal_exit,
-            ));
+            return Ok(finish((Vec::new(), true)));
         }
         self.assigned = before;
         self.narrowed = before_facts;
@@ -7720,15 +7717,7 @@ impl<'a> Checker<'a> {
         }
         // Keep the facts established by the shared finally across interrupted paths.
         self.assigned.extend(&normal_assigned);
-        Ok((
-            vec![Statement::Try {
-                body,
-                handlers,
-                orelse,
-                finalbody,
-            }],
-            has_normal_exit && final_falls,
-        ))
+        Ok(finish((finalbody, final_falls)))
     }
 
     fn if_chain(&mut self, branch: &ast::StmtIf) -> Result<(Vec<Statement>, bool), String> {
