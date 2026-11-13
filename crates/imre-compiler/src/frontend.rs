@@ -140,7 +140,7 @@ pub(crate) use registered::values::{
 };
 pub(crate) use registered::{
     AnnotationProvider, CheckedProvider, DeclarationSite, DeferredAnnotation, FrameInputs,
-    FrameSite, FrameSlots, LexicalOperands, ParameterAnnotations, ParameterEvaluator,
+    FrameSite, FrameSlots, LexicalOperands, NamedBody, ParameterAnnotations, ParameterEvaluator,
     PhysicalOperand, PreparedRefusal, RegisteredBindings, RegisteredBody, RegisteredFunction,
     RegisteredGenerator, RegisteredLambda, RegisteredScope, RegisteredSuite, SuitePreparation,
     TypeParameterValues, annotation_expression, place_fixed_function, registered_sites,
