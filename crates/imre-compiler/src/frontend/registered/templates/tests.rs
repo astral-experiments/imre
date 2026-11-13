@@ -39,16 +39,20 @@ fn template_children_use_their_eager_bindings_after_source_is_dropped() {
             }
         }
         ir::Node::Expression(Expr {
-            kind: ExprKind::Builtin(Builtin::RegisteredCall(call), args),
+            kind: ExprKind::Invoke { args, .. },
             ..
         }) => {
-            let ir::RegisteredCallTarget::Method { name, .. } = &call.target else {
+            let site = args.site.python().unwrap();
+            let ir::RegisteredCallTarget::Method { name, .. } = &site.call.target else {
                 panic!("expected a method call");
             };
-            let [scope, _, arg] = args.as_slice() else {
-                panic!("expected a scope, receiver and single argument");
+            let [arg] = args.values.as_slice() else {
+                panic!("expected a single argument");
             };
-            assert!(call.explicit_scope);
+            let scope = site
+                .scope
+                .as_deref()
+                .expect("expected a comprehension namespace");
             let ExprKind::Local(namespace) = scope.kind else {
                 panic!("expected a comprehension namespace");
             };

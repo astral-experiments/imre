@@ -168,27 +168,15 @@ pub(crate) fn frame_inputs(
             }
             ir::Node::Expression(expr) => expr,
         };
-        if let ExprKind::Builtin(operation, operands) = &expr.kind
-            && let Builtin::RegisteredCall(call) = match attribute {
-                Some(crate::frontend::FixedAttribute::Operation { operation, .. }) => &**operation,
-                Some(
-                    crate::frontend::FixedAttribute::ModuleName(_)
-                    | crate::frontend::FixedAttribute::Call(_),
-                ) => return false,
-                None => operation,
-            }
+        if let Some(crate::frontend::FixedAttribute::Call(call)) = attribute
+            && call.0.is_none()
+            && let ExprKind::Builtin(_, operands) = &expr.kind
         {
             uses_python_protocol = true;
-            let scope = usize::from(call.explicit_scope);
             if has_scalar {
-                // The method receiver and arguments are passed as their original handles.
-                protocol_reads += operands
-                    .iter()
-                    .skip(scope)
-                    .map(&protocol_parameter)
-                    .sum::<usize>();
+                protocol_reads += operands.iter().map(&protocol_parameter).sum::<usize>();
             }
-            return operands.len() > scope;
+            return !operands.is_empty();
         }
         if attribute.is_some() {
             return false;
@@ -292,7 +280,8 @@ pub(crate) fn frame_inputs(
                 uses_python_protocol = true;
                 if has_scalar {
                     if args.site.python().is_some_and(|site| {
-                        !matches!(site.call.arguments, ir::RegisteredArguments::Positional)
+                        matches!(site.call.target, ir::RegisteredCallTarget::Method { .. })
+                            || !matches!(site.call.arguments, ir::RegisteredArguments::Positional)
                     }) {
                         protocol_reads += protocol_parameter(callable);
                     }
@@ -1074,10 +1063,6 @@ impl<'f> Frame<'f, '_, '_> {
 
     pub(super) fn builtin(&mut self, op: &Builtin, operands: &[Expr]) -> CheckedValue {
         let handle = match (op, operands) {
-            (Builtin::RegisteredCall(call), [target, args @ ..]) => {
-                return CheckedBody::registered(self.reborrow())
-                    .registered_call(call, target, args);
-            }
             (Builtin::RegisteredAttribute { .. }, _) => self.mutate_attribute(op, operands.iter()),
             (Builtin::RegisteredInput(index), []) => self.registered_input(*index),
             (op, args) if let Some(iteration) = op.iteration_operands(args) => {

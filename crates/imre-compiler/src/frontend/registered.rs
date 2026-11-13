@@ -4877,17 +4877,16 @@ else:
         let bodies = graph.registered_functions();
         let body = &bodies[&graph.entry][&TextSize::default()].function.body;
         assert!(body.iter().any(|stmt| matches!(stmt, Statement::If(..))));
-        let mut counts = [0; 6];
+        let mut counts = [0; 5];
         ir::walk_expressions(body, &mut |expr| match &expr.kind {
             ExprKind::Conditional(..) => counts[0] += 1,
             ExprKind::Boolean(..) => counts[1] += 1,
             ExprKind::BooleanValue(..) => counts[2] += 1,
             ExprKind::Builtin(Builtin::RegisteredName(name), _) if name == "bool" => counts[3] += 1,
-            ExprKind::Builtin(Builtin::RegisteredCall(..), _) => counts[4] += 1,
-            ExprKind::Invoke { .. } => counts[5] += 1,
+            ExprKind::Invoke { .. } => counts[4] += 1,
             _ => {}
         });
-        assert_eq!(counts, [1, 1, 2, 1, 0, 3]);
+        assert_eq!(counts, [1, 1, 2, 1, 3]);
     }
 
     #[test]
@@ -5009,24 +5008,26 @@ else:
                 assert_eq!(expr.ty, rhs.ty);
                 binds.push(suite.local_names[slot].name.as_str());
             }
-            ExprKind::Builtin(Builtin::RegisteredCall(call), operands) => {
-                let ir::RegisteredCallTarget::Method { name, .. } = &call.target else {
-                    panic!("expected the positional method");
-                };
-                assert_eq!(call.arguments, ir::RegisteredArguments::Positional);
-                assert_eq!(operands.len(), 2);
-                calls.push(name.as_str());
-            }
             ExprKind::Invoke { args, .. } => {
-                assert_eq!(args.values.len(), 2);
-                assert_eq!(
-                    args.site.python().unwrap().call.arguments,
-                    ir::RegisteredArguments::Packed(ir::PackedArguments {
-                        starred: vec![true],
-                        keywords: vec![None],
-                    })
-                );
-                calls.push("packed");
+                let call = &args.site.python().unwrap().call;
+                match &call.target {
+                    ir::RegisteredCallTarget::Method { name, .. } => {
+                        assert_eq!(call.arguments, ir::RegisteredArguments::Positional);
+                        assert_eq!(args.values.len(), 1);
+                        calls.push(name.as_str());
+                    }
+                    ir::RegisteredCallTarget::Callable { .. } => {
+                        assert_eq!(args.values.len(), 2);
+                        assert_eq!(
+                            call.arguments,
+                            ir::RegisteredArguments::Packed(ir::PackedArguments {
+                                starred: vec![true],
+                                keywords: vec![None],
+                            })
+                        );
+                        calls.push("packed");
+                    }
+                }
             }
             _ => {}
         });
@@ -5084,11 +5085,11 @@ else:
         crate::verify::registered(operand.region()).unwrap();
         let mut receivers = Vec::new();
         ir::walk_operand_expressions(&operand.value, &mut |expr| {
-            if let ExprKind::Builtin(Builtin::RegisteredCall(call), args) = &expr.kind {
+            if let ExprKind::Invoke { callable, args } = &expr.kind {
                 assert!(
-                    matches!(&call.target, ir::RegisteredCallTarget::Method { name, .. } if name == "encode")
+                    matches!(&args.site.python().unwrap().call.target, ir::RegisteredCallTarget::Method { name, .. } if name == "encode")
                 );
-                receivers.push(args[0].ty);
+                receivers.push(callable.ty);
             }
         });
         assert_eq!(receivers, [Type::Str, Type::PythonObject]);
@@ -5515,9 +5516,8 @@ print(clean(CompletedProcess([], 0, " data ")))
             FixedAttribute::Operation { operation, .. }
             if matches!(&**operation, Builtin::RegisteredAttribute { name, .. } if name == "stdout"))));
         assert!(attributes.values().any(|field| matches!(field,
-            FixedAttribute::Operation { operation, .. }
-            if matches!(&**operation, Builtin::RegisteredCall(call)
-                if matches!(&call.target, ir::RegisteredCallTarget::Method { name, .. } if name == "strip")))));
+            FixedAttribute::Call(saved) if saved.0.is_none()
+                && matches!(&saved.1.call.target, ir::RegisteredCallTarget::Method { name, .. } if name == "strip"))));
     }
 
     #[test]
@@ -5660,9 +5660,9 @@ exec("print(1)")
             bodies[&graph.entry][&start].region().walk(&mut |node, _| {
                 let ir::Node::Expression(value) = node else { return };
                 match &value.kind {
-                    ExprKind::Builtin(Builtin::RegisteredCall(site), operands)
-                        if matches!(&site.target, ir::RegisteredCallTarget::Method { name, .. } if name == "selected") => {
-                            assert_eq!(operands.len(), 3);
+                    ExprKind::Invoke { args, .. }
+                        if matches!(&args.site.python().unwrap().call.target, ir::RegisteredCallTarget::Method { name, .. } if name == "selected") => {
+                            assert_eq!(args.values.len(), 2);
                             selections += 1;
                         }
                     ExprKind::Invoke { callable, .. } => {
@@ -5859,9 +5859,7 @@ publish(5, callback)
         let mut advances = 0;
         ir::walk_expressions(body, &mut |expr| match &expr.kind {
             ExprKind::Binary(Binary::Multiply, ..) => multiplies += 1,
-            ExprKind::Builtin(Builtin::RegisteredCall(_), _) | ExprKind::Invoke { .. } => {
-                calls += 1
-            }
+            ExprKind::Invoke { .. } => calls += 1,
             _ => {}
         });
         ir::walk_statements(body, &mut |stmt| {
@@ -6207,6 +6205,11 @@ publish(5, callback)
         ir::walk_expressions(&checked.function.body, &mut |expr| match &expr.kind {
             ExprKind::Invoke { callable, args } => {
                 let site = args.site.python().unwrap();
+                if matches!(site.call.target, ir::RegisteredCallTarget::Method { .. }) {
+                    assert_eq!(site.call.arguments, ir::RegisteredArguments::Positional);
+                    calls.push((&source[site.call.range], "method"));
+                    return;
+                }
                 let ExprKind::Builtin(Builtin::RegisteredLocation(range, ..), callee) =
                     &callable.kind
                 else {
@@ -6227,16 +6230,6 @@ publish(5, callback)
                     _ => panic!("unexpected positional callable"),
                 };
                 calls.push((&source[site.call.range], kind));
-            }
-            ExprKind::Builtin(Builtin::RegisteredCall(site), _) => {
-                let kind = match (&site.target, &site.arguments) {
-                    (
-                        ir::RegisteredCallTarget::Method { .. },
-                        ir::RegisteredArguments::Positional,
-                    ) => "method",
-                    _ => panic!("unexpected registered call"),
-                };
-                calls.push((&source[site.range], kind));
             }
             _ => {}
         });
@@ -6457,7 +6450,7 @@ publish(5, callback)
         assert!(matches!(body.inputs, FrameInputs::Protocol { .. }));
         let mut operations = Vec::new();
         ir::walk_expressions(&body.function.body, &mut |expr| match &expr.kind {
-            ExprKind::Builtin(Builtin::RegisteredCall(call), _) if matches!(&call.target, ir::RegisteredCallTarget::Method { name, .. } if name == "write_text") =>
+            ExprKind::Invoke { args, .. } if matches!(&args.site.python().unwrap().call.target, ir::RegisteredCallTarget::Method { name, .. } if name == "write_text") =>
             {
                 operations.push("write_text");
             }
@@ -6570,13 +6563,10 @@ publish(5, callback)
         let body = &bodies[&graph.entry][&TextSize::default()];
         let mut named = Vec::new();
         ir::walk_expressions(&body.function.body, &mut |expr| {
-            if let ExprKind::Builtin(
-                Builtin::RegisteredCall(ir::RegisteredCall {
-                    target: ir::RegisteredCallTarget::Method { name, .. },
-                    ..
-                }),
-                _,
-            ) = &expr.kind
+            if let Some(ir::RegisteredCall {
+                target: ir::RegisteredCallTarget::Method { name, .. },
+                ..
+            }) = expr.python_call()
             {
                 named.push(name.as_str());
             }
@@ -6956,10 +6946,7 @@ publish(5, callback)
         .expect("function-local annotations need no execution-time provider");
         let mut calls = 0;
         ir::walk_expressions(&checked.function.body, &mut |value| {
-            calls += usize::from(matches!(
-                value.kind,
-                ExprKind::Invoke { .. } | ExprKind::Builtin(Builtin::RegisteredCall(_), _)
-            ));
+            calls += usize::from(matches!(value.kind, ExprKind::Invoke { .. }));
         });
         assert_eq!(calls, 0);
     }

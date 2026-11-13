@@ -209,12 +209,14 @@ mod tests {
         assert_eq!(attributes.len(), 1);
         let (range, attribute) = attributes.iter().next().unwrap();
         assert_eq!(&text[*range], "events.append(mark)");
-        let FixedAttribute::Operation { operation, .. } = attribute else {
+        let FixedAttribute::Call(call) = attribute else {
             panic!("expected bound method")
         };
-        assert!(matches!(&**operation, Builtin::RegisteredCall(call)
-            if matches!(&call.target, ir::RegisteredCallTarget::Method { name, attribute, .. }
-                if name == "append" && &text[*attribute] == "events.append")));
+        assert!(call.0.is_none());
+        assert!(
+            matches!(&call.1.call.target, ir::RegisteredCallTarget::Method { name, attribute, .. }
+            if name == "append" && &text[*attribute] == "events.append")
+        );
     }
 
     #[test]
