@@ -101,13 +101,25 @@ pub(super) struct Acquire {
 }
 
 impl Acquire {
+    /// An already selected lock.acquire() with no Python arguments.
+    pub(super) fn blocking(lock: &Arc<PrimitiveLock>) -> Self {
+        Self {
+            lock: Arc::clone(lock),
+            blocking: true,
+            timeout: None,
+        }
+    }
+
     pub(super) fn prepare(
         ctx: &mut Context,
         name: &str,
         args: &[Id],
         kwargs: &[(String, Id)],
     ) -> Result<Self> {
-        let (id, _, args) = receiver_args(ctx, name, args)?;
+        let (id, lock, args) = receiver_args(ctx, name, args)?;
+        if args.is_empty() && kwargs.is_empty() {
+            return Ok(Self::blocking(lock));
+        }
         let (blocking, timeout) = acquire_args(ctx, args, kwargs)?;
         // Conversion may replace this lock's native backing in a forked child.
         let Value::PrimitiveLock(lock) = ctx.heap.get(id) else {
