@@ -81,6 +81,7 @@ pub(crate) enum FixedNode {
     Constant(ir::Constant),
     Binary(Binary, Type),
     Text(ir::TextOperation, usize, Type),
+    Path(ir::PathOperation, usize, Type),
     Builtin(std::mem::Discriminant<Builtin>, usize, Type),
 }
 
@@ -135,6 +136,9 @@ impl FixedNode {
                     Self::indexed(&expr.kind, slot, expr.ty)
                 }
                 ExprKind::Binary(op, _, _) => Self::Binary(op, expr.ty),
+                ExprKind::Builtin(Builtin::Path(op), ref operands) => {
+                    Self::Path(op, operands.len(), expr.ty)
+                }
                 ExprKind::Builtin(Builtin::Text(op), ref operands) => {
                     Self::Text(op, operands.len(), expr.ty)
                 }
@@ -157,7 +161,7 @@ pub(super) struct PendingSite {
 #[derive(Default)]
 pub(super) struct SourceSites {
     pub(super) attributes: HashMap<TextRange, FixedAttribute>,
-    wrapper_fields: bool,
+    pub(super) wrapper_fields: bool,
     sites: Vec<(TextRange, Option<FixedNode>)>,
     current: Option<PendingSite>,
     next_index: usize,
@@ -260,23 +264,16 @@ impl SourceSites {
         }
     }
 
-    pub(super) fn field(
-        &mut self,
-        field: &ast::ExprAttribute,
-        kind: &ExprKind,
-        slot: usize,
-        result: Type,
-    ) {
+    pub(super) fn field(&mut self, field: &ast::ExprAttribute, native: FixedNode) {
         // Private names require the registered class's lexical mangling.
-        if self.wrapper_fields
-            && !ruff_python_stdlib::identifiers::is_mangled_private(field.attr.as_str())
+        if !ruff_python_stdlib::identifiers::is_mangled_private(field.attr.as_str())
             && let Some(site) = self.site_at(field.range())
         {
             self.python_operation(
                 site,
                 field.attr.start(),
                 registered::values::attribute_load(field),
-                FixedNode::indexed(kind, slot, result),
+                native,
             );
         }
     }

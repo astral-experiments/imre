@@ -222,7 +222,7 @@ impl Checker<'_> {
     }
 
     pub(super) fn path_attribute(
-        &self,
+        &mut self,
         receiver: Expr,
         attribute: &ast::ExprAttribute,
     ) -> Result<Expr, String> {
@@ -245,6 +245,9 @@ impl Checker<'_> {
                 ));
             }
         };
+        if let Some(sites) = &mut self.fixed_sites {
+            sites.field(attribute, FixedNode::Path(kind, 1, ty));
+        }
         Ok(operation(kind, ty, vec![receiver]))
     }
 
