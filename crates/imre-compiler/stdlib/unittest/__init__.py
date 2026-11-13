@@ -687,8 +687,11 @@ class TestResult:
     def addSuccess(self, test: TestCase) -> None:
         pass
 
-    def addSkip(self, test: TestCase, reason: str) -> None:
-        self.skipped.append((test, reason))
+    if TYPE_CHECKING:
+        def addSkip(self, test: TestCase, reason: str) -> None: ...
+    else:
+        def addSkip(self, test, reason):
+            self.skipped.append((test, reason))
 
     def addUnexpectedSuccess(self, test: TestCase) -> None:
         try:
