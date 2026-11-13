@@ -3890,6 +3890,7 @@ impl Context {
     /// Invoke pending callbacks after the heap has cleared every dead reference.
     pub(super) fn run_weak_callbacks(&mut self, callbacks: impl IntoIterator<Item = (Id, Id)>) {
         for (callback, reference) in callbacks {
+            let mark = self.heap.temporary_mark();
             if let Err(error) = self.call(callback, vec![reference], Vec::new()) {
                 // clear_weak_targets retains __callback__ for cyclic GC, but clears it
                 // on ordinary release. CPython uses a distinct diagnostic for each.
@@ -3905,6 +3906,7 @@ impl Context {
                 };
                 super::unraisable::report(self, error, true, Some(callback), message);
             }
+            self.discard_truth(mark);
         }
     }
 }
