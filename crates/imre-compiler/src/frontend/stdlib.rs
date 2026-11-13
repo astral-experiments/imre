@@ -1110,6 +1110,20 @@ impl Checker<'_> {
             return Ok(Formatted(text));
         }
         let value = self.expr(&field.expression)?;
+        if value.ty == Type::Str
+            && conversion == ast::ConversionFlag::None
+            && field.format_spec.is_none()
+        {
+            let formatted = Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(Builtin::FormatField(Default::default()), vec![value]),
+            };
+            if let Some(sites) = &mut self.fixed_sites {
+                sites.checked_expression(field.range(), &formatted);
+                self.live_protocol_parameters = true;
+            }
+            return Ok(Formatted(formatted));
+        }
         if value.ty == Type::PythonObject {
             self.require_registered_operation(field)?;
             return Ok(Operand(value));

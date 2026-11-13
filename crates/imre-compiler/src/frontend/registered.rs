@@ -6262,9 +6262,11 @@ publish(5, callback)
             ExprKind::Builtin(Builtin::RegisteredName(name), _) if name == "target" => {
                 operations.push("target");
             }
-            ExprKind::Builtin(Builtin::FormatField(_), args) => match &args[1].kind {
-                ExprKind::None => operations.push("default format"),
-                ExprKind::Str(spec) if spec == ">4" => operations.push("explicit format"),
+            ExprKind::Builtin(Builtin::FormatField(_), args) => match args.as_slice() {
+                [_] => operations.push("default format"),
+                [_, spec] if matches!(&spec.kind, ExprKind::Str(s) if s == ">4") => {
+                    operations.push("explicit format")
+                }
                 _ => panic!("unexpected format specification"),
             },
             _ => {}

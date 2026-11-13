@@ -1984,6 +1984,16 @@ fn lower_function(
         source = checker.fixed_sites.and_then(|sites| {
             let method = match signature.method {
                 Some(_) => Some(registered::physical_method(signature, definition, classes)?),
+                // A free fixed frame binds scalar payloads before any Python operand runs.
+                // Keep its Python entry on the live binder when an operation needs it.
+                None if checker.live_protocol_parameters
+                    && signature
+                        .params
+                        .iter()
+                        .any(|param| param.ty.builtin_scalar_name().is_some()) =>
+                {
+                    return None;
+                }
                 None => None,
             };
             sites.finish(
@@ -8172,23 +8182,37 @@ impl<'a> Checker<'a> {
         expression: &ast::Expr,
         lower: impl FnOnce(&mut Self) -> Result<Expr, String>,
     ) -> Result<Expr, String> {
+        self.with_fixed_site(expression.range(), |checker| {
+            let value = lower(checker)?;
+            if let Some(sites) = &mut checker.fixed_sites
+                && matches!(
+                    (expression, &value.kind),
+                    (ast::Expr::StringLiteral(_), ExprKind::Str(_))
+                        | (ast::Expr::BooleanLiteral(_), ExprKind::Bool(_))
+                        | (ast::Expr::List(_), ExprKind::List(_))
+                        | (ast::Expr::Tuple(_), ExprKind::Tuple(_))
+                        | (
+                            ast::Expr::FString(_),
+                            ExprKind::Builtin(Builtin::FormatJoin, _)
+                        )
+                )
+            {
+                sites.checked_expression(expression.range(), &value);
+            }
+            Ok(value)
+        })
+    }
+
+    fn with_fixed_site<T>(
+        &mut self,
+        range: TextRange,
+        lower: impl FnOnce(&mut Self) -> Result<T, String>,
+    ) -> Result<T, String> {
         let parent = self
             .fixed_sites
             .as_mut()
-            .and_then(|sites| sites.enter(expression.range()));
+            .and_then(|sites| sites.enter(range));
         let value = lower(self)?;
-        if let Some(sites) = &mut self.fixed_sites
-            && matches!(
-                (expression, &value.kind),
-                (ast::Expr::StringLiteral(_), ExprKind::Str(_))
-                    | (ast::Expr::BooleanLiteral(_), ExprKind::Bool(_))
-                    | (ast::Expr::List(_), ExprKind::List(_))
-                    | (ast::Expr::Tuple(_), ExprKind::Tuple(_))
-            )
-            && let Some(node) = FixedNode::checked(&ir::Node::Expression(&value))
-        {
-            sites.expression(expression.range(), node);
-        }
         self.leave_fixed_site(parent);
         Ok(value)
     }

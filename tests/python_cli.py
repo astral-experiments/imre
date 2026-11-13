@@ -196,6 +196,18 @@ def check_registered_entry_operand(imre, root, run):
     result = run(imre, "-m", entry.stem)
     assert (result.returncode, result.stdout, result.stderr) == (0, b"1\nAttributeError\n", b""), result
 
+    entry.write_text(
+        "def label(value: str) -> str: return f'L:{value}'\n"
+        "print(label('ab'))\n"
+        "def startup(source: str) -> None: exec(source)\n"
+        "exec(" + repr(
+            "label.__annotations__ = {'value': int}\nprint(label(12))\n"
+            "del label.__annotations__\nprint(label(13))"
+        ) + ")\n"
+    )
+    result = run(imre, "-m", entry.stem)
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"L:ab\nL:12\nL:13\n", b""), result
+
 
 def check_module_search_root(imre, root, run):
     app = root / "application"

@@ -91,6 +91,15 @@ impl Emitter<'_, '_> {
             }
             Builtin::FormatField(_) => {
                 let value = &args[0].value;
+                if args.len() == 1 {
+                    assert_eq!(
+                        value.ty,
+                        Type::Str,
+                        "fixed default format requires an exact string"
+                    );
+                    self.retain(value);
+                    return value.clone();
+                }
                 let spec = &args[1].value;
                 debug_assert_eq!(spec.ty, Type::Str);
                 let format = if value.ty.is_format_scalar() {
@@ -260,6 +269,35 @@ print(f"{abs(-0.125):.2%}")
         ] {
             assert!(llvm.contains(operation), "missing {operation}");
         }
+    }
+
+    #[test]
+    fn fixed_format_fields_use_the_source_specification() {
+        use crate::ir::{Builtin, ExprKind, Type, walk_expressions};
+
+        let source = concat!(
+            "def render(text: str, number: float, items: list[int], spec: str) -> str:\n",
+            "    return f'{text}{number:{spec}}{items:{spec}}'\n",
+            "print(render('v', 2.5, [1], ''))",
+        );
+        let graph = crate::modules::SourceGraph::single(source).unwrap();
+        let module = crate::frontend::lower(&graph).unwrap();
+        let mut fields = Vec::new();
+        walk_expressions(&module.functions[0].body, &mut |expr| {
+            if let ExprKind::Builtin(Builtin::FormatField(_), args) = &expr.kind {
+                fields.push(args.iter().map(|arg| arg.ty).collect::<Vec<_>>());
+            }
+        });
+        assert_eq!(
+            fields,
+            [
+                vec![Type::Str],
+                vec![Type::Float, Type::Str],
+                vec![Type::Str], // nested {spec} for the float
+                vec![Type::ListInt, Type::Str],
+                vec![Type::Str], // nested {spec} for the list
+            ]
+        );
     }
 
     #[test]

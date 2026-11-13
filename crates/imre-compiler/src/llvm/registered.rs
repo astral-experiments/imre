@@ -178,7 +178,7 @@ pub(crate) fn frame_inputs(
                 uses_python_protocol |= args
                     .first()
                     .is_some_and(|value| value.ty == Type::PythonObject);
-                args.len() == 2
+                matches!(args.len(), 1 | 2)
             }
             ExprKind::Builtin(Builtin::FormatJoin, parts) => parts.len() >= 2,
             ExprKind::Binary(..) => true,
@@ -1032,11 +1032,11 @@ impl<'f> Frame<'f, '_, '_> {
                             frame.keep_operands(&mark, &value, "0");
                             frame.format_conversion(&value, *conversion)
                         }
-                        (Builtin::FormatField(_), [value, spec]) => {
+                        (Builtin::FormatField(_), [value, spec @ ..]) if spec.len() <= 1 => {
                             let value = frame.evaluate_handle(value);
                             frame.keep_operands(&mark, &value, "0");
-                            let spec = frame.evaluate_handle(spec);
-                            frame.format_field(&value, &spec)
+                            let spec = spec.first().map(|spec| frame.evaluate_handle(spec));
+                            frame.format_field(&value, spec.as_deref().unwrap_or("0"))
                         }
                         _ => unreachable!("checked format operands"),
                     };
