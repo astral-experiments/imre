@@ -824,7 +824,12 @@ impl Checker<'_> {
         };
         let value = unpromoted(value);
         let storage = existing.map_or(value.ty, |slot| self.locals[slot]);
-        let stored = self.coerce(value.clone(), storage, expression)?;
+        let stored = if value.ty == storage {
+            self.keep_module_list_layout(&value);
+            Cow::Borrowed(&value)
+        } else {
+            Cow::Owned(self.coerce(value.clone(), storage, expression)?)
+        };
         let slot = self.declare(name.id.as_str(), storage, expression)?;
         self.assigned_value(slot, &stored);
         if let Some(exports) = &mut self.comprehension_exports {
