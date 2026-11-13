@@ -1,4 +1,5 @@
 //! Boxed hash handles share streaming state across Python references and native workers.
+use std::borrow::Cow;
 use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -154,15 +155,15 @@ impl State {
         }
     }
 
-    /// Finalize a snapshot, borrowing the digest only until the caller consumes it.
+    /// Portable providers lend the snapshot bytes. OpenSSL hands over its output buffer.
     pub(crate) fn fixed_digest<T>(
         &self,
         method: &str,
-        result: impl FnOnce(&[u8]) -> exceptions::Result<T>,
+        result: impl FnOnce(Cow<'_, [u8]>) -> exceptions::Result<T>,
     ) -> exceptions::Result<T> {
         match self {
-            Self::Portable(hash) => hash.fixed_digest(method, result),
-            Self::OpenSsl(hash) => result(&hash.digest().map_err(native_error)?),
+            Self::Portable(hash) => hash.fixed_digest(method, |bytes| result(Cow::Borrowed(bytes))),
+            Self::OpenSsl(hash) => result(Cow::Owned(hash.digest().map_err(native_error)?)),
         }
     }
 
@@ -180,23 +181,16 @@ impl State {
     }
 
     pub(super) fn digest(&self, method: &str, length: Option<&Int>) -> Result<Value> {
-        let hex = method == "hexdigest";
-        Ok(match (self, length) {
-            (Self::Portable(hash), Some(length)) if hex => Value::Str(hash.xof_hexdigest(length)?),
-            (Self::Portable(hash), Some(length)) => Value::Bytes(hash.xof_digest(length)?),
-            (Self::Portable(hash), None) if hex => Value::Str(hash.hexdigest()?),
-            (Self::Portable(hash), None) => {
-                Value::Bytes(hash.fixed_digest(method, |bytes| Ok(bytes.to_vec()))?)
+        let result = |bytes: Cow<'_, [u8]>| {
+            if method == "hexdigest" {
+                hash_hex(&bytes).map(Value::Str)
+            } else {
+                Ok(Value::Bytes(bytes.into_owned()))
             }
-            (Self::OpenSsl(hash), None) => {
-                let bytes = hash.digest()?;
-                if hex {
-                    Value::Str(hash_hex(&bytes)?)
-                } else {
-                    Value::Bytes(bytes)
-                }
-            }
-            (Self::OpenSsl(_), Some(_)) => unreachable!("fixed OpenSSL digest"),
+        };
+        Ok(match length {
+            Some(length) => result(Cow::Owned(self.xof(method, length)?))?,
+            None => self.fixed_digest(method, result)?,
         })
     }
 }

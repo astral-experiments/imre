@@ -1,5 +1,6 @@
 //! Hash objects share mutable state. Digest reads finalize an independent snapshot.
 
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::ptr;
 
@@ -385,14 +386,6 @@ impl State {
             _ => unreachable!("checked XOF receiver"),
         }
         Ok(bytes)
-    }
-
-    pub(crate) fn xof_hexdigest(&self, length: &Int) -> Result<Str> {
-        hex_text(&self.xof_digest(length)?)
-    }
-
-    pub(crate) fn hexdigest(&self) -> Result<Str> {
-        self.fixed_digest("hexdigest", hex_text)
     }
 }
 
@@ -787,7 +780,10 @@ pub unsafe extern "C" fn imre_hash_digest(hash: *const Object) -> *const Bytes {
     // SAFETY: finalize reads a snapshot of the rooted hash.
     let digest = unsafe {
         with_state(hash, |s| {
-            s.fixed_digest("digest", super::bytes::owned_input)
+            s.fixed_digest("digest", |bytes| match bytes {
+                Cow::Borrowed(bytes) => super::bytes::owned_input(bytes),
+                Cow::Owned(bytes) => BytesOwner::try_new(bytes).map_err(|_| Error::memory_error()),
+            })
         })
     };
     finish(digest.map(BytesOwner::into_raw), ptr::null())
@@ -798,7 +794,11 @@ pub unsafe extern "C" fn imre_hash_digest(hash: *const Object) -> *const Bytes {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_hash_hexdigest(hash: *const Object) -> *const Str {
     // SAFETY: finalize reads a snapshot of the rooted hash.
-    let result = unsafe { with_state(hash, |s| s.fixed_digest("hexdigest", hex_text)) };
+    let result = unsafe {
+        with_state(hash, |s| {
+            s.fixed_digest("hexdigest", |bytes| hex_text(&bytes))
+        })
+    };
     finish(result.and_then(crate::checked_owned_str), ptr::null())
 }
 
