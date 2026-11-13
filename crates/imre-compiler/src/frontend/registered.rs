@@ -5306,7 +5306,7 @@ print(message('x'))
     return f'{[label]} {(label,)} { {label} }'
 def raw(label: str) -> str:
     message = f'{[label]}'
-    return label
+    return label + '!'
 print(show('ok'), raw('ok'))
 ";
         let graph = checked_named_source(text);
@@ -5326,7 +5326,7 @@ print(show('ok'), raw('ok'))
     return ''.join(word.upper() for word in words)
 def raw(words: str) -> str:
     joined = ''.join(word.upper() for word in words)
-    return words
+    return words + '!'
 print(render('ok'), raw('ok'))
 ";
         let graph = checked_named_source(text);
