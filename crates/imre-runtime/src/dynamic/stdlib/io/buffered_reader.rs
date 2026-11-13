@@ -3,6 +3,7 @@
 mod update;
 use update::Update;
 
+use crate::objects::{append_read_ahead, append_read_bytes};
 use crate::shared::Shared;
 use std::cell::Cell;
 
@@ -227,13 +228,6 @@ pub(super) fn adopt_for_close<F>(
     Ok(())
 }
 
-fn append(out: &mut Vec<u8>, bytes: &[u8]) -> Result<()> {
-    out.try_reserve(bytes.len())
-        .map_err(|_| crate::Error::allocation())?;
-    out.extend_from_slice(bytes);
-    Ok(())
-}
-
 fn attach(ctx: &mut Context, receiver: Id, state: Shared<Reader>) {
     let Value::Instance { memory_stream, .. } = ctx.heap.get_mut(receiver) else {
         unreachable!()
@@ -297,14 +291,8 @@ impl Reader {
     fn consume(&self, ctx: &Context, out: &mut Vec<u8>, limit: usize, line: bool) -> Result<()> {
         let data = ctx.bytes_like(self.buffer)?;
         let offset = self.pos.get();
-        let n = limit.min(self.unread());
-        let bytes = &data[offset..offset + n];
-        let n = if line {
-            bytes.iter().position(|c| *c == b'\n').map_or(n, |i| i + 1)
-        } else {
-            n
-        };
-        append(out, &bytes[..n])?;
+        let unread = &data[offset..offset + self.unread()];
+        let n = append_read_ahead(out, unread, limit, line)?;
         self.pos.set(offset + n);
         Ok(())
     }
@@ -468,7 +456,7 @@ impl Reader {
             return Ok(None);
         };
         let mut bytes = Vec::new();
-        append(&mut bytes, &ctx.bytes_like(buffer)?[..n])?;
+        append_read_bytes(&mut bytes, &ctx.bytes_like(buffer)?[..n])?;
         ctx.heap.release_temporaries_since(mark);
         Ok(Some(bytes))
     }
@@ -605,7 +593,7 @@ impl Reader {
                 if self.unread() == 0 {
                     self.fill(ctx, false)?;
                 }
-                append(
+                append_read_bytes(
                     &mut out,
                     &ctx.bytes_like(self.buffer)?[self.pos.get()..self.end.get()],
                 )?;
@@ -633,7 +621,7 @@ impl Reader {
                         let amount = remaining - remaining % self.size;
                         match self.read_raw(ctx, amount, first_raw.take())? {
                             Some(bytes) if !bytes.is_empty() => {
-                                append(&mut out, &bytes)?;
+                                append_read_bytes(&mut out, &bytes)?;
                                 continue;
                             }
                             None if out.is_empty() => return Ok(NONE),
@@ -694,7 +682,7 @@ impl Reader {
             if bytes.is_empty() {
                 break;
             }
-            append(&mut data, bytes)?;
+            append_read_bytes(&mut data, bytes)?;
             ctx.heap.release_temporaries_since(mark);
             if readall.is_some() {
                 break;

@@ -464,10 +464,9 @@ impl Member {
                     break;
                 }
             }
-            let n = (limit - out.len()).min(self.buffer.len() - self.pos);
-            out.try_reserve(n).map_err(|_| Error::allocation())?;
-            out.extend_from_slice(&self.buffer[self.pos..self.pos + n]);
-            self.pos += n;
+            let remaining = limit - out.len();
+            self.pos +=
+                files::append_read_ahead(&mut out, &self.buffer[self.pos..], remaining, false)?;
         }
         if self.pos == self.buffer.len() {
             self.buffer.clear();
@@ -490,18 +489,16 @@ impl Member {
                 self.refill(1)?;
             }
             let data = &self.buffer[self.pos..];
-            let line = memchr::memchr(b'\n', data).map(|i| i + 1);
-            let n = line.unwrap_or(data.len());
-            out.try_reserve(n).map_err(|_| Error::allocation())?;
-            out.extend_from_slice(&data[..n]);
+            let n = files::append_read_ahead(&mut out, data, usize::MAX, true)?;
+            let newline = out.ends_with(b"\n");
             self.pos += n;
             // ZipExtFile's newline shortcut retains its existing read buffer.
             // The buffered readline fallback consumes chunks through read().
-            if self.pos == self.buffer.len() && !(cached && line.is_some()) {
+            if self.pos == self.buffer.len() && !(cached && newline) {
                 self.buffer.clear();
                 self.pos = 0;
             }
-            if line.is_some() || n == 0 {
+            if newline || n == 0 {
                 break;
             }
         }
