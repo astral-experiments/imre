@@ -557,6 +557,15 @@ impl<'f> Frame<'f, '_, '_> {
         CheckedBody::registered(self.reborrow()).test_operand_in_scope(expr, already_rooted)
     }
 
+    /// Catching an exception must release every integer owned by the enclosing operand.
+    fn evaluate_scoped_handle(&mut self, expr: &Expr) -> String {
+        let outer = self.expression_integer_start;
+        self.expression_integer_start = Some(outer.unwrap_or(self.integer_owners));
+        let value = self.evaluate_handle(expr);
+        self.expression_integer_start = outer;
+        value
+    }
+
     fn evaluate_eager_handle(&mut self, expr: &Expr) -> String {
         self.with_operand_source(expr, |code| code.evaluate_handle(expr))
     }
@@ -985,7 +994,7 @@ impl<'f> Frame<'f, '_, '_> {
                 use ir::IterationOperands::*;
                 match iteration.expect("checked iteration operands") {
                     Iter(value, op) => {
-                        self.acquire_iterator(op, |frame| frame.evaluate_handle(value))
+                        self.acquire_iterator(op, |frame| frame.evaluate_scoped_handle(value))
                     }
                     PairNeedsRow(value) => {
                         let cursor = self.evaluate_handle(value);

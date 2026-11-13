@@ -227,12 +227,12 @@ impl Frame<'_, '_, '_> {
         let (exit, value, above_exit) = if site.is_async {
             let mark = self.temporary_mark();
             let (exit, value, above_exit) = self.unwind_operands(&mark, |frame| {
-                let manager = frame.evaluate_handle(manager);
+                let manager = frame.evaluate_scoped_handle(manager);
                 frame.enter_async(&manager, site, &mark)
             });
             (exit, value, Some(above_exit))
         } else {
-            let manager = self.evaluate_handle(manager);
+            let manager = self.evaluate_scoped_handle(manager);
             let (exit, value) = self.enter_sync(&manager, site);
             (exit, value, None)
         };

@@ -2891,10 +2891,7 @@ mod tests {
         let [region] = plan.suites.as_slice() else {
             panic!("missing registered loop");
         };
-        assert!(matches!(
-            region.operands.as_slice(),
-            [crate::frontend::PhysicalOperand::Checked(_)]
-        ));
+        assert!(region.operands.is_empty());
         let mut pulls = 0;
         crate::ir::walk_statements(&region.checked.function.body, &mut |stmt| {
             if matches!(stmt, crate::ir::Statement::IterNext { .. }) {
@@ -2918,10 +2915,13 @@ mod tests {
         let [region] = plan.suites.as_mut_slice() else {
             panic!("missing registered loop");
         };
-        let crate::frontend::PhysicalOperand::Checked(iterable) = &mut region.operands[0] else {
-            panic!("expected the retained iterable");
-        };
-        iterable.value = crate::ir::Expr::none();
+        crate::ir::walk_expressions_mut(&mut region.checked.function.body, &mut |expr| {
+            if let crate::ir::ExprKind::Builtin(crate::ir::Builtin::RegisteredIter(_), args) =
+                &mut expr.kind
+            {
+                args[0] = crate::ir::Expr::none();
+            }
+        });
         assert_ne!(module.standalone().unwrap(), original);
     }
 
@@ -4484,10 +4484,7 @@ mod tests {
         let [region] = suite.suites.as_slice() else {
             panic!("expected a prepared context")
         };
-        assert!(matches!(
-            region.operands.as_slice(),
-            [crate::frontend::PhysicalOperand::Checked(_)]
-        ));
+        assert!(region.operands.is_empty());
         let [
             _,
             crate::ir::Statement::With {
