@@ -8,6 +8,7 @@ pub(crate) fn place_fixed_function(
     source: FixedBodySource,
 ) -> RegisteredFunction {
     RegisteredFunction {
+        fixed_sites: source.positions(),
         inputs: match source.method {
             Some(method) => FrameInputs::Protocol {
                 sites: Box::new([FrameSite::Method(method)]),
@@ -17,7 +18,6 @@ pub(crate) fn place_fixed_function(
         function,
         local_names: source.local_names,
         frame_slots: Default::default(),
-        fixed_sites: source.positions,
         fixed_attributes: (!source.attributes.is_empty()).then(|| Box::new(source.attributes)),
     }
 }
@@ -88,7 +88,10 @@ mod tests {
         let read = &body.fixed_attributes.as_ref().unwrap()[&name];
         assert!(matches!(&*read.operation, Builtin::RegisteredName(key) if key == "Key"));
         let original = FixedNode::ModuleRead(slot, Type::Str);
-        let stale = [Some(FixedNode::ModuleRead(slot + 1, Type::Str))];
+        let stale = [(
+            TextRange::default(),
+            Some(FixedNode::ModuleRead(slot + 1, Type::Str)),
+        )];
         let node = ir::Node::Expression(value);
         assert!(FixedNode::checked(&node) == Some(original));
         assert!(FixedNode::consume(Some(&stale), &node).is_none());
@@ -277,7 +280,7 @@ mod tests {
             .iter()
             .find(|(id, ..)| *id == 0)
             .unwrap();
-        let positions = source.positions.as_ptr();
+        let positions = source.positions();
         let changed = TextSize::try_from(text.find("def changed").unwrap()).unwrap();
         let [Statement::Return(result)] = fixed.ir.0.functions[1].body.as_mut_slice() else {
             panic!()
@@ -292,7 +295,7 @@ mod tests {
         assert!(!definitions.contains_key(&changed));
         let placed = &definitions[&definition.start()];
         assert_eq!(placed.function.returns, Type::Str);
-        assert_eq!(placed.fixed_sites.as_ptr(), positions);
+        assert_eq!(placed.fixed_sites, positions);
         assert_eq!(placed.function.body.as_ptr(), body);
         assert_eq!(placed.local_names[&0].name, "left");
         assert_eq!(placed.local_names[&1].name, "right");

@@ -6,17 +6,21 @@ use super::*;
 pub(crate) struct FixedBodySource {
     pub(crate) method: Option<Arc<ast::StmtFunctionDef>>,
     pub(crate) attributes: HashMap<TextRange, FixedAttribute>,
-    pub(crate) positions: Vec<TextRange>,
-    pub(crate) operations: Vec<Option<FixedNode>>,
+    sites: Vec<(TextRange, Option<FixedNode>)>,
     pub(crate) local_names: HashMap<usize, registered::LocalBinding>,
 }
 
 impl FixedBodySource {
+    /// Project the compact source positions for the placed function.
+    pub(crate) fn positions(&self) -> Vec<TextRange> {
+        self.sites.iter().map(|(range, _)| *range).collect()
+    }
+
     pub(crate) fn matches(&self, function: &ir::Function) -> bool {
         if self.local_names.len() != function.locals.len() {
             return false;
         }
-        let mut remaining = Some(self.operations.as_slice());
+        let mut remaining = Some(self.sites.as_slice());
         ir::walk_nodes(&function.body, &mut |node, _| {
             remaining = FixedNode::consume(remaining, &node);
         });
@@ -46,10 +50,10 @@ pub(crate) enum FixedNode {
 
 impl FixedNode {
     pub(crate) fn consume<'a>(
-        operations: Option<&'a [Option<Self>]>,
+        sites: Option<&'a [(TextRange, Option<Self>)]>,
         node: &ir::Node<'_>,
-    ) -> Option<&'a [Option<Self>]> {
-        let (expected, rest) = operations?.split_first()?;
+    ) -> Option<&'a [(TextRange, Option<Self>)]> {
+        let ((_, expected), rest) = sites?.split_first()?;
         (Self::checked(node).as_ref() == Some(expected.as_ref()?)).then_some(rest)
     }
 
@@ -87,8 +91,7 @@ pub(super) struct PendingSite {
 pub(super) struct SourceSites {
     pub(super) attributes: HashMap<TextRange, FixedAttribute>,
     wrapper_fields: bool,
-    positions: Vec<TextRange>,
-    operations: Vec<Option<FixedNode>>,
+    sites: Vec<(TextRange, Option<FixedNode>)>,
     current: Option<PendingSite>,
     next_index: usize,
     statements: usize,
@@ -112,16 +115,14 @@ impl SourceSites {
 
     pub(super) fn leave(&mut self, parent: Option<PendingSite>) -> bool {
         let current = std::mem::replace(&mut self.current, parent);
-        current.is_some_and(|site| self.operations.get(site.index).is_some_and(Option::is_some))
+        current.is_some_and(|site| matches!(self.sites.get(site.index), Some((_, Some(_)))))
     }
 
     fn commit(&mut self, site: PendingSite, node: FixedNode) {
-        if self.positions.len() <= site.index {
-            self.positions.resize(site.index + 1, TextRange::default());
-            self.operations.resize(site.index + 1, None);
+        if self.sites.len() <= site.index {
+            self.sites.resize_with(site.index + 1, Default::default);
         }
-        self.positions[site.index] = site.range;
-        self.operations[site.index] = Some(node);
+        self.sites[site.index] = (site.range, Some(node));
     }
 
     fn site_at(&self, range: TextRange) -> Option<PendingSite> {
@@ -198,7 +199,8 @@ impl SourceSites {
 
     pub(super) fn statement(&mut self, operand: TextRange, node: FixedNode) {
         if let Some(site) = self.current
-            && self.positions.get(site.index + 1) == Some(&operand)
+            && let Some((range, _)) = self.sites.get(site.index + 1)
+            && *range == operand
         {
             self.commit(site, node);
             self.statements += 1;
@@ -243,8 +245,7 @@ impl SourceSites {
         Some(FixedBodySource {
             method: method.cloned(),
             attributes: self.attributes,
-            positions: self.positions,
-            operations: self.operations,
+            sites: self.sites,
             local_names,
         })
     }
@@ -260,8 +261,9 @@ mod tests {
             (unpacking::string("same"), unpacking::string("some")),
             (ir::Expr::boolean(false), ir::Expr::boolean(true)),
         ] {
-            let expected = [FixedNode::checked(&ir::Node::Expression(&value))];
-            assert!(FixedNode::consume(Some(&expected), &ir::Node::Expression(&value)).is_some());
+            let node = ir::Node::Expression(&value);
+            let expected = [(TextRange::default(), FixedNode::checked(&node))];
+            assert!(FixedNode::consume(Some(&expected), &node).is_some());
             assert!(FixedNode::consume(Some(&expected), &ir::Node::Expression(&changed)).is_none());
         }
     }
@@ -273,8 +275,7 @@ mod tests {
         let inner = sites.enter(TextRange::new(2.into(), 5.into()));
         assert!(!sites.leave(inner));
         assert!(!sites.leave(outer));
-        assert_eq!(sites.positions.capacity(), 0);
-        assert_eq!(sites.operations.capacity(), 0);
+        assert_eq!(sites.sites.capacity(), 0);
     }
 
     #[test]
@@ -420,7 +421,7 @@ mod tests {
                         method.start(),
                         Arc::as_ptr(method),
                         fixed.ir.0.functions[*slot].body.as_ptr(),
-                        source.positions.as_ptr(),
+                        source.positions(),
                     ))
                 })
                 .collect();
@@ -439,7 +440,8 @@ mod tests {
             for (start, declaration, operations, positions) in methods {
                 let placed = &registered[&graph.entry][&start];
                 assert_eq!(placed.function.body.as_ptr(), operations);
-                assert_eq!(placed.fixed_sites.as_ptr(), positions);
+                assert_eq!(placed.fixed_sites, positions);
+                assert_eq!(placed.fixed_sites.capacity(), positions.len());
                 assert!(matches!(&placed.inputs, FrameInputs::Protocol { sites }
                     if matches!(sites.as_ref(), [FrameSite::Method(method)] if Arc::as_ptr(method) == declaration)));
             }
@@ -469,7 +471,11 @@ mod tests {
         let (0, _, source) = &sources[0] else {
             panic!("expected the first function")
         };
-        let spellings: Vec<_> = source.positions.iter().map(|range| &text[*range]).collect();
+        let spellings: Vec<_> = source
+            .sites
+            .iter()
+            .map(|(range, _)| &text[*range])
+            .collect();
         assert_eq!(
             spellings,
             [
@@ -490,10 +496,10 @@ mod tests {
             ]
         );
         assert_eq!(source.local_names[&2].name, "total");
-        assert!(matches!(source.operations[0], Some(FixedNode::Store(2))));
-        assert!(matches!(source.operations[10], Some(FixedNode::Store(2))));
+        assert!(matches!(source.sites[0].1, Some(FixedNode::Store(2))));
+        assert!(matches!(source.sites[10].1, Some(FixedNode::Store(2))));
         assert!(matches!(
-            source.operations[13],
+            source.sites[13].1,
             Some(FixedNode::Read(2, Type::Int))
         ));
         assert!(matches!(
