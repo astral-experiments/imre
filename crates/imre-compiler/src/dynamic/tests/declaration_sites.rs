@@ -212,7 +212,7 @@ fn typing_initializer_binds_the_checked_reveal_type_definition() {
                 }
             });
             assert_eq!(bindings, 1);
-            assert!(module.source.function_suites[&start].fully_checked());
+            assert!(module.source.function_suite(start).fully_checked());
             assert_eq!(
                 module.source.scopes.functions[&start].type_params[0].binding,
                 "T"

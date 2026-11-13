@@ -375,17 +375,17 @@ impl FunctionScope {
 }
 
 #[derive(Default)]
-pub(crate) struct ScopeFacts {
+pub(crate) struct ScopeFacts<'p> {
     pub(crate) module_annotations: bool,
-    pub(crate) functions: HashMap<TextSize, NamedFunction>,
+    pub(crate) functions: HashMap<TextSize, NamedFunction<'p>>,
     pub(crate) aliases: HashMap<TextSize, FunctionScope>,
     pub(crate) classes: HashMap<TextSize, classes::ClassScope>,
     pub(crate) module_globals: BTreeSet<String>,
 }
 
-impl ScopeFacts {
+impl<'p> ScopeFacts<'p> {
     #[cfg(test)]
-    pub(crate) fn function(&self, def: &ast::StmtFunctionDef) -> &NamedFunction {
+    pub(crate) fn function(&self, def: &ast::StmtFunctionDef) -> &NamedFunction<'p> {
         &self.functions[&def
             .decorator_list
             .first()
@@ -439,8 +439,8 @@ impl Scope {
     }
 }
 
-struct Collector<'s, A, G> {
-    scopes: &'s mut ScopeFacts,
+struct Collector<'s, 'p, A, G> {
+    scopes: &'s mut ScopeFacts<'p>,
     names: &'s imre_ast::Names,
     scope: Scope,
     suite_scope: Option<Scope>,
@@ -450,7 +450,7 @@ struct Collector<'s, A, G> {
     expression: G,
 }
 
-impl<'a, A, G> Visitor<'a> for Collector<'_, A, G>
+impl<'a, A, G> Visitor<'a> for Collector<'_, '_, A, G>
 where
     A: FnMut(&'a ast::StmtTypeAlias, Option<TextSize>),
     G: FnMut(LexicalSite<'a, '_>),
