@@ -7381,6 +7381,20 @@ impl<'a> Checker<'a> {
             .map(|exit| (exit.assigned, exit.narrowed))
             .unwrap_or_default();
 
+        if try_.finalbody.is_empty() {
+            self.assigned = normal_assigned;
+            self.narrowed = normal_facts;
+            self.explicit_return |= earlier_returns;
+            return Ok((
+                vec![Statement::Try {
+                    body,
+                    handlers,
+                    orelse,
+                    finalbody: Vec::new(),
+                }],
+                has_normal_exit,
+            ));
+        }
         self.assigned = before;
         self.narrowed = before_facts;
         let mut protected = try_.body.to_vec();
@@ -7411,11 +7425,7 @@ impl<'a> Checker<'a> {
         // them; successful completion adds its assignments and invalidates any
         // optional facts it may have changed, rather than recording an early
         // "broken" flag before the final completion is known.
-        let pending_breaks = if try_.finalbody.is_empty() {
-            None
-        } else {
-            self.take_breaks()
-        };
+        let pending_breaks = self.take_breaks();
         let protected_returns = std::mem::replace(&mut self.explicit_return, earlier_returns);
         let outer_finally = self.finally_scope;
         self.finally_scope = FinallyScope::Cleanup;
@@ -7450,19 +7460,13 @@ impl<'a> Checker<'a> {
             self.include_breaks(Some(pending));
         }
         self.include_breaks(earlier_breaks);
-        if try_.finalbody.is_empty() {
-            self.assigned = normal_assigned;
-            self.narrowed = normal_facts;
-        } else {
-            for name in deleted {
-                if let Some(slot) = self.names.get(&name) {
-                    normal_assigned.remove(slot);
-                }
+        for name in deleted {
+            if let Some(slot) = self.names.get(&name) {
+                normal_assigned.remove(slot);
             }
-            self.assigned.extend(&normal_assigned);
-            // Facts from the successful body cannot describe an interrupted one.
-            // Preserve only facts established while checking the shared finally.
         }
+        // Keep the facts established by the shared finally across interrupted paths.
+        self.assigned.extend(&normal_assigned);
         Ok((
             vec![Statement::Try {
                 body,
