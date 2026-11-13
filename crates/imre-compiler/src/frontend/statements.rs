@@ -101,9 +101,6 @@ pub(super) trait StatementLowering {
         value: &ast::Expr,
     ) -> StdResult<Statement, Self::Error>;
     fn for_loop(&mut self, loop_: &ast::StmtFor) -> StdResult<Block, Self::Error>;
-    fn async_iteration(&self) -> bool {
-        false
-    }
     /// Record a reachable exit when this scope has an enclosing loop.
     fn record_loop_transfer(&mut self, transfer: &Statement) -> bool;
     fn other_statement(&mut self, stmt: &ast::Stmt) -> StdResult<Block, Self::Error>;
@@ -124,7 +121,7 @@ pub(super) trait StatementLowering {
             ast::Stmt::FunctionDef(def) => (self.definition(def)?, true),
             ast::Stmt::Expr(expr) => self.effect(&expr.value)?,
             ast::Stmt::Return(ret) if !module => (Some(self.returned(ret)?), false),
-            ast::Stmt::For(loop_) if !loop_.is_async || self.async_iteration() => {
+            ast::Stmt::For(loop_) => {
                 return Ok(append(body, self.for_loop(loop_)?));
             }
             ast::Stmt::Raise(raise) => (
@@ -341,6 +338,13 @@ impl StatementLowering for Checker<'_> {
     }
 
     fn for_loop(&mut self, loop_: &ast::StmtFor) -> Result<Block, String> {
+        if loop_.is_async {
+            return Err(self.classified_error(
+                Kind::GeneratorSuspension,
+                loop_,
+                "unsupported statement in the Imre subset",
+            ));
+        }
         self.iteration(loop_)
     }
 
