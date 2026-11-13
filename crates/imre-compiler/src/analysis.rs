@@ -18,7 +18,7 @@ mod tuple_displays;
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use ruff_db::diagnostic::{Diagnostic, DiagnosticId, DisplayDiagnosticConfig, Severity};
 use ruff_db::files::{File, Files, system_path_to_file};
@@ -40,6 +40,9 @@ use ty_python_semantic::{
     AnalysisSettings, Db, HasType, SemanticModel, check_file_unwrap, default_lint_registry,
 };
 use ty_site_packages::PythonVersionWithSource;
+
+static REGISTERED_BODY_RULES: LazyLock<Arc<RuleSelection>> =
+    LazyLock::new(|| Arc::new(RuleSelection::from_registry(default_lint_registry())));
 
 #[salsa::input(singleton)]
 struct DiagnosticRules {
@@ -1635,7 +1638,7 @@ impl Session {
             ..self.db.clone()
         };
         db.settings.search_paths.try_register_static_roots(&db);
-        DiagnosticRules::new(&db, Self::registered_body_rules());
+        DiagnosticRules::new(&db, Arc::clone(&REGISTERED_BODY_RULES));
         // Source rewrites belong to the owning Salsa database. Imports without
         // an override already read their selected bytes from the shared filesystem.
         for &original in self.files.iter().chain(&self.declarations) {
@@ -1649,18 +1652,32 @@ impl Session {
         Ok(RegisteredBodyChecks(db))
     }
 
-    fn registered_body_rules() -> Arc<RuleSelection> {
-        Arc::new(RuleSelection::from_registry(default_lint_registry()))
+    pub(crate) fn use_registered_body_rules(&mut self) {
+        DiagnosticRules::get(&self.db)
+            .set_rules(&mut self.db)
+            .to(Arc::clone(&REGISTERED_BODY_RULES));
+    }
+
+    pub(crate) fn current_registered_source_errors(
+        &self,
+        module: usize,
+    ) -> Option<Vec<Option<TextRange>>> {
+        Arc::ptr_eq(
+            DiagnosticRules::get(&self.db).rules(&self.db),
+            &REGISTERED_BODY_RULES,
+        )
+        .then(|| self.db.source_error_ranges(self.files[module]))
     }
 
     pub(crate) fn registered_source_error_ranges(
         &mut self,
         module: usize,
     ) -> Vec<Option<TextRange>> {
+        if let Some(errors) = self.current_registered_source_errors(module) {
+            return errors;
+        }
         self.with_diagnostic_rules(|session| {
-            DiagnosticRules::get(&session.db)
-                .set_rules(&mut session.db)
-                .to(Self::registered_body_rules());
+            session.use_registered_body_rules();
             session.db.source_error_ranges(session.files[module])
         })
     }
