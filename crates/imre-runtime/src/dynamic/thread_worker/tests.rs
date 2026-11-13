@@ -121,7 +121,7 @@ fn launch(
     registration: Registration,
     roots: Vec<Id>,
 ) -> Result<(usize, Option<u64>)> {
-    let started = super::launch(ctx, operation, registration, roots)?;
+    let started = super::launch(ctx, operation, registration, roots)?.wait()?;
     let identity = (started.ident, started.native_id);
     started.publish()?;
     Ok(identity)
@@ -192,7 +192,7 @@ fn worker_waits_for_the_creator_to_publish_its_receiver() {
         let prefix = Arc::<PrimitiveLock>::default();
         let body = Arc::<PrimitiveLock>::default();
         assert!(prefix.acquire(false, None));
-        let started = super::launch(
+        let ready = super::launch(
             &mut ctx,
             Operation::Acquire {
                 lock: body.clone(),
@@ -202,6 +202,7 @@ fn worker_waits_for_the_creator_to_publish_its_receiver() {
             vec![target],
         )
         .unwrap();
+        let started = ready.wait().unwrap();
         assert_ne!(started.ident, thread_ident());
         assert!(ctx.workers.roots().any(|id| *id == owner));
         assert!(prefix.locked());

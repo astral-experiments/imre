@@ -210,9 +210,7 @@ impl Handle {
     }
 
     fn join_result(&self, completed: bool) -> Result<()> {
-        if completed
-            && let Some((kind, message)) = self.joined().failure.take()
-        {
+        if completed && let Some((kind, message)) = self.joined().failure.take() {
             return Err(Error::new(kind, message));
         }
         Ok(())
@@ -407,8 +405,8 @@ impl RegisteredThread {
     /// Complete default Thread.run cleanup on the creator heap before releasing its bound operands.
     fn release_owner(&mut self, heap: &mut Heap) -> bool {
         let Some(owner) = self.owner else { return true };
-        // A cancelled bootstrap never entered Thread.run's try/finally.
-        if self.handle.ident.get() == Some(&None) {
+        // Only a published worker entered Thread.run and owes its target cleanup.
+        if self.handle.ident.get().is_none_or(Option::is_none) {
             self.owner = None;
             heap.weak_edge_removed(owner);
             return true;
@@ -635,13 +633,35 @@ impl Drop for Started {
     }
 }
 
+/// The worker cannot enter its callback until the receiver's native identity is published.
+struct Ready {
+    handle: Arc<Handle>,
+    started: mpsc::Receiver<std::result::Result<Started, String>>,
+}
+
+impl Ready {
+    fn wait(self) -> Result<Started> {
+        match self.started.recv() {
+            Ok(Ok(publication)) => Ok(publication),
+            failure => {
+                let _ = self.handle.join(None);
+                let reason = match failure {
+                    Ok(Err(message)) => message,
+                    _ => "thread initialization failed".into(),
+                };
+                Err(Error::new("RuntimeError", reason))
+            }
+        }
+    }
+}
+
 /// Both public launch paths use the same bootstrap, count guard and native startup handshake.
 fn launch(
     ctx: &mut Context,
     operation: Operation,
     registration: Registration,
     operands: Vec<Id>,
-) -> Result<Started> {
+) -> Result<Ready> {
     let (handle, thread, detached_label) = match registration {
         Registration::Thread(thread) => (Arc::clone(&thread.handle), Some(thread), None),
         Registration::Detached(label) => (Arc::default(), None, Some(label)),
@@ -669,6 +689,7 @@ fn launch(
         matches!(operation, Operation::Python(_)).then(|| ctx.heap.begin_fault_worker());
     let interpreter = fault_workers.as_ref().map(|_| ctx.finalizing.clone());
     handle.spawn(move || {
+        let mut running = Running::bootstrap(worker_active);
         let _publication = interpreter.map(crate::fault_handler::FramePublication::enter);
         // A failed bootstrap publishes no identity and contributes nothing to the live count.
         let mut prefix = None;
@@ -698,7 +719,7 @@ fn launch(
                 (None, Some(lock))
             }
         };
-        let _running = Running::enter(count, worker_active);
+        running.enter(count);
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         let native_id = Some(crate::objects::locks::native_thread_id());
         #[cfg(not(any(target_os = "linux", target_os = "macos")))]
@@ -755,23 +776,12 @@ fn launch(
         }
         Ok(())
     })?;
-    let started = match started.recv() {
-        Ok(Ok(publication)) => publication,
-        failure => {
-            let _ = handle.join(None);
-            let reason = match failure {
-                Ok(Err(message)) => message,
-                _ => "thread initialization failed".into(),
-            };
-            return Err(Error::new("RuntimeError", reason));
-        }
-    };
     ctx.workers.entries.push(Entry {
         active,
         operands,
         thread,
     });
-    Ok(started)
+    Ok(Ready { handle, started })
 }
 
 /// A low-level caller owns only the bootstrap roots after the native worker is detached.
@@ -785,7 +795,7 @@ pub(super) fn start_detached(
         .reap_where(&mut ctx.heap, |entry| entry.thread.is_none());
     ctx.workers.reserve_entry()?;
     let label = ctx.repr(function);
-    let started = launch(ctx, callback, Registration::Detached(label), operands)?;
+    let started = launch(ctx, callback, Registration::Detached(label), operands)?.wait()?;
     let ident = started.ident;
     started.publish()?;
     Ok(ident)
@@ -807,13 +817,12 @@ fn worker_target(ctx: &Context, target: Id, args: Id, kwargs: Id) -> Result<(Ope
     // Thread.run expands the containers. A bound method can retain the original positional tuple.
     let operands = [target, args];
     let target_value = ctx.heap.get(target);
-    let roots = if matches!(target_value, Value::Method { .. })
-        && matches!(sequence, Value::Tuple(_))
-    {
-        &operands[..]
-    } else {
-        &operands[..1]
-    };
+    let roots =
+        if matches!(target_value, Value::Method { .. }) && matches!(sequence, Value::Tuple(_)) {
+            &operands[..]
+        } else {
+            &operands[..1]
+        };
     if let Some(captured) = Callback::capture_checked(ctx, target, roots, pos, Some(kwargs), true)?
     {
         return Ok(captured);
@@ -866,6 +875,113 @@ fn worker_target(ctx: &Context, target: Id, args: Id, kwargs: Id) -> Result<(Ope
     ))
 }
 
+/// The worker registration roots the receiver, which owns its Python thread handle.
+pub(super) struct Start {
+    ready: Ready,
+    owner: Id,
+    handle: Id,
+}
+
+impl Start {
+    /// # Safety
+    /// The caller resumes the same registered frame on its owning thread.
+    pub(super) unsafe fn run(self, context: *mut Context) -> Result<Id> {
+        let ready = self.ready.wait();
+        let (started, ident, tid) = {
+            // SAFETY: the native wait has returned to the registered caller.
+            let ctx = unsafe { &mut *context };
+            ctx.set_attr(self.owner, "_handle", self.handle)?;
+            let started = ready?;
+            let ident = ctx.alloc(Value::Int(crate::Int::from_usize(started.ident)));
+            let tid = started.native_id.map_or(NONE, |id| {
+                ctx.alloc(Value::Int(crate::Int::from_usize(id as usize)))
+            });
+            ctx.set_attr(self.owner, "_ident", ident)?;
+            ctx.set_attr(self.owner, "_native_id", tid)?;
+            (started, ident, tid)
+        };
+        // Ordinary writes attach the IDs to the receiver. Allocation temporaries in the
+        // current frame also keep them live if an attribute hook redirects a write.
+        started.publish()?;
+        // SAFETY: native publication has finished and the caller again owns the context.
+        Ok(unsafe { &mut *context }.alloc(Value::Tuple(vec![self.handle, ident, tid])))
+    }
+}
+
+pub(super) fn prepare_start(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Start> {
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "start() takes no keyword arguments",
+        ));
+    }
+    ctx.reap_thread_operands();
+    let (&[owner, daemon] | &[owner, daemon, _]) = args else {
+        return Err(Error::new("TypeError", "invalid arguments for start()"));
+    };
+    // The independent worker cannot publish CPython's actual Python bootstrap
+    // callable and handle to an audit hook. Reject before consuming the handle.
+    if !ctx.audit_hooks.is_empty() {
+        return Err(Error::new(
+            "NotImplementedError",
+            "audited joinable thread startup requires the boxed Python bootstrap",
+        ));
+    }
+    check_start(ctx)?;
+    if args
+        .get(2)
+        .is_some_and(|&has_context| has_context != super::FALSE)
+    {
+        return Err(Error::new(
+            "NotImplementedError",
+            "native workers cannot enter a Python context",
+        ));
+    }
+    let [target, pos, kw, handle_id] = ctx.thread_operands(owner)?;
+    let Value::ThreadHandle(handle) = ctx.heap.get(handle_id) else {
+        return Err(Error::new("TypeError", "'handle' must be a _ThreadHandle"));
+    };
+    let handle = Arc::clone(handle);
+    handle.check_new()?;
+    let (operation, roots) = worker_target(ctx, target, pos, kw)?;
+    let Value::Bool(daemon) = *ctx.heap.get(daemon) else {
+        return Err(Error::new("TypeError", "expected a boolean daemon flag"));
+    };
+    if ctx
+        .workers
+        .reporting
+        .is_some_and(|(scope, original)| ctx.scope_name(scope, "excepthook") != original)
+    {
+        return Err(Error::new(
+            "NotImplementedError",
+            "custom threading.excepthook requires the parent Python heap",
+        ));
+    }
+    ctx.workers.reserve_entry()?;
+    let thread = RegisteredThread {
+        handle,
+        daemon,
+        owner: Some(owner),
+    };
+    let ready = launch(ctx, operation, Registration::Thread(thread), roots);
+    match ready {
+        Ok(ready) => Ok(Start {
+            ready,
+            owner,
+            handle: handle_id,
+        }),
+        Err(error) => {
+            // CPython consumes the handle even if the OS refuses to create a worker.
+            ctx.set_attr(owner, "_handle", handle_id)?;
+            Err(error)
+        }
+    }
+}
+
 pub(super) fn call(
     ctx: &mut Context,
     name: &str,
@@ -880,64 +996,6 @@ pub(super) fn call(
     }
     ctx.reap_thread_operands();
     match (name, args) {
-        ("start", &[owner, daemon] | &[owner, daemon, _]) => {
-            // The independent worker cannot publish CPython's actual Python bootstrap
-            // callable and handle to an audit hook. Reject before consuming the handle.
-            if !ctx.audit_hooks.is_empty() {
-                return Err(Error::new(
-                    "NotImplementedError",
-                    "audited joinable thread startup requires the boxed Python bootstrap",
-                ));
-            }
-            check_start(ctx)?;
-            if args
-                .get(2)
-                .is_some_and(|&has_context| has_context != super::FALSE)
-            {
-                return Err(Error::new(
-                    "NotImplementedError",
-                    "native workers cannot enter a Python context",
-                ));
-            }
-            let [target, pos, kw, handle_id] = ctx.thread_operands(owner)?;
-            let Value::ThreadHandle(handle) = ctx.heap.get(handle_id) else {
-                return Err(Error::new("TypeError", "'handle' must be a _ThreadHandle"));
-            };
-            let handle = Arc::clone(handle);
-            handle.check_new()?;
-            let (operation, roots) = worker_target(ctx, target, pos, kw)?;
-            let Value::Bool(daemon) = *ctx.heap.get(daemon) else {
-                return Err(Error::new("TypeError", "expected a boolean daemon flag"));
-            };
-            if ctx
-                .workers
-                .reporting
-                .is_some_and(|(scope, original)| ctx.scope_name(scope, "excepthook") != original)
-            {
-                return Err(Error::new(
-                    "NotImplementedError",
-                    "custom threading.excepthook requires the parent Python heap",
-                ));
-            }
-            ctx.workers.reserve_entry()?;
-            let thread = RegisteredThread {
-                handle,
-                daemon,
-                owner: Some(owner),
-            };
-            let started = launch(ctx, operation, Registration::Thread(thread), roots);
-            // CPython consumes the handle even when the OS refuses to create a thread.
-            ctx.set_attr(owner, "_handle", handle_id)?;
-            let started = started?;
-            let ident = ctx.alloc(Value::Int(crate::Int::from_usize(started.ident)));
-            let tid = started.native_id.map_or(NONE, |id| {
-                ctx.alloc(Value::Int(crate::Int::from_usize(id as usize)))
-            });
-            ctx.set_attr(owner, "_ident", ident)?;
-            ctx.set_attr(owner, "_native_id", tid)?;
-            started.publish()?;
-            Ok(ctx.alloc(Value::Tuple(vec![handle_id, ident, tid])))
-        }
         ("shutdown", &[]) => {
             // A signal handler may start a worker or reap entries. Keep only the
             // native handle across dispatch, then look up the next live worker.
