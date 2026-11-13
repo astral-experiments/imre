@@ -7364,8 +7364,9 @@ impl Context {
         Err(Error::new("AttributeError", message))
     }
 
-    pub(super) fn set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
-        self.set_named_attr(obj, AttributeName::Text(name), value)
+    pub(super) fn set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<Id> {
+        self.set_named_attr(obj, AttributeName::Text(name), value)?;
+        Ok(value)
     }
 
     /// Preserve a Python name object when an attribute builtin invokes a hook.
