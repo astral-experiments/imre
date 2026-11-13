@@ -2875,7 +2875,7 @@ impl Checker<'_> {
         mut input: Prepared,
         orelse: &[ast::Stmt],
         before_iteration: Vec<Statement>,
-        lower_body: impl FnOnce(&mut Self) -> Result<Vec<Statement>, String>,
+        lower_body: impl FnOnce(&mut Self, &mut Vec<Statement>) -> Result<(), String>,
     ) -> Result<(Vec<Statement>, bool), String> {
         // A later consumer argument or zip constructor argument may have
         // established new facts since this lazy body was checked.
@@ -2889,12 +2889,12 @@ impl Checker<'_> {
         let binding = input.bind_loop_target(self, target, true)?;
         assignments::forget_binding_writes(&mut facts, binding);
         self.loop_breaks.push(None);
-        let body = lower_body(self)?;
+        lower_body(self, &mut input.next)?;
         let breaks = self.loop_breaks.pop().unwrap();
         self.assigned.after_iteration(before);
         self.narrowed = facts;
         let (orelse, falls) = self.loop_else(orelse, breaks, true)?;
-        Ok((input.for_suite(body, orelse, before_iteration), falls))
+        Ok((input.loop_suite(orelse, before_iteration), falls))
     }
 
     /// A statically empty tuple can adopt its consumer's element layout because

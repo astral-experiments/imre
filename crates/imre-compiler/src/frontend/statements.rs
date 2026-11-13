@@ -4,6 +4,15 @@ use super::*;
 
 pub(super) type Block = (Vec<Statement>, bool);
 
+/// A range loop has no pull instructions, so its consumer can supply the whole body.
+pub(super) fn append_block(output: &mut Vec<Statement>, block: Vec<Statement>) {
+    if output.capacity() == 0 {
+        *output = block;
+    } else {
+        output.extend(block);
+    }
+}
+
 pub(super) fn loop_transfer(stmt: &ast::Stmt) -> Option<Statement> {
     match stmt {
         ast::Stmt::Break(_) => Some(Statement::Break),

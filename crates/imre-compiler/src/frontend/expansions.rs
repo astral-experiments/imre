@@ -930,14 +930,14 @@ impl Checker<'_> {
             ctx: ast::ExprContext::Store,
         });
         let (body, _) =
-            self.lower_iteration_after(&target, input, &[], before_iteration, |checker| {
+            self.lower_iteration_after(&target, input, &[], before_iteration, |checker, body| {
                 let slot = checker.names[&name];
-                let mut body = consume(checker, checker.local(slot))?;
+                statements::append_block(body, consume(checker, checker.local(slot))?);
                 // Builtin consumers release each yielded item before requesting
                 // the next one. Keeping this private target alive could alter
                 // file finalization or make an iterator's tuple cache shared.
                 body.push(Statement::Clear(slot));
-                Ok(body)
+                Ok(())
             })?;
         let target = self.names.remove(&name).unwrap();
         Ok(vec![Statement::Scope {
