@@ -1431,6 +1431,13 @@ fn lower_graph(
             .then(|| fixed_body_source::SourceSites::new(python_method));
         checker.placement_only = (named || unavailable.is_some()) && cache.is_none();
         let mut attributes = HashMap::new();
+        if signature.method.is_none()
+            && checker.fixed_sites.is_some()
+            && cache.is_none()
+            && pending_capture.borrow().is_some()
+        {
+            checker.settled_attributes = Some(&mut attributes);
+        }
         let result = if named
             && cache.is_none()
             && unavailable.is_none()
@@ -1457,14 +1464,6 @@ fn lower_graph(
         } else if let Some(cache) = cache.as_deref_mut().filter(|_| signature.method.is_none()) {
             cache.body(checker, definition, signature)
         } else {
-            // The FILE graph can still select a fixed layout after this declaration.
-            if !checker.placement_only
-                && checker.fixed_sites.is_some()
-                && signature.method.is_none()
-                && pending_capture.borrow().is_some()
-            {
-                checker.settled_attributes = Some(&mut attributes);
-            }
             lower_body(checker, definition, signature)
         };
         if !attributes.is_empty()
