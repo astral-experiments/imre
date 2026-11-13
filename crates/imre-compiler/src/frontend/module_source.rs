@@ -131,18 +131,18 @@ pub(crate) fn operand_diagnostic(
 }
 
 /// Check syntax and prepare the literal escapes that this module can emit.
-pub(crate) fn validate(
+pub(crate) fn validate<'a>(
     path: &Path,
     source: &str,
     parsed: &Parsed<ast::ModModule>,
-    scope_checked: bool,
+    checked: Option<&'a crate::modules::SourceModule>,
     keep_docstrings: bool,
-) -> Result<HashMap<TextRange, Vec<u32>>, String> {
+) -> Result<Cow<'a, HashMap<TextRange, Vec<u32>>>, String> {
     if let Some((range, reason)) = imre_ast::comprehension::dict_unpacking_error(parsed) {
         let error = super::diagnostic_message(source, &range, &format!("SyntaxError: {reason}"));
         return Err(format!("{}:{error}", path.display()));
     }
-    if !scope_checked {
+    if checked.is_none() {
         crate::analysis::check_scope_syntax(source, parsed.syntax())
             .map_err(|error| format!("{}:{error}", path.display()))?;
     }
@@ -152,8 +152,15 @@ pub(crate) fn validate(
         let error = super::diagnostic_message(source, keyword, &reason);
         return Err(format!("{}:{error}", path.display()));
     }
-    super::module_literal_replacements(source, parsed, keep_docstrings)
-        .map_err(|error| format!("{}:{error}", path.display()))
+    let replacements = checked
+        .and_then(|module| module.cached_registered_values())
+        .map_or_else(
+            || Cow::Owned(super::literal_replacements(source, parsed.tokens())),
+            |values| Cow::Borrowed(&values.replacements),
+        );
+    super::validate_docstring_literals(source, parsed, keep_docstrings, &replacements)
+        .map_err(|error| format!("{}:{error}", path.display()))?;
+    Ok(replacements)
 }
 
 pub(crate) fn lower(
@@ -200,6 +207,27 @@ pub(crate) fn validate_names(
 mod tests {
     use super::*;
     use crate::modules::SourceGraph;
+
+    #[test]
+    fn checked_literals_borrow_the_existing_map_and_still_validate_docstrings() {
+        let graph = SourceGraph::single("def f():\r\n    '\\ud800'\r\n").unwrap();
+        let module = &graph.modules[graph.entry];
+        let validate =
+            |checked, keep| validate(&module.path, &module.source, &module.parsed, checked, keep);
+        let independent = validate(None, false).unwrap();
+        assert!(matches!(independent, Cow::Owned(_)));
+        let map = &module.registered_values().replacements;
+        assert_eq!(&*independent, map);
+        assert!(matches!(
+            validate(Some(module), false).unwrap(),
+            Cow::Borrowed(borrowed) if std::ptr::eq(borrowed, map)
+        ));
+        let error = validate(None, true).unwrap_err();
+        assert!(
+            error.ends_with(":2:5: Imre: surrogate string escapes are unsupported in docstrings")
+        );
+        assert_eq!(validate(Some(module), true).unwrap_err(), error);
+    }
 
     #[test]
     fn discovery_borrows_only_the_original_entry_parse() {

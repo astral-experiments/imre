@@ -446,7 +446,7 @@ impl<'a> PreparedBody<'a> {
                     &path,
                     source,
                     parsed,
-                    checked_source.is_some(),
+                    checked_source,
                     keep_docstrings
                         && !(interactive
                             && parsed
@@ -459,7 +459,7 @@ impl<'a> PreparedBody<'a> {
             Input::Expression(syntax, tokens) => (
                 syntax,
                 *tokens,
-                crate::frontend::literal_replacements(source, tokens),
+                Cow::Owned(crate::frontend::literal_replacements(source, tokens)),
             ),
         };
         let docs = if keep_docstrings && name == "collections" && bundled {
@@ -702,7 +702,7 @@ impl<'a> PreparedBody<'a> {
             #[cfg(test)]
             template_fields,
             #[cfg(test)]
-            replacements,
+            replacements: replacements.into_owned(),
             #[cfg(test)]
             method_imports,
             future_flags,

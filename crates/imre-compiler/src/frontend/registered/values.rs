@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 
 pub(crate) struct ModuleSource {
     pub(crate) method_imports: BTreeSet<String>,
-    replacements: HashMap<TextRange, Vec<u32>>,
+    pub(crate) replacements: HashMap<TextRange, Vec<u32>>,
     pub(crate) has_templates: bool,
 }
 
@@ -159,13 +159,13 @@ impl RegisteredSource<'_> {
     }
 }
 
-/// Recover the source code points and reject a retained docstring that Python cannot encode.
-pub(crate) fn module_literal_replacements(
+/// Reject a retained docstring that Python cannot encode.
+pub(crate) fn validate_docstring_literals(
     source: &str,
     parsed: &ruff_python_parser::Parsed<ast::ModModule>,
     keep_docstrings: bool,
-) -> StdResult<HashMap<TextRange, Vec<u32>>, String> {
-    let replacements = literal_replacements(source, parsed.tokens());
+    replacements: &HashMap<TextRange, Vec<u32>>,
+) -> StdResult<(), String> {
     if keep_docstrings
         && !replacements.is_empty()
         && let Some(range) = imre_ast::strings::find_docstring(&parsed.syntax().body, true, |doc| {
@@ -181,7 +181,7 @@ pub(crate) fn module_literal_replacements(
             "surrogate string escapes are unsupported in docstrings",
         ));
     }
-    Ok(replacements)
+    Ok(())
 }
 
 pub(crate) fn literal_replacements(
