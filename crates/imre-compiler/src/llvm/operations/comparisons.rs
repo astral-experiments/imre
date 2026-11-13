@@ -127,7 +127,9 @@ struct ComparisonChain<'a> {
 impl<'a> ComparisonChain<'a> {
     fn new(code: &mut CheckedBody<'_, '_, '_, '_>, ops: &'a [CmpOp], truth: bool) -> Self {
         let root = if matches!(code.0, Entry::Registered(_))
-            && (ops.len() > 1 || matches!(ops, [CmpOp::Is | CmpOp::IsNot]))
+            && (ops.len() > 1
+                || matches!(ops, [CmpOp::Is | CmpOp::IsNot])
+                || matches!(ops, [op] if truth && Compare::from_operator(*op).is_some()))
         {
             Some(code.python().compare_scope())
         } else {
@@ -184,7 +186,12 @@ impl<'a> ComparisonChain<'a> {
             } else {
                 code.release_comparison(&right);
             }
+            let tested_handle = truth && handle.is_some();
             let value = code.comparison_result(value, truth);
+            if tested_handle && let Some((mark, _)) = root {
+                // A branch keeps the truth bit. Release the rich result before the next operand.
+                code.python().discard_truth(mark);
+            }
             let result = if self.branched {
                 join.jump(code.body(), done, value);
                 code.body().start(done);

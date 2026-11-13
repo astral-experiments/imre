@@ -129,3 +129,24 @@ def current():
 
 
 current()
+
+
+class Verdict:
+    def __bool__(self):
+        return False
+
+    def __del__(self):
+        events.append("released")
+
+
+class Item:
+    def __eq__(self, other):
+        events.append(other)
+        return Verdict()
+
+
+events = []
+item = Item()
+if item == 1 or item == 2:
+    raise AssertionError("unexpected truth result")
+assert events == [1, "released", 2, "released"], events
