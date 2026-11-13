@@ -2706,7 +2706,6 @@ pub(crate) fn compile(
         "stdlib_members":include_str!(concat!(env!("OUT_DIR"), "/imre-stdlib-members.txt")),
         "sitecustomize":options.sitecustomize || options.stdlib_sitecustomize,"user_site_pth":options.user_site_pth,"after_user_site":after_user_site,"path0":path0_len != 0,
         "bundle_entry":bundle_entry,
-        "module_docs":{"json": keep_docstrings.then_some(include_str!("../../stdlib/docstrings/json.txt"))},
         "python_version":crate::PYTHON_VERSION.to_string(),
         "python_hexversion":crate::version::hex(crate::version::components(false)),
         "implementation_version":env!("CARGO_PKG_VERSION"),

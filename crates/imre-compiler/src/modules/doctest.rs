@@ -12,10 +12,11 @@ pub(crate) use crate::dynamic::Prompt;
 pub(super) type Docstring = (String, String, Option<TextSize>);
 
 /// The runner and the DocTest metadata use the same physical declarations in source order.
-pub(crate) fn documents(
-    modules: &[SourceModule],
+pub(crate) fn documents<'a>(
+    modules: &'a [SourceModule],
     target: Binding,
-) -> Option<(&str, Cow<'_, [Docstring]>)> {
+    session: &Session,
+) -> Option<(&'a str, Cow<'a, [Docstring]>)> {
     match target {
         Binding::Module(id) => {
             let source = &modules[id];
@@ -29,7 +30,15 @@ pub(crate) fn documents(
         Binding::IntrinsicModule(module) => {
             let sealed = sealed(module)?;
             let mut docs = Vec::new();
-            sealed.append_to(&mut docs);
+            if sealed.entries.is_empty() {
+                docs.push((
+                    sealed.module.into(),
+                    session.shipped_module_docstring(sealed.module)?,
+                    None,
+                ));
+            } else {
+                sealed.append_to(&mut docs);
+            }
             Some((sealed.module, Cow::Owned(docs)))
         }
         _ => None,
@@ -118,16 +127,16 @@ impl SealedDocs {
 
 pub(crate) fn sealed(name: IntrinsicModule) -> Option<SealedDocs> {
     macro_rules! docs {
-        ($module:literal; $($name:literal),+ $(,)?) => {
+        ($module:literal; $($name:literal),* $(,)?) => {
             SealedDocs {
                 module: $module,
-                entries: &[$(($name, include_str!(concat!("../../stdlib/docstrings/", $name, ".txt")))),+],
+                entries: &[$(($name, include_str!(concat!("../../stdlib/docstrings/", $name, ".txt")))),*],
             }
         };
     }
     Some(match name {
         IntrinsicModule::Itertools => docs!("itertools"; "itertools.batched"),
-        IntrinsicModule::Json => docs!("json"; "json"),
+        IntrinsicModule::Json => docs!("json";),
         IntrinsicModule::JsonEncoder => docs!("json.encoder"; "json.encoder.JSONEncoder.encode"),
         IntrinsicModule::JsonDecoder => docs!("json.decoder"; "json.decoder"),
         IntrinsicModule::Collections => docs!("collections";
@@ -614,15 +623,22 @@ impl Loader<'_> {
             }
         }
         let mut cases = std::collections::BTreeMap::new();
-        if uses.executes {
-            let mut recorded = HashSet::new();
-            for variable in uses.variables {
-                if let Some(bindings) = uses.assignments.get(&variable) {
-                    uses.targets.extend(bindings);
-                }
+        let mut recorded = HashSet::new();
+        for variable in uses.variables {
+            if let Some(bindings) = uses.assignments.get(&variable) {
+                uses.targets.extend(bindings);
             }
-            for target in uses.targets {
-                let Some((_, docs)) = documents(&self.modules, target) else {
+        }
+        let executes = uses.executes;
+        for target in uses.targets {
+            if let Binding::IntrinsicModule(module) = target
+                && let Some(catalog) = sealed(module)
+                && catalog.entries.is_empty()
+            {
+                self.session.prepare_shipped_source(catalog.module)?;
+            }
+            if executes {
+                let Some((_, docs)) = documents(&self.modules, target, &self.session) else {
                     continue;
                 };
                 let mut prepared = Vec::new();
@@ -707,11 +723,14 @@ mod tests {
         let entry = graph.entry;
         let target = Binding::Module(entry);
         assert!(graph.modules[entry].doctest_documents.get().is_none());
-        let storage = documents(&graph.modules, target).unwrap().1.as_ptr();
+        let storage = documents(&graph.modules, target, &graph.session)
+            .unwrap()
+            .1
+            .as_ptr();
 
         let erased = SourceGraph::single("pass\n").unwrap();
         graph.modules[entry].parsed = erased.modules[erased.entry].parsed.clone();
-        let (owner, docs) = documents(&graph.modules, target).unwrap();
+        let (owner, docs) = documents(&graph.modules, target, &graph.session).unwrap();
         assert_eq!(owner, "__main__");
         assert_eq!(docs.as_ptr(), storage);
         let actual: Vec<_> = docs

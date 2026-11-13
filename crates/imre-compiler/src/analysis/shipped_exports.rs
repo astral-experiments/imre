@@ -79,6 +79,13 @@ impl Session {
             .and_then(|file| self.shipped_declaration_at(file, owner, name)))
     }
 
+    /// Read a package's docstring from the same parsed source as its exports.
+    pub(crate) fn shipped_module_docstring(&self, owner: &str) -> Option<String> {
+        let (filename, _) = crate::dynamic::bundled_module_source(owner, false)?;
+        let file = shipped_file(&self.db, filename)?;
+        crate::frontend::docstring(self.parsed(file).suite())
+    }
+
     pub(crate) fn shipped_declaration(&self, owner: &str, name: &str) -> Option<Binding> {
         let (filename, _) = crate::dynamic::bundled_module_source(owner, false)?;
         let file = shipped_file(&self.db, filename)?;
