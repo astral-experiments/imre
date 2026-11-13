@@ -908,12 +908,15 @@ impl Expr {
 
     /// A single explicit split whose immediately selected field is its prefix
     /// (`split(sep, 1)[0]`) or its suffix (`rsplit(sep, 1)[-1]`).
-    pub(crate) fn selected_split_args(&self, index: &Self) -> Option<(bool, &[Expr])> {
+    pub(crate) fn selected_split_args(&self, index: &Self) -> Option<(bool, [&Self; 2])> {
         let ExprKind::Builtin(Builtin::Text(TextOperation::Split(reverse)), args) = &self.kind
         else {
             return None;
         };
-        let [_, separator, limit] = args.as_slice() else {
+        let [source, separator, limit] = args.as_slice() else {
+            return None;
+        };
+        let ExprKind::Present(separator) = &separator.kind else {
             return None;
         };
         let selected = if *reverse {
@@ -921,10 +924,8 @@ impl Expr {
         } else {
             matches!(&index.kind, ExprKind::Int(n) if n == "0")
         };
-        (selected
-            && matches!(separator.kind, ExprKind::Present(_))
-            && matches!(&limit.kind, ExprKind::Int(n) if n == "1"))
-        .then_some((*reverse, args))
+        (selected && matches!(&limit.kind, ExprKind::Int(n) if n == "1"))
+            .then_some((*reverse, [source, separator.as_ref()]))
     }
 }
 
