@@ -13347,7 +13347,8 @@ impl<'a> Checker<'a> {
                     }
                     "split" | "rsplit" | "strip" | "lstrip" | "rstrip" | "startswith"
                     | "endswith" | "find" | "partition" => {
-                        return self.text_method(receiver, attribute.attr.as_str(), call);
+                        let value = self.text_method(receiver, attribute.attr.as_str(), call)?;
+                        return Ok(self.bound_text_result(call, attribute, value));
                     }
                     _ => {}
                 }

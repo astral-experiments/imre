@@ -228,8 +228,10 @@ impl Emitter<'_, '_> {
                 ))
             }
             TextOperation::Strip(mode) => {
-                let chars =
-                    self.instruction(format!("inttoptr i64 {} to ptr", args[1].value.operand));
+                let chars = args.get(1).map_or_else(
+                    || "null".into(),
+                    |arg| self.optional_object_pointer(&arg.value),
+                );
                 self.instruction(format!(
                     "call ptr @imre_str_strip(ptr {source}, ptr {chars}, i32 {mode})"
                 ))
