@@ -6830,12 +6830,13 @@ impl<'a> Checker<'a> {
                 if self.registered.is_some() {
                     return self.checked_python_with(with_);
                 }
+                let keep_body = !self.discarded_function_body();
                 if !with_.body.iter().any(ast::Stmt::is_function_def_stmt) {
-                    return self.with_items(&with_.items, &with_.body);
+                    return self.with_items(&with_.items, &with_.body, keep_body);
                 }
                 let enclosing = self.local_functions.clone();
                 self.collect_suite_definitions(&with_.body, false)?;
-                let result = self.with_items(&with_.items, &with_.body);
+                let result = self.with_items(&with_.items, &with_.body, keep_body);
                 self.local_functions = enclosing;
                 return result;
             }
@@ -6868,12 +6869,13 @@ impl<'a> Checker<'a> {
         &mut self,
         items: &[ast::WithItem],
         body: &[ast::Stmt],
+        keep_body: bool,
     ) -> Result<(Vec<Statement>, bool), String> {
         contexts::with_items(
             self,
             items.iter().enumerate(),
             |scope, (index, item), out| scope.acquire_with(out, item, &items[index + 1..], body),
-            |scope| scope.block(body),
+            |scope, protected| scope.lower_block(body, keep_body.then_some(protected)),
         )
     }
 
@@ -7029,7 +7031,7 @@ impl<'a> Checker<'a> {
         // The server cleanup is a checked virtual call. Preserve the protected
         // suite's first failure before checking its possible close methods.
         let server_body = if server.is_some() {
-            Some(self.with_items(remaining, body)?)
+            Some(self.with_items(remaining, body, true)?)
         } else {
             None
         };

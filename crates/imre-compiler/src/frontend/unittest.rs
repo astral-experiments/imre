@@ -999,7 +999,7 @@ impl Checker<'_> {
         suite: &[ast::Stmt],
     ) -> Result<Vec<Statement>, String> {
         let incoming = self.local_state();
-        let (protected, _) = self.with_items(remaining, suite)?;
+        let (protected, _) = self.with_items(remaining, suite, true)?;
         self.restore_state(incoming);
         if !remaining.is_empty() {
             self.narrowed = assignments::Narrowed::new();
