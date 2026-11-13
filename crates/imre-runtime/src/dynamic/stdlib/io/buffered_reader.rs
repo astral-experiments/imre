@@ -48,8 +48,10 @@ fn raw_member(ctx: &Context, receiver: Id) -> Option<Id> {
 
 /// Reinitialization invalidates buffered operations; the public raw slot changes only
 /// after readable() succeeds, even if allocation or size validation subsequently fails.
-pub(super) fn start_init(ctx: &mut Context, receiver: Id, raw: Option<Id>) -> Result<()> {
+/// An absent replacement keeps the current raw object visible during the callback.
+pub(super) fn start_init(ctx: &mut Context, receiver: Id, replacement: Option<Id>) -> Result<()> {
     let previous = raw_member(ctx, receiver);
+    let raw = replacement.or(previous);
     let Value::Instance { memory_stream, .. } = ctx.heap.get_mut(receiver) else {
         return Err(Error::new(
             "TypeError",
@@ -66,7 +68,7 @@ pub(super) fn start_init(ctx: &mut Context, receiver: Id, raw: Option<Id>) -> Re
 }
 
 pub(super) fn initialize(ctx: &mut Context, receiver: Id, raw: Id, size: i64) -> Result<Id> {
-    start_init(ctx, receiver, raw_member(ctx, receiver))?;
+    start_init(ctx, receiver, None)?;
     if invoke(ctx, raw, "readable", vec![])? != TRUE {
         return Err(Error::new(
             "UnsupportedOperation",
