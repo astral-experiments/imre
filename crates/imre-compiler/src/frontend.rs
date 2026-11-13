@@ -5745,6 +5745,21 @@ impl<'a> Checker<'a> {
         }
     }
 
+    fn discarded_function_body(&self) -> bool {
+        self.placement_only && self.block_depth == 1 && self.fixed_sites.is_none()
+    }
+
+    /// A discarded outer loop still needs each suite's binding and exit facts.
+    /// Nested handlers inspect their protected operations.
+    fn loop_suite(&mut self, statements: &[ast::Stmt]) -> Result<(Vec<Statement>, bool), String> {
+        if self.discarded_function_body() {
+            let falls = self.lower_block(statements, None)?;
+            Ok((Vec::new(), falls))
+        } else {
+            self.block(statements)
+        }
+    }
+
     /// The else suite is outside this loop, so its transfers target an outer loop.
     /// Only normal completion enters else; break states join after it.
     fn loop_else(
@@ -5755,7 +5770,7 @@ impl<'a> Checker<'a> {
     ) -> Result<(Vec<Statement>, bool), String> {
         let reachable = self.reachable;
         self.reachable &= can_exhaust;
-        let (orelse, falls) = self.block(orelse)?;
+        let (orelse, falls) = self.loop_suite(orelse)?;
         self.reachable = reachable;
         if can_exhaust && falls {
             self.merge_exit(&mut breaks);
@@ -5941,7 +5956,7 @@ impl<'a> Checker<'a> {
             self.leave_fixed_site(parent);
             if !emitting {
                 body.clear();
-            } else if self.placement_only && self.block_depth == 1 && self.fixed_sites.is_none() {
+            } else if self.discarded_function_body() {
                 *body = Vec::new();
                 output = None;
             }
@@ -6658,7 +6673,7 @@ impl<'a> Checker<'a> {
                 let before = self.assigned.clone();
                 self.apply_facts(&loop_.test, true);
                 self.loop_breaks.push(None);
-                let (body, _) = self.block(&loop_.body)?;
+                let (body, _) = self.loop_suite(&loop_.body)?;
                 let breaks = self.loop_breaks.pop().unwrap();
                 self.assigned.after_iteration(before);
                 self.narrowed = facts;
@@ -6670,7 +6685,9 @@ impl<'a> Checker<'a> {
                 }
                 let can_exhaust = entered != Some(true);
                 let (orelse, falls) = self.loop_else(&loop_.orelse, breaks, can_exhaust)?;
-                return Ok((vec![Statement::While(test, body, orelse)], falls));
+                let statement =
+                    (!self.discarded_function_body()).then(|| Statement::While(test, body, orelse));
+                return Ok((statement.into_iter().collect(), falls));
             }
             ast::Stmt::Assert(assertion) if self.graph.python_optimization() > 0 => {
                 assertion_syntax::validate(self.source, assertion)?;
