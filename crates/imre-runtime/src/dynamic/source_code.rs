@@ -2033,6 +2033,17 @@ pub(super) enum SyntaxSpan {
     InFields(ruff_text_size::TextRange),
 }
 
+impl SyntaxSpan {
+    pub(super) fn scope_error(error: imre_ast::async_generators::Error) -> (Self, String) {
+        let span = if error.location_in_args {
+            SyntaxSpan::InArgs(error.range)
+        } else {
+            SyntaxSpan::InFields(error.range)
+        };
+        (span, error.message)
+    }
+}
+
 pub(super) const SYNTAX_MEMBERS: &[&str] = &[
     "msg",
     "filename",
@@ -2458,23 +2469,14 @@ impl Context {
                 "import * only allowed at module level",
             ));
         }
-        let invalid = scope_error
-            .map(|error| {
-                let span = if error.location_in_args {
-                    SyntaxSpan::InArgs(error.range)
-                } else {
-                    SyntaxSpan::InFields(error.range)
-                };
-                (span, error.message)
-            })
-            .or_else(|| {
-                let keyword = imre_ast::repeated_keyword(parsed.syntax().into())?;
-                let name = keyword.arg.as_ref().unwrap();
-                Some((
-                    SyntaxSpan::InArgs(keyword.range()),
-                    format!("keyword argument repeated: {name}"),
-                ))
-            });
+        let invalid = scope_error.map(SyntaxSpan::scope_error).or_else(|| {
+            let keyword = imre_ast::repeated_keyword(parsed.syntax().into())?;
+            let name = keyword.arg.as_ref().unwrap();
+            Some((
+                SyntaxSpan::InArgs(keyword.range()),
+                format!("keyword argument repeated: {name}"),
+            ))
+        });
         if let Some((span, message)) = invalid {
             return Err(self.located_syntax_error(&message, span, filename_id, &lines)?);
         }
