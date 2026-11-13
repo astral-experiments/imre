@@ -1429,10 +1429,10 @@ impl RegisteredFrame<'_, '_> {
     ) -> String {
         let expression = self.source_text(expression, None);
         let conversion = conversion.map_or_else(|| "0".to_owned(), |c| self.text(&c.to_string()));
-        let metadata = self.op("list", &[]);
-        self.op("append", &[&metadata, &conversion]);
-        self.op("append", &[&metadata, spec]);
-        self.op("template_interpolation", &[value, &expression, &metadata])
+        self.take_matching_check();
+        self.checked(&format!(
+            "call i64 @imre_dyn_interpolation(ptr %ctx, i64 {value}, i64 {expression}, i64 {conversion}, i64 {spec})"
+        ))
     }
 }
 

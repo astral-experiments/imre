@@ -3246,6 +3246,27 @@ pub(super) unsafe extern "C" fn imre_dyn_unwind_operands(ctx: *mut Context, mark
     unsafe { (&mut *ctx).unwind_operands(mark) }
 }
 
+/// Construct a template interpolation from its four evaluated Python objects.
+///
+/// # Safety
+/// The generated frame owns the context and roots all four handles.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_interpolation(
+    ctx: *mut Context,
+    value: Id,
+    expression: Id,
+    conversion: Id,
+    format_spec: Id,
+) -> Id {
+    // SAFETY: the generated caller owns the active context.
+    let ctx = unsafe { &mut *ctx };
+    if ctx.pending.is_some() {
+        return NONE;
+    }
+    let result = ctx.template_interpolation(value, expression, conversion, format_spec);
+    finish(ctx, result)
+}
+
 /// Join the checked f-string parts and pop them in Python evaluation-stack order.
 ///
 /// # Safety

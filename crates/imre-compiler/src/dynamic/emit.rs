@@ -5329,12 +5329,12 @@ mod tests {
                 .functions
                 .contains("call i64 @imre_dyn_build_sequence(")
         );
-        for operation in [
-            "spread_arguments",
-            "format",
-            "template_interpolation",
-            "build_template",
-        ] {
+        assert!(
+            output
+                .functions
+                .contains("call i64 @imre_dyn_interpolation(")
+        );
+        for operation in ["spread_arguments", "format", "build_template"] {
             let symbol = output.strings.get_index_of(operation.as_bytes()).unwrap();
             assert!(
                 output.functions.contains(&format!(
