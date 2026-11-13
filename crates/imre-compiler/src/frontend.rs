@@ -4980,9 +4980,11 @@ impl<'a> Checker<'a> {
     fn object_method_iteration(
         &mut self,
         call: &ast::ExprCall,
+        method: &ast::ExprAttribute,
         receiver: Expr,
     ) -> Result<Iteration, String> {
-        let value = self.call_on(call, Some(receiver))?;
+        let target = registered::values::loaded_attribute(method, receiver);
+        let value = self.call_with_target(call, target)?;
         self.iteration_value(value, false, call)
     }
 
@@ -4994,8 +4996,10 @@ impl<'a> Checker<'a> {
             && self.class_reference(&attribute.value).is_none()
         {
             let receiver = self.expr(&attribute.value)?;
-            if receiver.ty == Type::PythonObject {
-                return self.object_method_iteration(call, receiver);
+            if receiver.ty == Type::PythonObject
+                || (receiver.ty == Type::JsonObject && call.arguments.is_empty())
+            {
+                return self.object_method_iteration(call, attribute, receiver);
             }
             if let Type::Class(class) = receiver.ty {
                 let value = self.iteration_method_call(call, attribute, class, receiver)?;
