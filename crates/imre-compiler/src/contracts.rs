@@ -991,8 +991,9 @@ impl Builtin {
             }
             Self::SequenceGetInBounds | Self::SequenceTakeInBounds => {
                 matches!(args, [source, cursor]
-                if matches!(source.ty, Type::List(_))
-                    && types.element(source.ty) == Some(result)
+                if ((matches!(source.ty, Type::List(_)) && types.element(source.ty) == Some(result))
+                    || (matches!(self, Self::SequenceGetInBounds)
+                        && types.homogeneous_tuple_element(source.ty) == Some(result)))
                     && matches!(source.kind, ExprKind::Local(_))
                     && cursor.ty == Type::Int && index(cursor))
             }

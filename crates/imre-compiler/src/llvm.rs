@@ -1568,11 +1568,14 @@ impl Emitter<'_, '_> {
         index: &Value,
         ty: Type,
     ) -> Value {
-        debug_assert!(matches!(receiver.ty, Type::List(_)));
-        debug_assert_eq!(self.module.types.element(receiver.ty), Some(ty));
         let mut index = index.clone();
         index.small_integer = true;
         let index = self.index_word(&index, true);
+        if matches!(receiver.ty, Type::Tuple(_)) {
+            return self.indexed_tuple_field(receiver, &index, ty);
+        }
+        debug_assert!(matches!(receiver.ty, Type::List(_)));
+        debug_assert_eq!(self.module.types.element(receiver.ty), Some(ty));
         let word = self.proven_list_word(slot, receiver, &index);
         self.decode_word(word, ty)
     }
@@ -7560,7 +7563,10 @@ impl Emitter<'_, '_> {
                         self.nonnegative_index(&expressions[1]),
                     )
                 }),
-            Builtin::SequenceGetInBounds if self.module.types.is_value_struct(returns) => {
+            Builtin::SequenceGetInBounds
+                if matches!(args[0].value.ty, Type::List(_))
+                    && self.module.types.is_value_struct(returns) =>
+            {
                 let native = self.instruction(format!("lshr i64 {}, 1", args[1].value.operand));
                 let word = self.checked_instruction(format!(
                     "call i64 @imre_seq_get_index(ptr {}, i64 {native})",
@@ -9810,6 +9816,16 @@ impl Emitter<'_, '_> {
         }
     }
 
+    /// Each fixed tuple field occupies one word. Both callers have checked the offset.
+    fn indexed_tuple_field(&mut self, receiver: &Value, offset: &str, ty: Type) -> Value {
+        let pointer = self.instruction(format!(
+            "getelementptr inbounds {}, ptr {}, i64 {offset}",
+            storage_type(ty),
+            receiver.operand
+        ));
+        self.field_value(&pointer, ty)
+    }
+
     /// Read the indexed value using the receiver's checked storage.
     fn get_item(
         &mut self,
@@ -9825,13 +9841,7 @@ impl Emitter<'_, '_> {
                     "call i64 @imre_tuple_index(i64 {}, i64 {len})",
                     index.operand
                 ));
-                // Every fixed tuple field occupies one word. Check before forming the inbounds pointer.
-                let ptr = self.instruction(format!(
-                    "getelementptr inbounds {}, ptr {}, i64 {offset}",
-                    storage_type(returns),
-                    table.operand
-                ));
-                let selected = self.field_value(&ptr, returns);
+                let selected = self.indexed_tuple_field(table, &offset, returns);
                 self.retain(&selected);
                 selected
             }
