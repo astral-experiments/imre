@@ -30,7 +30,7 @@ pub(crate) struct FixedAttribute {
     pub(crate) position: TextSize,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) enum FixedNode {
     Return,
     Effect,
@@ -38,6 +38,7 @@ pub(crate) enum FixedNode {
     Read(usize, Type),
     ModuleRead(usize, Type),
     Integer(i64),
+    Constant(ir::Constant),
     Field(usize, Type),
     Binary(Binary, Type),
     Builtin(std::mem::Discriminant<Builtin>, Type),
@@ -49,7 +50,7 @@ impl FixedNode {
         node: &ir::Node<'_>,
     ) -> Option<&'a [Option<Self>]> {
         let (expected, rest) = operations?.split_first()?;
-        (Self::checked(node) == Some((*expected)?)).then_some(rest)
+        (Self::checked(node).as_ref() == Some(expected.as_ref()?)).then_some(rest)
     }
 
     pub(crate) fn checked(node: &ir::Node<'_>) -> Option<Self> {
@@ -58,6 +59,9 @@ impl FixedNode {
             ir::Node::Statement(Statement::Expr(_)) => Self::Effect,
             ir::Node::Statement(Statement::Assign(slot, _)) => Self::Store(*slot),
             ir::Node::Expression(expr) => match expr.kind {
+                ExprKind::Str(_) | ExprKind::Bool(_) => {
+                    Self::Constant(ir::Constant::from_expr(expr)?)
+                }
                 ExprKind::Int(ref text) => Self::Integer(text.parse().ok()?),
                 ExprKind::Local(slot) => Self::Read(slot, expr.ty),
                 ExprKind::Field(_, slot) => Self::Field(slot, expr.ty),
@@ -249,6 +253,18 @@ impl SourceSites {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn changing_a_literal_invalidates_the_fixed_operation() {
+        for (value, changed) in [
+            (unpacking::string("same"), unpacking::string("some")),
+            (ir::Expr::boolean(false), ir::Expr::boolean(true)),
+        ] {
+            let expected = [FixedNode::checked(&ir::Node::Expression(&value))];
+            assert!(FixedNode::consume(Some(&expected), &ir::Node::Expression(&value)).is_some());
+            assert!(FixedNode::consume(Some(&expected), &ir::Node::Expression(&changed)).is_none());
+        }
+    }
 
     #[test]
     fn abandoning_unselected_sites_leaves_the_tables_unallocated() {
