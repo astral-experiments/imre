@@ -360,10 +360,6 @@ impl Callback {
         })
     }
 
-    pub(super) fn awaits_receiver(&self) -> bool {
-        self.receiver.is_some()
-    }
-
     pub(super) fn load(self) -> Result<(Context, Id, Vec<Id>)> {
         let heap = super::Heap::with_worker_stack(
             Some(self.frames),
@@ -374,6 +370,7 @@ impl Callback {
         ctx.socket_default_timeout = self.socket_default_timeout;
         ctx.finalizing = self.finalizing;
         let globals = ctx.scope(&self.module, None);
+        // The worker owns this cell and its selected lock before it reports readiness.
         let scope = if let Some((name, receiver)) = self.receiver {
             let value = match receiver {
                 Argument::Lock(lock) => ctx.alloc(Value::PrimitiveLock(lock)),
