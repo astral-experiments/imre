@@ -44,7 +44,7 @@ impl ExecutionIntrinsic {
                 .elements(model.db())
                 .iter()
                 .find_map(|ty| Self::from_type(model, *ty)),
-            _ => Self::resolve(model, expression),
+            ty => Self::from_type(model, ty),
         }
     }
 
