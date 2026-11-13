@@ -32,7 +32,7 @@ pub(super) struct PreparedUnit<'a> {
     pub(super) module: &'a ModuleSource<'a>,
     pub(super) builtin: bool,
     pub(super) physical: Option<(&'a PhysicalFile, PhysicalModuleKind<'a>)>,
-    pub(super) zip: Option<&'a ([u8; 32], u32)>,
+    pub(super) zip: Option<&'a [u8; 32]>,
     pub(super) initializer: Result<Initializer<'a>, &'a ModuleSyntaxError>,
 }
 
