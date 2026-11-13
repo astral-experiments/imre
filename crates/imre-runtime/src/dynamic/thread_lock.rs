@@ -67,7 +67,7 @@ pub(super) fn acquire_args(
     };
     if let Some(started) = ctx.threads.acquire_bound.take() {
         // The receiver and all arguments to the terminal acquire are now bound.
-        let _ = started.send(());
+        let _ = started.send(Ok(()));
     }
     Ok((blocking, timeout))
 }

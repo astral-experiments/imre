@@ -49,7 +49,7 @@ impl State {
 #[derive(Default)]
 pub(super) struct Handle {
     state: Mutex<State>,
-    ident: std::sync::OnceLock<usize>,
+    ident: std::sync::OnceLock<Option<usize>>,
     exiting: Condvar,
     native: Mutex<NativeJoin>,
 }
@@ -101,7 +101,7 @@ impl Handle {
     }
 
     pub(super) fn ident(&self) -> usize {
-        self.ident.get().copied().unwrap_or(0)
+        self.ident.get().copied().flatten().unwrap_or(0)
     }
 
     fn awaiting_exit(&self) -> bool {
@@ -368,6 +368,12 @@ impl RegisteredThread {
     /// Complete default Thread.run cleanup on the creator heap before releasing its bound operands.
     fn release_owner(&mut self, heap: &mut Heap) -> bool {
         let Some(owner) = self.owner else { return true };
+        // A cancelled bootstrap never entered Thread.run's try/finally.
+        if self.handle.ident.get() == Some(&None) {
+            self.owner = None;
+            heap.weak_edge_removed(owner);
+            return true;
+        }
         for name in ["_target", "_args", "_kwargs"] {
             let Value::Instance {
                 fields, namespace, ..
@@ -560,24 +566,61 @@ pub(super) fn check_start(ctx: &Context) -> Result<()> {
     Ok(())
 }
 
+/// The worker waits until its creator publishes the rooted receiver and native identity.
+struct Started {
+    handle: Arc<Handle>,
+    ident: usize,
+    native_id: Option<u64>,
+    bound: Option<mpsc::Receiver<WorkerStatus>>,
+}
+
+impl Started {
+    fn publish(self) -> Result<()> {
+        self.handle
+            .ident
+            .set(Some(self.ident))
+            .expect("unstarted handle");
+        if let Some(bound) = &self.bound
+            && let Ok(Err(reason)) = bound.recv()
+        {
+            return Err(Error::new("RuntimeError", reason));
+        }
+        Ok(())
+    }
+}
+
+impl Drop for Started {
+    fn drop(&mut self) {
+        // Wake the worker even if updating the receiver failed or unwound.
+        self.handle.ident.get_or_init(|| None);
+    }
+}
+
 /// Both public launch paths use the same bootstrap, count guard and native startup handshake.
 fn launch(
     ctx: &mut Context,
     operation: Operation,
     registration: Registration,
     operands: Vec<Id>,
-) -> Result<(usize, Option<u64>)> {
+) -> Result<Started> {
     let (handle, thread, detached_label) = match registration {
         Registration::Thread(thread) => (Arc::clone(&thread.handle), Some(thread), None),
         Registration::Detached(label) => (Arc::default(), None, Some(label)),
     };
     let (ready, started) = mpsc::sync_channel(0);
-    let (operand_bound, wait_for_operand) = match &operation {
-        Operation::Python(callback) if callback.awaits_receiver() => {
-            let (tx, rx) = mpsc::channel();
-            (Some(tx), Some(rx))
-        }
-        _ => (None, None),
+    let waits_for_binding = matches!(&operation, Operation::Python(callback) if callback.awaits_receiver())
+        || matches!(
+            operation,
+            Operation::Acquire {
+                release: Some(_),
+                ..
+            }
+        );
+    let (mut operand_bound, wait_for_operand) = if waits_for_binding {
+        let (tx, rx) = mpsc::channel();
+        (Some(tx), Some(rx))
+    } else {
+        (None, None)
     };
     let count = Arc::clone(&ctx.threads.count);
     let active = Arc::new(AtomicBool::new(true));
@@ -599,7 +642,7 @@ fn launch(
                         .observe_fault_workers(fault_workers.as_ref().expect("Python worker"));
                     worker.threads.count = Arc::clone(&count);
                     worker.threads.private_context = true;
-                    worker.threads.acquire_bound = operand_bound;
+                    worker.threads.acquire_bound = operand_bound.take();
                     (Some((worker, function, slots)), None)
                 }
                 Err(error) => {
@@ -618,22 +661,25 @@ fn launch(
             }
         };
         let _running = Running::enter(count, worker_active);
-        // Consume the nonblocking prefix and bind the final receiver before the
-        // parent resumes and can rebind either closure cell.
-        if let Some(lock) = prefix
-            && let Err(error) = lock.release()
-        {
-            let _ = ready.send(Err(Error::from(error).to_string()));
-            return Ok(());
-        }
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         let native_id = Some(crate::objects::locks::native_thread_id());
         #[cfg(not(any(target_os = "linux", target_os = "macos")))]
         let native_id = None;
         if ready.send(Ok((thread_ident(), native_id))).is_ok() {
-            // The creator publishes the native identity after rooting the Python operands.
-            starting.ident.wait();
+            if starting.ident.wait().is_none() {
+                return Ok(());
+            }
             drop(starting);
+            if let Some(lock) = prefix {
+                let result = lock
+                    .release()
+                    .map_err(|error| Error::from(error).to_string());
+                let failed = result.is_err();
+                let _ = operand_bound.expect("prefix acknowledgement").send(result);
+                if failed {
+                    return Ok(());
+                }
+            }
             if let Some((mut worker, function, slots)) = python {
                 let result = match worker.prepare_bound_function(function, slots) {
                     // SAFETY: the ABI pointer comes from the Context owned by this
@@ -676,18 +722,18 @@ fn launch(
             return Err(Error::new("RuntimeError", reason));
         }
     };
+    let started = Started {
+        handle,
+        ident,
+        native_id,
+        bound: wait_for_operand,
+    };
     ctx.workers.entries.push(Entry {
         active,
         operands,
         thread,
     });
-    let _ = handle.ident.set(ident);
-    if let Some(received) = wait_for_operand {
-        // The caller is the only Python evaluator that can change this cell. An
-        // early worker error also ends the wait and follows the usual reporting path.
-        let _ = received.recv();
-    }
-    Ok((ident, native_id))
+    Ok(started)
 }
 
 /// A low-level caller owns only the bootstrap roots after the native worker is detached.
@@ -701,7 +747,9 @@ pub(super) fn start_detached(
         .reap_where(&mut ctx.heap, |entry| entry.thread.is_none());
     ctx.workers.reserve_entry()?;
     let label = ctx.repr(function);
-    let (ident, _) = launch(ctx, callback, Registration::Detached(label), operands)?;
+    let started = launch(ctx, callback, Registration::Detached(label), operands)?;
+    let ident = started.ident;
+    started.publish()?;
     Ok(ident)
 }
 
@@ -846,23 +894,17 @@ pub(super) fn call(
                 daemon,
                 owner: Some(owner),
             };
-            let (ident, tid) = match launch(ctx, operation, Registration::Thread(thread), roots) {
-                Ok(identity) => identity,
-                Err(error) => {
-                    // Once native startup is attempted CPython consumes the handle,
-                    // even if the OS refuses to create a thread. No identity is published.
-                    ctx.set_attr(owner, "_handle", handle_id)?;
-                    return Err(error);
-                }
-            };
-            let ident = ctx.alloc(Value::Int(crate::Int::from_usize(ident)));
-            let tid = tid.map_or(NONE, |id| {
+            let started = launch(ctx, operation, Registration::Thread(thread), roots);
+            // CPython consumes the handle even when the OS refuses to create a thread.
+            ctx.set_attr(owner, "_handle", handle_id)?;
+            let started = started?;
+            let ident = ctx.alloc(Value::Int(crate::Int::from_usize(started.ident)));
+            let tid = started.native_id.map_or(NONE, |id| {
                 ctx.alloc(Value::Int(crate::Int::from_usize(id as usize)))
             });
-            // A pending Python signal can raise before Thread.start resumes.
-            ctx.set_attr(owner, "_handle", handle_id)?;
             ctx.set_attr(owner, "_ident", ident)?;
             ctx.set_attr(owner, "_native_id", tid)?;
+            started.publish()?;
             Ok(ctx.alloc(Value::Tuple(vec![handle_id, ident, tid])))
         }
         ("shutdown", &[]) => {
@@ -913,7 +955,10 @@ pub(super) fn call(
             if *state != State::New {
                 return Err(Error::new("RuntimeError", "thread already started"));
             }
-            handle.ident.set(thread_ident()).expect("unstarted handle");
+            handle
+                .ident
+                .set(Some(thread_ident()))
+                .expect("unstarted handle");
             *state = State::Running;
             Ok(NONE)
         }
