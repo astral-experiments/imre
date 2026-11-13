@@ -1872,9 +1872,12 @@ fn lower_function(
     checker.interactive_names = module.is_doctest_case() && definition.name.as_str() == "_run_case";
     let mut params = Vec::new();
     checker.bind_function_signature(definition, signature, |slot| params.push(slot))?;
-    checker.consuming_lists = consuming_lists::find(&definition.body, |func| {
-        checker.unshadowed_builtin(func, "sorted")
-    });
+    // A live Python frame obtains its iterator from the original object.
+    if checker.registered_local_start.is_none() {
+        checker.consuming_lists = consuming_lists::find(&definition.body, |func| {
+            checker.unshadowed_builtin(func, "sorted")
+        });
+    }
     // A function header owns its leading docstring. Keep a sole statement for the
     // implicit return and keep instrumented bodies on their ordinary line path.
     let statements =
