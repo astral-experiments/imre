@@ -93,27 +93,28 @@ pub(super) fn invoked_signature(value: &Expr) -> Option<Type> {
     }
 }
 
-/// Creation does not call a function. Every compatible constructed target is
-/// nevertheless a possible edge at an indirect invocation, including dead code.
-pub(super) fn targets(
-    functions: &[ir::Function],
-    entry: &ir::Function,
+/// A constructed callable is a possible target, even when it occurs after the invocation.
+pub(super) fn record_target(
+    value: &Expr,
     types: &Types,
-) -> std::result::Result<HashMap<Type, HashSet<usize>>, Diagnostic> {
-    let mut targets = HashMap::<Type, HashSet<usize>>::new();
-    for function in functions.iter().chain([entry]) {
-        ir::walk_expressions(&function.body, &mut |value| {
-            if let ExprKind::Callable { function, .. } = &value.kind {
-                targets.entry(value.ty).or_default().insert(*function);
-                if let Some(signature) = types.method_signature(value.ty) {
-                    targets.entry(signature).or_default().insert(*function);
-                }
-            }
-        });
+    targets: &mut HashMap<Type, HashSet<usize>>,
+) {
+    if let ExprKind::Callable { function, .. } = &value.kind {
+        targets.entry(value.ty).or_default().insert(*function);
+        if let Some(signature) = types.method_signature(value.ty) {
+            targets.entry(signature).or_default().insert(*function);
+        }
     }
+}
+
+pub(super) fn validate_targets(
+    functions: &[ir::Function],
+    types: &Types,
+    targets: &HashMap<Type, HashSet<usize>>,
+) -> std::result::Result<(), Diagnostic> {
     // A cold callback adapter executes an async body and returns the awaited
     // result. An eager factory returns a coroutine object through a different ABI.
-    for (signature, candidates) in &targets {
+    for (signature, candidates) in targets {
         let (_, returns) = types.signature(*signature).unwrap();
         if matches!(returns, Type::Coroutine(_))
             && candidates
@@ -126,7 +127,7 @@ pub(super) fn targets(
             );
         }
     }
-    Ok(targets)
+    Ok(())
 }
 
 impl Signature {
