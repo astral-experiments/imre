@@ -276,7 +276,7 @@ impl CheckedSites {
         site: TextSize,
         spelling: &str,
     ) -> String {
-        let text = frame.text(spelling);
+        let text = frame.source_text(spelling, None);
         frame.bind_annotation_expression(&text, &self.annotation_strings[&site]);
         text
     }

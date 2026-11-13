@@ -884,15 +884,15 @@ pub(crate) enum RegisteredScope {
     Function { is_async: bool },
 }
 
-/// Only compound, valid strings outside the bundled library get a separately bound
-/// expression. A literal or name retains exactly the ordinary Python str.
+/// Select a quoted annotation whose decoded expression needs its own executable body.
 pub(crate) fn annotation_expression(
     text: &str,
 ) -> Option<ruff_python_parser::Parsed<ast::ModExpression>> {
     let parsed = imre_ast::forward_refs::parse(text).ok()?;
     imre_ast::forward_refs::validate(&parsed).ok()?;
     let expr = &parsed.syntax().body;
-    (!expr.is_name_expr() && !expr.is_literal_expr()).then_some(parsed)
+    (expr.is_string_literal_expr() || (!expr.is_name_expr() && !expr.is_literal_expr()))
+        .then_some(parsed)
 }
 
 #[derive(Clone)]
