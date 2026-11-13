@@ -1,10 +1,10 @@
 //! The boxed emitter lowers each suspended body to an LLVM coroutine. Its heap frame
 //! contains machine spills; the Python activation tracks live handles at checkpoints.
+use crate::Shared;
 use std::alloc::Layout;
-use std::cell::{RefCell, UnsafeCell};
+use std::cell::{Cell, RefCell, UnsafeCell};
 use std::ffi::c_void;
 use std::ptr::NonNull;
-use std::rc::Rc;
 
 use super::generator_protocol::{DelegateOutcome, GeneratorInput};
 use super::value::{
@@ -36,44 +36,47 @@ pub(super) struct Activation {
 struct Continuation {
     entry: ResumeCode,
     scope: Id,
-    // LLVM may retain this address from the initial call until destruction.
-    // Interior mutability permits it to reborrow fields in each generated call.
-    activation: allocator_api2::boxed::Box<UnsafeCell<Activation>>,
-    // Frame.live owns the iterator at this operand boundary, even while running.
-    delegate_root: Option<usize>,
+    delegate_root: Cell<Option<usize>>,
+    // LLVM may keep this address until destruction. No borrow spans a generated call.
+    activation: UnsafeCell<Activation>,
+    parked: RefCell<Option<Frame>>,
 }
 
-impl Continuation {
+#[derive(Clone)]
+pub(super) struct Saved(Shared<Continuation>);
+
+impl Saved {
     fn new(entry: ResumeCode, scope: Id) -> Result<Self> {
-        let activation = allocator_api2::boxed::Box::try_new(UnsafeCell::new(Activation {
-            context: std::ptr::null_mut(),
-            input: None,
-            step: None,
-            frame: std::ptr::null_mut(),
-            drive: None,
-            allocation: None,
-        }))
-        .map_err(|_| crate::Error::allocation())?;
-        Ok(Self {
+        let state = Continuation {
             entry,
             scope,
-            activation,
-            delegate_root: None,
-        })
+            delegate_root: Cell::new(None),
+            activation: UnsafeCell::new(Activation {
+                context: std::ptr::null_mut(),
+                input: None,
+                step: None,
+                frame: std::ptr::null_mut(),
+                drive: None,
+                allocation: None,
+            }),
+            parked: RefCell::new(None),
+        };
+        Ok(Self(
+            Shared::try_new(state).map_err(|_| crate::Error::allocation())?,
+        ))
     }
 
-    fn resume(&mut self, ctx: &mut Context, input: Result<Id>) -> Result<Step> {
-        let activation = self.activation.get();
-        // SAFETY: the owner holds the running guard and the only active resume.
-        // The generated body may call the helpers below with the stable pointer.
-        // No borrow of Activation spans that call.
+    fn resume(&self, ctx: &mut Context, input: Result<Id>) -> Result<Step> {
+        let activation = self.0.activation.get();
+        // SAFETY: the running guard allows only this resume, and the owner keeps the
+        // embedded activation at a stable address until the native frame is destroyed.
         unsafe {
             (*activation).context = ctx;
             (*activation).input = Some(input);
             if let Some(drive) = (*activation).drive {
                 drive((*activation).frame, false);
             } else {
-                (self.entry)(activation, self.scope);
+                (self.0.entry)(activation, self.0.scope);
             }
             (*activation).context = std::ptr::null_mut();
             (*activation).input = None;
@@ -103,40 +106,38 @@ impl Drop for Continuation {
     }
 }
 
-#[derive(Clone, Default)]
-pub(super) struct Saved(Rc<RefCell<Option<(Continuation, Frame)>>>);
-
 impl Saved {
     /// The current delegated iterator is a strong operand only while its frame is parked.
     pub(super) fn parked_delegate(&self) -> Option<Id> {
-        let parked = self.0.borrow();
-        let (continuation, frame) = parked.as_ref()?;
-        frame.operand(continuation.delegate_root?)
+        let parked = self.0.parked.borrow();
+        parked.as_ref()?.operand(self.0.delegate_root.get()?)
     }
 
     /// Recheck at most the caller's remaining budget of strong roots while parked.
     pub(super) fn any_root(&self, limit: usize, predicate: impl FnMut(Id) -> bool) -> bool {
         self.0
+            .parked
             .borrow()
             .as_ref()
-            .is_some_and(|(_, frame)| frame.roots().take(limit).any(predicate))
+            .is_some_and(|frame| frame.roots().take(limit).any(predicate))
     }
 
     /// Number of strong edges owned by the parked native frame.
     pub(super) fn root_count(&self) -> usize {
         self.0
+            .parked
             .borrow()
             .as_ref()
-            .map_or(0, |(_, frame)| frame.roots().count())
+            .map_or(0, |frame| frame.roots().count())
     }
 
     /// Recheck one parked root while discovering or validating a bounded ownership path.
     pub(super) fn root_at(&self, index: usize) -> Option<Id> {
-        self.0.borrow().as_ref()?.1.roots().nth(index)
+        self.0.parked.borrow().as_ref()?.roots().nth(index)
     }
 
     pub(super) fn visit(&self, visitor: &mut impl VisitReferences) {
-        if let Some((_, activation)) = self.0.borrow().as_ref() {
+        if let Some(activation) = self.0.parked.borrow().as_ref() {
             activation.visit(visitor);
         }
     }
@@ -155,9 +156,8 @@ impl Context {
             scope,
             offset,
             running,
-            native,
             ..
-        } = self.heap.get_mut(generator)
+        } = self.heap.get(generator)
         else {
             unreachable!()
         };
@@ -168,21 +168,23 @@ impl Context {
             return Ok(None);
         }
         let (code, scope) = (*code, *scope);
-        let saved = native.get_or_insert_with(Saved::default).clone();
-        // Reserve the resumer's outgoing value slot before entering the generator.
+        // Reserve the resumer's outgoing value slot before taking its parked frame.
         self.heap.reserve_temporaries(1)?;
-        let parked = saved.0.borrow_mut().take();
-        let mut state = if let Some((state, frame)) = parked {
+        let Value::Generator { native, .. } = self.heap.get_mut(generator) else {
+            unreachable!()
+        };
+        let saved = if let Some(saved) = native.take() {
+            let frame = saved.0.parked.borrow_mut().take().expect("suspended frame");
             self.heap.restore_native_frame(frame);
-            state
+            saved
         } else {
             let Body::Suspended(entry) = self.code_object(code).body else {
                 unreachable!()
             };
-            let state = Continuation::new(entry, scope)?;
+            let saved = Saved::new(entry, scope)?;
             self.heap
                 .enter(scope, code, FrameOwner::Generator(generator));
-            state
+            saved
         };
         let Value::Generator { running, .. } = self.heap.get_mut(generator) else {
             unreachable!()
@@ -191,7 +193,7 @@ impl Context {
         self.heap.disarm_finalizer(owner);
         let mut external_throw = matches!(input, GeneratorInput::Throw { .. });
         let result = loop {
-            let mut arg = if let Some(mark) = state.delegate_root {
+            let mut arg = if let Some(mark) = saved.0.delegate_root.get() {
                 let iter = *self.heap.temporary_root(mark);
                 // throw/close forwards to a suspended delegate before the
                 // delegating handler becomes active again.
@@ -207,29 +209,15 @@ impl Context {
                 }
                 let result = match result {
                     Ok(DelegateOutcome::Yield(value)) => {
-                        return self.park_native(
-                            generator,
-                            owner,
-                            &saved,
-                            state,
-                            mark + 1,
-                            Ok(value),
-                        );
+                        return self.park_native(generator, owner, saved, mark + 1, Ok(value));
                     }
                     Ok(DelegateOutcome::LookupFailed(error)) => {
-                        return self.park_native(
-                            generator,
-                            owner,
-                            &saved,
-                            state,
-                            mark + 1,
-                            Err(error),
-                        );
+                        return self.park_native(generator, owner, saved, mark + 1, Err(error));
                     }
                     Ok(DelegateOutcome::Done(value)) => Ok(value),
                     Err(error) => Err(error),
                 };
-                state.delegate_root = None;
+                saved.0.delegate_root.set(None);
                 self.release_with_result(mark, result)
             } else {
                 match input {
@@ -241,9 +229,9 @@ impl Context {
                 self.chain_generator_input(error);
             }
             external_throw = false;
-            let (iterator, mark) = match state.resume(self, arg) {
+            let (iterator, mark) = match saved.resume(self, arg) {
                 Ok(Step::Yield(value, mark)) => {
-                    return self.park_native(generator, owner, &saved, state, mark, Ok(value));
+                    return self.park_native(generator, owner, saved, mark, Ok(value));
                 }
                 Ok(Step::YieldFrom(value, mark)) => (self.iterator(value), mark),
                 Ok(Step::AwaitIterator(iter, mark)) => (Ok(iter), mark),
@@ -252,7 +240,7 @@ impl Context {
             };
             input = match self.release_with_result(mark, iterator) {
                 Ok(_) => {
-                    state.delegate_root = Some(mark);
+                    saved.0.delegate_root.set(Some(mark));
                     GeneratorInput::Send(NONE)
                 }
                 Err(error) => GeneratorInput::Throw {
@@ -284,15 +272,14 @@ impl Context {
         &mut self,
         generator: Id,
         owner: Id,
-        saved: &Saved,
-        state: Continuation,
+        saved: Saved,
         mark: usize,
         result: Result<Id>,
     ) -> Result<Option<Id>> {
         // Operand release can run Python. Publish to the resumer first and keep
         // the generator running until its remaining frame is ready to suspend.
         let result = self.heap.publish_to_resumer(result);
-        if let (Some(delegate), Ok(value)) = (state.delegate_root, &result)
+        if let (Some(delegate), Ok(value)) = (saved.0.delegate_root.get(), &result)
             && !self.workers.has_unreaped_workers()
             && self.heap.forwarded_roots_survive(delegate, mark, *value)
         {
@@ -301,16 +288,18 @@ impl Context {
             self.discard_temporaries(mark, None);
         }
         let frame = self.heap.suspend_native_frame();
-        *saved.0.borrow_mut() = Some((state, frame));
+        *saved.0.parked.borrow_mut() = Some(frame);
         let Value::Generator {
             code,
             running,
             offset,
+            native,
             ..
         } = self.heap.get_mut(generator)
         else {
             unreachable!()
         };
+        *native = Some(saved);
         *running = false;
         *offset = Some(1);
         let code = *code;
