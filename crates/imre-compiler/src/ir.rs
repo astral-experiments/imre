@@ -1667,26 +1667,44 @@ impl Constant {
 
     /// A constant key contains only immutable literals and distinguishes Python types and float bits.
     pub(crate) fn from_expr(value: &Expr) -> Option<Self> {
+        Self::read_expr::<true>(value)
+    }
+
+    /// Check whether the expression can supply a constant key without copying its value.
+    pub(crate) fn is_constant(value: &Expr) -> bool {
+        Self::read_expr::<false>(value).is_some()
+    }
+
+    fn read_expr<const OWNED: bool>(value: &Expr) -> Option<Self> {
+        // Recognition needs only the outer Option. Its successful value can be any constant.
+        fn retain<const OWNED: bool>(make: impl FnOnce() -> Constant) -> Constant {
+            if OWNED { make() } else { Constant::None }
+        }
         Some(match &value.kind {
             ExprKind::Builtin(Builtin::RegisteredLocation(..), args) => {
-                return Self::from_expr(&args[0]);
+                return Self::read_expr::<OWNED>(&args[0]);
             }
-            ExprKind::Builtin(Builtin::RegisteredIndexConstant(key), _) => key.clone(),
+            ExprKind::Builtin(Builtin::RegisteredIndexConstant(key), _) => {
+                retain::<OWNED>(|| key.clone())
+            }
             ExprKind::None => Constant::None,
             ExprKind::Bool(b) => Constant::Bool(*b),
-            ExprKind::Int(n) => Constant::Int(n.clone()),
+            ExprKind::Int(n) => retain::<OWNED>(|| Constant::Int(n.clone())),
             ExprKind::Float(n) => Constant::Float(n.to_bits()),
-            ExprKind::Bytes(b) => Constant::Bytes(b.clone()),
-            ExprKind::Str(text) => Constant::text(text),
+            ExprKind::Bytes(b) => retain::<OWNED>(|| Constant::Bytes(b.clone())),
+            ExprKind::Str(text) => retain::<OWNED>(|| Constant::text(text)),
             ExprKind::Builtin(Builtin::RegisteredString(points), _) => {
-                Constant::Text(points.clone())
+                retain::<OWNED>(|| Constant::Text(points.clone()))
             }
             ExprKind::Builtin(Builtin::RegisteredComplex(r, i), _) => {
                 Constant::Complex(r.to_bits(), i.to_bits())
             }
             ExprKind::Builtin(Builtin::RegisteredEllipsis, _) => Constant::Ellipsis,
             ExprKind::Tuple(items) => {
-                Constant::Tuple(items.iter().map(Self::from_expr).collect::<Option<_>>()?)
+                if !OWNED {
+                    return items.iter().all(Self::is_constant).then_some(Self::None);
+                }
+                Self::Tuple(items.iter().map(Self::from_expr).collect::<Option<_>>()?)
             }
             _ => return None,
         })

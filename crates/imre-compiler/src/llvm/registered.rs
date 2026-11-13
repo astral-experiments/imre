@@ -658,11 +658,7 @@ impl<'f> Frame<'f, '_, '_> {
         let ExprKind::Tuple(items) = &container.without_location().kind else {
             return None;
         };
-        if items.len() > 8
-            || !items
-                .iter()
-                .all(|item| ir::Constant::from_expr(item).is_some())
-        {
+        if items.len() > 8 || !items.iter().all(ir::Constant::is_constant) {
             return None;
         }
         let items = items
