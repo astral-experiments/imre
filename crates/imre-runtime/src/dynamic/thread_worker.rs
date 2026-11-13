@@ -571,7 +571,7 @@ struct Started {
     handle: Arc<Handle>,
     ident: usize,
     native_id: Option<u64>,
-    bound: Option<mpsc::Receiver<WorkerStatus>>,
+    released: Option<mpsc::Receiver<WorkerStatus>>,
 }
 
 impl Started {
@@ -580,8 +580,8 @@ impl Started {
             .ident
             .set(Some(self.ident))
             .expect("unstarted handle");
-        if let Some(bound) = &self.bound
-            && let Ok(Err(reason)) = bound.recv()
+        if let Some(released) = &self.released
+            && let Ok(Err(reason)) = released.recv()
         {
             return Err(Error::new("RuntimeError", reason));
         }
@@ -608,15 +608,13 @@ fn launch(
         Registration::Detached(label) => (Arc::default(), None, Some(label)),
     };
     let (ready, started) = mpsc::sync_channel(0);
-    let waits_for_binding = matches!(&operation, Operation::Python(callback) if callback.awaits_receiver())
-        || matches!(
-            operation,
-            Operation::Acquire {
-                release: Some(_),
-                ..
-            }
-        );
-    let (mut operand_bound, wait_for_operand) = if waits_for_binding {
+    let (release_status, released) = if matches!(
+        operation,
+        Operation::Acquire {
+            release: Some(_),
+            ..
+        }
+    ) {
         let (tx, rx) = mpsc::channel();
         (Some(tx), Some(rx))
     } else {
@@ -642,7 +640,6 @@ fn launch(
                         .observe_fault_workers(fault_workers.as_ref().expect("Python worker"));
                     worker.threads.count = Arc::clone(&count);
                     worker.threads.private_context = true;
-                    worker.threads.acquire_bound = operand_bound.take();
                     (Some((worker, function, slots)), None)
                 }
                 Err(error) => {
@@ -675,7 +672,7 @@ fn launch(
                     .release()
                     .map_err(|error| Error::from(error).to_string());
                 let failed = result.is_err();
-                let _ = operand_bound.expect("prefix acknowledgement").send(result);
+                let _ = release_status.expect("prefix acknowledgement").send(result);
                 if failed {
                     return Ok(());
                 }
@@ -726,7 +723,7 @@ fn launch(
         handle,
         ident,
         native_id,
-        bound: wait_for_operand,
+        released,
     };
     ctx.workers.entries.push(Entry {
         active,
