@@ -1350,6 +1350,13 @@ impl RegisteredSuite {
     }
 
     fn child(&mut self, suite: RegisteredSuite) -> Vec<Statement> {
+        // A source suite with no private operands or locals can run in its enclosing frame.
+        if suite.checked.function.locals.is_empty()
+            && suite.operands.is_empty()
+            && suite.suites.is_empty()
+        {
+            return suite.checked.function.body;
+        }
         let index = self.suites.len();
         self.suites.push(suite);
         vec![Statement::Expr(operation(
@@ -1916,6 +1923,7 @@ impl<'a> SuitePreparation<'a> {
         let mut region = self.region(kind);
         let mut arms = Vec::new();
         let mut otherwise = None;
+        let mut arm_continues = false;
         for (test, suite) in statements::if_clauses(branch) {
             // A dead literal arm in a suspended frame has no resume entry.
             let test = match test {
@@ -1932,7 +1940,9 @@ impl<'a> SuitePreparation<'a> {
                 }
                 test => test.map(|expr| self.physical_operand(expr, kind, selection, suspended)),
             };
-            let child = region.child(self.physical_suite(suite, kind, selection, suspended));
+            let child = self.physical_suite(suite, kind, selection, suspended);
+            arm_continues |= child.falls_through;
+            let child = region.child(child);
             if let Some(test) = test {
                 arms.push((region.operand(test, Type::Bool), child));
             } else {
@@ -1945,8 +1955,7 @@ impl<'a> SuitePreparation<'a> {
             Type::None,
             vec![],
         )));
-        region.falls_through =
-            otherwise.is_none() || region.suites.iter().any(|arm| arm.falls_through);
+        region.falls_through = otherwise.is_none() || arm_continues;
         region
             .checked
             .function
