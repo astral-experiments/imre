@@ -50,6 +50,19 @@ def interrupted_call():
     assert events == [4, 2, 1]
 
 
-for run in (completed, partial, interrupted_call):
+def interrupted_method():
+    class Sink:
+        def consume(self, *values):
+            raise AssertionError("failed argument reached the method")
+
+    sink = Sink()
+    try:
+        sink.consume([item(1), [item(2), item(4)]], item(3))
+    except ValueError as exc:
+        assert exc is failure
+        assert events == [4, 2, 1]
+
+
+for run in (completed, partial, interrupted_call, interrupted_method):
     events.clear()
     run()
