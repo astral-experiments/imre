@@ -705,14 +705,10 @@ impl Checker<'_> {
         style: JoinStyle,
     ) -> Result<Expr, String> {
         let input = if style == JoinStyle::WindowsCommand
-            && let ast::Expr::List(display) = source
-            && !display
-                .elts
-                .iter()
-                .any(|item| matches!(item, ast::Expr::Starred(_)))
+            && let Some(iterable) = self.command_list(source)?
         {
             Iteration::Container {
-                iterable: self.process_argument_list(display)?,
+                iterable,
                 items: false,
                 start: None,
             }

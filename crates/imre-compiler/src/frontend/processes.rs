@@ -744,8 +744,20 @@ impl Checker<'_> {
         )
     }
 
+    /// A command display keeps its physical list site around the checked path operands.
+    pub(super) fn command_list(&mut self, source: &ast::Expr) -> Result<Option<Expr>, String> {
+        let Some(list) = source.as_list_expr() else {
+            return Ok(None);
+        };
+        if list.elts.iter().any(ast::Expr::is_starred_expr) {
+            return Ok(None);
+        }
+        self.with_expression_site(source, |checker| checker.process_argument_list(list))
+            .map(Some)
+    }
+
     /// Evaluate a fresh command list in source order, including mixed path representations.
-    pub(super) fn process_argument_list(
+    fn process_argument_list(
         &mut self,
         display: &ast::ExprList,
     ) -> Result<Expr, String> {
@@ -799,15 +811,9 @@ impl Checker<'_> {
 
     /// Keep the caller's argument object; only the OS launch converts each entry to bytes.
     fn command_argument(&mut self, arg: &ast::Expr) -> Result<Expr, String> {
-        let value = if let ast::Expr::List(display) = arg
-            && !display
-                .elts
-                .iter()
-                .any(|item| matches!(item, ast::Expr::Starred(_)))
-        {
-            self.process_argument_list(display)?
-        } else {
-            self.expr(arg)?
+        let value = match self.command_list(arg)? {
+            Some(list) => list,
+            None => self.expr(arg)?,
         };
         let accepts = |allow_boxed| {
             let scalar = |ty| command_path(ty, allow_boxed);
