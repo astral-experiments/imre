@@ -71,12 +71,11 @@ pub(crate) fn frame_inputs(
         required_private.insert(*slot);
         true
     };
-    let mut supported = true;
     // Scope declarations can follow uses in the walk. Check their complete set afterward.
     let private = checked.region().frame_layout(|node| {
         let expr = match node {
             ir::Node::Statement(stmt) => {
-                supported &= match stmt {
+                return match stmt {
                     Statement::Assign(slot, _) => uses_slot(slot, false),
                     Statement::Raise(value) => {
                         uses_python_protocol = true;
@@ -142,11 +141,10 @@ pub(crate) fn frame_inputs(
                     }
                     _ => false,
                 };
-                return;
             }
             ir::Node::Expression(expr) => expr,
         };
-        supported &= match &expr.kind {
+        match &expr.kind {
             ExprKind::Local(slot) => {
                 scalar_reads += usize::from(scalar_parameter(expr));
                 uses_slot(slot, false)
@@ -296,8 +294,8 @@ pub(crate) fn frame_inputs(
                 args,
             ) => args.len() == 2,
             _ => false,
-        };
-    });
+        }
+    })?;
     // Only an unresolved signature needs a Python operation to establish its
     // calling convention. Solved functions already have an ordinary checked caller.
     let has_live_parameter = has_scalar
@@ -306,10 +304,9 @@ pub(crate) fn frame_inputs(
             .params
             .iter()
             .any(|&slot| checked.function.locals[slot] == Type::PythonObject);
-    if !supported
-        || required_private
-            .iter()
-            .any(|slot| private.index(slot).is_none())
+    if required_private
+        .iter()
+        .any(|slot| private.index(slot).is_none())
         || has_live_parameter && !uses_python_protocol
         || scalar_reads != protocol_reads
     {

@@ -69,6 +69,7 @@ pub(crate) struct RegisteredRegion<'a> {
 }
 
 impl<'a> RegisteredRegion<'a> {
+    #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
     pub(crate) fn walk(self, visit: &mut impl FnMut(ir::Node<'a>, Option<&'a Expr>)) {
         match self.root {
             RegionRoot::Suite(body) => ir::walk_nodes(body, visit),
@@ -78,14 +79,17 @@ impl<'a> RegisteredRegion<'a> {
 
     #[cfg(test)]
     pub(crate) fn private_slots(self) -> Vec<usize> {
-        self.frame_layout(|_| {}).slots().to_vec()
+        self.frame_layout(|_| true).unwrap().slots().to_vec()
     }
 
     /// Collect private names and cursor kinds as the caller visits the scoped operations.
-    pub(crate) fn frame_layout(self, mut visit: impl FnMut(ir::Node<'a>)) -> FrameSlots {
+    pub(crate) fn frame_layout(
+        self,
+        mut supported: impl FnMut(ir::Node<'a>) -> bool,
+    ) -> Option<FrameSlots> {
         let mut slots = std::collections::BTreeSet::new();
         let mut cursors = HashMap::new();
-        self.walk(&mut |node, _| {
+        let mut visit = |node: ir::Node<'a>, _: Option<&'a Expr>| {
             match &node {
                 ir::Node::Statement(Statement::Scope { clear, .. })
                 | ir::Node::Expression(Expr {
@@ -99,10 +103,17 @@ impl<'a> RegisteredRegion<'a> {
                 }
                 _ => {}
             }
-            visit(node);
-        });
+            supported(node)
+        };
+        let complete = match self.root {
+            RegionRoot::Suite(body) => ir::all_nodes(body, &mut visit),
+            RegionRoot::Operand(value) => ir::all_operand_nodes(value, None, &mut visit),
+        };
+        if !complete {
+            return None;
+        }
         slots.retain(|slot| !self.local_names.contains_key(slot));
-        FrameSlots::new(slots.into_iter().collect(), cursors)
+        Some(FrameSlots::new(slots.into_iter().collect(), cursors))
     }
 }
 
