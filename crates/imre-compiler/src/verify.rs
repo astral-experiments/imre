@@ -499,6 +499,7 @@ impl Verifier<'_> {
             }
             Statement::Raise(None)
             | Statement::Expr(_)
+            | Statement::Position(..)
             | Statement::Break
             | Statement::Continue
             | Statement::Exhaust => Ok(()),

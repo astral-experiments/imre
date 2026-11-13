@@ -62,6 +62,10 @@ pub(super) trait StatementLowering {
         &mut self,
         def: &ast::StmtFunctionDef,
     ) -> StdResult<Option<Statement>, Self::Error>;
+    /// The enclosing block can already own this statement's checkpoint.
+    fn position_only(&mut self, _range: TextRange) -> Option<Statement> {
+        None
+    }
     fn effect(&mut self, value: &ast::Expr) -> StdResult<(Option<Statement>, bool), Self::Error>;
     fn returned(&mut self, ret: &ast::StmtReturn) -> StdResult<Statement, Self::Error>;
     fn raised_value(
@@ -95,7 +99,7 @@ pub(super) trait StatementLowering {
                 Some(raised(raise, |value| self.raised_value(raise, value))?),
                 false,
             ),
-            ast::Stmt::Pass(_) => (None, true),
+            ast::Stmt::Pass(_) => (self.position_only(stmt.range()), true),
             _ => match loop_transfer(stmt) {
                 Some(transfer) if self.record_loop_transfer(&transfer) => (Some(transfer), false),
                 _ => return self.other_statement(stmt),
@@ -130,9 +134,19 @@ impl StatementLowering for Checker<'_> {
         self.define_local_function(def)
     }
 
+    fn position_only(&mut self, range: TextRange) -> Option<Statement> {
+        if self.fault_enabled() {
+            return None;
+        }
+        self.fixed_sites
+            .as_mut()?
+            .record(range, FixedNode::Position(range));
+        Some(Statement::Position(range, None))
+    }
+
     fn effect(&mut self, expr: &ast::Expr) -> Result<(Option<Statement>, bool), String> {
         if expr.is_string_literal_expr() || expr.is_ellipsis_literal_expr() {
-            return Ok((None, true));
+            return Ok((self.position_only(expr.range()), true));
         }
         if let ast::Expr::Yield(yielded) = expr
             && let Some(element) = self.generator_item

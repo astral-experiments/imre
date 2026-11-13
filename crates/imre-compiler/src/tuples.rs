@@ -300,7 +300,10 @@ fn inspect(
                 inspect(body, candidates, producers, &mut HashSet::new());
                 inspect(orelse, candidates, producers, fresh);
             }
-            Statement::Break | Statement::Continue | Statement::Exhaust => {}
+            Statement::Position(..)
+            | Statement::Break
+            | Statement::Continue
+            | Statement::Exhaust => {}
         }
     }
     for slot in introduced {

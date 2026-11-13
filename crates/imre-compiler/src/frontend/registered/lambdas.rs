@@ -353,14 +353,12 @@ async def factory(seed, rows, mark):
             defaults.iter().flat_map(names).collect::<Vec<_>>(),
             ["early", "later"]
         );
-        let [Statement::Expr(checkpoint), Statement::Return(value)] =
+        let [Statement::Position(range, None), Statement::Return(value)] =
             plan.body.as_ref().unwrap().function.body.as_slice()
         else {
             panic!("expected a checked return")
         };
-        assert!(
-            matches!(checkpoint.kind, ExprKind::Builtin(Builtin::RegisteredStatement(range, None), _) if range == lambda.body.range())
-        );
+        assert_eq!(*range, lambda.body.range());
         assert_eq!(names(value), ["reader", "x", "closed", "y"]);
         let mut calls = Vec::new();
         ir::walk_operand_expressions(value, &mut |node| {

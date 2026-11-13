@@ -1825,7 +1825,7 @@ mod tests {
 
     #[test]
     fn interactive_compound_suites_display_only_their_own_expressions() {
-        use crate::ir::{Builtin, ExprKind};
+        use crate::ir::{Builtin, Expr, ExprKind, Node, Statement};
 
         let path = Path::new("<doctest sample[4]>");
         let text = "try:\n    for item in source:\n        saved = item; print(saved); None\n        def quiet():\n            record(item)\n        class C:\n            record(item)\n    else:\n        exhausted()\nexcept Error:\n    'handled'\nelse:\n    del item\nfinally:\n    done()\n";
@@ -1835,15 +1835,18 @@ mod tests {
         crate::verify::registered(suite.checked.region()).unwrap();
         let mut displayed = Vec::new();
         let mut checkpoints = Vec::new();
-        crate::ir::walk_expressions(&suite.checked.function.body, &mut |expr| match &expr.kind {
-            ExprKind::Builtin(Builtin::RegisteredDisplayHook, args) => {
+        crate::ir::walk_nodes(&suite.checked.function.body, &mut |node, _| match node {
+            Node::Expression(Expr {
+                kind: ExprKind::Builtin(Builtin::RegisteredDisplayHook, args),
+                ..
+            }) => {
                 let ExprKind::Builtin(Builtin::RegisteredLocation(range, ..), _) = &args[0].kind
                 else {
                     panic!("displayed operand lost its source position")
                 };
                 displayed.push(&text[*range]);
             }
-            ExprKind::Builtin(Builtin::RegisteredStatement(range, _), _) => {
+            Node::Statement(Statement::Position(range, _)) => {
                 checkpoints.push(text[*range].lines().next().unwrap());
             }
             _ => {}
@@ -2059,13 +2062,10 @@ mod tests {
     }
 
     fn assert_checked_call(body: &[crate::ir::Statement], source: &str, spelling: &str) {
-        use crate::ir::{Builtin, ExprKind, Statement};
+        use crate::ir::Statement;
 
-        let [Statement::Expr(mark), Statement::Expr(call)] = body else {
+        let [Statement::Position(range, _), Statement::Expr(call)] = body else {
             panic!("expected a statement checkpoint and call for {spelling}");
-        };
-        let ExprKind::Builtin(Builtin::RegisteredStatement(range, _), _) = &mark.kind else {
-            panic!("expected the source position of {spelling}");
         };
         assert_eq!(&source[*range], spelling);
         assert!(call.without_location().is_registered_invoke(), "{spelling}");
@@ -3084,14 +3084,13 @@ mod tests {
             suite: &mut crate::frontend::RegisteredSuite,
             range: TextRange,
         ) -> &mut crate::ir::Statement {
-            use crate::ir::{Builtin, ExprKind, Statement};
-            let [.., Statement::Expr(mark), transfer] = suite.checked.function.body.as_mut_slice()
+            use crate::ir::Statement;
+            let [.., Statement::Position(site, _), transfer] =
+                suite.checked.function.body.as_mut_slice()
             else {
                 panic!("expected a source checkpoint and a loop transfer");
             };
-            assert!(
-                matches!(&mark.kind, ExprKind::Builtin(Builtin::RegisteredStatement(site, _), _) if *site == range)
-            );
+            assert_eq!(*site, range);
             transfer
         }
         assert!(matches!(
@@ -3101,14 +3100,13 @@ mod tests {
         let [branch] = suite.suites.as_mut_slice() else {
             panic!("expected the if at the start of the while body");
         };
-        use crate::ir::{Builtin, ExprKind, Statement};
-        let [Statement::Expr(mark), Statement::If(..)] = branch.checked.function.body.as_slice()
+        use crate::ir::Statement;
+        let [Statement::Position(site, None), Statement::If(..)] =
+            branch.checked.function.body.as_slice()
         else {
             panic!("expected the checkpoint and checked conditional");
         };
-        assert!(matches!(&mark.kind,
-            ExprKind::Builtin(Builtin::RegisteredStatement(site, None), _) if *site == branch_range
-        ));
+        assert_eq!(*site, branch_range);
         let op = transfer(&mut branch.suites[0], skip_range);
         assert!(matches!(op, crate::ir::Statement::Continue));
         *op = crate::ir::Statement::Break;
@@ -3146,9 +3144,7 @@ mod tests {
             .unwrap();
         assert!(
             !matches!(&suite, RegisteredBody::Suite(plan) if plan.suites.iter().any(|region| matches!(region.checked.function.body.first(),
-                        Some(crate::ir::Statement::Expr(crate::ir::Expr {
-                            kind: crate::ir::ExprKind::Builtin(crate::ir::Builtin::RegisteredStatement(range, _), _), ..
-                        })) if *range == main.body[index].range()
+                        Some(crate::ir::Statement::Position(range, _)) if *range == main.body[index].range()
             )))
         );
         let last = main.body.last().unwrap().as_try_stmt().unwrap();
@@ -3156,10 +3152,8 @@ mod tests {
         let task_group = main.body.len() - 1;
         assert!(suite.checked().function.body.windows(2).any(|ops| matches!(
             ops,
-            [crate::ir::Statement::Expr(site), crate::ir::Statement::Try { .. }]
-                if matches!(site.kind, crate::ir::ExprKind::Builtin(
-                    crate::ir::Builtin::RegisteredStatement(range, _), _
-                ) if range == last.range())
+            [crate::ir::Statement::Position(range, _), crate::ir::Statement::Try { .. }]
+                if *range == last.range()
         )));
 
         let before = module.standalone().unwrap();

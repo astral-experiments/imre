@@ -2274,8 +2274,6 @@ pub(crate) enum Builtin {
         line: u32,
     },
     FaultLine(u32),
-    /// An original statement checkpoint and its optional call without a separate highlight.
-    RegisteredStatement(ruff_text_size::TextRange, Option<ruff_text_size::TextRange>),
     /// Emit the ordered child suite bound at this index in a prepared control region.
     RegisteredSuite(usize),
     /// The owning checked statement or region supplies this deferred operand.
@@ -3593,6 +3591,8 @@ pub(crate) struct RaisedException {
 
 #[derive(Clone)]
 pub(crate) enum Statement {
+    /// An original statement checkpoint and its optional call without a separate highlight.
+    Position(ruff_text_size::TextRange, Option<ruff_text_size::TextRange>),
     Assign(usize, Expr),
     /// Transfers an owned local to another local, resetting its source.
     Move(usize, usize),
@@ -3778,7 +3778,8 @@ macro_rules! statement_children {
                     ($expression)(cause);
                 }
             }
-            Statement::Move(..)
+            Statement::Position(..)
+            | Statement::Move(..)
             | Statement::Clear(_)
             | Statement::Raise(None)
             | Statement::IterNext { .. }

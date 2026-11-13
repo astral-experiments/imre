@@ -7939,7 +7939,7 @@ impl<'a> Checker<'a> {
         let right = Self::integer_addend(op, right, left.ty);
         let (op, ty) = self.binary_op(op, left.ty, right.ty, node)?;
         if let Some(sites) = &mut self.fixed_sites {
-            sites.expression(node.range(), FixedNode::Binary(op, ty));
+            sites.record(node.range(), FixedNode::Binary(op, ty));
         }
         Ok(Expr {
             ty,
@@ -8886,7 +8886,7 @@ impl<'a> Checker<'a> {
                     if let Some(sites) = &mut self.fixed_sites
                         && let Some(integer) = value.as_i64()
                     {
-                        sites.expression(expression.range(), FixedNode::Integer(integer));
+                        sites.record(expression.range(), FixedNode::Integer(integer));
                     }
                     (Type::Int, ExprKind::Int(value.to_string()))
                 }
@@ -9065,7 +9065,7 @@ impl<'a> Checker<'a> {
                     && matches!(value.kind, ExprKind::Local(read) if read == slot)
                     && value.ty == self.locals[slot]
                 {
-                    sites.expression(
+                    sites.record(
                         expression.range(),
                         FixedNode::indexed(&value.kind, slot, value.ty),
                     );
