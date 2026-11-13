@@ -54,7 +54,7 @@ impl Context {
     pub(super) fn code_local_field(&mut self, object: Id, field: &str) -> Result<Id> {
         if field == "co_freevars" {
             let code = self.code_object(object);
-            if !code.closure_supported && !code.module_definition {
+            if !code.definition.closure_supported && !code.definition.module_definition {
                 return Err(Error::new(
                     "NotImplementedError",
                     "code lacks closure metadata",
@@ -63,8 +63,13 @@ impl Context {
             if code.freevar_names != NONE {
                 return Ok(code.freevar_names);
             }
-            let names = code.freevars.clone();
-            let names = names.iter().map(|name| self.heap.code_name(name)).collect();
+            let names = code.definition.freevars.clone();
+            let names = names
+                .as_deref()
+                .unwrap_or_default()
+                .iter()
+                .map(|name| self.heap.code_name(name))
+                .collect();
             let tuple = self.alloc(Value::Tuple(names));
             let Value::Code(code) = self.heap.get_mut(object) else {
                 unreachable!()

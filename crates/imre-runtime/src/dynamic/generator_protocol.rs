@@ -59,13 +59,13 @@ impl Context {
     /// exposes its origin, await protocol and unstarted-coroutine finalizer.
     pub(super) fn new_suspended(&mut self, code: Id, scope: Id, owner: FrameOwner) -> Result<Id> {
         let frame = self.new_generator(code, scope, owner);
-        let definition = self.code_object(code);
-        if definition.is_coroutine() {
+        let code = self.code_object(code);
+        if code.is_coroutine() {
             let origin = self.coroutine_origin();
             let coroutine = self.alloc(Value::Coroutine { frame, origin });
             self.heap.watch_unstarted_coroutine(coroutine)?;
             Ok(coroutine)
-        } else if definition.flags & imre_ast::code_flags::ASYNC_GENERATOR != 0 {
+        } else if code.definition.flags & imre_ast::code_flags::ASYNC_GENERATOR != 0 {
             Ok(self.async_generator(frame))
         } else {
             Ok(frame)
@@ -176,12 +176,12 @@ impl Context {
 
     /// A generator lambda has no implicit StopIteration handler; a def or genexpr does.
     pub(super) fn frame_error(&mut self, error: Error, code: Id) -> Error {
-        let definition = self.code_object(code);
-        if definition.generator_lambda {
+        let code = self.code_object(code);
+        if code.definition.generator_lambda {
             return error;
         }
-        let async_gen = definition.flags & imre_ast::code_flags::ASYNC_GENERATOR != 0;
-        let coroutine = definition.is_coroutine();
+        let async_gen = code.definition.flags & imre_ast::code_flags::ASYNC_GENERATOR != 0;
+        let coroutine = code.is_coroutine();
         let message = if self.is_stop_iteration(&error) {
             if async_gen {
                 "async generator raised StopIteration"
@@ -353,7 +353,7 @@ impl Context {
 
     fn is_generator_coroutine(&self, id: Id) -> bool {
         matches!(self.heap.get(id), Value::Generator { code, .. }
-            if self.code_object(*code).flags & imre_ast::code_flags::ITERABLE_COROUTINE != 0)
+            if self.code_object(*code).definition.flags & imre_ast::code_flags::ITERABLE_COROUTINE != 0)
     }
 
     pub(super) fn call_coroutine_method(

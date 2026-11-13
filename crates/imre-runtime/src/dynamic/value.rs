@@ -52,21 +52,33 @@ pub(super) struct CodeObject {
     pub doc: Id,
     pub filename: Id,
     pub first_line: u32,
+    pub definition: CodeDefinition,
+    pub nested: Vec<(usize, Id)>,
+    pub compilation_constants: Option<std::rc::Rc<CompilationConstants>>,
+}
+
+/// Heap-independent lexical layout resolved at the Python definition site.
+#[derive(Clone, Default)]
+pub(super) struct CodeDefinition {
     pub module_definition: bool,
     /// CPython flags for boxed Python function definitions.
     pub flags: u32,
     /// Runtime source retains execution flags even when its complete co_flags is unknown.
     pub flags_complete: bool,
     pub generator_lambda: bool,
-    pub nested: Vec<(usize, Id)>,
-    pub compilation_constants: Option<std::rc::Rc<CompilationConstants>>,
-    pub freevars: Vec<String>,
+    pub freevars: Option<Arc<[String]>>,
     pub closure_supported: bool,
+}
+
+impl CodeDefinition {
+    pub(super) fn freevars(&self) -> &[String] {
+        self.freevars.as_deref().unwrap_or_default()
+    }
 }
 
 impl CodeObject {
     pub(super) fn is_coroutine(&self) -> bool {
-        self.flags & imre_ast::code_flags::COROUTINE != 0
+        self.definition.flags & imre_ast::code_flags::COROUTINE != 0
     }
 }
 
@@ -5805,7 +5817,7 @@ impl Heap {
                 && let Value::Generator { code, .. } = self.get(id)
                 && let Value::Code(code) = self.get(*code)
                 && !code.is_coroutine()
-                && code.flags & imre_ast::code_flags::ASYNC_GENERATOR == 0
+                && code.definition.flags & imre_ast::code_flags::ASYNC_GENERATOR == 0
             {
                 self.register_finalizer(id);
                 return Some(id);
