@@ -1158,10 +1158,9 @@ fn lower_graph(
                 &types,
                 inference,
                 needs_registered_entry.then_some(&checked_bodies),
-                definitions.iter().filter_map(|(_, _, signature)| {
-                    (!signature.registered_frame())
-                        .then(|| (signature.id, method_returns.remove(&signature.id)))
-                }),
+                definitions
+                    .iter()
+                    .map(|(_, _, signature)| (signature.id, method_returns.remove(&signature.id))),
             );
         }
     };
