@@ -1231,10 +1231,14 @@ impl<'p> sites::SiteDefinitions<'p> for LexicalDefinitions<'_, 'p> {
                 }
             }
         };
+        let text = child
+            .original_text
+            .as_deref()
+            .unwrap_or(&child.body.source.text);
         Some(sites::CompiledExec {
             entry: entry.clone(),
             flags: child.body.source.future_flags,
-            source: self.output.data(child.text.as_bytes()),
+            source: self.output.data(text.as_bytes()),
         })
     }
 

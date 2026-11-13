@@ -1036,7 +1036,6 @@ impl Session {
                     LiteralSite {
                         call: range,
                         operand,
-                        text: literal.value.to_str().into(),
                     },
                     module,
                 ))
@@ -1048,10 +1047,10 @@ impl Session {
         &self,
         parent: File,
         site: TextSize,
-        text: &str,
+        original: &str,
         inherited_flags: u32,
     ) -> Result<ParsedLiteral, String> {
-        let text = crate::normalize_source(text, crate::SourceKind::Command)?;
+        let text = crate::normalize_source(original, crate::SourceKind::Command)?;
         let input = imre_ast::indentation::prepare(&text);
         super::check_source_complexity(&input.text)
             .map_err(|error| format!("<string>: {error}"))?;
@@ -1081,7 +1080,8 @@ impl Session {
             self.checked_parse(file, "<string>", &text, &input, crate::SourceKind::Command)?;
         Ok(ParsedLiteral::new(
             file,
-            text.into_owned(),
+            text,
+            original,
             parsed,
             inherited_flags,
         ))
