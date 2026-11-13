@@ -4,6 +4,7 @@ use std::ffi::{CStr, c_char};
 use std::slice;
 use std::sync::Arc;
 
+use super::source_code::CONDITIONAL;
 use super::*;
 
 mod linked_literals;
@@ -2965,20 +2966,33 @@ impl Context {
             .and_then(|v| serde_json::from_str(v).ok())
             .unwrap_or_default();
         let annotation_class = metadata.annotation_class == true;
-        let mut read_class = false;
+        let class = self.scope_data(scope);
+        let class_reads =
+            class.in_class_body && (annotation_class || metadata.method_class_cell.is_boolean());
+        let mut implicit = Vec::new();
+        if annotation_class {
+            implicit.push("__classdict__".to_owned());
+        }
         let reads = metadata
             .scope_reads
             .as_array()
             .into_iter()
             .flatten()
             .filter_map(|value| value.as_str())
-            .filter(|name| {
-                if annotation_class && *name == "__class__" {
-                    read_class = true;
-                    false
-                } else {
-                    !annotation_class || *name != "__classdict__"
+            .filter(|&name| {
+                if annotation_class && name == "__classdict__" {
+                    return false;
                 }
+                let captured = match name {
+                    "__class__" => annotation_class,
+                    "__classdict__" => class_reads,
+                    CONDITIONAL => class_reads && class.conditional_annotation_cell().is_some(),
+                    _ => false,
+                };
+                if captured {
+                    implicit.push(name.to_owned());
+                }
+                !captured
             });
         let lexical = if annotation_class
             && !self
@@ -3003,11 +3017,8 @@ impl Context {
             self.enclosing_freevars(lexical, reads)
         }
         .map(|mut freevars| {
-            if annotation_class {
-                freevars.push("__classdict__".to_owned());
-                if read_class {
-                    freevars.push("__class__".to_owned());
-                }
+            if !implicit.is_empty() {
+                freevars.append(&mut implicit);
                 freevars.sort();
             }
             freevars
@@ -3075,7 +3086,10 @@ impl Context {
         annotate: Id,
         annotation_scope: bool,
     ) -> Result<Id> {
+        let defining_scope = scope;
         let owner = self.scope_data(scope);
+        let in_class = owner.in_class_body;
+        let conditional_cell = owner.conditional_annotation_cell();
         // A borrowed method only owns its defining class if its code captures __class__.
         let code_data = self.code_object(code);
         let mut class_cell = owner.class_cell.filter(|_| {
@@ -3110,10 +3124,9 @@ impl Context {
         let signature = self.code_object(code).parameters;
         let signature: serde_json::Value = if signature == NONE
             || (entries.is_empty()
-                && !names
-                    .iter()
-                    .any(|name| matches!(name.as_str(), "__class__" | "__classdict__")))
-        {
+                && !names.iter().any(|name| {
+                    matches!(name.as_str(), "__class__" | "__classdict__" | CONDITIONAL)
+                })) {
             serde_json::Value::Null
         } else {
             serde_json::from_str(
@@ -3159,9 +3172,20 @@ impl Context {
             self.dict(keyword)
         };
         let mut cells = Vec::new();
+        let class_reads = in_class
+            && (signature["annotation_class"] == true
+                || signature["method_class_cell"].is_boolean());
         for name in &names {
-            if name == "__classdict__" && signature["annotation_class"] == true {
-                cells.push(self.class_annotation_dict_cell(scope));
+            if name == "__classdict__" && (class_reads || signature["annotation_class"] == true) {
+                let owner = if class_reads { defining_scope } else { scope };
+                cells.push(self.class_annotation_dict_cell(owner));
+                continue;
+            }
+            if name == CONDITIONAL
+                && class_reads
+                && let Some(cell) = conditional_cell
+            {
+                cells.push(cell);
                 continue;
             }
             if name == "__class__"

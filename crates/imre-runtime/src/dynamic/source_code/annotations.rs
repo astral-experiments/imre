@@ -3,8 +3,6 @@
 use super::*;
 use ast::visitor::{self, Visitor};
 
-pub(super) const CONDITIONAL: &str = "__conditional_annotations__";
-
 /// A nested lambda body or comprehension has its own scope. Defaults and the outer
 /// iterable still execute in the annotation scope.
 #[derive(Default)]

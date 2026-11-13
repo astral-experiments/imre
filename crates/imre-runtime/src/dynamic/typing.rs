@@ -10,6 +10,7 @@ pub(super) use parameter_value::{
 use crate::dynamic::value::SlotStorage;
 use std::collections::{HashMap, HashSet};
 
+use super::source_code::CONDITIONAL;
 use super::value::EMPTY_TUPLE;
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
 
@@ -1907,23 +1908,31 @@ pub(super) fn parameter_scope(ctx: &mut Context, outer: Id, names: Id, class: bo
     let module = enclosing.module.clone();
     let scope = ctx.scope(&module, Some(parent));
     if in_class && !class {
-        capture_parameter_class(ctx, scope, outer);
+        capture_parameter_class(ctx, scope, outer, names);
     }
     initialize_parameters(ctx, scope, names, class)
 }
 
 /// A delayed parameter expression can read the enclosing class dictionary after the
 /// class body has finished, even though ordinary lexical lookup skips that body.
-fn capture_parameter_class(ctx: &mut Context, scope: Id, outer: Id) {
+fn capture_parameter_class(ctx: &mut Context, scope: Id, outer: Id, names: Id) {
     let class_cell = ctx.scope_data(outer).class_cell;
-    let dictionary = ctx.class_annotation_dict_cell(outer);
+    let conditional = ctx
+        .scope_data(outer)
+        .conditional_annotation_cell()
+        .filter(|_| ctx.dict_named_item(names, CONDITIONAL).is_none());
+    let dictionary = ctx
+        .dict_named_item(names, "__classdict__")
+        .is_none()
+        .then(|| ctx.class_annotation_dict_cell(outer));
     let Value::Scope(parameters) = ctx.heap.get_mut(scope) else {
         unreachable!()
     };
-    parameters
-        .closure
-        .cells
-        .insert("__classdict__".to_owned(), dictionary);
+    for (name, cell) in [("__classdict__", dictionary), (CONDITIONAL, conditional)] {
+        if let Some(cell) = cell {
+            parameters.closure.cells.insert(name.to_owned(), cell);
+        }
+    }
     parameters.class_cell = class_cell;
 }
 
@@ -1936,7 +1945,7 @@ pub(super) fn class_parameter_frame(ctx: &mut Context, scope: Id, names: Id) -> 
             unreachable!()
         };
         frame.parent = parent;
-        capture_parameter_class(ctx, scope, outer);
+        capture_parameter_class(ctx, scope, outer, names);
     }
     initialize_parameters(ctx, scope, names, true)
 }

@@ -27,6 +27,7 @@ pub(crate) struct ClassScope {
     pub(crate) frame_reads: BTreeSet<String>,
     pub(crate) needs_class_cell: bool,
     pub(crate) needs_dict_cell: bool,
+    pub(crate) needs_conditional_cell: bool,
     pub(crate) static_attributes: BTreeSet<String>,
 }
 
@@ -54,8 +55,8 @@ impl ClassScope {
         let bindings = ClassBindings::from_names(&declarations);
         let (frame_reads, method_reads) =
             class_metadata::capture(&mut declarations, class, string_annotations);
-        let (needs_class_cell, needs_dict_cell) =
-            imre_ast::class_cell::required(body, string_annotations);
+        let (needs_class_cell, needs_dict_cell, needs_conditional_cell) =
+            imre_ast::class_cell::required_with_conditional(body, string_annotations);
         Self {
             enclosing_class,
             bindings,
@@ -72,6 +73,7 @@ impl ClassScope {
             frame_reads,
             needs_class_cell,
             needs_dict_cell,
+            needs_conditional_cell,
             static_attributes: imre_ast::class_attributes::static_attributes(body, names),
         }
     }

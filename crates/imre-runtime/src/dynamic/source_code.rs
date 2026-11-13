@@ -3,8 +3,6 @@
 mod annotations;
 mod comprehensions;
 
-use annotations::CONDITIONAL;
-
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
@@ -18,6 +16,8 @@ use ruff_text_size::{Ranged, TextRange};
 
 use super::value::{Body, ExecGlobals};
 use super::*;
+
+pub(super) const CONDITIONAL: &str = "__conditional_annotations__";
 
 /// Only the module code object escapes validation of a source string.
 struct ParsedModule {

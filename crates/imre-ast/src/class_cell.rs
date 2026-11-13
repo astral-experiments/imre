@@ -1,16 +1,17 @@
-//! Identify the implicit class and class-namespace cells before the class body executes.
+//! Identify the implicit cells needed before a class body executes.
 use crate::comprehension::{Output, Plan};
 use ast::visitor::{self, Visitor};
 use ruff_python_ast as ast;
 
-// The same lexical walk resolves the two cells independently.
 const CLASS: u8 = 1;
 const DICT: u8 = 2;
+const CONDITIONAL: u8 = 4;
 
 fn cell(name: &str) -> u8 {
     match name {
         "__class__" => CLASS,
         "__classdict__" => DICT,
+        "__conditional_annotations__" => CONDITIONAL,
         _ => 0,
     }
 }
@@ -21,6 +22,15 @@ fn cells<'a>(names: impl Iterator<Item = &'a str>) -> u8 {
 
 /// Return the class and namespace cells required by the class body, in that order.
 pub fn required(body: &[ast::Stmt], string_annotations: bool) -> (bool, bool) {
+    let (class, dict, _) = required_with_conditional(body, string_annotations);
+    (class, dict)
+}
+
+/// Return the class, namespace and conditional annotation cells needed by lexical reads.
+pub fn required_with_conditional(
+    body: &[ast::Stmt],
+    string_annotations: bool,
+) -> (bool, bool, bool) {
     let mut scope = Scope {
         class: true,
         string_annotations,
@@ -28,7 +38,11 @@ pub fn required(body: &[ast::Stmt], string_annotations: bool) -> (bool, bool) {
     };
     scope.visit_body(body);
     let needed = scope.nested | (scope.annotation & (!scope.shadows | scope.nonlocal));
-    (needed & CLASS != 0, needed & DICT != 0)
+    (
+        needed & CLASS != 0,
+        needed & DICT != 0,
+        needed & CONDITIONAL != 0,
+    )
 }
 
 /// Whether the function body reads a free __class__, including through zero-argument super.

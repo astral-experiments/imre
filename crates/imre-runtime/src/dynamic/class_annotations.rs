@@ -1,5 +1,5 @@
 //! Deferred ordinary class declarations and class-wide annotation providers.
-use super::{Context, Error, Id, NONE, Result, Value};
+use super::{Context, Error, Id, NONE, Result, Value, source_code::CONDITIONAL};
 
 impl Context {
     /// Capture the live class dictionary and the conditional declarations that ran.
@@ -12,21 +12,16 @@ impl Context {
             names.push("__class__".to_owned());
             cells.push(cell);
         }
-        if let Some(active) = self
-            .scope_data(class_scope)
-            .class_namespace
-            .as_ref()
-            .and_then(|ns| ns.annotation_scratch?.1)
-        {
-            names.push("__conditional_annotations__".to_owned());
-            cells.push(self.alloc(Value::Cell(Some(active))));
+        if let Some(cell) = self.scope_data(class_scope).conditional_annotation_cell() {
+            names.push(CONDITIONAL.to_owned());
+            cells.push(cell);
         }
         self.closure_environment(parent, names, &cells)
     }
 
     /// Mark the declaration as executed and record its field name for TypedDict.
     pub(super) fn record_class_annotation(&mut self, scope: Id, name: Id, index: Id) -> Result<Id> {
-        let Some((fields, active)) = self
+        let Some((fields, conditional_cell)) = self
             .scope_data(scope)
             .class_namespace
             .as_ref()
@@ -38,7 +33,11 @@ impl Context {
             ));
         };
         if index != NONE {
-            self.mark_annotation(active.expect("conditional class annotation set"), index)?;
+            let cell = conditional_cell.expect("conditional class annotation cell");
+            let Value::Cell(Some(active)) = *self.heap.get(cell) else {
+                return Err(Error::unbound_local(CONDITIONAL));
+            };
+            self.mark_annotation(active, index)?;
         }
         if fields != NONE {
             self.put_item(fields, name, NONE)?;

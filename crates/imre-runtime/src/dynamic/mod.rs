@@ -2922,12 +2922,7 @@ impl Context {
         let frame = self.scope_data(scope);
         let declared = !frame.in_class_body && frame.closure.declared.contains(name);
         let mut error = if declared && origin == scope {
-            Error::new(
-                "UnboundLocalError",
-                format!(
-                    "cannot access local variable '{name}' where it is not associated with a value"
-                ),
-            )
+            Error::unbound_local(name)
         } else if declared || frame.closure.cells.contains_key(name) {
             Error::new(
                 "NameError",
