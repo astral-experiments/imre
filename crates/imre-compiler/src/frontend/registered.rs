@@ -74,30 +74,33 @@ impl<'a> RegisteredRegion<'a> {
         }
     }
 
-    #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
-    pub(crate) fn private_slots(self) -> std::collections::BTreeSet<usize> {
-        self.frame_slots(|_| {})
+    #[cfg(test)]
+    pub(crate) fn private_slots(self) -> Vec<usize> {
+        self.frame_layout(|_| {}).slots().to_vec()
     }
 
-    /// Collect storage declared by scopes while visiting the operations that use it.
-    pub(crate) fn frame_slots(
-        self,
-        mut visit: impl FnMut(ir::Node<'a>),
-    ) -> std::collections::BTreeSet<usize> {
+    /// Collect private names and cursor kinds as the caller visits the scoped operations.
+    pub(crate) fn frame_layout(self, mut visit: impl FnMut(ir::Node<'a>)) -> FrameSlots {
         let mut slots = std::collections::BTreeSet::new();
+        let mut cursors = HashMap::new();
         self.walk(&mut |node, _| {
-            if let ir::Node::Statement(Statement::Scope { clear, .. })
-            | ir::Node::Expression(Expr {
-                kind: ExprKind::Scope { clear, .. },
-                ..
-            }) = &node
-            {
-                slots.extend(clear);
+            match &node {
+                ir::Node::Statement(Statement::Scope { clear, .. })
+                | ir::Node::Expression(Expr {
+                    kind: ExprKind::Scope { clear, .. },
+                    ..
+                }) => {
+                    slots.extend(clear);
+                }
+                ir::Node::Statement(Statement::IterNext { iterator, kind, .. }) => {
+                    cursors.insert(*iterator, *kind);
+                }
+                _ => {}
             }
             visit(node);
         });
         slots.retain(|slot| !self.local_names.contains_key(slot));
-        slots
+        FrameSlots::new(slots, cursors)
     }
 }
 
@@ -190,8 +193,44 @@ pub(crate) enum FrameInputs {
     },
 }
 
+/// The logical slots and cursor operations selected by this physical region.
+#[derive(Clone, Default)]
+pub(crate) struct FrameSlots(Option<Arc<PrivateSlots>>);
+
+struct PrivateSlots {
+    slots: Box<[usize]>,
+    cursors: HashMap<usize, ir::IterNextKind>,
+}
+
+impl FrameSlots {
+    pub(crate) fn new(
+        slots: std::collections::BTreeSet<usize>,
+        cursors: HashMap<usize, ir::IterNextKind>,
+    ) -> Self {
+        Self((!slots.is_empty() || !cursors.is_empty()).then(|| {
+            Arc::new(PrivateSlots {
+                slots: slots.into_iter().collect(),
+                cursors,
+            })
+        }))
+    }
+
+    pub(crate) fn slots(&self) -> &[usize] {
+        self.0.as_ref().map_or(&[], |layout| &*layout.slots)
+    }
+
+    pub(crate) fn index(&self, slot: &usize) -> Option<usize> {
+        self.slots().binary_search(slot).ok()
+    }
+
+    pub(crate) fn cursor(&self, slot: &usize) -> Option<ir::IterNextKind> {
+        self.0.as_ref()?.cursors.get(slot).copied()
+    }
+}
+
 pub(crate) struct RegisteredFunction {
     pub(crate) inputs: FrameInputs,
+    pub(crate) frame_slots: FrameSlots,
     /// Physical positions for the unchanged fixed operations, in checked node order.
     pub(crate) fixed_sites: Vec<TextRange>,
     /// Descriptor names and token positions for placed fixed-layout field reads.
@@ -226,6 +265,7 @@ impl RegisteredFunction {
         let body = Self::returning(range, value);
         Self {
             inputs: FrameInputs::Checked,
+            frame_slots: FrameSlots::default(),
             fixed_sites: Vec::new(),
             fixed_attributes: None,
             function: ir::Function {
@@ -384,12 +424,13 @@ pub(super) fn lower_definition(
     }
     let mut function = RegisteredFunction {
         inputs: FrameInputs::Checked,
+        frame_slots: FrameSlots::default(),
         fixed_sites: Vec::new(),
         fixed_attributes: None,
         function: body.function,
         local_names,
     };
-    function.inputs =
+    (function.inputs, function.frame_slots) =
         crate::llvm::registered::frame_inputs(&function, body.live_protocol_parameters)
             .ok_or_else(|| {
                 error(
@@ -969,6 +1010,7 @@ impl DeferredAnnotation {
         ))];
         Ok(RegisteredFunction {
             inputs: FrameInputs::Checked,
+            frame_slots: FrameSlots::default(),
             fixed_sites: Vec::new(),
             fixed_attributes: None,
             function: ir::Function {
@@ -3123,6 +3165,7 @@ impl<'a> SourceScope<'a> {
         let (locals, local_names) = self.bindings();
         RegisteredFunction {
             inputs: FrameInputs::Checked,
+            frame_slots: FrameSlots::default(),
             fixed_sites: Vec::new(),
             fixed_attributes: None,
             function: ir::Function {
@@ -5197,7 +5240,7 @@ main()
         let mut registered = false;
         let mut negated = false;
         let mut protected = false;
-        main.region().frame_slots(|node| match node {
+        main.region().walk(&mut |node, _| match node {
             ir::Node::Expression(value) => match &value.kind {
                 ExprKind::Builtin(Builtin::RegisteredAttribute { name, .. }, _) if name == "ArgumentParser" => constructed = true,
                 ExprKind::Builtin(Builtin::RegisteredCall(site), _) => {
@@ -5246,7 +5289,7 @@ exec("print(1)")
             let start = TextSize::try_from(text.find(&format!("def {name}(")).unwrap()).unwrap();
             let mut names = Vec::new();
             let mut selections = 0;
-            bodies[&graph.entry][&start].region().frame_slots(|node| {
+            bodies[&graph.entry][&start].region().walk(&mut |node, _| {
                 let ir::Node::Expression(value) = node else { return };
                 match &value.kind {
                     ExprKind::Builtin(Builtin::RegisteredCall(site), operands)

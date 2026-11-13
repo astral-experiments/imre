@@ -9,8 +9,8 @@ mod sequences;
 pub(crate) mod sites;
 pub(crate) mod suspension;
 use crate::frontend::{
-    ExpressionSelection, LocalBinding, PhysicalOperand, RegisteredBody, RegisteredFunction,
-    RegisteredOperand, RegisteredRegion, RegisteredSuite,
+    ExpressionSelection, FrameSlots, LocalBinding, PhysicalOperand, RegisteredBody,
+    RegisteredFunction, RegisteredOperand, RegisteredRegion, RegisteredSuite,
 };
 use crate::ir::{self, Builtin, Expr, ExprKind, Statement, Type};
 use crate::llvm::LoopTarget;
@@ -44,7 +44,7 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
 pub(crate) fn frame_inputs(
     checked: &RegisteredFunction,
     live_parameters: bool,
-) -> Option<crate::frontend::FrameInputs> {
+) -> Option<(crate::frontend::FrameInputs, FrameSlots)> {
     use crate::frontend::{FrameInputs, FrameSite};
     let scalar_parameter = |value: &Expr| {
         live_parameters
@@ -67,7 +67,7 @@ pub(crate) fn frame_inputs(
     };
     let mut supported = true;
     // Scope declarations can follow uses in the walk. Check their complete set afterward.
-    let private = checked.region().frame_slots(|node| {
+    let private = checked.region().frame_layout(|node| {
         let expr = match node {
             ir::Node::Statement(stmt) => {
                 supported &= match stmt {
@@ -287,26 +287,28 @@ pub(crate) fn frame_inputs(
         ty == Type::PythonObject || live_parameters && ty.builtin_scalar_name().is_some()
     });
     if !supported
-        || !required_private.is_subset(&private)
+        || required_private
+            .iter()
+            .any(|slot| private.index(slot).is_none())
         || has_live_parameter && !uses_python_protocol
         || scalar_reads != protocol_reads
     {
         return None;
     }
-    Some(if live_parameters {
+    let inputs = if live_parameters {
         FrameInputs::Protocol {
             sites: sites.into_boxed_slice(),
         }
     } else {
         FrameInputs::Checked
-    })
+    };
+    Some((inputs, private))
 }
 
 #[derive(Default)]
 pub(super) struct IterationState {
-    private_slots: Vec<usize>,
+    storage: FrameSlots,
     first_slot: usize,
-    cursors: HashMap<usize, ir::IterNextKind>,
     expression_mark: Option<String>,
 }
 
@@ -359,9 +361,10 @@ impl<'p> RegisteredBody<'p> {
             Self::Function(checked) | Self::Prepared(checked) => (checked, None, &[][..]),
             Self::Suite(suite) => (&suite.checked, Some(suite), suite.operands.as_slice()),
         };
-        let Some(enclosing) =
-            code.enter_checked_slots(checked.region(), Some(checked.function.locals.len()))
-        else {
+        let Some(enclosing) = code.enter_checked_slots(
+            checked.region(),
+            Some((checked.function.locals.len(), &checked.frame_slots)),
+        ) else {
             return;
         };
         let next = Cell::new(0);
@@ -565,13 +568,7 @@ impl<'f> Frame<'f, '_, '_> {
     }
 
     pub(crate) fn lookup_local(&mut self, slot: usize) -> String {
-        if self
-            .code
-            .iteration
-            .private_slots
-            .binary_search(&slot)
-            .is_ok()
-        {
+        if self.code.iteration.storage.index(&slot).is_some() {
             return self.load_private(slot);
         }
         let binding = &self.names.expect("registered local names")[&slot];
@@ -586,13 +583,7 @@ impl<'f> Frame<'f, '_, '_> {
 
     pub(crate) fn assign(&mut self, slot: usize, value: CheckedValue) {
         let handle = self.materialize(&value);
-        if self
-            .code
-            .iteration
-            .private_slots
-            .binary_search(&slot)
-            .is_ok()
-        {
+        if self.code.iteration.storage.index(&slot).is_some() {
             self.store_private(slot, &handle);
             return;
         }
@@ -739,7 +730,7 @@ impl<'f> Frame<'f, '_, '_> {
             .filter(|slots| !slots.is_empty());
         self.code.finish_unwind(scope.error_targets, |code| {
             let slots = clear.iter().rev().filter_map(|slot| {
-                let index = code.iteration.private_slots.binary_search(slot).ok()?;
+                let index = code.iteration.storage.index(slot)?;
                 Some(code.iteration.first_slot + index)
             });
             if let Some(nested) = nested {
@@ -757,7 +748,7 @@ impl<'f> Frame<'f, '_, '_> {
                 ));
             } else {
                 for slot in clear {
-                    if let Ok(index) = code.iteration.private_slots.binary_search(slot) {
+                    if let Some(index) = code.iteration.storage.index(slot) {
                         let physical = code.iteration.first_slot + index;
                         code.line(&format!("store i64 0, ptr %ir_slot{physical}"));
                     }
@@ -786,7 +777,7 @@ impl<'f> Frame<'f, '_, '_> {
         // Stack bottom first: an inner scope unwinds before its parent, and
         // each scope consumes its pending slots in the declared clear order.
         for slot in clear.iter().rev() {
-            if let Ok(index) = frame.iteration.private_slots.binary_search(slot) {
+            if let Some(index) = frame.iteration.storage.index(slot) {
                 slots.insert(frame.iteration.first_slot + index);
             }
         }
@@ -1506,7 +1497,7 @@ impl RegisteredFrame<'_, '_> {
     pub(crate) fn enter_checked_slots(
         &mut self,
         checked: RegisteredRegion<'_>,
-        local_count: Option<usize>,
+        function: Option<(usize, &FrameSlots)>,
     ) -> Option<EnclosingSlots> {
         #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
         if let Err(error) = crate::verify::registered(checked) {
@@ -1519,18 +1510,16 @@ impl RegisteredFrame<'_, '_> {
         let live_roots = self.live_slots.len();
         let first = self.private_slot_count;
         // Iterator cursors and other private storage occupy unnamed local slots.
-        if local_count != Some(checked.local_names.len()) {
-            self.iteration.private_slots = checked
-                .frame_slots(|node| {
-                    if let ir::Node::Statement(Statement::IterNext { iterator, kind, .. }) = node {
-                        self.iteration.cursors.insert(*iterator, *kind);
-                    }
-                })
-                .into_iter()
-                .collect();
-        }
+        self.iteration.storage = match function {
+            Some((count, layout))
+                if count == checked.local_names.len() || !layout.slots().is_empty() =>
+            {
+                layout.clone()
+            }
+            _ => checked.frame_layout(|_| {}),
+        };
         self.iteration.first_slot = first;
-        let end = first + self.iteration.private_slots.len();
+        let end = first + self.iteration.storage.slots().len();
         self.private_slot_count = end;
         self.live_slots.extend(first..end);
         Some(EnclosingSlots {
@@ -1552,15 +1541,15 @@ impl RegisteredFrame<'_, '_> {
         self.iteration.expression_mark.is_none()
             && slots
                 .iter()
-                .any(|slot| self.iteration.cursors.get(slot) == Some(&ir::IterNextKind::Generic))
+                .any(|slot| self.iteration.storage.cursor(slot) == Some(ir::IterNextKind::Generic))
     }
 
     pub(crate) fn clear_slots(&mut self, slots: &[usize]) {
         for &slot in slots {
-            if self.iteration.private_slots.binary_search(&slot).is_err() {
+            if self.iteration.storage.index(&slot).is_none() {
                 continue;
             }
-            if self.iteration.cursors.contains_key(&slot) {
+            if self.iteration.storage.cursor(&slot).is_some() {
                 let old = self.load_private(slot);
                 self.store_private(slot, "0");
                 self.op("break_iter", &[&old]);
@@ -1576,8 +1565,8 @@ impl RegisteredFrame<'_, '_> {
         self.iteration.first_slot
             + self
                 .iteration
-                .private_slots
-                .binary_search(&slot)
+                .storage
+                .index(&slot)
                 .expect("checked private slot")
     }
 

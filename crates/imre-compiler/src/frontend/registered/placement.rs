@@ -11,6 +11,7 @@ pub(crate) fn place_fixed_function(
         inputs: FrameInputs::Checked,
         function,
         local_names: source.local_names,
+        frame_slots: Default::default(),
         fixed_sites: source.positions,
         fixed_attributes: (!source.attributes.is_empty()).then(|| Box::new(source.attributes)),
     }
