@@ -8616,7 +8616,7 @@ impl<'a> Checker<'a> {
             ));
         }
         if let ast::Expr::Attribute(attr) = expression
-            && let Some(value) = self.calendar_class_attribute(attr)?
+            && let Some(value) = self.calendar_class_attribute(attr, self.resolve(&attr.value))?
         {
             return Ok(value);
         }
@@ -12757,28 +12757,27 @@ impl<'a> Checker<'a> {
         if binding == Some(Binding::Intrinsic(Intrinsic::CheckOutput)) {
             return self.process_check_output(call);
         }
-        if let ast::Expr::Attribute(attribute) = &*call.func
-            && let Some(Binding::Intrinsic(
+        if let ast::Expr::Attribute(attr) = call.func.as_ref() {
+            let base = self.resolve(&attr.value);
+            if let Some(Binding::Intrinsic(
                 mapping @ (Intrinsic::Environ | Intrinsic::EnvironBytes),
-            )) = self.resolve(&attribute.value)
-        {
-            return self.environ_method(attribute, call, mapping == Intrinsic::EnvironBytes);
-        }
-        if let ast::Expr::Attribute(attr) = call.func.as_ref()
-            && self.resolve(&attr.value)
+            )) = base
+            {
+                return self.environ_method(attr, call, mapping == Intrinsic::EnvironBytes);
+            }
+            if base
                 == Some(Binding::Intrinsic(Intrinsic::Calendar(
                     ir::CalendarType::DateTime,
                 )))
-        {
-            match attr.attr.as_str() {
-                "fromisoformat" => return self.datetime_fromisoformat(call),
-                "now" => return self.calendar_now(call),
-                "combine" => return self.calendar_combine(call),
-                _ => {}
+            {
+                match attr.attr.as_str() {
+                    "fromisoformat" => return self.datetime_fromisoformat(call),
+                    "now" => return self.calendar_now(call),
+                    "combine" => return self.calendar_combine(call),
+                    _ => {}
+                }
             }
-        }
-        if let ast::Expr::Attribute(attr) = call.func.as_ref() {
-            self.calendar_class_attribute(attr)?;
+            self.calendar_class_attribute(attr, base)?;
         }
         if let Some(class) = self.class_reference(&call.func) {
             let result = self.construct(call, class);

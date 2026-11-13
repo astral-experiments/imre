@@ -179,8 +179,8 @@ impl Checker<'_> {
     pub(super) fn calendar_class_attribute(
         &self,
         a: &ast::ExprAttribute,
+        base: Option<Binding>,
     ) -> Result<Option<Expr>, String> {
-        let base = self.resolve(&a.value);
         let kind = match base {
             Some(Binding::Intrinsic(Intrinsic::Calendar(kind))) => Type::Calendar(kind),
             Some(Binding::Intrinsic(Intrinsic::ClockTime)) => Type::ClockTime,
