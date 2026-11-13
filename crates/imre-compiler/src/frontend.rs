@@ -8883,41 +8883,40 @@ impl<'a> Checker<'a> {
                 (Type::Str, ExprKind::Str(name.to_owned()))
             }
             ast::Expr::Name(name) => {
-                if !self.names.contains_key(name.id.as_str()) && self.resolve(expression).is_none()
-                {
-                    if self
-                        .graph
-                        .session
-                        .operand_types(self.module)
-                        .reads_deferred_global(expression)
-                    {
-                        self.require_registered_operation(expression)?;
-                        return Ok(registered::values::name_binding(name.id.as_str()));
-                    }
-                    if let Some(value) = annotations::builtin_type(name.id.as_str()) {
-                        return Ok(value);
-                    }
-                }
-                if self.comprehension_targets.contains(name.id.as_str())
-                    && !self.names.contains_key(name.id.as_str())
-                {
-                    return Err(error(
-                        self.source,
-                        expression,
-                        "comprehension local may be uninitialized on this path",
-                    ));
-                }
                 let Some(&slot) = self.names.get(name.id.as_str()) else {
                     let name = name.id.as_str();
+                    let binding = self.resolve(expression);
+                    if binding.is_none() {
+                        if self
+                            .graph
+                            .session
+                            .operand_types(self.module)
+                            .reads_deferred_global(expression)
+                        {
+                            self.require_registered_operation(expression)?;
+                            return Ok(registered::values::name_binding(name));
+                        }
+                        if let Some(value) = annotations::builtin_type(name) {
+                            return Ok(value);
+                        }
+                    }
+                    if self.comprehension_targets.contains(name) {
+                        return Err(error(
+                            self.source,
+                            expression,
+                            "comprehension local may be uninitialized on this path",
+                        ));
+                    }
                     if (imre_ast::providers::BUILTIN_FUNCTIONS.contains(&name)
                         || imre_ast::exceptions::boxed_builtin_kind(name).is_some())
-                        && self.unshadowed_builtin(expression, name)
+                        && binding.is_none()
+                        && self.local_function_binding(expression).is_none()
                     {
                         self.require_builtin_scope(name, expression);
                         return Ok(registered::values::name_binding(name));
                     }
                     if matches!(
-                        self.resolve(expression),
+                        binding,
                         Some(Binding::IntrinsicModule(
                             crate::modules::IntrinsicModule::Builtins
                         ))
@@ -8926,9 +8925,14 @@ impl<'a> Checker<'a> {
                             self.scoped_builtin_error("the builtin module as a value", expression)
                         );
                     }
-                    if let Some(Binding::Definition(_) | Binding::TypeAlias(..)) =
-                        self.resolve(expression)
+                    if self.inference.is_some()
+                        && self.graph.modules[self.module].is_program_source()
+                        && matches!(binding, Some(Binding::IntrinsicModule(_)))
                     {
+                        self.require_registered_operation(expression)?;
+                        return Ok(registered::values::name_binding(name));
+                    }
+                    if let Some(Binding::Definition(_) | Binding::TypeAlias(..)) = binding {
                         return Err(self.classified_error(
                             Kind::ScopedObject,
                             expression,
