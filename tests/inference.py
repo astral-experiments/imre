@@ -42,6 +42,15 @@ REJECTED = {
 }
 
 IMPORTED_REJECTIONS = {
+    "returned_keyword_contract": {
+        "main.py": (
+            "from supplier import project\n"
+            "def take(value: int) -> int:\n    return value\n"
+            'print(take(project(1, selected="wrong")))\n'
+            "import opcode\n"
+        ),
+        "supplier.py": "def project(first, *, selected):\n    return selected\n",
+    },
     "conflicting_reexports": {
         "main.py": 'from helper import identity\nfrom facade import identity as alias\nidentity(1)\nalias("one")\n',
         "helper.py": "def identity(value):\n    return value\n",
