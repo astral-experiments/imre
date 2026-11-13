@@ -797,9 +797,8 @@ impl Codec {
                         text.try_reserve(1).map_err(|_| Error::allocation())?;
                         text.push(char::from(byte));
                     } else {
-                        decoding_error(&mut text, errors, &[byte], || match owned_input(data) {
-                            Ok(bytes) => ascii_decode_error(bytes, index),
-                            Err(error) => error,
+                        decoding_error(&mut text, errors, &[byte], || {
+                            ascii_decode_error(data, index)
                         })?;
                     }
                 }

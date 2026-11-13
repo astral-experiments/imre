@@ -991,16 +991,18 @@ pub(super) fn decode_error(value: &[u8], error: std::str::Utf8Error) -> Error {
     }
 }
 
-pub(super) fn ascii_decode_error(bytes: crate::BytesOwner, index: usize) -> Error {
-    let byte = bytes[index];
-    let reason = "ordinal not in range(128)";
-    Error::unicode_decode(
-        "ascii",
-        bytes,
-        index..index + 1,
-        reason,
-        format!("'ascii' codec can't decode byte 0x{byte:02x} in position {index}: {reason}"),
-    )
+pub(super) fn ascii_decode_error(data: &[u8], index: usize) -> Error {
+    let issue = DecodeIssue {
+        encoding: "ascii",
+        start: index,
+        end: index + 1,
+        reason: "ordinal not in range(128)",
+    };
+    if data.len() == 1 {
+        issue.owned_error(copied_bytes(data))
+    } else {
+        issue.error(data)
+    }
 }
 
 /// Most decoders already own the immutable input. Retain it only on the failing path.
@@ -1103,11 +1105,7 @@ pub unsafe extern "C" fn imre_bytes_decode_ascii(value: *const Bytes) -> *const 
     // SAFETY: the exact bytes remain owned by the caller.
     let data = unsafe { &*value };
     let result = if let Some(index) = data.iter().position(|b| !b.is_ascii()) {
-        // SAFETY: the original immutable bytes are still owned by this caller.
-        Err(ascii_decode_error(
-            unsafe { crate::acquire_bytes(value as usize) },
-            index,
-        ))
+        Err(ascii_decode_error(data, index))
     } else {
         let text = std::str::from_utf8(data).expect("ASCII is valid UTF-8");
         Str::try_new(text)
@@ -1291,11 +1289,11 @@ mod tests {
     }
 
     #[test]
-    fn ascii_decode_error_retains_its_input_and_offsets() {
+    fn ascii_decode_error_owns_copied_bytes_and_offsets() {
         let input = crate::BytesOwner::new(b"a\xffb".to_vec());
-        let observer = input.clone();
         // SAFETY: input roots the bytes until the decoder returns.
         assert!(unsafe { imre_bytes_decode_ascii(crate::BytesOwner::as_ptr(&input)) }.is_null());
+        assert_eq!(crate::BytesOwner::strong_count(&input), 1);
         drop(input);
         // SAFETY: taking the pending error transfers its owner.
         let error = unsafe { crate::ObjectOwner::from_raw(imre_error_take()) };
@@ -1309,9 +1307,14 @@ mod tests {
             repr.as_str(),
             r"UnicodeDecodeError('ascii', b'a\xffb', 1, 2, 'ordinal not in range(128)')"
         );
-        assert_eq!(crate::BytesOwner::strong_count(&observer), 2);
-        drop(error);
-        assert_eq!(crate::BytesOwner::strong_count(&observer), 1);
+        let singleton = copied_bytes(b"\xff");
+        let distinct = crate::BytesOwner::new(vec![0xff]);
+        let error = ascii_decode_error(&distinct, 0);
+        assert_eq!(crate::BytesOwner::strong_count(&distinct), 1);
+        assert!(std::ptr::eq(
+            error.decode_args().unwrap().object,
+            singleton.as_slice()
+        ));
     }
 
     #[test]

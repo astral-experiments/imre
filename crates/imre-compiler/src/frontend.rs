@@ -13041,16 +13041,8 @@ impl<'a> Checker<'a> {
                 if call.arguments.keywords.is_empty() {
                     let builtin = match call.arguments.args.as_ref() {
                         [] => Some(Builtin::Decode),
-                        [ast::Expr::StringLiteral(s)]
-                            if s.value.to_str().eq_ignore_ascii_case("ascii") =>
-                        {
-                            Some(Builtin::DecodeAscii)
-                        }
-                        [ast::Expr::StringLiteral(s)]
-                            if matches!(s.value.to_str(), "utf-8" | "utf8" | "UTF-8" | "UTF8") =>
-                        {
-                            Some(Builtin::Decode)
-                        }
+                        [ast::Expr::StringLiteral(s)] => codecs::bytes_decoder(s.value.to_str())
+                            .filter(|op| matches!(op, Builtin::Decode | Builtin::DecodeAscii)),
                         _ => None,
                     };
                     if let Some(builtin) = builtin {
@@ -13892,16 +13884,14 @@ impl<'a> Checker<'a> {
             && let [bytes, encoding] = args.as_slice()
             && bytes.ty == Type::Bytes
             && let ExprKind::Str(name) = &encoding.kind
-            && ["latin-1", "latin1", "iso-8859-1", "iso8859-1"]
-                .iter()
-                .any(|alias| name.eq_ignore_ascii_case(alias))
+            && let Some(builtin @ (Builtin::DecodeAscii | Builtin::DecodeLatin1)) =
+                codecs::bytes_decoder(name)
         {
             // str(bytes, encoding) decodes the buffer even when bytes.decode is overridden.
-            let mut args = args;
             args.truncate(1);
             return Ok(Expr {
                 ty: Type::Str,
-                kind: ExprKind::Builtin(Builtin::DecodeLatin1, args),
+                kind: ExprKind::Builtin(builtin, args),
             });
         }
         if tuple_dir && self.types.is_plain_or_declared_tuple(args[0].ty) {

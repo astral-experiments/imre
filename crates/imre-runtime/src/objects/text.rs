@@ -48,10 +48,7 @@ impl<'a> UrlInput<'a> {
             Self::Text(s) => Ok(s),
             Self::Bytes(b) => {
                 if let Some(i) = b.iter().position(|c| !c.is_ascii()) {
-                    return Err(super::bytes::ascii_decode_error(
-                        super::bytes::owned_input(b)?,
-                        i,
-                    ));
+                    return Err(super::bytes::ascii_decode_error(b, i));
                 }
                 Ok(std::str::from_utf8(b).expect("ASCII is UTF-8"))
             }
