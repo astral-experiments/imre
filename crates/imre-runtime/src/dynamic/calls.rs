@@ -9670,28 +9670,26 @@ impl Context {
                     format!("{context} requires {family}"),
                 ));
             }
-            // The boxed parameter retains the integer itself, including in a closure.
-            if integer_argument && family == "float" {
-                return Ok(());
-            }
             family
         } else if let Some(fallback) = expected.and_then(|name| ScalarHint::new(name).0) {
             fallback
         } else {
             return Ok(());
         };
-        // A boxed comparison can read the integer's sign from the original object.
-        if (integer_sign && matches!((expected, boxed), ("float", Value::Int(_))))
-            || matches!(
-                (expected, boxed),
-                ("None", Value::None)
-                    | ("int", Value::Int(_))
-                    | ("float", Value::Float(_))
-                    | ("bytes", Value::Bytes(_))
-                    | ("str", Value::Str(_) | Value::SurrogateStr(_))
-                    | ("bool", Value::Bool(_))
-            )
-        {
+        // Resolved numeric arguments keep their original objects in the frame.
+        let resolved_argument = bound.is_some() && slot != "return";
+        let accepted = match (expected, boxed) {
+            ("int", Value::Bool(_)) => resolved_argument,
+            ("float", Value::Int(_)) => resolved_argument || integer_sign,
+            ("None", Value::None)
+            | ("int", Value::Int(_))
+            | ("float", Value::Float(_))
+            | ("bytes", Value::Bytes(_))
+            | ("str", Value::Str(_) | Value::SurrogateStr(_))
+            | ("bool", Value::Bool(_)) => true,
+            _ => false,
+        };
+        if accepted {
             Ok(())
         } else {
             Err(Error::new(
