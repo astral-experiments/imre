@@ -534,8 +534,14 @@ fn object_fallback(
                         for original in specialize(module)? {
                             owners.push(owners[original]);
                         }
-                        match output.emit_fixed(&graph, &mut fixed, options.address_sanitizer) {
-                            Ok(()) => {
+                        match llvm::analyze_program(module) {
+                            Ok(program) => {
+                                output.emit_fixed(
+                                    &graph,
+                                    &mut fixed,
+                                    options.address_sanitizer,
+                                    program,
+                                );
                                 native_includes()?;
                                 return Ok(match entry {
                                     ProgramEntry::Source(_) => SourceInputs::default(),
@@ -545,8 +551,7 @@ fn object_fallback(
                                 });
                             }
                             Err(reason) => {
-                                // Native analysis and emission can both decline. Hand the
-                                // original checked siblings to the registered source once.
+                                // Keep the original checked bodies when a callable needs a Python frame.
                                 fixed.register_definitions(&graph);
                                 LoweringDiagnostic::plain(reason.0.to_owned()).classified(reason.1)
                             }

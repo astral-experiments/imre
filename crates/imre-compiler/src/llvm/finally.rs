@@ -159,19 +159,11 @@ impl Emitter<'_, '_> {
     }
 
     pub(super) fn emit_finalbody(&mut self, statements: &[Statement]) {
-        const MAX_CLEANUP_BYTES: usize = 8 * 1024 * 1024;
         let region = self.finalbodies.pop().expect("active finally");
         if region.is_empty() {
             return;
         }
         self.start(&region.entry);
-        if self.cleanup_limit_hit || self.cleanup_bytes >= MAX_CLEANUP_BYTES {
-            self.cleanup_limit_hit = true;
-            self.body.end("unreachable");
-            return;
-        }
-        let before = self.body.code.len();
-        let previous_bytes = self.cleanup_bytes;
         let (targets, tag) = region.completions(&mut self.body, None, |value| value.ty);
         let returned = targets.iter().find_map(|target| match target {
             Completion::Return(ty) => {
@@ -217,8 +209,5 @@ impl Emitter<'_, '_> {
                 code.route(target.map_return(|_| returned.as_ref().unwrap().clone()));
             });
         }
-        // A nested finalbody is included once in its enclosing byte range.
-        self.cleanup_bytes = previous_bytes + (self.body.code.len() - before);
-        self.cleanup_limit_hit |= self.cleanup_bytes >= MAX_CLEANUP_BYTES;
     }
 }

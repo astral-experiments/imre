@@ -384,7 +384,7 @@ pub(crate) fn emit(
     let program = analyze_program(module)?;
     let mut unit = crate::CodegenUnit::new("__main__", String::new());
     Output::new([], std::slice::from_mut(&mut unit), 0, false)
-        .emit(module, ranges, sanitize, program)?;
+        .emit(module, ranges, sanitize, program);
     Ok(unit.llvm_ir)
 }
 
@@ -506,7 +506,7 @@ fn emit_program(
     sanitize: bool,
     output: &mut Output<'_>,
     program: NativeProgram,
-) -> Result<(), Unsupported> {
+) {
     let mut literal_globals = vec![None; module.globals.len()];
     let mut extension_modules = BTreeSet::new();
     let mut uses_regex_positions = false;
@@ -634,9 +634,6 @@ fn emit_program(
         cleanups: Vec::new(),
         finalbodies: Vec::new(),
         handler_depth: 0,
-        try_nesting: 0,
-        cleanup_bytes: 0,
-        cleanup_limit_hit: false,
         return_exit: String::new(),
         sanitize,
         ranges,
@@ -679,7 +676,7 @@ fn emit_program(
             emitter.body.reset_names();
         }
         let frame = function_source_frame(module, &repr_methods, id);
-        emitter.function(function, entry, frame, &borrows[id])?;
+        emitter.function(function, entry, frame, &borrows[id]);
         emitter
             .output
             .include_integers(std::mem::take(&mut emitter.body.integers));
@@ -845,7 +842,6 @@ fn emit_program(
     );
     // Layout hints never replace the representation, overflow, or error guards.
     emitter.output.common().push_str(BRANCH_WEIGHTS);
-    Ok(())
 }
 
 #[derive(Default)]
@@ -916,9 +912,6 @@ struct Emitter<'a, 'units> {
     finalbodies: Vec<finally::Finalbody>,
     /// Owners below the active exception target survive a caught failure.
     handler_depth: usize,
-    try_nesting: usize,
-    cleanup_bytes: usize,
-    cleanup_limit_hit: bool,
     return_exit: String,
     sanitize: bool,
     ranges: &'a RangeFacts<'a>,
@@ -2243,10 +2236,6 @@ impl Emitter<'_, '_> {
         finalbody: &[Statement],
         protected: impl FnOnce(&mut Self, String, usize),
     ) {
-        if self.try_nesting == 0 {
-            self.cleanup_bytes = 0;
-        }
-        self.try_nesting += 1;
         // A try inside an expression can handle an error and resume evaluation.
         // Release the enclosing operands only if control leaves that expression.
         let outer_depth = self.cleanups.len();
@@ -2266,7 +2255,6 @@ impl Emitter<'_, '_> {
         self.cleanups.truncate(outer_depth);
         self.temporaries = outer_temporaries;
         self.start(&end);
-        self.try_nesting -= 1;
     }
 
     /// Resource-bearing parameters own their arguments so rebinding can close
@@ -2277,7 +2265,7 @@ impl Emitter<'_, '_> {
         entry: bool,
         frame: Option<&ir::SourceFrame>,
         borrows: &FunctionBorrows,
-    ) -> Result<(), Unsupported> {
+    ) {
         self.uses_regex_positions =
             self.module_reads_regex_positions && regex_positions_may_escape(self.module, function);
         self.body.entry.clear();
@@ -2687,13 +2675,6 @@ impl Emitter<'_, '_> {
             );
         }
         self.body.code.insert_str(allocas_at, &self.body.entry);
-        if self.cleanup_limit_hit {
-            return Err(Unsupported(
-                "Imre: finally cleanup expansion exceeds the compiler limit",
-                crate::LoweringKind::Object,
-            ));
-        }
-        Ok(())
     }
 
     fn block(&mut self, statements: &[Statement]) {
