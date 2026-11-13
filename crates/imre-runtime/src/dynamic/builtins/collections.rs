@@ -1395,22 +1395,14 @@ fn find_sequence_item(
     needle: Id,
     positions: std::ops::Range<i64>,
 ) -> Result<Option<i64>> {
+    let mark = ctx.heap.temporary_mark();
     for i in positions {
         let Some((_, Some(item))) = ctx.sequence_at(receiver, i as usize) else {
             break;
         };
-        if item != needle {
-            let mark = ctx.heap.temporary_mark();
-            ctx.heap.keep(item);
-            let matched = ctx
-                .binary("==", item, needle)
-                .and_then(|equal| ctx.truth(equal));
-            ctx.heap.release_temporaries_since(mark);
-            if !matched? {
-                continue;
-            }
+        if ctx.sequence_item_matches(item, needle, mark)? {
+            return Ok(Some(i));
         }
-        return Ok(Some(i));
     }
     Ok(None)
 }
