@@ -15,16 +15,15 @@ fn parameter_layout(parameters: &ast::Parameters, layout: &mut Value) -> Vec<Str
         ("kwonly", &parameters.kwonlyargs),
     ] {
         if !args.is_empty() {
-            layout[group] = json!(
-                args.iter()
-                    .map(|p| p.parameter.name.as_str())
-                    .collect::<Vec<_>>()
-            );
-            defaults.extend(
-                args.iter()
-                    .filter(|p| p.default.is_some())
-                    .map(|p| p.parameter.name.to_string()),
-            );
+            let mut names = Vec::with_capacity(args.len());
+            for parameter in args {
+                let name = parameter.parameter.name.as_str();
+                if parameter.default.is_some() {
+                    defaults.push(name.to_owned());
+                }
+                names.push(Value::from(name));
+            }
+            layout[group] = Value::Array(names);
         }
     }
     for (key, param) in [
