@@ -34,6 +34,10 @@ def replace(items: list[Item]) -> str:
     return ":"
 
 
+def first(parts: list[str]) -> str:
+    return parts[0]
+
+
 def main() -> None:
     items = [Item("original", 1 << 100)]
     print(select(items)(replace(items)))
@@ -58,6 +62,11 @@ def main() -> None:
     update_wrapper(wrapper, temporary, (), ())
     print(wrapper is repeat, saved is method, repeat.__wrapped__ is temporary)
     print(wrapper(":"), saved("?"), wrapper.__wrapped__("/"))
+
+    original = ":".join
+    joined = update_wrapper(first, original, (), ())
+    saved_join = joined.__wrapped__
+    print(saved_join is original, joined(["first", "second"]), saved_join(["a", "b"]))
 
 
 main()
