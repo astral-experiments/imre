@@ -5172,7 +5172,7 @@ impl Context {
                 ),
             ));
         }
-        if (matches!(op, "+" | "**") || (op == "/" && float_operand))
+        if matches!(op, "+" | "**" | "/")
             && [left, right]
                 .into_iter()
                 .any(|id| !matches!(self.heap.get(id), Value::Int(_) | Value::Bool(_)))

@@ -81,6 +81,28 @@ def current():
     assert type(result) is Quotient and result == 0.125
     assert float.__truediv__(result, object()) is NotImplemented
 
+    class Left:
+        def __truediv__(self, other):
+            return NotImplemented
+
+    class Right:
+        def __rtruediv__(self, other):
+            return NotImplemented
+
+    left, right = Left(), Right()
+    try:
+        left / right
+    except TypeError as error:
+        assert str(error) == "unsupported operand type(s) for /: 'Left' and 'Right'"
+    else:
+        raise AssertionError("declined division succeeded")
+    try:
+        left /= right
+    except TypeError as error:
+        assert str(error) == "unsupported operand type(s) for /=: 'Left' and 'Right'"
+    else:
+        raise AssertionError("declined in-place division succeeded")
+
     class DeclinesDivision(float):
         def __truediv__(self, other):
             return NotImplemented
