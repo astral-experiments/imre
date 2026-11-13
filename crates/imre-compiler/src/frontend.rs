@@ -13721,8 +13721,10 @@ impl<'a> Checker<'a> {
                 ty,
                 kind: ExprKind::Builtin(builtin, args),
             };
-            if matches!(value.kind, ExprKind::Builtin(Builtin::Append, _))
-                && let Some(sites) = &mut self.fixed_sites
+            // Only the joined-lines rewrite substitutes a private buffer for the list.
+            if let Some(sites) = &mut self.fixed_sites
+                && !matches!(value.kind, ExprKind::Builtin(Builtin::JoinBufferAppend, _))
+                && registered::values::fixed_positional_arguments(call)
             {
                 sites.method(call, attribute, &value);
             }
