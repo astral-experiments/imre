@@ -7393,13 +7393,15 @@ mod tests {
             parent.allocation_traces.worker(),
         );
         let interpreter = crate::dynamic::InterpreterState::default();
+        let config = Arc::new(serde_json::json!({}));
         let worker = crate::dynamic::ffi::new_context_with_heap(
-            serde_json::json!({}),
+            Arc::clone(&config),
             std::iter::empty::<String>(),
             heap,
             Some(interpreter.clone()),
         );
         assert!(worker.threads.private_context);
+        assert!(Arc::ptr_eq(&worker.config, &config));
         assert!(Arc::ptr_eq(
             &interpreter.worker_count,
             &worker.interpreter.worker_count
