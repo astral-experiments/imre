@@ -1895,6 +1895,11 @@ impl Checker<'_> {
         let tuple_element = fields
             .as_deref()
             .and_then(|fields| self.types.tuple_iteration_element(fields));
+        if !reverse && fields.is_some() && tuple_element.is_none() {
+            // A tuple can be iterable without a common native layout for its items.
+            self.require_registered_operation(node)?;
+            return Ok(self.python_cursor(iterable, node.range()));
+        }
         let element = self.types.iteration_element(iterable.ty, items)
             .or(tuple_element)
             .ok_or_else(|| error(self.source, node, "iteration requires a concrete container, homogeneous tuple, string, bytes, or range"))?;
