@@ -12762,7 +12762,7 @@ impl<'a> Checker<'a> {
             return self.directory_manager(kind, call);
         }
         if matches!(binding, Some(Binding::Intrinsic(Intrinsic::SubprocessRun))) {
-            return self.process_run(call, false);
+            return self.process_run(call);
         }
         if let Some(Binding::Intrinsic(Intrinsic::ShellOutput { status })) = binding {
             return self.shell_output(call, status);

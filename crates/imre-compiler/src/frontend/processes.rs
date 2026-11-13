@@ -24,7 +24,7 @@ enum LaunchApi {
     Popen,
     Call(bool),
     CheckOutput,
-    Run { discarded: bool },
+    Run,
 }
 
 /// A child callback or platform-specific setting needs the boxed Popen constructor.
@@ -320,7 +320,7 @@ fn stream_plan(
     call: &ast::ExprCall,
 ) -> std::result::Result<(u32, ProcessCapture), &'static str> {
     let checked_output = api == LaunchApi::CheckOutput;
-    let run = matches!(api, LaunchApi::Run { .. });
+    let run = matches!(api, LaunchApi::Run);
     let mut streams = [u32::from(checked_output), 0];
     let mut capture = false;
     let mut text = false;
@@ -439,22 +439,17 @@ fn error_field_type(graph: &SourceGraph, types: &Types, field: u32, timeout: boo
                                 || self.graph.session.is_string_list(self.module, arg)
                             );
                         }
-                        stream_plan(
-                            self.graph,
-                            self.module,
-                            LaunchApi::Run { discarded: false },
-                            call,
-                        )
-                        .ok()
-                        .filter(|(mode, _)| mode & 256 == 0)
-                        .map(|(_, capture)| {
-                            error_stream(
-                                self.types,
-                                capture,
-                                self.stdout,
-                                self.timeout && timeout_argument(call).is_some(),
-                            )
-                        })
+                        stream_plan(self.graph, self.module, LaunchApi::Run, call)
+                            .ok()
+                            .filter(|(mode, _)| mode & 256 == 0)
+                            .map(|(_, capture)| {
+                                error_stream(
+                                    self.types,
+                                    capture,
+                                    self.stdout,
+                                    self.timeout && timeout_argument(call).is_some(),
+                                )
+                            })
                     }
                     _ => None,
                 };
@@ -925,7 +920,7 @@ impl Checker<'_> {
 
     fn launch_process(&mut self, call: &ast::ExprCall, api: LaunchApi) -> Result<Expr, String> {
         if self.graph.command_startup.is_some()
-            && matches!(api, LaunchApi::Run { .. } | LaunchApi::CheckOutput)
+            && matches!(api, LaunchApi::Run | LaunchApi::CheckOutput)
             && call
                 .arguments
                 .keywords
@@ -1021,7 +1016,7 @@ impl Checker<'_> {
                 Some(Expr::absent(deadline)),
             ));
         }
-        if matches!(api, LaunchApi::CheckOutput | LaunchApi::Run { .. }) {
+        if matches!(api, LaunchApi::CheckOutput | LaunchApi::Run) {
             let input = self
                 .types
                 .optional(if capture.text { Type::Str } else { Type::Bytes });
@@ -1160,7 +1155,7 @@ impl Checker<'_> {
                 }
                 4..=6 | 8 => Ok(Expr::boolean(false)), // effect-free stream or encoding
                 11 => checker.condition(arg),
-                14 if matches!(api, LaunchApi::Run { .. }) => checker.expr_expected(arg, Type::Bool),
+                14 if matches!(api, LaunchApi::Run) => checker.expr_expected(arg, Type::Bool),
                 14 => checker.expr(arg), // evaluated before reporting a forbidden check keyword
                 17 => Ok(Expr::boolean(false)), // errors is encoded in the launch operation
                 12 => checker.deadline_value(arg),
@@ -1187,26 +1182,7 @@ impl Checker<'_> {
                 },
                 capture.stream(true),
             ),
-            // A discarded list[str] run forwarding stdout to stderr only needs the exit status.
-            LaunchApi::Run { discarded: true }
-                if streams == 4
-                    && args.values[args.order[0]].ty == self.types.list(Type::Str)
-                    && call.arguments.keywords.iter().all(|kw| {
-                        matches!(
-                            kw.arg.as_ref().map(|name| name.as_str()),
-                            Some("stdout" | "check")
-                        )
-                    }) =>
-            {
-                (
-                    ProcessOperation::Call {
-                        streams,
-                        fixed_check: None,
-                    },
-                    Type::Int,
-                )
-            }
-            LaunchApi::Run { .. } => (
+            LaunchApi::Run => (
                 ProcessOperation::Run {
                     streams,
                     validation,
@@ -1389,12 +1365,8 @@ impl Checker<'_> {
         self.coerce(value, timeout, argument)
     }
 
-    pub(super) fn process_run(
-        &mut self,
-        call: &ast::ExprCall,
-        discarded: bool,
-    ) -> Result<Expr, String> {
-        self.launch_process(call, LaunchApi::Run { discarded })
+    pub(super) fn process_run(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        self.launch_process(call, LaunchApi::Run)
     }
 
     /// Path conversion is sealed and pure; optional paths retain their absence.
