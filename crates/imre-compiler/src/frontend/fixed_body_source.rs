@@ -124,6 +124,12 @@ impl SourceSites {
         self.current.replace(PendingSite { index, range })
     }
 
+    pub(super) fn leaf(&mut self, range: TextRange, value: &Expr) {
+        let parent = self.enter(range);
+        self.checked_expression(range, value);
+        self.leave(parent);
+    }
+
     pub(super) fn leave(&mut self, parent: Option<PendingSite>) -> bool {
         let current = std::mem::replace(&mut self.current, parent);
         current.is_some_and(|site| matches!(self.sites.get(site.index), Some((_, Some(_)))))
@@ -143,6 +149,12 @@ impl SourceSites {
     pub(super) fn expression(&mut self, range: TextRange, node: FixedNode) {
         if let Some(site) = self.site_at(range) {
             self.commit(site, node);
+        }
+    }
+
+    pub(super) fn checked_expression(&mut self, range: TextRange, value: &Expr) {
+        if let Some(node) = FixedNode::checked(&ir::Node::Expression(value)) {
+            self.expression(range, node);
         }
     }
 

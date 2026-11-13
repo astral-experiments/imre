@@ -84,18 +84,17 @@ impl<C, E> Fields<C, E> {
                 if let Some(flag) = conversion.to_char() {
                     value = (self.conversion)(&self.context, value, flag);
                 }
-                let spec = match &field.format_spec {
+                let operands = match &field.format_spec {
                     Some(elements) => {
                         let mut spec = Parts::default();
                         self.elements(&mut spec, &elements.elements, raw)?;
-                        self.finish(spec)?
+                        vec![value, self.finish(spec)?]
                     }
-                    // The Python format operation accepts an omitted specification.
-                    None if self.result == Type::PythonObject => Expr::none(),
-                    None => (self.literal)(&mut self.context, &[])?,
+                    None => vec![value],
                 };
-                let op = (self.format)(&mut self.context, field, value.ty, spec.ty);
-                self.operation(op, vec![value, spec])
+                let spec = operands.get(1).map_or(Type::Str, |spec| spec.ty);
+                let op = (self.format)(&mut self.context, field, operands[0].ty, spec);
+                self.operation(op, operands)
             }
         };
         if self.result == Type::PythonObject {
@@ -292,12 +291,22 @@ impl Checker<'_> {
                     }
                     text.push_str(piece.text());
                 }
-                Ok(Expr {
+                let value = Expr {
                     ty: Type::Str,
                     kind: ExprKind::Str(text),
+                };
+                if let [FStringLiteral::Middle(literal, _)] = pieces
+                    && let Some(sites) = &mut checker.fixed_sites
+                {
+                    sites.leaf(literal.range(), &value);
+                }
+                Ok(value)
+            },
+            prepare: |checker, field, conversion| {
+                checker.with_fixed_site(field.range(), |checker| {
+                    checker.prepare_field(field, conversion)
                 })
             },
-            prepare: |checker, field, conversion| checker.prepare_field(field, conversion),
             conversion: |checker, value, flag| checker.field_conversion(value, flag),
             format: |checker, field, value, spec| checker.field_format(field, value, spec),
         }
