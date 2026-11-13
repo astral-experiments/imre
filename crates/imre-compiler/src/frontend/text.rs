@@ -786,19 +786,20 @@ impl Checker<'_> {
                 )],
             ),
             "find" => {
-                let optional_index = self.types.optional(Type::Int);
-                (
-                    TextOperation::Find,
-                    Type::Int,
-                    vec![
-                        PositionalOnly.parameter("sub", Type::Str, None),
-                        PositionalOnly.parameter(
-                            "start",
-                            optional_index,
-                            Some(Expr::absent(optional_index)),
-                        ),
-                    ],
-                )
+                let mut parameters = vec![PositionalOnly.parameter("sub", Type::Str, None)];
+                // An omitted bound belongs to the native search ABI. A Python
+                // method selected on a live receiver sees only supplied operands.
+                if !matches!(call.arguments.args.as_ref(), [sub] if !sub.is_starred_expr())
+                    || !call.arguments.keywords.is_empty()
+                {
+                    let start = self.types.optional(Type::Int);
+                    parameters.push(PositionalOnly.parameter(
+                        "start",
+                        start,
+                        Some(Expr::absent(start)),
+                    ));
+                }
+                (TextOperation::Find, Type::Int, parameters)
             }
             "partition" => (
                 TextOperation::Partition,
@@ -811,7 +812,12 @@ impl Checker<'_> {
             self.arguments_with(call, &parameters, Some(receiver), |checker, i, arg| {
                 let parameter = &parameters[i];
                 if name == "find" && parameter.name == "start" {
-                    checker.optional_scalar_argument(arg, parameter.ty)
+                    let bound = checker.optional_scalar_argument(arg, parameter.ty)?;
+                    // An Int is already the nonzero word accepted by the search ABI.
+                    Ok(match bound.kind {
+                        ExprKind::Present(value) if value.ty == Type::Int => *value,
+                        _ => bound,
+                    })
                 } else {
                     checker.direct_argument(arg, parameter.ty, parameter.sign_only)
                 }

@@ -246,7 +246,8 @@ impl Emitter<'_, '_> {
             }
             TextOperation::Find => self.instruction(format!(
                 "call i64 @imre_str_find(ptr {source}, ptr {}, i64 {})",
-                args[1].value.operand, args[2].value.operand,
+                args[1].value.operand,
+                args.get(2).map_or("0", |start| &start.value.operand),
             )),
             TextOperation::Partition => {
                 // A failed partition leaves zeroed fields, so ordinary pending
