@@ -3413,20 +3413,7 @@ impl Context {
 
     pub(super) fn load_exec_name(&mut self, locals: Id, name: &str) -> Result<Id> {
         let key = self.text(name);
-        if let Some(get) = self.bound_slot(locals, "__getitem__")? {
-            return self.call(get, vec![key], Vec::new());
-        }
-        let indices = match self.heap.get(locals) {
-            Value::List(_) => "list indices must be integers or slices, not str",
-            Value::Tuple(_) | Value::NamedTuple { .. } => {
-                "tuple indices must be integers or slices, not str"
-            }
-            Value::Str(_) => "string indices must be integers, not 'str'",
-            Value::Bytes(_) => "byte indices must be integers or slices, not str",
-            Value::Range(_) => "range indices must be integers or slices, not str",
-            _ => return self.get_item(locals, key),
-        };
-        Err(Error::new("TypeError", indices))
+        self.get_item(locals, key)
     }
 
     /// Return the imported object and the hook that processed its fromlist.
