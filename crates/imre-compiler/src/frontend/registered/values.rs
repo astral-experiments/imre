@@ -444,7 +444,7 @@ pub(in crate::frontend) fn fixed_positional_arguments(call: &ast::ExprCall) -> b
     )
 }
 
-fn call_arguments<E>(
+pub(in crate::frontend) fn call_arguments<E>(
     call: &ast::ExprCall,
     check: impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
 ) -> StdResult<Vec<Expr>, E> {
