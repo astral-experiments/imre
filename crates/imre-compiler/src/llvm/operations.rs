@@ -268,17 +268,12 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             // Each evaluation leaves just its result above the previous operands.
             // Release intermediate owners before the next argument can run Python.
             let mut next = mark.clone();
-            let enclosing_scope = frame.scope.clone();
             let mut evaluate = |expr: &Expr| {
                 let value = frame.evaluate_handle(expr);
                 next = frame.keep_operands(&next, &value, "0");
                 value
             };
-            let scope = site
-                .scope
-                .as_deref()
-                .map(&mut evaluate)
-                .unwrap_or(enclosing_scope);
+            let scope = site.scope.as_deref().map(&mut evaluate);
             let (target, values) = args.capture_invoke(callable, evaluate);
             let (array, count) = frame.fixed_call_arguments(&target, values, exec);
             let positional = super::registered::CallArguments::Positional {
@@ -292,7 +287,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 &mark,
                 site.range,
                 site.callee_end,
-                &scope,
+                scope.as_deref(),
             )
         });
         CheckedValue::handle(result)

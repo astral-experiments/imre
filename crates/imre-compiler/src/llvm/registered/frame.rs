@@ -876,31 +876,21 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         mark: &str,
         range: TextRange,
         callee_end: TextSize,
-        scope: &str,
+        scope: Option<&str>,
     ) -> String {
         let span = self.expression_range_span(range, callee_end, b'(');
         self.call_position(range);
-        self.call_in_scope(callable, operands, mark, span, scope)
+        self.call_at(callable, operands, mark, span, scope)
     }
 
     /// Pass the caller's temporary root boundary and optional traceback position.
-    pub(crate) fn call_at(
+    fn call_at(
         &mut self,
         callable: &str,
         operands: CallArguments,
         mark: &str,
         span: Option<[usize; 4]>,
-    ) -> String {
-        self.call_in_scope(callable, operands, mark, span, &self.scope.clone())
-    }
-
-    pub(crate) fn call_in_scope(
-        &mut self,
-        callable: &str,
-        operands: CallArguments,
-        mark: &str,
-        span: Option<[usize; 4]>,
-        scope: &str,
+        scope: Option<&str>,
     ) -> String {
         let position = span.map_or_else(|| "null".into(), |span| self.output.position(span));
         let (function, args) = match operands {
@@ -938,6 +928,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
                 format!("ptr {ptr}, i64 {count}"),
             ),
         };
+        let scope = scope.unwrap_or(&self.scope);
         self.checked(&format!("call i64 @{function}(ptr %ctx, i64 {callable}, {args}, i64 {mark}, ptr {position}, i64 {scope})"))
     }
 
@@ -1853,9 +1844,9 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
         }
         let (scope, target) = if call.explicit_scope {
             let scope = self.evaluate_handle(target);
-            (scope, args.next().expect("scoped call has a target"))
+            (Some(scope), args.next().expect("scoped call has a target"))
         } else {
-            (self.scope.clone(), target)
+            (None, target)
         };
         let (callable, receiver, callee_end) = match &call.target {
             RegisteredCallTarget::Callable { end, .. } => {
@@ -1920,7 +1911,14 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
                 CallArguments::Packed { args, kwargs }
             }),
         };
-        self.positioned_call(&callable, operands, &mark, call.range, callee_end, &scope)
+        self.positioned_call(
+            &callable,
+            operands,
+            &mark,
+            call.range,
+            callee_end,
+            scope.as_deref(),
+        )
     }
 
     /// Execute a descriptor operation at the original target, using the same live receiver
@@ -2055,6 +2053,7 @@ impl RegisteredFrame<'_, '_> {
             },
             mark,
             span,
+            None,
         )
     }
 
