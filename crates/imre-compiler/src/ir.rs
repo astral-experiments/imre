@@ -1596,7 +1596,7 @@ pub(crate) enum RegisteredArguments {
     Positional,
     Keywords {
         positional: usize,
-        names: Vec<String>,
+        names: Vec<ruff_python_ast::name::Name>,
     },
     Packed(PackedArguments),
 }
