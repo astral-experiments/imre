@@ -81,8 +81,11 @@ pub(crate) fn frame_inputs(
                         uses_python_protocol = true;
                         value.as_ref().is_none_or(|raised| raised.origin.is_none())
                     }
+                    Statement::Return(value) => {
+                        protocol_reads += protocol_parameter(value);
+                        true
+                    }
                     Statement::Position(..)
-                    | Statement::Return(_)
                     | Statement::Expr(_)
                     | Statement::Scope { .. }
                     | Statement::While(..)
