@@ -371,7 +371,7 @@ impl<'p> RegisteredBody<'p> {
 
     fn emit_on(self, mut code: FrameOwner<'_, '_, 'p>) {
         let (checked, suite, inputs) = match self {
-            Self::Function(checked) => (checked, None, &[][..]),
+            Self::Function(checked) | Self::Prepared(checked) => (checked, None, &[][..]),
             Self::Suite(suite) => (&suite.checked, Some(suite), suite.operands.as_slice()),
         };
         let Some(enclosing) =

@@ -922,14 +922,14 @@ struct TypeAliasDefinition {
 impl<'a> RegisteredBody<'a> {
     fn fully_checked(&self) -> bool {
         match self {
-            Self::Function(_) => true,
+            Self::Function(_) | Self::Prepared(_) => true,
             Self::Suite(suite) => suite.fully_checked(),
         }
     }
 
     fn checked(&self) -> &'a crate::frontend::RegisteredFunction {
         match self {
-            Self::Function(checked) => checked,
+            Self::Function(checked) | Self::Prepared(checked) => checked,
             Self::Suite(suite) => &suite.checked,
         }
     }
@@ -2064,19 +2064,26 @@ mod tests {
             self.scopes.functions[&site].body()
         }
 
-        fn function_suite(&self, site: TextSize) -> &crate::frontend::RegisteredSuite {
-            match self.definition_body(site) {
-                RegisteredBody::Suite(suite) => suite,
-                RegisteredBody::Function(_) => panic!("expected a prepared suite"),
-            }
+        fn take_prepared_function(
+            &mut self,
+            site: TextSize,
+        ) -> crate::frontend::RegisteredFunction {
+            let body = self.scopes.functions.get_mut(&site).unwrap().body.take();
+            let Some(RegisteredBody::Prepared(checked)) = body else {
+                panic!("expected an owned complete function");
+            };
+            *checked
         }
 
-        fn take_function_suite(&mut self, site: TextSize) -> Box<crate::frontend::RegisteredSuite> {
-            let body = self.scopes.functions.get_mut(&site).unwrap().body.take();
-            let Some(RegisteredBody::Suite(suite)) = body else {
-                panic!("expected a prepared suite")
+        fn prepared_function_mut(
+            &mut self,
+            site: TextSize,
+        ) -> &mut crate::frontend::RegisteredFunction {
+            let body = &mut self.scopes.functions.get_mut(&site).unwrap().body;
+            let Some(RegisteredBody::Prepared(checked)) = body else {
+                panic!("expected an owned complete function");
             };
-            suite
+            checked
         }
     }
 
@@ -2086,7 +2093,7 @@ mod tests {
         body: crate::frontend::RegisteredSuite,
     ) {
         source.scopes.functions.get_mut(&def.start()).unwrap().body =
-            Some(RegisteredBody::Suite(Box::new(body)));
+            Some(RegisteredBody::from_suite(body));
     }
 
     fn test_function_suite<'s>(
@@ -2103,7 +2110,7 @@ mod tests {
             .unwrap()
         {
             RegisteredBody::Suite(suite) => suite,
-            RegisteredBody::Function(_) => panic!("expected a prepared suite"),
+            _ => panic!("expected a prepared suite with residual operands or children"),
         }
     }
 
@@ -2352,16 +2359,16 @@ mod tests {
             |mut module| {
                 let initializer = module.initializer();
                 let mut headers = Vec::new();
-                for suite in std::iter::once(initializer).chain(
+                for suite in std::iter::once(RegisteredBody::Suite(initializer)).chain(
                     module
                         .source
                         .scopes
                         .functions
                         .keys()
-                        .map(|site| module.source.function_suite(*site)),
+                        .map(|site| module.source.definition_body(*site)),
                 ) {
                     assert!(suite.fully_checked());
-                    crate::ir::walk_expressions(&suite.checked.function.body, &mut |value| {
+                    crate::ir::walk_expressions(&suite.checked().function.body, &mut |value| {
                         if let crate::ir::ExprKind::Builtin(
                             crate::ir::Builtin::RegisteredDefinition(site),
                             operands,
@@ -2484,15 +2491,14 @@ mod tests {
         let site = ruff_text_size::TextSize::default();
         let mut original =
             PreparedBody::module("render", path, source, 0, ModuleOrigin::Program(None)).unwrap();
-        let suite = original.source.take_function_suite(site);
+        let mut checked = original.source.take_prepared_function(site);
         let mut generators = Vec::new();
-        RequiredSite::visit(&suite.checked.function.body, None, &mut |required| {
+        RequiredSite::visit(&checked.function.body, None, &mut |required| {
             if let RequiredSite::Generator(range) = required {
                 generators.push(&source[range]);
             }
         });
         assert_eq!(generators, ["word.title() for word in words"]);
-        let mut checked = suite.checked;
         checked.inputs = crate::llvm::registered::frame_inputs(&checked, true).unwrap();
         let bodies = HashMap::from([(site, checked)]);
         for (source, retained) in [
@@ -2508,9 +2514,9 @@ mod tests {
             )
             .unwrap();
             assert_eq!(
-                matches!(
-                    module.source.definition_body(site),
-                    RegisteredBody::Function(_)
+                std::ptr::eq(
+                    module.source.definition_body(site).checked(),
+                    &bodies[&site]
                 ),
                 retained
             );
@@ -2525,8 +2531,7 @@ mod tests {
         let site = TextSize::default();
         let mut original =
             PreparedBody::module("example", path, source, 0, ModuleOrigin::Program(None)).unwrap();
-        let suite = original.source.take_function_suite(site);
-        let mut checked = suite.checked;
+        let mut checked = original.source.take_prepared_function(site);
         checked.inputs = crate::llvm::registered::frame_inputs(&checked, true).unwrap();
         let bodies = HashMap::from([(site, checked)]);
         for (text, retained) in [(source, true), (refused, false)] {
@@ -2539,9 +2544,9 @@ mod tests {
             )
             .unwrap();
             assert_eq!(
-                matches!(
-                    module.source.definition_body(site),
-                    RegisteredBody::Function(_)
+                std::ptr::eq(
+                    module.source.definition_body(site).checked(),
+                    &bodies[&site]
                 ),
                 retained
             );
@@ -2562,8 +2567,8 @@ mod tests {
         let site = ruff_text_size::TextSize::default();
         let mut initial =
             PreparedBody::module("header", path, source, 0, ModuleOrigin::Program(None)).unwrap();
-        let suite = initial.source.take_function_suite(site);
-        let bodies = HashMap::from([(site, suite.checked)]);
+        let checked = initial.source.take_prepared_function(site);
+        let bodies = HashMap::from([(site, checked)]);
         let module = PreparedBody::module(
             "header",
             path,
@@ -2711,7 +2716,7 @@ mod tests {
             .unwrap();
             let plan = module
                 .source
-                .function_suite(ruff_text_size::TextSize::new(0));
+                .definition_body(ruff_text_size::TextSize::new(0));
             if body == deletion
                 || body == manager
                 || body == checked_lambda
@@ -2724,9 +2729,9 @@ mod tests {
             }
             if header == suspended_target {
                 assert!(plan.fully_checked(), "{source}");
-                let owners = plan.checked.region().private_slots();
+                let owners = plan.checked().region().private_slots();
                 let mut projected = 0;
-                crate::ir::walk_statements(&plan.checked.function.body, &mut |stmt| {
+                crate::ir::walk_statements(&plan.checked().function.body, &mut |stmt| {
                     if let crate::ir::Statement::IterNext {
                         iterator,
                         key,
@@ -2853,12 +2858,12 @@ mod tests {
                 .as_function_def_stmt_mut()
                 .unwrap();
             let start = def.start();
-            assert!(module.source.function_suite(start).fully_checked());
+            assert!(module.source.definition_body(start).fully_checked());
             def.body.clear();
             assert_eq!(module.standalone().unwrap(), before);
 
-            let suite = test_function_suite(&mut module.source, start);
-            let Some(crate::ir::Statement::Return(result)) = suite.checked.function.body.last_mut()
+            let checked = module.source.prepared_function_mut(start);
+            let Some(crate::ir::Statement::Return(result)) = checked.function.body.last_mut()
             else {
                 panic!("expected the checked return after the nested declaration");
             };
@@ -2974,7 +2979,12 @@ mod tests {
         let parsed = ruff_python_parser::parse_module(text).unwrap();
         let outer = parsed.syntax().body[0].as_function_def_stmt().unwrap();
         let scoped = outer.body[0].as_function_def_stmt().unwrap();
-        assert!(module.source.function_suite(scoped.start()).fully_checked());
+        assert!(
+            module
+                .source
+                .definition_body(scoped.start())
+                .fully_checked()
+        );
         let parameters = &module.source.scopes.functions[&scoped.start()].type_params;
         assert_eq!(parameters.len(), 1);
         assert_eq!(parameters[0].name, "T");
@@ -2999,7 +3009,7 @@ mod tests {
         )
         .unwrap();
         let site = TextSize::try_from(text.find("def choose").unwrap()).unwrap();
-        assert!(module.syntax.is_none() && module.source.function_suite(site).fully_checked());
+        assert!(module.syntax.is_none() && module.source.definition_body(site).fully_checked());
         let before = module.standalone().unwrap();
         let header = module.source.scopes.functions.get_mut(&site).unwrap();
         let [u, t, v] = header.type_params.as_mut_slice() else {
@@ -3145,7 +3155,7 @@ mod tests {
             })
             .unwrap();
         let main = syntax[definition].as_function_def_stmt().unwrap();
-        let suite = module.source.function_suite(main.start());
+        let suite = module.source.definition_body(main.start());
         let index = main
             .body
             .iter()
@@ -3155,15 +3165,17 @@ mod tests {
                     .is_some_and(|name| name.id.as_str() == "entry")
             })
             .unwrap();
-        assert!(!suite.suites.iter().any(|region| matches!(region.checked.function.body.first(),
-                    Some(crate::ir::Statement::Expr(crate::ir::Expr {
-                        kind: crate::ir::ExprKind::Builtin(crate::ir::Builtin::RegisteredStatement(range, _), _), ..
-                    })) if *range == main.body[index].range()
-        )));
+        assert!(
+            !matches!(&suite, RegisteredBody::Suite(plan) if plan.suites.iter().any(|region| matches!(region.checked.function.body.first(),
+                        Some(crate::ir::Statement::Expr(crate::ir::Expr {
+                            kind: crate::ir::ExprKind::Builtin(crate::ir::Builtin::RegisteredStatement(range, _), _), ..
+                        })) if *range == main.body[index].range()
+            )))
+        );
         let last = main.body.last().unwrap().as_try_stmt().unwrap();
         assert!(last.body[0].as_with_stmt().unwrap().is_async);
         let task_group = main.body.len() - 1;
-        assert!(suite.checked.function.body.windows(2).any(|ops| matches!(
+        assert!(suite.checked().function.body.windows(2).any(|ops| matches!(
             ops,
             [crate::ir::Statement::Expr(site), crate::ir::Statement::Try { .. }]
                 if matches!(site.kind, crate::ir::ExprKind::Builtin(
@@ -3278,11 +3290,11 @@ mod tests {
                 PreparedBody::module(name, Path::new("module.py"), text, 0, ModuleOrigin::Bundled)
                     .unwrap();
             let start = ruff_text_size::TextSize::try_from(text.find(definition).unwrap()).unwrap();
-            let suite = module.source.function_suite(start);
+            let suite = module.source.definition_body(start);
             assert!(suite.fully_checked(), "{name}");
-            crate::verify::registered(suite.checked.region()).unwrap();
+            crate::verify::registered(suite.checked().region()).unwrap();
             let mut suspends = false;
-            crate::ir::walk_expressions(&suite.checked.function.body, &mut |expr| {
+            crate::ir::walk_expressions(&suite.checked().function.body, &mut |expr| {
                 suspends |= matches!(
                     expr.kind,
                     crate::ir::ExprKind::Builtin(crate::ir::Builtin::RegisteredSuspend(..), _)
@@ -3318,10 +3330,10 @@ mod tests {
             .body;
         let def = body[0].as_function_def_stmt_mut().unwrap();
         let classes = [def.body[0].start(), def.body[1].start()];
-        let plan = module.source.function_suite(def.start());
+        let plan = module.source.definition_body(def.start());
         assert!(plan.fully_checked());
         let mut definitions = Vec::new();
-        RequiredSite::visit(&plan.checked.function.body, None, &mut |required| {
+        RequiredSite::visit(&plan.checked().function.body, None, &mut |required| {
             if let RequiredSite::Definition(start) = required {
                 definitions.push(start);
             }
@@ -3506,8 +3518,8 @@ mod tests {
         });
         assert_eq!(bindings, [start(method)]);
         assert!(matches!(
-            module.source.definition_body(start(method)),
-            RegisteredBody::Suite(_)
+            module.source.scopes.functions[&start(method)].body.as_ref(),
+            Some(RegisteredBody::Prepared(_))
         ));
     }
 
@@ -3643,9 +3655,9 @@ mod tests {
         )
         .unwrap();
         let start = ruff_text_size::TextSize::try_from(source.find("async def").unwrap()).unwrap();
-        let suite = module.source.function_suite(start);
+        let suite = module.source.definition_body(start);
         let mut pulls = 0;
-        crate::ir::walk_statements(&suite.checked.function.body, &mut |stmt| {
+        crate::ir::walk_statements(&suite.checked().function.body, &mut |stmt| {
             if matches!(
                 stmt,
                 crate::ir::Statement::IterNext {
@@ -3705,14 +3717,14 @@ mod tests {
         let def = prepared.syntax.as_ref().unwrap()[0]
             .as_function_def_stmt()
             .unwrap();
-        let suite = prepared.source.function_suite(def.start());
-        crate::verify::registered(suite.checked.region()).unwrap();
+        let suite = prepared.source.definition_body(def.start());
+        crate::verify::registered(suite.checked().region()).unwrap();
         assert!(suite.fully_checked());
-        assert!(suite.operands.is_empty() && suite.suites.is_empty());
+        assert!(matches!(suite, RegisteredBody::Prepared(_)));
         for name in ["selected", "suspended"] {
             assert!(
                 suite
-                    .checked
+                    .checked()
                     .local_names
                     .values()
                     .any(|binding| binding.name == name)
@@ -3721,11 +3733,11 @@ mod tests {
         let def = prepared.syntax.as_ref().unwrap()[1]
             .as_function_def_stmt()
             .unwrap();
-        let suite = prepared.source.function_suite(def.start());
+        let suite = prepared.source.definition_body(def.start());
         assert!(suite.fully_checked());
-        crate::verify::registered(suite.checked.region()).unwrap();
+        crate::verify::registered(suite.checked().region()).unwrap();
         let mut suspensions = Vec::new();
-        crate::ir::walk_expressions(&suite.checked.function.body, &mut |expr| {
+        crate::ir::walk_expressions(&suite.checked().function.body, &mut |expr| {
             if let crate::ir::ExprKind::Builtin(
                 crate::ir::Builtin::RegisteredSuspend(_, range),
                 _,
@@ -3756,7 +3768,7 @@ mod tests {
         assert!(
             prepared
                 .source
-                .function_suite(function.start())
+                .definition_body(function.start())
                 .fully_checked()
         );
         function.body[0] = ast::StmtPass {
@@ -3791,7 +3803,7 @@ mod tests {
         let original = module.standalone().unwrap();
         for stmt in module.syntax.as_mut().unwrap().to_mut() {
             let def = stmt.as_function_def_stmt_mut().unwrap();
-            assert!(module.source.function_suite(def.start()).fully_checked());
+            assert!(module.source.definition_body(def.start()).fully_checked());
             def.body.clear();
         }
         assert_eq!(module.standalone().unwrap(), original);
@@ -3822,7 +3834,7 @@ mod tests {
             assert!(
                 prepared
                     .source
-                    .function_suite(function.start())
+                    .definition_body(function.start())
                     .fully_checked()
             );
             function.body.clear();
@@ -3844,12 +3856,19 @@ mod tests {
         let function = prepared.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
             .unwrap();
-        let suite = prepared.source.function_suite(function.start());
+        let suite = prepared.source.definition_body(function.start());
         assert!(suite.fully_checked());
-        assert!(suite.checked.function.body.iter().any(|statement| matches!(
-            statement,
-            crate::ir::Statement::With { binding: Some(_), site, .. } if site.is_async
-        )));
+        assert!(
+            suite
+                .checked()
+                .function
+                .body
+                .iter()
+                .any(|statement| matches!(
+                    statement,
+                    crate::ir::Statement::With { binding: Some(_), site, .. } if site.is_async
+                ))
+        );
         let context = function.body[0].as_with_stmt_mut().unwrap();
         context.items.clear();
         context.body.clear();
@@ -3889,10 +3908,10 @@ mod tests {
             |prepared| {
                 let bodies = &prepared.source.scopes.functions;
                 assert_eq!(bodies.len(), 1);
-                let suite = prepared.source.function_suite(*bodies.keys().next().unwrap());
+                let suite = prepared.source.definition_body(*bodies.keys().next().unwrap());
                 assert!(suite.fully_checked());
-                crate::verify::registered(suite.checked.region()).unwrap();
-                assert!(suite.checked.function.body.iter().any(|stmt| {
+                crate::verify::registered(suite.checked().region()).unwrap();
+                assert!(suite.checked().function.body.iter().any(|stmt| {
                     matches!(stmt, crate::ir::Statement::With { .. })
                 }));
                 prepared.standalone()
@@ -3922,17 +3941,20 @@ mod tests {
         let function = prepared.syntax.as_ref().unwrap()[0]
             .as_function_def_stmt()
             .unwrap();
-        let suite = prepared.source.function_suite(function.start());
+        let suite = prepared.source.definition_body(function.start());
         assert!(suite.fully_checked());
-        crate::verify::registered(suite.checked.region()).unwrap();
+        crate::verify::registered(suite.checked().region()).unwrap();
         let mut operations = Vec::new();
-        crate::ir::walk_expressions(&suite.checked.function.body, &mut |expr| match &expr.kind {
-            ExprKind::Binary(..) => operations.push("binary"),
-            ExprKind::Builtin(Builtin::RegisteredSubscript(..), _) => operations.push("index"),
-            ExprKind::Builtin(Builtin::RegisteredLambda(..), _) => operations.push("lambda"),
-            ExprKind::Builtin(Builtin::RegisteredSuspend(..), _) => operations.push("suspend"),
-            _ => {}
-        });
+        crate::ir::walk_expressions(
+            &suite.checked().function.body,
+            &mut |expr| match &expr.kind {
+                ExprKind::Binary(..) => operations.push("binary"),
+                ExprKind::Builtin(Builtin::RegisteredSubscript(..), _) => operations.push("index"),
+                ExprKind::Builtin(Builtin::RegisteredLambda(..), _) => operations.push("lambda"),
+                ExprKind::Builtin(Builtin::RegisteredSuspend(..), _) => operations.push("suspend"),
+                _ => {}
+            },
+        );
         for (kind, expected) in [("binary", 1), ("index", 1), ("lambda", 2), ("suspend", 2)] {
             assert_eq!(
                 operations.iter().filter(|op| **op == kind).count(),
@@ -3974,12 +3996,12 @@ mod tests {
         let function = prepared.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
             .unwrap();
-        let plan = prepared.source.function_suite(function.start());
+        let plan = prepared.source.definition_body(function.start());
         let ret = function.body[0].as_return_stmt_mut().unwrap();
         let value = ret.value.as_deref_mut().unwrap();
         assert!(plan.fully_checked());
-        crate::verify::registered(plan.checked.region()).unwrap();
-        let Some(Statement::Return(result)) = plan.checked.function.body.last() else {
+        crate::verify::registered(plan.checked().region()).unwrap();
+        let Some(Statement::Return(result)) = plan.checked().function.body.last() else {
             panic!("expected checked return");
         };
         let mut binary = 0;
@@ -4252,9 +4274,9 @@ mod tests {
         let def = prepared.syntax.as_ref().unwrap()[0]
             .as_function_def_stmt()
             .unwrap();
-        let plan = prepared.source.function_suite(def.start());
+        let plan = prepared.source.definition_body(def.start());
         assert!(plan.fully_checked());
-        let Some(Statement::Raise(Some(value))) = plan.checked.function.body.last() else {
+        let Some(Statement::Raise(Some(value))) = plan.checked().function.body.last() else {
             panic!("expected a terminal raise");
         };
         for operand in [&value.exception, value.cause.as_deref().unwrap()] {
@@ -4679,17 +4701,17 @@ mod tests {
         )
         .unwrap();
         let start = TextSize::try_from(source.find("async def choose(").unwrap()).unwrap();
-        let function = module.source.function_suite(start);
+        let function = module.source.definition_body(start);
         assert!(function.fully_checked());
         assert!(
             function
-                .checked
+                .checked()
                 .function
                 .body
                 .iter()
                 .any(|statement| { matches!(statement, crate::ir::Statement::While(..)) })
         );
-        crate::verify::registered(function.checked.region()).unwrap();
+        crate::verify::registered(function.checked().region()).unwrap();
     }
 
     #[test]
@@ -4714,10 +4736,10 @@ mod tests {
         let def = prepared.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
             .unwrap();
-        let suite = prepared.source.function_suite(def.start());
+        let suite = prepared.source.definition_body(def.start());
         assert!(suite.fully_checked());
         let mut awaits = 0;
-        ir::walk_nodes(&suite.checked.function.body, &mut |node, _| {
+        ir::walk_nodes(&suite.checked().function.body, &mut |node, _| {
             if let ir::Node::Expression(expr) = node
                 && matches!(
                     expr.kind,
@@ -4728,7 +4750,7 @@ mod tests {
             }
         });
         assert_eq!(awaits, 3);
-        crate::verify::registered(suite.checked.region()).unwrap();
+        crate::verify::registered(suite.checked().region()).unwrap();
         def.body.clear();
         assert_eq!(prepared.standalone().unwrap(), original);
     }
@@ -4857,14 +4879,13 @@ mod tests {
         .unwrap();
         assert!(prepared.syntax.is_none());
         let start = TextSize::new(0);
-        let function = prepared.source.function_suite(start);
+        let function = prepared.source.definition_body(start);
         assert!(function.fully_checked());
-        crate::verify::registered(function.checked.region()).unwrap();
+        crate::verify::registered(function.checked().region()).unwrap();
 
         let original = prepared.standalone().unwrap();
-        let suite = test_function_suite(&mut prepared.source, start);
-        let cases = suite
-            .checked
+        let checked = prepared.source.prepared_function_mut(start);
+        let cases = checked
             .function
             .body
             .iter_mut()
@@ -4907,9 +4928,9 @@ mod tests {
         let function = prepared.syntax.as_ref().unwrap()[0]
             .as_function_def_stmt()
             .unwrap();
-        let suite = prepared.source.function_suite(function.start());
+        let suite = prepared.source.definition_body(function.start());
         assert!(suite.fully_checked());
-        crate::verify::registered(suite.checked.region()).unwrap();
+        crate::verify::registered(suite.checked().region()).unwrap();
         let original = prepared.standalone().unwrap();
         prepared.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
@@ -4959,18 +4980,18 @@ mod tests {
                 .as_function_def_stmt()
                 .unwrap();
             let start = function.start();
-            let suite = prepared.source.function_suite(start);
+            let suite = prepared.source.definition_body(start);
             assert!(suite.fully_checked(), "{body}");
-            crate::verify::registered(suite.checked.region()).unwrap();
+            crate::verify::registered(suite.checked().region()).unwrap();
             let original = prepared.standalone().unwrap();
             let function = prepared.syntax.as_mut().unwrap().to_mut()[0]
                 .as_function_def_stmt_mut()
                 .unwrap();
             function.body.clear();
             assert_eq!(prepared.standalone().unwrap(), original);
-            let suite = test_function_suite(&mut prepared.source, start);
+            let checked = prepared.source.prepared_function_mut(start);
             let [_, crate::ir::Statement::Match(subject, cases), ..] =
-                &mut suite.checked.function.body[..]
+                &mut checked.function.body[..]
             else {
                 panic!("expected a checked match")
             };
@@ -4994,7 +5015,7 @@ mod tests {
             } else {
                 *subject = crate::ir::Expr::none();
             }
-            crate::verify::registered(suite.checked.region()).unwrap();
+            crate::verify::registered(checked.region()).unwrap();
             assert_ne!(prepared.standalone().unwrap(), original);
         }
     }
@@ -5223,9 +5244,9 @@ mod tests {
         let defs = module.syntax.as_mut().unwrap().to_mut();
         for (i, stmt) in defs.iter_mut().enumerate() {
             let def = stmt.as_function_def_stmt_mut().unwrap();
-            let plan = module.source.function_suite(def.start());
+            let plan = module.source.definition_body(def.start());
             assert!(plan.fully_checked());
-            let body = &plan.checked;
+            let body = plan.checked();
             let mut required = Vec::new();
             RequiredSite::visit(&body.function.body, None, &mut |site| required.push(site));
             if i == 0 {
@@ -5464,7 +5485,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             |prepared| {
                 let methods = &prepared.source.scopes.functions;
                 assert_eq!(methods.len(), 1);
-                assert!(methods.keys().all(|site| prepared.source.function_suite(*site).fully_checked()));
+                assert!(methods.keys().all(|site| prepared.source.definition_body(*site).fully_checked()));
                 assert!(prepared.syntax.is_none());
                 prepared.standalone()
             },
@@ -5530,10 +5551,10 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
                 .iter()
                 .all(|key| excluded.get(key).is_none())
             );
-            let suite = prepared.source.function_suite(start(target));
+            let suite = prepared.source.definition_body(start(target));
             assert!(suite.fully_checked());
             let mut methods = Vec::new();
-            ir::walk_expressions(&suite.checked.function.body, &mut |expr| {
+            ir::walk_expressions(&suite.checked().function.body, &mut |expr| {
                 if let ExprKind::Builtin(Builtin::RegisteredCall(call), _) = &expr.kind
                     && let RegisteredCallTarget::Method { name, .. } = &call.target
                 {
@@ -6053,11 +6074,11 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         let def = prepared.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
             .unwrap();
-        let suite = prepared.source.function_suite(def.start());
+        let suite = prepared.source.definition_body(def.start());
         assert!(suite.fully_checked());
         assert!(
             suite
-                .checked
+                .checked()
                 .function
                 .body
                 .iter()
@@ -6494,7 +6515,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         let def = prepared.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
             .unwrap();
-        assert!(prepared.source.function_suite(def.start()).fully_checked());
+        assert!(prepared.source.definition_body(def.start()).fully_checked());
         let loop_ = def.body[0].as_while_stmt_mut().unwrap();
         *loop_.test = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
             range: loop_.test.range(),
@@ -6529,12 +6550,12 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
                     .filter_map(ast::Stmt::as_function_def_stmt_mut)
                     .find(|def| def.name.as_str() == name)
                     .unwrap();
-                let suite = prepared.source.function_suite(def.start());
+                let suite = prepared.source.definition_body(def.start());
                 assert!(suite.fully_checked(), "{name}");
-                crate::verify::registered(suite.checked.region()).unwrap();
+                crate::verify::registered(suite.checked().region()).unwrap();
                 if name == "defaults" {
                     let site = def.body[1].start();
-                    assert!(prepared.source.function_suite(site).fully_checked());
+                    assert!(prepared.source.definition_body(site).fully_checked());
                     assert_eq!(prepared.source.scopes.functions[&site].name, "nested");
                 }
                 def.body.clear();
@@ -7102,7 +7123,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         let def = prepared.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
             .unwrap();
-        assert!(prepared.source.function_suite(def.start()).fully_checked());
+        assert!(prepared.source.definition_body(def.start()).fully_checked());
         let assignment = def.body[0].as_assign_stmt_mut().unwrap();
         assignment.value.as_dict_expr_mut().unwrap().items.clear();
         assert_eq!(prepared.standalone().unwrap(), before);
@@ -7126,7 +7147,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         let def = prepared.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
             .unwrap();
-        assert!(prepared.source.function_suite(def.start()).fully_checked());
+        assert!(prepared.source.definition_body(def.start()).fully_checked());
         def.body[0].as_assign_stmt_mut().unwrap().targets.clear();
         assert_eq!(prepared.standalone().unwrap(), before);
     }
@@ -7156,7 +7177,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             .into_syntax()
             .body;
         let def = syntax[0].as_function_def_stmt_mut().unwrap();
-        assert!(prepared.source.function_suite(def.start()).fully_checked());
+        assert!(prepared.source.definition_body(def.start()).fully_checked());
         for assignment in &mut def.body[..2] {
             assignment.as_assign_stmt_mut().unwrap().targets.clear();
         }
@@ -7190,7 +7211,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         assert!(
             prepared
                 .source
-                .function_suite(TextSize::new(0))
+                .definition_body(TextSize::new(0))
                 .fully_checked()
         );
         let class = prepared.source.class_bodies.values().next().unwrap();
@@ -7396,10 +7417,10 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             .as_function_def_stmt_mut()
             .unwrap();
         let evaluate = factory.body[0].as_function_def_stmt_mut().unwrap();
-        let suite = prepared.source.function_suite(evaluate.start());
+        let suite = prepared.source.definition_body(evaluate.start());
         assert!(suite.fully_checked());
         assert!(matches!(
-            suite.checked.function.body.last(),
+            suite.checked().function.body.last(),
             Some(crate::ir::Statement::Raise(Some(_)))
         ));
         let raise = evaluate.body[0].as_raise_stmt_mut().unwrap();
