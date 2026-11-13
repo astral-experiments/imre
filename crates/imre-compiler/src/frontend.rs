@@ -5924,7 +5924,7 @@ impl<'a> Checker<'a> {
             let body = output.as_deref_mut().unwrap_or(&mut discarded);
             let start = body.len();
             if emitting && self.registered.is_some() && !statement.is_assert_stmt() {
-                body.push(registered::checkpoint(statement));
+                registered::push_checkpoint(body, statement);
             }
             let ops = body.len();
             let continues = if !self.module_scope

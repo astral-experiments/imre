@@ -742,13 +742,13 @@ impl Analyzer {
                 }
                 return self.for_loop(*target, &args, body, orelse, state, record);
             }
-            Statement::Break => {
+            Statement::Break(_) => {
                 return Flow {
                     breaks: Some(state),
                     ..Flow::default()
                 };
             }
-            Statement::Continue => {
+            Statement::Continue(_) => {
                 return Flow {
                     continues: Some(state),
                     ..Flow::default()
@@ -1647,8 +1647,8 @@ mod tests {
     fn scoped_cleanup_restores_integers_on_every_loop_exit() {
         for exit in [
             None,
-            Some(Statement::Break),
-            Some(Statement::Continue),
+            Some(Statement::Break(None)),
+            Some(Statement::Continue(Default::default())),
             Some(Statement::Exhaust),
         ] {
             let mut module = module("def scoped(again: bool) -> int:\n    return 0\n");

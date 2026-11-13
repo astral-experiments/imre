@@ -89,8 +89,8 @@ pub(crate) fn frame_inputs(
                     | Statement::Expr(_)
                     | Statement::Scope { .. }
                     | Statement::While(..)
-                    | Statement::Break
-                    | Statement::Continue
+                    | Statement::Break(_)
+                    | Statement::Continue(_)
                     | Statement::Exhaust => true,
                     Statement::Try {
                         handlers,

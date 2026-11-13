@@ -1085,6 +1085,9 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         if let Entry::Registered(frame) = &mut self.0 {
             match (stmt, frame.next_fixed_site()) {
                 (Statement::Position(range, simple), _) => frame.statement_site(*range, *simple),
+                (Statement::Break(Some(range)) | Statement::Continue(range), _) => {
+                    frame.statement_site(*range, None)
+                }
                 (_, Some(range)) => frame.statement_site(range, None),
                 (_, None) => {}
             }
@@ -1163,7 +1166,9 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 ready,
                 kind,
             } => self.pull(*iterator, *key, *value, *ready, *kind),
-            Statement::Break | Statement::Continue | Statement::Exhaust => self.loop_transfer(stmt),
+            Statement::Break(_) | Statement::Continue(_) | Statement::Exhaust => {
+                self.loop_transfer(stmt)
+            }
             Statement::Move(target, source) => self.fixed().move_local(*target, *source),
             Statement::SetField(receiver, field, rhs) => {
                 let code = self.fixed();

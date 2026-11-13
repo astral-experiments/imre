@@ -347,8 +347,8 @@ impl CheckedBody<'_, '_, '_, '_> {
         }
         .expect("loop transfer");
         let label = match statement {
-            Statement::Break => &target.edges.done,
-            Statement::Continue => &target.edges.step,
+            Statement::Break(_) => &target.edges.done,
+            Statement::Continue(_) => &target.edges.step,
             Statement::Exhaust => &target.edges.exhausted,
             _ => unreachable!("loop transfer"),
         }

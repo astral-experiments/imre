@@ -1265,7 +1265,7 @@ impl Checker<'_> {
         let mut advance = vec![Statement::Assign(done, Expr::boolean(true))];
         advance.append(&mut outer.next);
         let mut exhausted: Vec<_> = outer.clear.iter().copied().map(Statement::Clear).collect();
-        exhausted.push(Statement::Break);
+        exhausted.push(Statement::Break(None));
         advance.push(Statement::If(
             not(self.local(outer.ready)),
             exhausted,
@@ -1282,7 +1282,7 @@ impl Checker<'_> {
         pull.append(&mut inner.next);
         pull.push(Statement::If(
             self.local(inner.ready),
-            vec![Statement::Break],
+            vec![Statement::Break(None)],
             Vec::new(),
         ));
         pull.extend(inner.clear.iter().copied().map(Statement::Clear));
@@ -2707,12 +2707,12 @@ impl Checker<'_> {
                     vec![Statement::Assign(ready, Expr::boolean(true))],
                     vec![Statement::Clear(input.value)],
                 )],
-                vec![Statement::Clear(input.value), Statement::Break],
+                vec![Statement::Clear(input.value), Statement::Break(None)],
             );
             step.push(Statement::If(
                 self.local(input.ready),
                 predicate,
-                vec![Statement::Break],
+                vec![Statement::Break(None)],
             ));
             input.next = vec![
                 Statement::Clear(input.value),
@@ -3073,7 +3073,7 @@ impl Checker<'_> {
                     deciding,
                     vec![
                         Statement::Assign(result, Expr::boolean(!all)),
-                        Statement::Break,
+                        Statement::Break(None),
                     ],
                     Vec::new(),
                 )])

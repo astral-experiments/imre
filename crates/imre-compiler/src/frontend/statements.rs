@@ -15,8 +15,8 @@ pub(super) fn append_block(output: &mut Vec<Statement>, block: Vec<Statement>) {
 
 pub(super) fn loop_transfer(stmt: &ast::Stmt) -> Option<Statement> {
     match stmt {
-        ast::Stmt::Break(_) => Some(Statement::Break),
-        ast::Stmt::Continue(_) => Some(Statement::Continue),
+        ast::Stmt::Break(_) => Some(Statement::Break(Some(stmt.range()))),
+        ast::Stmt::Continue(_) => Some(Statement::Continue(stmt.range())),
         _ => None,
     }
 }
@@ -330,7 +330,7 @@ impl StatementLowering for Checker<'_> {
         if self.loop_breaks.is_empty() {
             return false;
         }
-        if self.reachable && matches!(transfer, Statement::Break) {
+        if self.reachable && matches!(transfer, Statement::Break(_)) {
             let mut exits = self.take_breaks();
             self.merge_exit(&mut exits);
             *self.loop_breaks.last_mut().unwrap() = exits;

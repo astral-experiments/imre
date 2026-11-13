@@ -737,7 +737,14 @@ pub(super) fn capture(
     }
 }
 
-pub(super) fn checkpoint(stmt: &ast::Stmt) -> Statement {
+/// Written loop jumps carry their checkpoint directly on the terminating instruction.
+pub(super) fn push_checkpoint(body: &mut Vec<Statement>, stmt: &ast::Stmt) {
+    if !matches!(stmt, ast::Stmt::Break(_) | ast::Stmt::Continue(_)) {
+        body.push(checkpoint(stmt));
+    }
+}
+
+fn checkpoint(stmt: &ast::Stmt) -> Statement {
     // Truth conversion can call Python after the condition's last operand returns.
     let range = match stmt {
         ast::Stmt::If(branch) => branch.test.range(),
@@ -2344,7 +2351,7 @@ impl<'a> SuitePreparation<'a> {
         let mut operands = Vec::new();
         for stmt in stmts {
             if let Some(transfer) = statements::loop_transfer(stmt) {
-                body.statements.extend([checkpoint(stmt), transfer]);
+                body.statements.push(transfer);
                 body.falls_through = false;
                 continue;
             }
@@ -3298,9 +3305,9 @@ impl PhysicalRegion {
                 kind: ExprKind::Builtin(Builtin::RegisteredDefinition(_), _),
                 ..
             }) if self != Self::Fallthrough => self_contained = false,
-            ir::Node::Statement(Statement::Break | Statement::Continue | Statement::Exhaust)
-                if self != Self::Loop =>
-            {
+            ir::Node::Statement(
+                Statement::Break(_) | Statement::Continue(_) | Statement::Exhaust,
+            ) if self != Self::Loop => {
                 self_contained = false;
             }
             ir::Node::Statement(Statement::Return(_) | Statement::Raise(_))
@@ -3494,7 +3501,7 @@ impl SourceScope<'_> {
             return Ok(true);
         }
         let start = body.len();
-        body.push(checkpoint(stmt));
+        push_checkpoint(body, stmt);
         let mut lower = |scope: &mut Self| {
             statements::StatementLowering::source_statement(
                 scope,
@@ -6661,7 +6668,7 @@ publish(5, callback)
             } = stmt
             {
                 assert!(handlers.is_empty() && !finalbody.is_empty());
-                assert!(matches!(body.last(), Some(Statement::Break)));
+                assert!(matches!(body.last(), Some(Statement::Break(_))));
                 found = true;
             }
         });

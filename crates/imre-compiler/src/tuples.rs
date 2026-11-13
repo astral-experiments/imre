@@ -297,8 +297,8 @@ fn inspect(
                 inspect(orelse, candidates, producers, fresh);
             }
             Statement::Position(..)
-            | Statement::Break
-            | Statement::Continue
+            | Statement::Break(_)
+            | Statement::Continue(_)
             | Statement::Exhaust => {}
         }
     }

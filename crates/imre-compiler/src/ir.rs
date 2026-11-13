@@ -3663,8 +3663,9 @@ pub(crate) enum Statement {
         ready: usize,
     },
     Return(Expr),
-    Break,
-    Continue,
+    /// Written loop jumps checkpoint their source before unwinding. Synthesized breaks have no site.
+    Break(Option<ruff_text_size::TextRange>),
+    Continue(ruff_text_size::TextRange),
     /// A compiler-owned iterator reached its end; unlike break, this runs else.
     Exhaust,
     /// A successfully acquired exit protects the target binding and suite.
@@ -3814,8 +3815,8 @@ macro_rules! statement_children {
             | Statement::Clear(_)
             | Statement::Raise(None)
             | Statement::IterNext { .. }
-            | Statement::Break
-            | Statement::Continue
+            | Statement::Break(_)
+            | Statement::Continue(_)
             | Statement::Exhaust => {}
         }
     };
