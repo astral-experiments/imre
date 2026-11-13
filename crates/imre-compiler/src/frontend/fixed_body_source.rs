@@ -22,6 +22,9 @@ impl FixedBodySource {
         }
         let mut remaining = Some(self.sites.as_slice());
         ir::walk_nodes(&function.body, &mut |node, _| {
+            if !node.has_fixed_site() {
+                return;
+            }
             remaining = remaining.and_then(|sites| {
                 let ((_, expected), rest) = sites.split_first()?;
                 (FixedNode::checked(&node).as_ref() == Some(expected.as_ref()?)).then_some(rest)

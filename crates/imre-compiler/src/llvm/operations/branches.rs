@@ -171,7 +171,7 @@ impl CheckedBody<'_, '_, '_, '_> {
         if let Entry::Registered(frame) = &mut self.0
             && let ExprKind::Builtin(Builtin::Bool, args) = &expr.kind
         {
-            frame.next_fixed_site();
+            frame.next_fixed_site(crate::ir::Node::Expression(expr));
             return self.test_operand_in_scope(&args[0], already_rooted);
         }
         let at = match &self.0 {
@@ -180,7 +180,7 @@ impl CheckedBody<'_, '_, '_, '_> {
         };
         if let ExprKind::Bool(value) = expr.kind {
             if let Entry::Registered(frame) = &self.0 {
-                frame.next_fixed_site();
+                frame.next_fixed_site(crate::ir::Node::Expression(expr));
             }
             return value.to_string();
         }

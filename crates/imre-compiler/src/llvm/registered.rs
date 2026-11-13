@@ -74,9 +74,13 @@ pub(crate) fn frame_inputs(
     // Scope declarations can follow uses in the walk. Check their complete set afterward.
     let mut positions = checked.fixed_sites.iter();
     let private = checked.region().frame_layout(|node| {
-        let attribute = positions
-            .next()
-            .and_then(|&range| checked.fixed_attribute(range));
+        let attribute = if !checked.fixed_sites.is_empty() && node.has_fixed_site() {
+            positions
+                .next()
+                .and_then(|&range| checked.fixed_attribute(range))
+        } else {
+            None
+        };
         let expr = match node {
             ir::Node::Statement(stmt) => {
                 return match stmt {
@@ -542,8 +546,11 @@ impl<'f> Frame<'f, '_, '_> {
         frame.kept_call_value(expr, next)
     }
 
-    pub(super) fn next_fixed_site(&self) -> Option<TextRange> {
+    pub(super) fn next_fixed_site(&self, node: ir::Node<'_>) -> Option<TextRange> {
         let (function, next) = self.fixed_sites?;
+        if !node.has_fixed_site() {
+            return None;
+        }
         let i = next.get();
         next.set(i + 1);
         Some(function.fixed_sites[i])

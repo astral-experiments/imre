@@ -3873,6 +3873,14 @@ pub(crate) enum Node<'a> {
     Expression(&'a Expr),
 }
 
+impl Node<'_> {
+    /// A native optional wraps its None-valued operand in an absence tag. The
+    /// Python frame evaluates that operand at its original source position.
+    pub(crate) fn has_fixed_site(&self) -> bool {
+        !matches!(self, Self::Expression(Expr { kind: ExprKind::Absent(value), .. }) if value.ty == Type::None)
+    }
+}
+
 /// Visits every IR node together with its immediate containing expression, when present.
 pub(crate) fn walk_nodes<'a>(
     body: &'a [Statement],
