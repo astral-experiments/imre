@@ -175,8 +175,9 @@ pub(crate) fn frame_inputs(
             }
             ExprKind::Builtin(Builtin::FormatJoin, parts) => parts.len() >= 2,
             ExprKind::Binary(..) => true,
-            ExprKind::List(_) | ExprKind::Tuple(_) | ExprKind::Set { .. } => {
+            ExprKind::List(values) | ExprKind::Tuple(values) | ExprKind::Set { values, .. } => {
                 uses_python_protocol = true;
+                protocol_reads += values.iter().map(&protocol_parameter).sum::<usize>();
                 true
             }
             ExprKind::Builtin(Builtin::RegisteredSpread, args) => args.len() == 1,
