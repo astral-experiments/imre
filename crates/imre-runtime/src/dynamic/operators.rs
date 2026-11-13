@@ -3622,20 +3622,30 @@ impl Context {
     ) -> Result<bool> {
         let mark = self.heap.temporary_mark();
         while let Some(value) = next(self)? {
-            if value == item {
-                return Ok(true);
-            }
-            // Equality can resize the source and collect a removed candidate.
-            self.heap.keep(value);
-            let equal = self.binary("==", value, item)?;
-            let matched = self.truth(equal)?;
-            self.heap.release_temporaries_since(mark);
-            if matched {
+            if self.sequence_item_matches(value, item, mark)? {
                 return Ok(true);
             }
         }
         Ok(false)
     }
+    /// Keep each candidate alive through user equality and truth, then release comparison temporaries.
+    pub(super) fn sequence_item_matches(
+        &mut self,
+        value: Id,
+        item: Id,
+        mark: usize,
+    ) -> Result<bool> {
+        if value == item {
+            return Ok(true);
+        }
+        self.heap.keep(value);
+        let result = self
+            .binary("==", value, item)
+            .and_then(|equal| self.truth(equal));
+        self.heap.release_temporaries_since(mark);
+        result
+    }
+
     /// Read an ordinary sequence slice directly when its bounds need no Python callbacks.
     pub(super) fn get_slice(
         &mut self,
