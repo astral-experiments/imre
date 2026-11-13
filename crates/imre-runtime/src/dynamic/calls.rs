@@ -276,7 +276,8 @@ impl RegisteredCall {
             Self::Join(join) => unsafe { join.run(context) },
             // SAFETY: the native worker takes no reference into its creator's heap.
             Self::Start(start) => unsafe { start.run(context) },
-            Self::Acquire(wait) => Ok(wait.run()),
+            // SAFETY: the caller owns the context and its interrupted frame on this thread.
+            Self::Acquire(wait) => unsafe { wait.run_registered(context) },
             Self::Release(lock) => {
                 lock.release()?;
                 Ok(NONE)

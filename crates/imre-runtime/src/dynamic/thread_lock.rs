@@ -2,6 +2,7 @@
 use super::builtins::{bind_method_arguments, boolean};
 use super::{Context, Error, Id, NONE, Result, Value};
 use crate::objects::locks::{PrimitiveLock, timeout_float, timeout_int};
+use crate::objects::time::Deadline;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -100,6 +101,59 @@ pub(super) struct Acquire {
     timeout: Option<Duration>,
 }
 
+pub(super) enum NativeWait {
+    Acquire(Option<Duration>),
+    Join(Option<Deadline>),
+}
+
+impl NativeWait {
+    /// # Safety
+    /// The caller owns the interrupted context and frame. The native wait must release
+    /// its native locks before returning and must hold no references to the Python heap.
+    pub(super) unsafe fn run(
+        self,
+        _context: *mut Context,
+        wait: impl Fn(Option<Duration>) -> bool,
+    ) -> Result<bool> {
+        #[cfg(unix)]
+        if crate::signals::is_main() {
+            let deadline = match self {
+                Self::Acquire(timeout) => timeout.map(Deadline::after),
+                Self::Join(deadline) => deadline,
+            };
+            let interval = Duration::from_millis(50);
+            loop {
+                let remaining = deadline.map(Deadline::remaining);
+                let slice = remaining.map_or(interval, |left| left.min(interval));
+                if wait(Some(slice)) {
+                    return Ok(true);
+                }
+                // An expired join returns immediately. A lock wait interrupted during
+                // a positive slice dispatches first, then probes the lock once more.
+                if matches!(self, Self::Join(_))
+                    && deadline.is_some_and(|end| end.remaining().is_zero())
+                {
+                    return Ok(false);
+                }
+                if !slice.is_zero()
+                    && crate::signals::TRIPPED.load(std::sync::atomic::Ordering::Acquire)
+                {
+                    // SAFETY: the wait released its native locks before returning to this frame.
+                    unsafe { Context::dispatch_pending_calls(_context)? };
+                    continue;
+                }
+                if matches!(self, Self::Acquire(_)) && remaining == Some(slice) {
+                    return Ok(false);
+                }
+            }
+        }
+        Ok(wait(match self {
+            Self::Acquire(timeout) => timeout,
+            Self::Join(deadline) => deadline.map(Deadline::remaining),
+        }))
+    }
+}
+
 impl Acquire {
     /// An already selected lock.acquire() with no Python arguments.
     pub(super) fn blocking(lock: &Arc<PrimitiveLock>) -> Self {
@@ -134,6 +188,19 @@ impl Acquire {
 
     pub(super) fn run(self) -> Id {
         boolean(self.lock.acquire(self.blocking, self.timeout))
+    }
+
+    /// # Safety
+    /// The interrupted caller and its Python frame belong to this thread throughout the wait.
+    pub(super) unsafe fn run_registered(self, _context: *mut Context) -> Result<Id> {
+        if !self.blocking {
+            return Ok(self.run());
+        }
+        // SAFETY: the caller owns its frame and the lock releases its mutex after each wait.
+        unsafe {
+            NativeWait::Acquire(self.timeout).run(_context, |limit| self.lock.acquire(true, limit))
+        }
+        .map(boolean)
     }
 }
 
@@ -176,7 +243,9 @@ pub(super) fn method(
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     if matches!(name, "acquire" | "__enter__") {
-        return Ok(Acquire::prepare(ctx, name, args, kwargs)?.run());
+        let wait = Acquire::prepare(ctx, name, args, kwargs)?;
+        // SAFETY: argument conversion returned to this exclusively executing caller.
+        return unsafe { wait.run_registered(ctx) };
     }
     let (id, lock, args) = receiver_args(ctx, name, args)?;
     check_method_args(name, args, kwargs)?;
