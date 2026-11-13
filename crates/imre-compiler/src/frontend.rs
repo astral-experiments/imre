@@ -7690,7 +7690,7 @@ impl<'a> Checker<'a> {
             // Different partials can share a call signature without sharing a capture frame.
             self.coerce(value, partial.callable, target)?
         } else if let Some(&nullable) = self.nullable_assignments.get(name.id.as_str())
-            && self.types.payload(nullable) == Some(value.ty)
+            && (value.ty == Type::None || self.types.payload(nullable) == Some(value.ty))
         {
             self.coerce(value, nullable, target)?
         } else if let Some(signature) = self.types.method_signature(value.ty) {
