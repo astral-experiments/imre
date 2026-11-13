@@ -316,12 +316,11 @@ fn typed_pipe_errors(value: &ast::Expr) -> bool {
 fn stream_plan(
     graph: &SourceGraph,
     module: ModuleId,
+    api: LaunchApi,
     call: &ast::ExprCall,
 ) -> std::result::Result<(u32, ProcessCapture), &'static str> {
-    let checked_output =
-        graph.resolve(module, &call.func) == Some(Binding::Intrinsic(Intrinsic::CheckOutput));
-    let run =
-        graph.resolve(module, &call.func) == Some(Binding::Intrinsic(Intrinsic::SubprocessRun));
+    let checked_output = api == LaunchApi::CheckOutput;
+    let run = matches!(api, LaunchApi::Run { .. });
     let mut streams = [u32::from(checked_output), 0];
     let mut capture = false;
     let mut text = false;
@@ -381,12 +380,7 @@ fn stream_plan(
         ProcessCapture {
             stdout,
             stderr,
-            text: text
-                && (stdout
-                    || stderr
-                    || run
-                    || graph.resolve(module, &call.func)
-                        == Some(Binding::Intrinsic(Intrinsic::Popen))),
+            text: text && (stdout || stderr || run || api == LaunchApi::Popen),
         },
     ))
 }
@@ -420,7 +414,7 @@ fn error_field_type(graph: &SourceGraph, types: &Types, field: u32, timeout: boo
                     }
                     Some(Binding::Intrinsic(Intrinsic::CheckOutput)) => {
                         self.variable_command = true;
-                        stream_plan(self.graph, self.module, call)
+                        stream_plan(self.graph, self.module, LaunchApi::CheckOutput, call)
                             .ok()
                             .map(|(_, capture)| {
                                 error_stream(
@@ -445,17 +439,22 @@ fn error_field_type(graph: &SourceGraph, types: &Types, field: u32, timeout: boo
                                 || self.graph.session.is_string_list(self.module, arg)
                             );
                         }
-                        stream_plan(self.graph, self.module, call)
-                            .ok()
-                            .filter(|(mode, _)| mode & 256 == 0)
-                            .map(|(_, capture)| {
-                                error_stream(
-                                    self.types,
-                                    capture,
-                                    self.stdout,
-                                    self.timeout && timeout_argument(call).is_some(),
-                                )
-                            })
+                        stream_plan(
+                            self.graph,
+                            self.module,
+                            LaunchApi::Run { discarded: false },
+                            call,
+                        )
+                        .ok()
+                        .filter(|(mode, _)| mode & 256 == 0)
+                        .map(|(_, capture)| {
+                            error_stream(
+                                self.types,
+                                capture,
+                                self.stdout,
+                                self.timeout && timeout_argument(call).is_some(),
+                            )
+                        })
                     }
                     _ => None,
                 };
@@ -934,7 +933,7 @@ impl Checker<'_> {
         }
         let directory = self.types.optional(Type::Str);
         let environment = self.types.optional(self.types.dict(Type::Str, Type::Str));
-        let (streams, capture) = stream_plan(self.graph, self.module, call)
+        let (streams, capture) = stream_plan(self.graph, self.module, api, call)
             .map_err(|message| error(self.source, call, message))?;
         let stdin = call
             .arguments
