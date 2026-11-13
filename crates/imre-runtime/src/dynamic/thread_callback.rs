@@ -2,12 +2,13 @@
 //! Only the compiler can certify that the function needs no surrounding heap.
 
 use super::thread_lock::Acquire;
-use super::thread_worker::Operation;
+use super::thread_worker::{Operation, WorkerStatus};
 use super::value::{Body, Code, CodeDefinition, CodeObject, WorkerStack};
 use super::{CallParameters, Context, Error, Id, NONE, Result, Value, copy_label, ffi};
 use crate::objects::locks::PrimitiveLock;
 use crate::objects::logging::HandlerLock;
 use std::collections::HashMap;
+use std::io::Write;
 use std::sync::Arc;
 
 enum Argument {
@@ -358,7 +359,13 @@ impl Callback {
         })
     }
 
-    pub(super) fn load(self) -> Result<(Context, Id, Vec<Id>, Vec<(String, Id)>)> {
+    /// Prepare on the child before publishing its identity. Invoking or dropping the
+    /// returned call consumes its arguments and context on that same thread.
+    pub(super) fn into_call(
+        self,
+        fault_workers: &Arc<()>,
+        detached_label: Option<String>,
+    ) -> Result<impl FnOnce() -> WorkerStatus + use<>> {
         let heap = super::Heap::with_worker_stack(
             Some(self.frames),
             self.gc_settings,
@@ -441,6 +448,27 @@ impl Callback {
         {
             keywords.push((copy_label(name)?, value));
         }
-        Ok((ctx, function, slots, keywords))
+        ctx.heap.observe_fault_workers(fault_workers);
+        Ok(move || {
+            let result = match ctx.prepare_call(function, slots, keywords) {
+                // SAFETY: the call owns this pthread's Context; preparation's borrow has ended.
+                Ok(call) => unsafe { call.run(&raw mut ctx) },
+                Err(error) => Err(error),
+            };
+            if let Err(error) = result {
+                if let Some(label) = detached_label {
+                    if error.kind != "SystemExit" {
+                        let _ = writeln!(
+                            crate::sys::stderr_writer(),
+                            "Exception ignored in thread started by {label}:\n{}",
+                            error.report(&ctx.heap)
+                        );
+                    }
+                } else {
+                    return Err(error.report(&ctx.heap).to_string());
+                }
+            }
+            Ok(())
+        })
     }
 }

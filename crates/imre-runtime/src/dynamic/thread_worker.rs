@@ -3,7 +3,6 @@
 use super::thread_callback::Callback;
 use super::thread_lock::{Acquire, NativeWait};
 use super::value::Heap;
-use std::io::Write;
 use std::sync::{
     Arc, Condvar, Mutex, MutexGuard, Weak,
     atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -18,7 +17,7 @@ use super::{Context, Error, Id, NONE, Result, Value};
 use crate::objects::locks::{PrimitiveLock, thread_ident};
 use crate::objects::time::Deadline;
 
-type WorkerStatus = std::result::Result<(), String>;
+pub(super) type WorkerStatus = std::result::Result<(), String>;
 
 #[derive(Default)]
 struct NativeJoin {
@@ -541,17 +540,11 @@ impl Drop for Registry {
     }
 }
 
-pub(super) enum Operation {
-    Python(Box<Callback>),
+pub(super) enum Operation<P = Box<Callback>, R = Arc<PrimitiveLock>> {
+    Python(P),
     Empty,
-    UpdateHash {
-        hash: SharedHash,
-        data: Vec<u8>,
-    },
-    Acquire {
-        wait: Acquire,
-        release: Option<Arc<PrimitiveLock>>,
-    },
+    UpdateHash { hash: SharedHash, data: Vec<u8> },
+    Acquire { wait: Acquire, release: Option<R> },
 }
 
 enum Registration {
@@ -696,59 +689,47 @@ fn launch(request: Start) -> Result<(Ready, Entry)> {
     handle.spawn(move |exit| {
         let (fault_workers, interpreter) = request.fault_workers.unzip();
         let _publication = interpreter.map(crate::fault_handler::FramePublication::enter);
-        // A failed bootstrap publishes no identity and contributes nothing to the live count.
-        match request.operation {
+        // Only this pthread owns the prepared Python context, even if startup is cancelled.
+        let mut released = None;
+        let call = match request.operation {
             Operation::Python(callback) => {
-                let (mut worker, function, args, kwargs) = match callback.load() {
-                    Ok(call) => call,
+                match callback.into_call(
+                    fault_workers.as_ref().expect("Python worker"),
+                    detached_label,
+                ) {
+                    Ok(invoke) => Operation::Python(invoke),
                     Err(error) => {
                         let _ = ready.send(Err(error.to_string()));
                         return Ok(());
                     }
-                };
-                worker
-                    .heap
-                    .observe_fault_workers(fault_workers.as_ref().expect("Python worker"));
-                if !exit.enter(request.count, starting, &ready, None) {
-                    return Ok(());
-                }
-                let result = match worker.prepare_call(function, args, kwargs) {
-                    // SAFETY: the ABI pointer comes from the Context owned by this
-                    // pthread. Preparation's borrow has ended and no other code can
-                    // move or access the Context until this frame returns.
-                    Ok(call) => unsafe { call.run(&raw mut worker) },
-                    Err(error) => Err(error),
-                };
-                if let Err(error) = result {
-                    if let Some(label) = detached_label {
-                        if error.kind != "SystemExit" {
-                            let _ = writeln!(
-                                crate::sys::stderr_writer(),
-                                "Exception ignored in thread started by {label}:\n{}",
-                                error.report(&worker.heap)
-                            );
-                        }
-                    } else {
-                        return Err(error.report(&worker.heap).to_string());
-                    }
                 }
             }
-            Operation::Empty => {
-                exit.enter(request.count, starting, &ready, None);
-            }
+            Operation::Empty => Operation::Empty,
+            Operation::UpdateHash { hash, data } => Operation::UpdateHash { hash, data },
+            Operation::Acquire { wait, release } => Operation::Acquire {
+                wait,
+                release: release.map(|lock| {
+                    // start() waits for the outcome of this prefix before returning.
+                    let (ack, receiver) = mpsc::channel();
+                    released = Some(receiver);
+                    (lock, ack)
+                }),
+            },
+        };
+        // All targets publish identity and wait for the creator before any target effects.
+        if !exit.enter(request.count, starting, &ready, released) {
+            return Ok(());
+        }
+        match call {
+            Operation::Python(invoke) => return invoke(),
+            Operation::Empty => {}
             Operation::UpdateHash { hash, data } => {
-                if exit.enter(request.count, starting, &ready, None) {
-                    hash.lock()
-                        .update(&data)
-                        .map_err(|error| error.to_string())?;
-                }
+                hash.lock()
+                    .update(&data)
+                    .map_err(|error| error.to_string())?;
             }
             Operation::Acquire { wait, release } => {
-                if let Some(lock) = release {
-                    let (ack, released) = mpsc::channel();
-                    if !exit.enter(request.count, starting, &ready, Some(released)) {
-                        return Ok(());
-                    }
+                if let Some((lock, ack)) = release {
                     let result = lock
                         .release()
                         .map_err(|error| Error::from(error).to_string());
@@ -757,8 +738,6 @@ fn launch(request: Start) -> Result<(Ready, Entry)> {
                     if failed {
                         return Ok(());
                     }
-                } else if !exit.enter(request.count, starting, &ready, None) {
-                    return Ok(());
                 }
                 wait.run();
             }
