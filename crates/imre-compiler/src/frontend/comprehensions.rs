@@ -3,7 +3,7 @@
 //! enclosing function, including when a later iteration raises.
 
 use ruff_python_ast::UnaryOp;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 pub(crate) use imre_ast::comprehension::collect_target_names as target_names;
 use imre_ast::comprehension::{Output, Plan};
@@ -41,6 +41,8 @@ pub(super) struct Helper {
 /// checking their bodies, then fill it without disturbing earlier call targets.
 pub(super) struct Helpers {
     first: usize,
+    // Inference needs stable call edges even when it never emits a helper body.
+    reserved: Cell<usize>,
     functions: RefCell<Vec<Option<Helper>>>,
     /// Lifted functions normally leave scope after checking their enclosing body.
     pub(super) local_annotations:
@@ -52,6 +54,7 @@ impl Helpers {
     pub fn new(first: usize) -> Self {
         Self {
             first,
+            reserved: Cell::new(0),
             functions: RefCell::new(Vec::new()),
             local_annotations: RefCell::default(),
             list_builds: RefCell::default(),
@@ -59,23 +62,25 @@ impl Helpers {
     }
 
     pub(super) fn len(&self) -> usize {
-        self.functions.borrow().len()
+        self.reserved.get()
     }
 
     pub(super) fn reserve(&self) -> usize {
-        let mut functions = self.functions.borrow_mut();
-        let id = self.first + functions.len();
-        functions.push(None);
-        id
+        let index = self.len();
+        self.reserved.set(index + 1);
+        self.first + index
     }
 
     pub(super) fn finish(&self, id: usize, helper: Helper) {
-        self.functions.borrow_mut()[id - self.first] = Some(helper);
+        let mut functions = self.functions.borrow_mut();
+        functions.resize_with(self.len(), || None);
+        functions[id - self.first] = Some(helper);
     }
 
     pub fn take_functions(&self) -> impl Iterator<Item = Helper> {
-        self.functions
-            .take()
+        let functions = self.functions.take();
+        assert_eq!(functions.len(), self.reserved.replace(0));
+        functions
             .into_iter()
             .map(|helper| helper.expect("checked comprehension filled its helper"))
     }
@@ -1182,8 +1187,8 @@ mod tests {
             assert!(matches!(args.values[0].kind, ExprKind::List(_)));
             assert!(checker.calls.contains(&id));
         }
-        let bodies = helpers.functions.borrow();
-        assert!(matches!(&bodies[..], [None, None, None]));
+        assert_eq!(helpers.len(), 3);
+        assert_eq!(helpers.functions.borrow().capacity(), 0);
     }
 
     #[test]
