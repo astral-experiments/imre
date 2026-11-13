@@ -27,7 +27,7 @@ impl FixedBodySource {
             }
             remaining = remaining.and_then(|sites| {
                 let ((_, expected), rest) = sites.split_first()?;
-                (FixedNode::checked(&node).as_ref() == Some(expected.as_ref()?)).then_some(rest)
+                expected.as_ref()?.matches(&node).then_some(rest)
             });
         });
         if !matches!(remaining, Some([])) {
@@ -98,7 +98,9 @@ pub(crate) enum FixedNode {
     Indexed(std::mem::Discriminant<ExprKind>, usize, Type),
     NamedCall(std::mem::Discriminant<ExprKind>, usize, usize, Type),
     Integer(i64),
-    Constant(ir::Constant),
+    None,
+    Bool(bool),
+    String(Box<str>),
     Binary(Binary, Type),
     Copy(ir::CopyOperation, usize, Type),
     Text(ir::TextOperation, usize, Type),
@@ -109,6 +111,18 @@ pub(crate) enum FixedNode {
 impl FixedNode {
     pub(super) fn indexed(kind: &ExprKind, index: usize, ty: Type) -> Self {
         Self::Indexed(std::mem::discriminant(kind), index, ty)
+    }
+
+    /// Borrow the checked spelling when a source literal is placed on its final instruction.
+    fn matches(&self, node: &ir::Node<'_>) -> bool {
+        if let ir::Node::Expression(Expr {
+            kind: ExprKind::Str(value),
+            ..
+        }) = node
+        {
+            return matches!(self, Self::String(expected) if expected.as_ref() == value);
+        }
+        Self::checked(node).as_ref() == Some(self)
     }
 
     pub(crate) fn checked(node: &ir::Node<'_>) -> Option<Self> {
@@ -123,10 +137,9 @@ impl FixedNode {
             ir::Node::Statement(Statement::Assign(slot, _)) => Self::Store(*slot),
             ir::Node::Statement(Statement::SetField(_, field, _)) => Self::StoreField(*field),
             ir::Node::Expression(expr) => match expr.kind {
-                ExprKind::None if expr.ty == Type::None => Self::Constant(ir::Constant::None),
-                ExprKind::Str(_) | ExprKind::Bool(_) => {
-                    Self::Constant(ir::Constant::from_expr(expr)?)
-                }
+                ExprKind::None if expr.ty == Type::None => Self::None,
+                ExprKind::Bool(value) => Self::Bool(value),
+                ExprKind::Str(ref value) => Self::String(value.as_str().into()),
                 ExprKind::List(ref items) if matches!(expr.ty, Type::List(_) | Type::ListInt) => {
                     Self::indexed(&expr.kind, items.len(), expr.ty)
                 }
@@ -456,7 +469,7 @@ mod tests {
         let text = concat!(
             "class Receiver:\n    def read(self, value: int) -> int: return value\n",
             "def pick(flag: bool) -> str:\n",
-            "    if flag:\n        return 'yes'\n    else:\n        return 'no'\n",
+            "    if flag:\n        return 'café'\n    else:\n        return ''\n",
             "print(pick(True))\n",
         );
         let mut graph = SourceGraph::single(text).unwrap();
@@ -472,7 +485,7 @@ mod tests {
         let body = function.body.as_ptr();
         let placed = source.clone().place(function).ok().unwrap();
         assert_eq!(placed.function.body.as_ptr(), body);
-        assert_eq!(&text[placed.fixed_sites[3]], "'yes'");
+        assert_eq!(&text[placed.fixed_sites[3]], "'café'");
         function = placed.function;
         let [Statement::If(_, yes, _)] = function.body.as_mut_slice() else {
             panic!()
@@ -480,7 +493,7 @@ mod tests {
         let [Statement::Return(value)] = yes.as_mut_slice() else {
             panic!()
         };
-        *value = unpacking::string("new");
+        *value = unpacking::string("cafè");
         assert!(source.clone().place(function.clone()).is_err());
         let [Statement::If(_, yes, no)] = function.body.as_mut_slice() else {
             panic!()
@@ -488,7 +501,7 @@ mod tests {
         let [Statement::Return(value)] = yes.as_mut_slice() else {
             panic!()
         };
-        *value = unpacking::string("yes");
+        *value = unpacking::string("café");
         no.insert(0, yes.remove(0));
         assert_eq!(function.body.as_ptr(), body);
         assert!(source.place(function).is_err());
