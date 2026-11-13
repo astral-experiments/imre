@@ -2843,7 +2843,7 @@ impl UnicodeProperty {
 }
 
 /// Closed string operations preserve exact argument and storage types.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TextOperation {
     Predicate(TextPredicate),
     SplitLineEnds,
@@ -2885,7 +2885,7 @@ pub(crate) enum TextOperation {
     ShlexQuote,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
 pub(crate) enum UrlProperty {
     Username,
@@ -2894,7 +2894,7 @@ pub(crate) enum UrlProperty {
     Port,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TextPredicate {
     Alnum,
     Ascii,
