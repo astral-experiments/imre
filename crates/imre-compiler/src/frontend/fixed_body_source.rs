@@ -47,7 +47,7 @@ pub(crate) enum FixedNode {
     Integer(i64),
     Constant(ir::Constant),
     Binary(Binary, Type),
-    Builtin(std::mem::Discriminant<Builtin>, Type),
+    Builtin(std::mem::Discriminant<Builtin>, usize, Type),
 }
 
 impl FixedNode {
@@ -93,7 +93,9 @@ impl FixedNode {
                     Self::ModuleRead(slot, expr.ty)
                 }
                 ExprKind::Binary(op, _, _) => Self::Binary(op, expr.ty),
-                ExprKind::Builtin(ref op, _) => Self::Builtin(std::mem::discriminant(op), expr.ty),
+                ExprKind::Builtin(ref op, ref operands) => {
+                    Self::Builtin(std::mem::discriminant(op), operands.len(), expr.ty)
+                }
                 _ => return None,
             },
             _ => return None,
@@ -182,8 +184,8 @@ impl SourceSites {
         if let Some(site) = self.site_at(call.range())
             && call.start() == name.start()
             && !ruff_python_stdlib::identifiers::is_mangled_private(name.id.as_str())
-            && let ExprKind::Call(_, args) = &value.kind
-            && args.values.len() == call.arguments.args.len()
+            && let Some(args) = value.named_call_arguments()
+            && args.len() == call.arguments.args.len()
             && registered::values::fixed_positional_arguments(call)
             && let Some(node) = FixedNode::checked(&ir::Node::Expression(value))
         {
@@ -231,7 +233,11 @@ impl SourceSites {
                 site,
                 field.attr.start(),
                 registered::values::bound_method_operation(call, field),
-                FixedNode::Builtin(std::mem::discriminant(op), result),
+                FixedNode::Builtin(
+                    std::mem::discriminant(op),
+                    1 + call.arguments.args.len(),
+                    result,
+                ),
             );
         }
     }
@@ -270,10 +276,10 @@ impl SourceSites {
         locals: &[Type],
         method: Option<&Arc<ast::StmtFunctionDef>>,
     ) -> Option<FixedBodySource> {
-        if self.current.is_some()
+        if body.is_empty()
+            || self.current.is_some()
             || source_statements != body.len()
             || names.len() != locals.len()
-            || !matches!(body.last(), Some(Statement::Return(_)))
         {
             return None;
         }

@@ -256,13 +256,13 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             return CheckedValue::owned(native.native_call(target, args, values, returns));
         };
 
-        self.python_invoke(site, args, |frame| frame.evaluate_handle(callable))
+        self.python_invoke(site, &args.values, |frame| frame.evaluate_handle(callable))
     }
 
     fn python_invoke(
         &mut self,
         site: &ir::InvokeSite,
-        args: &CallArgs,
+        args: &[Expr],
         callable: impl FnOnce(&mut CheckedFrame<'_, '_, '_>) -> String,
     ) -> CheckedValue {
         let frame = self.python();
@@ -286,7 +286,10 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 .as_deref()
                 .map(|expr| keep(frame.evaluate_handle(expr), frame));
             let target = keep(callable(frame), frame);
-            let values = args.capture(|expr| keep(frame.evaluate_handle(expr), frame));
+            let values = args
+                .iter()
+                .map(|expr| keep(frame.evaluate_handle(expr), frame))
+                .collect();
             let (array, count) = frame.fixed_call_arguments(&target, values, exec);
             let positional = super::registered::CallArguments::Positional {
                 array,
@@ -766,12 +769,12 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         {
             let attribute = frame.fixed_attribute(range);
             let position = attribute
-                .filter(|_| !matches!(expr.kind, ExprKind::Call(_, _)))
+                .filter(|field| !matches!(*field.operation, Builtin::RegisteredName(_)))
                 .map_or(range.start(), |op| op.position);
             return frame.at_expression(range, position, |frame| {
                 if let Some(field) = attribute {
-                    if let (Builtin::RegisteredName(name), ExprKind::Call(_, args)) =
-                        (&*field.operation, &expr.kind)
+                    if let Builtin::RegisteredName(name) = &*field.operation
+                        && let Some(args) = expr.named_call_arguments()
                     {
                         let name_range = TextRange::new(range.start(), field.position);
                         let site = ir::InvokeSite {

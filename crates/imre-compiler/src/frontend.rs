@@ -12691,14 +12691,7 @@ impl<'a> Checker<'a> {
                 ));
             }
             let value = self.source_call(call, &signature, None, 0)?;
-            if let Some(sites) = &mut self.fixed_sites
-                && let Some(name) = call.func.as_name_expr()
-                && self.namespace.is_none()
-                && !self.names.contains_key(name.id.as_str())
-                && self.source.get(name.range().to_std_range()) == Some(name.id.as_str())
-            {
-                sites.named_call(call, name, &value);
-            }
+            self.record_named_call(call, &value);
             return Ok(value);
         }
         if matches!(&*call.func, ast::Expr::Name(name) if self.names.contains_key(name.id.as_str()))
@@ -14575,10 +14568,24 @@ impl<'a> Checker<'a> {
             }
             _ => return Err(error(self.source, call, UNSUPPORTED_ARGUMENTS)),
         };
-        Ok(Expr {
+        let value = Expr {
             ty,
             kind: ExprKind::Builtin(builtin, args),
-        })
+        };
+        self.record_named_call(call, &value);
+        Ok(value)
+    }
+
+    /// Retain a written global lookup for the Python entry of a checked positional call.
+    fn record_named_call(&mut self, call: &ast::ExprCall, value: &Expr) {
+        if let Some(sites) = &mut self.fixed_sites
+            && let Some(name) = call.func.as_name_expr()
+            && self.namespace.is_none()
+            && !self.names.contains_key(name.id.as_str())
+            && self.source.get(name.range().to_std_range()) == Some(name.id.as_str())
+        {
+            sites.named_call(call, name, value);
+        }
     }
 
     /// Complete the checked arguments in the original positional and keyword order.
