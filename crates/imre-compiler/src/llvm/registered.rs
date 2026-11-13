@@ -1071,7 +1071,8 @@ impl<'f> Frame<'f, '_, '_> {
     pub(super) fn builtin(&mut self, op: &Builtin, operands: &[Expr]) -> CheckedValue {
         let handle = match (op, operands) {
             (Builtin::RegisteredCall(call), [target, args @ ..]) => {
-                self.call_value(call, target, args)
+                return CheckedBody::registered(self.reborrow())
+                    .registered_call(call, target, args);
             }
             (Builtin::RegisteredAttribute { .. }, _) => self.mutate_attribute(op, operands.iter()),
             (Builtin::RegisteredInput(index), []) => self.registered_input(*index),

@@ -269,38 +269,144 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         args: &[Expr],
         callable: impl FnOnce(&mut CheckedFrame<'_, '_, '_>, &mut String) -> String,
     ) -> CheckedValue {
-        let frame = self.python();
-        let exec = frame.exec_literal_at(site.range);
-        let mark = frame.temporary_mark();
-        let result = frame.unwind_stack_operands(&mark, |frame| {
-            if frame.native_suspension
-                && let Some(name) = site.suspended_name
+        let call = ir::RegisteredCall {
+            target: ir::RegisteredCallTarget::Callable {
+                end: site.callee_end,
+                suspended_name: site.suspended_name,
+            },
+            range: site.range,
+            arguments: ir::RegisteredArguments::Positional,
+            explicit_scope: site.scope.is_some(),
+            partition_field: None,
+        };
+        self.python_call(&call, site.scope.as_deref(), args, callable)
+    }
+
+    pub(super) fn registered_call(
+        &mut self,
+        call: &ir::RegisteredCall,
+        operand: &Expr,
+        args: &[Expr],
+    ) -> CheckedValue {
+        let (scope, target, args) = if call.explicit_scope {
+            let (target, args) = args.split_first().expect("scoped call has a target");
+            (Some(operand), target, args)
+        } else {
+            (None, operand, args)
+        };
+        self.python_call(call, scope, args, |frame, next| {
+            if matches!(call.target, ir::RegisteredCallTarget::Callable { .. })
+                && !matches!(call.arguments, ir::RegisteredArguments::Packed(_))
             {
-                frame.call_position(name);
+                frame.kept_call_value(target, next)
+            } else {
+                frame.evaluate_handle(target)
             }
-            // Each evaluation leaves just its result above the previous operands.
-            // Release intermediate owners before the next argument can run Python.
-            let mut next = mark.clone();
-            let scope = site
-                .scope
-                .as_deref()
-                .map(|expr| frame.kept_call_value(expr, &mut next));
-            let target = callable(frame, &mut next);
-            let (array, count) = frame.kept_call_arguments(&target, args, next, exec);
-            let positional = super::registered::CallArguments::Positional {
-                array,
-                count,
-                receiver_slot: false,
-            };
+        })
+    }
+
+    /// Resolve the callable and any bound receiver before capturing the written arguments.
+    fn python_call(
+        &mut self,
+        call: &ir::RegisteredCall,
+        scope: Option<&Expr>,
+        args: &[Expr],
+        target: impl FnOnce(&mut CheckedFrame<'_, '_, '_>, &mut String) -> String,
+    ) -> CheckedValue {
+        use super::registered::CallArguments;
+        use ir::{RegisteredArguments, RegisteredCallTarget};
+
+        let frame = self.python();
+        let exec = frame.exec_literal_at(call.range);
+        let mark = frame.temporary_mark();
+        let edge = frame.begin_operand_scope();
+        if frame.native_suspension
+            && let RegisteredCallTarget::Callable {
+                suspended_name: Some(name),
+                ..
+            } = &call.target
+        {
+            frame.call_position(*name);
+        }
+        let mut next = mark.clone();
+        let packed = matches!(call.arguments, RegisteredArguments::Packed(_));
+        let scope = scope.map(|scope| {
+            if packed {
+                frame.evaluate_handle(scope)
+            } else {
+                frame.kept_call_value(scope, &mut next)
+            }
+        });
+        let target = target(frame, &mut next);
+        let (callable, receiver, end) = match &call.target {
+            RegisteredCallTarget::Callable { end, .. } => (target, None, *end),
+            RegisteredCallTarget::Method {
+                name, attribute, ..
+            } => {
+                let direct = matches!(call.arguments, RegisteredArguments::Positional);
+                let (callable, bound) = frame.call_method_target(&target, name, *attribute, direct);
+                next = frame.keep_operands(&next, &callable, bound.as_deref().unwrap_or("0"));
+                if bound.is_some() && !args.is_empty() {
+                    // keep_operands returns the boundary above the callable. A direct
+                    // lookup may have placed its receiver above that boundary as well.
+                    next = frame.temporary_mark();
+                }
+                (callable, bound, attribute.end())
+            }
+        };
+        let operands = match &call.arguments {
+            RegisteredArguments::Packed(pack) => {
+                let (args, kwargs) = frame.pack_arguments(pack, args, Some(&callable));
+                CallArguments::Packed { args, kwargs }
+            }
+            layout => {
+                let receiver_slot = receiver.is_some();
+                let (array, count) =
+                    frame.kept_call_arguments(&callable, receiver, args, next, exec);
+                if let RegisteredArguments::Keywords { positional, names } = layout {
+                    CallArguments::FixedKeywords {
+                        array,
+                        positional: *positional,
+                        keywords: names.len(),
+                        names: frame.output.data(names.join("\0").as_bytes()),
+                    }
+                } else if let Some((index, range)) = call.partition_field {
+                    let span = frame.expression_range_span(range, call.range.end(), b'[');
+                    let get_position =
+                        span.map_or_else(|| "null".into(), |span| frame.output.position(span));
+                    debug_assert!(receiver_slot && count == 2);
+                    CallArguments::PartitionField {
+                        array,
+                        index,
+                        get_position,
+                    }
+                } else {
+                    CallArguments::Positional {
+                        array,
+                        count,
+                        receiver_slot,
+                    }
+                }
+            }
+        };
+        let invoke = |frame: &mut CheckedFrame<'_, '_, '_>| {
             frame.positioned_call(
-                &target,
-                positional,
+                &callable,
+                operands,
                 &mark,
-                site.range,
-                site.callee_end,
+                call.range,
+                end,
                 scope.as_deref(),
             )
-        });
+        };
+        let result = if packed {
+            frame.finish_unwind(edge, |frame| frame.release_owned_operands(&mark));
+            invoke(frame)
+        } else {
+            let result = invoke(frame);
+            frame.finish_unwind(edge, |frame| frame.release_owned_operands(&mark));
+            result
+        };
         CheckedValue::handle(result)
     }
 
