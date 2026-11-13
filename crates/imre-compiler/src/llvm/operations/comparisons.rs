@@ -48,7 +48,7 @@ impl<'f, 'a, 'p, 'm> CheckedBody<'f, 'a, 'p, 'm> {
                 && let Some(CheckedValue::Handle { id, .. }) = &chain.left
                 && let Some(result) =
                     self.python()
-                        .literal_tuple_membership(id, expr, *op == CmpOp::NotIn)
+                        .literal_sequence_membership(id, expr, *op == CmpOp::NotIn)
             {
                 // Membership has already tested each rich comparison and returned a Python bool.
                 return if truth {

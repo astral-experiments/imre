@@ -665,14 +665,15 @@ impl<'f> Frame<'f, '_, '_> {
         self.handle_array(&handles)
     }
 
-    /// A short tuple of constants can be searched without materializing the tuple.
-    pub(crate) fn literal_tuple_membership(
+    /// A short list or tuple of constants can be searched without building the container.
+    pub(crate) fn literal_sequence_membership(
         &mut self,
         needle: &str,
         container: &Expr,
         negate: bool,
     ) -> Option<String> {
-        let ExprKind::Tuple(items) = &container.without_location().kind else {
+        let (ExprKind::List(items) | ExprKind::Tuple(items)) = &container.without_location().kind
+        else {
             return None;
         };
         if items.len() > 8 || !items.iter().all(ir::Constant::is_constant) {
