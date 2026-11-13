@@ -698,7 +698,7 @@ impl Expr {
     /// Written operands available to a direct named call. A module read has no call site.
     pub(crate) fn named_call_arguments(&self) -> Option<&[Expr]> {
         match &self.kind {
-            ExprKind::Call(_, args) => Some(&args.values),
+            ExprKind::Call(_, args) | ExprKind::Construct { args, .. } => Some(&args.values),
             ExprKind::Exception { message, .. } => {
                 Some(message.as_deref().map_or(&[], std::slice::from_ref))
             }
