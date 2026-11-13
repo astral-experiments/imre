@@ -91,9 +91,26 @@ struct WorkerExit {
 }
 
 impl WorkerExit {
-    fn enter(&mut self, count: Arc<AtomicUsize>) {
+    fn enter(
+        &mut self,
+        count: Arc<AtomicUsize>,
+        handle: Arc<Handle>,
+        ready: &mpsc::SyncSender<std::result::Result<Started, String>>,
+        released: Option<mpsc::Receiver<WorkerStatus>>,
+    ) -> bool {
         count.fetch_add(1, Ordering::SeqCst);
         self.count = Some(count);
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        let native_id = Some(crate::objects::locks::native_thread_id());
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        let native_id = None;
+        let start = Started {
+            handle: Arc::clone(&handle),
+            ident: thread_ident(),
+            native_id,
+            released,
+        };
+        ready.send(Ok(start)).is_ok() && handle.ident.wait().is_some()
     }
 }
 
@@ -695,75 +712,26 @@ fn launch(request: Start) -> Result<(Ready, Entry)> {
     // The child's identity can arrive before the creator receives it. Dropping
     // the queued publication cancels the worker through the same gate.
     let (ready, started) = mpsc::sync_channel(1);
-    let (release_status, released) = if matches!(
-        request.operation,
-        Operation::Acquire {
-            release: Some(_),
-            ..
-        }
-    ) {
-        let (tx, rx) = mpsc::channel();
-        (Some(tx), Some(rx))
-    } else {
-        (None, None)
-    };
     let starting = Arc::clone(&handle);
     handle.spawn(move |exit| {
         let (fault_workers, interpreter) = request.fault_workers.unzip();
         let _publication = interpreter.map(crate::fault_handler::FramePublication::enter);
         // A failed bootstrap publishes no identity and contributes nothing to the live count.
-        let mut prefix = None;
-        let mut update = None;
-        let (python, acquire) = match request.operation {
-            Operation::Python(callback) => match callback.load() {
-                Ok((worker, function, slots)) => {
-                    worker
-                        .heap
-                        .observe_fault_workers(fault_workers.as_ref().expect("Python worker"));
-                    (Some((worker, function, slots)), None)
-                }
-                Err(error) => {
-                    let _ = ready.send(Err(error.to_string()));
+        match request.operation {
+            Operation::Python(callback) => {
+                let (mut worker, function, slots) = match callback.load() {
+                    Ok(call) => call,
+                    Err(error) => {
+                        let _ = ready.send(Err(error.to_string()));
+                        return Ok(());
+                    }
+                };
+                worker
+                    .heap
+                    .observe_fault_workers(fault_workers.as_ref().expect("Python worker"));
+                if !exit.enter(request.count, starting, &ready, None) {
                     return Ok(());
                 }
-            },
-            Operation::Empty => (None, None),
-            Operation::UpdateHash { hash, data } => {
-                update = Some((hash, data));
-                (None, None)
-            }
-            Operation::Acquire { wait, release } => {
-                prefix = release;
-                (None, Some(wait))
-            }
-        };
-        exit.enter(request.count);
-        #[cfg(any(target_os = "linux", target_os = "macos"))]
-        let native_id = Some(crate::objects::locks::native_thread_id());
-        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-        let native_id = None;
-        let publication = Started {
-            handle: Arc::clone(&starting),
-            ident: thread_ident(),
-            native_id,
-            released,
-        };
-        if ready.send(Ok(publication)).is_ok() {
-            if starting.ident.wait().is_none() {
-                return Ok(());
-            }
-            drop(starting);
-            if let Some(lock) = prefix {
-                let result = lock
-                    .release()
-                    .map_err(|error| Error::from(error).to_string());
-                let failed = result.is_err();
-                let _ = release_status.expect("prefix acknowledgement").send(result);
-                if failed {
-                    return Ok(());
-                }
-            }
-            if let Some((mut worker, function, slots)) = python {
                 let result = match worker.prepare_bound_function(function, slots) {
                     // SAFETY: the ABI pointer comes from the Context owned by this
                     // pthread. Preparation's borrow has ended and no other code can
@@ -784,12 +752,35 @@ fn launch(request: Start) -> Result<(Ready, Entry)> {
                         return Err(error.report(&worker.heap).to_string());
                     }
                 }
-            } else if let Some(wait) = acquire {
+            }
+            Operation::Empty => {
+                exit.enter(request.count, starting, &ready, None);
+            }
+            Operation::UpdateHash { hash, data } => {
+                if exit.enter(request.count, starting, &ready, None) {
+                    hash.lock()
+                        .update(&data)
+                        .map_err(|error| error.to_string())?;
+                }
+            }
+            Operation::Acquire { wait, release } => {
+                if let Some(lock) = release {
+                    let (ack, released) = mpsc::channel();
+                    if !exit.enter(request.count, starting, &ready, Some(released)) {
+                        return Ok(());
+                    }
+                    let result = lock
+                        .release()
+                        .map_err(|error| Error::from(error).to_string());
+                    let failed = result.is_err();
+                    let _ = ack.send(result);
+                    if failed {
+                        return Ok(());
+                    }
+                } else if !exit.enter(request.count, starting, &ready, None) {
+                    return Ok(());
+                }
                 wait.run();
-            } else if let Some((hash, data)) = update {
-                hash.lock()
-                    .update(&data)
-                    .map_err(|error| error.to_string())?;
             }
         }
         Ok(())
