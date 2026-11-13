@@ -2328,12 +2328,7 @@ impl Context {
                             continue;
                         }
                         Value::Raised(error) => {
-                            if !repr
-                                && let Some(fields) = error
-                                    .trace
-                                    .as_ref()
-                                    .and_then(|trace| trace.source_syntax.as_ref())
-                            {
+                            if !repr && let Some(fields) = ctx.syntax_members(error) {
                                 syntax
                                     .try_reserve(1)
                                     .map_err(|_| Error::new("MemoryError", ""))?;
@@ -2345,10 +2340,10 @@ impl Context {
                                         "maximum recursion depth exceeded while getting the str of an object",
                                     ));
                                 }
-                                let suffix = ctx.syntax_suffix(fields[1].get(), fields[2].get())?;
+                                let suffix = ctx.syntax_suffix(fields[1], fields[2])?;
                                 push_frame(&mut work, Part::SyntaxEnd(id))?;
                                 push_frame(&mut work, Part::Suffix(suffix))?;
-                                push_frame(&mut work, Part::SyntaxMessage(fields[0].get()))?;
+                                push_frame(&mut work, Part::SyntaxMessage(fields[0]))?;
                                 continue;
                             }
                             if !repr

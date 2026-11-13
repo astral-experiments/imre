@@ -173,12 +173,9 @@ pub(super) fn construct(
                 return Ok(result);
             }
             if let Value::Raised(error) = ctx.heap.get(value)
-                && let Some(fields) = error
-                    .trace
-                    .as_ref()
-                    .and_then(|trace| trace.source_syntax.as_ref())
+                && let Some(fields) = ctx.syntax_members(error)
             {
-                let (message, filename, line) = (fields[0].get(), fields[1].get(), fields[2].get());
+                let (message, filename, line) = (fields[0], fields[1], fields[2]);
                 if let Some(suffix) = ctx.surrogate_syntax_suffix(filename, line)? {
                     return ctx.with_slot_depth(
                         "maximum recursion depth exceeded while getting the str of an object",
