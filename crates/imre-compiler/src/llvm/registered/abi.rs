@@ -154,6 +154,7 @@ impl Output {
     }
 
     pub(crate) fn integer_prelude(&mut self) {
+        self.functions.push_str(crate::llvm::BRANCH_WEIGHTS);
         if self.declarations.reads_exact_int_word {
             self.functions
                 .push_str("declare i64 @imre_dyn_exact_int_word(ptr, i64)\n");
@@ -166,8 +167,6 @@ impl Output {
             "declare void @imre_int_retain(i64)\n",
             "declare void @imre_int_release(i64)\n",
             "declare i64 @imre_int_binary(i64, i64, i32)\n",
-            "!0 = !{!\"branch_weights\", i32 1, i32 2000}\n",
-            "!1 = !{!\"branch_weights\", i32 2000, i32 1}\n",
         ));
         self.declarations.integers.write(&mut self.functions, true);
         if self.declarations.releases_integer_owner {
