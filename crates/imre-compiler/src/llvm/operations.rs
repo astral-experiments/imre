@@ -811,7 +811,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
 
     pub(super) fn value_for(&mut self, expr: &Expr, usage: ValueUse) -> CheckedValue {
         if let Entry::Registered(frame) = &mut self.0
-            && let Some(range) = frame.next_fixed_site()
+            && let Some(range) = frame.next_fixed_site(ir::Node::Expression(expr))
         {
             let attribute = frame.fixed_attribute(range);
             use crate::frontend::FixedAttribute;
@@ -1073,7 +1073,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
 
     pub(crate) fn emit_statement(&mut self, stmt: &Statement) {
         if let Entry::Registered(frame) = &mut self.0 {
-            match (stmt, frame.next_fixed_site()) {
+            match (stmt, frame.next_fixed_site(ir::Node::Statement(stmt))) {
                 (Statement::Position(range, simple), _) => frame.statement_site(*range, *simple),
                 (Statement::Break(Some(range)) | Statement::Continue(range), _) => {
                     frame.statement_site(*range, None)
