@@ -196,7 +196,12 @@ pub(crate) fn frame_inputs(
                     sites.push(FrameSite::Generator(*range));
                 }
                 uses_python_protocol = true;
-                ir::generator_operands(*scoped, operands).is_ok()
+                if let Ok((_, iterable)) = ir::generator_operands(*scoped, operands) {
+                    protocol_reads += protocol_parameter(iterable);
+                    true
+                } else {
+                    false
+                }
             }
             ExprKind::Compare(values, ops) if ir::Compare::uses_python_protocol(expr.ty, ops) => {
                 let reads = values.iter().map(&protocol_parameter).sum::<usize>();
