@@ -4500,16 +4500,6 @@ impl<'a> Checker<'a> {
                 let value = self.dictionary(dict, Some((Type::Str, Type::ObjectValue)), None)?;
                 self.coerce(value, concrete, expression)?
             }
-            ast::Expr::Call(call)
-                if self.types.is_counter(concrete)
-                    && self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::Counter))
-                    && call.arguments.is_empty() =>
-            {
-                Expr {
-                    ty: concrete,
-                    kind: ExprKind::Builtin(Builtin::CounterNew, Vec::new()),
-                }
-            }
             ast::Expr::Lambda(lambda) => {
                 let (params, returns) = self.types.signature(concrete).ok_or_else(|| {
                     error(
@@ -4574,27 +4564,9 @@ impl<'a> Checker<'a> {
                 }
             }
             ast::Expr::Call(call)
-                if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::ChainMap))
-                    && let Type::ChainMap(id) = concrete =>
+                if let Some(value) = self.contextual_collection(call, concrete)? =>
             {
-                self.chainmap(call, self.types.mapping(Type::Dict(id)))?
-            }
-            ast::Expr::Call(call)
-                if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::Deque))
-                    && self.types.deque_element(concrete).is_some() =>
-            {
-                self.deque_new(call, self.types.deque_element(concrete))?
-            }
-            ast::Expr::Call(call)
-                if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::Counter))
-                    && self.types.mapping(concrete).is_some() =>
-            {
-                self.counter(call, None, self.types.mapping(concrete).map(|(key, _)| key))?
-            }
-            ast::Expr::Call(call)
-                if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::OrderedDict)) =>
-            {
-                self.ordered_dict_constructor(call, self.types.mapping(concrete))?
+                value
             }
             ast::Expr::Call(call)
                 if let Some((key, value)) = self.types.mapping(concrete)
@@ -4712,6 +4684,38 @@ impl<'a> Checker<'a> {
             return Ok(value);
         }
         coerce(self, value, expected, expression)
+    }
+
+    fn contextual_collection(
+        &mut self,
+        call: &ast::ExprCall,
+        expected: Type,
+    ) -> Result<Option<Expr>, String> {
+        let Some(Binding::Intrinsic(constructor)) = self.resolve(&call.func) else {
+            return Ok(None);
+        };
+        let value = match constructor {
+            Intrinsic::ChainMap if let Type::ChainMap(id) = expected => {
+                self.chainmap(call, self.types.mapping(Type::Dict(id)))?
+            }
+            Intrinsic::Deque if let Some(element) = self.types.deque_element(expected) => {
+                self.deque_new(call, Some(element))?
+            }
+            Intrinsic::Counter if self.types.is_counter(expected) && call.arguments.is_empty() => {
+                Expr {
+                    ty: expected,
+                    kind: ExprKind::Builtin(Builtin::CounterNew, Vec::new()),
+                }
+            }
+            Intrinsic::Counter if let Some((key, _)) = self.types.mapping(expected) => {
+                self.counter(call, None, Some(key))?
+            }
+            Intrinsic::OrderedDict => {
+                self.ordered_dict_constructor(call, self.types.mapping(expected))?
+            }
+            _ => return Ok(None),
+        };
+        Ok(Some(value))
     }
 
     /// The display and its elements use the same source positions in either frame.
