@@ -111,6 +111,7 @@ impl ParsedLiteral {
     fn prepare(
         self,
         python_optimization: i32,
+        python_annotations: bool,
         children: LiteralSites,
     ) -> Result<PreparedLiteral, String> {
         let body = PreparedBody::from_parsed(
@@ -121,7 +122,10 @@ impl ParsedLiteral {
                 parsed: Cow::Borrowed(&self.parsed),
             },
             python_optimization,
-            ModuleOrigin::ExecLiteral(self.inherited_flags),
+            ModuleOrigin::ExecLiteral {
+                inherited_flags: self.inherited_flags,
+                python_annotations,
+            },
             children,
             Default::default(),
         )?;
@@ -234,12 +238,17 @@ impl LiteralForest {
         mut self,
         session: &Session,
         python_optimization: i32,
+        python_annotations: impl Fn(usize) -> bool,
     ) -> BTreeMap<usize, LiteralSites> {
         debug_assert!(!self.has_pending());
         while let Some(node) = self.nodes.pop() {
-            let module = session
-                .check_literal(&node.source)
-                .and_then(|()| node.source.prepare(python_optimization, node.children));
+            let module = session.check_literal(&node.source).and_then(|()| {
+                node.source.prepare(
+                    python_optimization,
+                    python_annotations(node.unit),
+                    node.children,
+                )
+            });
             self.table(node.parent).insert(node.site, module);
         }
         self.roots

@@ -55,6 +55,20 @@ pub(super) struct RegisteredBodies<'a> {
 }
 
 impl RegisteredBodies<'_> {
+    pub(super) fn origin(&self, unit: usize, bundled: bool) -> ModuleOrigin<'_> {
+        if bundled {
+            ModuleOrigin::Bundled
+        } else if self.python_providers.contains(&unit) {
+            ModuleOrigin::Provider
+        } else {
+            ModuleOrigin::Program(
+                self.checked_units
+                    .get(&unit)
+                    .and_then(|unit| self.functions.get(&unit.module?)),
+            )
+        }
+    }
+
     pub(super) fn parsed(&self, unit: usize) -> Option<ParsedModule<'_, '_>> {
         self.checked_units
             .get(&unit)?
@@ -66,10 +80,26 @@ impl RegisteredBodies<'_> {
 #[derive(Clone, Copy)]
 pub(super) enum ModuleOrigin<'a> {
     Program(Option<&'a super::CheckedFunctions>),
-    ExecLiteral(u32),
+    ExecLiteral {
+        inherited_flags: u32,
+        python_annotations: bool,
+    },
     Interactive(u32),
     Provider,
     Bundled,
+}
+
+impl ModuleOrigin<'_> {
+    pub(super) fn python_annotations(self, name: &str) -> bool {
+        match self {
+            Self::Provider => true,
+            Self::ExecLiteral {
+                python_annotations, ..
+            } => python_annotations,
+            Self::Bundled => matches!(name, "_py_warnings" | "tomllib._parser" | "typing"),
+            _ => false,
+        }
+    }
 }
 
 impl crate::ProgramOutput {
@@ -424,9 +454,11 @@ impl<'a> PreparedBody<'a> {
         let keep_docstrings = python_optimization < 2;
         let source = text.as_ref();
         let bundled = matches!(origin, ModuleOrigin::Bundled);
-        let provider = matches!(origin, ModuleOrigin::Provider);
         let inherited_flags = match origin {
-            ModuleOrigin::ExecLiteral(flags) | ModuleOrigin::Interactive(flags) => flags,
+            ModuleOrigin::ExecLiteral {
+                inherited_flags, ..
+            }
+            | ModuleOrigin::Interactive(inherited_flags) => inherited_flags,
             _ => 0,
         };
         let expression = matches!(&input, Input::Expression(..));
@@ -609,9 +641,7 @@ impl<'a> PreparedBody<'a> {
         // the selected body's decision in the enclosing suite.
         use crate::frontend::DeclarationSite;
         let mut class_bodies = HashMap::new();
-        // These CPython providers implement their own call semantics in Python.
-        let python_annotations =
-            provider || bundled && matches!(name, "_py_warnings" | "tomllib._parser" | "typing");
+        let python_annotations = origin.python_annotations(name);
         for declaration in sites.declarations.into_iter().rev() {
             let site = match declaration {
                 DeclarationSite::Function(site) => site,
