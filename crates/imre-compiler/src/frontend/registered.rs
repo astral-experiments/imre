@@ -2111,14 +2111,8 @@ impl<'a> SuitePreparation<'a> {
             self.operations,
             self.sites.omit_assertions,
         );
-        let names: Vec<_> = stmt
-            .handlers
-            .iter()
-            .map(|ast::ExceptHandler::ExceptHandler(handler)| {
-                handler.name.as_ref().map(|name| scope.slot(name.as_str()))
-            })
-            .collect();
-        let mut region = RegisteredSuite::new(scope.finish(vec![checkpoint]), Vec::new());
+        let mut operands = Vec::new();
+        let mut suites = Vec::new();
 
         // Preserve the first refusal from the body, entered else, handlers and finally.
         let body = self.physical_suite(&stmt.body, kind, selection, suspended);
@@ -2127,23 +2121,22 @@ impl<'a> SuitePreparation<'a> {
             self.refusal = self.refusal.or(otherwise.refusal);
         }
         let body_continues = body.falls_through;
-        let body = region.child(body);
-        let orelse = region.child(otherwise);
+        let body = body.into_child(&mut suites);
+        let orelse = otherwise.into_child(&mut suites);
         let mut handlers = Vec::with_capacity(stmt.handlers.len());
-        for (ast::ExceptHandler::ExceptHandler(handler), name) in stmt.handlers.iter().zip(names) {
+        for ast::ExceptHandler::ExceptHandler(handler) in &stmt.handlers {
             let matcher = exception_matcher(handler, stmt.is_star, |class, site| {
-                let operand = self.physical_operand(class, kind, selection, suspended);
-                Ok::<_, std::convert::Infallible>(values::located(
-                    site,
-                    class.start(),
-                    region.operand(operand, Type::PythonObject),
-                ))
+                let operand =
+                    self.region_operand(class, &mut scope, &mut operands, selection, suspended);
+                Ok::<_, std::convert::Infallible>(values::located(site, class.start(), operand))
             })
             .expect("prepared exception matcher");
             handlers.push(ir::ExceptHandler {
                 matcher,
-                name,
-                body: region.child(self.physical_suite(&handler.body, kind, selection, suspended)),
+                name: handler.name.as_ref().map(|name| scope.slot(name.as_str())),
+                body: self
+                    .physical_suite(&handler.body, kind, selection, suspended)
+                    .into_child(&mut suites),
             });
         }
         let (finalbody, final_continues) = if stmt.finalbody.is_empty() {
@@ -2151,16 +2144,22 @@ impl<'a> SuitePreparation<'a> {
         } else {
             let suite = self.physical_suite(&stmt.finalbody, kind, selection, suspended);
             let continues = suite.falls_through;
-            (region.child(suite), continues)
+            (suite.into_child(&mut suites), continues)
         };
-        region.falls_through = try_continues(body_continues, !handlers.is_empty(), final_continues);
-        region.checked.function.body.push(Statement::Try {
+        let falls_through = try_continues(body_continues, !handlers.is_empty(), final_continues);
+        let statement = Statement::Try {
             body,
             handlers,
             orelse,
             finalbody,
-        });
-        region
+        };
+        RegisteredSuite {
+            checked: scope.finish(vec![checkpoint, statement]),
+            operands,
+            suites,
+            falls_through,
+            refusal: None,
+        }
     }
 
     fn prepare_context(
