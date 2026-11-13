@@ -1438,10 +1438,11 @@ fn lower_graph(
             && signature.returns == Type::None
             && definition.returns.is_some()
             && !signature.params.is_empty()
-            && signature
-                .params
-                .iter()
-                .all(|p| p.ty.is_format_scalar() && p.default.is_none() && !p.sign_only)
+            && signature.params.iter().all(|p| {
+                (p.ty.is_format_scalar() || p.ty == Type::Path)
+                    && p.default.is_none()
+                    && !p.sign_only
+            })
             && signature.parameter_declarations.iter().all(Option::is_some)
         {
             registered::place_checked_definition(&checker, definition, signature, &inference)
