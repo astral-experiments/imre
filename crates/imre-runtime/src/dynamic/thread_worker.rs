@@ -4,6 +4,7 @@ use super::lowlevel_threads::Running;
 use super::thread_callback::Callback;
 use super::value::Heap;
 use std::io::Write;
+use std::ops::ControlFlow;
 use std::sync::{
     Arc, Condvar, Mutex, MutexGuard, Weak,
     atomic::{AtomicBool, Ordering},
@@ -16,7 +17,6 @@ use super::builtins::boolean;
 use super::stdlib::hashlib::digest::SharedHash;
 use super::{Context, Error, Id, NONE, Result, Value};
 use crate::objects::locks::{PrimitiveLock, thread_ident};
-#[cfg(unix)]
 use crate::objects::time::Deadline;
 
 type WorkerStatus = std::result::Result<(), String>;
@@ -52,6 +52,36 @@ pub(super) struct Handle {
     ident: std::sync::OnceLock<Option<usize>>,
     exiting: Condvar,
     native: Mutex<NativeJoin>,
+}
+
+/// The OS wait owns no Python values. The caller and its operands remain on the heap's frame stack.
+pub(super) struct Join {
+    handle: Arc<Handle>,
+    deadline: Option<Deadline>,
+}
+
+impl Join {
+    /// # Safety
+    /// The registered caller owns this context on the current thread through wait and resumption.
+    #[inline(never)]
+    pub(super) unsafe fn run(self, context: *mut Context) -> Result<Id> {
+        let result = loop {
+            if let ControlFlow::Break(done) = self.handle.wait_interruptible(self.deadline) {
+                break self.handle.join_result(done);
+            }
+            // SAFETY: the wait released both native locks. The interrupted Python frame and
+            // its exception are still current while the handler runs.
+            #[cfg(unix)]
+            if let Err(error) = unsafe { (&mut *context).dispatch_signals() } {
+                break Err(error);
+            }
+        };
+        // SAFETY: the native wait and any signal callback have returned to their owner.
+        let ctx = unsafe { &mut *context };
+        result.map_err(|error| super::stdlib::io::qualify_error(ctx, error, None))?;
+        ctx.reap_thread_operands();
+        Ok(NONE)
+    }
 }
 
 // A detached worker must not keep its own join handle alive.
@@ -176,7 +206,11 @@ impl Handle {
     }
 
     fn join(&self, timeout: Option<Duration>) -> Result<()> {
-        if self.wait(timeout, State::join_pending)
+        self.join_result(self.wait(timeout, State::join_pending))
+    }
+
+    fn join_result(&self, completed: bool) -> Result<()> {
+        if completed
             && let Some((kind, message)) = self.joined().failure.take()
         {
             return Err(Error::new(kind, message));
@@ -184,7 +218,11 @@ impl Handle {
         Ok(())
     }
 
-    pub(super) fn join_public(&self, ctx: &mut Context, timeout: Option<Duration>) -> Result<()> {
+    pub(super) fn prepare_join(
+        self: Arc<Self>,
+        ctx: &Context,
+        timeout: Option<Duration>,
+    ) -> Result<Join> {
         match *self.state.lock().unwrap() {
             State::New => return Err(Error::new("RuntimeError", "thread not started")),
             State::Running if self.ident() == thread_ident() => {
@@ -198,17 +236,16 @@ impl Handle {
             }
             _ => {}
         }
-        if self.wait_interruptible(ctx, timeout)? {
-            self.join(Some(Duration::ZERO))?;
-        }
-        Ok(())
+        Ok(Join {
+            handle: self,
+            deadline: timeout.map(Deadline::after),
+        })
     }
 
     /// The condvar can restart after EINTR. Dispatch Python outside both handle locks.
-    fn wait_interruptible(&self, ctx: &mut Context, timeout: Option<Duration>) -> Result<bool> {
+    fn wait_interruptible(&self, deadline: Option<Deadline>) -> ControlFlow<bool> {
         #[cfg(unix)]
-        if crate::signals::is_main() && timeout != Some(Duration::ZERO) {
-            let deadline = timeout.map(Deadline::after);
+        if crate::signals::is_main() {
             loop {
                 let remaining = deadline.map(Deadline::remaining);
                 let interval = Duration::from_millis(50);
@@ -216,15 +253,17 @@ impl Handle {
                     Some(remaining.map_or(interval, |left| left.min(interval))),
                     State::join_pending,
                 ) {
-                    return Ok(true);
+                    return ControlFlow::Break(true);
                 }
                 if deadline.is_some_and(|end| end.remaining().is_zero()) {
-                    return Ok(false);
+                    return ControlFlow::Break(false);
                 }
-                ctx.dispatch_signals()?;
+                if crate::signals::TRIPPED.load(Ordering::Acquire) {
+                    return ControlFlow::Continue(());
+                }
             }
         }
-        Ok(self.wait(timeout, State::join_pending))
+        ControlFlow::Break(self.wait(deadline.map(Deadline::remaining), State::join_pending))
     }
 }
 
@@ -911,15 +950,18 @@ pub(super) fn call(
                 else {
                     break;
                 };
-                if let Err(error) = handle.wait_interruptible(ctx, None) {
-                    super::unraisable::report(
-                        ctx,
-                        error,
-                        false,
-                        None,
-                        "Exception ignored while joining a thread in _thread._shutdown()",
-                    );
-                    return Ok(NONE);
+                while handle.wait_interruptible(None).is_continue() {
+                    #[cfg(unix)]
+                    if let Err(error) = ctx.dispatch_signals() {
+                        super::unraisable::report(
+                            ctx,
+                            error,
+                            false,
+                            None,
+                            "Exception ignored while joining a thread in _thread._shutdown()",
+                        );
+                        return Ok(NONE);
+                    }
                 }
                 // Explicit detach completes handle joins. CPython keeps this entry
                 // in its shutdown list until the worker exits, without running a

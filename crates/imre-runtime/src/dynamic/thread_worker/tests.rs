@@ -470,7 +470,9 @@ fn detached_handle_keeps_the_non_daemon_worker_registered_until_exit() {
         assert_eq!(handle.ident(), ident);
         assert!(handle.check_new().is_err());
         handle.set_done().unwrap();
-        handle.join_public(&mut ctx, None).unwrap();
+        let receiver = ctx.alloc(Value::ThreadHandle(handle.clone()));
+        let join = ctx.lookup_attr(receiver, "join").unwrap();
+        assert_eq!(ctx.call(join, vec![], vec![]).unwrap(), NONE);
         assert!(handle.is_done());
         assert!(handle.awaiting_exit());
         ctx.reap_thread_operands();

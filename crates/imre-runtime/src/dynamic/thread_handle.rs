@@ -1,5 +1,8 @@
 //! Public _thread handle descriptors share the worker's native lifecycle.
+use super::calls::RegisteredCall;
+use super::thread_worker::{Handle, Join};
 use super::{Context, Error, Id, NONE, Result, Value, builtins, stdlib};
+use std::sync::Arc;
 use std::time::Duration;
 
 pub(super) const CLASS: &str = "_thread._ThreadHandle";
@@ -37,6 +40,11 @@ pub(super) fn method(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "join" {
+        let call = RegisteredCall::Join(join_ticket(ctx, args, kwargs)?);
+        // SAFETY: the internal _imre_thread entry waits synchronously in its owning context.
+        return unsafe { call.run(ctx) };
+    }
     if name == "__repr__" {
         let Some((&receiver, rest)) = args.split_first() else {
             return Err(Error::new(
@@ -68,28 +76,7 @@ pub(super) fn method(
         return Ok(ctx.text(ctx.repr(receiver)));
     }
     let method = if name == "_get_ident" { "ident" } else { name };
-    let (receiver, args) = builtins::method_receiver_args(ctx, CLASS, method, args, kwargs)?;
-    let Value::ThreadHandle(handle) = ctx.heap.get(receiver) else {
-        unreachable!("validated thread handle");
-    };
-    let handle = handle.clone();
-    if name == "join" {
-        let timeout = match args {
-            [] | [NONE] => None,
-            [seconds] => u64::try_from(stdlib::time::timeout_ns(ctx, *seconds)?)
-                .ok()
-                .map(Duration::from_nanos),
-            _ => {
-                return Err(Error::new(
-                    "TypeError",
-                    format!("join() takes at most 1 argument ({} given)", args.len()),
-                ));
-            }
-        };
-        handle.join_public(ctx, timeout)?;
-        ctx.reap_thread_operands();
-        return Ok(NONE);
-    }
+    let (handle, args) = receiver_args(ctx, method, args, kwargs)?;
     if !args.is_empty() {
         return Err(Error::new(
             "TypeError",
@@ -114,4 +101,50 @@ pub(super) fn method(
         }
         _ => unreachable!("registered thread handle method"),
     }
+}
+
+fn receiver_args<'a>(
+    ctx: &Context,
+    method: &str,
+    args: &'a [Id],
+    kwargs: &[(String, Id)],
+) -> Result<(Arc<Handle>, &'a [Id])> {
+    let (receiver, args) = builtins::method_receiver_args(ctx, CLASS, method, args, kwargs)?;
+    let Value::ThreadHandle(handle) = ctx.heap.get(receiver) else {
+        unreachable!("validated thread handle");
+    };
+    Ok((handle.clone(), args))
+}
+
+fn join_ticket(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Join> {
+    let (handle, args) = receiver_args(ctx, "join", args, kwargs)?;
+    let timeout = match args {
+        [] | [NONE] => None,
+        [seconds] => u64::try_from(stdlib::time::timeout_ns(ctx, *seconds)?)
+            .ok()
+            .map(Duration::from_nanos),
+        _ => {
+            return Err(Error::new(
+                "TypeError",
+                format!("join() takes at most 1 argument ({} given)", args.len()),
+            ));
+        }
+    };
+    handle.prepare_join(ctx, timeout)
+}
+
+/// Finish native preparation here so ordinary call dispatch need not reserve space for a join.
+#[inline(never)]
+pub(super) fn prepare_join(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<RegisteredCall> {
+    join_ticket(ctx, args, kwargs)
+        .map(RegisteredCall::Join)
+        .map_err(|error| stdlib::io::qualify_error(ctx, error, None))
 }
