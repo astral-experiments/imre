@@ -126,7 +126,7 @@ pub(crate) mod stdio;
 use sorted_split_fields::SortedSplitFields;
 mod stdlib;
 pub(crate) use stdlib::comparator::sort_by_less;
-pub(crate) use stdlib::{format_fixed_float, replace_text};
+pub(crate) use stdlib::{format_fixed_float, join_utf8, replace_text};
 mod string_enums;
 mod structs;
 mod sumprod;
