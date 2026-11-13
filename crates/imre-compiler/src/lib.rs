@@ -1097,27 +1097,11 @@ impl FixedProgram {
 
     fn register_definitions(self, graph: &modules::SourceGraph) {
         let (module, owners) = self.ir;
-        let mut functions = module.functions.into_iter();
-        let mut next = 0;
-        for (id, definition, source) in self.frame_sources {
-            let start = definition.start();
-            let function = functions.nth(id - next).expect("checked function slot");
-            next = id + 1;
-            let owner = owners[id];
-            if graph
-                .registered_functions()
-                .get(&owner)
-                .is_some_and(|entries| entries.contains_key(&start))
-                || !source.matches(&function)
-            {
-                continue;
-            }
-            graph.register_function(
-                owner,
-                start,
-                frontend::place_fixed_function(function, source),
-            );
+        frontend::FixedFunctions {
+            functions: module.functions,
+            frames: self.frame_sources,
         }
+        .register(graph, &owners, |_, _| true);
     }
 }
 

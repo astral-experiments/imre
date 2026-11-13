@@ -267,6 +267,9 @@ mod tests {
             "    return left + right\n",
             "def changed(left: str, right: str) -> str:\n",
             "    return left + right\n",
+            "def erased(n: int) -> int: return +n\n",
+            "def occupied(n: int) -> int: return n\n",
+            "def last(n: int) -> int: return n + 1\n",
             "print(append('a', 'b'))\n",
         );
         let mut graph = SourceGraph::single(text).unwrap();
@@ -289,10 +292,33 @@ mod tests {
             panic!()
         };
         right.kind = ExprKind::Local(0);
-        fixed.register_definitions(&graph);
+        let occupied = TextSize::try_from(text.find("def occupied").unwrap()).unwrap();
+        let (slot, _, source) = fixed
+            .frame_sources
+            .iter()
+            .find(|(_, range, _)| range.start() == occupied)
+            .unwrap();
+        let earlier = place_fixed_function(fixed.ir.0.functions[*slot].clone(), source.clone());
+        let earlier_body = earlier.function.body.as_ptr();
+        graph.register_function(graph.entry, occupied, earlier);
+        let last = TextSize::try_from(text.find("def last").unwrap()).unwrap();
+        let mut checked = Vec::new();
+        FixedFunctions {
+            functions: fixed.ir.0.functions,
+            frames: fixed.frame_sources,
+        }
+        .register(&graph, &fixed.ir.1, |module, range| {
+            checked.push((module, range.start()));
+            true
+        });
+        assert_eq!(
+            checked,
+            [(graph.entry, definition.start()), (graph.entry, last)]
+        );
         let functions = graph.registered_functions();
         let definitions = &functions[&graph.entry];
         assert!(!definitions.contains_key(&changed));
+        assert_eq!(definitions[&occupied].function.body.as_ptr(), earlier_body);
         let placed = &definitions[&definition.start()];
         assert_eq!(placed.function.returns, Type::Str);
         assert_eq!(placed.fixed_sites, positions);

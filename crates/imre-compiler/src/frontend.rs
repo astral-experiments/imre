@@ -139,15 +139,15 @@ pub(crate) use registered::values::{
     validate_docstring_literals,
 };
 pub(crate) use registered::{
-    AnnotationProvider, CheckedProvider, DeclarationSite, FrameInputs, FrameSite, FrameSlots,
-    LexicalOperands, NamedBody, ParameterAnnotations, ParameterEvaluator, PhysicalOperand,
-    PreparedRefusal, RegisteredBody, RegisteredFunction, RegisteredGenerator, RegisteredLambda,
-    RegisteredScope, RegisteredSuite, SuitePreparation, TypeParameterValues, annotation_expression,
-    place_fixed_function, registered_sites, registered_type_alias,
+    AnnotationProvider, CheckedProvider, DeclarationSite, FixedFunctions, FrameInputs, FrameSite,
+    FrameSlots, LexicalOperands, NamedBody, ParameterAnnotations, ParameterEvaluator,
+    PhysicalOperand, PreparedRefusal, RegisteredBody, RegisteredFunction, RegisteredGenerator,
+    RegisteredLambda, RegisteredScope, RegisteredSuite, SuitePreparation, TypeParameterValues,
+    annotation_expression, registered_sites, registered_type_alias,
 };
 pub(crate) use registered::{LocalBinding, RegisteredClass, RegisteredOperand, RegisteredRegion};
 #[cfg(test)]
-pub(crate) use registered::{StatementSites, booleans::OwnedExpression};
+pub(crate) use registered::{StatementSites, booleans::OwnedExpression, place_fixed_function};
 pub(crate) use required_sites::RequiredSite;
 mod sequences;
 mod shutil;
@@ -1260,11 +1260,16 @@ fn lower_graph(
         cache.validate_abi(&definitions, &globals);
     }
     let named = graph.registered_startup && !needs_registered_entry;
-    let mut completed = registered::FixedFunctions::default();
+    let mut completed = FixedFunctions::default();
+    let register = |completed: FixedFunctions, owners: &[ModuleId]| {
+        completed.register(graph, owners, |module, range| {
+            inference.source_checks.accepts(graph, module, range)
+        });
+    };
     let recover_completed = std::cell::Cell::new(named);
-    let place_completed = |completed: &mut registered::FixedFunctions, owners: &[ModuleId]| {
+    let place_completed = |completed: &mut FixedFunctions, owners: &[ModuleId]| {
         if recover_completed.get() {
-            completed.place(graph, owners, &inference.source_checks);
+            register(std::mem::take(completed), owners);
             capture();
         }
     };
@@ -1504,7 +1509,7 @@ fn lower_graph(
             // its completed functions can move to the Python binder before ordinary recovery.
             if !named {
                 if failure.is_object() && !captured.get() {
-                    completed.place(graph, &owners, &inference.source_checks);
+                    register(std::mem::take(&mut completed), &owners);
                 }
                 capture_on_object(failure);
             }
@@ -1538,7 +1543,7 @@ fn lower_graph(
         return Ok(crate::CheckedProgram::Registered(None));
     }
     if let Some(error) = graph.deferred_object_error.take() {
-        completed.place(graph, &owners, &inference.source_checks);
+        register(completed, &owners);
         if named || error.kind.is_object() {
             capture();
         }
@@ -1671,7 +1676,7 @@ fn lower_graph(
     let selected = registered_entry(graph, functions, &entry)
         .inspect_err(|_| place_completed(&mut completed, &owners))?;
     if let Some(registered) = selected {
-        completed.place(graph, &owners, &inference.source_checks);
+        register(completed, &owners);
         if recover_completed.get() {
             capture();
         }

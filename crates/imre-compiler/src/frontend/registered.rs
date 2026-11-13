@@ -551,31 +551,34 @@ pub(super) fn selected_operands(and: bool, mut operands: Vec<Expr>) -> Expr {
 /// Fixed validation borrows these functions. A Python entry that survives the
 /// checks takes the original operations, including checked siblings on an error exit.
 #[derive(Default)]
-pub(super) struct FixedFunctions {
-    pub(super) functions: Vec<ir::Function>,
-    pub(super) frames: crate::FixedFrameSources,
+pub(crate) struct FixedFunctions {
+    pub(crate) functions: Vec<ir::Function>,
+    pub(crate) frames: crate::FixedFrameSources,
 }
 
 impl FixedFunctions {
-    pub(super) fn place(
-        &mut self,
+    pub(crate) fn register(
+        self,
         graph: &SourceGraph,
         owners: &[ModuleId],
-        checks: &SourceChecks,
+        mut accepted: impl FnMut(ModuleId, TextRange) -> bool,
     ) {
-        // Only a terminating layout uses this path. Reverse order keeps earlier slots
-        // intact while their functions move into their original Python frames.
-        for (slot, definition, source) in self.frames.drain(..).rev() {
+        // Frame sources are recorded in slot order. Functions without a physical
+        // source (including synthesized helpers) drop with the iterator.
+        let mut functions = self.functions.into_iter();
+        let mut next = 0;
+        for (slot, definition, source) in self.frames {
+            let function = functions.nth(slot - next).expect("checked function slot");
+            next = slot + 1;
             let module = owners[slot];
             let start = definition.start();
             if !graph
                 .registered_functions()
                 .get(&module)
                 .is_some_and(|entries| entries.contains_key(&start))
-                && source.matches(&self.functions[slot])
-                && checks.accepts(graph, module, definition)
+                && source.matches(&function)
+                && accepted(module, definition)
             {
-                let function = self.functions.swap_remove(slot);
                 graph.register_function(module, start, place_fixed_function(function, source));
             }
         }
