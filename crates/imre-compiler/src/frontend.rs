@@ -7473,16 +7473,15 @@ impl<'a> Checker<'a> {
 
     fn if_chain(&mut self, branch: &ast::StmtIf) -> Result<(Vec<Statement>, bool), String> {
         let clauses = &branch.elif_else_clauses;
-        let conditions = std::iter::once((branch.test.as_ref(), branch.body.as_slice())).chain(
-            clauses
-                .iter()
-                .filter_map(|clause| Some((clause.test.as_ref()?, clause.body.as_slice()))),
-        );
+        let conditions =
+            statements::if_clauses(branch).map_while(|(test, body)| Some((test?, body)));
         let mut arms = Vec::with_capacity(clauses.len() + 1);
         let mut joined = None;
         let mut falls_at_cutoff = None;
         let mut exit_fixed = false;
+        let mut last_test = branch.test.as_ref();
         for (index, (test, body)) in conditions.enumerate() {
+            last_test = test;
             self.branch_layouts(body, &clauses[index..])?;
             let condition = self.condition(test)?;
             let known = self.instance_condition(&condition);
@@ -7544,11 +7543,6 @@ impl<'a> Checker<'a> {
         }
         let (no, no_falls) = if let Some(tail) = clauses.last().filter(|c| c.test.is_none()) {
             let guards = self.present_fields.len();
-            let last_test = clauses
-                .iter()
-                .rev()
-                .find_map(|clause| clause.test.as_ref())
-                .unwrap_or(&branch.test);
             self.enter_namespace_guards(last_test, false, &tail.body);
             let field = arms
                 .last()

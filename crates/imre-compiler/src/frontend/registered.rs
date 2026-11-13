@@ -1400,15 +1400,6 @@ pub(super) fn cursor_input(
     pipelines::Prepared::pull_cursor(cursor, element, kind, hidden)
 }
 
-fn if_clauses(branch: &ast::StmtIf) -> impl Iterator<Item = (Option<&ast::Expr>, &[ast::Stmt])> {
-    std::iter::once((Some(branch.test.as_ref()), branch.body.as_slice())).chain(
-        branch
-            .elif_else_clauses
-            .iter()
-            .map(|clause| (clause.test.as_ref(), clause.body.as_slice())),
-    )
-}
-
 #[derive(Clone, Copy)]
 enum SuiteSelection {
     All,
@@ -1912,7 +1903,7 @@ impl<'a> SuitePreparation<'a> {
         let mut region = self.region(kind);
         let mut arms = Vec::new();
         let mut otherwise = None;
-        for (test, suite) in if_clauses(branch) {
+        for (test, suite) in statements::if_clauses(branch) {
             // A dead literal arm in a suspended frame has no resume entry.
             let test = match test {
                 Some(ast::Expr::BooleanLiteral(literal)) if suspended => {
@@ -2679,7 +2670,7 @@ impl statements::StatementLowering for SourceScope<'_> {
         let mut arms = Vec::new();
         let mut otherwise = (Vec::new(), true);
         let mut falls = false;
-        for (test, suite) in if_clauses(branch) {
+        for (test, suite) in statements::if_clauses(branch) {
             if let Some(test) = test {
                 // The branch writer consumes the checked operand as a condition.
                 let condition = self.condition_operand(test).ok_or(())?;
