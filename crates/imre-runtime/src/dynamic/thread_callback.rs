@@ -79,7 +79,6 @@ impl Callback {
         ctx: &Context,
         target: Id,
         args: Id,
-        pos: &[Id],
         kwargs: Option<Id>,
     ) -> Result<Option<(Operation, Vec<Id>)>> {
         // _thread.start_new_thread owns the original argument containers through the call.
@@ -87,6 +86,7 @@ impl Callback {
             Some(kwargs) => super::copy_ids(&[target, args, kwargs]),
             None => super::copy_ids(&[target, args]),
         }?;
+        let pos = ctx.tuple_elements(args).expect("validated thread arguments");
         Self::capture_checked(ctx, target, roots, pos, kwargs, false)
     }
 
