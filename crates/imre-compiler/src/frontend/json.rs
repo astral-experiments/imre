@@ -957,6 +957,26 @@ mod tests {
     }
 
     #[test]
+    fn a_nullable_field_projects_json_null_at_the_lookup() {
+        let source = r#"import json
+
+
+def f(text: str, flag: bool) -> bool:
+    value = json.loads(text)["version"] if flag else None
+    return value is None
+
+
+print(f(input(), input() == "take"))
+"#;
+        let llvm = crate::compile(source, &crate::CompileOptions::default()).unwrap();
+        let mut selects = llvm
+            .lines()
+            .filter(|line| line.contains("call i64 @imre_json_select("));
+        assert!(selects.next().unwrap().contains("i32 256,"));
+        assert!(selects.next().is_none());
+    }
+
+    #[test]
     fn mixed_comparisons_keep_the_following_constructor_check() {
         let source = r#"
 import json

@@ -4014,6 +4014,10 @@ impl<'a> Checker<'a> {
                     kind: ExprKind::Builtin(Builtin::UnionInject, vec![value]),
                 });
             }
+            // A decoded JSON null has a view handle until the selector projects it.
+            if payload == Type::JsonValue && value.ty == payload {
+                return Ok(json::select(value, expected, None, None));
+            }
             let kind = if value.ty == Type::None {
                 ExprKind::Absent(Box::new(value))
             } else {
