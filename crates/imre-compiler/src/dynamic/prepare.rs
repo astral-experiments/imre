@@ -5,17 +5,21 @@ use std::path::{Path, PathBuf};
 
 use super::ModuleSyntaxError;
 use super::emit::{ModuleOrigin, PhysicalFile, PreparedBody, RegisteredBodies};
-use super::provider_archive::Providers;
 use crate::frontend::module_source::ParsedModule;
 use crate::ir::PhysicalModuleKind;
 
 pub(crate) type ModuleSource<'a> = (String, PathBuf, Cow<'a, str>);
 
+pub(super) enum Shipped<'a> {
+    Checked(Result<(), String>),
+    Archived(&'a str),
+}
+
 #[derive(Default)]
 pub(super) struct SourceInputs<'a> {
     pub(super) entry_source: Option<ParsedModule<'a, 'a>>,
     pub(super) scanned_modules: HashMap<usize, super::ScannedModule>,
-    pub(super) shipped_checks: HashMap<usize, Result<(), String>>,
+    pub(super) shipped_checks: HashMap<usize, Shipped<'a>>,
 }
 
 pub(super) enum Initializer<'a> {
@@ -59,7 +63,7 @@ pub(super) fn units<'a>(
         mut shipped_checks,
     }: SourceInputs<'a>,
     python_optimization: i32,
-    (bundled_root, providers): (&'a Path, Option<&'a Providers>),
+    bundled_root: &'a Path,
     module_errors: &'a HashMap<PathBuf, Box<ModuleSyntaxError>>,
     registrations: &'a RegisteredBodies<'a>,
     mut layouts: Vec<crate::analysis::RegisteredLayouts>,
@@ -101,15 +105,11 @@ pub(super) fn units<'a>(
                 && types.is_none();
             let initializer = if !builtin && let Some(error) = module_errors.get(path) {
                 Err(error.as_ref())
-            } else if standalone && let Some(check) = shipped_checks.remove(&unit) {
-                return check.map(|()| None);
-            } else if standalone
-                && python_optimization == 0
-                && let Some(symbol) =
-                    providers.and_then(|archive| archive.sealed(name, path, source))
-            {
-                // The standalone producer checked these exact bytes without application facts.
-                Ok(Initializer::Archived(symbol))
+            } else if standalone && let Some(shipped) = shipped_checks.remove(&unit) {
+                match shipped {
+                    Shipped::Checked(check) => return check.map(|()| None),
+                    Shipped::Archived(symbol) => Ok(Initializer::Archived(symbol)),
+                }
             } else {
                 // Preserve the loader's digest while compiling its normalized source.
                 let (text, syntax) = if let Some(entry) = discovered {

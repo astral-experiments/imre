@@ -1363,7 +1363,7 @@ pub(crate) fn compile(
             && imports.invalid_executable.is_none()
         {
             let checked = prepare::check_shipped(name, path, input, python_optimization);
-            shipped_checks.insert(unit, checked);
+            shipped_checks.insert(unit, prepare::Shipped::Checked(checked));
         }
         Ok(imports)
     };
@@ -2566,9 +2566,30 @@ pub(crate) fn compile(
             || registrations.physical_files.contains_key(path)
                 && !winners.iter().any(|source| source.path == path)
     };
+    let providers = options
+        .bundled_provider_archive
+        .as_deref()
+        .filter(|_| keep_docstrings && output.is_some())
+        .and_then(provider_archive::Providers::read)
+        .unwrap_or_default();
+    let matching_archive = (python_optimization == 0
+        && options
+            .target_os
+            .is_none_or(|os| os == std::env::consts::OS))
+    .then_some(&providers);
     for (unit, module) in sources.iter().chain(&builtins).enumerate() {
         let (name, path, source) = module;
         if namespace_portions.contains(path) {
+            continue;
+        }
+        // A matching standalone provider has already passed the source-local syntax check.
+        // A recorded loader failure still needs the diagnostic for its registration origin.
+        if path.starts_with(bundled_root)
+            && !module_errors.contains_key(path)
+            && let Some(symbol) =
+                matching_archive.and_then(|archive| archive.sealed(name, path, source))
+        {
+            shipped_checks.insert(unit, prepare::Shipped::Archived(symbol));
             continue;
         }
         let check_runtime = unit >= first_runtime_unit && output.is_none();
@@ -2586,7 +2607,7 @@ pub(crate) fn compile(
                 parsed: Cow::Borrowed(&parsed),
             };
             let check = prepare::check_shipped(name, path, input.into(), python_optimization);
-            shipped_checks.insert(unit, check);
+            shipped_checks.insert(unit, prepare::Shipped::Checked(check));
         }
     }
     drop(syntax);
@@ -2633,12 +2654,6 @@ pub(crate) fn compile(
     if let Some(file) = entry_file {
         registrations.checked_units.entry(0).or_default().source = Some(file);
     }
-    let providers = options
-        .bundled_provider_archive
-        .as_deref()
-        .filter(|_| keep_docstrings && output.is_some())
-        .and_then(provider_archive::Providers::read)
-        .unwrap_or_default();
     let mut prepared = prepare::units(
         (&sources, &builtins),
         prepare::SourceInputs {
@@ -2647,13 +2662,7 @@ pub(crate) fn compile(
             shipped_checks,
         },
         python_optimization,
-        (
-            Path::new(bundled_root),
-            options
-                .target_os
-                .is_none_or(|os| os == std::env::consts::OS)
-                .then_some(&providers),
-        ),
+        Path::new(bundled_root),
         &module_errors,
         &registrations,
         layouts,
