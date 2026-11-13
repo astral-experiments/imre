@@ -2898,7 +2898,7 @@ impl Context {
     pub(super) fn function_with_closure(
         &mut self,
         code: Id,
-        scope: Id,
+        globals: Id,
         closure: FunctionClosure<'_>,
         (name, qualname): (Id, Id),
         defaults: Id,
@@ -2921,9 +2921,9 @@ impl Context {
             .iter()
             .position(|name| name == "__class__")
             .map(|index| cells[index]);
-        let scope = self.closure_environment(scope, freevars, &cells);
+        let scope = self.closure_environment(globals, freevars, &cells);
         let fields = super::function_fields::FunctionFields::new(
-            self, scope, name, qualname, code_doc, NONE,
+            self, scope, globals, name, qualname, code_doc, NONE,
         );
         self.alloc(Value::Function {
             fields,
@@ -3362,7 +3362,7 @@ impl Context {
                 scope
             };
             let owner = function.map_or_else(
-                || FrameOwner::Module(self.function_module(scope)),
+                || FrameOwner::Module(self.root_module_name(scope)),
                 FrameOwner::Function,
             );
             self.prepare_execution(code_id, module, owner, mode == "exec")

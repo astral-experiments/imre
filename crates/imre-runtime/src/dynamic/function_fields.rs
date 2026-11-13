@@ -20,6 +20,7 @@ impl FunctionFields {
     pub fn new(
         ctx: &mut Context,
         scope: Id,
+        root: Id,
         name: Id,
         qualname: Id,
         doc: Id,
@@ -30,7 +31,7 @@ impl FunctionFields {
             qualname,
             doc,
             annotate,
-            module: ctx.function_module(scope),
+            module: ctx.root_module_name(root),
             annotations: None,
             type_params: ctx.alloc(Value::Tuple(Vec::new())),
             dict: if ctx.scope_data(scope).parent.is_none()
@@ -58,11 +59,8 @@ impl FunctionFields {
 }
 
 impl Context {
-    pub(super) fn function_module(&self, mut scope: Id) -> Id {
-        while let Some(parent) = self.scope_data(scope).parent {
-            scope = parent;
-        }
-        self.scope_name(scope, "__name__").unwrap_or(NONE)
+    pub(super) fn root_module_name(&self, root: Id) -> Id {
+        self.scope_name(root, "__name__").unwrap_or(NONE)
     }
 
     /// Materialize the dictionary only when Python exposes or writes it.
