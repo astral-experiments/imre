@@ -110,7 +110,7 @@ try:
                 status = 1
                 try:
                     os.close(notify)
-                    for payload in (b"L", b"I"):
+                    for payload in (b"L", b"I", b"F", b"B"):
                         if os.read(notice, 1) != b"R":
                             break
                         # Let the interrupted receive encounter the still-empty socket.
@@ -136,6 +136,13 @@ try:
                 signal.alarm(1)
                 received = receiver.recv_into(memoryview(buffer)[1:2])
                 assert received == 1 and buffer == b".I."
+                receiver.setblocking(True)
+                signal.alarm(1)
+                assert receiver.recvfrom(1) == (b"F", None)
+                receiver.setblocking(True)
+                signal.alarm(1)
+                assert receiver.recvfrom_into(memoryview(buffer)[1:2]) == (1, None)
+                assert buffer == b".B."
             finally:
                 signal.alarm(0)
                 os.close(notify)

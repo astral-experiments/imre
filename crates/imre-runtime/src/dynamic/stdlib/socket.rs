@@ -1256,29 +1256,30 @@ fn receive_into(
                 return Err(Error::new("ValueError", message));
             }
             let range = span.start..span.start + size;
-            if method == "recv_into" {
-                // Validate even an empty destination before waiting. Keep only the storage id
-                // and byte range across a poll or a returning Python signal handler.
-                if receive_buffer(ctx, storage, range.clone())?.is_empty() {
-                    return Ok((0, None));
-                }
-                let count = native::read_socket(
-                    socket,
-                    ctx,
-                    Context::dispatch_signals,
-                    |_, raw, end| Ok(native::poll_interruptible(raw, libc::POLLIN, Some(end))),
-                    |ctx, raw| {
-                        let target = receive_buffer(ctx, storage, range.clone())?;
-                        Ok(native::recv_into_once(raw, target, flags))
-                    },
-                )?;
-                return Ok((count, None));
+            let with_address = method == "recvfrom_into";
+            // A zero-length recvfrom still consumes a datagram and returns its address.
+            if receive_buffer(ctx, storage, range.clone())?.is_empty() && !with_address {
+                return Ok((0, None));
             }
-            retry(ctx, socket, |ctx, until| {
-                let target = receive_buffer(ctx, storage, range.clone())?;
-                let (count, peer) = native::recv_from_into(socket, target, flags, until)?;
-                Ok((count, Some(peer)))
-            })
+            let (count, address) = native::read_socket(
+                socket,
+                ctx,
+                Context::dispatch_signals,
+                |_, raw, end| Ok(native::poll_interruptible(raw, libc::POLLIN, Some(end))),
+                |ctx, raw| {
+                    let target = receive_buffer(ctx, storage, range.clone())?;
+                    Ok(if with_address {
+                        native::receive_from_once(raw, target, flags)
+                            .map(|(count, addr, len)| (count, Some((addr, len))))
+                    } else {
+                        native::recv_into_once(raw, target, flags).map(|count| (count, None))
+                    })
+                },
+            )?;
+            let peer = address
+                .map(|(addr, len)| native::unpack_socket_name(&addr, len))
+                .transpose()?;
+            Ok((count, peer))
         },
     )?;
     let count = ctx.int(count as i64);

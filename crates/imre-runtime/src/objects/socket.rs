@@ -1849,7 +1849,10 @@ pub(crate) fn socket_name(s: &Object, peer: bool) -> Result<SocketName> {
     unpack_socket_name(&addr, len)
 }
 
-fn unpack_socket_name(addr: &libc::sockaddr_storage, len: libc::socklen_t) -> Result<SocketName> {
+pub(crate) fn unpack_socket_name(
+    addr: &libc::sockaddr_storage,
+    len: libc::socklen_t,
+) -> Result<SocketName> {
     if len == 0 {
         return Ok(SocketName::NoAddress);
     }
@@ -2052,8 +2055,8 @@ pub(crate) fn recv_from<E: From<Error>>(
     check_signals: impl FnMut() -> std::result::Result<(), E>,
 ) -> std::result::Result<(Vec<u8>, SocketName), E> {
     let mut bytes = zeroed_receive_buffer(size)?;
-    let (count, addr, len) = retry_read(s, check_signals, |until| {
-        receive_from(s, &mut bytes, flags, until)
+    let (count, addr, len) = local_read(s, check_signals, |raw| {
+        receive_from_once(raw, &mut bytes, flags)
     })?;
     let peer = unpack_socket_name(&addr, len)?;
     // MSG_TRUNC may report the full datagram size even when fewer bytes were copied.
@@ -2069,42 +2072,27 @@ pub(crate) fn recv_from<E: From<Error>>(
     Ok((bytes, peer))
 }
 
-/// Receive a message into the caller's buffer and preserve the kernel's byte count and address.
-pub(crate) fn recv_from_into(
-    s: &Object,
+/// Read one datagram and retain the kernel address length even for an empty packet.
+pub(crate) fn receive_from_once(
+    raw: RawFd,
     buffer: &mut [u8],
     flags: i32,
-    until: Option<Deadline>,
-) -> Result<(usize, SocketName)> {
-    let (count, addr, len) = receive_from(s, buffer, flags, until).map_err(errno_error)?;
-    Ok((count, unpack_socket_name(&addr, len)?))
-}
-
-fn receive_from(
-    s: &Object,
-    buffer: &mut [u8],
-    flags: i32,
-    until: Option<Deadline>,
 ) -> io::Result<(usize, libc::sockaddr_storage, libc::socklen_t)> {
     // SAFETY: zero initializes the entire socket-address storage, including padding.
     let mut peer: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
-    let raw = fd(s);
-    let (count, len) = socket_call_interruptible(raw, libc::POLLIN, until, || {
-        let mut len = size_of_val(&peer) as libc::socklen_t;
-        // SAFETY: buffer and peer remain writable up to their respective capacities.
-        let count = unsafe {
-            libc::recvfrom(
-                raw,
-                buffer.as_mut_ptr().cast(),
-                buffer.len(),
-                flags,
-                (&raw mut peer).cast(),
-                &mut len,
-            )
-        };
-        let count = usize::try_from(count).map_err(|_| io::Error::last_os_error())?;
-        Ok((count, len))
-    })?;
+    let mut len = size_of_val(&peer) as libc::socklen_t;
+    // SAFETY: buffer and peer remain writable up to their respective capacities.
+    let count = unsafe {
+        libc::recvfrom(
+            raw,
+            buffer.as_mut_ptr().cast(),
+            buffer.len(),
+            flags,
+            (&raw mut peer).cast(),
+            &mut len,
+        )
+    };
+    let count = usize::try_from(count).map_err(|_| io::Error::last_os_error())?;
     Ok((count, peer, len))
 }
 
