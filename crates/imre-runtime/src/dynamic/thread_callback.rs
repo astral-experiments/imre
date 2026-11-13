@@ -40,6 +40,13 @@ pub(super) fn unsupported() -> Error {
     )
 }
 
+pub(super) fn unsupported_target() -> Error {
+    Error::new(
+        "NotImplementedError",
+        "this thread target cannot run independently of the boxed Python heap",
+    )
+}
+
 impl Callback {
     pub(super) fn capture(
         ctx: &Context,
@@ -95,13 +102,12 @@ impl Callback {
         let signature = ctx.str_value(code.parameters)?;
         let meta: serde_json::Value = serde_json::from_str(signature)
             .map_err(|e| Error::new("SystemError", e.to_string()))?;
-        if let Some(receiver) = receiver {
+        if let Some(receiver) = receiver
+            && let Some(field) = meta["thread_bound_lock_field"].as_str()
+        {
             if !matches!(code.body, Body::Native(_, NONE)) {
                 return Ok(None);
             }
-            let Some(field) = meta["thread_bound_lock_field"].as_str() else {
-                return Ok(None);
-            };
             if !code.freevars.is_empty()
                 || !pos.is_empty()
                 || kwargs.is_some_and(
@@ -141,6 +147,9 @@ impl Callback {
                 },
                 roots,
             )));
+        }
+        if receiver.is_some() && !code.freevars.is_empty() {
+            return Ok(None);
         }
         let captured = match ctx.heap.get(closure) {
             Value::Tuple(cells) => Some(cells.as_slice()),
@@ -261,6 +270,11 @@ impl Callback {
         {
             return Ok(None);
         }
+        let refused = if high_level && receiver.is_some() {
+            unsupported_target
+        } else {
+            unsupported
+        };
         let kw = kwargs
             .and_then(|id| ctx.dict_entries(id))
             .unwrap_or_default();
@@ -269,7 +283,7 @@ impl Callback {
             .map_err(|_| Error::new("MemoryError", ""))?;
         for &(key, _) in kw {
             let Value::Str(key) = ctx.heap.get(key) else {
-                return Err(unsupported());
+                return Err(refused());
             };
             keys.push(key);
         }
@@ -277,20 +291,21 @@ impl Callback {
         let binding = shape
             .bind(
                 ctx.str_value(code.name)?,
-                pos.len(),
+                pos.len() + usize::from(receiver.is_some()),
                 keys.iter().copied(),
                 num_defaults,
                 |name| ctx.dict_named_item(kwdefaults, name).is_some(),
             )
             .map_err(|error| match error {
                 crate::source_arguments::Error::Memory => Error::new("MemoryError", ""),
-                crate::source_arguments::Error::Type(_) => unsupported(),
+                crate::source_arguments::Error::Type(_) => refused(),
             })?;
         let count = shape.positional.len() + shape.keyword_only.len();
         let mut bound = Vec::new();
         bound
             .try_reserve_exact(count)
             .map_err(|_| Error::new("MemoryError", ""))?;
+        bound.extend(receiver);
         bound.extend_from_slice(pos);
         bound.resize(count, NONE);
         for (&(_, value), slot) in kw.iter().zip(binding.keywords) {
@@ -323,10 +338,10 @@ impl Callback {
                     ]
                     .into_iter()
                     .find(|symbol| *symbol == name)
-                    .ok_or_else(unsupported)?;
+                    .ok_or_else(refused)?;
                     Argument::Builtin(symbol)
                 }
-                _ => return Err(unsupported()),
+                _ => return Err(refused()),
             };
             values.push(value);
         }

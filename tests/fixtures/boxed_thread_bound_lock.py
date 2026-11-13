@@ -47,3 +47,18 @@ def check():
 
 
 check()
+
+
+def acquire(self, alias, *, done):
+    self.acquire(False)
+    if alias.locked():
+        done.acquire(False)
+
+
+gate = _thread.allocate_lock()
+done = _thread.allocate_lock()
+worker = threading.Thread(target=acquire.__get__(gate), args=(gate,), kwargs={"done": done})
+worker.start()
+worker.join(3)
+assert not worker.is_alive()
+assert gate.locked() and done.locked()
