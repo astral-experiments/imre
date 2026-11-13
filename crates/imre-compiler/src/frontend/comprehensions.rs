@@ -357,8 +357,11 @@ impl EagerDisplay for Checker<'_> {
         _: Output<'_>,
         body: impl FnOnce(&mut Self) -> Result<Vec<Statement>, String>,
     ) -> Result<Vec<Statement>, String> {
-        self.lower_iteration(target, input, &[], body)
-            .map(|(body, _)| body)
+        self.lower_iteration(target, input, &[], |checker, output| {
+            statements::append_block(output, body(checker)?);
+            Ok(())
+        })
+        .map(|(body, _)| body)
     }
 
     fn filter(&mut self, test: &ast::Expr) -> Result<Expr, String> {

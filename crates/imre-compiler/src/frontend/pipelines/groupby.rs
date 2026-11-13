@@ -207,8 +207,8 @@ impl Checker<'_> {
         input.clear.extend([next_key, group_key, have_group]);
         self.invalidate_loop_facts(&loop_.body, Some((&input, &loop_.iter)))?;
         let writes = input.writes.clone();
-        self.lower_prepared_iteration(key_target, input, &loop_.orelse, Vec::new(), |checker| {
-            let mut body = Vec::new();
+        let orelse = &loop_.orelse;
+        self.lower_prepared_iteration(key_target, input, orelse, Vec::new(), |checker, body| {
             if let Some(callback) = retained_callback {
                 body.push(Statement::Assign(grouper, checker.local(callback)));
             }
@@ -241,11 +241,11 @@ impl Checker<'_> {
                     group,
                     &inner.orelse,
                     Vec::new(),
-                    |checker| {
+                    |checker, each| {
                         // A break leaves the outer iterator to skip the rest of this group.
-                        let mut each = vec![Statement::Assign(ready, Expr::boolean(false))];
-                        each.extend(checker.block(&inner.body)?.0);
-                        Ok(each)
+                        each.push(Statement::Assign(ready, Expr::boolean(false)));
+                        checker.lower_block(&inner.body, Some(each))?;
+                        Ok(())
                     },
                 )?;
                 body.extend(statements);
@@ -281,8 +281,8 @@ impl Checker<'_> {
                     clear: vec![accumulating],
                 });
             }
-            body.extend(checker.block(rest)?.0);
-            Ok(body)
+            checker.lower_block(rest, Some(body))?;
+            Ok(())
         })
     }
 }

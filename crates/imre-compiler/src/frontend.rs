@@ -5252,8 +5252,9 @@ impl<'a> Checker<'a> {
         {
             self.locals[*slot] = Type::PythonObject;
         }
-        self.lower_iteration(&loop_.target, input, &loop_.orelse, |checker| {
-            Ok(checker.block(&loop_.body)?.0)
+        self.lower_iteration(&loop_.target, input, &loop_.orelse, |checker, body| {
+            checker.lower_block(&loop_.body, Some(body))?;
+            Ok(())
         })
     }
 
@@ -5339,7 +5340,7 @@ impl<'a> Checker<'a> {
         target: &ast::Expr,
         input: Iteration,
         orelse: &[ast::Stmt],
-        lower_body: impl FnOnce(&mut Self) -> Result<Vec<Statement>, String>,
+        lower_body: impl FnOnce(&mut Self, &mut Vec<Statement>) -> Result<(), String>,
     ) -> Result<(Vec<Statement>, bool), String> {
         self.lower_iteration_after(target, input, orelse, Vec::new(), lower_body)
     }
@@ -5353,7 +5354,7 @@ impl<'a> Checker<'a> {
         input: Iteration,
         orelse: &[ast::Stmt],
         before_iteration: Vec<Statement>,
-        lower_body: impl FnOnce(&mut Self) -> Result<Vec<Statement>, String>,
+        lower_body: impl FnOnce(&mut Self, &mut Vec<Statement>) -> Result<(), String>,
     ) -> Result<(Vec<Statement>, bool), String> {
         if let Iteration::Prepared(input) = input {
             return self.lower_prepared_iteration(
@@ -5374,7 +5375,8 @@ impl<'a> Checker<'a> {
             let before = self.assigned.clone();
             self.assigned.insert(target);
             self.loop_breaks.push(None);
-            let body = lower_body(self)?;
+            let mut body = Vec::new();
+            lower_body(self, &mut body)?;
             let breaks = self.loop_breaks.pop().unwrap();
             self.assigned.after_iteration(before);
             self.narrowed = facts;
@@ -5615,7 +5617,7 @@ impl<'a> Checker<'a> {
             ));
         }
         self.loop_breaks.push(None);
-        body.extend(lower_body(self)?);
+        lower_body(self, &mut body)?;
         let breaks = self.loop_breaks.pop().unwrap();
         self.assigned.after_iteration(before);
         self.narrowed = facts;
