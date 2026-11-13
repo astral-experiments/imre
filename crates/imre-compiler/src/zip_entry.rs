@@ -1,7 +1,7 @@
 //! Resolve ZIP member snapshots for native lowering and Python's ZIP loader.
 
 use std::fs::File;
-use std::io::{BufReader, Cursor, Read, Seek};
+use std::io::{BufReader, Read, Seek};
 use std::path::{Path, PathBuf};
 
 use zip::ZipArchive;
@@ -42,10 +42,7 @@ pub fn is_zip_path(path: &Path) -> bool {
 
 /// Find an imported module in the SDK archive's existing build-time member index.
 pub(crate) fn packaged_member(name: &str) -> Option<&'static str> {
-    imre_ast::providers::module_member(
-        name,
-        include_str!(concat!(env!("OUT_DIR"), "/imre-stdlib-members.txt")).lines(),
-    )
+    imre_ast::providers::module_member(name, PACKAGED_MEMBERS.lines())
 }
 
 /// Archive members that also travel with a standalone executable when imported.
@@ -56,24 +53,51 @@ pub(crate) fn standalone_member(name: &str) -> Option<&'static str> {
     imre_ast::providers::module_member(name, members)
 }
 
-fn read_source<R: Read + Seek>(archive: &mut ZipArchive<R>, member: &str) -> Option<String> {
-    std::io::read_to_string(archive.by_name(member).ok()?).ok()
-}
-
 /// Exact installed standard library bytes shared by the native compiler and CLI.
-pub fn packaged_stdlib_zip() -> &'static [u8] {
+pub const fn packaged_stdlib_zip() -> &'static [u8] {
     const LENGTH: usize = include_bytes!(concat!(env!("OUT_DIR"), "/imre-stdlib.zip")).len();
     static BYTES: [u8; LENGTH] = *include_bytes!(concat!(env!("OUT_DIR"), "/imre-stdlib.zip"));
     &BYTES
 }
 
-/// Read a selected member only after checking earlier application sources.
-pub(crate) fn installed_source(member: &str) -> Result<String, String> {
-    let mut archive =
-        ZipArchive::new(Cursor::new(packaged_stdlib_zip())).map_err(|e| e.to_string())?;
-    read_source(&mut archive, member)
-        .ok_or_else(|| format!("cannot read installed source {member}"))
+/// Validate the bounds and UTF-8 of each indexed ZIP payload at compile time.
+pub(crate) const fn stored_source(start: usize, len: usize) -> Option<&'static str> {
+    let (_, tail) = packaged_stdlib_zip().split_at(start);
+    let (bytes, _) = tail.split_at(len);
+    match std::str::from_utf8(bytes) {
+        Ok(source) => Some(source),
+        Err(_) => None,
+    }
 }
+
+// Both the ordinary lookup and the fixed-source macro borrow the indexed ZIP payload.
+// A fixed registration must also match the physical source root used by the ZIP writer.
+macro_rules! packaged_sources {
+    ($(($member:tt [$($package:tt)?] $start:literal $length:literal))*) => {
+        pub(crate) const PACKAGED_MEMBERS: &str = {
+            let names = concat!($($member, "\n",)*);
+            names.split_at(names.len().saturating_sub(1)).0
+        };
+
+        pub(crate) fn installed_source(member: &str) -> Result<&'static str, String> {
+            match member {
+                $($member => const { stored_source($start, $length) },)*
+                _ => None,
+            }.ok_or_else(|| format!("cannot read installed source {member}"))
+        }
+
+        macro_rules! packaged_fixed {
+            $((($member $($package)?), $fallback:expr) => {
+                Some(($member, const {
+                    $crate::zip_entry::stored_source($start, $length).expect("required bundled source")
+                }))
+            };)*
+            ($origin:tt, $fallback:expr) => { $fallback };
+        }
+        pub(crate) use packaged_fixed;
+    };
+}
+include!(concat!(env!("OUT_DIR"), "/imre-stdlib-sources.rs"));
 
 pub(crate) struct ZipSources {
     path: PathBuf,
