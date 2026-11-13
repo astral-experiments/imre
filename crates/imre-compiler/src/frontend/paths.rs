@@ -245,10 +245,11 @@ impl Checker<'_> {
                 ));
             }
         };
+        let value = operation(kind, ty, vec![receiver]);
         if let Some(sites) = &mut self.fixed_sites {
-            sites.field(attribute, FixedNode::Path(kind, 1, ty));
+            sites.field(attribute, &value);
         }
-        Ok(operation(kind, ty, vec![receiver]))
+        Ok(value)
     }
 
     /// CPython's tuple contains integral seconds, while its time attributes use the subsecond stat data.

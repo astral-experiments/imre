@@ -1612,11 +1612,14 @@ impl Checker<'_> {
                 ));
             }
         };
-        let kind = ExprKind::Field(Box::new(receiver), field);
+        let value = Expr {
+            ty,
+            kind: ExprKind::Field(Box::new(receiver), field),
+        };
         if let Some(sites) = &mut self.fixed_sites {
-            sites.field(attribute, FixedNode::indexed(&kind, field, ty));
+            sites.field(attribute, &value);
         }
-        Ok(Expr { ty, kind })
+        Ok(value)
     }
 
     pub(super) fn process_method(
