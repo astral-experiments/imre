@@ -3128,8 +3128,10 @@ impl Context {
         } else {
             scope
         };
-        let fields =
-            super::function_fields::FunctionFields::new(self, scope, name, qualname, doc, annotate);
+        let root = self.root_scope(scope);
+        let fields = super::function_fields::FunctionFields::new(
+            self, scope, root, name, qualname, doc, annotate,
+        );
         let names = self.code_object(code).definition.freevars().to_vec();
         let entries = if defaults == NONE {
             Vec::new()
@@ -3209,11 +3211,7 @@ impl Context {
             cells.push(cell);
         }
         let scope = if self.code_object(code).definition.closure_supported {
-            let mut globals = scope;
-            while let Some(parent) = self.scope_data(globals).parent {
-                globals = parent;
-            }
-            let globals = self.new_function_globals(globals)?;
+            let globals = self.new_function_globals(root)?;
             self.closure_environment(globals, names, &cells)
         } else if self.scope_data(scope).parent.is_none() {
             self.new_function_globals(scope)?
