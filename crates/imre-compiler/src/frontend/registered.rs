@@ -283,6 +283,10 @@ pub(crate) struct RegisteredFunction {
 }
 
 impl RegisteredFunction {
+    pub(crate) fn fixed_attribute(&self, range: TextRange) -> Option<&FixedAttribute> {
+        self.fixed_attributes.as_ref()?.get(&range)
+    }
+
     pub(super) fn from_checked_body(
         function: ir::Function,
         local_names: HashMap<usize, LocalBinding>,
@@ -557,7 +561,7 @@ impl SourceChecks {
             .all(|error| !definition.contains_range(*error))
     }
 
-    fn cached(graph: &SourceGraph, module: ModuleId, definition: TextRange) -> Option<bool> {
+    pub(super) fn cached(graph: &SourceGraph, module: ModuleId, definition: TextRange) -> Option<bool> {
         graph
             .registered_source_errors
             .borrow()
@@ -635,7 +639,7 @@ impl FixedFunctions {
         self,
         graph: &SourceGraph,
         owners: &[ModuleId],
-        mut accepted: impl FnMut(ModuleId, TextRange) -> bool,
+        mut accepted: impl FnMut(ModuleId, TextRange, &FrameInputs) -> bool,
     ) {
         // Frame sources are recorded in slot order. Functions without a physical
         // source (including synthesized helpers) drop with the iterator.
@@ -650,7 +654,8 @@ impl FixedFunctions {
                 .registered_functions()
                 .get(&module)
                 .is_some_and(|entries| entries.contains_key(&start))
-                && let Ok(placed) = source.place_if(function, || accepted(module, definition))
+                && let Ok(placed) = source.place(function)
+                && accepted(module, definition, &placed.inputs)
             {
                 graph.register_function(module, start, placed);
             }

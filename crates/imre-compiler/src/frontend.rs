@@ -1300,8 +1300,22 @@ fn lower_graph(
     let named = graph.registered_startup && !needs_registered_entry;
     let mut completed = FixedFunctions::default();
     let register = |completed: FixedFunctions, owners: &[ModuleId]| {
-        completed.register(graph, owners, |module, range| {
-            inference.source_checks.accepts(graph, module, range)
+        completed.register(graph, owners, |module, range, inputs| {
+            let checks = &inference.source_checks;
+            if let Some(accepted) = registered::SourceChecks::cached(graph, module, range) {
+                return accepted;
+            }
+            if let FrameInputs::Protocol { sites } = inputs
+                && !matches!(sites.as_ref(), [FrameSite::Method(_)])
+                && let Some(solved) = &checks.solved
+            {
+                // Check a placed live function with the other solved ranges. Forcing a
+                // module check here would change the contract of its following siblings.
+                solved.borrow_mut().push((module, range));
+                true
+            } else {
+                checks.accepts(graph, module, range)
+            }
         });
     };
     let recover_completed = std::cell::Cell::new(named);
@@ -3448,16 +3462,6 @@ impl<'a> Checker<'a> {
                 definition,
                 self.classes,
             )?),
-            // A free fixed frame binds scalar payloads before any Python operand runs.
-            // Keep its Python entry on the live binder when an operation needs it.
-            None if self.frame_arguments == FrameArguments::Python
-                && signature
-                    .params
-                    .iter()
-                    .any(|param| param.ty.builtin_scalar_name().is_some()) =>
-            {
-                return None;
-            }
             None => None,
         };
         sites.finish(
@@ -3466,6 +3470,7 @@ impl<'a> Checker<'a> {
             std::mem::take(&mut self.names),
             &self.locals,
             method,
+            self.frame_arguments,
         )
     }
 
@@ -13335,7 +13340,10 @@ impl<'a> Checker<'a> {
             if receiver.ty == Type::Str {
                 match attribute.attr.as_str() {
                     "join" => return self.join_call(receiver, call),
-                    "replace" => return self.replace_call(receiver, call),
+                    "replace" => {
+                        let value = self.replace_call(receiver, call)?;
+                        return Ok(self.bound_text_result(call, attribute, value));
+                    }
                     "split" | "rsplit" | "strip" | "lstrip" | "rstrip" | "startswith"
                     | "endswith" | "find" | "partition" => {
                         return self.text_method(receiver, attribute.attr.as_str(), call);
