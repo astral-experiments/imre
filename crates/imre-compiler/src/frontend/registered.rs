@@ -5439,6 +5439,25 @@ publish(5, callback)
     }
 
     #[test]
+    fn an_inferred_procedure_keeps_its_checked_registered_body() {
+        let source = concat!(
+            "probe = map(int, '12')\n",
+            "def emit(*, label: str) -> str:\n    return label\n",
+            "def publish(label: str):\n    emit(label=label)\n",
+            "publish('ready')\n",
+        );
+        let graph = SourceGraph::single(source).unwrap();
+        let (_, lowered) = caller_cache::observe_lowerings(|| super::super::lower(&graph));
+        assert_eq!(
+            lowered.iter().filter(|name| *name == "publish").count(),
+            1,
+            "{lowered:?}"
+        );
+        let site = graph.modules[graph.entry].parsed.syntax().body[2].start();
+        assert!(graph.registered_functions()[&graph.entry].contains_key(&site));
+    }
+
+    #[test]
     fn recovery_reuses_the_solved_body_and_lowers_the_missing_callback() {
         let mut graph = SourceGraph::single(concat!(
             "def square(n: int) -> int:\n    return n * n\n",
