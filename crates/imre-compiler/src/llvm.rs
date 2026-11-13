@@ -7618,7 +7618,10 @@ impl Emitter<'_, '_> {
             Builtin::ListSum => self.call(
                 "imre_list_sum",
                 Type::Int,
-                &[&args[0].value, &args[1].value],
+                &[
+                    &args[0].value,
+                    args.get(1).map_or(&small(0), |arg| &arg.value),
+                ],
             ),
             Builtin::ListSliceSum => self.call(
                 "imre_list_slice_sum",

@@ -221,7 +221,9 @@ impl Checker<'_> {
                     .mapping(receiver.ty)
                     .is_some_and(|(_, value)| value == Type::Int)
             {
-                let start = self.integer_fold_start(call, "0")?;
+                let start = self
+                    .integer_fold_start(call)?
+                    .unwrap_or_else(|| Expr::integer("0"));
                 return Ok(Expr {
                     ty: Type::Int,
                     kind: ExprKind::Builtin(Builtin::DictSumValues, vec![receiver, start]),
@@ -251,7 +253,7 @@ impl Checker<'_> {
             );
             let subtotal =
                 self.comprehension_display(source, &plan, comprehensions::Collector::IntegerSum)?;
-            let start = self.integer_fold_start(call, "0")?;
+            let start = self.integer_fold_start(call)?;
             return Ok(add_start(subtotal, start));
         }
         let generator = matches!(source, ast::Expr::Generator(_));
@@ -268,7 +270,7 @@ impl Checker<'_> {
         } else {
             self.consumer_input(source, (!generator).then_some(Type::Int))?
         };
-        let start = self.integer_fold_start(call, "0")?;
+        let start = self.integer_fold_start(call)?;
         let iterable = match input {
             Iteration::Container {
                 iterable,
@@ -280,6 +282,7 @@ impl Checker<'_> {
                 if let Some(sum) = zip_sum {
                     self.zip_sums.insert(result, sum);
                 }
+                let start = start.unwrap_or_else(|| Expr::integer("0"));
                 return self.integer_fold(call, input, start, result, convert, Binary::Add);
             }
         };
@@ -296,9 +299,11 @@ impl Checker<'_> {
         // Evaluate both arguments before borrowing the list: `start` may
         // mutate the source through an alias. Exact integer addition has
         // no callbacks or recoverable errors during the reduction.
+        let mut operands = vec![iterable];
+        operands.extend(start);
         let value = Expr {
             ty: Type::Int,
-            kind: ExprKind::Builtin(Builtin::ListSum, vec![iterable, start]),
+            kind: ExprKind::Builtin(Builtin::ListSum, operands),
         };
         if self
             .fixed_sites
@@ -386,7 +391,9 @@ impl Checker<'_> {
             ));
         }
         let (input, convert) = self.consumer_input(source, None)?;
-        let start = self.integer_fold_start(call, "1")?;
+        let start = self
+            .integer_fold_start(call)?
+            .unwrap_or_else(|| Expr::integer("1"));
         let result = self.hidden(Type::Int);
         self.integer_fold(call, input, start, result, convert, Binary::Multiply)
     }
@@ -457,17 +464,18 @@ impl Checker<'_> {
     }
 
     /// Checks the optional starting value after checking the eager first argument.
-    fn integer_fold_start(&mut self, call: &ast::ExprCall, identity: &str) -> Result<Expr, String> {
-        let start = call.arguments.args.get(1).or_else(|| {
-            call.arguments
-                .keywords
-                .first()
-                .map(|keyword| &keyword.value)
-        });
-        match start {
-            Some(start) => self.expr_expected(start, Type::Int),
-            None => Ok(Expr::integer(identity)),
-        }
+    fn integer_fold_start(&mut self, call: &ast::ExprCall) -> Result<Option<Expr>, String> {
+        call.arguments
+            .args
+            .get(1)
+            .or_else(|| {
+                call.arguments
+                    .keywords
+                    .first()
+                    .map(|keyword| &keyword.value)
+            })
+            .map(|start| self.expr_expected(start, Type::Int))
+            .transpose()
     }
 
     /// The sealed converter has no user callback or escaping iterator object.
@@ -478,9 +486,8 @@ impl Checker<'_> {
         element: Option<Type>,
     ) -> Result<(Iteration, bool), String> {
         if let ast::Expr::Call(call) = expression
-            && let Some((_, source)) = self.map_converter_input(call, |name| {
-                name == "int" && self.fixed_map(call)
-            })
+            && let Some((_, source)) =
+                self.map_converter_input(call, |name| name == "int" && self.fixed_map(call))
         {
             if !call.arguments.keywords.is_empty() {
                 return Err(error(
@@ -571,7 +578,8 @@ impl Checker<'_> {
 
 /// Eager producers finish before `start` is evaluated. Exact integer addition
 /// allows the producer's subtotal to replace a private materialized container.
-fn add_start(subtotal: Expr, start: Expr) -> Expr {
+fn add_start(subtotal: Expr, start: Option<Expr>) -> Expr {
+    let Some(start) = start else { return subtotal };
     if matches!(&start.kind, ExprKind::Int(value) if value == "0") {
         subtotal
     } else {

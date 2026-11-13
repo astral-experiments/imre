@@ -1042,7 +1042,10 @@ impl Builtin {
                 signature(&[Type::ListInt], Type::ListInt)
                     || signature(&[Type::ListInt, Type::Int], Type::ListInt)
             }
-            Self::ListSum => signature(&[Type::ListInt, Type::Int], Type::Int),
+            Self::ListSum => {
+                signature(&[Type::ListInt], Type::Int)
+                    || signature(&[Type::ListInt, Type::Int], Type::Int)
+            }
             Self::Sumprod => {
                 matches!(args, [left, right] if left.ty == right.ty && match types.element(left.ty) {
                     Some(Type::Int) => result == Type::Int,
