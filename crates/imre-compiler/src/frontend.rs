@@ -1431,10 +1431,11 @@ fn lower_graph(
         }
         let named_function = named
             && cache.is_none()
-            && unavailable.is_none()
             && signature.physical_frame
             && signature.method.is_none();
         let result = if named_function
+            && (unavailable.is_none()
+                || registered::SourceChecks::cached(graph, *module_id, definition.range()) == Some(true))
             && signature
                 .params
                 .iter()
@@ -1451,6 +1452,7 @@ fn lower_graph(
                 .map(|body| (body, Default::default()))
                 .map_or_else(|| lower_body(checker, definition, signature), Ok)
         } else if named_function
+            && unavailable.is_none()
             && definition.returns.is_some()
             && signature.returns.builtin_scalar_name().is_some()
         {
