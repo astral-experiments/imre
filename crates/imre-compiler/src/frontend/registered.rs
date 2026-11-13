@@ -732,7 +732,7 @@ pub(super) fn capture(
     types: &Types,
     inference: &inference::Inference,
     source: Capture,
-    candidates: impl IntoIterator<Item = (usize, Option<fixed_body_source::PlacedBody>)>,
+    candidates: impl IntoIterator<Item = (usize, Option<PreparedBody>)>,
 ) {
     // Methods under the same class share a module definition, but have separate signature slots.
     for (slot, prepared) in candidates {
@@ -787,17 +787,15 @@ pub(super) fn capture(
             Ok(body) => (body, HashMap::new()),
             Err(attributes) => (None, attributes),
         };
-        let recover_method = method.is_some() && !checked;
-        let placed = if let Some(body) = prepared.filter(|_| recover_method) {
-            Some(body)
-        } else if recover_method {
-            let mut fixed = checker();
-            fixed.fixed_sites = Some(fixed_body_source::SourceSites::new(true));
-            fixed.placement_only = true;
-            fixed.settled_attributes = Some(&mut attributes);
-            let Some((body, _)) =
+        let placed = if method.is_some() && !checked {
+            let body = prepared.or_else(|| {
+                let mut fixed = checker();
+                fixed.fixed_sites = Some(fixed_body_source::SourceSites::new(true));
+                fixed.placement_only = true;
+                fixed.settled_attributes = Some(&mut attributes);
                 graph.try_registered_body(id, || lower_body(fixed, function, signature).ok())
-            else {
+            });
+            let Some((body, _)) = body else {
                 continue;
             };
             body.source
