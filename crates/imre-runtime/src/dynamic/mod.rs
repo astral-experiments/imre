@@ -1894,7 +1894,7 @@ impl Context {
             Value::Filter { predicate, input } => {
                 let (predicate, input) = (*predicate, *input);
                 return stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
-                    self.next_filtered(predicate, input)
+                    self.next_filtered(id, predicate, input)
                 });
             }
             Value::Zip { .. } => {

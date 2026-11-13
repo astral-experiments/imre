@@ -220,10 +220,15 @@ impl Context {
     }
 
     /// Keep each candidate alive across its predicate and return the original item.
-    pub(super) fn next_filtered(&mut self, predicate: Id, input: Id) -> Result<Option<Id>> {
+    pub(super) fn next_filtered(
+        &mut self,
+        filter: Id,
+        predicate: Id,
+        input: Id,
+    ) -> Result<Option<Id>> {
         let roots = self.heap.temporary_mark();
-        self.heap.keep(predicate);
-        self.heap.keep(input);
+        // The filter owns its predicate and input throughout a reentrant pull.
+        self.heap.keep(filter);
         let step = self.heap.temporary_mark();
         let mut limit = self.heap.streaming_collection_limit();
         let result = (|| loop {
