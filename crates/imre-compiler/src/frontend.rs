@@ -10919,7 +10919,8 @@ impl<'a> Checker<'a> {
             }
             return Err(self.scoped_builtin_error(name, call));
         }
-        if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::BuiltinsAscii)) {
+        let mut binding = self.resolve(&call.func);
+        if binding == Some(Binding::Intrinsic(Intrinsic::BuiltinsAscii)) {
             return self.ascii_call(call);
         }
         if let Some(registration) = self.immediate_registration(call)? {
@@ -10929,7 +10930,7 @@ impl<'a> Checker<'a> {
             .func
             .as_name_expr()
             .is_some_and(|n| n.id == "object" && !self.names.contains_key("object"))
-            && self.resolve(&call.func).is_none()
+            && binding.is_none()
             && call.arguments.args.is_empty()
             && call.arguments.keywords.is_empty()
         {
@@ -10951,8 +10952,9 @@ impl<'a> Checker<'a> {
         {
             chain.push(call);
             call = inner;
+            binding = None;
         }
-        let mut value = self.call_on(call, None)?;
+        let mut value = self.call_with_binding(call, None, binding)?;
         for call in chain.into_iter().rev() {
             if matches!(value.ty, Type::StrLiteral(_)) {
                 value = literals::view(value, Type::Str);
@@ -10962,12 +10964,18 @@ impl<'a> Checker<'a> {
         Ok(value)
     }
 
-    fn call_on(
+    fn call_on(&mut self, call: &ast::ExprCall, receiver: Option<Expr>) -> Result<Expr, String> {
+        let binding = self.resolve(&call.func);
+        self.call_with_binding(call, receiver, binding)
+    }
+
+    fn call_with_binding(
         &mut self,
         call: &ast::ExprCall,
         mut receiver: Option<Expr>,
+        binding: Option<Binding>,
     ) -> Result<Expr, String> {
-        if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::BuiltinsLen))
+        if binding == Some(Binding::Intrinsic(Intrinsic::BuiltinsLen))
             || self.graph.mutable_builtin_len && self.unshadowed_len(&call.func)
         {
             let callable = self.builtin_len();
@@ -11011,7 +11019,7 @@ impl<'a> Checker<'a> {
         if receiver.is_none()
             && matches!(&*call.func,ast::Expr::Name(n) if n.id.as_str()=="len")
             && !self.names.contains_key("len")
-            && self.resolve(&call.func).is_none()
+            && binding.is_none()
             && call.arguments.keywords.is_empty()
             && let [arg] = call.arguments.args.as_ref()
             && self.resolve(arg) == Some(Binding::Intrinsic(Intrinsic::OverloadRegistry))
@@ -11030,8 +11038,7 @@ impl<'a> Checker<'a> {
         if let Some(value) = self.cache_control(call, receiver.as_ref())? {
             return Ok(value);
         }
-        if let Some(Binding::Intrinsic(Intrinsic::MockCallList { mark })) = self.resolve(&call.func)
-        {
+        if let Some(Binding::Intrinsic(Intrinsic::MockCallList { mark })) = binding {
             self.reject_builtin_keywords(call)?;
             let [values] = call.arguments.args.as_ref() else {
                 return Err(error(self.source, call, "expected a mock call list"));
@@ -11094,7 +11101,7 @@ impl<'a> Checker<'a> {
                 && crate::classes::super_method(call).is_none()
                 && self.class_reference(&method.value).is_none()
                 && self.exception_category(&method.value).is_none()
-                && self.resolve(&call.func).is_none()
+                && binding.is_none()
             {
                 let target = match receiver.take() {
                     Some(value) => value,
@@ -11111,7 +11118,7 @@ impl<'a> Checker<'a> {
         }
         if processes::boxed_launch_keywords(call)
             && matches!(
-                self.resolve(&call.func),
+                binding,
                 Some(Binding::Intrinsic(
                     Intrinsic::Popen
                         | Intrinsic::SubprocessCall
@@ -11123,7 +11130,7 @@ impl<'a> Checker<'a> {
         {
             return Err(self.scoped_builtin_error("subprocess launch keywords", call));
         }
-        if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::OrderedDict)) {
+        if binding == Some(Binding::Intrinsic(Intrinsic::OrderedDict)) {
             return self.ordered_dict_constructor(call, None);
         }
         if let Some(Binding::Intrinsic(
@@ -11131,14 +11138,14 @@ impl<'a> Checker<'a> {
             | Intrinsic::TomliLoad
             | Intrinsic::TomlDumps
             | Intrinsic::TomliDump),
-        )) = self.resolve(&call.func)
+        )) = binding
         {
             return self.document_call(kind, call);
         }
         if let Some(expression) = self.parse_args(call)? {
             return Ok(expression);
         }
-        self.call_with_key_view(call, None, receiver)
+        self.call_with_key_view(call, binding, None, receiver)
     }
 
     fn dict_subscript(
@@ -11244,7 +11251,7 @@ impl<'a> Checker<'a> {
         let mut view = false;
         let value = match source {
             ast::Expr::Call(call) if matches!(&*call.func, ast::Expr::Attribute(attr) if attr.attr.as_str() == "keys") => {
-                self.call_with_key_view(call, Some(&mut view), None)?
+                self.call_with_key_view(call, self.resolve(&call.func), Some(&mut view), None)?
             }
             _ => self.expr(source)?,
         };
@@ -11259,6 +11266,7 @@ impl<'a> Checker<'a> {
     fn call_with_key_view(
         &mut self,
         call: &ast::ExprCall,
+        binding: Option<Binding>,
         key_view: Option<&mut bool>,
         receiver: Option<Expr>,
     ) -> Result<Expr, String> {
@@ -11428,7 +11436,6 @@ impl<'a> Checker<'a> {
         if let Some(copy) = self.dataclass_copy(call)? {
             return Ok(copy);
         }
-        let binding = self.resolve(&call.func);
         match binding {
             Some(Binding::Intrinsic(Intrinsic::Partial)) => return self.partial(call),
             Some(Binding::Intrinsic(Intrinsic::LoggingShutdown)) => {
@@ -12465,22 +12472,17 @@ impl<'a> Checker<'a> {
         }
         if let Some(Binding::Intrinsic(
             kind @ (Intrinsic::TemporaryDirectory | Intrinsic::NullContext),
-        )) = self.resolve(&call.func)
+        )) = binding
         {
             return self.directory_manager(kind, call);
         }
-        if matches!(
-            self.resolve(&call.func),
-            Some(Binding::Intrinsic(Intrinsic::SubprocessRun))
-        ) {
+        if matches!(binding, Some(Binding::Intrinsic(Intrinsic::SubprocessRun))) {
             return self.process_run(call, false);
         }
-        if let Some(Binding::Intrinsic(Intrinsic::ShellOutput { status })) =
-            self.resolve(&call.func)
-        {
+        if let Some(Binding::Intrinsic(Intrinsic::ShellOutput { status })) = binding {
             return self.shell_output(call, status);
         }
-        if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::CheckOutput)) {
+        if binding == Some(Binding::Intrinsic(Intrinsic::CheckOutput)) {
             return self.process_check_output(call);
         }
         if let ast::Expr::Attribute(attribute) = &*call.func
@@ -12513,26 +12515,19 @@ impl<'a> Checker<'a> {
             }
             return result;
         }
-        if let Some(Binding::Intrinsic(Intrinsic::PosixPath(operation))) = self.resolve(&call.func)
-        {
+        if let Some(Binding::Intrinsic(Intrinsic::PosixPath(operation))) = binding {
             return self.posix_path(call, operation);
         }
-        if matches!(
-            self.resolve(&call.func),
-            Some(Binding::Intrinsic(Intrinsic::Path))
-        ) {
+        if matches!(binding, Some(Binding::Intrinsic(Intrinsic::Path))) {
             return self.path_constructor(call, Type::Path);
         }
-        if let Some(Binding::Intrinsic(Intrinsic::PurePath(flavor))) = self.resolve(&call.func) {
+        if let Some(Binding::Intrinsic(Intrinsic::PurePath(flavor))) = binding {
             return self.path_constructor(call, Type::PurePath(flavor));
         }
-        if matches!(
-            self.resolve(&call.func),
-            Some(Binding::Intrinsic(Intrinsic::JsonDecode))
-        ) {
+        if matches!(binding, Some(Binding::Intrinsic(Intrinsic::JsonDecode))) {
             return self.json_decode(call);
         }
-        if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::JsonEncoderClass)) {
+        if binding == Some(Binding::Intrinsic(Intrinsic::JsonEncoderClass)) {
             let flag = |name, default| {
                 ParameterKind::KeywordOnly.parameter(name, Type::Bool, Some(Expr::boolean(default)))
             };
@@ -12547,7 +12542,7 @@ impl<'a> Checker<'a> {
             )?;
             return Ok(self.ordered_builtin(Builtin::JsonEncoderNew, Type::JsonEncoder, args));
         }
-        if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::JsonDecoderClass)) {
+        if binding == Some(Binding::Intrinsic(Intrinsic::JsonDecoderClass)) {
             self.reject_builtin_keywords(call)?;
             if !call.arguments.args.is_empty() {
                 return Err(error(
@@ -12562,23 +12557,19 @@ impl<'a> Checker<'a> {
             });
         }
         if let Some(Binding::Intrinsic(operation @ (Intrinsic::JsonLoads | Intrinsic::JsonLoad))) =
-            self.resolve(&call.func)
+            binding
         {
             return self.json_loads(call, operation == Intrinsic::JsonLoad);
         }
-        if matches!(
-            self.resolve(&call.func),
-            Some(Binding::Intrinsic(Intrinsic::TomlDecode))
-        ) {
+        if matches!(binding, Some(Binding::Intrinsic(Intrinsic::TomlDecode))) {
             return self.toml_decode(call);
         }
         if let Some(Binding::Intrinsic(
             op @ (Intrinsic::JsonEncode | Intrinsic::JsonDumps | Intrinsic::JsonDump),
-        )) = self.resolve(&call.func)
+        )) = binding
         {
             return self.json_encode(call, op);
         }
-        let binding = self.resolve(&call.func);
         if binding.is_some_and(Binding::is_registered_object) {
             self.require_registered_operation(call.func.as_ref())?;
             return self.call_with_target(call, Expr::unrepresented());
