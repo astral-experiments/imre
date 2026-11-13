@@ -402,12 +402,9 @@ fn method_target(field: &ast::ExprAttribute) -> ir::RegisteredCallTarget {
 pub(in crate::frontend) fn bound_method_operation(
     call: &ast::ExprCall,
     field: &ast::ExprAttribute,
+    arguments: ir::RegisteredArguments,
 ) -> Builtin {
-    call_operation(
-        call,
-        method_target(field),
-        registered_argument_layout(&call.arguments),
-    )
+    call_operation(call, method_target(field), arguments)
 }
 
 fn callable_target(call: &ast::ExprCall) -> ir::RegisteredCallTarget {

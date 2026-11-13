@@ -319,8 +319,8 @@ impl SourceSites {
         }
     }
 
-    /// A source method binds a Python callable before its arguments even when
-    /// the fixed entry can use a collection operation directly.
+    /// Bind a method with already-checked positional arguments while the fixed
+    /// entry keeps the collection operation.
     pub(super) fn method(
         &mut self,
         call: &ast::ExprCall,
@@ -332,10 +332,11 @@ impl SourceSites {
             && operands.len() == 1 + call.arguments.args.len()
             && let Some(node) = FixedNode::checked(&ir::Node::Expression(value))
         {
+            let layout = ir::RegisteredArguments::Positional;
             self.python_operation(
                 site,
                 field.attr.start(),
-                registered::values::bound_method_operation(call, field),
+                registered::values::bound_method_operation(call, field, layout),
                 node,
             );
         }
