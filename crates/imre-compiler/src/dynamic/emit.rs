@@ -660,6 +660,15 @@ impl<'a> PreparedBody<'a> {
                 prepare.suite(statements, crate::frontend::RegisteredScope::Module)
             })
         };
+        // Decode the annotation while its original lexical inputs are still in scope.
+        let annotation = if expression {
+            let [ast::Stmt::Expr(statement)] = body.as_slice() else {
+                unreachable!("single decoded expression");
+            };
+            crate::frontend::AnnotationCode::prepare(&statement.value, values)
+        } else {
+            None
+        };
         #[cfg(test)]
         let statement_sites = prepare.sites;
         let source = SourceInfo {
@@ -684,9 +693,13 @@ impl<'a> PreparedBody<'a> {
             #[cfg(test)]
             class_keywords,
             docs,
+            #[cfg(test)]
             has_templates,
+            #[cfg(test)]
             template_fields,
+            #[cfg(test)]
             replacements,
+            #[cfg(test)]
             method_imports,
             future_flags,
             private_names,
@@ -695,14 +708,6 @@ impl<'a> PreparedBody<'a> {
         let docstring = (!expression && !interactive && keep_docstrings)
             .then(|| crate::frontend::docstring(&body).or_else(|| source.bundled_docstring("")))
             .flatten();
-        let annotation = if expression {
-            let [ast::Stmt::Expr(statement)] = body.as_slice() else {
-                unreachable!("single decoded expression");
-            };
-            crate::frontend::AnnotationCode::prepare(&statement.value, source.registered_source())
-        } else {
-            None
-        };
         drop(body);
         Ok((
             PreparedBody {
@@ -972,10 +977,14 @@ struct SourceInfo<'a> {
     #[cfg(test)]
     class_keywords: Vec<ruff_text_size::TextSize>,
     docs: Option<crate::modules::doctest::SealedDocs>,
+    #[cfg(test)]
     has_templates: bool,
+    #[cfg(test)]
     template_fields: HashMap<TextSize, imre_ast::strings::TemplateFieldText>,
+    #[cfg(test)]
     replacements: HashMap<ruff_text_size::TextRange, Vec<u32>>,
     private_names: imre_ast::Names,
+    #[cfg(test)]
     method_imports: Cow<'a, std::collections::BTreeSet<String>>,
     future_flags: u32,
     text: Cow<'a, str>,
@@ -996,6 +1005,7 @@ impl SourceInfo<'_> {
             .map(str::to_owned)
     }
 
+    #[cfg(test)]
     fn registered_source(&self) -> crate::frontend::RegisteredSource<'_> {
         crate::frontend::RegisteredSource {
             python_optimization: self.python_optimization,
