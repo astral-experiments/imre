@@ -127,20 +127,17 @@ pub(crate) fn write(directory: &Path) -> Result<(), String> {
         let (file, source) = if let Some(provider) = bundled_module_source(&name, true) {
             provider
         } else if let Some(member) = crate::zip_entry::packaged_member(&name) {
-            (member, crate::zip_entry::installed_source(member)?.into())
+            (member, crate::zip_entry::installed_source(member)?)
         } else {
             continue;
         };
-        write_module(&name, file, &source, Some(&mut pending)).map_err(|err| err.to_string())?;
+        write_module(&name, file, source, Some(&mut pending)).map_err(|err| err.to_string())?;
     }
     for (name, file, source) in super::builtin_sources(std::env::consts::OS) {
         write_module(name, file, source, None).map_err(|err| err.to_string())?;
     }
     for (name, file, source) in defaults {
-        if bundled_module_source(name, true)
-            .as_ref()
-            .is_none_or(|(path, text)| *path != file || text.as_ref() != source)
-        {
+        if bundled_module_source(name, true) != Some((file, source)) {
             write_module(name, file, source, None).map_err(|err| err.to_string())?;
         }
     }
