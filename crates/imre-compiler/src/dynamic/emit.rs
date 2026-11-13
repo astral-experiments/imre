@@ -4208,27 +4208,41 @@ mod tests {
 
     #[test]
     fn checked_raise_preserves_the_following_declarations_located_refusal() {
-        let source = concat!(
-            "raise RuntimeError('stop')\n",
-            "async def update(values):\n",
-            "    values += [lambda v=await get(x): v for x in [0]]\n",
+        let check = |source: &str, expected| {
+            let path = Path::new("example.py");
+            let parsed = ParsedModule::parse(path, source.into()).unwrap();
+            let diagnostic = PreparedBody::from_parsed(
+                "example",
+                path,
+                parsed,
+                0,
+                ModuleOrigin::Program(None),
+                LiteralSites::default(),
+                Default::default(),
+            )
+            .err()
+            .expect("located declaration refusal");
+            assert_eq!(diagnostic, expected);
+        };
+        check(
+            concat!(
+                "raise RuntimeError('stop')\n",
+                "async def update(values):\n",
+                "    values += [lambda v=await get(x): v for x in [0]]\n",
+            ),
+            "example.py:3:15: cannot compile this comprehension ahead of time (through 3:54)",
         );
-        let path = Path::new("example.py");
-        let parsed = ParsedModule::parse(path, source.into()).unwrap();
-        let diagnostic = PreparedBody::from_parsed(
-            "example",
-            path,
-            parsed,
-            0,
-            ModuleOrigin::Program(None),
-            LiteralSites::default(),
-            Default::default(),
-        )
-        .err()
-        .expect("located declaration refusal");
-        assert_eq!(
-            diagnostic,
-            "example.py:3:15: cannot compile this comprehension ahead of time (through 3:54)"
+        check(
+            concat!(
+                "class C:\n",
+                "    def f[T](self):\n",
+                "        raise RuntimeError('stop')\n",
+                "        while False:\n",
+                "            pass\n",
+                "        async def update(values):\n",
+                "            values += [lambda v=await get(x): v for x in [0]]\n",
+            ),
+            "example.py:7:23: cannot compile this comprehension ahead of time (through 7:62)",
         );
     }
 
