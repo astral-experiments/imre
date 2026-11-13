@@ -1,6 +1,6 @@
 use super::sequences::{self, STACK_USE_GUIDELINE};
 use super::{CheckedBody, CheckedValue, Entry};
-use crate::ir::{DictEntry, Type};
+use crate::ir::{Builtin, DictEntry, Expr, ExprKind, Type};
 use crate::llvm::registered::FrameEmitter;
 use crate::llvm::{Value, representation_kind};
 
@@ -91,6 +91,20 @@ impl CheckedBody<'_, '_, '_, '_> {
         let mark = frame.temporary_mark();
         frame.unwind_operands(&mark, |frame| {
             let mut body = CheckedBody::registered(frame.reborrow());
+            let text = |value: &Expr| {
+                matches!(
+                    value.without_location().kind,
+                    ExprKind::Str(_) | ExprKind::Builtin(Builtin::RegisteredString(_), _)
+                )
+            };
+            // Literal text pairs can be inserted as they are evaluated without calling Python.
+            if entries.len() > STACK_USE_GUIDELINE / 2 + 2
+                && entries
+                    .iter()
+                    .all(|e| e.key.as_ref().is_some_and(text) && text(&e.value))
+            {
+                return body.dictionary_pairs(ty, entries, Some((&mark, "0")));
+            }
             let mut result: Option<CheckedValue> = None;
             let mut remaining = entries;
             while let Some((entry, tail)) = remaining.split_first() {
