@@ -388,7 +388,7 @@ impl CallParameters {
     }
 
     /// Decode both compiled and runtime-created function metadata once per definition.
-    fn from_metadata(mut metadata: serde_json::Value) -> Result<Self> {
+    fn from_metadata(metadata: &mut serde_json::Value) -> Result<Self> {
         let names = |key: &str| -> Result<Vec<String>> {
             let mut result = Vec::new();
             for name in metadata[key]
@@ -418,7 +418,7 @@ impl CallParameters {
             .map_err(|_| Error::new("MemoryError", ""))?;
         locals.extend(local_names);
         // Runtime-created functions can declare their parameters without a separate local list.
-        for arg in code_locals::argument_slots(&metadata) {
+        for arg in code_locals::argument_slots(metadata) {
             if !locals.contains(arg) {
                 locals
                     .try_reserve(1)
@@ -457,6 +457,23 @@ impl CallParameters {
     }
 }
 
+impl value::CodeObject {
+    /// Keep one decoded binding layout for all calls in this heap.
+    fn call_parameters(
+        &self,
+        decode: impl FnOnce() -> Result<CallParameters>,
+    ) -> Result<std::rc::Rc<CallParameters>> {
+        if let Some(parameters) = self.parsed_parameters.get() {
+            return Ok(std::rc::Rc::clone(parameters));
+        }
+        let parameters = decode()?;
+        Ok(std::rc::Rc::clone(
+            self.parsed_parameters
+                .get_or_init(|| std::rc::Rc::new(parameters)),
+        ))
+    }
+}
+
 impl Context {
     fn code_object(&self, id: Id) -> &value::CodeObject {
         let Value::Code(code) = self.heap.get(id) else {
@@ -465,19 +482,13 @@ impl Context {
         code
     }
 
-    /// Decode a function's parameter metadata on its first call.
     fn parsed_parameters(&self, code: Id) -> Result<std::rc::Rc<CallParameters>> {
         let code = self.code_object(code);
-        if let Some(parameters) = code.parsed_parameters.get() {
-            return Ok(std::rc::Rc::clone(parameters));
-        }
-        let parameters = serde_json::from_str(self.str_value(code.parameters)?)
-            .map_err(|error| Error::new("SystemError", error.to_string()))?;
-        let parameters = CallParameters::from_metadata(parameters)?;
-        Ok(std::rc::Rc::clone(
-            code.parsed_parameters
-                .get_or_init(|| std::rc::Rc::new(parameters)),
-        ))
+        code.call_parameters(|| {
+            let mut metadata = serde_json::from_str(self.str_value(code.parameters)?)
+                .map_err(|error| Error::new("SystemError", error.to_string()))?;
+            CallParameters::from_metadata(&mut metadata)
+        })
     }
 
     fn alloc(&mut self, value: Value) -> Id {

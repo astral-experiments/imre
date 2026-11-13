@@ -4,7 +4,7 @@
 use super::thread_lock::Acquire;
 use super::thread_worker::Operation;
 use super::value::{Body, Code, CodeDefinition, CodeObject, WorkerStack};
-use super::{Context, Error, Id, NONE, Result, Value, copy_label, ffi};
+use super::{CallParameters, Context, Error, Id, NONE, Result, Value, copy_label, ffi};
 use crate::objects::locks::PrimitiveLock;
 use crate::objects::logging::HandlerLock;
 use std::collections::HashMap;
@@ -102,10 +102,12 @@ impl Callback {
             return Ok(None);
         }
         let signature = ctx.str_value(code.parameters)?;
-        let meta: serde_json::Value = serde_json::from_str(signature)
+        let mut meta: serde_json::Value = serde_json::from_str(signature)
             .map_err(|e| Error::new("SystemError", e.to_string()))?;
         if let Some(receiver) = receiver
-            && let Some(field) = meta["thread_bound_lock_field"].as_str()
+            && let Some(serde_json::Value::String(field)) = meta
+                .get_mut("thread_bound_lock_field")
+                .map(serde_json::Value::take)
         {
             if !matches!(code.body, Body::Native(_, NONE)) {
                 return Ok(None);
@@ -121,7 +123,7 @@ impl Callback {
             // This operation executes only the lock acquire. A receiver check that
             // would raise in the Python frame still requires the worker's exception path.
             if meta.get("types").is_some() {
-                let sig = ctx.parsed_parameters(code_id)?;
+                let sig = code.call_parameters(|| CallParameters::from_metadata(&mut meta))?;
                 let name = ctx.str_value(fields.qualname)?;
                 let checked = ctx.check_supplied_types(function, &sig, name, |param| {
                     (sig.positional.first()?.as_str() == param).then_some(receiver)
@@ -133,7 +135,7 @@ impl Callback {
                     return Err(error);
                 }
             }
-            let Some(operand) = ctx.plain_instance_field(receiver, field) else {
+            let Some(operand) = ctx.plain_instance_field(receiver, &field) else {
                 return Ok(None);
             };
             let Value::PrimitiveLock(lock) = ctx.heap.get(operand) else {
@@ -236,22 +238,23 @@ impl Callback {
         if bindings.environment {
             return Ok(None);
         }
-        let legacy = meta["thread_parameters"].as_array();
         let lock_only = match meta["thread_lock_only"].as_bool() {
             Some(lock_only) => lock_only,
-            None if legacy.is_some() => meta["thread_worker_locks"].as_array() == legacy,
+            None if meta["thread_parameters"].is_array() => {
+                meta["thread_worker_locks"] == meta["thread_parameters"]
+            }
             None => return Ok(None),
         };
         if high_level && !lock_only {
             return Ok(None);
         }
-        let parameters = ctx.parsed_parameters(code_id)?;
+        let parameters = code.call_parameters(|| CallParameters::from_metadata(&mut meta))?;
         let shape = parameters.shape();
         if shape.varargs || shape.kwargs {
             return Ok(None);
         }
         // Earlier producers repeated the positional signature in the admission proof.
-        if let Some(names) = legacy
+        if let Some(names) = meta["thread_parameters"].as_array()
             && (!shape.keyword_only.is_empty()
                 || !names
                     .iter()
