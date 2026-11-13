@@ -99,8 +99,7 @@ pub(crate) enum FixedNode {
     Indexed(std::mem::Discriminant<ExprKind>, usize, Type),
     NamedCall(std::mem::Discriminant<ExprKind>, usize, usize, Type),
     Integer(i64),
-    None,
-    Bool(bool),
+    Scalar(ir::Constant),
     String(Box<str>),
     Binary(Binary, Type),
     Copy(ir::CopyOperation, usize, Type),
@@ -138,8 +137,10 @@ impl FixedNode {
             ir::Node::Statement(Statement::Assign(slot, _)) => Self::Store(*slot),
             ir::Node::Statement(Statement::SetField(_, field, _)) => Self::StoreField(*field),
             ir::Node::Expression(expr) => match expr.kind {
-                ExprKind::None if expr.ty == Type::None => Self::None,
-                ExprKind::Bool(value) => Self::Bool(value),
+                ExprKind::None if expr.ty != Type::None => return None,
+                ExprKind::None | ExprKind::Bool(_) | ExprKind::Float(_) => {
+                    Self::Scalar(ir::Constant::from_expr(expr)?)
+                }
                 ExprKind::Str(ref value) => Self::String(value.as_str().into()),
                 ExprKind::List(ref items) if matches!(expr.ty, Type::List(_) | Type::ListInt) => {
                     Self::indexed(&expr.kind, items.len(), expr.ty)
