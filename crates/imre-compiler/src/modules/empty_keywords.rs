@@ -20,6 +20,9 @@ impl EmptyKeywords {
     pub(super) fn collect(graph: &SourceGraph) -> Self {
         let mut result = Self::default();
         for (module, source) in graph.modules.iter().enumerate() {
+            if !source.source.contains("**") {
+                continue;
+            }
             for stmt in &source.parsed.syntax().body {
                 let ast::Stmt::FunctionDef(f) = stmt else {
                     continue;
