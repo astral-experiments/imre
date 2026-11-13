@@ -324,12 +324,15 @@ impl Context {
         let (start, receiver) = match args {
             [] => {
                 let scope = self.heap.current_scope();
-                let Value::Scope(frame) = self.heap.get(scope) else {
+                let (Value::Scope(frame), Value::Code(code)) =
+                    (self.heap.get(scope), self.heap.get(self.heap.current_code()))
+                else {
                     return Err(Error::new("RuntimeError", "super(): no arguments"));
                 };
-                let first = frame
-                    .first_argument
-                    .as_ref()
+                let first = code
+                    .parsed_parameters
+                    .get()
+                    .and_then(|params| params.positional.first())
                     .ok_or_else(|| Error::new("RuntimeError", "super(): no arguments"))?;
                 let receiver = self
                     .scope_name(scope, first)
