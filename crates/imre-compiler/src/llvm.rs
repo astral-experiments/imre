@@ -390,7 +390,7 @@ pub(crate) fn emit(
 
 const BRANCH_WEIGHTS: &str = "\n!0 = !{!\"branch_weights\", i32 1, i32 2000}\n!1 = !{!\"branch_weights\", i32 2000, i32 1}\n";
 
-/// Callable representation selected for the specialized checked module.
+/// Callable representation selected from the original checked operations.
 pub(crate) struct NativeProgram {
     callable_targets: crate::callables::Targets,
     linked_functions: HashSet<usize>,

@@ -526,16 +526,16 @@ fn object_fallback(
                     CheckedProgram::Registered(reason) => break reason,
                     CheckedProgram::Native(mut fixed) => {
                         let (module, owners) = &mut fixed.ir;
+                        verify_after(module, "lowering")?;
                         let Some(output) = output.as_deref_mut() else {
-                            verify_after(module, "lowering")?;
                             native_includes()?;
                             return Ok(graph.inputs);
                         };
-                        for original in specialize(module)? {
-                            owners.push(owners[original]);
-                        }
                         match llvm::analyze_program(module) {
                             Ok(program) => {
+                                for original in specialize(module)? {
+                                    owners.push(owners[original]);
+                                }
                                 output.emit_fixed(
                                     &graph,
                                     &mut fixed,
@@ -551,7 +551,7 @@ fn object_fallback(
                                 });
                             }
                             Err(reason) => {
-                                // Keep the original checked bodies when a callable needs a Python frame.
+                                // Placement needs the original checked operations and their source sites.
                                 fixed.register_definitions(&graph);
                                 LoweringDiagnostic::plain(reason.0.to_owned()).classified(reason.1)
                             }
@@ -1280,7 +1280,6 @@ fn checked_lower_with(
 }
 
 fn specialize(module: &mut ir::Module) -> Result<Vec<usize>, String> {
-    verify_after(module, "lowering")?;
     loop_fusion::specialize(module);
     verify_after(module, "producer-consumer loop fusion")?;
     sorted_rows::specialize(module);
