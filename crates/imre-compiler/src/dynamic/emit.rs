@@ -869,8 +869,8 @@ enum Body<'a> {
         &'a crate::frontend::function_scope::classes::ClassScope,
     ),
     CheckedProvider(&'a crate::frontend::CheckedProvider, AnnotationScope<'a>),
-    /// A named body uses the bindings resolved for its own declaration.
-    Registered(RegisteredBody<'a>, Option<&'a NamedFunction<'a>>),
+    /// The checked body borrows its declaring callable's bindings during emission.
+    Registered(RegisteredBody<'a>, &'a Callable<'a>),
     Operand(
         TextRange,
         &'a crate::frontend::RegisteredOperand,
@@ -1028,9 +1028,13 @@ impl SourceMap<'_> {
         frame.async_generator = suspension == imre_ast::code_flags::ASYNC_GENERATOR;
         let empty = BTreeSet::new();
         let declared_globals = match &body {
-            Body::Registered(_, Some(header)) => {
+            Body::Registered(_, Callable::Named(header)) => {
                 frame.function_locals = header.metadata.local_names();
                 &header.globals
+            }
+            Body::Registered(_, Callable::Generator(generator)) => {
+                frame.function_locals = generator.metadata.local_names();
+                &empty
             }
             Body::Namespace(_, class) => &class.bindings.globals,
             _ => &empty,
@@ -1355,7 +1359,7 @@ impl LexicalDefinitions<'_, '_> {
                 } else {
                     format!("{qualname}.<locals>.")
                 },
-                Body::Registered(body, header),
+                Body::Registered(body, &callable),
                 true,
                 Some((site, suspension)),
             );
