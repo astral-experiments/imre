@@ -3,7 +3,7 @@
 use super::{ScalarMatch, Session, concrete_scalar};
 use crate::frontend::phase::{Diagnostic, Kind};
 use ruff_python_ast::helpers::Truthiness;
-use ruff_python_ast::{Expr, ExprCall, Stmt, StmtReturn};
+use ruff_python_ast::{Expr, ExprCall, Stmt, StmtFunctionDef};
 use ruff_text_size::{Ranged, TextRange, TextSize};
 use std::{collections::HashMap, path::Path};
 use ty_python_core::FileScopeId;
@@ -35,13 +35,7 @@ pub(crate) fn unambiguous_file_module(name: &str) -> bool {
 /// These statements cannot run application code or modify another module's namespace.
 fn passive(stmt: &Stmt) -> bool {
     match stmt {
-        Stmt::FunctionDef(f) => {
-            f.decorator_list.is_empty()
-                && f.type_params.is_none()
-                && f.parameters
-                    .iter_non_variadic_params()
-                    .all(|p| p.default.as_deref().is_none_or(Expr::is_literal_expr))
-        }
+        Stmt::FunctionDef(f) => passive_declaration(f),
         Stmt::Assign(a) => a.targets.iter().all(Expr::is_name_expr) && a.value.is_literal_expr(),
         Stmt::Expr(e) => e.value.is_literal_expr(),
         Stmt::If(guard) => {
@@ -64,37 +58,44 @@ pub(crate) fn inert_declaration(statement: &Stmt) -> bool {
     ) && passive(statement)
 }
 
-/// Can this loaded definition run without invoking application code on literal arguments?
-pub(crate) fn passive_function(function: &ruff_python_ast::StmtFunctionDef) -> bool {
-    passive_function_return(function).is_some()
-}
-
-/// For an effect-free call, the first return supplies its operand. Falling off the
-/// end or executing a bare return supplies None. An open body has no proven result.
-fn passive_function_return(
-    function: &ruff_python_ast::StmtFunctionDef,
-) -> Option<Option<&StmtReturn>> {
-    let mut first_return = None;
-    let passive_body = function.decorator_list.is_empty()
+fn passive_declaration(function: &StmtFunctionDef) -> bool {
+    function.decorator_list.is_empty()
         && function.type_params.is_none()
         && function
             .parameters
             .iter_non_variadic_params()
-            .all(|parameter| {
-                parameter
-                    .default
-                    .as_deref()
-                    .is_none_or(Expr::is_literal_expr)
-            })
-        && function.body.iter().all(|statement| match statement {
+            .all(|p| p.default.as_deref().is_none_or(Expr::is_literal_expr))
+}
+
+/// Can this loaded definition run without invoking application code on literal arguments?
+pub(crate) fn passive_function(function: &StmtFunctionDef) -> bool {
+    passive_function_return(function, |value| value.is_literal_expr().then_some(())).is_some()
+}
+
+/// Resolve the first return using the operands available to this caller. An empty
+/// result denotes an implicit or bare return. An open operand ends the proof.
+fn passive_function_return<T>(
+    function: &StmtFunctionDef,
+    operand: impl Fn(&Expr) -> Option<T>,
+) -> Option<Option<T>> {
+    if !passive_declaration(function) {
+        return None;
+    }
+    let mut first_return = None;
+    for statement in &function.body {
+        match statement {
             Stmt::Return(ret) => {
-                first_return.get_or_insert(ret);
-                ret.value.as_deref().is_none_or(Expr::is_literal_expr)
+                let value = match &ret.value {
+                    Some(value) => Some(operand(value)?),
+                    None => None,
+                };
+                first_return.get_or_insert(value);
             }
-            Stmt::Pass(_) | Stmt::Expr(_) | Stmt::If(_) => passive(statement),
-            _ => false,
-        });
-    passive_body.then_some(first_return)
+            Stmt::Pass(_) | Stmt::Expr(_) | Stmt::If(_) if passive(statement) => {}
+            _ => return None,
+        }
+    }
+    Some(first_return.flatten())
 }
 
 fn after_docstring(body: &[Stmt]) -> &[Stmt] {
@@ -552,7 +553,8 @@ impl Session {
         }
         let bound = crate::frontend::fixed_call_arguments(call, &function.parameters)?;
         let owner_model = SemanticModel::new(&self.db, self.db.program_file(owner));
-        for ((p, value), actual) in bound.into_iter().zip(actuals) {
+        let supplied = bound.iter().zip(actuals.iter().copied());
+        for ((p, value), actual) in supplied.clone() {
             if p.parameter.annotation.is_some()
                 && let Some(expected) = p.parameter.inferred_type(&owner_model)
                 && let Some(error) = self.scalar_argument_error(model, expected, value, actual)
@@ -562,14 +564,22 @@ impl Session {
         }
         if !iterated
             && !function.is_async
-            && let Some(ret) = passive_function_return(function)
+            && let Some(ret) = passive_function_return(function, |operand| {
+                if operand.is_literal_expr() {
+                    return operand.inferred_type(&owner_model);
+                }
+                let parameter = self.parameter_read(owner, &owner_ast, operand)?;
+                let (_, actual) = supplied
+                    .clone()
+                    .find(|((p, _), _)| p.name().range() == parameter)?;
+                self.unconditional_module_operand(module, stmt.start(), call.range())
+                    .then_some(actual)
+            })
             && !generator()?
         {
-            let actual = match ret.and_then(|ret| ret.value.as_deref()) {
-                Some(value) => value.inferred_type(&owner_model)?,
-                None => Type::none(&self.db, &owner_model.program_environment()),
-            };
-            return Some(Ok(actual));
+            return Some(Ok(ret.unwrap_or_else(|| {
+                Type::none(&self.db, &owner_model.program_environment())
+            })));
         }
         // Read the body only after the real initializer and its passive arguments have
         // selected this function. Literal guards above are also checked for scalar contracts.

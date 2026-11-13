@@ -366,18 +366,12 @@ impl<'ast> Escape<'ast, '_> {
     }
 
     fn parameter_fact(&self, value: &Expr) -> Option<(TextRange, ArgumentFact)> {
-        if self.callbacks.is_empty() || !value.is_name_expr() {
+        if self.callbacks.is_empty() {
             return None;
         }
-        let binding = self.session.file_binding(self.model.file(), value)?;
-        let kind = binding.kind(self.model.db());
-        if !matches!(
-            kind,
-            DefinitionKind::Parameter(_) | DefinitionKind::LambdaParameter(_)
-        ) {
-            return None;
-        }
-        let parameter = kind.target_range(self.parsed);
+        let parameter = self
+            .session
+            .parameter_read(self.model.file(), self.parsed, value)?;
         self.callbacks
             .iter()
             .copied()
@@ -940,6 +934,22 @@ impl Session {
                 _ => None,
             })
             .unwrap_or(false)
+    }
+
+    /// The physical formal supplying this name at its use, while its binding is unchanged.
+    pub(super) fn parameter_read(
+        &self,
+        owner: File,
+        parsed: &ParsedModuleRef,
+        value: &Expr,
+    ) -> Option<TextRange> {
+        value.as_name_expr()?;
+        let kind = self.file_binding(owner, value)?.kind(&self.db);
+        matches!(
+            kind,
+            DefinitionKind::Parameter(_) | DefinitionKind::LambdaParameter(_)
+        )
+        .then(|| kind.target_range(parsed))
     }
 
     pub(super) fn assigned_value<'a>(
