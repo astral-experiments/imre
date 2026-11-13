@@ -3933,12 +3933,14 @@ publish.__annotations__["a"] = str
 print(publish.__annotations__["a"] is str)
 invoke(publish, 3)
 invoke(publish, "bad")
+
+invoke(publish, True)
 """
         )
         for args in [(scalar_parameters,), ("-m", "scalar_parameters")]:
             result = run(imre, "-B", *args, stdin=b"first\n3\n4\n12\n")
             assert result.returncode == 0 and not result.stderr, result
-            assert result.stdout == b'first 7\n8\nTrue\nfirst 6\npublish argument "a" requires int\n'
+            assert result.stdout == b'first 7\n8\nTrue\nfirst 6\npublish argument "a" requires int\nfirst 2\n'
 
         served = root / "served"
         served.mkdir()
