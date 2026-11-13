@@ -703,7 +703,7 @@ impl Expr {
                         .as_ref()
                         .is_none_or(|scope| scope.ty == Type::PythonObject)
             })
-            && args.order.iter().copied().eq(0..args.values.len())
+            && args.order.is_empty()
     }
 
     fn registered_invoke_target(&self, site: &InvokeSite) -> bool {
@@ -1034,6 +1034,7 @@ pub(crate) struct CallArgs {
     /// The callee's nominal tag feeds a complete member dispatch at this site.
     pub exhaustive_enum_match: bool,
     pub values: Vec<Expr>,
+    /// Native formal order. Python binds the source-ordered values itself.
     pub order: Vec<usize>,
 }
 
@@ -1044,10 +1045,15 @@ impl CallArgs {
     }
 
     pub(crate) fn positional_at(values: Vec<Expr>, site: CallSite) -> Self {
+        let order = if site.python().is_some() {
+            Vec::new()
+        } else {
+            (0..values.len()).collect()
+        };
         Self {
             site,
             exhaustive_enum_match: false,
-            order: (0..values.len()).collect(),
+            order,
             values,
         }
     }

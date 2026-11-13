@@ -5726,7 +5726,7 @@ publish(5, callback)
                 let name = site.suspended_name.unwrap();
                 assert_eq!(&source[name], "sink");
                 assert_eq!(name.end(), site.callee_end);
-                assert_eq!(args.order, [0]);
+                assert!(args.order.is_empty());
                 assert_eq!(expr.ty, Type::PythonObject);
                 invokes += 1;
             }
@@ -5889,7 +5889,7 @@ publish(5, callback)
                     }]
                 ));
                 assert_eq!(args.values.len(), 1);
-                assert_eq!(args.order, [0]);
+                assert!(args.order.is_empty());
                 operations.push("call");
             }
             ExprKind::Binary(Binary::Add, left, right) => {
