@@ -11064,10 +11064,10 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(Builtin::MockCallList { mark }, vec![values]),
             });
         }
-        if let Some(suite) = self.doctest_suite(call)? {
+        if let Some(suite) = self.doctest_suite(call, binding)? {
             return Ok(suite);
         }
-        if let Some(value) = self.sys_call(call)? {
+        if let Some(value) = self.sys_call(call, binding)? {
             return Ok(value);
         }
         if call.arguments.keywords.iter().any(|kw| kw.arg.is_none()) {

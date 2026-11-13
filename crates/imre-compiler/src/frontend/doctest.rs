@@ -6,8 +6,12 @@ use super::*;
 use crate::modules::doctest::documents;
 
 impl Checker<'_> {
-    pub(super) fn doctest_suite(&mut self, call: &ast::ExprCall) -> Result<Option<Expr>, String> {
-        if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::DocExecute)) {
+    pub(super) fn doctest_suite(
+        &mut self,
+        call: &ast::ExprCall,
+        binding: Option<Binding>,
+    ) -> Result<Option<Expr>, String> {
+        if binding == Some(Binding::Intrinsic(Intrinsic::DocExecute)) {
             let def = self.graph.doctest_runner().ok_or_else(|| {
                 error(
                     self.source,
@@ -29,7 +33,7 @@ impl Checker<'_> {
             | Intrinsic::DocExceptionName
             | Intrinsic::DocAscii
             | Intrinsic::DocDisplay),
-        )) = self.resolve(&call.func)
+        )) = binding
         {
             self.reject_builtin_keywords(call)?;
             let (ty, kind) = match (op, call.arguments.args.as_ref()) {
@@ -118,7 +122,7 @@ impl Checker<'_> {
             };
             return Ok(Some(Expr { ty, kind }));
         }
-        let Some(Binding::Definition(def)) = self.resolve(&call.func) else {
+        let Some(Binding::Definition(def)) = binding else {
             return Ok(None);
         };
         let owner = &self.graph.modules[def.module];
