@@ -286,11 +286,11 @@ pub(super) trait EagerDisplay: Sized {
         emit: &mut impl FnMut(&mut Self, Output<'p>, &[Expr]) -> StdResult<Vec<Statement>, Self::Error>,
     ) -> StdResult<Vec<Statement>, Self::Error> {
         let clause = &plan.clauses[depth];
-        self.before_pull(plan, depth);
         self.with_target(&clause.target, input, plan.output, |lower| {
             let conditions = lower.eager_filters(clause)?;
             let body = if let Some(inner) = plan.clauses.get(depth + 1) {
                 let input = lower.input(inner)?;
+                lower.before_pull(plan, depth + 1);
                 lower.comprehension_loop(plan, depth + 1, input, emit)?
             } else {
                 emit(lower, plan.output, &conditions)?
@@ -1024,6 +1024,11 @@ impl Checker<'_> {
         }
         let scope = self.enter_comprehension(targets.clone());
         let result = self.hidden(Type::None);
+        // The outer loop can only invalidate a narrowing when the display writes a name.
+        // Displays checked in a private helper have already proved this set empty.
+        if !writes.is_empty() {
+            self.before_pull(display, 0);
+        }
         let checked = self.comprehension_body(
             display,
             input,
