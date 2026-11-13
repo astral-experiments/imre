@@ -303,7 +303,8 @@ impl<'a> PreparedBody<'a> {
         let path = self.source.path.as_ref();
         let text = self.source.text.as_ref();
         let mut body = module_source::into_body(ParsedModule::parse(path, text.into())?.parsed);
-        module_source::lower(path, text, &mut body)?;
+        let names = imre_ast::lower(&mut body);
+        module_source::validate_names(path, text, &body, &names)?;
         Ok(body)
     }
 
@@ -516,11 +517,12 @@ impl<'a> PreparedBody<'a> {
             || Cow::Owned(imre_ast::module_imports(&syntax.body)),
             |values| Cow::Borrowed(&values.method_imports),
         );
-        let future_flags = super::literal::future_flags(&syntax.body, inherited_flags);
+        let future_flags = inherited_flags | imre_ast::future_flags(&syntax.body);
         let lower = |mut body: ast::Suite| {
-            let names = module_source::lower_with_future(
+            let names = imre_ast::lower_in(
                 &mut body,
-                inherited_flags & imre_ast::code_flags::FUTURE_ANNOTATIONS != 0,
+                "",
+                future_flags & imre_ast::code_flags::FUTURE_ANNOTATIONS != 0,
             );
             (body, names)
         };

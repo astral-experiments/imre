@@ -811,25 +811,27 @@ fn imports_from_body(
     file_alternative: Option<&Path>,
 ) -> Result<Imports, String> {
     let error = ModuleSyntaxError::in_body(normalized, body);
-    // The optional file must satisfy the emitter's checks before registration.
-    // Use its discovery tree for both checking and collecting the lowered imports.
-    let checked_names = file_alternative
-        .map(|path| module_source::lower(path, normalized, body))
-        .transpose()?;
+    let module_flags = imre_ast::future_flags(body);
+    let names = imre_ast::lower_in(
+        body,
+        "",
+        module_flags & imre_ast::code_flags::FUTURE_ANNOTATIONS != 0,
+    );
+    // An optional file must pass the emitter's name checks before registration.
+    if let Some(path) = file_alternative {
+        module_source::validate_names(path, normalized, body, &names)?;
+    }
     if let Some(diagnostic) = error {
         return Ok(Imports {
             invalid_executable: Some(Box::new(diagnostic)),
             ..Imports::default()
         });
     }
-    let mut imports = Imports::default();
-    if imre_ast::future_import(body, "barry_as_FLUFL") {
-        imports.module_flags |= imre_ast::code_flags::FUTURE_BARRY_AS_BDFL;
-    }
-    imports.private_names = checked_names.unwrap_or_else(|| imre_ast::lower(body));
-    if imports.private_names.string_annotations {
-        imports.module_flags |= imre_ast::code_flags::FUTURE_ANNOTATIONS;
-    }
+    let mut imports = Imports {
+        module_flags,
+        private_names: names,
+        ..Imports::default()
+    };
     let mut getter_bodies = Vec::new();
     if getter.is_some() {
         for (index, stmt) in body.iter_mut().enumerate() {

@@ -420,15 +420,28 @@ pub fn future_annotations(body: &[ast::Stmt]) -> bool {
 
 /// Whether the module imports a given compiler feature from __future__.
 pub fn future_import(body: &[ast::Stmt], feature: &str) -> bool {
-    leading_future_imports(body)
-        .any(|import| import.names.iter().any(|n| n.name.as_str() == feature))
+    future_features(body).any(|name| name == feature)
+}
+
+/// Return the code flags declared in the module's leading future imports.
+pub fn future_flags(body: &[ast::Stmt]) -> u32 {
+    let mut flags = 0;
+    for name in future_features(body) {
+        flags |= match name {
+            "annotations" => code_flags::FUTURE_ANNOTATIONS,
+            "barry_as_FLUFL" => code_flags::FUTURE_BARRY_AS_BDFL,
+            _ => 0,
+        };
+    }
+    flags
 }
 
 /// Future directives form one contiguous prefix after the optional module docstring.
-fn leading_future_imports(body: &[ast::Stmt]) -> impl Iterator<Item = &ast::StmtImportFrom> {
+fn future_features(body: &[ast::Stmt]) -> impl Iterator<Item = &str> {
     ast::helpers::body_without_leading_docstring(body)
         .iter()
         .map_while(future_statement)
+        .flat_map(|import| import.names.iter().map(|alias| alias.name.as_str()))
 }
 
 fn future_statement(stmt: &ast::Stmt) -> Option<&ast::StmtImportFrom> {

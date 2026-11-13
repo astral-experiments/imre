@@ -2543,13 +2543,8 @@ impl Context {
                 if !code.strip_docstrings && !spellings.is_empty() {
                     self.check_source_docstrings(&body, !interactive, &spellings)?;
                 }
-                if imre_ast::future_import(&body, "barry_as_FLUFL") {
-                    flags |= code_flags::FUTURE_BARRY_AS_BDFL;
-                }
-                if flags & code_flags::FUTURE_ANNOTATIONS != 0
-                    || imre_ast::future_annotations(&body)
-                {
-                    flags |= code_flags::FUTURE_ANNOTATIONS;
+                flags |= imre_ast::future_flags(&body);
+                if flags & code_flags::FUTURE_ANNOTATIONS != 0 {
                     code.private_names = Some(Rc::new(imre_ast::lower_in(&mut body, "", true)));
                 }
                 code.syntax_limit = symbol_error.map(|(range, _)| range);
