@@ -39,7 +39,7 @@ pub(super) fn prepare_method(
     classes: &Classes,
 ) -> (Defaults, Option<DefinitionId>) {
     if method.name.as_str() == "__init__"
-        && let Some(origin) = expand_initializer(graph, module, method.to_mut(), context, classes)
+        && let Some(origin) = expand_initializer(graph, module, method, context, classes)
     {
         (
             Defaults {
@@ -56,7 +56,7 @@ pub(super) fn prepare_method(
 fn expand_initializer(
     graph: &SourceGraph,
     module: ModuleId,
-    method: &mut ast::StmtFunctionDef,
+    method: &mut Cow<'_, ast::StmtFunctionDef>,
     context: records::MethodContext,
     classes: &Classes,
 ) -> Option<DefinitionId> {
@@ -161,6 +161,7 @@ fn expand_initializer(
             ctx: ast::ExprContext::Load,
         })
     }));
+    let method = method.to_mut();
     let ast::Stmt::Expr(stmt) = &mut method.body[after_doc] else {
         unreachable!()
     };
