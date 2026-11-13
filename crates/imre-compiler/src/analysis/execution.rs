@@ -121,7 +121,14 @@ enum ArgumentFact {
 }
 
 pub(super) type FunctionImports = HashMap<TextRange, (usize, Option<ExecutionRequirement>)>;
-pub(super) type CapturedImports = HashMap<usize, FunctionImports>;
+pub(super) type CapturedImports = HashMap<usize, InitializerImports>;
+
+#[derive(Default)]
+pub(super) struct InitializerImports {
+    pub(super) functions: FunctionImports,
+    /// The active import whose selected initializer cannot complete.
+    pub(super) stop: Option<TextSize>,
+}
 
 struct CapturedImport<'a> {
     owner: File,
@@ -1235,17 +1242,21 @@ impl Session {
             let model = SemanticModel::new(&self.db, source);
             let mut visitor = self.execution_visitor(path, &parsed, &model);
             visitor.open_providers = &open_providers;
-            if let Some(imports) = captures.remove(&index)
-                && !imports.is_empty()
-            {
-                visitor.captured = imports;
+            let mut body = parsed.suite().as_slice();
+            if let Some(imports) = captures.remove(&index) {
+                if let Some(stop) = imports.stop {
+                    body = &body[..body.partition_point(|stmt| stmt.start() < stop)];
+                }
+                visitor.captured = imports.functions;
+            }
+            if !visitor.captured.is_empty() {
                 visitor.unreachable =
                     ty_python_semantic::types::ide_support::unreachable_ranges(&self.db, source)
                         .iter()
                         .map(|unreachable| unreachable.range)
                         .collect();
             }
-            visitor.visit_body(&parsed.syntax().body);
+            visitor.visit_body(body);
             if let Some(error) = visitor.first {
                 return Err(error.report.to_string());
             }

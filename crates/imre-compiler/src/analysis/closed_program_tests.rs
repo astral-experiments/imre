@@ -700,6 +700,36 @@ fn initializer_checks_record_the_startup_namespace_lookup() {
 }
 
 #[test]
+fn execution_operands_follow_the_selected_initializer() {
+    let project = tempdir().unwrap();
+    let root = project.path();
+    let app = root.join("app.py");
+    fs::write(
+        &app,
+        "import bridge\nfrom producer import consume\nconsume('ok')\n",
+    )
+    .unwrap();
+    fs::write(root.join("bridge.py"), "import leaf\n").unwrap();
+    fs::write(
+        root.join("producer.py"),
+        "def consume(value):\n    exec(input())\n",
+    )
+    .unwrap();
+    let mut compiler = crate::IncrementalCompiler::default();
+    let leaf = root.join("leaf.py");
+    fs::write(&leaf, "print('enter leaf')\nraise LookupError()\n").unwrap();
+    compiler.check_file(&app, None).unwrap();
+    for (source, error) in [
+        ("exec(input())\nraise LookupError()\n", "leaf.py:1:6"),
+        ("pass\n", "producer.py:2:10"),
+    ] {
+        fs::write(&leaf, source).unwrap();
+        let actual = compiler.check_file(&app, None).unwrap_err();
+        assert!(actual.contains(error), "{actual}");
+    }
+}
+
+#[test]
 fn a_nested_import_resumes_the_checked_caller_only_on_its_normal_edge() {
     let root = tempdir().unwrap();
     let paths = ["app.py", "bridge.py", "leaf.py"].map(|name| root.path().join(name));
