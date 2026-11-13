@@ -285,7 +285,7 @@ impl Checker<'_> {
             items,
             ..
         } = protocol_snapshot(self, site, 2, None, item, sequence, None);
-        body.push(Statement::SetItem(
+        body.push(Statement::assign_item(
             self.local(target),
             self.local(items[0]),
             self.local(items[1]),
@@ -595,7 +595,7 @@ impl Checker<'_> {
                     if self.module_scope && self.is_module_namespace(&receiver) {
                         self.namespace_item_store(&index, &value);
                     }
-                    break 'place Statement::SetItem(receiver, index, value);
+                    break 'place Statement::assign_item(receiver, index, value);
                 }
                 if let Some((key, element)) = self.types.chainmap_entries(receiver.ty) {
                     let value = self.coerce(value, element, target)?;
@@ -682,7 +682,7 @@ impl Checker<'_> {
                 } else {
                     self.expr_expected_from(&subscript.slice, key, declaration)?
                 };
-                Statement::SetItem(receiver, index, value?)
+                Statement::assign_item(receiver, index, value?)
             } else if let ast::Expr::Attribute(attribute) = target {
                 if self.registered.is_some() {
                     let receiver = self.expr(&attribute.value)?;
@@ -918,13 +918,13 @@ impl Checker<'_> {
                 {
                     let cell = self.cmp_field(receiver, frame, 1);
                     let value = self.coerce(value, self.types.element(cell.ty).unwrap(), target)?;
-                    break 'place Statement::SetItem(cell, Expr::integer(0), value);
+                    break 'place Statement::assign_item(cell, Expr::integer(0), value);
                 }
                 if let Type::SimpleNamespace(id) = receiver.ty {
                     let name = self.namespace_attr_name(attribute)?;
                     let item = self.types.mapping(Type::Dict(id)).unwrap().1;
                     let value = self.coerce(value, item, target)?;
-                    break 'place Statement::SetItem(
+                    break 'place Statement::assign_item(
                         super::namespaces::backing(receiver, id),
                         name,
                         value,

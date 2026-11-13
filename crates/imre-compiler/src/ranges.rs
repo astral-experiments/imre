@@ -680,10 +680,10 @@ impl Analyzer {
                 }
                 state.0[*ready] = Interval::bounded(0, 1);
             }
-            Statement::SetItem(list, index, value) => {
-                self.expression(value, &mut state, record);
-                self.expression(list, &mut state, record);
-                self.expression(index, &mut state, record);
+            Statement::SetItem(order, list, index, value) => {
+                order.evaluate(list, index, value, |expr| {
+                    self.expression(expr, &mut state, record)
+                });
             }
             Statement::AugmentItem(list, index, _, value) => {
                 self.expression(list, &mut state, record);

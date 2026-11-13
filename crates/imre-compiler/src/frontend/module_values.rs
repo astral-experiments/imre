@@ -452,7 +452,7 @@ impl Checker<'_> {
                 self.coerce(value, ty, statement)?
             }
         };
-        Ok(Statement::SetItem(
+        Ok(Statement::assign_item(
             self.globals.slot_value(slot),
             Expr::integer(0),
             value,

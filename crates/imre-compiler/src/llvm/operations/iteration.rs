@@ -1,6 +1,6 @@
 //! Shared traversal of loop and unpacking IR for fixed and registered entries.
 use super::{CheckedBody, CheckedValue, Entry, Expr, ExprKind, Statement};
-use crate::ir::{Binary, Compare, ItemUpdate, IterNextKind};
+use crate::ir::{Binary, Compare, ItemOrder, ItemUpdate, IterNextKind};
 use crate::llvm::{Cleanup, Emitter, LoopTarget, NativeLoop, small};
 
 #[derive(Clone)]
@@ -419,7 +419,7 @@ impl CheckedBody<'_, '_, '_, '_> {
         }
     }
 
-    pub(super) fn store_item(&mut self, table: &Expr, key: &Expr, value: &Expr) {
+    pub(super) fn store_item(&mut self, order: ItemOrder, table: &Expr, key: &Expr, value: &Expr) {
         let (buffer, nonnegative, mark) = match &mut self.0 {
             Entry::Native(e) => {
                 if e.copy_item(table, key, value) {
@@ -437,21 +437,38 @@ impl CheckedBody<'_, '_, '_, '_> {
             }
             Entry::Registered(f) => (None, false, Some(f.temporary_mark())),
         };
-        let value = self.store_operand(value);
-        let table = self.store_operand(table);
-        let key = self.store_operand(key);
+        // A display can discard intermediate Python values as soon as each operand
+        // is ready. Keep the key alive across the value, including a raising value.
+        let display = mark.as_ref().filter(|_| order == ItemOrder::Display);
+        let unwind = display.map(|_| self.python().begin_operand_scope());
+        let mut next = display.cloned();
+        let (table, key, value) = order.evaluate(table, key, value, |expr| {
+            let operand = self.store_operand(expr);
+            if let Some(mark) = &mut next {
+                *mark = self
+                    .python()
+                    .keep_operands(mark, operand.rooted_handle(), "0");
+            }
+            operand
+        });
         self.write_item(&table, &key, &value, buffer, nonnegative);
         if let Some(operands) = mark {
             // STORE_SUBSCR pops key and receiver before the RHS. The target
             // checkpoint also releases any earlier snapshot of a taken slot.
             let f = self.python();
+            if let Some(unwind) = unwind {
+                f.finish_unwind(unwind, |frame| frame.release_owned_operands(&operands));
+            }
             f.release_owned_operands(&operands);
-            f.release_target();
+            if order == ItemOrder::Assignment {
+                f.release_target();
+            }
         } else {
             let e = self.fixed();
             let (list, index, value) =
                 (table.into_native(), key.into_native(), value.into_native());
-            if e.module.types.mapping(list.value.ty).is_some()
+            if order == ItemOrder::Assignment
+                && e.module.types.mapping(list.value.ty).is_some()
                 && e.module
                     .types
                     .may_own_file(value.value.ty, &e.module.class_fields, true)

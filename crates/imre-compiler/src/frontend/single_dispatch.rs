@@ -235,7 +235,7 @@ impl Registration {
         Ok(self.scope.finish(Expr {
             ty: target.ty,
             kind: ExprKind::Scope {
-                body: vec![Statement::SetItem(self.table, self.key, target.clone())],
+                body: vec![Statement::assign_item(self.table, self.key, target.clone())],
                 value: Box::new(target),
                 clear: vec![],
             },

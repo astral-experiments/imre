@@ -362,7 +362,7 @@ impl Verifier<'_> {
                 self.slots(clear)?;
                 self.block(body)
             }
-            Statement::SetItem(receiver, index, value) => {
+            Statement::SetItem(_, receiver, index, value) => {
                 same(value.ty, self.item(receiver.ty, index.ty)?)
             }
             Statement::AugmentItem(receiver, index, _, _) => {

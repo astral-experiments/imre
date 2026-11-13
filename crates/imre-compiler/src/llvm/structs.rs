@@ -203,7 +203,7 @@ impl Emitter<'_, '_> {
     ) {
         let [
             Statement::Assign(index, subscript),
-            Statement::SetItem(list, at, row),
+            Statement::SetItem(_, list, at, row),
         ] = body
         else {
             return;

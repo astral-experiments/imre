@@ -1092,7 +1092,9 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 self.while_suite(stmt, test, body, otherwise)
             }
             Statement::If(test, yes, no) => self.conditional_suite(stmt, test, yes, no),
-            Statement::SetItem(table, key, value) => self.store_item(table, key, value),
+            Statement::SetItem(order, table, key, value) => {
+                self.store_item(*order, table, key, value)
+            }
             Statement::IterNext {
                 iterator,
                 key,

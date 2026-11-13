@@ -198,10 +198,8 @@ impl Analysis<'_> {
                     self.block(finalbody, state);
                     state.fill(None);
                 }
-                Statement::SetItem(receiver, index, value) => {
-                    self.expression(value, state);
-                    self.expression(receiver, state);
-                    self.expression(index, state);
+                Statement::SetItem(order, receiver, index, value) => {
+                    order.evaluate(receiver, index, value, |expr| self.expression(expr, state));
                     state.fill(None);
                 }
                 Statement::AugmentItem(receiver, index, _, value) => {

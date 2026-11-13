@@ -4126,7 +4126,7 @@ mod tests {
         assert!(suite.fully_checked());
         let mut stored = 0;
         crate::ir::rewrite_statements(&mut suite.checked.function.body, &mut |statement| {
-            if let crate::ir::Statement::SetItem(_, key, _) = statement {
+            if let crate::ir::Statement::SetItem(_, _, key, _) = statement {
                 assert!(
                     matches!(crate::ir::Constant::from_expr(key), Some(crate::ir::Constant::Tuple(parts))
                     if parts.len() == 3 && parts[1] == crate::ir::Constant::Float((-0.0f64).to_bits()))
