@@ -1400,7 +1400,7 @@ struct PendingStatement<'s> {
 }
 
 enum PendingEffect<'s> {
-    Statement(Box<Statement>, Option<PreparedRefusal>),
+    Checked(Option<PreparedRefusal>),
     Source(&'s ast::Stmt),
     Refused(OperandRefusal),
 }
@@ -1845,20 +1845,8 @@ impl<'a> SuitePreparation<'a> {
             offset = run.at;
             let preceding = self.refusal.take();
             let refusal = match run.effect {
-                PendingEffect::Statement(statement, refusal) => {
-                    self.refusal = preceding.or_else(|| {
-                        if live {
-                            refusal.or_else(|| {
-                                self.checked_declaration_refusal(std::slice::from_ref(
-                                    statement.as_ref(),
-                                ))
-                            })
-                        } else {
-                            None
-                        }
-                    });
-                    live &= !matches!(*statement, Statement::Return(_) | Statement::Raise(_));
-                    suite.checked.function.body.push(*statement);
+                PendingEffect::Checked(refusal) => {
+                    self.refusal = preceding.or(refusal.filter(|_| live));
                     continue;
                 }
                 PendingEffect::Refused(refusal) => refusal,
@@ -2369,6 +2357,21 @@ impl<'a> SuitePreparation<'a> {
                 continue;
             }
             scope.truncate_locals(slots_before);
+            // A completed operation lives in the function. Keep only an operand diagnostic or
+            // the point where the original queued operation stopped checking later declarations.
+            let after_transfer = checked_exit.is_some();
+            let complete = |body: &mut Vec<Statement>,
+                            pending: &mut Vec<PendingStatement<'s>>,
+                            statement: Statement,
+                            refusal: Option<PreparedRefusal>| {
+                if refusal.is_some() || after_transfer {
+                    pending.push(PendingStatement {
+                        at: body.len(),
+                        effect: PendingEffect::Checked(refusal),
+                    });
+                }
+                body.push(statement);
+            };
             if let ast::Stmt::Assert(assertion) = stmt {
                 let test = RegisteredOperand::prepare_with(self.source, kind, |scope| {
                     scope.condition_operand(&assertion.test)
@@ -2385,13 +2388,12 @@ impl<'a> SuitePreparation<'a> {
                 });
                 let [checkpoint, branch] = assertion_statements(assertion, condition, message);
                 body.push(checkpoint);
-                residual.push(PendingStatement {
-                    at: body.len(),
-                    effect: PendingEffect::Statement(
-                        Box::new(branch),
-                        self.operand_refusals(&operands[start..]),
-                    ),
-                });
+                complete(
+                    &mut body,
+                    &mut residual,
+                    branch,
+                    self.operand_refusals(&operands[start..]),
+                );
                 continue;
             }
             let start = operands.len();
@@ -2402,16 +2404,12 @@ impl<'a> SuitePreparation<'a> {
                     .map(|expr| keep(self.registered_operand(expr, kind, suspended)))
                     .collect();
                 let slot = scope.hidden(Type::PythonObject);
-                residual.push(PendingStatement {
-                    at: body.len(),
-                    effect: PendingEffect::Statement(
-                        Box::new(Statement::Assign(
-                            slot,
-                            definition_value(class_site(class), header),
-                        )),
-                        self.operand_refusals(&operands[start..]),
-                    ),
-                });
+                complete(
+                    &mut body,
+                    &mut residual,
+                    Statement::Assign(slot, definition_value(class_site(class), header)),
+                    self.operand_refusals(&operands[start..]),
+                );
                 body.push(scope.store(
                     class.name.as_str(),
                     unpacking::take_pattern_temporary(Expr::local(slot, Type::PythonObject), slot),
@@ -2425,13 +2423,12 @@ impl<'a> SuitePreparation<'a> {
                         let slot = scope.hidden(Type::PythonObject);
                         let input = frame_value(expr);
                         let refusal = self.operand_refusal(&input);
-                        residual.push(PendingStatement {
-                            at: body.len(),
-                            effect: PendingEffect::Statement(
-                                Box::new(Statement::Assign(slot, keep(input))),
-                                refusal,
-                            ),
-                        });
+                        complete(
+                            &mut body,
+                            &mut residual,
+                            Statement::Assign(slot, keep(input)),
+                            refusal,
+                        );
                         unpacking::take_pattern_temporary(
                             Expr::local(slot, Type::PythonObject),
                             slot,
@@ -2468,13 +2465,24 @@ impl<'a> SuitePreparation<'a> {
             };
             if let Some(output) = output {
                 body.push(checkpoint(stmt));
-                residual.push(PendingStatement {
-                    at: body.len(),
-                    effect: PendingEffect::Statement(
-                        Box::new(output),
-                        self.operand_refusals(&operands[start..]),
-                    ),
-                });
+                // Unlike return, a raise does not itself end the general declaration-site walk.
+                let raised = matches!(output, Statement::Raise(_));
+                let exits = raised || matches!(output, Statement::Return(_));
+                complete(
+                    &mut body,
+                    &mut residual,
+                    output,
+                    self.operand_refusals(&operands[start..]),
+                );
+                if exits {
+                    checked_exit.get_or_insert(body.len());
+                    if raised {
+                        residual.push(PendingStatement {
+                            at: body.len(),
+                            effect: PendingEffect::Checked(None),
+                        });
+                    }
+                }
                 continue;
             }
             if let ast::Stmt::AnnAssign(ann) = stmt
@@ -2482,14 +2490,12 @@ impl<'a> SuitePreparation<'a> {
             {
                 body.push(checkpoint(stmt));
                 if let Some(inputs) = values::bare_target_operands(&ann.target) {
-                    residual.push(PendingStatement {
-                        at: body.len(),
-                        effect: self.bound_operation(
-                            Builtin::RegisteredDiscard,
-                            inputs.into_iter().map(frame_value),
-                            &mut operands,
-                        ),
-                    });
+                    let (value, refusal) = self.bound_operation(
+                        Builtin::RegisteredDiscard,
+                        inputs.into_iter().map(frame_value),
+                        &mut operands,
+                    );
+                    complete(&mut body, &mut residual, value, refusal);
                 }
                 continue;
             }
@@ -2497,14 +2503,12 @@ impl<'a> SuitePreparation<'a> {
                 && let Some(effect) = attribute_write(stmt)
             {
                 body.push(checkpoint(stmt));
-                residual.push(PendingStatement {
-                    at: body.len(),
-                    effect: self.bound_operation(
-                        attribute_opcode(effect.action, effect.field),
-                        effect.operands().map(frame_value),
-                        &mut operands,
-                    ),
-                });
+                let (value, refusal) = self.bound_operation(
+                    attribute_opcode(effect.action, effect.field),
+                    effect.operands().map(frame_value),
+                    &mut operands,
+                );
+                complete(&mut body, &mut residual, value, refusal);
                 continue;
             }
             if let ast::Stmt::AugAssign(assign) = stmt {
@@ -2538,13 +2542,12 @@ impl<'a> SuitePreparation<'a> {
                     _ => unreachable!("validated augmented target after attribute lowering"),
                 };
                 body.push(checkpoint(stmt));
-                residual.push(PendingStatement {
-                    at: body.len(),
-                    effect: PendingEffect::Statement(
-                        Box::new(output),
-                        self.operand_refusals(&operands[start..]),
-                    ),
-                });
+                complete(
+                    &mut body,
+                    &mut residual,
+                    output,
+                    self.operand_refusals(&operands[start..]),
+                );
                 body.extend(binding);
                 continue;
             }
@@ -2568,32 +2571,32 @@ impl<'a> SuitePreparation<'a> {
                 scope.report_child_refusals = true;
                 let targets = scope.assignment_targets(targets, value);
                 scope.report_child_refusals = false;
-                let (effect, targets) = match targets {
-                    Ok(targets) => (
-                        {
-                            let rhs = frame_value(rhs);
-                            let refusal = self.operand_refusal(&rhs);
-                            PendingEffect::Statement(
-                                Box::new(Statement::Assign(input, keep(rhs))),
-                                refusal,
-                            )
-                        },
-                        targets,
-                    ),
+                body.push(checkpoint(stmt));
+                let targets = match targets {
+                    Ok(targets) => {
+                        let rhs = frame_value(rhs);
+                        let refusal = self.operand_refusal(&rhs);
+                        complete(
+                            &mut body,
+                            &mut residual,
+                            Statement::Assign(input, keep(rhs)),
+                            refusal,
+                        );
+                        targets
+                    }
                     Err(()) => {
                         scope.truncate_locals(slots_before);
-                        let (range, reason) = scope.refusal.or(first_refusal).unwrap_or((
+                        let refusal = scope.refusal.or(first_refusal).unwrap_or((
                             stmt.range(),
                             "cannot compile this assignment target ahead of time",
                         ));
-                        (PendingEffect::Refused((range, reason)), Vec::new())
+                        residual.push(PendingStatement {
+                            at: body.len(),
+                            effect: PendingEffect::Refused(refusal),
+                        });
+                        Vec::new()
                     }
                 };
-                body.push(checkpoint(stmt));
-                residual.push(PendingStatement {
-                    at: body.len(),
-                    effect,
-                });
                 body.extend(targets);
                 if let ast::Stmt::AnnAssign(ann) = stmt
                     && ann.simple
@@ -2617,14 +2620,9 @@ impl<'a> SuitePreparation<'a> {
                         body.push(Statement::Expr(operation(op, Type::None, values)));
                     } else {
                         scope.truncate_locals(slots);
-                        residual.push(PendingStatement {
-                            at: body.len(),
-                            effect: self.bound_operation(
-                                op,
-                                inputs.map(target_input),
-                                &mut operands,
-                            ),
-                        });
+                        let (value, refusal) =
+                            self.bound_operation(op, inputs.map(target_input), &mut operands);
+                        complete(&mut body, &mut residual, value, refusal);
                     }
                 }
                 continue;
@@ -2644,21 +2642,18 @@ impl<'a> SuitePreparation<'a> {
         }
     }
 
-    fn bound_operation<'s>(
+    fn bound_operation(
         &self,
         opcode: Builtin,
         inputs: impl Iterator<Item = PhysicalOperand>,
         operands: &mut Vec<PhysicalOperand>,
-    ) -> PendingEffect<'s> {
+    ) -> (Statement, Option<PreparedRefusal>) {
         let start = operands.len();
         let values = inputs
             .map(|input| bind_operand(operands, input, Type::PythonObject))
             .collect();
         let statement = Statement::Expr(operation(opcode, Type::None, values));
-        PendingEffect::Statement(
-            Box::new(statement),
-            self.operand_refusals(&operands[start..]),
-        )
+        (statement, self.operand_refusals(&operands[start..]))
     }
 }
 
