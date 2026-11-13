@@ -1,5 +1,5 @@
 use super::*;
-use crate::llvm::registered::{Output, RegisteredFrame, SourcePositions, sites::CheckedSites};
+use crate::llvm::registered::{Frame, Output, RegisteredFrame, SourcePositions, tests::TestFrame};
 
 #[test]
 fn template_children_use_their_eager_bindings_after_source_is_dropped() {
@@ -97,7 +97,7 @@ fn template_children_use_their_eager_bindings_after_source_is_dropped() {
     let file = output.data(b"lexical.py");
     let positions = SourcePositions::new(std::path::Path::new("lexical.py"), "", &file);
     let mut frame = RegisteredFrame::new(&mut output, &positions, false, 0, 0.into());
-    frame.prepared_operand(&operand, &CheckedSites::default(), false);
+    Frame::prepared_operand(&mut TestFrame(&mut frame, Default::default()), &operand);
     frame.finish_callable(None);
     let code = &output.functions;
     assert_eq!(
