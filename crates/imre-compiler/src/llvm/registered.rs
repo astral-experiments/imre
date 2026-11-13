@@ -193,6 +193,18 @@ pub(crate) fn frame_inputs(
                 matches!(args.len(), 1 | 2)
             }
             ExprKind::Builtin(Builtin::FormatJoin, parts) => parts.len() >= 2,
+            ExprKind::Binary(ir::Binary::Add, left, right)
+                if has_scalar
+                    && matches!(
+                        (left.checked_operand_type(), right.checked_operand_type()),
+                        (Type::Str, Type::Str | Type::PythonObject)
+                            | (Type::PythonObject, Type::Str)
+                    ) =>
+            {
+                // The Python addition receives both operands before it dispatches to either type.
+                protocol_reads += protocol_parameter(left) + protocol_parameter(right);
+                true
+            }
             ExprKind::Binary(..) => true,
             ExprKind::List(values) | ExprKind::Tuple(values) | ExprKind::Set { values, .. } => {
                 uses_python_protocol = true;
