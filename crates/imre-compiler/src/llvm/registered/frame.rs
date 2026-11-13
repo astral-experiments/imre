@@ -87,7 +87,7 @@ pub(crate) struct RegisteredFrame<'a, 'p> {
     annotation_active: Option<String>,
     pub(crate) body: FunctionBody,
     id: u32,
-    pending_check: Option<ErrorCheck>,
+    pending_check: Option<String>,
     pub(crate) scope: String,
     // Handles held in native registers across statement boundaries must stay reachable.
     pub(crate) live: Vec<String>,
@@ -105,12 +105,6 @@ pub(crate) struct RegisteredFrame<'a, 'p> {
     pub(crate) simple_call: Option<TextRange>,
     pub(super) position: SourcePosition,
     pub(crate) native_suspension: bool,
-}
-
-struct ErrorCheck {
-    handler: String,
-    failed: String,
-    next: String,
 }
 
 impl<'a, 'p> RegisteredFrame<'a, 'p> {
@@ -497,20 +491,13 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
             *end = self.integer_owners;
             handler = label.clone();
         }
-        self.pending_check = Some(ErrorCheck {
-            handler,
-            failed: self.name("%v"),
-            next: self.name("b"),
-        });
+        self.pending_check = Some(handler);
     }
 
     pub(crate) fn flush_check(&mut self) {
-        if let Some(ErrorCheck {
-            handler,
-            failed,
-            next,
-        }) = self.pending_check.take()
-        {
+        if let Some(handler) = self.pending_check.take() {
+            let failed = self.name("%v");
+            let next = self.name("b");
             self.instruction(&format!("{failed} = call i1 @imre_dyn_failed(ptr %ctx)"));
             self.body.branch(&failed, &handler, &next);
             self.body.start(&next);
@@ -520,7 +507,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
     /// A guarded successor can deliver the first failure to the same handler.
     pub(crate) fn take_matching_check(&mut self) -> bool {
         self.pending_check
-            .take_if(|check| check.handler == self.body.error_target)
+            .take_if(|handler| *handler == self.body.error_target)
             .is_some()
     }
 
