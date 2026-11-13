@@ -2,6 +2,7 @@
 
 pub enum Error {
     Syntax(&'static str),
+    InvalidScope(crate::async_generators::Error),
     Scope,
 }
 
@@ -100,17 +101,21 @@ pub fn validate(
     if let Some(message) = invalid {
         return Err(Error::Syntax(message));
     }
-    // The grammar alone cannot validate nested coroutine/generator scopes or walrus
-    // bindings across comprehension scopes. Those require a compile-time symbol table.
+    // Comprehension targets restrict assignments in their lexical scope.
     let tokens = parsed.tokens();
     let comprehension = tokens.iter().any(|t| t.kind() == TokenKind::For);
+    if comprehension
+        && tokens.iter().any(|t| t.kind() == TokenKind::ColonEqual)
+        && let Some(error) = crate::async_generators::check(parsed.syntax().into(), true)
+    {
+        return Err(Error::InvalidScope(error));
+    }
     let lambda_body = body.as_lambda_expr().map(|lambda| lambda.body.range());
     if tokens.iter().any(|token| match token.kind() {
         TokenKind::Await | TokenKind::Async => true,
         TokenKind::Yield => {
             comprehension || !lambda_body.is_some_and(|r| r.contains_range(token.range()))
         }
-        TokenKind::ColonEqual => comprehension,
         _ => false,
     }) {
         return Err(Error::Scope);
@@ -121,4 +126,22 @@ pub fn validate(
         return Err(Error::Syntax("invalid binding in forward reference"));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn assignment_expressions_use_their_comprehension_scope() {
+        for (source, valid) in [
+            ("((callee := capture), tuple(callee(i) for i in items))", true),
+            ("((lambda: (i := 1))() for i in items)", true),
+            ("((i := 1) for i in items)", false),
+            ("(i for i in (items := values))", false),
+            ("(await f(), tuple(i for i in items))", false),
+        ] {
+            assert_eq!(validate(&parse(source).unwrap()).is_ok(), valid, "{source}");
+        }
+    }
 }
