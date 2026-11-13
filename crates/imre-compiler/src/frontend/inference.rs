@@ -392,7 +392,7 @@ pub(super) struct Inference {
 }
 
 pub(super) struct Solution {
-    pub(super) method_returns: HashMap<usize, fixed_body_source::PlacedBody>,
+    pub(super) method_returns: HashMap<usize, PreparedBody>,
     pub(super) registered_parameters: HashMap<usize, Diagnostic>,
     /// Definitions checked to completion with the final input and return types.
     pub(super) checked_bodies: HashSet<usize>,
@@ -1015,6 +1015,7 @@ impl Inference {
                     && !checker.fault_enabled()
                     && registered::physical_method(signature, function, classes).is_some();
                 checker.placement_only = !keep_return;
+                let method_storage = keep_return.then(|| (helpers.len(), globals.types().len()));
                 let mut return_body = keep_return.then(|| {
                     checker.frame = LexicalFrame::Named(function.name.id.clone());
                     checker.fixed_sites = Some(fixed_body_source::SourceSites::new(true));
@@ -1203,20 +1204,19 @@ impl Inference {
                     if let Some((params, body)) = return_body
                         && checked_return && !checked_call_cannot_return && body_revision == revision
                         && checker.calls.is_empty() && checker.class_reads.borrow().is_empty()
+                        && checker.unrepresented.borrow().is_none()
+                        && method_storage == Some((helpers.len(), globals.types().len()))
                         && let Some(source) = checker.fixed_body_source(function, signature, function.body.len(), &body)
-                        // A module read needs its initializing storage; a bound method may
-                        // have consulted a different callee layout during discovery.
-                        && source.attributes.values().all(|attr| matches!(attr, FixedAttribute::Operation { operation, .. } if matches!(**operation, Builtin::RegisteredAttribute { .. })))
+                        // Module storage and method targets belong to the graph that selected them.
+                        // A written global callee will be looked up again by the Python frame.
+                        && source.attributes.values().all(|attribute| match attribute {
+                            FixedAttribute::Operation { operation, .. } => matches!(**operation, Builtin::RegisteredAttribute { .. }),
+                            FixedAttribute::Call(call) => matches!(&call.0.without_location().kind,
+                                ExprKind::Builtin(Builtin::RegisteredName(_), args) if args.is_empty()),
+                            FixedAttribute::ModuleName(_) => false,
+                        })
                     {
-                        let function = ir::Function {
-                            params,
-                            returns: signature.returns,
-                            locals: checker.locals,
-                            body,
-                        };
-                        if let Ok(placed) = source.place(function) {
-                            method_returns.insert(signature.id, Ok(placed));
-                        }
+                        method_returns.insert(signature.id, Ok(checker.completed_body(params, body, Some(source), false)));
                     }
                     if superseded_returns
                         && !graph.session.call_may_return_implicitly(*module, function)

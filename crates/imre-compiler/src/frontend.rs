@@ -1416,9 +1416,19 @@ fn lower_graph(
         // A bound wrapper with an unknown owner may need the method's Python
         // frame. Keep the operand sites until its specialized layout is known.
         let python_method = graph.registered_startup || has_wrapper_link;
-        checker.fixed_sites = (!needs_registered_entry
+        let prepare_sites = !needs_registered_entry
             && (signature.method.is_none() || python_method)
-            && signature.physical_frame)
+            && signature.physical_frame;
+        let inferred = if signature.method.is_some() && prepare_sites {
+            pending_capture
+                .borrow_mut()
+                .as_mut()
+                .and_then(|prepared| prepared.remove(&signature.id))
+                .and_then(StdResult::ok)
+        } else {
+            None
+        };
+        checker.fixed_sites = (prepare_sites && inferred.is_none())
             .then(|| fixed_body_source::SourceSites::new(python_method));
         checker.placement_only = (named || unavailable.is_some()) && cache.is_none();
         let mut attributes = HashMap::new();
@@ -1429,13 +1439,14 @@ fn lower_graph(
         {
             checker.settled_attributes = Some(&mut attributes);
         }
-        let named_function = named
-            && cache.is_none()
-            && signature.physical_frame
-            && signature.method.is_none();
-        let result = if named_function
+        let named_function =
+            named && cache.is_none() && signature.physical_frame && signature.method.is_none();
+        let result = if let Some(body) = inferred {
+            Ok(body)
+        } else if named_function
             && (unavailable.is_none()
-                || registered::SourceChecks::cached(graph, *module_id, definition.range()) == Some(true))
+                || registered::SourceChecks::cached(graph, *module_id, definition.range())
+                    == Some(true))
             && signature
                 .params
                 .iter()
@@ -1941,7 +1952,9 @@ struct LoweredBody {
     default_reads: Option<Vec<caller_cache::DefaultId>>,
 }
 
-type BodyResult = Result<(LoweredBody, HashMap<usize, zip_sums::Sum>), String>;
+type CompletedBody = (LoweredBody, HashMap<usize, zip_sums::Sum>);
+type BodyResult = Result<CompletedBody, String>;
+type PreparedBody = StdResult<CompletedBody, HashMap<TextRange, FixedAttribute>>;
 
 type FunctionDefinition<'a> = (ModuleId, Cow<'a, ast::StmtFunctionDef>, Signature);
 
@@ -2107,8 +2120,8 @@ fn lower_function(
     checker.finish_region(Ok(()))?;
     let mut source = None;
     if let Some(names) = registered_locals {
-        names.extend(checker.namespace_bindings);
-        names.extend(checker.names.into_iter().map(|(name, slot)| {
+        names.extend(checker.namespace_bindings.drain());
+        names.extend(checker.names.drain().map(|(name, slot)| {
             (
                 slot,
                 registered::LocalBinding {
@@ -2127,24 +2140,7 @@ fn lower_function(
         checker.fault_frame(&mut body, definition.name.as_str(), definition.start());
         source = checker.fixed_body_source(definition, signature, statements.len(), &body);
     }
-    Ok((
-        LoweredBody {
-            cannot_return,
-            frame_arguments: checker.frame_arguments,
-            wrapper_link: checker.wrapper_link.get(),
-            source,
-            function: ir::Function {
-                params,
-                returns: checker.returns,
-                locals: checker.locals,
-                body,
-            },
-            calls: checker.calls,
-            class_reads: checker.class_reads.into_inner(),
-            default_reads: checker.default_reads,
-        },
-        checker.zip_sums,
-    ))
+    Ok(checker.completed_body(params, body, source, cannot_return))
 }
 
 fn signature(
@@ -3395,6 +3391,34 @@ struct Checker<'a> {
 }
 
 impl<'a> Checker<'a> {
+    /// Move the function and the dependencies established while checking its operations together.
+    fn completed_body(
+        self,
+        params: Vec<usize>,
+        body: Vec<Statement>,
+        source: Option<FixedBodySource>,
+        cannot_return: bool,
+    ) -> CompletedBody {
+        (
+            LoweredBody {
+                cannot_return,
+                frame_arguments: self.frame_arguments,
+                wrapper_link: self.wrapper_link.get(),
+                source,
+                function: ir::Function {
+                    params,
+                    returns: self.returns,
+                    locals: self.locals,
+                    body,
+                },
+                calls: self.calls,
+                class_reads: self.class_reads.into_inner(),
+                default_reads: self.default_reads,
+            },
+            self.zip_sums,
+        )
+    }
+
     fn new(
         graph: &'a SourceGraph,
         module: ModuleId,
