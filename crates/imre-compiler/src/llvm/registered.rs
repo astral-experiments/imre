@@ -6,6 +6,7 @@ mod frame;
 mod handlers;
 pub(crate) mod patterns;
 mod sequences;
+pub(super) use sequences::permanent_handle;
 pub(crate) mod sites;
 pub(crate) mod suspension;
 use crate::frontend::{

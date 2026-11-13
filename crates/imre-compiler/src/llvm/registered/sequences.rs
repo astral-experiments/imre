@@ -2,15 +2,8 @@
 use super::permanent;
 use crate::ir::{Builtin, Expr, ExprKind};
 
-fn literal(value: &Expr) -> &ExprKind {
-    match &value.kind {
-        ExprKind::Builtin(Builtin::RegisteredLocation(..), args) => literal(&args[0]),
-        kind => kind,
-    }
-}
-
-pub(super) fn permanent_handle(value: &Expr) -> Option<u16> {
-    let handle = match literal(value) {
+pub(in crate::llvm) fn permanent_handle(value: &Expr) -> Option<u16> {
+    let handle = match &value.without_location().kind {
         ExprKind::None => permanent::NONE,
         ExprKind::Bool(true) => permanent::TRUE,
         ExprKind::Bool(false) => permanent::FALSE,
