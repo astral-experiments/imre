@@ -146,7 +146,7 @@ impl FixedNode {
                         expr.ty,
                     )
                 }
-                ExprKind::Local(slot) | ExprKind::Field(_, slot) => {
+                ExprKind::Local(slot) | ExprKind::Field(_, slot) | ExprKind::Bind(slot, _) => {
                     Self::indexed(&expr.kind, slot, expr.ty)
                 }
                 ExprKind::Builtin(Builtin::GlobalGet(slot), ref args) if args.is_empty() => {
