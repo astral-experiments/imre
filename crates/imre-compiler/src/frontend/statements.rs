@@ -268,7 +268,14 @@ impl StatementLowering for Checker<'_> {
             }
             None
         } else {
-            if !terminates {
+            let source_result = !terminates
+                && self.checked_call_contracts
+                && self.returns.builtin_scalar_name().is_some()
+                && value.ty == Type::PythonObject
+                && ret.value.as_deref().is_some_and(|expression| {
+                    self.graph.session.scalar_type(self.module, expression) == Some(self.returns)
+                });
+            if !terminates && !source_result {
                 value = self
                     .coerce(value, self.returns, &origin)
                     .map_err(|failure| {

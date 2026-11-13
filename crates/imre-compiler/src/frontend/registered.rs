@@ -484,6 +484,16 @@ pub(super) fn place_checked_definition(
 ) -> Option<LoweredBody> {
     let graph = original.graph;
     let module = original.module;
+    let checks = &inference.source_checks;
+    let contract = SourceChecks::cached(graph, module, definition.range());
+    if contract == Some(false) {
+        return None;
+    }
+    // A settled signature can use the source check that already owns this module.
+    let deferred = checks
+        .solved
+        .as_ref()
+        .filter(|_| contract.is_none() && original.discarded_function_body());
     let helpers = Helpers::new(inference.len());
     let values = ModuleValues::default();
     let mut checker = Checker::new(
@@ -497,6 +507,9 @@ pub(super) fn place_checked_definition(
     );
     checker.nonreturning_functions = original.nonreturning_functions;
     checker.checked_call_contracts = true;
+    if deferred.is_some() {
+        checker.frame_arguments = FrameArguments::Pending;
+    }
     checker.registered_local_start = Some(signature.params.len());
     let (body, frame) = graph.try_registered_body(module, || {
         let (mut body, names) = checked_definition(checker, definition, signature).ok()?;
@@ -510,10 +523,9 @@ pub(super) fn place_checked_definition(
         body.function.returns = signature.returns;
         Some((body, frame))
     })?;
-    if !inference
-        .source_checks
-        .accepts(graph, module, definition.range())
-    {
+    if let Some(solved) = deferred {
+        solved.borrow_mut().push((module, definition.range()));
+    } else if contract.is_none() && !checks.accepts(graph, module, definition.range()) {
         return None;
     }
     graph.register_function(module, definition.start(), frame);
@@ -531,7 +543,7 @@ fn checked_definition(
     let helpers = checker.helpers;
     let first_helper = helpers.len();
     let mut local_names = HashMap::new();
-    let (body, _) = lower_function(checker, definition, signature, Some(&mut local_names))?;
+    let (body, _) = lower_function(checker, definition, signature, Some(&mut local_names), None)?;
     if !source_calls && !body.calls.is_empty() || helpers.len() != first_helper {
         return Err(error(
             source,

@@ -849,7 +849,7 @@ impl Checker<'_> {
             }
         }
         let mut body = self.inference.is_none().then(Vec::new);
-        let falls = helper.function_body(&definition.body, body.as_mut())?;
+        let falls = helper.function_body(&definition.body, body.as_mut(), None)?;
         if let Some(mut returns) = helper.inferred_returns.take() {
             if falls || returns.is_empty() {
                 returns.push(Type::None);

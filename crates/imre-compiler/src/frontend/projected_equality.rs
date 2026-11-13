@@ -183,13 +183,14 @@ impl Checker<'_> {
         &mut self,
         stmts: &[ast::Stmt],
         mut output: Option<&mut Vec<Statement>>,
+        place: Option<&mut dyn FnMut(&Self) -> bool>,
     ) -> Result<bool, String> {
         self.collect_local_definitions(stmts)?;
         if self.returns != Type::Bool {
-            return self.lower_block(stmts, output);
+            return self.lower_block_with_placement(stmts, output, place);
         }
         let Some((at, a, b, answers)) = tail(self, stmts) else {
-            return self.lower_block(stmts, output);
+            return self.lower_block_with_placement(stmts, output, place);
         };
         let prefix_falls = self.lower_block(&stmts[..at], output.as_deref_mut())?;
         let reachable = self.reachable;

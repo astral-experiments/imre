@@ -1438,11 +1438,12 @@ fn lower_graph(
         {
             checker.settled_attributes = Some(&mut attributes);
         }
-        let result = if named
+        let named_function = named
             && cache.is_none()
             && unavailable.is_none()
             && signature.physical_frame
-            && signature.method.is_none()
+            && signature.method.is_none();
+        let result = if named_function
             && signature
                 .params
                 .iter()
@@ -1461,6 +1462,11 @@ fn lower_graph(
             registered::place_checked_definition(&checker, definition, signature, &inference)
                 .map(|body| (body, Default::default()))
                 .map_or_else(|| lower_body(checker, definition, signature), Ok)
+        } else if named_function
+            && definition.returns.is_some()
+            && signature.returns.builtin_scalar_name().is_some()
+        {
+            lower_function(checker, definition, signature, None, Some(&inference))
         } else if let Some(cache) = cache.as_deref_mut().filter(|_| signature.method.is_none()) {
             cache.body(checker, definition, signature)
         } else {
@@ -1944,7 +1950,7 @@ fn lower_body(
     definition: &ast::StmtFunctionDef,
     signature: &Signature,
 ) -> BodyResult {
-    lower_function(checker, definition, signature, None)
+    lower_function(checker, definition, signature, None, None)
 }
 
 fn lower_function(
@@ -1952,6 +1958,7 @@ fn lower_function(
     definition: &ast::StmtFunctionDef,
     signature: &Signature,
     registered_locals: Option<&mut HashMap<usize, registered::LocalBinding>>,
+    placement: Option<&inference::Inference>,
 ) -> BodyResult {
     debug_assert_eq!(checker.registered.is_some(), registered_locals.is_some());
     #[cfg(test)]
@@ -2037,7 +2044,28 @@ fn lower_function(
         (vec![], true)
     } else {
         let mut body = Vec::new();
-        match checker.function_body(statements, Some(&mut body)) {
+        let mut placed = None;
+        let result = if let Some(inference) = placement {
+            let helpers = checker.helpers.len();
+            checker.function_body(
+                statements,
+                Some(&mut body),
+                Some(&mut |cx| {
+                    if cx.helpers.len() != helpers || cx.unrepresented.borrow().is_some() {
+                        return false;
+                    }
+                    placed =
+                        registered::place_checked_definition(cx, definition, signature, inference);
+                    placed.is_some()
+                }),
+            )
+        } else {
+            checker.function_body(statements, Some(&mut body), None)
+        };
+        if let Some(body) = placed {
+            return Ok((body, HashMap::new()));
+        }
+        match result {
             Ok(falls) => {
                 cannot_return = checker.checked_call_cannot_return(definition, falls);
                 (body, falls)
@@ -5867,7 +5895,17 @@ impl<'a> Checker<'a> {
     fn lower_block(
         &mut self,
         statements: &[ast::Stmt],
+        output: Option<&mut Vec<Statement>>,
+    ) -> Result<bool, String> {
+        self.lower_block_with_placement(statements, output, None)
+    }
+
+    /// Let a complete Python body finish a function whose fixed positions no longer match.
+    fn lower_block_with_placement(
+        &mut self,
+        statements: &[ast::Stmt],
         mut output: Option<&mut Vec<Statement>>,
+        mut place: Option<&mut dyn FnMut(&Self) -> bool>,
     ) -> Result<bool, String> {
         if let Some(reason) = statements.first().and_then(|first| {
             self.graph
@@ -6030,6 +6068,11 @@ impl<'a> Checker<'a> {
             if !emitting {
                 body.clear();
             } else if self.discarded_function_body() {
+                // The fixed body has lost its physical operands. Continue the source
+                // checks here if the Python frame cannot validate the whole declaration.
+                if place.take().is_some_and(|place| place(self)) {
+                    break;
+                }
                 *body = Vec::new();
                 output = None;
             }
