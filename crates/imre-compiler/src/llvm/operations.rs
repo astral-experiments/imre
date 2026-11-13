@@ -68,13 +68,6 @@ impl CheckedValue {
             exact_word: None,
         }
     }
-    pub(crate) fn rooted_integer(id: String, n: i64) -> Self {
-        Self::Handle {
-            id,
-            exact_word: exact_integer_literal(n).map(|value| value.operand),
-        }
-    }
-
     /// An integer consumer can use the result without boxing it. In that case
     /// one available word is enough to try projecting the other operand.
     fn can_use_integer_arithmetic(
@@ -151,12 +144,6 @@ impl CheckedValue {
         };
         operand
     }
-}
-
-fn exact_integer_literal(value: i64) -> Option<Value> {
-    (-(1_i64 << 62)..1_i64 << 62)
-        .contains(&value)
-        .then(|| small(value))
 }
 
 impl CallArgs {
@@ -809,22 +796,27 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             }
             ExprKind::Int(text) => {
                 let integer = text.parse::<i64>().ok();
+                let tagged = integer.and_then(crate::ir::tagged_integer);
                 match &mut self.0 {
                     Entry::Native(emitter) => CheckedValue::owned(
-                        integer
-                            .and_then(exact_integer_literal)
+                        tagged
+                            .map(small)
                             .unwrap_or_else(|| emitter.pooled_literal(text.as_bytes(), Type::Int)),
                     ),
-                    Entry::Registered(frame) => {
-                        if usage == ValueUse::FinalIntegerOperand
-                            && let Some(n) = expr.tagged_integer_literal()
-                            && super::registered::permanent::small_integer_id(n).is_none()
+                    Entry::Registered(frame) => match integer {
+                        Some(n)
+                            if usage == ValueUse::FinalIntegerOperand
+                                && tagged.is_some()
+                                && super::registered::permanent::small_integer_id(n).is_none() =>
                         {
                             CheckedValue::IntegerLiteral(n)
-                        } else {
-                            frame.integer(text, integer)
                         }
-                    }
+                        Some(n) => CheckedValue::Handle {
+                            id: frame.integer(n),
+                            exact_word: tagged.map(|value| small(value).operand),
+                        },
+                        None => CheckedValue::handle(frame.lit(0, text.as_bytes())),
+                    },
                 }
             }
             ExprKind::Str(text) => match &mut self.0 {

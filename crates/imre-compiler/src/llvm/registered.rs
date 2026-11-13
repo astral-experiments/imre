@@ -906,13 +906,6 @@ impl<'f> Frame<'f, '_, '_> {
         }
         self.code.label(&done);
     }
-    pub(crate) fn integer(&mut self, text: &str, integer: Option<i64>) -> CheckedValue {
-        match integer {
-            Some(n) => CheckedValue::rooted_integer(self.code.integer(n), n),
-            None => CheckedValue::handle(self.code.lit(0, text.as_bytes())),
-        }
-    }
-
     pub(crate) fn string(&mut self, value: &str) -> CheckedValue {
         CheckedValue::handle(self.code.source_text(value, None))
     }
