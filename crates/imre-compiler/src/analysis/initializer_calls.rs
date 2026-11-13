@@ -38,7 +38,9 @@ pub(crate) fn unambiguous_file_module(name: &str) -> bool {
 fn passive(stmt: &Stmt) -> bool {
     match stmt {
         Stmt::FunctionDef(f) => passive_declaration(f),
-        Stmt::Assign(a) => a.targets.iter().all(Expr::is_name_expr) && a.value.is_literal_expr(),
+        Stmt::Assign(a) => {
+            a.targets.iter().all(Expr::is_name_expr) && crate::modules::inert_literal(&a.value)
+        }
         Stmt::Expr(e) => e.value.is_literal_expr(),
         Stmt::If(guard) => {
             guard.test.is_literal_expr()

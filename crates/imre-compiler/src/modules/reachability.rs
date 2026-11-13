@@ -879,7 +879,7 @@ impl Reachable {
 
 /// Building these literals only allocates builtin storage. A dict or set still
 /// hashes every key at import time: a nested list/dict/set there must not be elided.
-fn inert_literal(expr: &ast::Expr) -> bool {
+pub(crate) fn inert_literal(expr: &ast::Expr) -> bool {
     match expr {
         ast::Expr::Tuple(t) => t.elts.iter().all(inert_literal),
         ast::Expr::List(l) => l.elts.iter().all(inert_literal),
