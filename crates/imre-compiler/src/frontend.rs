@@ -1180,6 +1180,10 @@ fn lower_graph(
             if signature.method.is_some() {
                 return registered::physical_method(signature, definition, &classes).is_some();
             }
+            // Top-level functions borrow the parsed declaration until a transform edits it.
+            if matches!(definition, Cow::Borrowed(_)) {
+                return true;
+            }
             graph.modules[*module].parsed.syntax().body[callable_definitions[id].statement]
                 .as_function_def_stmt()
                 == Some(definition)
