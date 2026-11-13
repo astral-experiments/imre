@@ -349,14 +349,7 @@ fn emit_physical_operand<'a, 'p>(
             }
         }
     };
-    owner.place_operand(value);
-    let result = Frame::with_operand(owner, operand, |frame| {
-        if condition {
-            frame.test_with_temporaries(|frame| frame.evaluate_test(value, true))
-        } else {
-            frame.evaluate_handle(value)
-        }
-    });
+    let result = Frame::evaluate_operand(owner, value, operand, condition);
     owner.current_range = previous;
     result
 }
@@ -386,11 +379,14 @@ impl<'p> RegisteredBody<'p> {
 }
 
 impl<'a, 'p> Frame<'_, 'a, 'p> {
-    fn with_operand(
+    /// Write a value or truth test after placing its definitions in the owning scope.
+    pub(crate) fn evaluate_operand(
         code: &mut dyn PreparedSuiteEmitter<'a, 'p>,
+        value: &Expr,
         operand: Option<&RegisteredOperand>,
-        emit: impl FnOnce(&mut Frame<'_, 'a, 'p>) -> String,
+        condition: bool,
     ) -> String {
+        code.place_operand(value);
         let enclosing = if let Some(operand) = operand {
             let Some(enclosing) = code.enter_checked_slots(operand.region(), None) else {
                 return "0".into();
@@ -401,29 +397,23 @@ impl<'a, 'p> Frame<'_, 'a, 'p> {
         };
         let first = code.integer_owners;
         let outer = code.expression_integer_start.replace(first);
-        let result = emit(&mut Frame {
+        let mut frame = Frame {
             code,
             names: operand.map(|operand| &operand.local_names),
             inputs: operand.map_or(&[], |operand| &*operand.inputs),
             suite: None,
             fixed_sites: None,
-        });
+        };
+        let result = if condition {
+            frame.test_with_temporaries(|frame| frame.evaluate_test(value, true))
+        } else {
+            frame.evaluate_handle(value)
+        };
         code.expression_integer_start = outer;
         if let Some(enclosing) = enclosing {
             code.restore_checked_slots(enclosing);
         }
         result
-    }
-
-    /// The evaluator shares the lexical owner that inserts its nested definitions.
-    pub(crate) fn prepared_operand(
-        code: &mut dyn PreparedSuiteEmitter<'a, 'p>,
-        operand: &RegisteredOperand,
-    ) -> String {
-        code.place_operand(&operand.value);
-        Self::with_operand(code, Some(operand), |frame| {
-            frame.evaluate_handle(&operand.value)
-        })
     }
 }
 

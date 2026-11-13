@@ -1087,8 +1087,12 @@ impl SourceMap<'_> {
                 if let Some(class) = class {
                     frame.use_class_annotation_names(class);
                 }
-                let value =
-                    crate::llvm::registered::Frame::prepared_operand(&mut function, operand);
+                let value = crate::llvm::registered::Frame::evaluate_operand(
+                    &mut function,
+                    &operand.value,
+                    Some(operand),
+                    false,
+                );
                 function.frame.return_value(&value);
             }
         }
