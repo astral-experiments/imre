@@ -1118,6 +1118,7 @@ fn lower_graph(
         registered_parameters,
         mut checked_bodies,
         registered_generators,
+        needs_registered_entry,
     } = inference.solve(
         graph,
         &entry_statements,
@@ -1136,8 +1137,6 @@ fn lower_graph(
                 .diagnostic(class.node.as_ref(), "__bool__ must return bool"));
         }
     }
-    let needs_registered_entry =
-        !registered_generators.is_empty() || signatures.values().any(Signature::registered_frame);
     if needs_registered_entry {
         checked_bodies.retain(|&id| {
             let (module, definition, signature) = &definitions[id];
@@ -1292,6 +1291,7 @@ fn lower_graph(
     let mut has_wrapper_link = false;
     let mut refused_body = None;
     let mut completed_calls = classes.nonreturning_functions.clone();
+    let mut body_checks = Some(&checked_bodies);
     let mut zip_sums = Vec::new();
     let mut owners = Vec::new();
     let mut call_graph = Vec::new();
@@ -1361,8 +1361,8 @@ fn lower_graph(
         }
         // This graph will emit registered frames. Inference already checked this exact
         // definition with the settled signature; recovery owns its executable checked body.
-        if needs_registered_entry
-            && checked_bodies.contains(&signature.id)
+        if (needs_registered_entry || unavailable.is_some())
+            && body_checks.is_some_and(|ids| ids.contains(&signature.id))
             && graph
                 .registered_functions()
                 .get(module_id)
@@ -1395,8 +1395,8 @@ fn lower_graph(
                 break;
             }
         };
-        if body.cannot_return {
-            completed_calls.insert(signature.id);
+        if body.cannot_return && completed_calls.insert(signature.id) && !needs_registered_entry {
+            body_checks = None;
         }
         if needs_registered_entry {
             // The fixed-layout checks have supplied their diagnostics. Registered

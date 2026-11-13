@@ -392,6 +392,7 @@ pub(super) struct Solution {
     /// Definitions checked to completion with the final input and return types.
     pub(super) checked_bodies: HashSet<usize>,
     pub(super) registered_generators: HashSet<usize>,
+    pub(super) needs_registered_entry: bool,
 }
 
 impl Inference {
@@ -855,6 +856,7 @@ impl Inference {
                 && (reserved_builtin_function(name)
                     || imre_ast::providers::BUILTIN_TYPES.contains(&name))
         };
+        let mut before = self.revision.get();
         loop {
             let widened = self.widened.replace(false);
             let signatures_settled = !self.unresolved();
@@ -878,13 +880,15 @@ impl Inference {
                     self.update(signature);
                 }
             }
-            let before = self.revision.get();
+            before = self.revision.get();
             let class_globals = classes.declarations.has_class_values(graph.entry);
             let helpers = Helpers::new(self.len() + graph.initializers(class_globals).count());
             let globals = ModuleValues::for_initializers(!registered.is_empty());
             let mut available = HashSet::new();
             let mut errors = Vec::new();
             let mut completed_calls = classes.nonreturning_functions.clone();
+            let initial_nonreturning = completed_calls.len();
+            let mut checked_revision = before;
             let mut conflicting_returns = None;
             let mut opaque_returns = Vec::new();
             let mut staged_returns = Vec::new();
@@ -972,7 +976,9 @@ impl Inference {
                 checker.inference = Some(self);
                 checker.discover_document_return = document_return;
                 checker.inferred_returns = discover_returns.then(Vec::new);
+                let body_revision = self.revision.get();
                 let mut checked_return = false;
+                let mut implicit_none = false;
                 let mut superseded_returns = false;
                 let mut checked_call_cannot_return = false;
                 let result = (|| {
@@ -1023,6 +1029,8 @@ impl Inference {
                             };
                             ty = joined;
                         }
+                        implicit_none =
+                            ty == Type::None && falls_through && !checker.explicit_return;
                         self.pending.borrow_mut()[signature.id].returns = Some(ty);
                         self.revision.set(self.revision.get() + 1);
                     }
@@ -1030,6 +1038,11 @@ impl Inference {
                         !infer_return && (!falls_through || signature.returns == Type::None);
                     Ok::<_, Failure>(())
                 })();
+                let revision = self.revision.get();
+                if revision != checked_revision {
+                    checked_bodies.clear();
+                    checked_revision = revision;
+                }
                 if let Err(diagnostic) = checker.finish_region(result) {
                     // A completed return check can still require Python operations. Only the
                     // registered frame may own that body, after its ordinary source check.
@@ -1096,7 +1109,14 @@ impl Inference {
                     }
                     errors.push((*module, diagnostic));
                 } else {
-                    if checked_return {
+                    if (checked_return || implicit_none)
+                        && revision == body_revision + usize::from(implicit_none)
+                        && (revision == before
+                            || signature.physical_frame
+                                && signature.method.is_none()
+                                && !checked_call_cannot_return
+                                && !checker.calls.contains(&signature.id))
+                    {
                         checked_bodies.insert(signature.id);
                     }
                     if infer_return
@@ -1305,7 +1325,10 @@ impl Inference {
                     return Err(unresolved);
                 }
                 unreachable!("an unresolved signature has a missing parameter or return");
-            } else {
+            } else if checked_revision != self.revision.get()
+                || completed_calls.len() != initial_nonreturning
+                || classes.nonreturning_functions.len() != initial_nonreturning
+            {
                 checked_bodies.clear();
             }
         }
@@ -1320,10 +1343,18 @@ impl Inference {
                 self.update(signature);
             }
         }
+        let needs_registered_entry = !registered_generators.is_empty()
+            || signatures.values().any(Signature::registered_frame);
+        // Registered captures use a complete unchanged round. In fixed recovery only the
+        // physical checks after the final signature change may replace another body check.
+        if needs_registered_entry != (before == self.revision.get()) {
+            checked_bodies.clear();
+        }
         Ok(Solution {
             registered_parameters: registered,
             checked_bodies,
             registered_generators,
+            needs_registered_entry,
         })
     }
 }
