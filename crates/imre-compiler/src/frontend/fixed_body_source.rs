@@ -470,18 +470,30 @@ mod tests {
                 })
                 .collect();
             assert!(methods.iter().map(|m| m.0).eq(declarations.iter().copied()));
+            let refused = methods[0].3[0];
+            graph
+                .registered_source_errors
+                .borrow_mut()
+                .insert(graph.entry, vec![Some(refused)]);
             if early {
                 let (module, owners) = fixed.ir;
-                registered::FixedFunctions {
+                let checks = registered::SourceChecks::default();
+                FixedFunctions {
                     functions: module.functions,
                     frames: fixed.frame_sources,
                 }
-                .place(&graph, &owners, &registered::SourceChecks::default());
+                .register(&graph, &owners, |module, range| {
+                    checks.accepts(&graph, module, range)
+                });
             } else {
                 fixed.register_definitions(&graph);
             }
             let registered = graph.registered_functions();
             for (start, declaration, operations, positions) in methods {
+                if early && positions.contains(&refused) {
+                    assert!(!registered[&graph.entry].contains_key(&start));
+                    continue;
+                }
                 let placed = &registered[&graph.entry][&start];
                 assert_eq!(placed.function.body.as_ptr(), operations);
                 assert_eq!(placed.fixed_sites, positions);
