@@ -13803,12 +13803,12 @@ impl<'a> Checker<'a> {
                 return self.extend_list(receiver, &call.arguments.args[0], call, append);
             }
             let declaration = self.value_declaration(&receiver);
-            let mut args = vec![receiver];
+            let mut args = Vec::new();
             let (builtin, ty) = match attribute.attr.as_str() {
                 "append" if call.arguments.args.len() == 1 => {
                     let arg = &call.arguments.args[0];
                     let value = if let Some(inference) = self.inference
-                        && let Some(ValueSource::InferredList(owner)) = self.value_source(&args[0])
+                        && let Some(ValueSource::InferredList(owner)) = self.value_source(&receiver)
                     {
                         self.expr_in_context(
                             arg,
@@ -13825,7 +13825,7 @@ impl<'a> Checker<'a> {
                             },
                             declaration,
                         )?
-                    } else if let ExprKind::Local(slot) = args[0].kind
+                    } else if let ExprKind::Local(slot) = receiver.kind
                         && let Some(&site) = self.document_list_sites.get(&slot)
                         && let Some(inference) = self.inference
                         && element != documents::LIST
@@ -13858,15 +13858,14 @@ impl<'a> Checker<'a> {
             };
             if self.checked_call_contracts && !matches!(builtin, Builtin::JoinBufferAppend) {
                 self.frame_arguments = FrameArguments::Python;
-                let layout = registered::values::registered_argument_layout(&call.arguments);
-                return Ok(Expr {
-                    ty: Type::PythonObject,
-                    kind: ExprKind::Builtin(
-                        registered::values::bound_method_operation(call, attribute, layout),
-                        args,
-                    ),
-                });
+                return Ok(registered::values::bound_call(
+                    call,
+                    registered::values::method_target(attribute),
+                    receiver,
+                    args,
+                ));
             }
+            args.insert(0, receiver);
             let value = Expr {
                 ty,
                 kind: ExprKind::Builtin(builtin, args),

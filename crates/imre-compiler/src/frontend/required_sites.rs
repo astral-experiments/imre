@@ -24,7 +24,6 @@ fn visit_expression_site(
 ) {
     let call = match &expr.kind {
         ExprKind::Invoke { args, .. } => args.site.python().map(|site| site.call.range),
-        ExprKind::Builtin(Builtin::RegisteredCall(call), _) => Some(call.range),
         ExprKind::Builtin(op, operands) => {
             visit(match op {
                 Builtin::RegisteredDefinition(site) => RequiredSite::definition(site, operands),

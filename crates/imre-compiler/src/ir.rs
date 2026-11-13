@@ -712,7 +712,6 @@ impl Expr {
     pub(crate) fn python_call(&self) -> Option<&RegisteredCall> {
         match &self.kind {
             ExprKind::Invoke { args, .. } => Some(&args.site.python()?.call),
-            ExprKind::Builtin(Builtin::RegisteredCall(call), _) => Some(call),
             _ => None,
         }
     }
@@ -758,8 +757,16 @@ impl Expr {
                 pack.starred.len() + pack.keywords.len() == args.values.len()
             }
         };
+        let valid_projection = call.partition_field.is_none_or(|(field, range)| {
+            field <= 2
+                && range.contains_range(call.range)
+                && matches!(call.target, RegisteredCallTarget::Method { .. })
+                && matches!(call.arguments, RegisteredArguments::Positional)
+                && args.values.len() == 1
+        });
         self.ty == Type::PythonObject
             && valid_layout
+            && valid_projection
             && call.range.start() < end
             && end < call.range.end()
             && site
@@ -1632,8 +1639,6 @@ pub(crate) struct RegisteredCall {
     pub(crate) range: ruff_text_size::TextRange,
     pub(crate) target: RegisteredCallTarget,
     pub(crate) arguments: RegisteredArguments,
-    /// A comprehension supplies its Python namespace before the callable operand.
-    pub(crate) explicit_scope: bool,
 }
 
 impl RegisteredCall {
@@ -1647,7 +1652,6 @@ impl RegisteredCall {
             target,
             arguments,
             partition_field: None,
-            explicit_scope: false,
         }
     }
 
@@ -2406,7 +2410,6 @@ pub(crate) enum Builtin {
     },
     /// Delete one current-scope binding, reporting a missing name at its source target.
     RegisteredDeleteName(String, ruff_text_size::TextRange),
-    RegisteredCall(RegisteredCall),
     /// Resolve the code name in the live registered Python scope.
     RegisteredName(ruff_python_ast::name::Name),
     /// Apply Python's in-place protocol to the previously loaded target and the RHS.

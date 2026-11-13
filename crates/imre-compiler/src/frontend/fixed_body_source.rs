@@ -76,7 +76,8 @@ pub(crate) enum FixedAttribute {
         operation: Box<Builtin>,
         position: TextSize,
     },
-    Call(Box<(Expr, ir::InvokeSite)>),
+    /// The fixed builtin already carries its method receiver. A standalone callee is saved here.
+    Call(Box<(Option<Expr>, ir::InvokeSite)>),
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -304,8 +305,10 @@ impl SourceSites {
                 ir::RegisteredArguments::Positional,
             )
             .invoke_site();
-            self.attributes
-                .insert(site.range, FixedAttribute::Call(Box::new((target, invoke))));
+            self.attributes.insert(
+                site.range,
+                FixedAttribute::Call(Box::new((Some(target), invoke))),
+            );
             self.commit(site, node);
         }
     }
@@ -347,13 +350,15 @@ impl SourceSites {
             && operands.len() == 1 + call.arguments.args.len()
             && let Some(node) = FixedNode::checked(&ir::Node::Expression(value))
         {
-            let layout = ir::RegisteredArguments::Positional;
-            self.python_operation(
-                site,
-                field.attr.start(),
-                registered::values::bound_method_operation(call, field, layout),
-                node,
-            );
+            let invoke = ir::RegisteredCall::new(
+                call.range(),
+                registered::values::method_target(field),
+                ir::RegisteredArguments::Positional,
+            )
+            .invoke_site();
+            self.attributes
+                .insert(site.range, FixedAttribute::Call(Box::new((None, invoke))));
+            self.commit(site, node);
         }
     }
 

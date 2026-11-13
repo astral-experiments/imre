@@ -355,14 +355,15 @@ pub(in crate::frontend) fn subscript(
             ExprKind::Builtin(Builtin::RegisteredLocation(..), operands) => &mut operands[0].kind,
             kind => kind,
         };
-        if let ExprKind::Builtin(Builtin::RegisteredCall(call), operands) = call
-            && call.range == index.value.range()
-            && let ir::RegisteredCallTarget::Method { name, .. } = &call.target
+        if let ExprKind::Invoke { args, .. } = call
+            && let ir::CallSite::Python(site) = &mut args.site
+            && site.call.range == index.value.range()
+            && let ir::RegisteredCallTarget::Method { name, .. } = &site.call.target
             && matches!(name.as_str(), "partition" | "rpartition")
-            && matches!(call.arguments, ir::RegisteredArguments::Positional)
-            && operands.len() == 2 + usize::from(call.explicit_scope)
+            && matches!(site.call.arguments, ir::RegisteredArguments::Positional)
+            && args.values.len() == 1
         {
-            call.partition_field = Some((field as u32, index.range()));
+            site.call.partition_field = Some((field as u32, index.range()));
             return value;
         }
     }
@@ -373,24 +374,12 @@ pub(in crate::frontend) fn subscript(
     )
 }
 
-fn method_target(field: &ast::ExprAttribute) -> ir::RegisteredCallTarget {
+pub(in crate::frontend) fn method_target(field: &ast::ExprAttribute) -> ir::RegisteredCallTarget {
     ir::RegisteredCallTarget::Method {
         name: field.attr.id.clone(),
         attribute: field.range(),
         name_start: field.attr.start(),
     }
-}
-
-pub(in crate::frontend) fn bound_method_operation(
-    call: &ast::ExprCall,
-    field: &ast::ExprAttribute,
-    arguments: ir::RegisteredArguments,
-) -> Builtin {
-    Builtin::RegisteredCall(ir::RegisteredCall::new(
-        call.range(),
-        method_target(field),
-        arguments,
-    ))
 }
 
 pub(in crate::frontend) fn callable_target(call: &ast::ExprCall) -> ir::RegisteredCallTarget {
@@ -465,28 +454,18 @@ fn call_arguments<E>(
 }
 
 /// Keep the evaluated callable and its argument layout together on the invocation.
-fn bound_call(
+pub(in crate::frontend) fn bound_call(
     call: &ast::ExprCall,
     selection: ir::RegisteredCallTarget,
     target: Expr,
-    mut arguments: Vec<Expr>,
+    arguments: Vec<Expr>,
 ) -> Expr {
-    let layout = match selection {
-        ir::RegisteredCallTarget::Method { .. } => fixed_argument_layout(&call.arguments),
-        ir::RegisteredCallTarget::Callable { .. } => registered_argument_layout(&call.arguments),
-    };
-    let invoke = match selection {
-        ir::RegisteredCallTarget::Callable { .. } => target.ty == Type::PythonObject,
-        ir::RegisteredCallTarget::Method { .. } => {
-            matches!(layout, ir::RegisteredArguments::Keywords { .. })
-        }
-    };
-    let site = ir::RegisteredCall::new(call.range(), selection, layout);
-    if invoke {
-        return invoke_value(site, target, arguments);
-    }
-    arguments.insert(0, target);
-    super::operation(Builtin::RegisteredCall(site), Type::PythonObject, arguments)
+    let layout = registered_argument_layout(&call.arguments);
+    invoke_value(
+        ir::RegisteredCall::new(call.range(), selection, layout),
+        target,
+        arguments,
+    )
 }
 
 fn invoke_value(site: ir::RegisteredCall, target: Expr, arguments: Vec<Expr>) -> Expr {
@@ -1217,10 +1196,6 @@ pub(super) fn in_namespace(value: &mut Expr, namespace: Expr) {
                 },
             ..
         } => site.scope = Some(Box::new(namespace)),
-        ExprKind::Builtin(Builtin::RegisteredCall(call), args) => {
-            args.insert(0, namespace);
-            call.explicit_scope = true;
-        }
         ExprKind::Builtin(
             Builtin::RegisteredLambda(_, scoped) | Builtin::RegisteredGenerator(_, scoped, _),
             args,
@@ -1474,12 +1449,13 @@ impl Checker<'_> {
                     && let Some(module) = field.value.as_name_expr()
                     && !self.names.contains_key(module.id.as_str())
                     && let Some(FixedAttribute::Call(saved)) = sites.remove(&call.range())
-                    && matches!(&saved.1.call.target, ir::RegisteredCallTarget::Callable {
+                    && let (Some(target), site) = *saved
+                    && matches!(&site.call.target, ir::RegisteredCallTarget::Callable {
                         end, suspended_name: None,
                     } if *end == call.func.end())
                     && operands.is_original_operand(&call.func)
                 {
-                    callee = Some((call.func.as_ref(), saved.0));
+                    callee = Some((call.func.as_ref(), target));
                 }
                 return None;
             }
@@ -1655,25 +1631,20 @@ mod tests {
                 registered_value(&stmt.value, source).unwrap()
             })
             .collect();
-        let (
-            Builtin::RegisteredCall(ir::RegisteredCall {
-                target:
-                    ir::RegisteredCallTarget::Method {
-                        name,
-                        attribute,
-                        name_start,
-                    },
-                ..
-            }),
-            args,
-            pos,
-        ) = operation_and_position(&values[0])
+        let (ExprKind::Invoke { args, .. }, pos) = value_and_position(&values[0]) else {
+            panic!("expected a direct method invocation");
+        };
+        let ir::RegisteredCallTarget::Method {
+            name,
+            attribute,
+            name_start,
+        } = &args.site.python().unwrap().call.target
         else {
-            panic!("expected a direct method");
+            panic!("expected the physical method target");
         };
         assert_eq!(name, "method");
         assert_eq!(*name_start, pos);
-        assert_eq!(args.len(), 2);
+        assert_eq!(args.values.len(), 1);
         assert_eq!(
             &text[attribute.start().to_usize()..pos.to_usize()],
             "holder\n ."
@@ -1851,28 +1822,19 @@ mod tests {
                 private_names: None,
             };
             let value = registered_value(&stmt.value, source).unwrap();
-            match value_and_position(&value).0 {
-                ExprKind::Invoke { args, .. } => {
-                    assert!(count >= 30);
-                    assert_eq!(args.values.len(), count);
-                    assert_eq!(
-                        matches!(
-                            args.site.python().unwrap().call.arguments,
-                            ir::RegisteredArguments::Packed(_)
-                        ),
-                        count > 64
-                    );
-                }
-                ExprKind::Builtin(Builtin::RegisteredCall(call), operands) => {
-                    assert!(count < 30);
-                    assert_eq!(operands.len(), count + 1);
-                    assert!(matches!(
-                        call.target,
-                        ir::RegisteredCallTarget::Method { .. }
-                    ));
-                }
-                _ => panic!("expected a Python call"),
-            }
+            let (ExprKind::Invoke { args, .. }, _) = value_and_position(&value) else {
+                panic!("expected a Python invocation");
+            };
+            let call = &args.site.python().unwrap().call;
+            assert_eq!(args.values.len(), count);
+            assert_eq!(
+                matches!(call.target, ir::RegisteredCallTarget::Method { .. }),
+                count < 30
+            );
+            assert_eq!(
+                matches!(call.arguments, ir::RegisteredArguments::Packed(_)),
+                count > 64
+            );
         }
         for (text, fused) in [
             ("s.partition('-')[0]", Some(0)),
@@ -1898,8 +1860,9 @@ mod tests {
             let value = registered_value(&stmt.value, source).unwrap();
             let mut calls = Vec::new();
             ir::walk_operand_expressions(&value, &mut |expr| {
-                if let ExprKind::Builtin(Builtin::RegisteredCall(call), operands) = &expr.kind {
-                    calls.push((call.range, call.partition_field, operands.len()));
+                if let ExprKind::Invoke { args, .. } = &expr.kind {
+                    let call = &args.site.python().unwrap().call;
+                    calls.push((call.range, call.partition_field, args.values.len()));
                 }
             });
             let subscript = stmt.value.as_subscript_expr().unwrap();
@@ -1908,12 +1871,14 @@ mod tests {
                 [(
                     subscript.value.range(),
                     fused.map(|i| (i, subscript.range())),
-                    2
+                    1
                 )]
             );
-            let (operation, _, _) = operation_and_position(&value);
             assert_eq!(
-                matches!(operation, Builtin::RegisteredSubscript(..)),
+                matches!(
+                    value_and_position(&value).0,
+                    ExprKind::Builtin(Builtin::RegisteredSubscript(..), _)
+                ),
                 fused.is_none()
             );
         }

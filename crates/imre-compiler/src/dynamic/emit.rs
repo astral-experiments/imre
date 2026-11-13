@@ -5545,8 +5545,8 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
     }
 
     #[test]
-    fn physical_worker_targets_use_checked_registered_calls() {
-        use crate::ir::{self, Builtin, ExprKind, RegisteredCallTarget};
+    fn physical_worker_targets_use_checked_method_invocations() {
+        use crate::ir::{self, RegisteredCallTarget};
         use serde_json::json;
 
         for (source, target, key, expected, calls, excluded) in [
@@ -5605,7 +5605,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             assert!(suite.fully_checked());
             let mut methods = Vec::new();
             ir::walk_expressions(&suite.checked().function.body, &mut |expr| {
-                if let ExprKind::Builtin(Builtin::RegisteredCall(call), _) = &expr.kind
+                if let Some(call) = expr.python_call()
                     && let RegisteredCallTarget::Method { name, .. } = &call.target
                 {
                     methods.push(name.as_str());

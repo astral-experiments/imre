@@ -258,35 +258,13 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             return CheckedValue::owned(native.native_call(target, args, values, returns));
         };
 
-        self.python_call(
-            &site.call,
-            site.scope.as_deref(),
-            callable,
-            &args.values,
-            CheckedFrame::kept_call_value,
-        )
-    }
-
-    pub(super) fn registered_call(
-        &mut self,
-        call: &ir::RegisteredCall,
-        operand: &Expr,
-        args: &[Expr],
-    ) -> CheckedValue {
-        let (scope, target, args) = if call.explicit_scope {
-            let (target, args) = args.split_first().expect("scoped call has a target");
-            (Some(operand), target, args)
-        } else {
-            (None, operand, args)
-        };
-        self.python_call(call, scope, target, args, CheckedFrame::kept_call_value)
+        self.python_call(site, callable, &args.values, CheckedFrame::kept_call_value)
     }
 
     /// Resolve the callable and any bound receiver before capturing the written arguments.
     fn python_call(
         &mut self,
-        call: &ir::RegisteredCall,
-        scope: Option<&Expr>,
+        site: &ir::InvokeSite,
         target: &Expr,
         args: &[Expr],
         load_callable: fn(&mut CheckedFrame<'f, 'a, 'p>, &Expr, &mut String) -> String,
@@ -294,6 +272,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         use super::registered::CallArguments;
         use ir::{RegisteredArguments, RegisteredCallTarget};
 
+        let call = &site.call;
         let frame = self.python();
         let exec = frame.exec_literal_at(call.range);
         let mark = frame.temporary_mark();
@@ -308,7 +287,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         }
         let mut next = mark.clone();
         let packed = matches!(call.arguments, RegisteredArguments::Packed(_));
-        let scope = scope.map(|scope| {
+        let scope = site.scope.as_deref().map(|scope| {
             if packed {
                 frame.evaluate_handle(scope)
             } else {
@@ -906,6 +885,10 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             use crate::frontend::FixedAttribute;
             let position = match attribute {
                 Some(FixedAttribute::Operation { position, .. }) => *position,
+                Some(FixedAttribute::Call(call)) => match &call.1.call.target {
+                    ir::RegisteredCallTarget::Method { name_start, .. } => *name_start,
+                    ir::RegisteredCallTarget::Callable { .. } => range.start(),
+                },
                 _ => range.start(),
             };
             return frame.at_expression(range, position, |frame| {
@@ -914,9 +897,12 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                     let args = expr
                         .named_call_arguments()
                         .expect("placed call has its written operands");
+                    let (target, args) = match target {
+                        Some(target) => (target, args),
+                        None => args.split_first().expect("placed method has a receiver"),
+                    };
                     return CheckedBody::registered(frame.reborrow()).python_call(
-                        &site.call,
-                        None,
+                        site,
                         target,
                         args,
                         CheckedFrame::source_callee,

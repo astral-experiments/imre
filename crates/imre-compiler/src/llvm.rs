@@ -4486,7 +4486,6 @@ impl Emitter<'_, '_> {
             | Builtin::RegisteredUnpack { .. }
             | Builtin::RegisteredIter(_)
             | Builtin::RegisteredPairNeedsRow
-            | Builtin::RegisteredCall(..)
             | Builtin::RegisteredName(_)
             | Builtin::Unrepresented
             | Builtin::RegisteredInPlace(_)
