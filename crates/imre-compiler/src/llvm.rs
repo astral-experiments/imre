@@ -3752,14 +3752,6 @@ impl Emitter<'_, '_> {
         best
     }
 
-    fn integer_order(&mut self, left: &Value, right: &Value) -> String {
-        self.output.local_helper("compare_int", INTEGER_COMPARE);
-        self.instruction(format!(
-            "call i32 @compare_int(i64 {}, i64 {})",
-            left.operand, right.operand
-        ))
-    }
-
     fn compare(&mut self, op: Compare, left: &Value, right: &Value) -> Value {
         let predicate = op.signed_predicate();
         if matches!(
@@ -4285,7 +4277,6 @@ impl Emitter<'_, '_> {
     fn integer_absolute(&mut self, value: &Value) -> Value {
         self.output
             .local_helper("int_abs", conditionals::INTEGER_ABSOLUTE_HELPER);
-        self.output.local_helper("compare_int", INTEGER_COMPARE);
         self.call("int_abs", Type::Int, &[value])
     }
 
@@ -7494,7 +7485,9 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::IntSignAsFloat => {
-                let order = self.integer_order(&args[0].value, &small(0));
+                self.output.local_helper("int_sign", INTEGER_SIGN);
+                let word = &args[0].value.operand;
+                let order = self.instruction(format!("call i32 @int_sign(i64 {word})"));
                 Value {
                     ty: Type::Float,
                     operand: self.instruction(format!("sitofp i32 {order} to double")),
@@ -11556,22 +11549,21 @@ done:
     }
 }
 
-const INTEGER_COMPARE: &str = r#"
-define internal i32 @compare_int(i64 %a, i64 %b) alwaysinline {
+const INTEGER_SIGN: &str = r#"
+define internal i32 @int_sign(i64 %value) alwaysinline {
 entry:
-  %both = and i64 %a, %b
-  %tag = and i64 %both, 1
-  %small = icmp eq i64 %tag, 1
-  br i1 %small, label %fast, label %big, !prof !1
-fast:
-  %less = icmp slt i64 %a, %b
-  %equal = icmp eq i64 %a, %b
-  %nonless = select i1 %equal, i32 0, i32 1
-  %order = select i1 %less, i32 -1, i32 %nonless
-  ret i32 %order
-big:
-  %slow = call i32 @imre_int_compare(i64 %a, i64 %b) cold
-  ret i32 %slow
+  %small = trunc i64 %value to i1
+  br i1 %small, label %tagged, label %heap, !prof !1
+tagged:
+  %negative = icmp slt i64 %value, 1
+  %positive = icmp sgt i64 %value, 1
+  %below = sext i1 %negative to i32
+  %above = zext i1 %positive to i32
+  %sign = or i32 %below, %above
+  ret i32 %sign
+heap:
+  %sign_big = call i32 @imre_int_compare(i64 %value, i64 1) cold
+  ret i32 %sign_big
 }
 "#;
 

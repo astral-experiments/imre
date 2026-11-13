@@ -417,7 +417,7 @@ mod tests {
         let entry = temp.path().join("main.py");
         fs::write(
             &entry,
-            "from math_ops import add, magnitude\nprint(add(1, magnitude(-2)))\n",
+            "from math_ops import add, magnitude\ndef negative(x: float) -> bool:\n    return x < 0\nprint(add(1, magnitude(-2)), negative(4))\n",
         )
         .unwrap();
         fs::write(temp.path().join("math_ops.py"), "def add(a: int, b: int) -> int:\n    return a + b\ndef magnitude(n: int) -> int:\n    return -n if n < 0 else n\n").unwrap();
@@ -438,8 +438,8 @@ mod tests {
             }
             assert_eq!(ir.contains("call i64 @int_add("), unit.name == "math_ops");
             assert_eq!(
-                ir.matches("define internal i32 @compare_int(").count(),
-                usize::from(ir.contains("call i32 @compare_int("))
+                ir.matches("define internal i32 @int_sign(").count(),
+                usize::from(ir.contains("call i32 @int_sign("))
             );
         }
     }
