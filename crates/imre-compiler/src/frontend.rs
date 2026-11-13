@@ -1189,7 +1189,7 @@ fn lower_graph(
     // actual representation failure can still use functions whose signatures solved.
     let pending_capture = std::cell::RefCell::new(Some(method_returns));
     let capture = || {
-        if let Some(mut method_returns) = pending_capture.take() {
+        if let Some(mut prepared) = pending_capture.take() {
             registered::capture(
                 graph,
                 &signatures,
@@ -1201,7 +1201,7 @@ fn lower_graph(
                 registered::Capture::Solved(needs_registered_entry.then_some(&checked_bodies)),
                 definitions
                     .iter()
-                    .map(|(_, _, signature)| (signature.id, method_returns.remove(&signature.id))),
+                    .map(|(_, _, signature)| (signature.id, prepared.remove(&signature.id))),
             );
         }
     };
@@ -1430,6 +1430,7 @@ fn lower_graph(
             && signature.physical_frame)
             .then(|| fixed_body_source::SourceSites::new(python_method));
         checker.placement_only = (named || unavailable.is_some()) && cache.is_none();
+        let mut attributes = HashMap::new();
         let result = if named
             && cache.is_none()
             && unavailable.is_none()
@@ -1456,8 +1457,21 @@ fn lower_graph(
         } else if let Some(cache) = cache.as_deref_mut().filter(|_| signature.method.is_none()) {
             cache.body(checker, definition, signature)
         } else {
+            // The FILE graph can still select a fixed layout after this declaration.
+            if !checker.placement_only
+                && checker.fixed_sites.is_some()
+                && signature.method.is_none()
+                && pending_capture.borrow().is_some()
+            {
+                checker.settled_attributes = Some(&mut attributes);
+            }
             lower_body(checker, definition, signature)
         };
+        if !attributes.is_empty()
+            && let Some(prepared) = pending_capture.borrow_mut().as_mut()
+        {
+            prepared.insert(signature.id, Err(attributes));
+        }
         let (body, sums) = match checked_region(
             result,
             graph,
@@ -3263,7 +3277,7 @@ struct Checker<'a> {
     placement_only: bool,
     /// The graph keeps this physical function's declaration and first-party call edges.
     checked_call_contracts: bool,
-    /// During physical method recovery, forward completed attribute operations to the live frame.
+    /// Resolved operations from a fixed source that the live frame can still use.
     settled_attributes: Option<&'a mut HashMap<TextRange, FixedAttribute>>,
     nonreturning_functions: &'a HashSet<usize>,
     /// Locals in this body are bound in an existing Python activation.

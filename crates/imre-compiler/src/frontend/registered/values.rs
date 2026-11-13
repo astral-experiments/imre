@@ -1015,15 +1015,6 @@ pub(super) fn operation<E>(
             || value.ty == Type::PythonObject)
             .then(|| Expr::unary(unary.op, value, Type::PythonObject)));
     }
-    if let Some(value) = source.object_operation(
-        node,
-        attribute,
-        allow_typed_receiver,
-        dynamic_receiver,
-        &mut child,
-    )? {
-        return Ok(Some(value));
-    }
     let kind = match node {
         ast::Expr::Generator(generator)
             if source
@@ -1091,7 +1082,12 @@ pub(super) fn operation<E>(
         {
             value
         }
-        ast::Expr::Name(name) => return Ok(Some(name_binding(&name.id))),
+        ast::Expr::Name(name) => {
+            return Ok(Some(attribute.map_or_else(
+                || name_binding(&name.id),
+                |op| super::operation(*op, Type::PythonObject, vec![]),
+            )));
+        }
         ast::Expr::NumberLiteral(lit) => number_literal(&lit.value, false),
         ast::Expr::StringLiteral(lit) => {
             return Ok(Some(
@@ -1119,7 +1115,15 @@ pub(super) fn operation<E>(
                 source.text,
             )));
         }
-        _ => return Ok(None),
+        _ => {
+            return source.object_operation(
+                node,
+                attribute,
+                allow_typed_receiver,
+                dynamic_receiver,
+                child,
+            );
+        }
     };
     Ok(Some(Expr {
         ty: Type::PythonObject,
@@ -1528,20 +1532,32 @@ impl Checker<'_> {
         let class = self.class;
         let mut live_receiver = false;
         let attribute = self.settled_attributes.as_deref_mut().and_then(|sites| {
-            let field = node.as_attribute_expr()?;
-            // A rewritten operand can inherit the physical range under a different name.
+            if !matches!(node, ast::Expr::Name(_) | ast::Expr::Attribute(_)) {
+                return None;
+            }
             let FixedAttribute::Operation {
                 operation,
                 position,
-            } = sites.remove(&field.range())?
+            } = sites.remove(&node.range())?
             else {
                 return None;
             };
-            (position == field.attr.start()
-                && matches!(&*operation, Builtin::RegisteredAttribute {
-                    action: ir::AttributeAction::Load, name, ..
-                } if name == field.attr.as_str()))
-            .then_some(operation)
+            // A rewritten operand can inherit a physical range under a different name.
+            let (token, start, name) = match (node, &*operation) {
+                (ast::Expr::Name(id), Builtin::RegisteredName(name)) => {
+                    (id.id.as_str(), id.start(), name)
+                }
+                (
+                    ast::Expr::Attribute(field),
+                    Builtin::RegisteredAttribute {
+                        action: ir::AttributeAction::Load,
+                        name,
+                        ..
+                    },
+                ) => (field.attr.as_str(), field.attr.start(), name),
+                _ => return None,
+            };
+            (position == start && name == token).then_some(operation)
         });
         let Some(mut value) = operation(
             node,
