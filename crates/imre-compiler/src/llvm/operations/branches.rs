@@ -1,6 +1,6 @@
 //! Branch plans and ownership transfers shared by fixed-layout values and Python frame entries.
 use super::{CheckedBody, CheckedValue, Entry, Value, ValueJoin};
-use crate::ir::control::{Context, Depth, Edges, Input, Target, edges};
+use crate::ir::control::{Context, Depth, Edges, Input, Target, edges, needs_truth_plan};
 use crate::ir::{Builtin, Expr, ExprKind, TruthPredicate, Type};
 
 /// A logical plan owns the short-circuit edges and the selected value join.
@@ -346,6 +346,11 @@ impl CheckedBody<'_, '_, '_, '_> {
         if let Some(value) = self.native_boolean(expr) {
             let bit = self.operand_truth(expr, &value, None);
             self.release_input(value);
+            self.body().branch(&bit, yes, no);
+            return;
+        }
+        if !needs_truth_plan(expr) {
+            let bit = self.test_operand(expr);
             self.body().branch(&bit, yes, no);
             return;
         }
