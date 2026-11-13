@@ -173,27 +173,21 @@ pub(super) fn python_binding<B: unpacking::PatternBinder>(
     })
 }
 
-pub(super) fn python_with(
-    managers: impl IntoIterator<Item = (ir::ContextSite, Expr, Option<ir::ContextBinding>)>,
-    body: Vec<Statement>,
-) -> Vec<Statement> {
-    let Ok((statements, _)) = with_items(
-        &mut (),
-        managers,
-        |(), (site, manager, binding), protected| {
-            Ok(Protected::Continue(open(
-                protected,
-                Statement::With {
-                    manager,
-                    site,
-                    binding,
-                    body: Vec::new(),
-                },
-            )))
+pub(super) fn enter_python(
+    enclosing: &mut Vec<Statement>,
+    site: ir::ContextSite,
+    manager: Expr,
+    binding: Option<ir::ContextBinding>,
+) -> &mut Vec<Statement> {
+    open(
+        enclosing,
+        Statement::With {
+            manager,
+            site,
+            binding,
+            body: Vec::new(),
         },
-        |()| Ok::<_, std::convert::Infallible>((body, true)),
-    );
-    statements
+    )
 }
 
 impl Checker<'_> {
@@ -201,7 +195,8 @@ impl Checker<'_> {
         &mut self,
         stmt: &ast::StmtWith,
     ) -> Result<(Vec<Statement>, bool), String> {
-        let mut managers = Vec::with_capacity(stmt.items.len());
+        let mut statements = Vec::new();
+        let mut protected = &mut statements;
         for item in &stmt.items {
             let manager = self.expr(&item.context_expr)?;
             if manager.ty != Type::PythonObject {
@@ -213,11 +208,11 @@ impl Checker<'_> {
                 .map(|target| python_binding(self, target))
                 .transpose()?;
             let site = registered::context_site(self.source, &item.context_expr, false);
-            managers.push((site, manager, binding));
+            protected = enter_python(protected, site, manager, binding);
         }
-        let (body, _) = self.block(&stmt.body)?;
+        *protected = self.block(&stmt.body)?.0;
         // A manager can suppress an exception from its protected suite.
-        Ok((python_with(managers, body), true))
+        Ok((statements, true))
     }
 
     pub(super) fn enter_generator_context<'s>(
