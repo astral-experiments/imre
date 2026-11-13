@@ -11356,10 +11356,12 @@ impl<'a> Checker<'a> {
         key_view: Option<&mut bool>,
         receiver: Option<Expr>,
     ) -> Result<Expr, String> {
-        if let Some((origin, declaration)) = self.namedtuple_factory(self.resolve(&call.func)) {
+        if let Some((origin, declaration)) = self.namedtuple_factory(binding) {
             return self.namedtuple_call(origin, &declaration, call);
         }
-        if self.collection_binding(&call.func) == Some(Binding::Intrinsic(Intrinsic::NamedTuple)) {
+        if binding == Some(Binding::Intrinsic(Intrinsic::NamedTuple))
+            && !self.local_collection_root(&call.func)
+        {
             return Err(self.scoped_builtin_error("collections.namedtuple", call));
         }
         if let Some((method, name)) = crate::classes::super_method(call)
@@ -12786,7 +12788,7 @@ impl<'a> Checker<'a> {
                 }
                 return self.class_method_call(call, attribute, class, None);
             }
-            if self.resolve(&call.func).is_none()
+            if binding.is_none()
                 && self.resolve(&attribute.value)
                     == Some(Binding::IntrinsicModule(
                         crate::modules::IntrinsicModule::Threading,
