@@ -1394,7 +1394,8 @@ impl Checker<'_> {
         let declarations = &self.classes.declarations.definitions;
         let is_bound_method =
             |callee: &ast::Expr| graph.session.operand_types(owner).is_bound_method(callee);
-        let mut live_method = false;
+        let class = self.class;
+        let mut live_receiver = false;
         let Some(mut value) = operation(
             node,
             source,
@@ -1410,12 +1411,14 @@ impl Checker<'_> {
                 if let Some(callee) = method {
                     let list_parameter =
                         parameter && matches!(operand.ty, Type::ListInt | Type::List(_));
-                    live_method = !list_parameter
+                    live_receiver = !list_parameter
                         && (local.is_some() || operand.ty == Type::Str)
                         && is_bound_method(callee);
-                    list_parameter || live_method
+                    list_parameter || live_receiver
                 } else {
                     node.as_attribute_expr().is_some_and(|attribute| {
+                        // A bound method reads this attribute on its live Python receiver.
+                        live_receiver = parameter && local == Some(0) && class.map(Type::Class) == Some(operand.ty);
                         parameter
                             || matches!((local, operand.ty), (Some(_), Type::Class(class))
                                 if declarations[class].fields.iter().any(|field| field.name == attribute.attr.as_str()))
@@ -1447,7 +1450,7 @@ impl Checker<'_> {
         if let Some(slot) = self.namespace {
             in_namespace(&mut value, self.local(slot));
         }
-        self.live_protocol_parameters |= live_method;
+        self.live_protocol_parameters |= live_receiver;
         // Checked locals and exact literals keep their known types in the registered frame.
         value.ty = match &value.kind {
             ExprKind::Int(_) => Type::Int,
