@@ -1,6 +1,7 @@
 """Read the RFC 822 headers and description of an installed distribution."""
 import re
-from email.message import Message as EmailMessage, _valid_field_name
+from email.message import Message as EmailMessage
+from email.parser import HeaderParser
 from _imre_metadata import dedent
 
 
@@ -13,39 +14,14 @@ class Message(EmailMessage):
 
     def __init__(self, text):
         super().__init__()
-        # Only CR and LF delimit RFC 822 lines. Other Unicode line separators are data.
-        lines = re.findall(r'[^\r\n]*(?:\r\n|\r|\n)|[^\r\n]+$', text)
-        i = 0
-        envelope = ''
-        while i < len(lines):
-            line = lines[i]
-            # The email parser treats a trailing, non-initial Unix envelope as body.
-            if line.startswith('From '):
-                envelope = line if i else ''
-                i += 1
-                continue
-            if line.startswith((' ', '\t')):
-                envelope = ''
-                i += 1
-                continue
-            if line in ('\n', '\r', '\r\n'):
-                i += 1
-                break
-            name, colon, value = line.partition(':')
-            if not colon or (name and not _valid_field_name(name)):
-                break
-            envelope = ''
-            i += 1
-            while i < len(lines) and lines[i].startswith((' ', '\t')):
-                value += lines[i]
-                i += 1
-            if name:
-                value = value.lstrip(' \t\r\n').rstrip('\r\n')
-                if '\n' in value:
-                    value = dedent(' ' * 8 + value)
-                self._headers.append((name, value))
-        if envelope or i < len(lines):
-            self._headers.append(('Description', envelope + ''.join(lines[i:])))
+        parsed = HeaderParser().parsestr(text)
+        for name, value in parsed.raw_items():
+            if '\n' in value:
+                value = dedent(' ' * 8 + value)
+            self._headers.append((name, value))
+        # Preserve the description text before email's payload charset conversion.
+        if parsed._payload:
+            self._headers.append(('Description', parsed._payload))
 
     def __getitem__(self, name):
         value = self.get(name)
