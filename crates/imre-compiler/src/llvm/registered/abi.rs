@@ -1,6 +1,7 @@
 //! Registered call ABI, module constants and emitted definitions.
 use crate::ir::Constant;
 use crate::llvm::{ByteEscapes, write_byte_string};
+use indexmap::IndexSet;
 use std::collections::{BTreeSet, HashMap};
 use std::fmt::Write as _;
 
@@ -86,7 +87,7 @@ pub(crate) struct Output {
     pub(crate) diagnostic: Option<String>,
     pub(crate) keep_docstrings: bool,
     pub(crate) constant_slots: HashMap<(usize, Constant), usize>,
-    pub(crate) strings: HashMap<Vec<u8>, u32>,
+    pub(crate) strings: IndexSet<Vec<u8>>,
     pub(crate) interned_identifiers: BTreeSet<String>,
     pub(crate) positions: HashMap<[usize; 4], usize>,
     pub(crate) constants: String,
@@ -182,9 +183,10 @@ impl Output {
 
     /// Use this output's symbol number and share the written initializer with the whole dump.
     fn place_data(&mut self, bytes: &[u8], initializer: Option<&str>) -> String {
-        let count = self.strings.len() as u32;
-        let index = *self.strings.entry(bytes.to_vec()).or_insert(count);
-        let initializer = if index == count {
+        let (index, initializer) = if let Some(index) = self.strings.get_index_of(bytes) {
+            (index, initializer)
+        } else {
+            let (index, _) = self.strings.insert_full(bytes.to_vec());
             write!(
                 self.constants,
                 "@str{index} = private unnamed_addr constant [{} x i8] ",
@@ -201,9 +203,7 @@ impl Output {
                     ByteEscapes::NonPrintable,
                 );
             }
-            Some(&self.constants[start..])
-        } else {
-            initializer
+            (index, Some(&self.constants[start..]))
         };
         let local = format!("@str{index}");
         match &mut self.whole {

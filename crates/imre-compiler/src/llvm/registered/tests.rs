@@ -657,7 +657,11 @@ fn async_pull_parks_the_iterator_returned_by_the_protocol_once() {
 
     assert_eq!(frame.body.error_target, "outer");
     let body = &frame.body.code;
-    let next = frame.output.strings[b"async_next_iter".as_slice()];
+    let next = frame
+        .output
+        .strings
+        .get_index_of(b"async_next_iter".as_slice())
+        .unwrap();
     assert_eq!(
         body.matches(&format!("ptr @str{next}, i64 %stream"))
             .count(),
@@ -668,7 +672,7 @@ fn async_pull_parks_the_iterator_returned_by_the_protocol_once() {
             .count(),
         1
     );
-    assert!(!frame.output.strings.contains_key(b"await_iter".as_slice()));
+    assert!(!frame.output.strings.contains(b"await_iter".as_slice()));
     assert!(body.contains("label %exhausted,"));
     assert!(body.contains("br label %outer"));
 }
