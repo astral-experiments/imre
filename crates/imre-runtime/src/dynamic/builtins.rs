@@ -1494,7 +1494,6 @@ fn delete_attribute(
 }
 
 impl Context {
-    /// Direct Python calls carry their lexical scope, including inlined comprehensions.
     pub(super) fn call_in_scope(
         &mut self,
         scope: Id,
@@ -1502,17 +1501,30 @@ impl Context {
         args: Vec<Id>,
         kwargs: Vec<(String, Id)>,
     ) -> Result<Id> {
+        let call = self.prepare_call_in_scope(scope, callable, args, kwargs)?;
+        // SAFETY: this synchronous caller owns the context that prepared the call.
+        unsafe { call.run(self) }
+    }
+
+    /// Direct Python calls carry their lexical scope, including inlined comprehensions.
+    pub(super) fn prepare_call_in_scope(
+        &mut self,
+        scope: Id,
+        callable: Id,
+        args: Vec<Id>,
+        kwargs: Vec<(String, Id)>,
+    ) -> Result<super::calls::RegisteredCall> {
         if let Value::Native(name) = self.heap.get(callable) {
-            match name.as_str() {
+            let result = match name.as_str() {
                 "operator.call" => {
                     let (target, args) = self.operator_call_target(args)?;
-                    return self.call_in_scope(scope, target, args, kwargs);
+                    return self.prepare_call_in_scope(scope, target, args, kwargs);
                 }
-                "len" => return call(self, "len", &args, &kwargs),
-                "eval" => return self.call_eval_exec(scope, "eval", &args, &kwargs),
-                "exec" => return self.call_eval_exec(scope, "exec", &args, &kwargs),
+                "len" => call(self, "len", &args, &kwargs),
+                "eval" => self.call_eval_exec(scope, "eval", &args, &kwargs),
+                "exec" => self.call_eval_exec(scope, "exec", &args, &kwargs),
                 "locals" | "vars" if args.is_empty() && kwargs.is_empty() => {
-                    return self.frame_locals(scope);
+                    self.frame_locals(scope)
                 }
                 "dir"
                     if args.is_empty()
@@ -1520,12 +1532,13 @@ impl Context {
                         && self.scope_data(scope).parent.is_none() =>
                 {
                     let namespace = self.module_globals(scope)?;
-                    return collections::sorted(self, &[namespace], &[]);
+                    collections::sorted(self, &[namespace], &[])
                 }
-                _ => {}
-            }
+                _ => return self.prepare_call(callable, args, kwargs),
+            };
+            return result.map(super::calls::RegisteredCall::Returned);
         }
-        self.call(callable, args, kwargs)
+        self.prepare_call(callable, args, kwargs)
     }
 }
 

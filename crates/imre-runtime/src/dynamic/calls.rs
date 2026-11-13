@@ -8168,10 +8168,9 @@ impl Context {
         Ok(())
     }
 
-    /// A generated call can enter a registered function from its owning ABI pointer.
-    pub(super) fn prepare_call_in_scope(
+    /// Return the bound Python frame to the caller that owns execution of this heap.
+    pub(super) fn prepare_call(
         &mut self,
-        scope: Id,
         callable: Id,
         args: Vec<Id>,
         kwargs: Vec<(String, Id)>,
@@ -8187,7 +8186,7 @@ impl Context {
             }
             _ => {
                 return self
-                    .call_in_scope(scope, callable, args, kwargs)
+                    .call_other(callable, args, kwargs)
                     .map(RegisteredCall::Returned);
             }
         };
@@ -8241,6 +8240,17 @@ impl Context {
     }
 
     pub(super) fn call(
+        &mut self,
+        callable: Id,
+        args: Vec<Id>,
+        kwargs: Vec<(String, Id)>,
+    ) -> Result<Id> {
+        let call = self.prepare_call(callable, args, kwargs)?;
+        // SAFETY: the call was prepared in this context for synchronous execution.
+        unsafe { call.run(self) }
+    }
+
+    fn call_other(
         &mut self,
         callable: Id,
         mut args: Vec<Id>,
@@ -8303,11 +8313,6 @@ impl Context {
             ));
         }
         let target = match self.heap.get(callable) {
-            Value::Function { .. } => {
-                let call = self.prepare_function_call(callable, args, kwargs, None)?;
-                // SAFETY: this synchronous caller retains exclusive use of its Context.
-                return unsafe { call.run(self) };
-            }
             Value::Native(name) => Value::Native(copy_label(name)?),
             Value::Class {
                 name,

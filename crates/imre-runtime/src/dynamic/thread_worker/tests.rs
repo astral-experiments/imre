@@ -50,17 +50,33 @@ fn owned_registered_entry_roots_bound_slots_and_restores_its_frame() {
     let target = ctx
         .define_function(code, scope, name, defaults, name, NONE, NONE, false)
         .unwrap();
+    let operator = ctx.builtin("operator.call");
     let worker = std::cell::RefCell::new(ctx);
-    for fails in [false, true] {
+    for (forwarded, fails) in [(false, false), (false, true), (true, false), (true, true)] {
         let (value, frame) = {
             let mut ctx = worker.borrow_mut();
             let mark = ctx.heap.temporary_mark();
             let value = ctx.alloc(Value::List(if fails { vec![NONE] } else { Vec::new() }));
             // Collection in the linked entry must find the value through its bound scope.
             ctx.heap.release_temporaries_since(mark);
-            let frame = ctx
-                .prepare_bound_function(target, vec![value, value])
-                .unwrap();
+            let frame = if forwarded {
+                let method = ctx.bind_python_method(target, value);
+                let call = ctx
+                    .prepare_call_in_scope(
+                        scope,
+                        operator,
+                        vec![method],
+                        vec![("alias".into(), value)],
+                    )
+                    .unwrap();
+                let crate::dynamic::calls::RegisteredCall::Native(frame) = call else {
+                    panic!("operator.call ran the registered method during preparation");
+                };
+                frame
+            } else {
+                ctx.prepare_bound_function(target, vec![value, value])
+                    .unwrap()
+            };
             // A parked native entry leaves the complete binding layout with its code.
             let layout = ctx.code_object(code).parsed_parameters.get().unwrap();
             assert_eq!(std::rc::Rc::strong_count(layout), 1);
