@@ -5895,11 +5895,21 @@ publish(5, callback)
             assert!(body.contains(native) && body.contains("call i64 @imre_dyn_op_at("));
         }
         assert!(!registered_body_at(&ir, "prices.py", 4).contains("@int_add("));
+        let constant = |initializer: &str| {
+            ir.lines()
+                .find_map(|line| {
+                    let (name, data) = line.split_once(" = private unnamed_addr constant ")?;
+                    (data == initializer).then_some(name)
+                })
+                .unwrap()
+        };
+        let modulo = constant(r#"[2 x i8] c"%\00""#);
+        let position = constant("[4 x i32] [i32 10, i32 11, i32 13, i32 16]");
+        let operation = format!("call i64 @imre_dyn_op_at(ptr %ctx, ptr {modulo},");
         assert!(
-            registered_body_at(&ir, "prices.py", 10)
-                .lines()
-                .any(|line| line.contains("call i64 @imre_dyn_op_at(")
-                    && line.ends_with("ptr null)"))
+            registered_body_at(&ir, "prices.py", 10).lines().any(
+                |line| line.contains(&operation) && line.ends_with(&format!("ptr {position})"))
+            )
         );
     }
 
