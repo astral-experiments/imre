@@ -1121,8 +1121,9 @@ impl Checker<'_> {
                     checker.coerce(value, Type::Int, arg)
                 };
             }
-            if params[index].name == "universal_newlines" {
-                return Ok(Expr::boolean(false));
+            if matches!(params[index].name.as_str(), "text" | "universal_newlines" | "capture_output") {
+                // stream_plan encodes the mode. Keep the written bool or None at its source site.
+                return checker.expr(arg);
             }
             match index {
                 0 => checker.command_argument(arg),
@@ -1147,11 +1148,11 @@ impl Checker<'_> {
                             "process redirection requires a file, a literal descriptor, or file.fileno()"))
                     }
                 }
-                4..=8 => Ok(Expr::boolean(false)), // effect-free literals checked by stream_plan
+                4..=6 | 8 => Ok(Expr::boolean(false)), // effect-free stream or encoding
                 11 => checker.condition(arg),
                 14 if matches!(api, LaunchApi::Run { .. }) => checker.expr_expected(arg, Type::Bool),
                 14 => checker.expr(arg), // evaluated before reporting a forbidden check keyword
-                15..=17 => Ok(Expr::boolean(false)), // literals validated by stream_plan
+                17 => Ok(Expr::boolean(false)), // errors is encoded in the launch operation
                 12 => checker.deadline_value(arg),
                 _ => checker.expr_expected(arg, params[index].ty),
             }
@@ -1725,5 +1726,45 @@ impl Checker<'_> {
             ty,
             vec![receiver.clone()],
         )))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn checked_stream_modes_keep_the_written_literals() {
+        let project = tempfile::tempdir().unwrap();
+        let path = project.path().join("app.py");
+        std::fs::write(
+            &path,
+            concat!(
+                "import subprocess\n",
+                "def capture(command: list[str]) -> str:\n",
+                "    result = subprocess.run(command, text=True, capture_output=True, universal_newlines=None)\n",
+                "    return result.stdout\n",
+                "print(capture(['echo']))\n",
+            ),
+        )
+        .unwrap();
+        let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
+        let crate::CheckedProgram::Native(fixed) = crate::checked_lower(&mut graph).unwrap() else {
+            panic!("expected the native subprocess operation")
+        };
+        let mut calls = 0;
+        for function in &fixed.ir.0.functions {
+            ir::walk_expressions(&function.body, &mut |expr| {
+                if let ExprKind::Builtin(Builtin::Process(ProcessOperation::Run { .. }), args) =
+                    &expr.kind
+                {
+                    calls += 1;
+                    assert!(matches!(args[7].kind, ExprKind::Bool(true)));
+                    assert!(matches!(args[15].kind, ExprKind::Bool(true)));
+                    assert!(matches!(args[16].kind, ExprKind::None));
+                }
+            });
+        }
+        assert_eq!(calls, 1);
     }
 }

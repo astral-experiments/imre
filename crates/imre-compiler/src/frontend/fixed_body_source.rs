@@ -101,6 +101,7 @@ impl FixedNode {
             },
             ir::Node::Statement(Statement::Assign(slot, _)) => Self::Store(*slot),
             ir::Node::Expression(expr) => match expr.kind {
+                ExprKind::None if expr.ty == Type::None => Self::Constant(ir::Constant::None),
                 ExprKind::Str(_) | ExprKind::Bool(_) => {
                     Self::Constant(ir::Constant::from_expr(expr)?)
                 }
