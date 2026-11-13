@@ -378,10 +378,8 @@ fn generator_definition<'a>(
 ) -> Option<&'a ast::StmtFunctionDef> {
     let module = &modules[owner.module];
     let definition = module.parsed.syntax().body[owner.statement].as_function_def_stmt()?;
-    (module.is_program_source()
-        && !definition.is_async
-        && session.is_generator_definition(owner.module, definition))
-    .then_some(definition)
+    (module.is_program_source() && session.is_generator_definition(owner.module, definition))
+        .then_some(definition)
 }
 
 pub(super) fn retain_generator(
@@ -456,7 +454,9 @@ fn retain_generator_body(
     let module = &graph.modules[id];
     let Some(body) = RegisteredFunction::from_suite(
         &physical.body,
-        RegisteredScope::Function { is_async: false },
+        RegisteredScope::Function {
+            is_async: physical.is_async,
+        },
         RegisteredSource {
             operand_types: Some(graph.session.operand_types(id)),
             ..module
@@ -2990,10 +2990,6 @@ impl statements::StatementLowering for SourceScope<'_> {
         }))
     }
 
-    fn async_iteration(&self) -> bool {
-        matches!(self.kind, RegisteredScope::Function { is_async: true })
-    }
-
     fn for_loop(&mut self, loop_: &ast::StmtFor) -> StdResult<statements::Block, ()> {
         let mut input = self
             .creating_iterable(|scope| scope.iteration_input(&loop_.iter, for_pull(loop_)))
@@ -3086,7 +3082,7 @@ impl statements::StatementLowering for SourceScope<'_> {
                 let (statement, falls) = registered_try(body, handlers, orelse, finalbody);
                 Ok((vec![statement], falls))
             }
-            ast::Stmt::With(stmt) if !stmt.is_async || self.async_iteration() => Ok((
+            ast::Stmt::With(stmt) if !stmt.is_async || self.is_async_function() => Ok((
                 self.with_items(&stmt.items, stmt.is_async, &stmt.body)?,
                 true,
             )),
@@ -3757,11 +3753,18 @@ impl SourceScope<'_> {
         }
     }
 
+    fn is_async_function(&self) -> bool {
+        matches!(self.kind, RegisteredScope::Function { is_async: true })
+    }
+
     fn iteration_input(
         &mut self,
         iterable: &ast::Expr,
         pull: Option<ir::AsyncPull>,
     ) -> Option<pipelines::Prepared> {
+        if pull.is_some() && !self.is_async_function() {
+            return None;
+        }
         let value = self.ordinary_operand(iterable)?;
         Some(cursor_input(
             value,
@@ -5930,6 +5933,43 @@ publish(5, callback)
             report.contains("types.new_class requires native Python object operations"),
             "{report}"
         );
+    }
+
+    #[test]
+    fn ordinary_async_generator_retains_its_pull_and_yield() {
+        let mut graph = SourceGraph::single(concat!(
+            "async def selected(response):\n",
+            "    async for part in response.aiter_bytes():\n",
+            "        if part:\n",
+            "            yield part\n",
+        ))
+        .unwrap();
+        crate::checked_lower(&mut graph).unwrap();
+        let table = graph.registered_functions();
+        let body = &table[&graph.entry][&TextSize::default()];
+        crate::verify::registered(body.region()).unwrap();
+        let mut pulls = 0;
+        let mut yields = 0;
+        ir::walk_statements(&body.function.body, &mut |stmt| {
+            if matches!(
+                stmt,
+                Statement::IterNext {
+                    kind: ir::IterNextKind::Async(_),
+                    ..
+                }
+            ) {
+                pulls += 1;
+            }
+        });
+        ir::walk_expressions(&body.function.body, &mut |expr| {
+            if matches!(
+                expr.kind,
+                ExprKind::Builtin(Builtin::RegisteredSuspend(ir::SuspendValue::Yield, _), _)
+            ) {
+                yields += 1;
+            }
+        });
+        assert_eq!((pulls, yields), (1, 1));
     }
 
     #[test]

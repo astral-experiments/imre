@@ -5,7 +5,6 @@ use crate::frontend::comprehensions::{
     ClauseLowering, Collector, EagerDisplay, acquire_in_namespace, async_pull, filter_suite,
     scoped_result,
 };
-use crate::frontend::statements::StatementLowering;
 use imre_ast::comprehension::{Output, Plan};
 
 pub(super) struct Namespace {
@@ -80,9 +79,6 @@ impl ClauseLowering for SourceScope<'_> {
     type Body = Vec<Statement>;
 
     fn input(&mut self, clause: &ast::Comprehension) -> StdResult<pipelines::Prepared, ()> {
-        if clause.is_async && !self.async_iteration() {
-            return Err(());
-        }
         self.iteration_input(&clause.iter, async_pull(clause))
             .ok_or(())
     }
