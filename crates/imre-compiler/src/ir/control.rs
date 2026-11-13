@@ -30,6 +30,17 @@ pub(crate) fn boolean_literal(expr: &Expr) -> Option<bool> {
     }
 }
 
+/// A single operand can go straight to its truth test and the caller's two successors.
+pub(crate) fn needs_truth_plan(expr: &Expr) -> bool {
+    matches!(
+        Context::Condition.operand(expr).kind,
+        ExprKind::Conditional(..)
+            | ExprKind::Boolean(..)
+            | ExprKind::BooleanValue(..)
+            | ExprKind::Unary(UnaryOp::Not, _)
+    )
+}
+
 #[derive(Clone, Copy)]
 pub(crate) enum Target {
     Step(usize),

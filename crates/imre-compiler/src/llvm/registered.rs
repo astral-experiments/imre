@@ -526,15 +526,7 @@ impl<'f> Frame<'f, '_, '_> {
     }
 
     fn evaluate_test(&mut self, expr: &Expr, already_rooted: bool) -> String {
-        let inner = expr.without_location();
-        if matches!(
-            inner.kind,
-            ExprKind::Conditional(..)
-                | ExprKind::Boolean(..)
-                | ExprKind::BooleanValue(..)
-                | ExprKind::Unary(UnaryOp::Not, _)
-                | ExprKind::Builtin(Builtin::Bool, _)
-        ) {
+        if ir::control::needs_truth_plan(expr) {
             return crate::llvm::operations::ValueJoin::select(
                 self,
                 Self::body,
