@@ -956,7 +956,6 @@ pub(super) fn operation<E>(
     source: RegisteredSource<'_>,
     attribute: Option<Box<Builtin>>,
     allow_typed_receiver: impl FnOnce(Option<&ast::Expr>, &ast::Expr, &Expr) -> bool,
-    literal: impl Fn(&Expr) -> Option<bool>,
     dynamic_receiver: impl FnOnce(&ast::Expr) -> bool,
     mut child: impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
 ) -> StdResult<Option<Expr>, E> {
@@ -1062,7 +1061,7 @@ pub(super) fn operation<E>(
             let mut values = Vec::with_capacity(op.values.len());
             for operand in &op.values {
                 let value = child(operand)?;
-                let stops = literal(&value) == Some(!and);
+                let stops = ir::control::boolean_literal(&value) == Some(!and);
                 values.push(value);
                 if stops {
                     break;
@@ -1234,7 +1233,6 @@ impl Region {
                 source,
                 None,
                 |_, _, _| false,
-                ir::control::boolean_literal,
                 |_| true,
                 |child| self.operand(child, source).ok_or(()),
             )
@@ -1501,7 +1499,6 @@ impl Checker<'_> {
                 }
             },
             // Even a skipped operand participates in static argument and result checking.
-            |_| None,
             |receiver| {
                 first_local.is_some()
                     || graph.session.is_dynamic_receiver(owner, receiver)
