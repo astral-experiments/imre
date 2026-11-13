@@ -3192,14 +3192,9 @@ impl Context {
         } else {
             scope
         };
-        let closure = match cells.as_slice() {
-            [] => NONE,
-            [only] => *only,
-            _ => self.alloc(Value::Tuple(cells)),
-        };
         Ok(self.alloc(Value::Function {
             fields,
-            closure,
+            closure: NONE,
             code,
             scope,
             class_cell,
@@ -4189,14 +4184,15 @@ mod tests {
         frame
             .closure
             .declared
-            .extend(["kept".into(), "unused".into()]);
+            .extend(["kept".into(), "other".into(), "unused".into()]);
         frame.closure.declared_complete = true;
         let (kept, kept_probe) = payload(&mut ctx);
         let (unused, unused_probe) = payload(&mut ctx);
         ctx.bind(outer, "kept", kept);
+        ctx.bind(outer, "other", NONE);
         ctx.bind(outer, "unused", unused);
         let name = ctx.text("read");
-        let signature = ctx.text(r#"{"scope_complete":true,"scope_reads":["kept"]}"#);
+        let signature = ctx.text(r#"{"scope_complete":true,"scope_reads":["kept","other"]}"#);
         let location = value::Location {
             file: "cells.py".into(),
             line: 1,
@@ -4215,11 +4211,12 @@ mod tests {
         let function = ctx
             .define_function(code, outer, name, defaults, name, NONE, NONE, false)
             .unwrap();
-        let closure = ctx.lookup_attr(function, "__closure__").unwrap();
-        let Value::Tuple(cells) = ctx.heap.get(closure) else {
+        let Value::Function { scope, closure, .. } = *ctx.heap.get(function) else {
             unreachable!()
         };
-        let cell = cells[0];
+        assert_eq!(closure, NONE);
+        let cell = ctx.scope_data(scope).closure.cells["kept"];
+        let other = ctx.scope_data(scope).closure.cells["other"];
         for (roots, keeps_value) in [
             (&[function][..], true),
             (&[cell][..], true),
@@ -4232,6 +4229,11 @@ mod tests {
             ctx.checkpoint(roots, location.clone(), NONE);
             assert!(unused_probe.upgrade().is_none());
             assert_eq!(kept_probe.upgrade().is_some(), keeps_value);
+            if roots == [function] {
+                let closure = ctx.lookup_attr(function, "__closure__").unwrap();
+                assert_eq!(ctx.tuple_elements(closure), Some(&[cell, other][..]));
+                assert_eq!(ctx.lookup_attr(function, "__closure__").unwrap(), closure);
+            }
         }
     }
 }
