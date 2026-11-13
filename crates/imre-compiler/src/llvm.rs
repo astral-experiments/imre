@@ -2390,11 +2390,26 @@ impl Emitter<'_, '_> {
         self.append_windows.clear();
         let cursors = ir::private_string_cursors(function);
         let invariant = ir::invariant_string_cursors(function, &cursors);
-        let mut estimated = std::collections::BTreeSet::new();
-        ir::walk_expressions(&function.body, &mut |value| {
-            if let ExprKind::Builtin(Builtin::CursorScanBudget(slot), _) = value.kind {
-                estimated.insert(slot);
-            }
+        let mut estimated = BTreeSet::new();
+        let mut pair_views = BTreeSet::new();
+        let mut field_masks = vec![0_u8; self.locals.len()];
+        let mut text_fields = vec![0_u8; self.locals.len()];
+        ir::walk_nodes(&function.body, &mut |node, _| match node {
+            ir::Node::Expression(expr) => match expr.kind {
+                ExprKind::Builtin(Builtin::CursorScanBudget(slot), _) => {
+                    estimated.insert(slot);
+                }
+                ExprKind::Builtin(Builtin::PairTable(ir::PairTableOp::Snapshot(slot)), _) => {
+                    pair_views.insert(slot);
+                }
+                _ => {}
+            },
+            ir::Node::Statement(Statement::Assign(slot, value)) => match value.kind {
+                ExprKind::Builtin(Builtin::SplitIntSource(mask), _) => field_masks[*slot] |= mask,
+                ExprKind::Builtin(Builtin::SplitTextSource(count), _) => text_fields[*slot] = count,
+                _ => {}
+            },
+            ir::Node::Statement(_) => {}
         });
         for slot in cursors {
             // Private cursors keep their UTF-8 position in the two native pointers.
@@ -2430,41 +2445,9 @@ impl Emitter<'_, '_> {
             }
         }
         let allocas_at = self.body.code.len();
-        let mut pair_views = BTreeSet::new();
-        ir::walk_expressions(&function.body, &mut |expr| {
-            if let ExprKind::Builtin(Builtin::PairTable(ir::PairTableOp::Snapshot(slot)), _) =
-                expr.kind
-            {
-                pair_views.insert(slot);
-            }
-        });
         for slot in pair_views {
             self.line(format!("%pair_view{slot} = alloca {{ ptr, i64 }}"));
         }
-        let mut field_masks = vec![0_u8; self.locals.len()];
-        let mut text_fields = vec![0_u8; self.locals.len()];
-        ir::walk_statements(&function.body, &mut |stmt| {
-            if let Statement::Assign(
-                slot,
-                Expr {
-                    kind: ExprKind::Builtin(Builtin::SplitTextSource(count), _),
-                    ..
-                },
-            ) = stmt
-            {
-                text_fields[*slot] = *count;
-            }
-            if let Statement::Assign(
-                slot,
-                Expr {
-                    kind: ExprKind::Builtin(Builtin::SplitIntSource(mask), _),
-                    ..
-                },
-            ) = stmt
-            {
-                field_masks[*slot] |= mask;
-            }
-        });
         for (slot, mask) in field_masks.into_iter().enumerate() {
             if mask != 0 {
                 self.line(format!(
