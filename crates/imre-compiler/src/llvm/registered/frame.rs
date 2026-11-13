@@ -1774,6 +1774,24 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
         })
     }
 
+    /// Keep each supplied value alive and release its intermediate owners before
+    /// evaluating the next argument. A permanent literal needs no temporary root.
+    pub(in crate::llvm) fn kept_call_values(
+        &mut self,
+        args: &[Expr],
+        mut next: String,
+    ) -> Vec<String> {
+        args.iter()
+            .map(|expr| {
+                let value = self.evaluate_handle(expr);
+                if permanent_handle(expr).is_none() {
+                    next = self.keep_operands(&next, &value, "0");
+                }
+                value
+            })
+            .collect()
+    }
+
     /// Evaluate the callable before its arguments. A lone *iterable is converted
     /// at invocation, after the keywords; a mixed positional list expands each * in place.
     pub(super) fn call_value(
@@ -1802,6 +1820,11 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
         } else {
             (None, target)
         };
+        let keyword_call = matches!(call.arguments, RegisteredArguments::Keywords { .. });
+        let scope_root = scope
+            .as_deref()
+            .filter(|_| keyword_call)
+            .map(|scope| self.keep_operands(&mark, scope, "0"));
         let (callable, receiver, callee_end) = match &call.target {
             RegisteredCallTarget::Callable { end, .. } => {
                 (self.evaluate_handle(target), None, *end)
@@ -1820,7 +1843,9 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
                 } else {
                     self.method_target(&receiver, name, *attribute, direct)
                 };
-                self.keep_operands(&mark, &callee, bound.as_deref().unwrap_or("0"));
+                if !keyword_call {
+                    self.keep_operands(&mark, &callee, bound.as_deref().unwrap_or("0"));
+                }
                 (callee, bound, attribute.end())
             }
         };
@@ -1851,14 +1876,26 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
                 }
             }
             RegisteredArguments::Keywords { positional, names } => {
-                let values: Vec<_> = args.map(|a| self.evaluate_handle(a)).collect();
+                let next =
+                    self.keep_operands(scope_root.as_deref().unwrap_or(&mark), &callable, "0");
+                let values = self.kept_call_values(args.as_slice(), next);
                 let (array, _) = self.fixed_call_arguments(&callable, values, exec);
-                CallArguments::FixedKeywords {
+                let operands = CallArguments::FixedKeywords {
                     array,
                     positional: *positional,
                     keywords: names.len(),
                     names: self.output.data(names.join("\0").as_bytes()),
-                }
+                };
+                let value = self.positioned_call(
+                    &callable,
+                    operands,
+                    &mark,
+                    call.range,
+                    callee_end,
+                    scope.as_deref(),
+                );
+                self.finish_unwind(edge, |frame| frame.release_owned_operands(&mark));
+                return value;
             }
             RegisteredArguments::Packed(pack) => {
                 let (args, kwargs) = self.pack_arguments(pack, args.as_slice(), Some(&callable));

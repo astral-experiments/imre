@@ -285,7 +285,7 @@ fn fixed_argument_layout(args: &ast::Arguments) -> ir::RegisteredArguments {
             names: args
                 .keywords
                 .iter()
-                .map(|key| key.arg.as_ref().unwrap().to_string())
+                .map(|key| key.arg.as_ref().unwrap().id.clone())
                 .collect(),
         }
     }
