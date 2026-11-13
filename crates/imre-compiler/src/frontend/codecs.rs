@@ -3,6 +3,22 @@ use super::calls::parameter;
 use super::*;
 use crate::ir::WriterOperation as Writer;
 
+/// Select the strict decoder for a checked literal encoding.
+pub(super) fn bytes_decoder(encoding: &str) -> Option<Builtin> {
+    if encoding.eq_ignore_ascii_case("ascii") {
+        Some(Builtin::DecodeAscii)
+    } else if matches!(encoding, "utf-8" | "utf8" | "UTF-8" | "UTF8") {
+        Some(Builtin::Decode)
+    } else if ["latin-1", "latin1", "iso-8859-1", "iso8859-1"]
+        .iter()
+        .any(|alias| encoding.eq_ignore_ascii_case(alias))
+    {
+        Some(Builtin::DecodeLatin1)
+    } else {
+        None
+    }
+}
+
 pub(super) fn writer(op: Writer, ty: Type, args: Vec<Expr>) -> Expr {
     Expr {
         ty,
