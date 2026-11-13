@@ -398,6 +398,40 @@ mod tests {
     }
 
     #[test]
+    fn list_method_keeps_its_receiver_and_declines_a_rewritten_operation() {
+        let text = concat!(
+            "class Receiver:\n    def read(self, value: int) -> int: return value\n",
+            "events = [37]\ndef reset(): return events.clear()\nreset()\n",
+        );
+        let mut graph = SourceGraph::single(text).unwrap();
+        let crate::CheckedProgram::Native(fixed) = crate::checked_lower(&mut graph).unwrap() else {
+            panic!("expected a fixed list operation");
+        };
+        let (id, _, source) = fixed
+            .frame_sources
+            .into_iter()
+            .find(|(_, range, _)| text[*range].starts_with("def reset"))
+            .unwrap();
+        let function = fixed.ir.0.functions.into_iter().nth(id).unwrap();
+        let body = function.body.as_ptr();
+        let mut placed = source.clone().place(function).ok().unwrap();
+        assert_eq!(placed.function.body.as_ptr(), body);
+        assert_eq!(&text[*placed.fixed_sites.last().unwrap()], "events");
+        let [
+            Statement::Return(Expr {
+                kind: ExprKind::Builtin(operation, _),
+                ..
+            }),
+        ] = placed.function.body.as_mut_slice()
+        else {
+            panic!("expected a list method return");
+        };
+        assert!(matches!(operation, Builtin::ListClear));
+        *operation = Builtin::DictClear;
+        assert!(source.place(placed.function).is_err());
+    }
+
+    #[test]
     fn a_text_site_keeps_its_selected_operation() {
         use ir::{TextOperation, TextPredicate};
         for (original, changed, ty) in [
