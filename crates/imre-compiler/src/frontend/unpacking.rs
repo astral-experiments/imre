@@ -82,7 +82,6 @@ pub(super) trait PatternBinder {
 }
 
 pub(super) struct PatternSnapshot {
-    root: usize,
     body: Vec<Statement>,
     // Captured target slots follow the temporaries used to evaluate and check the input.
     clear: Vec<usize>,
@@ -116,7 +115,6 @@ fn protocol_snapshot(
     );
     let root = binder.pattern_hidden(sequence.ty);
     let mut snapshot = PatternSnapshot {
-        root,
         body: vec![Statement::Assign(root, consume_row(sequence, row))],
         clear: vec![root],
     };
@@ -220,13 +218,12 @@ pub(super) fn bind_input<B: PatternBinder>(
         Some(Row::Pulled { pair, .. }) => *pair,
         _ => None,
     };
-    let PatternSnapshot {
-        root,
-        mut body,
-        clear,
-    } = binder.pattern_snapshot(target, targets, star, value, row)?;
-    let items = &clear[clear.len() - targets.len()..];
-    body.push(Statement::Clear(root));
+    let PatternSnapshot { mut body, clear } =
+        binder.pattern_snapshot(target, targets, star, value, row)?;
+    let (temporaries, items) = clear.split_at(clear.len() - targets.len());
+    if let Some(&root) = temporaries.first() {
+        body.push(Statement::Clear(root));
+    }
     let pair = if let Some((iterator, ready)) = pair_pull
         && star.is_none()
         && let &[first, second] = items
@@ -278,9 +275,7 @@ impl Checker<'_> {
         site: TextRange,
     ) -> Statement {
         let sequence = self.types.list(Type::PythonObject);
-        let PatternSnapshot {
-            mut body, clear, ..
-        } = protocol_snapshot(
+        let PatternSnapshot { mut body, clear } = protocol_snapshot(
             self,
             site,
             [Type::PythonObject; 2].into_iter(),
@@ -341,11 +336,6 @@ impl Checker<'_> {
                 declaration,
             )
         }
-    }
-
-    /// Yields the captured value and clears its slot before evaluating the next target.
-    fn take_temporary(&self, slot: usize) -> Expr {
-        take_pattern_temporary(self.local(slot), slot)
     }
 
     /// Keep a terminating RHS and any fresh name declarations, without evaluating its targets.
@@ -437,36 +427,6 @@ impl Checker<'_> {
                 output.push(self.formatter_set(receiver, attribute, Expr::boolean(utc))?);
                 return Ok(true);
             }
-        }
-        // A literal tuple assigned to plain locals can stage its elements in native
-        // slots. This also permits unpacking a typed callable without storing it
-        // in a heap object. All RHS expressions still precede all target writes.
-        if let [ast::Expr::Tuple(targets)] = assignment.targets.as_slice()
-            && let ast::Expr::Tuple(values) = &*assignment.value
-            && targets.elts.len() == values.elts.len()
-            && targets
-                .elts
-                .iter()
-                .all(|target| matches!(target, ast::Expr::Name(_)))
-            && !values
-                .elts
-                .iter()
-                .any(|value| matches!(value, ast::Expr::Starred(_)))
-        {
-            let mut body = Vec::new();
-            let mut slots = Vec::new();
-            for (target, source) in targets.elts.iter().zip(&values.elts) {
-                let value = self.unpacking_value(target, source)?;
-                let slot = self.hidden(value.ty);
-                body.push(Statement::Assign(slot, value));
-                slots.push(slot);
-            }
-            for (target, &slot) in targets.elts.iter().zip(&slots) {
-                let value = self.take_temporary(slot);
-                self.store_value(target, value, None, Some(&mut body))?;
-            }
-            output.push(Statement::Scope { body, clear: slots });
-            return Ok(true);
         }
         if let [target] = assignment.targets.as_slice() {
             if pattern_elements(target).is_some() {
@@ -1277,6 +1237,21 @@ impl PatternBinder for Checker<'_> {
                 None,
             ));
         }
+        // A tuple display already evaluates these operands in snapshot order.
+        if star.is_none()
+            && row.is_none()
+            && matches!(value.ty, Type::Tuple(_))
+            && let ExprKind::Tuple(items) = value.kind
+        {
+            let mut snapshot = PatternSnapshot {
+                body: Vec::with_capacity(items.len()),
+                clear: Vec::with_capacity(items.len()),
+            };
+            for item in items {
+                snapshot.capture(self, item);
+            }
+            return Ok(snapshot);
+        }
         let (captured, mut body) = if let Some(Row::Projected(captured)) = row {
             (captured, Vec::new())
         } else {
@@ -1325,11 +1300,7 @@ impl PatternBinder for Checker<'_> {
                 ));
             }
         }
-        let mut snapshot = PatternSnapshot {
-            root: captured,
-            body,
-            clear,
-        };
+        let mut snapshot = PatternSnapshot { body, clear };
         for (index, target) in targets.iter().enumerate() {
             let item = if let ast::Expr::Starred(starred) = target {
                 let suffix = targets.len() - index - 1;
