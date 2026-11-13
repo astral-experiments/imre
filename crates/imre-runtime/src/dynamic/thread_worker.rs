@@ -7,7 +7,7 @@ use std::io::Write;
 use std::ops::ControlFlow;
 use std::sync::{
     Arc, Condvar, Mutex, MutexGuard, Weak,
-    atomic::{AtomicUsize, Ordering},
+    atomic::{AtomicBool, AtomicUsize, Ordering},
     mpsc,
 };
 use std::thread::{self, JoinHandle};
@@ -651,14 +651,40 @@ impl Ready {
     }
 }
 
-/// Both public launch paths use the same bootstrap, count guard and native startup handshake.
-fn launch(
-    ctx: &mut Context,
+/// Everything needed to spawn the worker after releasing the selection borrow.
+struct Launch {
     operation: Operation,
     registration: Registration,
     operands: Vec<Id>,
-) -> Result<Ready> {
-    let (handle, thread, detached_label) = match registration {
+    count: Arc<AtomicUsize>,
+    fault_workers: Option<(Arc<()>, Arc<AtomicBool>)>,
+}
+
+impl Launch {
+    fn new(
+        ctx: &Context,
+        operation: Operation,
+        registration: Registration,
+        operands: Vec<Id>,
+    ) -> Self {
+        let fault_workers = matches!(operation, Operation::Python(_)).then(|| {
+            (
+                ctx.heap.begin_fault_worker(),
+                Arc::clone(&ctx.interpreter.finalizing),
+            )
+        });
+        Self {
+            operation,
+            registration,
+            operands,
+            count: Arc::clone(&ctx.interpreter.worker_count),
+            fault_workers,
+        }
+    }
+}
+
+fn launch(request: Launch) -> Result<(Ready, Entry)> {
+    let (handle, thread, detached_label) = match request.registration {
         Registration::Thread(handle, thread) => (handle, Some(thread), None),
         Registration::Detached(label) => (Arc::default(), None, Some(label)),
     };
@@ -666,7 +692,7 @@ fn launch(
     // the queued publication cancels the worker through the same gate.
     let (ready, started) = mpsc::sync_channel(1);
     let (release_status, released) = if matches!(
-        operation,
+        request.operation,
         Operation::Acquire {
             release: Some(_),
             ..
@@ -677,19 +703,14 @@ fn launch(
     } else {
         (None, None)
     };
-    let count = Arc::clone(&ctx.interpreter.worker_count);
     let starting = Arc::clone(&handle);
-    let fault_workers =
-        matches!(operation, Operation::Python(_)).then(|| ctx.heap.begin_fault_worker());
-    let interpreter = fault_workers
-        .as_ref()
-        .map(|_| ctx.interpreter.finalizing.clone());
     handle.spawn(move |exit| {
+        let (fault_workers, interpreter) = request.fault_workers.unzip();
         let _publication = interpreter.map(crate::fault_handler::FramePublication::enter);
         // A failed bootstrap publishes no identity and contributes nothing to the live count.
         let mut prefix = None;
         let mut update = None;
-        let (python, acquire) = match operation {
+        let (python, acquire) = match request.operation {
             Operation::Python(callback) => match callback.load() {
                 Ok((worker, function, slots)) => {
                     worker
@@ -712,7 +733,7 @@ fn launch(
                 (None, Some(wait))
             }
         };
-        exit.enter(count);
+        exit.enter(request.count);
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         let native_id = Some(crate::objects::locks::native_thread_id());
         #[cfg(not(any(target_os = "linux", target_os = "macos")))]
@@ -769,12 +790,12 @@ fn launch(
         }
         Ok(())
     })?;
-    ctx.workers.entries.push(Entry {
+    let entry = Entry {
         handle: Arc::clone(&handle),
-        operands,
+        operands: request.operands,
         thread,
-    });
-    Ok(Ready { handle, started })
+    };
+    Ok((Ready { handle, started }, entry))
 }
 
 /// A low-level caller owns only the bootstrap roots after the native worker is detached.
@@ -788,7 +809,10 @@ pub(super) fn start_detached(
         .reap_where(&mut ctx.heap, |entry| entry.thread.is_none());
     ctx.workers.reserve_entry()?;
     let label = ctx.repr(function);
-    let started = launch(ctx, callback, Registration::Detached(label), operands)?.wait()?;
+    let request = Launch::new(ctx, callback, Registration::Detached(label), operands);
+    let (ready, entry) = launch(request)?;
+    ctx.workers.entries.push(entry);
+    let started = ready.wait()?;
     let ident = started.ident;
     // No Python handle can join this worker. Release its native JoinHandle immediately.
     started.handle.set_done()?;
@@ -867,18 +891,36 @@ fn worker_target(ctx: &Context, target: Id, args: Id, kwargs: Id) -> Result<(Ope
     Err(super::thread_callback::unsupported_target())
 }
 
-/// The worker registration roots the receiver, which owns its Python thread handle.
+/// The caller retains the receiver and its selected operands until launch registers them.
 pub(super) struct Start {
-    ready: Ready,
     owner: Id,
     handle: Id,
+    request: Launch,
 }
 
 impl Start {
     /// # Safety
-    /// The caller resumes the same registered frame on its owning thread.
+    /// Run immediately after preparation, before reentering Python on the owning frame.
     pub(super) unsafe fn run(self, context: *mut Context) -> Result<Id> {
-        let ready = self.ready.wait();
+        let ready = match launch(self.request) {
+            Ok((ready, entry)) => {
+                // SAFETY: spawn runs no Python on the creator. Register the selected roots in
+                // the reserved slot before a callback, wait or collection can run here.
+                unsafe { &mut *context }.workers.entries.push(entry);
+                ready
+            }
+            Err(error) => {
+                // SAFETY: the failed native spawn returned to the registered caller.
+                let ctx = unsafe { &mut *context };
+                // CPython consumes the handle even if the OS refuses to create a worker.
+                let error = ctx
+                    .set_attr(self.owner, "_handle", self.handle)
+                    .err()
+                    .unwrap_or(error);
+                return Err(super::stdlib::io::qualify_error(ctx, error, None));
+            }
+        };
+        let ready = ready.wait();
         let (started, ident, tid) = {
             // SAFETY: the native wait has returned to the registered caller.
             let ctx = unsafe { &mut *context };
@@ -955,19 +997,11 @@ pub(super) fn prepare_start(
     }
     ctx.workers.reserve_entry()?;
     let thread = RegisteredThread { daemon, owner };
-    let ready = launch(ctx, operation, Registration::Thread(handle, thread), roots);
-    match ready {
-        Ok(ready) => Ok(Start {
-            ready,
-            owner,
-            handle: handle_id,
-        }),
-        Err(error) => {
-            // CPython consumes the handle even if the OS refuses to create a worker.
-            ctx.set_attr(owner, "_handle", handle_id)?;
-            Err(error)
-        }
-    }
+    Ok(Start {
+        owner,
+        handle: handle_id,
+        request: Launch::new(ctx, operation, Registration::Thread(handle, thread), roots),
+    })
 }
 
 pub(super) fn call(
