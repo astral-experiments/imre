@@ -23,6 +23,17 @@ pub(super) fn raised<E>(
     }
 }
 
+pub(super) fn if_clauses(
+    branch: &ast::StmtIf,
+) -> impl Iterator<Item = (Option<&ast::Expr>, &[ast::Stmt])> {
+    std::iter::once((Some(branch.test.as_ref()), branch.body.as_slice())).chain(
+        branch
+            .elif_else_clauses
+            .iter()
+            .map(|clause| (clause.test.as_ref(), clause.body.as_slice())),
+    )
+}
+
 pub(super) fn if_arms(
     arms: Vec<(Expr, Vec<Statement>)>,
     mut otherwise: Vec<Statement>,
