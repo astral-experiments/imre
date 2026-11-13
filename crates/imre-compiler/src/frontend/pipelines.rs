@@ -2493,6 +2493,7 @@ impl Checker<'_> {
             Statement::Assign(resume_pc, Expr::integer(0)),
             Statement::Assign(done, Expr::boolean(false)),
         ]);
+        let retry = pulls.len() > 1 || !pulls[0].filters.is_empty();
         let mut cases = Vec::new();
         let mut accepted = vec![
             Statement::Assign(value, yielded),
@@ -2533,14 +2534,21 @@ impl Checker<'_> {
             )];
         }
         // The leftmost iterator is already acquired. Restore the caller on yield or unwind.
-        let resume = self.generator_frame(Statement::While(
-            Expr {
-                ty: Type::Bool,
-                kind: ExprKind::Boolean(true, vec![not(self.local(ready)), not(self.local(done))]),
-            },
-            cases,
-            Vec::new(),
-        ));
+        // A single unfiltered pull either yields, exhausts, or raises.
+        if retry {
+            cases = vec![Statement::While(
+                Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Boolean(
+                        true,
+                        vec![not(self.local(ready)), not(self.local(done))],
+                    ),
+                },
+                cases,
+                Vec::new(),
+            )];
+        }
+        let resume = self.generator_frame(cases);
         let next = vec![
             Statement::Clear(value),
             Statement::Assign(ready, Expr::boolean(false)),
@@ -2560,7 +2568,7 @@ impl Checker<'_> {
     }
 
     /// Run one prepared generator step or an equivalent callback-free bulk operation.
-    pub(super) fn generator_frame(&self, step: Statement) -> Statement {
+    pub(super) fn generator_frame(&self, mut body: Vec<Statement>) -> Statement {
         let module = if self.module == self.graph.entry {
             "__main__"
         } else {
@@ -2572,11 +2580,9 @@ impl Checker<'_> {
                 kind: ExprKind::Builtin(builtin, Vec::new()),
             })
         };
+        body.insert(0, marker(Builtin::GeneratorFrameEnter(module.to_owned())));
         Statement::Try {
-            body: vec![
-                marker(Builtin::GeneratorFrameEnter(module.to_owned())),
-                step,
-            ],
+            body,
             handlers: Vec::new(),
             orelse: Vec::new(),
             finalbody: vec![marker(Builtin::GeneratorFrameLeave)],
