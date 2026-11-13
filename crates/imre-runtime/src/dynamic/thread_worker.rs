@@ -283,7 +283,7 @@ impl Handle {
 
 struct RegisteredThread {
     daemon: bool,
-    owner: Option<Id>,
+    owner: Id,
 }
 
 struct Entry {
@@ -418,18 +418,11 @@ impl Context {
 
 impl RegisteredThread {
     /// Complete default Thread.run cleanup on the creator heap before releasing its bound operands.
-    fn release_owner(&mut self, heap: &mut Heap, published: bool) -> bool {
-        let Some(owner) = self.owner else { return true };
-        // Only a published worker entered Thread.run and owes its target cleanup.
-        if !published {
-            self.owner = None;
-            heap.weak_edge_removed(owner);
-            return true;
-        }
+    fn clear_target(&self, heap: &mut Heap) -> bool {
         for name in ["_target", "_args", "_kwargs"] {
             let Value::Instance {
                 fields, namespace, ..
-            } = heap.get_mut(owner)
+            } = heap.get_mut(self.owner)
             else {
                 unreachable!("a registered Thread owns its original instance")
             };
@@ -458,9 +451,16 @@ impl RegisteredThread {
                 heap.weak_edge_removed(value);
             }
         }
-        self.owner = None;
-        heap.weak_edge_removed(owner);
         true
+    }
+}
+
+impl Entry {
+    fn roots(&self) -> impl Iterator<Item = &Id> {
+        self.thread
+            .iter()
+            .map(|thread| &thread.owner)
+            .chain(&self.operands)
     }
 }
 
@@ -472,17 +472,19 @@ impl Registry {
     }
 
     fn reap_where(&mut self, heap: &mut Heap, include: impl Fn(&Entry) -> bool) {
-        self.entries.retain_mut(|entry| {
+        self.entries.retain(|entry| {
             if !include(entry) || entry.handle.awaiting_exit() {
                 return true;
             }
-            if let Some(thread) = &mut entry.thread
-                && !thread.release_owner(heap, entry.handle.ident() != 0)
+            // Cancellation skips Thread.run cleanup and releases the same registered roots.
+            if let Some(thread) = &entry.thread
+                && entry.handle.ident() != 0
+                && !thread.clear_target(heap)
             {
                 return true;
             }
-            for operand in entry.operands.drain(..) {
-                heap.weak_edge_removed(operand);
+            for &root in entry.roots() {
+                heap.weak_edge_removed(root);
             }
             false
         });
@@ -506,7 +508,7 @@ impl Registry {
     fn live_threads(&self) -> impl Iterator<Item = (usize, Id)> + '_ {
         self.entries
             .iter()
-            .filter_map(|entry| Some((&entry.handle, entry.thread.as_ref()?.owner?)))
+            .filter_map(|entry| Some((&entry.handle, entry.thread.as_ref()?.owner)))
             .filter(|(handle, _)| handle.awaiting_exit())
             .map(|(handle, owner)| (handle.ident(), owner))
     }
@@ -515,14 +517,7 @@ impl Registry {
         // Completion can race tracing. Keep the entire record rooted until the creator reaps it.
         self.entries
             .iter()
-            .flat_map(|entry| {
-                entry
-                    .thread
-                    .as_ref()
-                    .and_then(|thread| thread.owner.as_ref())
-                    .into_iter()
-                    .chain(&entry.operands)
-            })
+            .flat_map(Entry::roots)
             .chain(self.default_run.iter().flatten())
             .chain(self.main.iter().map(|(_, main)| main))
             .chain(
@@ -971,10 +966,7 @@ pub(super) fn prepare_start(
         ));
     }
     ctx.workers.reserve_entry()?;
-    let thread = RegisteredThread {
-        daemon,
-        owner: Some(owner),
-    };
+    let thread = RegisteredThread { daemon, owner };
     let ready = launch(ctx, operation, Registration::Thread(handle, thread), roots);
     match ready {
         Ok(ready) => Ok(Start {
