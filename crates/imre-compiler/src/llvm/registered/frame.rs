@@ -644,20 +644,6 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         ))
     }
 
-    pub(crate) fn enter_test(
-        &mut self,
-        range: TextRange,
-        anchor: TextSize,
-    ) -> (TextRange, SourcePosition) {
-        let previous = std::mem::replace(&mut self.current_range, range);
-        (previous, self.enter_expression(range, anchor))
-    }
-
-    pub(crate) fn leave_test(&mut self, (range, position): (TextRange, SourcePosition)) {
-        self.leave_expression(position);
-        self.current_range = range;
-    }
-
     pub(crate) fn boolean_result(&mut self, bit: &str, negate: bool) -> super::CheckedValue {
         let (yes, no) = if negate {
             (permanent::FALSE, permanent::TRUE)
