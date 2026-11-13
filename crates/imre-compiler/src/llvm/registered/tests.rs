@@ -460,7 +460,6 @@ fn placed_arithmetic_keeps_the_python_operator_and_integer_guards() {
             .into_iter()
             .find(|(id, ..)| *id == 0)
             .unwrap();
-        assert!(frame.matches(&fixed.ir.0.functions[0]));
         let function = fixed.ir.0.functions.remove(0);
         let [Statement::Return(value)] = function.body.as_slice() else {
             panic!()
@@ -469,7 +468,7 @@ fn placed_arithmetic_keeps_the_python_operator_and_integer_guards() {
             &value.kind,
             ExprKind::Binary(actual, ..) if *actual == op
         ));
-        let placed = crate::frontend::place_fixed_function(function, frame);
+        let placed = frame.place(function).ok().unwrap();
         let mut output = Output::default();
         let file = output.data(b"combine.py");
         let positions = SourcePositions::new(Path::new("combine.py"), &source, &file);

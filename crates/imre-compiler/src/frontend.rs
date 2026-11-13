@@ -147,7 +147,7 @@ pub(crate) use registered::{
 };
 pub(crate) use registered::{LocalBinding, RegisteredClass, RegisteredOperand, RegisteredRegion};
 #[cfg(test)]
-pub(crate) use registered::{StatementSites, booleans::OwnedExpression, place_fixed_function};
+pub(crate) use registered::{StatementSites, booleans::OwnedExpression};
 pub(crate) use required_sites::RequiredSite;
 mod sequences;
 mod shutil;
@@ -8515,9 +8515,8 @@ impl<'a> Checker<'a> {
                     && let ast::Expr::Name(name) = expression
                     && (self.class.is_none()
                         || !ruff_python_stdlib::identifiers::is_mangled_private(&name.id))
-                    && let ExprKind::Builtin(Builtin::GlobalGet(slot), _) = value.kind
                 {
-                    sites.module_read(name, slot, value.ty);
+                    sites.module_read(name, &value);
                 }
                 return Ok(value);
             }

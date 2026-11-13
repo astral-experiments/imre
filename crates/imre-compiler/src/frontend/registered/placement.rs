@@ -1,27 +1,5 @@
 use super::*;
 
-/// Register an existing checked function with its original frame positions.
-/// The caller has matched these positions to the current operations.
-/// The registered frame boxes each returned value during emission.
-pub(crate) fn place_fixed_function(
-    function: ir::Function,
-    source: FixedBodySource,
-) -> RegisteredFunction {
-    RegisteredFunction {
-        fixed_sites: source.positions(),
-        inputs: match source.method {
-            Some(method) => FrameInputs::Protocol {
-                sites: Box::new([FrameSite::Method(method)]),
-            },
-            None => FrameInputs::Checked,
-        },
-        function,
-        local_names: source.local_names,
-        frame_slots: Default::default(),
-        fixed_attributes: (!source.attributes.is_empty()).then(|| Box::new(source.attributes)),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -87,14 +65,15 @@ mod tests {
         assert_eq!(&text[name], "Key");
         let read = &body.fixed_attributes.as_ref().unwrap()[&name];
         assert!(matches!(&*read.operation, Builtin::RegisteredName(key) if key == "Key"));
-        let original = FixedNode::ModuleRead(slot, Type::Str);
-        let stale = [(
-            TextRange::default(),
-            Some(FixedNode::ModuleRead(slot + 1, Type::Str)),
-        )];
-        let node = ir::Node::Expression(value);
-        assert!(FixedNode::checked(&node) == Some(original));
-        assert!(FixedNode::consume(Some(&stale), &node).is_none());
+        let binding = FixedNode::checked(&ir::Node::Expression(value)).unwrap();
+        for kind in [
+            ExprKind::Builtin(Builtin::GlobalGet(slot + 1), vec![]),
+            ExprKind::Builtin(Builtin::GlobalGet(slot), vec![value.clone()]),
+            ExprKind::Local(slot),
+        ] {
+            let changed = Expr { ty: value.ty, kind };
+            assert!(FixedNode::checked(&ir::Node::Expression(&changed)) != Some(binding.clone()));
+        }
 
         let project = tempfile::tempdir().unwrap();
         let entry = project.path().join("app.py");
@@ -283,7 +262,12 @@ mod tests {
             .iter()
             .find(|(id, ..)| *id == 0)
             .unwrap();
-        let positions = source.positions();
+        let positions = source
+            .clone()
+            .place(fixed.ir.0.functions[0].clone())
+            .ok()
+            .unwrap()
+            .fixed_sites;
         let changed = TextSize::try_from(text.find("def changed").unwrap()).unwrap();
         let [Statement::Return(result)] = fixed.ir.0.functions[1].body.as_mut_slice() else {
             panic!()
@@ -298,7 +282,11 @@ mod tests {
             .iter()
             .find(|(_, range, _)| range.start() == occupied)
             .unwrap();
-        let earlier = place_fixed_function(fixed.ir.0.functions[*slot].clone(), source.clone());
+        let earlier = source
+            .clone()
+            .place(fixed.ir.0.functions[*slot].clone())
+            .ok()
+            .unwrap();
         let earlier_body = earlier.function.body.as_ptr();
         graph.register_function(graph.entry, occupied, earlier);
         let last = TextSize::try_from(text.find("def last").unwrap()).unwrap();
