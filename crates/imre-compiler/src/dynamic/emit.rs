@@ -640,7 +640,15 @@ impl<'a> PreparedBody<'a> {
                     .ok_or("unsupported interactive statement")?,
             )
         } else {
-            (!expression).then(|| prepare.suite(&body, crate::frontend::RegisteredScope::Module))
+            (!expression).then(|| {
+                // begin_module binds the leading docstring at its own statement checkpoint.
+                let statements = if keep_docstrings {
+                    ast::helpers::body_without_leading_docstring(&body)
+                } else {
+                    &body
+                };
+                prepare.suite(statements, crate::frontend::RegisteredScope::Module)
+            })
         };
         #[cfg(test)]
         let statement_sites = prepare.sites;
