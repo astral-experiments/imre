@@ -190,6 +190,16 @@ def current():
 
     assert module.get_annotations(WithOwnAnnotations) == {"field": int}
 
+    def quoted(value: "mark(x)", rest: "*items"):
+        pass
+
+    seen = []
+    scope = {"mark": seen.append, "x": 14, "items": (int,)}
+    assert module.get_annotations(quoted, globals=scope, locals=scope, eval_str=True) == {
+        "value": None, "rest": int,
+    }
+    assert seen == [14]
+
     def sums(reflected: 1 + int, nested: Left + (Right + 1)):
         pass
 
