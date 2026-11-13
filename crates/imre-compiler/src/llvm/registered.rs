@@ -10,8 +10,9 @@ pub(super) use sequences::permanent_handle;
 pub(crate) mod sites;
 pub(crate) mod suspension;
 use crate::frontend::{
-    ExpressionSelection, FrameSlots, LocalBinding, PhysicalOperand, RegisteredBody,
-    RegisteredFunction, RegisteredOperand, RegisteredRegion, RegisteredSuite, RequiredSite,
+    ExpressionSelection, FrameArguments, FrameInputs, FrameSlots, LocalBinding, PhysicalOperand,
+    RegisteredBody, RegisteredFunction, RegisteredOperand, RegisteredRegion, RegisteredSuite,
+    RequiredSite,
 };
 use crate::ir::{self, Builtin, Expr, ExprKind, Statement, Type};
 use crate::llvm::LoopTarget;
@@ -30,23 +31,21 @@ use ruff_text_size::{TextRange, TextSize};
 
 #[cfg(test)]
 pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
-    frame_inputs(
-        checked,
-        matches!(
-            checked.inputs,
-            crate::frontend::FrameInputs::Protocol { .. }
-        ),
-    )
-    .is_some()
+    let arguments = match checked.inputs {
+        FrameInputs::Checked => FrameArguments::Checked,
+        FrameInputs::Deferred { .. } => FrameArguments::Pending,
+        FrameInputs::Protocol { .. } => FrameArguments::Python,
+    };
+    frame_inputs(checked, arguments).is_some()
 }
 
 /// Check the frame's operations and retain their lexical requirements at the same visit.
 pub(crate) fn frame_inputs(
     checked: &RegisteredFunction,
-    live_parameters: bool,
-) -> Option<(crate::frontend::FrameInputs, FrameSlots)> {
-    use crate::frontend::{FrameInputs, FrameSite};
-    let has_scalar = live_parameters
+    arguments: FrameArguments,
+) -> Option<(FrameInputs, FrameSlots)> {
+    use crate::frontend::FrameSite;
+    let has_scalar = arguments != FrameArguments::Checked
         && checked.function.params.iter().any(|&slot| {
             checked.function.locals[slot]
                 .builtin_scalar_name()
@@ -63,6 +62,7 @@ pub(crate) fn frame_inputs(
     let mut protocol_reads = 0usize;
     let mut sites = Vec::new();
     let mut uses_python_protocol = false;
+    let mut uses_scalar_protocol = false;
     let mut required_private = std::collections::BTreeSet::new();
     let mut uses_slot = |slot: &usize, private: bool| {
         if checked.local_names.contains_key(slot) {
@@ -190,7 +190,8 @@ pub(crate) fn frame_inputs(
                     return false;
                 };
                 let reads = protocol_parameter(value);
-                uses_python_protocol |= reads != 0 || value.ty == Type::PythonObject;
+                uses_scalar_protocol |= reads != 0;
+                uses_python_protocol |= value.ty == Type::PythonObject;
                 protocol_reads += reads;
                 spec.len() <= 1
             }
@@ -225,14 +226,14 @@ pub(crate) fn frame_inputs(
                 true
             }
             ExprKind::Builtin(Builtin::RegisteredLambda(site, scoped), operands) => {
-                if live_parameters {
+                if arguments != FrameArguments::Checked {
                     sites.push(FrameSite::Lambda(*site));
                 }
                 uses_python_protocol = true;
                 !scoped || !operands.is_empty()
             }
             ExprKind::Builtin(Builtin::RegisteredGenerator(range, scoped, _), operands) => {
-                if live_parameters {
+                if arguments != FrameArguments::Checked {
                     sites.push(FrameSite::Generator(*range));
                 }
                 uses_python_protocol = true;
@@ -245,7 +246,7 @@ pub(crate) fn frame_inputs(
             }
             ExprKind::Compare(values, ops) if ir::Compare::uses_python_protocol(expr.ty, ops) => {
                 let reads = values.iter().map(&protocol_parameter).sum::<usize>();
-                uses_python_protocol |= reads != 0;
+                uses_scalar_protocol |= reads != 0;
                 protocol_reads += reads;
                 !ops.is_empty() && values.len() == ops.len() + 1
             }
@@ -325,26 +326,32 @@ pub(crate) fn frame_inputs(
     })?;
     // Only an unresolved signature needs a Python operation to establish its
     // calling convention. Solved functions already have an ordinary checked caller.
-    let has_live_parameter = has_scalar
-        || checked
-            .function
-            .params
-            .iter()
-            .any(|&slot| checked.function.locals[slot] == Type::PythonObject);
+    let object_parameter = checked
+        .function
+        .params
+        .iter()
+        .any(|&slot| checked.function.locals[slot] == Type::PythonObject);
     if required_private
         .iter()
         .any(|slot| private.index(slot).is_none())
-        || has_live_parameter && !uses_python_protocol
-        || scalar_reads != protocol_reads
     {
         return None;
     }
-    let inputs = if live_parameters {
-        FrameInputs::Protocol {
-            sites: sites.into_boxed_slice(),
-        }
-    } else {
-        FrameInputs::Checked
+    let live_sites = || {
+        let needs_protocol = object_parameter || has_scalar;
+        (scalar_reads == protocol_reads
+            && (!needs_protocol || uses_python_protocol || uses_scalar_protocol))
+            .then(|| sites.into_boxed_slice())
+    };
+    let inputs = match arguments {
+        FrameArguments::Python => FrameInputs::Protocol {
+            sites: live_sites()?,
+        },
+        _ if object_parameter && !uses_python_protocol => return None,
+        FrameArguments::Pending => FrameInputs::Deferred {
+            live_sites: live_sites(),
+        },
+        FrameArguments::Checked => FrameInputs::Checked,
     };
     Some((inputs, private))
 }

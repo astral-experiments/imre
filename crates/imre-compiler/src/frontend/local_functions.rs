@@ -907,7 +907,7 @@ impl Checker<'_> {
                         body: statements,
                     },
                     names,
-                    helper.live_protocol_parameters,
+                    helper.frame_arguments,
                 )
             {
                 self.graph

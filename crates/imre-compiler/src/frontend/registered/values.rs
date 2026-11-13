@@ -1359,14 +1359,14 @@ impl Checker<'_> {
             && self.registered_local_start.is_some()
         {
             let value = fstrings::registered_fstring(value, source, |child| self.expr(child))?;
-            self.live_protocol_parameters = true;
+            self.frame_arguments = FrameArguments::Python;
             return Ok(Some(source.located(node, value)));
         }
         if let ast::Expr::Generator(generator) = node
             && self.registered_local_start.is_some()
         {
             let mut value = generator_binding(generator, |outer| self.expr(outer))?;
-            self.live_protocol_parameters = true;
+            self.frame_arguments = FrameArguments::Python;
             if let Some(slot) = self.namespace {
                 in_namespace(&mut value, self.local(slot));
             }
@@ -1374,7 +1374,9 @@ impl Checker<'_> {
         }
         if let ast::Expr::Lambda(lambda) = node {
             // A protocol frame resolves its lexical children when the checked body is placed.
-            if !self.live_protocol_parameters && !has_checked_lambda_body(lambda, source) {
+            if self.frame_arguments != FrameArguments::Python
+                && !has_checked_lambda_body(lambda, source)
+            {
                 return Ok(None);
             }
             let defaults = lambda_defaults(lambda)
@@ -1540,7 +1542,9 @@ impl Checker<'_> {
         if let Some(slot) = self.namespace {
             in_namespace(&mut value, self.local(slot));
         }
-        self.live_protocol_parameters |= live_receiver;
+        if live_receiver {
+            self.frame_arguments = FrameArguments::Python;
+        }
         // Checked locals and exact literals keep their known types in the registered frame.
         value.ty = match &value.kind {
             ExprKind::Int(_) => Type::Int,

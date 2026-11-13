@@ -3362,7 +3362,7 @@ impl SourceGraph {
         }
         // A fixed method carries its own placement proof. Its failed source check
         // cannot authorize that placement at a later Python call.
-        if matches!(body.inputs, crate::frontend::FrameInputs::Checked) {
+        if !matches!(body.inputs, crate::frontend::FrameInputs::Protocol { .. }) {
             functions.lexical.push((module, start, body));
         }
     }
@@ -3385,11 +3385,25 @@ impl SourceGraph {
             lexical,
         } = self.registered_functions.take();
         for (module, start, mut body) in lexical {
-            let Some((inputs, slots)) = crate::llvm::registered::frame_inputs(&body, true) else {
-                continue;
-            };
-            body.inputs = inputs;
-            body.frame_slots = slots;
+            use crate::frontend::{FrameArguments, FrameInputs};
+            match body.inputs {
+                FrameInputs::Deferred {
+                    live_sites: Some(sites),
+                } => {
+                    body.inputs = FrameInputs::Protocol { sites };
+                }
+                FrameInputs::Checked => {
+                    // A subsequent registration can replace the provisional body at this site.
+                    let Some((inputs, slots)) =
+                        crate::llvm::registered::frame_inputs(&body, FrameArguments::Python)
+                    else {
+                        continue;
+                    };
+                    body.inputs = inputs;
+                    body.frame_slots = slots;
+                }
+                _ => continue,
+            }
             admitted
                 .entry(module)
                 .or_default()

@@ -139,11 +139,11 @@ pub(crate) use registered::values::{
     validate_docstring_literals,
 };
 pub(crate) use registered::{
-    AnnotationProvider, CheckedProvider, DeclarationSite, FixedFunctions, FrameInputs, FrameSite,
-    FrameSlots, LexicalOperands, NamedBody, ParameterAnnotations, ParameterEvaluator,
-    PhysicalOperand, PreparedRefusal, RegisteredBody, RegisteredFunction, RegisteredGenerator,
-    RegisteredLambda, RegisteredScope, RegisteredSuite, SuitePreparation, TypeParameterValues,
-    annotation_expression, registered_sites, registered_type_alias,
+    AnnotationProvider, CheckedProvider, DeclarationSite, FixedFunctions, FrameArguments,
+    FrameInputs, FrameSite, FrameSlots, LexicalOperands, NamedBody, ParameterAnnotations,
+    ParameterEvaluator, PhysicalOperand, PreparedRefusal, RegisteredBody, RegisteredFunction,
+    RegisteredGenerator, RegisteredLambda, RegisteredScope, RegisteredSuite, SuitePreparation,
+    TypeParameterValues, annotation_expression, registered_sites, registered_type_alias,
 };
 pub(crate) use registered::{LocalBinding, RegisteredClass, RegisteredOperand, RegisteredRegion};
 #[cfg(test)]
@@ -1875,7 +1875,7 @@ fn registered_entry(
 #[derive(Clone)]
 struct LoweredBody {
     cannot_return: bool,
-    live_protocol_parameters: bool,
+    frame_arguments: FrameArguments,
     wrapper_link: bool,
     function: ir::Function,
     source: Option<FixedBodySource>,
@@ -2047,7 +2047,7 @@ fn lower_function(
     Ok((
         LoweredBody {
             cannot_return,
-            live_protocol_parameters: checker.live_protocol_parameters,
+            frame_arguments: checker.frame_arguments,
             wrapper_link: checker.wrapper_link.get(),
             source,
             function: ir::Function {
@@ -3228,8 +3228,8 @@ struct Checker<'a> {
     checked_callback_effects: bool,
     /// First non-parameter slot of a solved-signature registered body, when being tried.
     registered_local_start: Option<usize>,
-    /// This body takes a lexical callable binding with live parameter annotations.
-    live_protocol_parameters: bool,
+    /// An operation on a live parameter can require the Python binder during lowering.
+    frame_arguments: FrameArguments,
     /// The first operation whose execution requires a different representation. All
     /// later source operations still see the facts from the ordinary checker.
     unrepresented: std::cell::RefCell<Option<Failure>>,
@@ -3331,7 +3331,7 @@ impl<'a> Checker<'a> {
             bound_function_imports: false,
             checked_callback_effects: false,
             registered_local_start: None,
-            live_protocol_parameters: false,
+            frame_arguments: FrameArguments::Checked,
             unrepresented: Default::default(),
             namespace_calls: HashSet::new(),
             module_namespace: Default::default(),
@@ -3429,7 +3429,7 @@ impl<'a> Checker<'a> {
             )?),
             // A free fixed frame binds scalar payloads before any Python operand runs.
             // Keep its Python entry on the live binder when an operation needs it.
-            None if self.live_protocol_parameters
+            None if self.frame_arguments == FrameArguments::Python
                 && signature
                     .params
                     .iter()

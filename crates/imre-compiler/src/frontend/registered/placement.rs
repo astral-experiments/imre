@@ -104,7 +104,7 @@ mod tests {
         else {
             panic!("expected both checkpoints and an implicit None return");
         };
-        assert_eq!(body.fixed_sites, [*first, *last]);
+        assert_eq!(&*body.fixed_sites, &[*first, *last]);
         assert_eq!((&text[*first], &text[*last]), ("pass", "pass"));
         assert!(first.end() < last.start());
     }

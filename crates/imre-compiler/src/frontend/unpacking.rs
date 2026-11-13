@@ -704,7 +704,9 @@ impl Checker<'_> {
                             "expected a Python object target",
                         ));
                     }
-                    self.live_protocol_parameters |= method_receiver;
+                    if method_receiver {
+                        self.frame_arguments = FrameArguments::Python;
+                    }
                     break 'place registered::attribute_statement(
                         ir::AttributeAction::Store,
                         attribute,
