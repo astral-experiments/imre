@@ -1113,20 +1113,25 @@ fn prepare(
     // Byte escapes have a separate grammar. Unicode IGNORECASE must fold
     // the literal guard without extending Python's word-category membership.
     let literal_guards = !bytes && (flags & IGNORECASE == 0 || ascii);
+    let multiline = flags & MULTILINE != 0;
     let translate = |spelling: &str| {
-        imre_regex::translate_pattern_with_line_mode(
+        imre_regex::regular_pattern(
             spelling,
             flags & VERBOSE != 0,
             alphabet(bytes, ascii, flags),
             flags & DOTALL != 0,
             literal_guards,
-            flags & MULTILINE != 0,
+            multiline,
         )
-        .map(|parsed| parsed.source)
     };
     let build = |source: String| {
         let matcher = build_regex(&source, bytes, flags, &[])?;
         Ok((source, matcher))
+    };
+    let build_translated = |parsed: imre_regex::TokenizedPattern| {
+        let matcher = build_regex(&parsed.source, bytes, flags, &[])?;
+        parsed.check_capture_names(matcher.group_info().pattern_names(PatternID::ZERO))?;
+        Ok((parsed.source, matcher))
     };
     let backtrack = |error| lookahead::compile(&source, flags, bytes, error);
     // Keep the raw fallback for inline verbose patterns beyond the Python tokenizer's
@@ -1161,7 +1166,7 @@ fn prepare(
                 // handle such a pattern when the regular engine cannot compile it.
                 let regular = if prefer_translation || inline_verbose {
                     translate(&source)
-                        .and_then(build)
+                        .and_then(build_translated)
                         .or_else(|err| {
                             if fallback.is_some() {
                                 Err(err)
@@ -1177,7 +1182,7 @@ fn prepare(
             }
         }
     } else {
-        translate(&source).and_then(build)
+        translate(&source).and_then(build_translated)
     };
     let prepared = match prepared {
         Err(original)
@@ -1186,7 +1191,9 @@ fn prepare(
                 && (literal_guards && source.contains("(?!")
                     || flags & !UNICODE == 0 && source.contains("(?>")) =>
         {
-            translate(&source).map_err(|_| original).and_then(build)
+            translate(&source)
+                .map_err(|_| original)
+                .and_then(build_translated)
         }
         result => result,
     };
@@ -1215,10 +1222,12 @@ fn prepare(
             } else {
                 None
             };
+            let fixed =
+                |spelling: &str| imre_regex::fixed_pattern(translate(spelling)?, bytes, multiline);
             let syntax = syntax(bytes, flags);
             let mut guards = Vec::new();
             for (name, kind, body) in extracted.guards {
-                let mut translated = translate(&body)?;
+                let mut translated = fixed(&body)?.source;
                 // Matching the guard only needs a boolean. A terminal dollar still admits a
                 // final newline, but its private capture is unnecessary in this submatcher.
                 if translated.ends_with(imre_regex::FINAL_NEWLINE_ANCHOR) {
@@ -1267,7 +1276,7 @@ fn prepare(
                     },
                 ));
             }
-            let source = translate(&extracted.source)?;
+            let source = fixed(&extracted.source)?.source;
             let matcher = build_regex(&source, bytes, flags, &guards)?;
             if let Some(expected) = expected_groups
                 && !matcher
