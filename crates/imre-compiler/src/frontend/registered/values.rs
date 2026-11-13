@@ -1518,6 +1518,7 @@ impl Checker<'_> {
             }
         }
         let first_local = self.registered_local_start;
+        let python_frame = self.frame_arguments == FrameArguments::Python;
         let declarations = &self.classes.declarations.definitions;
         let operands = graph.session.operand_types(owner);
         let is_bound_method = |callee: &ast::Expr| operands.is_bound_method(callee);
@@ -1566,6 +1567,10 @@ impl Checker<'_> {
                 let Some(first) = first_local else {
                     return false;
                 };
+                // This operand and its frame already use the Python protocol.
+                if python_frame && operand.ty == Type::PythonObject {
+                    return true;
+                }
                 let local = match operand.without_location().kind {
                     ExprKind::Local(slot) if receiver.is_name_expr() => Some(slot),
                     _ => None,
