@@ -549,13 +549,13 @@ where
             }
             ast::Stmt::AnnAssign(assign) => match self.scope {
                 Scope::Module => self.scopes.module_annotations = true,
-                Scope::Class(site) if !strings => {
-                    self.scopes
-                        .classes
-                        .get_mut(&site)
-                        .unwrap()
-                        .annotations
-                        .observe(assign);
+                Scope::Class(site) => {
+                    let class = self.scopes.classes.get_mut(&site).unwrap();
+                    if strings {
+                        class.postponed_annotations = true;
+                    } else {
+                        class.annotations.observe(assign);
+                    }
                 }
                 _ => {}
             },

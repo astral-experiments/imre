@@ -72,8 +72,7 @@ impl ClassScope {
                 false,
             ),
             frame_reads,
-            postponed_annotations: string_annotations
-                && imre_ast::annotations::has_variable_annotation(body),
+            postponed_annotations: false,
             needs_class_cell: imre_ast::class_cell::needed(body, string_annotations),
             needs_dict_cell: imre_ast::class_cell::dict_needed(body, string_annotations),
             static_attributes: imre_ast::class_attributes::static_attributes(body, names),
