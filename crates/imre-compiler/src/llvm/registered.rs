@@ -10,7 +10,7 @@ pub(crate) mod sites;
 pub(crate) mod suspension;
 use crate::frontend::{
     ExpressionSelection, FrameSlots, LocalBinding, PhysicalOperand, RegisteredBody,
-    RegisteredFunction, RegisteredOperand, RegisteredRegion, RegisteredSuite,
+    RegisteredFunction, RegisteredOperand, RegisteredRegion, RegisteredSuite, RequiredSite,
 };
 use crate::ir::{self, Builtin, Expr, ExprKind, Statement, Type};
 use crate::llvm::LoopTarget;
@@ -323,9 +323,7 @@ pub(crate) trait PreparedSuiteEmitter<'a, 'p>:
     std::ops::DerefMut<Target = RegisteredFrame<'a, 'p>>
 {
     fn frame_and_sites(&mut self) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites);
-    fn place_operand(&mut self, operand: &Expr);
-    fn place_definition(&mut self, site: TextSize);
-    fn place_statement(&mut self, statement: &Statement);
+    fn place_site(&mut self, site: RequiredSite);
 }
 
 /// Evaluate the selected input at its use, placing definitions in the lexical owner.
@@ -381,14 +379,13 @@ impl<'p> RegisteredBody<'p> {
 }
 
 impl<'a, 'p> Frame<'_, 'a, 'p> {
-    /// Write a value or truth test after placing its definitions in the owning scope.
+    /// Write a value or truth test in its owning operand region.
     pub(crate) fn evaluate_operand(
         code: &mut dyn PreparedSuiteEmitter<'a, 'p>,
         value: &Expr,
         operand: Option<&RegisteredOperand>,
         condition: bool,
     ) -> String {
-        code.place_operand(value);
         let enclosing = if let Some(operand) = operand {
             let Some(enclosing) = code.enter_checked_slots(operand.region(), None) else {
                 return "0".into();
@@ -442,11 +439,6 @@ impl std::ops::DerefMut for Frame<'_, '_, '_> {
 }
 
 impl<'f, 'a, 'p> Frame<'f, 'a, 'p> {
-    /// Nested suites place their own operands when the checked emitter enters them.
-    pub(super) fn place_statement(&mut self, statement: &Statement) {
-        self.code.place_statement(statement);
-    }
-
     #[cfg(test)]
     pub(super) fn for_expression(code: &'f mut dyn PreparedSuiteEmitter<'a, 'p>) -> Self {
         Self {
@@ -1069,6 +1061,7 @@ impl<'f> Frame<'f, '_, '_> {
                     .interpolation(&value, expression, *conversion, &spec)
             }),
             (Builtin::RegisteredLambda(site, scoped), operands) => {
+                self.code.place_site(RequiredSite::Lambda(*site, *scoped));
                 let mut operands = operands.iter();
                 let scope = if *scoped {
                     self.evaluate_handle(operands.next().expect("explicit lambda scope"))
@@ -1082,6 +1075,7 @@ impl<'f> Frame<'f, '_, '_> {
                 sites.bind_lambda(code, *site, &scope, &defaults)
             }
             (Builtin::RegisteredGenerator(site, scoped), operands) => {
+                self.code.place_site(RequiredSite::Generator(*site));
                 let (scope, iterable) =
                     ir::generator_operands(*scoped, operands).expect("checked generator operands");
                 let scope = scope
@@ -1100,6 +1094,8 @@ impl<'f> Frame<'f, '_, '_> {
                 })
             }
             (Builtin::RegisteredDefinition(site), header) => {
+                let requested = RequiredSite::definition(site, header);
+                self.code.place_site(requested);
                 let (decorators, defaults, arguments) = match site {
                     ir::DefinitionSite::Class {
                         arguments: Some(layout),
@@ -1126,20 +1122,14 @@ impl<'f> Frame<'f, '_, '_> {
                     .collect::<Vec<_>>();
                 let class_arguments =
                     arguments.map(|(layout, operands)| self.pack_arguments(layout, operands, None));
-                if matches!(site, ir::DefinitionSite::Class { .. })
-                    && !self
-                        .code
-                        .frame_and_sites()
-                        .1
-                        .definitions
-                        .contains_key(&site.start())
-                {
-                    self.code.place_definition(site.start());
+                if let RequiredSite::DefinitionAfterInputs(start) = requested {
+                    self.code.place_site(RequiredSite::Definition(start));
                 }
                 let (code, sites) = self.code.frame_and_sites();
                 sites.definition(code, site.start(), &decorators, &defaults, class_arguments)
             }
             (Builtin::RegisteredClassNamespace(site, layout), operands) => {
+                self.code.place_site(RequiredSite::ClassNamespace(*site));
                 let (code, sites) = self.code.frame_and_sites();
                 let (_, parameters, range) = &sites.class_namespaces[site];
                 let range = *range;
@@ -1159,6 +1149,7 @@ impl<'f> Frame<'f, '_, '_> {
                     .instantiate_class(code, arguments, Some(range))
             }
             (Builtin::RegisteredTypeAlias(site), []) => {
+                self.code.place_site(RequiredSite::Alias(*site));
                 let (code, sites) = self.code.frame_and_sites();
                 match &sites.aliases[site] {
                     Ok(alias) => alias.instantiate(code),
@@ -1201,6 +1192,7 @@ impl<'f> Frame<'f, '_, '_> {
                 self.code.take_annotation_result()
             }
             (Builtin::BindAnnotationExpression { site, spelling }, []) => {
+                self.code.place_site(RequiredSite::AnnotationString(*site));
                 let (code, sites) = self.code.frame_and_sites();
                 sites.annotation_string(code, *site, spelling)
             }
@@ -1265,6 +1257,7 @@ impl<'f> Frame<'f, '_, '_> {
     }
 
     pub(super) fn exec_literal_at(&mut self, site: TextRange) -> Option<sites::CompiledExec> {
+        self.code.place_site(RequiredSite::ExecLiteral(site));
         self.code
             .frame_and_sites()
             .1

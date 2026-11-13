@@ -1,20 +1,10 @@
 use crate::dynamic::emit::{ModuleOrigin, Output, PreparedBody, RegisteredFrame};
 use std::path::Path;
 
-fn place_statements<'p>(
-    sites: &mut crate::dynamic::emit::CheckedSites,
-    body: &[crate::ir::Statement],
-    mut definitions: crate::dynamic::emit::LexicalDefinitions<'_, 'p>,
-) {
-    for statement in body {
-        sites.place_statement(statement, &mut definitions);
-    }
-}
-
 #[test]
 fn checked_module_places_class_generator_and_following_lambda() {
     use crate::dynamic::emit::SourcePositions;
-    use crate::dynamic::emit::{CheckedSites, SourceMap};
+    use crate::dynamic::emit::{RegisteredBody, SourceMap};
     use crate::frontend::RequiredSite;
 
     let text = concat!(
@@ -42,14 +32,14 @@ fn checked_module_places_class_generator_and_following_lambda() {
         unit: 0,
         positions: &SourcePositions::new(&module.source.path, text, &file),
     };
-    let mut frame = RegisteredFrame::new(
+    let frame = RegisteredFrame::new(
         &mut output,
         location.positions,
         false,
         0,
         module.source.module_start,
     );
-    let mut sites = CheckedSites::default();
+    let mut function = location.function(frame, &module.source.scopes.module_globals, "", false);
     let body = &module.initializer().checked.function.body;
     let mut required = Vec::new();
     RequiredSite::visit(body, Some(&module.source.exec_literals), &mut |site| {
@@ -65,11 +55,8 @@ fn checked_module_places_class_generator_and_following_lambda() {
     else {
         panic!("expected the function, lambda, class, generator and final lambda");
     };
-    place_statements(
-        &mut sites,
-        body,
-        location.definitions(&mut frame, "", &module.source.scopes.module_globals, false),
-    );
+    RegisteredBody::Suite(module.initializer()).emit(&mut function);
+    let sites = &function.sites;
     assert_eq!(sites.definitions.len(), 2);
     assert_eq!(sites.lambdas.len(), 2);
     assert!(sites.generators.contains_key(generator));
@@ -83,19 +70,15 @@ fn checked_module_places_class_generator_and_following_lambda() {
         sites.lambdas[first].code,
         location.callable_code.borrow()[first]
     );
-    let count = frame.output.count;
-    place_statements(
-        &mut sites,
-        body,
-        location.definitions(&mut frame, "", &module.source.scopes.module_globals, false),
-    );
-    assert_eq!(frame.output.count, count);
+    let count = function.frame.output.count;
+    RegisteredBody::Suite(module.initializer()).emit(&mut function);
+    assert_eq!(function.frame.output.count, count);
 }
 
 #[test]
 fn checked_module_places_both_plain_and_generic_aliases_before_their_following_lambda() {
     use crate::dynamic::emit::SourcePositions;
-    use crate::dynamic::emit::{CheckedSites, SourceMap};
+    use crate::dynamic::emit::{RegisteredBody, SourceMap};
     use crate::frontend::RequiredSite;
 
     for alias in ["type Count = int", "type Count[T] = T"] {
@@ -118,14 +101,14 @@ fn checked_module_places_both_plain_and_generic_aliases_before_their_following_l
             unit: 0,
             positions: &SourcePositions::new(&module.source.path, &text, &file),
         };
-        let mut frame = RegisteredFrame::new(
+        let frame = RegisteredFrame::new(
             &mut output,
             location.positions,
             false,
             0,
             module.source.module_start,
         );
-        let mut sites = CheckedSites::default();
+        let mut function = location.function(frame, &module.source.scopes.module_globals, "", false);
         let body = &module.initializer().checked.function.body;
         let mut required = Vec::new();
         RequiredSite::visit(body, Some(&module.source.exec_literals), &mut |site| {
@@ -140,26 +123,19 @@ fn checked_module_places_both_plain_and_generic_aliases_before_their_following_l
             panic!("expected the class, alias and final lambda");
         };
         assert_eq!(alias.to_u32(), 18);
-        let first = frame.output.count;
+        let first = function.frame.output.count;
         let symbol = |index: u32| format!("@code_site{}", first + index);
-        place_statements(
-            &mut sites,
-            body,
-            location.definitions(&mut frame, "", &module.source.scopes.module_globals, false),
-        );
+        RegisteredBody::Suite(module.initializer()).emit(&mut function);
+        let sites = &function.sites;
         assert_eq!(sites.definitions[class].definition.code, symbol(0));
         assert_eq!(
             sites.aliases[alias].as_ref().unwrap().definition.code,
             symbol(1)
         );
         assert_eq!(sites.lambdas[last].code, symbol(2));
-        let count = frame.output.count;
-        place_statements(
-            &mut sites,
-            body,
-            location.definitions(&mut frame, "", &module.source.scopes.module_globals, false),
-        );
-        assert_eq!(frame.output.count, count);
+        let count = function.frame.output.count;
+        RegisteredBody::Suite(module.initializer()).emit(&mut function);
+        assert_eq!(function.frame.output.count, count);
     }
 }
 

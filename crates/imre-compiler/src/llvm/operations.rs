@@ -257,6 +257,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         };
 
         let frame = self.python();
+        let exec = frame.exec_literal_at(site.range);
         let mark = frame.temporary_mark();
         let result = frame.unwind_stack_operands(&mark, |frame| {
             if frame.native_suspension
@@ -279,7 +280,6 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 .map(&mut evaluate)
                 .unwrap_or(enclosing_scope);
             let (target, values) = args.capture_invoke(callable, evaluate);
-            let exec = frame.exec_literal_at(site.range);
             let (array, count) = frame.fixed_call_arguments(&target, values, exec);
             let positional = super::registered::CallArguments::Positional {
                 array,
@@ -1002,11 +1002,10 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
     }
 
     pub(crate) fn emit_statement(&mut self, stmt: &Statement) {
-        if let Entry::Registered(frame) = &mut self.0 {
-            frame.place_statement(stmt);
-            if let Some(range) = frame.next_fixed_site() {
-                frame.statement_site(range, None);
-            }
+        if let Entry::Registered(frame) = &mut self.0
+            && let Some(range) = frame.next_fixed_site()
+        {
+            frame.statement_site(range, None);
         }
         match stmt {
             Statement::Assign(slot, expr) => {
