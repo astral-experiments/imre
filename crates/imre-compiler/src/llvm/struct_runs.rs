@@ -74,7 +74,8 @@ fn run_sum<'a>(module: &Module, test: &Expr, body: &'a [Statement]) -> Option<Ru
     let ExprKind::Binary(Binary::Add, old_sum, term) = &update.kind else {
         return None;
     };
-    (module.types.is_value_struct(item.ty)
+    (matches!(receiver.ty, Type::List(_))
+        && module.types.is_value_struct(item.ty)
         && local(index, *cursor) && local(start, *cursor) && local(old_index, *cursor)
         && matches!(&bound.kind, ExprKind::Builtin(Builtin::Len, a) if matches!(a.as_slice(), [v] if local(v, list)))
         && matches!(&one.kind, ExprKind::Int(n) if n == "1")

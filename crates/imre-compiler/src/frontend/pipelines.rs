@@ -2008,7 +2008,9 @@ impl Checker<'_> {
             } else {
                 in_bounds
             };
-            let item = if let Some(fields) = fields {
+            let item = if let Some(fields) = fields
+                && self.types.homogeneous_tuple_element(ty) != Some(element)
+            {
                 let mut item = Expr {
                     ty: element,
                     kind: ExprKind::None,
@@ -2052,7 +2054,7 @@ impl Checker<'_> {
                             Builtin::BytesGet
                         } else if !reverse && self.consumes_list(ty, node.range()) {
                             Builtin::SequenceTakeInBounds
-                        } else if matches!(ty, Type::List(_)) {
+                        } else if matches!(ty, Type::List(_) | Type::Tuple(_)) {
                             Builtin::SequenceGetInBounds
                         } else {
                             Builtin::ListGet(None)
