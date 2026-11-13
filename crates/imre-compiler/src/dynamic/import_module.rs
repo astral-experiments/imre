@@ -341,11 +341,6 @@ mod tests {
     fn inspect_compiles_the_tracked_python_verbatim() {
         let (filename, source) = boxed_source("inspect").unwrap();
         assert_eq!(filename, "inspect.py");
-        // A header may span lines, or its old spelling may occur in a docstring.
-        // Even the body after such a header must reach the parser byte for byte.
-        let body = source
-            .strip_prefix(include_str!("../../stdlib/inspect_cleandoc.py"))
-            .and_then(|rest| rest.strip_prefix('\n'));
-        assert!(body == Some(include_str!("../../stdlib/inspect.py")));
+        assert!(source == include_str!("../../stdlib/inspect.py"));
     }
 }

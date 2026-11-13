@@ -3021,15 +3021,6 @@ pub(crate) fn bundled_module_source(
     let (file, source) = if standalone && name == "_pydecimal" {
         // Standalone executables can run without the Python launcher's installed stdlib ZIP.
         crate::modules::bundled_source!("_pydecimal.py")?
-    } else if name == "dataclasses" {
-        (
-            "dataclasses.py",
-            concat!(
-                include_str!("../../stdlib/dataclasses_missing.py"),
-                "\n",
-                include_str!("../../stdlib/dataclasses.py"),
-            ),
-        )
     } else {
         import_module::boxed_source(name)?
     };

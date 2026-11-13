@@ -325,3 +325,32 @@ fn decorated_shipped_import_and_attribute_share_the_defining_slot() {
     let missing = &module.parsed.suite()[3].as_expr_stmt().unwrap().value;
     assert_eq!(graph.resolve(graph.entry, missing), None);
 }
+
+#[test]
+fn checked_cleandoc_keeps_the_complete_shipped_inspect_namespace() {
+    let graph = SourceGraph::single_with_mode(
+        "from inspect import cleandoc, isclass\nprint(cleandoc('  text'))\n",
+        true,
+    )
+    .unwrap();
+    assert!(
+        graph
+            .session
+            .shipped_declaration("inspect", "isclass")
+            .is_some()
+    );
+}
+
+#[test]
+fn checked_missing_keeps_the_root_import_diagnostic() {
+    let result = SourceGraph::single_with_mode(
+        "from dataclasses import MISSING\nfrom dataclasses import _dataclass_getstate\n",
+        true,
+    );
+    assert!(
+        result
+            .err()
+            .unwrap()
+            .contains("unsupported sealed standard-library export dataclasses._dataclass_getstate")
+    );
+}

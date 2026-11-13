@@ -37,13 +37,22 @@ impl Session {
         let Some((filename, body)) = crate::dynamic::bundled_module_source(owner, false) else {
             return Ok(None);
         };
+        self.prepare_shipped_file(owner, filename, &body).map(Some)
+    }
+
+    fn prepare_shipped_file(
+        &mut self,
+        owner: &str,
+        filename: &str,
+        body: &str,
+    ) -> Result<File, String> {
         let root = Path::new(crate::dynamic::BUNDLED_SOURCE_ROOT);
         let path = root.join(filename);
         let origin = path.to_str().expect("SDK filename");
         if let Ok(file) = system_path_to_file(&self.db, origin) {
-            return Ok(Some(file));
+            return Ok(file);
         }
-        self.seed(&path, &body)?;
+        self.seed(&path, body)?;
         let file = system_path_to_file(&self.db, origin).map_err(|error| error.to_string())?;
         if filename.ends_with("/__init__.py") {
             for (_, child) in star_imports(&self.db, file, Name::new(owner)).clone() {
@@ -60,7 +69,37 @@ impl Session {
                 }
             }
         }
-        Ok(Some(file))
+        Ok(file)
+    }
+
+    /// The checked ABI uses the leading declarations of the same module that boxed callers import.
+    pub(crate) fn checked_shipped_prefix(
+        &mut self,
+        owner: &str,
+        last: &str,
+    ) -> Result<&'static str, String> {
+        let (filename, source) = crate::modules::bundled_runtime_source(owner)
+            .ok_or_else(|| format!("no checked runtime provider selected for {owner:?}"))?;
+        let file = self.prepare_shipped_file(owner, filename, source)?;
+        // A user file at the SDK spelling still owns its declarations. Select the
+        // immutable provider in a separate file before using offsets in its bytes.
+        let file = if self.file_matches_parser_input(file, source) {
+            file
+        } else {
+            self.virtual_source(&format!("imre/stdlib/{filename}"), source)
+        };
+        let definition = self
+            .final_module_binding(file, last)
+            .ok_or_else(|| format!("missing checked definition {owner}.{last}"))?;
+        let end = definition
+            .kind(&self.db)
+            .full_range(&self.parsed(file))
+            .end()
+            .to_usize();
+        let newline = source.as_bytes().get(end) == Some(&b'\n');
+        source
+            .get(..end + usize::from(newline))
+            .ok_or_else(|| format!("invalid checked definition range for {owner}.{last}"))
     }
 
     pub(super) fn final_module_binding(&self, file: File, name: &str) -> Option<Definition<'_>> {

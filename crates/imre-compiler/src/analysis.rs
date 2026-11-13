@@ -909,6 +909,19 @@ impl Session {
         Ok(())
     }
 
+    /// Virtual files keep immutable parser inputs outside the module search path.
+    fn virtual_source(&self, key: &str, text: &str) -> File {
+        let key = ruff_db::system::SystemVirtualPath::new(key);
+        self.db
+            .files
+            .try_virtual_file(key)
+            .unwrap_or_else(|| {
+                self.db.system.fs().write_virtual_file(key, text.as_bytes());
+                self.db.files.virtual_file(&self.db, key)
+            })
+            .file()
+    }
+
     pub(crate) fn selected_file(
         &self,
         path: &Path,
