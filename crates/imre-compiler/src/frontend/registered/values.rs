@@ -110,10 +110,16 @@ impl RegisteredSource<'_> {
                 let Some(target) = receiver(target, method.is_some(), method)? else {
                     return Ok(None);
                 };
-                let args = imre_ast::argument_values(&call.arguments)
-                    .map(child)
-                    .collect::<StdResult<_, _>>()?;
-                Ok(Some(bound_call(call, selection, target, args)))
+                let mut value = bound_call(call, selection, target, None);
+                let arguments = match &mut value.kind {
+                    ExprKind::Invoke { args, .. } => &mut args.values,
+                    ExprKind::Builtin(Builtin::RegisteredCall(_), operands) => operands,
+                    _ => unreachable!("bound call owns its evaluated arguments"),
+                };
+                for argument in imre_ast::argument_values(&call.arguments) {
+                    arguments.push(child(argument)?);
+                }
+                Ok(Some(value))
             }
             ast::Expr::Attribute(field) => Ok(receiver(&field.value, true, None)?.map(|value| {
                 let op = attribute.map_or_else(|| attribute_load(field), |op| *op);
@@ -473,8 +479,10 @@ fn bound_call(
     call: &ast::ExprCall,
     selection: ir::RegisteredCallTarget,
     target: Expr,
-    mut arguments: Vec<Expr>,
+    arguments: Option<Vec<Expr>>,
 ) -> Expr {
+    let arguments =
+        |prefix| arguments.unwrap_or_else(|| Vec::with_capacity(call.arguments.len() + prefix));
     let layout = match selection {
         // A direct method target already established the bounded, unexpanded arguments.
         ir::RegisteredCallTarget::Method { .. } => fixed_argument_layout(&call.arguments),
@@ -487,8 +495,9 @@ fn bound_call(
             suspended_name,
         } = selection
     {
-        return positional_invoke(call.range(), end, suspended_name, target, arguments);
+        return positional_invoke(call.range(), end, suspended_name, target, arguments(0));
     }
+    let mut arguments = arguments(1);
     arguments.insert(0, target);
     super::operation(
         call_operation(call, selection, layout),
@@ -577,7 +586,7 @@ impl Checker<'_> {
     }
 
     fn call_with_values(&self, call: &ast::ExprCall, target: Expr, arguments: Vec<Expr>) -> Expr {
-        let mut value = bound_call(call, callable_target(call), target, arguments);
+        let mut value = bound_call(call, callable_target(call), target, Some(arguments));
         if let Some(slot) = self.namespace {
             in_namespace(&mut value, self.local(slot));
         }
@@ -596,7 +605,7 @@ impl Checker<'_> {
             .operands(self.source, self.graph.python_optimization());
         let (selection, receiver) = source.call_target(call);
         let target = registered_value(receiver, source).map_or_else(|| self.expr(receiver), Ok)?;
-        let mut value = bound_call(call, selection, target, operands);
+        let mut value = bound_call(call, selection, target, Some(operands));
         if let Some(slot) = self.namespace {
             in_namespace(&mut value, self.local(slot));
         }
@@ -644,7 +653,12 @@ pub(in crate::frontend) fn name_call(
     name: &str,
     arguments: Vec<Expr>,
 ) -> Expr {
-    bound_call(call, callable_target(call), name_binding(name), arguments)
+    bound_call(
+        call,
+        callable_target(call),
+        name_binding(name),
+        Some(arguments),
+    )
 }
 
 pub(super) fn number_literal(number: &ast::Number, minus: bool) -> ExprKind {
