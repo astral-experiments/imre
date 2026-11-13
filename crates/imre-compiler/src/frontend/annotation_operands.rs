@@ -93,7 +93,8 @@ pub(super) fn annotation_operand<R>(
             checked_annotation_value(expr, |input| Region::Suite.operand(input, source))
         };
     };
-    let body = if bundled {
+    // A postponed name already has its spelling and needs no executable child.
+    let body = if bundled || (string_annotations && expr.is_name_expr()) {
         None
     } else {
         let expanded;
