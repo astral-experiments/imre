@@ -455,7 +455,8 @@ impl Session {
             };
             let function = definition.node(&parsed);
             if !function.is_async && function.decorator_list.is_empty() {
-                let source = imre_ast::code_flags::is_generator(&function.body)
+                let source = self
+                    .is_generator_definition(owner.0, function)
                     .then(|| self.generator_execution_error(owner, &parsed, &model, function))
                     .flatten();
                 captures.insert(alias.range(), (owner.0, source));
@@ -556,12 +557,7 @@ impl Session {
         if !function.decorator_list.is_empty() || function.type_params.is_some() {
             return None;
         }
-        let generator = || {
-            let index = ty_python_core::semantic_index(&self.db, self.db.program_file(owner));
-            index
-                .try_node_scope(ty_python_core::scope::NodeWithScopeRef::Function(function))
-                .map(|scope| scope.is_generator_function(index))
-        };
+        let generator = || self.indexed_generator(owner, function);
         if iterated && (owner == file || function.is_async || !generator()?) {
             return None;
         }

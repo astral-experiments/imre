@@ -493,7 +493,7 @@ impl<'ast, 'db> Escape<'ast, 'db> {
         if !callback
             && (!function.decorator_list.is_empty()
                 || function.is_async
-                || imre_ast::code_flags::is_generator(&function.body)
+                || self.session.indexed_generator(owner, function)?
                 || !self.reachable(call.range()))
         {
             return None;
@@ -569,7 +569,7 @@ impl<'ast, 'db> Escape<'ast, 'db> {
             let parsed = self.session.parsed(file);
             let function = declaration.node(&parsed);
             if !function.is_async
-                && !imre_ast::code_flags::is_generator(&function.body)
+                && self.session.indexed_generator(file, function) != Some(true)
                 && !super::initializer_calls::passive_function(function)
             {
                 self.captured.clear();
