@@ -254,8 +254,9 @@ impl CheckedSites {
                     .or_insert_with(|| definitions.type_alias(site));
             }
             RequiredSite::ExecLiteral(site) => {
-                if let std::collections::hash_map::Entry::Vacant(entry) =
-                    self.exec_literals.entry(site)
+                if definitions.literal_sites().contains(site)
+                    && let std::collections::hash_map::Entry::Vacant(entry) =
+                        self.exec_literals.entry(site)
                     && let Some(compiled) = definitions.exec_literal(site)
                 {
                     entry.insert(compiled);
@@ -267,24 +268,6 @@ impl CheckedSites {
                     .or_insert_with(|| definitions.annotation_string(site));
             }
         }
-    }
-
-    pub(crate) fn place_operand<'p>(
-        &mut self,
-        value: &ir::Expr,
-        definitions: &mut impl SiteDefinitions<'p>,
-    ) {
-        RequiredSite::visit_operand(value, Some(definitions.literal_sites()), &mut |site| {
-            self.place(site, definitions)
-        });
-    }
-
-    pub(crate) fn place_statement<'p>(
-        &mut self,
-        statement: &ir::Statement,
-        definitions: &mut impl SiteDefinitions<'p>,
-    ) {
-        statement.operands(|operand| self.place_operand(operand, definitions));
     }
 
     pub(crate) fn annotation_string(

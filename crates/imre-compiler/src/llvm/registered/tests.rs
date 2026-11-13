@@ -27,11 +27,7 @@ impl<'a, 'p> PreparedSuiteEmitter<'a, 'p> for TestFrame<'_, 'a, 'p> {
     fn frame_and_sites(&mut self) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites) {
         (self.0, &self.1)
     }
-    fn place_operand(&mut self, _: &crate::ir::Expr) {}
-    fn place_definition(&mut self, _: TextSize) {
-        panic!("source definition requested in isolated writer test")
-    }
-    fn place_statement(&mut self, _: &crate::ir::Statement) {}
+    fn place_site(&mut self, _: crate::frontend::RequiredSite) {}
 }
 
 #[test]

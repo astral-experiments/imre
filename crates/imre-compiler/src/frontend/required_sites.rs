@@ -27,17 +27,7 @@ fn visit_expression_site(
         ExprKind::Builtin(Builtin::RegisteredCall(call), _) => Some(call.range),
         ExprKind::Builtin(op, operands) => {
             visit(match op {
-                Builtin::RegisteredDefinition(ir::DefinitionSite::Class { start, .. })
-                    if operands.iter().any(|value| {
-                        matches!(
-                            value.kind,
-                            ExprKind::Builtin(Builtin::RegisteredInput(_), _)
-                        )
-                    }) =>
-                {
-                    RequiredSite::DefinitionAfterInputs(*start)
-                }
-                Builtin::RegisteredDefinition(site) => RequiredSite::Definition(site.start()),
+                Builtin::RegisteredDefinition(site) => RequiredSite::definition(site, operands),
                 Builtin::RegisteredClassNamespace(site, _) => RequiredSite::ClassNamespace(*site),
                 Builtin::RegisteredLambda(site, scoped) => RequiredSite::Lambda(*site, *scoped),
                 Builtin::RegisteredGenerator(site, _) => RequiredSite::Generator(*site),
@@ -59,6 +49,19 @@ fn visit_expression_site(
 }
 
 impl RequiredSite {
+    /// Class bodies follow any header inputs evaluated by their enclosing suite.
+    pub(crate) fn definition(site: &ir::DefinitionSite, header: &[Expr]) -> Self {
+        if matches!(site, ir::DefinitionSite::Class { .. })
+            && header.iter().any(|value| {
+                matches!(value.kind, ExprKind::Builtin(Builtin::RegisteredInput(_), _))
+            })
+        {
+            Self::DefinitionAfterInputs(site.start())
+        } else {
+            Self::Definition(site.start())
+        }
+    }
+
     pub(crate) fn visit_operand(
         value: &Expr,
         literals: Option<&LiteralSites>,

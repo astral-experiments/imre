@@ -1192,19 +1192,9 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
         (&mut self.frame, &self.sites)
     }
 
-    fn place_operand(&mut self, operand: &crate::ir::Expr) {
+    fn place_site(&mut self, site: RequiredSite) {
         let (sites, mut definitions) = self.definitions();
-        sites.place_operand(operand, &mut definitions);
-    }
-
-    fn place_definition(&mut self, site: TextSize) {
-        let (sites, mut definitions) = self.definitions();
-        sites.place(RequiredSite::Definition(site), &mut definitions);
-    }
-
-    fn place_statement(&mut self, statement: &crate::ir::Statement) {
-        let (sites, mut definitions) = self.definitions();
-        sites.place_statement(statement, &mut definitions);
+        sites.place(site, &mut definitions);
     }
 }
 
