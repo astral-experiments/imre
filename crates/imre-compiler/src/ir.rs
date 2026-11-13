@@ -7,6 +7,13 @@ use ruff_python_ast::CmpOp;
 use ruff_python_ast::UnaryOp;
 use std::collections::BTreeSet;
 
+/// Return the exact value when it fits in the tagged integer representation.
+pub(crate) fn tagged_integer(value: i64) -> Option<i64> {
+    (-(1_i64 << 62)..1_i64 << 62)
+        .contains(&value)
+        .then_some(value)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SysEncoding {
     Locale,
@@ -824,9 +831,7 @@ impl Expr {
             }
             _ => return None,
         };
-        (-(1_i64 << 62)..(1_i64 << 62))
-            .contains(&value)
-            .then_some(value)
+        tagged_integer(value)
     }
 
     /// Split an integer index into its local and the literal offset added to it.
