@@ -1672,7 +1672,7 @@ impl Checker<'_> {
                     && checker.class_reference(arg).is_some()
                 {
                     // Actions can write to the class itself. Read that binding in its Python frame.
-                    return Ok(registered::values::name_binding(name.id.as_str()));
+                    return Ok(registered::values::name_binding(name.id.clone()));
                 }
                 return checker.expr(arg);
             }
@@ -1700,7 +1700,7 @@ impl Checker<'_> {
                 .value
                 .as_name_expr()
                 .expect("collected parser name");
-            let receiver = registered::values::name_binding(builder.id.as_str());
+            let receiver = registered::values::name_binding(builder.id.clone());
             bound.values.truncate(call.arguments.len());
             return self
                 .registered_method_call_with_values(
