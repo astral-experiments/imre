@@ -569,7 +569,7 @@ impl<'a> PreparedBody<'a> {
             ..values
         };
         // Annotation providers use the completed lambda sites for this source unit.
-        let (mut sites, annotation_children) = crate::frontend::registered_sites(
+        let (sites, annotation_children) = crate::frontend::registered_sites(
             &body,
             &private_names,
             values,
@@ -633,20 +633,6 @@ impl<'a> PreparedBody<'a> {
                 program_bodies.and_then(|bodies| bodies.get(&start)),
                 python_annotations,
             );
-        }
-        for start in class_bodies.keys() {
-            scopes
-                .classes
-                .get_mut(start)
-                .expect("registered class scope")
-                .annotations
-                .prepare_body(
-                    &mut sites.class_annotations,
-                    sites
-                        .class_annotation_bindings
-                        .remove(start)
-                        .unwrap_or_default(),
-                );
         }
         let initializer = if interactive {
             Some(
@@ -1102,7 +1088,7 @@ impl SourceMap<'_> {
                     &mut function.frame,
                     &prefix,
                     in_function,
-                    &class.annotations,
+                    &prepared.annotations,
                     globals,
                     start.expect("class definition site"),
                 );
@@ -1507,7 +1493,8 @@ impl LexicalDefinitions<'_, '_> {
                     .function_flags(self.in_function || type_parameter_scope, false)
             );
         }
-        if let Body::Namespace(_, scope) = &body {
+        if let Body::Namespace(class, scope) = &body {
+            signature["postponed_annotations"] = json!(class.annotations.postponed);
             scope.write_signature(&mut signature);
         } else if let Some(facts) = evaluator_scope {
             facts.write_signature(&mut signature);
@@ -1653,11 +1640,11 @@ impl SourceMap<'_> {
         if frame.body.terminated {
             return;
         }
-        let conditional = plan.sites.iter().any(|site| site.index.is_some());
+        let conditional = !plan.conditional_offsets.is_empty();
         let offsets = if conditional {
             let offsets = frame.op("list", &[]);
-            for site in plan.sites.iter().filter(|site| site.index.is_some()) {
-                let offset = frame.integer(site.site.to_u32());
+            for site in &plan.conditional_offsets {
+                let offset = frame.integer(site.to_u32());
                 frame.op("append", &[&offsets, &offset]);
             }
             offsets
@@ -2254,8 +2241,7 @@ mod tests {
 
         let provider = prepared
             .source
-            .scopes
-            .classes
+            .class_bodies
             .get_mut(&owner)
             .unwrap()
             .annotations

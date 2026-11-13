@@ -521,45 +521,18 @@ where
                     .module_globals
                     .extend(global.names.iter().map(ToString::to_string));
             }
-            // Ordinary try compiles the else suite before its handlers. Class annotation
-            // operands and their conditional indices both follow that declaration order.
-            ast::Stmt::Try(region)
-                if matches!(self.scope, Scope::Class(_))
-                    && !strings
-                    && !region.is_star
-                    && !region.orelse.is_empty() =>
-            {
-                self.visit_body(&region.body);
-                self.visit_body(&region.orelse);
-                for handler in &region.handlers {
-                    self.visit_except_handler(handler);
-                }
-                self.visit_body(&region.finalbody);
-                return;
+            ast::Stmt::AnnAssign(_) if self.scope == Scope::Module => {
+                self.scopes.module_annotations = true;
             }
-            ast::Stmt::AnnAssign(assign) => match self.scope {
-                Scope::Module => self.scopes.module_annotations = true,
-                Scope::Class(site) => {
-                    let class = self.scopes.classes.get_mut(&site).unwrap();
-                    if strings {
-                        class.postponed_annotations = true;
-                    } else {
-                        class.annotations.observe(assign);
-                    }
-                }
-                _ => {}
-            },
             _ => {}
         }
-        let suite_scope = self.suite_scope;
         visitor::walk_stmt(self, stmt);
-        if let (ast::Stmt::ClassDef(class), Some(Scope::Class(start))) = (stmt, suite_scope) {
-            if self.yields && !parent_yields {
-                self.yields = imre_ast::class_definition_expressions(class)
-                    .any(imre_ast::code_flags::yields_in_expression);
-            }
-            let scope = self.scopes.classes.get_mut(&start).unwrap();
-            scope.annotations.finish(class, &scope.bindings);
+        if let ast::Stmt::ClassDef(class) = stmt
+            && self.yields
+            && !parent_yields
+        {
+            self.yields = imre_ast::class_definition_expressions(class)
+                .any(imre_ast::code_flags::yields_in_expression);
         }
     }
 

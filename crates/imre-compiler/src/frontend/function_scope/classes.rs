@@ -22,11 +22,9 @@ impl ClassBindings {
 
 pub(crate) struct ClassScope {
     pub(crate) enclosing_class: Option<ruff_text_size::TextSize>,
-    pub(crate) annotations: super::ClassAnnotations,
     pub(crate) bindings: ClassBindings,
     pub(crate) namespace: FunctionScope,
     pub(crate) frame_reads: BTreeSet<String>,
-    pub(crate) postponed_annotations: bool,
     pub(crate) needs_class_cell: bool,
     pub(crate) needs_dict_cell: bool,
     pub(crate) static_attributes: BTreeSet<String>,
@@ -34,7 +32,6 @@ pub(crate) struct ClassScope {
 
 impl ClassScope {
     pub(crate) fn write_signature(&self, signature: &mut Value) {
-        signature["postponed_annotations"] = json!(self.postponed_annotations);
         signature["needs_class_cell"] = json!(self.needs_class_cell);
         signature["needs_dict_cell"] = json!(self.needs_dict_cell);
         signature["static_attributes"] = json!(self.static_attributes);
@@ -59,7 +56,6 @@ impl ClassScope {
             class_metadata::capture(&mut declarations, class, string_annotations);
         Self {
             enclosing_class,
-            annotations: Default::default(),
             bindings,
             namespace: FunctionScope::new(
                 ClosureNames {
@@ -72,7 +68,6 @@ impl ClassScope {
                 false,
             ),
             frame_reads,
-            postponed_annotations: false,
             needs_class_cell: imre_ast::class_cell::needed(body, string_annotations),
             needs_dict_cell: imre_ast::class_cell::dict_needed(body, string_annotations),
             static_attributes: imre_ast::class_attributes::static_attributes(body, names),

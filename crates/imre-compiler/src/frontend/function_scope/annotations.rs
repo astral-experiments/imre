@@ -1,10 +1,10 @@
 //! Lexical reads for lazy function and class annotation providers.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 
 use ruff_python_ast as ast;
 use ruff_python_ast::visitor::Visitor;
-use ruff_text_size::{Ranged, TextSize};
+use ruff_text_size::TextSize;
 
 use super::{ClassBindings, ClosureNames};
 
@@ -31,73 +31,33 @@ impl ParameterReads {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct ClassAnnotationSite {
-    pub(crate) site: TextSize,
-    pub(crate) index: Option<usize>,
-}
-
 #[derive(Default)]
 pub(crate) struct ClassAnnotations {
-    pub(crate) sites: Vec<ClassAnnotationSite>,
+    pub(crate) conditional_offsets: Vec<TextSize>,
     pub(crate) body: Option<Box<crate::frontend::AnnotationProvider>>,
     pub(crate) reads: BTreeSet<String>,
     pub(crate) incomplete: bool,
+    pub(crate) postponed: bool,
 }
 
 impl ClassAnnotations {
-    /// Compile the lazy provider once its lexical sites and annotation operands are known.
-    pub(crate) fn prepare_body(
-        &mut self,
-        fields: &mut HashMap<TextSize, crate::frontend::DeferredAnnotation>,
-        bindings: crate::frontend::RegisteredBindings,
-    ) {
-        if !self.sites.is_empty() {
-            let fields = self.sites.iter().map(|site| {
-                (
-                    fields.remove(&site.site).expect("checked class annotation"),
-                    site.index,
-                )
-            });
-            self.body = Some(Box::new(crate::frontend::DeferredAnnotation::prepare_body(
-                fields, bindings,
-            )));
-        }
+    pub(in crate::frontend) fn read(&mut self, expr: &ast::Expr) {
+        let mut names = ClosureNames {
+            reads: std::mem::take(&mut self.reads),
+            ..ClosureNames::default()
+        };
+        names.visit_expr(expr);
+        self.reads = names.reads;
+        self.incomplete |= names.incomplete;
     }
 
-    pub(super) fn observe(&mut self, assign: &ast::StmtAnnAssign) {
-        if assign.simple && assign.target.is_name_expr() {
-            let mut names = ClosureNames {
-                reads: std::mem::take(&mut self.reads),
-                ..ClosureNames::default()
-            };
-            names.visit_expr(&assign.annotation);
-            self.reads = names.reads;
-            self.incomplete |= names.incomplete;
-            self.sites.push(ClassAnnotationSite {
-                site: assign.start(),
-                index: None,
-            });
-        }
-    }
-
-    pub(super) fn finish(&mut self, class: &ast::StmtClassDef, bindings: &ClassBindings) {
-        if self.sites.is_empty() {
-            return;
-        }
-        self.reads
-            .retain(|name| !bindings.locals.contains(name) && !bindings.globals.contains(name));
-        self.reads.insert("__classdict__".into());
-        let mut conditional = 0;
-        for entry in &mut self.sites {
-            if class
-                .body
-                .binary_search_by_key(&entry.site, Ranged::start)
-                .is_err()
-            {
+    pub(in crate::frontend) fn resolve(&mut self, bindings: &ClassBindings) {
+        if self.body.is_some() {
+            self.reads
+                .retain(|name| !bindings.locals.contains(name) && !bindings.globals.contains(name));
+            self.reads.insert("__classdict__".into());
+            if !self.conditional_offsets.is_empty() {
                 self.reads.insert("__conditional_annotations__".into());
-                entry.index = Some(conditional);
-                conditional += 1;
             }
         }
     }

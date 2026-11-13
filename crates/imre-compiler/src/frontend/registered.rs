@@ -1078,6 +1078,7 @@ pub(crate) struct FunctionSite<'a> {
 }
 
 pub(crate) struct RegisteredClass {
+    pub(crate) annotations: super::ClassAnnotations,
     pub(crate) name: ast::Identifier,
     pub(crate) range: TextRange,
     pub(crate) doc: Option<String>,
@@ -1139,7 +1140,12 @@ impl ModuleAnnotations {
 
 pub(crate) enum DeclarationSite<'a> {
     Function(FunctionSite<'a>),
-    Class(&'a ast::StmtClassDef),
+    Class(ClassSite<'a>),
+}
+
+pub(crate) struct ClassSite<'a> {
+    def: &'a ast::StmtClassDef,
+    annotations: super::ClassAnnotations,
 }
 
 #[derive(Default)]
@@ -1147,8 +1153,6 @@ pub(crate) struct RegisteredSites<'a> {
     pub(crate) operations: HashMap<TextRange, Expr>,
     pub(crate) declarations: Vec<DeclarationSite<'a>>,
     pub(crate) module_annotations: ModuleAnnotations,
-    pub(crate) class_annotations: HashMap<TextSize, DeferredAnnotation>,
-    pub(crate) class_annotation_bindings: HashMap<TextSize, RegisteredBindings>,
 }
 
 pub(crate) fn registered_sites<'a, R>(
@@ -1182,21 +1186,40 @@ pub(super) fn collect_sites<'a>(
     source: values::RegisteredSource<'_>,
     mut operand: impl FnMut(&ast::Expr, bool) -> Option<Expr>,
 ) -> RegisteredSites<'a> {
-    use ast::statement_visitor::{StatementVisitor, walk_stmt};
+    use ast::statement_visitor::{StatementVisitor, walk_body, walk_stmt};
+    #[derive(Default)]
+    struct ClassFields {
+        plan: super::ClassAnnotations,
+        fields: Vec<(DeferredAnnotation, Option<usize>)>,
+        conditional: bool,
+    }
     struct Collector<'s, 'a> {
         names: &'s imre_ast::Names,
         source: values::RegisteredSource<'s>,
         operand: &'s mut dyn FnMut(&ast::Expr, bool) -> Option<Expr>,
         annotations: SourceScope<'s>,
+        class: ClassFields,
         scope: RegisteredScope,
         in_unprepared_generic: bool,
         output: RegisteredSites<'a>,
     }
     impl<'a> StatementVisitor<'a> for Collector<'_, 'a> {
+        fn visit_body(&mut self, body: &'a [ast::Stmt]) {
+            let outer = std::mem::replace(&mut self.class.conditional, true);
+            walk_body(self, body);
+            self.class.conditional = outer;
+        }
+
         fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
             match stmt {
                 ast::Stmt::ClassDef(class) => {
-                    self.output.declarations.push(DeclarationSite::Class(class));
+                    let site = self.output.declarations.len();
+                    self.output
+                        .declarations
+                        .push(DeclarationSite::Class(ClassSite {
+                            def: class,
+                            annotations: Default::default(),
+                        }));
                     let outer = std::mem::replace(&mut self.scope, RegisteredScope::Class);
                     let child = SourceScope::new(
                         self.annotations.kind,
@@ -1205,14 +1228,23 @@ pub(super) fn collect_sites<'a>(
                         self.annotations.sites,
                     );
                     let outer_annotations = std::mem::replace(&mut self.annotations, child);
-                    walk_stmt(self, stmt);
+                    let outer_fields = std::mem::take(&mut self.class);
+                    walk_body(self, &class.body);
+                    let ClassFields {
+                        mut plan, fields, ..
+                    } = std::mem::replace(&mut self.class, outer_fields);
                     self.scope = outer;
                     let child = std::mem::replace(&mut self.annotations, outer_annotations);
-                    if !child.locals.is_empty() {
-                        self.output
-                            .class_annotation_bindings
-                            .insert(class.start(), child.bindings());
+                    if !fields.is_empty() {
+                        plan.body = Some(Box::new(DeferredAnnotation::prepare_body(
+                            fields,
+                            child.bindings(),
+                        )));
                     }
+                    self.output.declarations[site] = DeclarationSite::Class(ClassSite {
+                        def: class,
+                        annotations: plan,
+                    });
                 }
                 ast::Stmt::FunctionDef(def) => {
                     let annotations = ParameterAnnotations::prepare(
@@ -1267,14 +1299,17 @@ pub(super) fn collect_sites<'a>(
                     self.in_unprepared_generic = outer_generic;
                 }
                 ast::Stmt::AnnAssign(ann)
-                    if !matches!(self.scope, RegisteredScope::Function { .. }) && ann.simple =>
+                    if !matches!(self.scope, RegisteredScope::Function { .. }) =>
                 {
-                    let Some(name) = ann.target.as_name_expr() else {
+                    let module = matches!(self.scope, RegisteredScope::Module);
+                    if !module && self.names.string_annotations {
+                        self.class.plan.postponed = true;
+                    }
+                    let Some(name) = ann.target.as_name_expr().filter(|_| ann.simple) else {
                         return;
                     };
 
                     let name = name.id.to_string();
-                    let module = matches!(self.scope, RegisteredScope::Module);
                     let operand = (self.operand)(&ann.annotation, module);
                     let (annotation, values) = if self.names.string_annotations {
                         (
@@ -1294,7 +1329,13 @@ pub(super) fn collect_sites<'a>(
                             fields.push(field);
                             ir::NamespaceAnnotation::Module { index }
                         } else {
-                            self.output.class_annotations.insert(ann.start(), field);
+                            self.class.plan.read(&ann.annotation);
+                            let index = self.class.conditional.then(|| {
+                                let offsets = &mut self.class.plan.conditional_offsets;
+                                offsets.push(ann.start());
+                                offsets.len() - 1
+                            });
+                            self.class.fields.push((field, index));
                             ir::NamespaceAnnotation::Class {
                                 site: ann.start(),
                                 name,
@@ -1313,7 +1354,9 @@ pub(super) fn collect_sites<'a>(
                 }
                 // Ordinary try numbers its else before the handlers. Except-star uses source order.
                 ast::Stmt::Try(region)
-                    if matches!(self.scope, RegisteredScope::Module)
+                    if (matches!(self.scope, RegisteredScope::Module)
+                        || matches!(self.scope, RegisteredScope::Class)
+                            && !self.names.string_annotations)
                         && !region.is_star
                         && !region.orelse.is_empty() =>
                 {
@@ -1342,6 +1385,7 @@ pub(super) fn collect_sites<'a>(
         ),
         scope: RegisteredScope::Module,
         in_unprepared_generic: false,
+        class: Default::default(),
         output: RegisteredSites::default(),
     };
     sites.visit_body(body);
@@ -1562,7 +1606,7 @@ impl<'a> SuitePreparation<'a> {
     #[cfg(test)]
     pub(crate) fn class_suites(
         &mut self,
-        classes: Vec<&ast::StmtClassDef>,
+        classes: Vec<ClassSite<'_>>,
         class_keywords: &[TextSize],
         names: &imre_ast::Names,
         scopes: &super::function_scope::ScopeFacts<'_>,
@@ -1576,7 +1620,10 @@ impl<'a> SuitePreparation<'a> {
 
     pub(crate) fn class_suite(
         &mut self,
-        class: &ast::StmtClassDef,
+        ClassSite {
+            def: class,
+            mut annotations,
+        }: ClassSite<'_>,
         class_keywords: &[TextSize],
         names: &imre_ast::Names,
         scopes: &super::function_scope::ScopeFacts<'_>,
@@ -1634,7 +1681,9 @@ impl<'a> SuitePreparation<'a> {
         {
             self.declaration_refusals.insert(start, refusal);
         }
+        annotations.resolve(&scopes.classes[&start].bindings);
         let class = RegisteredClass {
+            annotations,
             name: class.name.clone(),
             range,
             doc: docstring(&class.body),
@@ -4359,7 +4408,6 @@ mod tests {
         );
         let def = stmts[0].as_function_def_stmt().unwrap();
         assert!(sites.module_annotations.fields.is_empty());
-        assert!(sites.class_annotations.is_empty());
         let [DeclarationSite::Function(site)] = sites.declarations.as_slice() else {
             panic!("expected a function declaration");
         };
