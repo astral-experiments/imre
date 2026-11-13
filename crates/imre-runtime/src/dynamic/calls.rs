@@ -261,6 +261,7 @@ pub(super) enum RegisteredCall {
         module: bool,
         discard: bool,
     },
+    Join(thread_worker::Join),
 }
 
 impl RegisteredCall {
@@ -281,6 +282,8 @@ impl RegisteredCall {
                 let result = unsafe { Context::run_code_frame(context, entry, module) }?;
                 Ok(if discard { NONE } else { result })
             }
+            // SAFETY: the interrupted caller remains rooted in this exclusively executing context.
+            Self::Join(join) => unsafe { join.run(context) },
         }
     }
 }
@@ -8204,6 +8207,9 @@ impl Context {
                 } => {
                     args = method_arguments(receiver, args)?;
                     callable = target;
+                }
+                Value::Native(ref name) if name == "_thread._ThreadHandle.join" => {
+                    return thread_handle::prepare_join(self, &args, &kwargs);
                 }
                 _ => break,
             }
