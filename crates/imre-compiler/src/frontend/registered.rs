@@ -2450,13 +2450,24 @@ impl<'a> SuitePreparation<'a> {
             }
             let slots_before = scope.locals.len();
             scope.refusal = None;
-            let lowered = match select {
-                SuiteSelection::All => scope.statement(stmt, &mut body.statements),
-                SuiteSelection::Physical => scope.physical_statement(stmt, &mut body, self),
+            let physical = matches!(select, SuiteSelection::Physical)
+                || (suspended
+                    && matches!(
+                        stmt,
+                        ast::Stmt::If(_) | ast::Stmt::While(_) | ast::Stmt::Try(_)
+                    ));
+            let lowered = if physical {
+                scope.physical_statement(stmt, &mut body, self)
+            } else {
+                scope.statement(stmt, &mut body.statements)
             };
             if let Ok(continues) = lowered {
                 if !continues {
                     body.falls_through = false;
+                    // A checked raise retains the surrounding declaration diagnostics.
+                    if !stmt.is_raise_stmt() {
+                        body.check_run(self);
+                    }
                 }
                 continue;
             }
