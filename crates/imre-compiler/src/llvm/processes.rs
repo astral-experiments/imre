@@ -362,12 +362,9 @@ impl Emitter<'_, '_> {
             | ProcessOperation::Call { streams, .. }
             | ProcessOperation::CheckOutput { streams, .. }
             | ProcessOperation::Run { streams, .. } => {
-                let cwd =
-                    self.instruction(format!("inttoptr i64 {} to ptr", args[2].value.operand));
-                let env =
-                    self.instruction(format!("inttoptr i64 {} to ptr", args[3].value.operand));
-                let executable =
-                    self.instruction(format!("inttoptr i64 {} to ptr", args[10].value.operand));
+                let cwd = self.optional_object_pointer(&args[2].value);
+                let env = self.optional_object_pointer(&args[3].value);
+                let executable = self.optional_object_pointer(&args[10].value);
                 // Bit 20 is set in the ABI word only when the caller disables
                 // restoration. The optional boolean is the final bound operand.
                 let signal_arg = streams & (1 << 20) != 0;
