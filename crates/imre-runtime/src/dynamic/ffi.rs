@@ -475,11 +475,7 @@ impl Context {
                     self.lookup_attr(a, &name)
                 }
             }
-            "setattr" => {
-                let name = self.copy_name(b)?;
-                self.set_attr(a, &name, c)?;
-                Ok(c)
-            }
+            "setattr" => self.set_attr(a, &self.copy_name(b)?, c),
             "delattr" => {
                 let name = self.copy_name(b)?;
                 self.delete_attr(a, &name)?;
@@ -2293,6 +2289,16 @@ pub(super) unsafe extern "C" fn imre_boxed_named_op(
     len: usize,
     value: Id,
 ) -> Id {
+    // SAFETY: the emitter supplies a live context and a terminated opcode.
+    if unsafe { !imre_dyn_failed(ctx) && libc::strcmp(op, c"setattr".as_ptr()) == 0 } {
+        // The existing setter can consume this spelling without boxing the name.
+        // SAFETY: the generated name has exactly len bytes for the lifetime of this call.
+        let (ctx, name) = unsafe { (&mut *ctx, slice::from_raw_parts(name, len)) };
+        let result = std::str::from_utf8(name)
+            .map_err(|error| Error::new("UnicodeError", error.to_string()))
+            .and_then(|name| ctx.set_attr(receiver, name, value));
+        return finish(ctx, result);
+    }
     // SAFETY: generated code owns the context, opcode and linked name for this call.
     unsafe {
         let key = imre_dyn_lit(ctx, 6, name, len);
