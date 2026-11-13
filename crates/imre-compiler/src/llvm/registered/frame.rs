@@ -92,6 +92,7 @@ pub(crate) struct RegisteredFrame<'a, 'p> {
     // Handles held in native registers across statement boundaries must stay reachable.
     pub(crate) live: Vec<String>,
     /// Addressable IR temporaries whose contents survive Python statement boundaries.
+    /// Entering a region appends newly allocated indices. Leaving it removes a suffix.
     pub(crate) live_slots: Vec<usize>,
     pub(crate) private_slot_count: usize,
     pub(crate) max_live: usize,
@@ -771,11 +772,8 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
     fn live_handles(&mut self, trailing: &[&str]) -> (Cow<'static, str>, usize) {
         if trailing.is_empty()
             && self.live.is_empty()
-            && let Some(first) = self.live_slots.first()
-            && self
-                .live_slots
-                .windows(2)
-                .all(|pair| pair[1] == pair[0] + 1)
+            && let Some((&first, rest)) = self.live_slots.split_first()
+            && self.live_slots.last() == Some(&(first + rest.len()))
         {
             return (
                 Cow::Owned(format!("%ir_slot{first}")),

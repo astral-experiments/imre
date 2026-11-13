@@ -520,24 +520,45 @@ fn checkpoints_preserve_the_selected_roots_of_nested_regions() {
     let file = output.data(b"nested.py");
     let positions = SourcePositions::new(Path::new("nested.py"), "", &file);
     let mut frame = RegisteredFrame::new(&mut output, &positions, false, 0, 0.into());
-    frame.live_slots = vec![2, 3];
+    let graph =
+        SourceGraph::single("def post(row, book, read):\n    book[0], book[read()] = row\n")
+            .unwrap();
+    let _ = crate::frontend::lower(&graph);
+    let functions = graph.registered_functions();
+    let region = functions[&graph.entry][&TextSize::default()].region();
+    let count = region.frame_slots.slots().len();
+    assert!(count > 0);
+    let outer = frame.enter_checked_slots(region).unwrap();
+    let first = frame.enter_checked_slots(region).unwrap();
     frame.checkpoint(Default::default());
-    assert!(frame.body.code.contains("ptr %ir_slot2, i64 2,"));
+    let both = 2 * count;
+    assert!(
+        frame
+            .body
+            .code
+            .contains(&format!("ptr %ir_slot0, i64 {both},"))
+    );
 
+    frame.restore_checked_slots(first);
+    let sibling = frame.enter_checked_slots(region).unwrap();
     frame.body.code.clear();
-    frame.live_slots = vec![0, 3];
     frame.checkpoint(Default::default());
-    assert!(frame.body.code.contains("ptr %live, i64 2,"));
-    assert!(frame.body.code.contains("load i64, ptr %ir_slot0"));
-    assert!(frame.body.code.contains("load i64, ptr %ir_slot3"));
-    assert!(!frame.body.code.contains("%ir_slot2"));
+    assert!(frame.body.code.contains(&format!("ptr %live, i64 {both},")));
+    assert!(frame.body.code.contains("ptr %ir_slot0,"));
+    assert!(frame.body.code.contains(&format!("ptr %ir_slot{both},")));
+    assert!(!frame.body.code.contains(&format!("ptr %ir_slot{count},")));
 
+    frame.restore_checked_slots(sibling);
     frame.body.code.clear();
-    frame.live_slots = vec![2, 3];
-    frame.live.push("%exception".into());
-    frame.checkpoint(Default::default());
+    frame.checkpoint_with_roots(Default::default(), &["%exception"]);
     assert!(frame.body.code.contains("store i64 %exception,"));
-    assert!(frame.body.code.contains("ptr %live, i64 3,"));
+    assert!(
+        frame
+            .body
+            .code
+            .contains(&format!("ptr %live, i64 {},", count + 1))
+    );
+    frame.restore_checked_slots(outer);
 }
 
 #[test]
