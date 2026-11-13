@@ -1000,7 +1000,7 @@ fn lower_graph(
             // property aliases and synthesized initializers have separate native slots.
             let physical_entry = kind == crate::classes::MethodKind::Instance
                 && class.method_origins[index] == class.definition
-                && class.initializer != Some(index)
+                && !context.generated_initializer(classes.declarations)
                 && class.forwarder.is_none()
                 && module.is_program_source()
                 && defaults.forwarded.is_none()

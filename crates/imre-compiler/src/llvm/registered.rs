@@ -269,6 +269,9 @@ pub(crate) fn frame_inputs(
             ExprKind::Builtin(Builtin::RegisteredAttribute { action, .. }, operands) => {
                 use ir::AttributeAction;
                 uses_python_protocol |= *action != AttributeAction::Load;
+                if *action == AttributeAction::Store && has_scalar {
+                    protocol_reads += operands.iter().map(&protocol_parameter).sum::<usize>();
+                }
                 operands.len()
                     == match action {
                         AttributeAction::Load | AttributeAction::Delete => 1,
