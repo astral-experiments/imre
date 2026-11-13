@@ -332,14 +332,7 @@ impl Emitter<'_, '_> {
             false,
         );
         let right_value = self.instruction(format!("ashr i64 {}, 1", right.value.operand));
-        let predicate = match operation {
-            Compare::Equal => "eq",
-            Compare::NotEqual => "ne",
-            Compare::Less => "slt",
-            Compare::LessEqual => "sle",
-            Compare::Greater => "sgt",
-            Compare::GreaterEqual => "sge",
-        };
+        let predicate = operation.signed_predicate();
         let fast_value = self.instruction(format!(
             "icmp {predicate} i64 {}, {right_value}",
             values[summary.result]
