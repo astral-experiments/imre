@@ -39,6 +39,17 @@ def partial():
     assert events == [2, 1, 0]
 
 
-for run in (completed, partial):
+def interrupted_call():
+    def unreachable(*values):
+        raise AssertionError("failed argument reached the callee")
+
+    try:
+        unreachable([item(1), [item(2), item(4)]], item(3))
+    except ValueError as exc:
+        assert exc is failure
+    assert events == [4, 2, 1]
+
+
+for run in (completed, partial, interrupted_call):
     events.clear()
     run()

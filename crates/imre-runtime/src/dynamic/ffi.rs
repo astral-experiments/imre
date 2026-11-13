@@ -3243,14 +3243,7 @@ pub(super) unsafe extern "C" fn imre_dyn_discard_truth(ctx: *mut Context, mark: 
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_unwind_operands(ctx: *mut Context, mark: usize) {
     // SAFETY: the generated caller owns this context and marked the same activation.
-    let ctx = unsafe { &mut *ctx };
-    if ctx.heap.observes_released_roots() {
-        for slot in (mark..ctx.heap.temporary_mark()).rev() {
-            ctx.discard_truth(slot);
-        }
-    } else {
-        ctx.discard_truth(mark);
-    }
+    unsafe { (&mut *ctx).unwind_operands(mark) }
 }
 
 /// Join the checked f-string parts and pop them in Python evaluation-stack order.
