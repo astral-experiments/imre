@@ -37,18 +37,13 @@ fn source_key(name: &str, path: &Path, source: &str) -> blake3::Hash {
     hash.finalize()
 }
 
-pub(super) fn seal(ir: &mut String, symbol: &str, name: &str, path: &Path, source: &str) {
-    use std::fmt::Write;
-
-    if let Some(compiler) = compiler_digest() {
-        let key = source_key(name, path, source);
-        // Only the archive index needs the stamp. The native link can discard its section.
-        writeln!(
-            ir,
-            "@{SEALED}{key}_{compiler} = hidden constant ptr @{symbol}, section \".data.rel.ro.imre.provider\""
-        )
-        .unwrap();
-    }
+pub(super) fn seal(symbol: &str, name: &str, path: &Path, source: &str) -> Option<String> {
+    let compiler = compiler_digest()?;
+    let key = source_key(name, path, source);
+    // Only the archive index needs the stamp. The native link can discard its section.
+    Some(format!(
+        "@{SEALED}{key}_{compiler} = hidden constant ptr @{symbol}, section \".data.rel.ro.imre.provider\"\n"
+    ))
 }
 
 #[derive(Default)]

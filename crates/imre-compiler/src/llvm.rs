@@ -52,7 +52,7 @@ mod truthiness;
 mod unions;
 mod units;
 
-pub(crate) use module_registration::ModuleLauncher;
+pub(crate) use module_registration::{ModuleLauncher, ProviderBody};
 use operations::{CheckedBody, LoopEdges};
 use units::Output;
 
