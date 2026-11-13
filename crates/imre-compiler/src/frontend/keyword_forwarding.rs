@@ -218,11 +218,7 @@ fn expand(
 ) -> Option<(usize, ModuleId)> {
     let parameters = &function.parameters;
     let keyword = parameters.kwarg.as_ref()?;
-    if function.is_async
-        || parameters.vararg.is_some()
-        || keyword.annotation.is_some()
-        || !function.decorator_list.is_empty()
-    {
+    if function.is_async || parameters.vararg.is_some() || keyword.annotation.is_some() {
         return None;
     }
     let bound: HashSet<_> = parameters

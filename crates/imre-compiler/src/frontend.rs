@@ -885,8 +885,8 @@ fn lower_graph(
                                 node_index: ast::AtomicNodeIndex::NONE,
                             })));
                     }
-                    let defaults = if cached.is_some() {
-                        // A cache can distinguish omitted keywords from explicitly supplied defaults.
+                    let defaults = if cached.is_some() || !function.decorator_list.is_empty() {
+                        // A wrapper can distinguish omitted keywords from explicitly supplied defaults.
                         keyword_forwarding::Defaults::local(module_id)
                     } else {
                         keyword_forwarding::prepare(graph, module_id, &mut function)
@@ -2175,7 +2175,8 @@ fn signature(
             graph.needs_object_runtime.set(true);
         }
     }
-    if !function.decorator_list.is_empty() || function.type_params.is_some() {
+    // The class collector has already resolved method decorators to their descriptor kinds.
+    if function.type_params.is_some() || (method.is_none() && !function.decorator_list.is_empty()) {
         if function.decorator_list.iter().any(|decorator| {
             decorator.expression.as_call_expr().is_some_and(|call| {
                 graph.resolve(module, &call.func) == Some(Binding::Intrinsic(Intrinsic::Wraps))

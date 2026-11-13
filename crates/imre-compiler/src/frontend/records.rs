@@ -31,10 +31,8 @@ pub(super) fn executable_method<'a>(
     types: &Types,
 ) -> std::result::Result<(Cow<'a, ast::StmtFunctionDef>, bool), String> {
     let mut method = Cow::Borrowed(binding.function.as_ref());
-    if binding.name != method.name || !method.decorator_list.is_empty() {
-        let method = method.to_mut();
-        method.name.clone_from(&binding.name);
-        method.decorator_list.clear();
+    if binding.name != method.name {
+        method.to_mut().name.clone_from(&binding.name);
     }
     if classes.definitions[context.class].forwarder.is_some()
         && matches!(method.name.as_str(), "__str__" | "__repr__")
