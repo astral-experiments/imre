@@ -1209,8 +1209,7 @@ impl DeferredAnnotation {
 pub(crate) struct FunctionSite<'a> {
     pub(crate) def: &'a ast::StmtFunctionDef,
     pub(crate) annotations: Option<Box<ParameterAnnotations>>,
-    pub(crate) parameters: Option<Vec<ir::RegisteredTypeParameter<ParameterEvaluator>>>,
-    pub(crate) prepare_entry: bool,
+    pub(crate) parameters: Vec<ir::RegisteredTypeParameter<ParameterEvaluator>>,
     module_scope: bool,
     pub(crate) thread_entry: Option<imre_ast::ThreadEntry>,
 }
@@ -1339,7 +1338,6 @@ pub(super) fn collect_sites<'a>(
         annotations: SourceScope<'s>,
         class: ClassFields,
         scope: RegisteredScope,
-        in_unprepared_generic: bool,
         output: RegisteredSites<'a>,
     }
     impl<'a> StatementVisitor<'a> for Collector<'_, 'a> {
@@ -1392,20 +1390,11 @@ pub(super) fn collect_sites<'a>(
                         self.operand,
                         self.names.string_annotations,
                     );
-                    let parameters = def.type_params.as_deref().filter(|_| {
-                        !matches!(self.scope, RegisteredScope::Class)
-                            || super::function_scope::type_parameter_scope(
-                                def,
-                                self.names.string_annotations,
-                                true,
-                                Some(self.names),
-                            )
-                            .is_some()
+                    let parameters = def.type_params.as_deref().map_or_else(Vec::new, |params| {
+                        registered_type_parameters(params, self.names, |rhs| {
+                            ParameterEvaluator::prepare(rhs, self.source, None)
+                        })
                     });
-                    // Nested ordinary functions of an admitted definition take the
-                    // same preparation path as any other lexical function.
-                    let unprepared = parameters.is_none()
-                        && (self.in_unprepared_generic || def.type_params.is_some());
                     let thread_entry = imre_ast::thread_entry(def);
                     let worker = thread_entry.is_some();
                     self.output
@@ -1413,12 +1402,7 @@ pub(super) fn collect_sites<'a>(
                         .push(DeclarationSite::Function(FunctionSite {
                             def,
                             annotations,
-                            parameters: parameters.map(|params| {
-                                registered_type_parameters(params, self.names, |rhs| {
-                                    ParameterEvaluator::prepare(rhs, self.source, None)
-                                })
-                            }),
-                            prepare_entry: !unprepared || worker,
+                            parameters,
                             module_scope: matches!(self.scope, RegisteredScope::Module),
                             thread_entry,
                         }));
@@ -1426,8 +1410,6 @@ pub(super) fn collect_sites<'a>(
                         // A proven worker contains no nested declarations or namespace effects.
                         return;
                     }
-                    let outer_generic =
-                        std::mem::replace(&mut self.in_unprepared_generic, unprepared);
                     let outer = std::mem::replace(
                         &mut self.scope,
                         RegisteredScope::Function {
@@ -1448,7 +1430,6 @@ pub(super) fn collect_sites<'a>(
                         children = &rest[rest.partition_point(|next| next.start() < child.end())..];
                     }
                     self.scope = outer;
-                    self.in_unprepared_generic = outer_generic;
                 }
                 ast::Stmt::AnnAssign(ann)
                     if !matches!(self.scope, RegisteredScope::Function { .. }) =>
@@ -1533,7 +1514,6 @@ pub(super) fn collect_sites<'a>(
             false,
         ),
         scope: RegisteredScope::Module,
-        in_unprepared_generic: false,
         class: Default::default(),
         output: RegisteredSites::default(),
     };
@@ -1924,7 +1904,7 @@ impl<'a> SuitePreparation<'a> {
         python_annotations: bool,
     ) {
         let def = site.def;
-        header.type_params = site.parameters.unwrap_or_default();
+        header.type_params = site.parameters;
         header.annotations = site.annotations;
         // A checked frame can reference lexical activations prepared at this definition.
         let checked = checked.filter(|body| {
@@ -1959,12 +1939,8 @@ impl<'a> SuitePreparation<'a> {
             } else {
                 &def.body
             };
-            let suite = self.named_body(
-                statements,
-                kind,
-                header.metadata.suspension_flags() != 0,
-                site.prepare_entry,
-            );
+            let suite =
+                self.function_suite(statements, kind, header.metadata.suspension_flags() != 0);
             let refusal = suite.refusal;
             (NamedBody::from_suite(suite), refusal)
         };
@@ -1985,19 +1961,15 @@ impl<'a> SuitePreparation<'a> {
         }
     }
 
-    pub(crate) fn named_body(
+    #[cfg(test)]
+    pub(crate) fn physical_function_suite(
         &mut self,
         stmts: &[ast::Stmt],
         kind: RegisteredScope,
         suspended: bool,
-        prepare_entry: bool,
     ) -> RegisteredSuite {
-        if prepare_entry {
-            self.function_suite(stmts, kind, suspended)
-        } else {
-            let physical = SuiteSelection::Physical;
-            self.selected_suite(stmts, kind, physical, physical, suspended)
-        }
+        let physical = SuiteSelection::Physical;
+        self.selected_suite(stmts, kind, physical, physical, suspended)
     }
 
     fn prepare_child(
@@ -4255,11 +4227,10 @@ mod tests {
         let operations = HashMap::new();
         let mut prepare =
             SuitePreparation::new(&operations, module.registered_values().context(text), true);
-        let suite = prepare.named_body(
+        let suite = prepare.physical_function_suite(
             &function.body,
             RegisteredScope::Function { is_async: false },
             true,
-            false,
         );
         assert!(suite.refusal.is_none());
         assert!(suite.fully_checked());
@@ -4278,11 +4249,10 @@ mod tests {
         let literals = values::ModuleSource::new(module);
         let operations = HashMap::new();
         let mut prepare = SuitePreparation::new(&operations, literals.context(text), true);
-        let suite = prepare.named_body(
+        let suite = prepare.physical_function_suite(
             body,
             RegisteredScope::Function { is_async: false },
             true,
-            false,
         );
         assert!(suite.refusal.is_none());
         assert!(!suite.fully_checked());
@@ -4302,7 +4272,7 @@ mod tests {
 
     #[test]
     fn generic_method_closure_uses_ordinary_function_sites() {
-        let source = "class Box:\n    def capture[T](self, __value: T):\n        def get():\n            return __value\n        return get\n";
+        let source = "class Box:\n    def capture[__T](self, __value: __T):\n        def get():\n            return __value\n        return get\n";
         let graph = SourceGraph::single(source).unwrap();
         let module = &graph.modules[graph.entry];
         let mut body = module.parsed.syntax().body.clone();
@@ -4326,11 +4296,12 @@ mod tests {
         else {
             panic!("expected the method and its lexical function");
         };
-        assert!(method.prepare_entry && closure.prepare_entry);
-        let [parameter] = method.parameters.as_deref().unwrap() else {
+        assert!(closure.parameters.is_empty());
+        let [parameter] = method.parameters.as_slice() else {
             panic!("expected the method's type parameter");
         };
-        assert_eq!(parameter.binding, "T");
+        assert_eq!(parameter.binding, "_Box__T");
+        assert_eq!(parameter.name, "__T");
         assert_eq!(closure.def.name.as_str(), "get");
     }
 

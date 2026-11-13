@@ -1343,7 +1343,7 @@ impl LexicalDefinitions<'_, '_> {
                     .or_else(|| source.bundled_docstring(&qualname))
             });
         let provider = header.and_then(|h| self.parameter_provider(h, &qualname));
-        let generic = header.is_some_and(|h| h.generic);
+        let generic = header.is_some_and(|h| !h.type_params.is_empty());
         let suspension = metadata.suspension_flags();
         // Several expression regions can place the same lexical lambda.
         let cache = match callable {
@@ -1370,16 +1370,13 @@ impl LexicalDefinitions<'_, '_> {
         });
         // A lambda inside a display captures the iteration namespace even in a class body.
         let comprehension = matches!(callable, Callable::Lambda(_, true));
-        let method = !comprehension && self.method_scope;
-        let mut flags = source.function_flags(
-            self.in_function || comprehension || generic,
-            method && !generic,
-        );
+        let direct_method = self.method_scope && !comprehension && !generic;
+        let mut flags =
+            source.function_flags(self.in_function || comprehension || generic, direct_method);
         if doc.is_some() {
             flags |= imre_ast::code_flags::HAS_DOCSTRING;
         }
-        let class_cell = header.is_none_or(|h| !h.generic || h.type_params.is_empty());
-        let signature = metadata.signature(flags, method && class_cell);
+        let signature = metadata.signature(flags, direct_method);
         if !matches!(callable, Callable::Generator(_)) {
             self.output
                 .interned_identifiers
@@ -1564,7 +1561,7 @@ impl LexicalDefinitions<'_, '_> {
         let reads = annotations.reads(class);
         let mut metadata = json!({
             "posonly": ["format"],
-            "code_flags": source.function_flags(self.in_function || header.generic, false),
+            "code_flags": source.function_flags(self.in_function || !header.type_params.is_empty(), false),
             "scope_reads": reads,
             "scope_complete": true,
             "scope_locals_complete": true,
@@ -2865,10 +2862,9 @@ mod tests {
             true,
         );
         physical.sites.expressions = lexical;
-        let body = physical.named_body(
+        let body = physical.physical_function_suite(
             &def.body,
             crate::frontend::RegisteredScope::Function { is_async: false },
-            false,
             false,
         );
         module.source.statement_sites = physical.sites;
@@ -3020,10 +3016,9 @@ mod tests {
         };
         let mut plan = SuitePreparation::new(&module.source.namespace_operations, source, true);
         plan.sites.expressions = lexical;
-        let body = plan.named_body(
+        let body = plan.physical_function_suite(
             &function.body,
             RegisteredScope::Function { is_async: false },
-            false,
             false,
         );
         module.source.statement_sites = plan.sites;
@@ -4551,10 +4546,9 @@ mod tests {
             true,
         );
         physical.sites.expressions = lexical;
-        let body = physical.named_body(
+        let body = physical.physical_function_suite(
             &function.body,
             crate::frontend::RegisteredScope::Function { is_async: false },
-            false,
             false,
         );
         prepared.source.statement_sites = physical.sites;
@@ -5985,11 +5979,10 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         };
         let mut plan = SuitePreparation::new(&module.source.namespace_operations, values, true);
         plan.sites.expressions = lexical;
-        let body = plan.named_body(
+        let body = plan.physical_function_suite(
             &function.body,
             RegisteredScope::Function { is_async: true },
             true,
-            false,
         );
         module.source.statement_sites = plan.sites;
         install_test_function_body(&mut module.source, function, body);
@@ -6309,7 +6302,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             let mut physical =
                 SuitePreparation::new(&module.source.namespace_operations, source, true);
             physical.sites.expressions = lexical;
-            let body = physical.named_body(&def.body, kind, true, false);
+            let body = physical.physical_function_suite(&def.body, kind, true);
             module.source.statement_sites = physical.sites;
             install_test_function_body(&mut module.source, def, body);
             let suite = test_function_suite(&mut module.source, function);
