@@ -25,6 +25,19 @@ def check():
     head = original.__traceback__
     tail = head.tb_next
     alias = ValueError().with_traceback(head)
+    frame = tail.tb_frame
+    builtins = type(frame).f_builtins
+    assert builtins is vars(type(frame))["f_builtins"]
+    assert type(builtins).__get__(builtins, frame) is frame.f_builtins
+    assert builtins.__get__(frame) is frame.f_builtins
+    for edit in (lambda: setattr(frame, "f_builtins", {}), lambda: delattr(frame, "f_builtins")):
+        try:
+            edit()
+        except AttributeError as error:
+            assert str(error) == "attribute 'f_builtins' of 'frame' objects is not writable"
+        else:
+            raise AssertionError("modified frame builtins")
+    del frame
     assert refs[0]() is not None
 
     for target, value, error_type, detail in (
