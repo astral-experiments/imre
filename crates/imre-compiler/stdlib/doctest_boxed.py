@@ -146,21 +146,6 @@ class DocTestCase(_DocTestCase):
         self._dt_tearDown = tearDown
 
 
-def _set_exception_info(failure, test, example, exc_info):
-    failure.test = test
-    failure.example = example
-    failure.exc_info = exc_info
-
-
-def _set_failure_output(failure, test, example, got, exc_info):
-    if exc_info is not None:
-        from traceback import format_exception
-        got += "".join(format_exception(*exc_info))
-    failure.test = test
-    failure.example = example
-    failure.got = got
-
-
 def _execute_case(case, debug):
     execute(case._dt_test, debug, case._dt_optionflags, case._dt_checker)
 

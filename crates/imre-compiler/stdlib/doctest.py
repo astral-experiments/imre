@@ -221,11 +221,43 @@ class OutputChecker:
 
 
 class DocTestFailure(Exception):
-    pass
+    """A DocTest example has failed in debugging mode.
+
+    The exception instance has variables:
+
+    - test: the DocTest object being run
+
+    - example: the Example object that failed
+
+    - got: the actual output
+    """
+    def __init__(self, test, example, got):
+        self.test = test
+        self.example = example
+        self.got = got
+
+    def __str__(self):
+        return str(self.test)
 
 
 class UnexpectedException(Exception):
-    pass
+    """A DocTest example has encountered an unexpected exception
+
+    The exception instance has variables:
+
+    - test: the DocTest object being run
+
+    - example: the Example object that failed
+
+    - exc_info: the exception info
+    """
+    def __init__(self, test, example, exc_info):
+        self.test = test
+        self.example = example
+        self.exc_info = exc_info
+
+    def __str__(self):
+        return str(self.test)
 
 
 def _optionflags(example: Example, flags: int = 0) -> int:
@@ -271,19 +303,18 @@ def _check_output(test: DocTest, example: Example, got: str, error: str,
         return True
     if quiet:
         return False
+    if debug:
+        if error and expected is None:
+            raise UnexpectedException(test, example, exc_info)
+        if exc_info is not None:
+            from traceback import format_exception
+            got += "".join(format_exception(*exc_info))
+        raise DocTestFailure(test, example, got)
     message = f"{_example_location(test, example)}\nFailed example:\n{example.source}"
     if error and expected is None:
         message += "Exception raised:\n" + error
-        if debug:
-            unexpected = UnexpectedException(message)
-            _set_exception_info(unexpected, test, example, exc_info)
-            raise unexpected
     else:
         message += f"Expected:\n{example.want}Got:\n{error or got}"
-        if debug:
-            mismatch = DocTestFailure(message)
-            _set_failure_output(mismatch, test, example, got, exc_info)
-            raise mismatch
     failures.append(message)
     return False
 
