@@ -1297,17 +1297,26 @@ impl Checker<'_> {
                 kind: ExprKind::Builtin(operation, arguments.values),
             };
         }
+        // Immediate values and initialized local reads in source order already have owners.
+        let immediate = |value: &Expr| match &value.kind {
+            ExprKind::Bool(_) | ExprKind::None => true,
+            ExprKind::Absent(inner) => matches!(inner.kind, ExprKind::None),
+            ExprKind::Int(_) => value.tagged_integer_literal().is_some(),
+            _ => false,
+        };
         let mut scope = ArgumentScope::default();
-        for value in &mut arguments.values {
-            // Singleton and tagged constants need no owner while the other operands run.
-            let immediate = match &value.kind {
-                ExprKind::Bool(_) | ExprKind::None => true,
-                ExprKind::Absent(inner) => matches!(inner.kind, ExprKind::None),
-                ExprKind::Int(_) => value.tagged_integer_literal().is_some(),
-                _ => false,
-            };
-            if !immediate {
-                *value = scope.hold(self, std::mem::replace(value, Expr::none()));
+        let mut previous = None;
+        let already_rooted = arguments.order.iter().all(|&index| {
+            let value = &arguments.values[index];
+            immediate(value)
+                || matches!(value.kind, ExprKind::Local(slot) if self.assigned.contains(&slot))
+                    && previous.replace(index).is_none_or(|last| last < index)
+        });
+        if !already_rooted {
+            for value in &mut arguments.values {
+                if !immediate(value) {
+                    *value = scope.hold(self, std::mem::replace(value, Expr::none()));
+                }
             }
         }
         scope.finish(Expr {

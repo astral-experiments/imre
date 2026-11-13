@@ -230,12 +230,14 @@ impl StatementLowering for Checker<'_> {
         }
         let mut value = self.expr(expr)?;
         // A discarded run forwarding stdout to stderr needs only its exit status.
-        // The checked call already holds the command before permuting its keywords.
-        if let ExprKind::Scope { value: result, .. } = &mut value.kind
-            && let ExprKind::Builtin(
-                Builtin::Process(op @ ir::ProcessOperation::Run { streams: 4, .. }),
-                args,
-            ) = &mut result.kind
+        let result = match &mut value.kind {
+            ExprKind::Scope { value, .. } => value.as_mut(),
+            _ => &mut value,
+        };
+        if let ExprKind::Builtin(
+            Builtin::Process(op @ ir::ProcessOperation::Run { streams: 4, .. }),
+            args,
+        ) = &mut result.kind
             && args[0].ty == self.types.list(Type::Str)
             && let ast::Expr::Call(call) = expr
             && call
