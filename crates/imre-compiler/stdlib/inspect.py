@@ -1981,26 +1981,38 @@ def _signature_fromstr(cls, obj, s, skip_bound_arg=True):
             raise ValueError("Annotations are not currently supported")
         return node.arg
 
+    missing = object()
+
+    def lookup(mapping, name):
+        if type(mapping) is dict:
+            return mapping.get(name, missing)
+        try:
+            return mapping[name]
+        except KeyError:
+            return missing
+
     class RewriteSymbolics(ast.NodeTransformer):
         def symbol(self, name, attrs=()):
-            # Clinic defaults may refer to a name or one of its attributes.
-            # Keep the defining globals, builtins and loaded-module fallback.
+            default_builtins = type(self).symbol.__builtins__
             for namespace in (module_dict, sys_module_dict):
-                if '__builtins__' not in namespace:
-                    namespace['__builtins__'] = type(self).symbol.__builtins__
                 try:
+                    # Set up globals before capturing the builtins for this lookup.
+                    if not dict.__contains__(namespace, '__builtins__'):
+                        dict.__setitem__(namespace, '__builtins__', default_builtins)
+                    builtins = dict.get(namespace, '__builtins__', default_builtins)
                     if name == '__debug__':
                         value = not sys.flags.optimize
-                    elif name in namespace:
-                        value = namespace[name]
                     else:
-                        builtins = namespace['__builtins__']
-                        if isinstance(builtins, types.ModuleType):
-                            builtins = vars(builtins)
-                        try:
-                            value = builtins[name]
-                        except KeyError:
-                            continue
+                        value = lookup(namespace, name)
+                        if value is missing:
+                            # LOAD_NAME retries the raw globals dictionary after a locals miss.
+                            value = dict.get(namespace, name, missing)
+                        if value is missing:
+                            if isinstance(builtins, types.ModuleType):
+                                builtins = types.ModuleType.__dict__['__dict__'].__get__(builtins)
+                            value = lookup(builtins, name)
+                            if value is missing:
+                                continue
                     for attr in reversed(attrs):
                         value = getattr(value, attr)
                 except NameError:
