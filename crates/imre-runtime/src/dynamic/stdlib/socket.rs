@@ -2,6 +2,7 @@
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod message;
 use super::{Context, Error, Id, NONE, Result, Value, argument, option};
+use crate::dynamic::calls::RegisteredCall;
 use crate::dynamic::value::NativeModuleState;
 use crate::objects::socket as native;
 use std::time::Duration;
@@ -98,13 +99,13 @@ fn socket_class(ctx: &mut Context, module: Id, scope: Id) -> Result<Id> {
     Ok(owner)
 }
 
-pub(in crate::dynamic) fn descriptor_call(
+pub(in crate::dynamic) fn prepare_descriptor(
     ctx: &mut Context,
     owner: Id,
     name: &str,
     args: &[Id],
     kwargs: &[(String, Id)],
-) -> Result<Id> {
+) -> Result<RegisteredCall> {
     let receiver = argument(args, 0)?;
     if name == "__new__" {
         let class = argument(args, 1)?;
@@ -113,17 +114,66 @@ pub(in crate::dynamic) fn descriptor_call(
         }
         let handle = native::uninitialized()?;
         if class == owner {
-            return Ok(ctx.alloc(Value::Socket { class, handle }));
+            return Ok(RegisteredCall::Returned(
+                ctx.alloc(Value::Socket { class, handle }),
+            ));
         }
         let instance = ctx.instance(class, None);
         let Value::Instance { socket, .. } = ctx.heap.get_mut(instance) else {
             unreachable!()
         };
         *socket = Some(handle);
-        return Ok(instance);
+        return Ok(RegisteredCall::Returned(instance));
     }
     ctx.check_heap_method_receiver(owner, name, receiver)?;
-    call_method(ctx, name, args, kwargs)
+    if name == "__init__" {
+        return initialize(ctx, args, kwargs).map(RegisteredCall::Returned);
+    }
+    let Some(socket) = ctx.heap.get(receiver).socket_handle().cloned() else {
+        if CLASS_METHODS.contains(&name) {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "descriptor '{name}' for '_socket.socket' objects doesn't apply to a '{}' object",
+                    ctx.type_name(receiver)
+                ),
+            ));
+        }
+        return Err(Error::new("TypeError", "expected a socket"));
+    };
+    let args = &args[1..];
+    if name == "recv" {
+        check_args(name, args, kwargs, 2, &[])?;
+        let size = usize::try_from(ctx.as_integer(argument(args, 0)?)?)
+            .map_err(|_| Error::new("ValueError", "negative buffersize in recv"))?;
+        let flags = int_option(ctx, args, kwargs, 1, "flags", 0)?;
+        return Ok(RegisteredCall::Recv(Recv {
+            socket,
+            size,
+            flags,
+        }));
+    }
+    call_method(ctx, name, receiver, socket, args, kwargs).map(RegisteredCall::Returned)
+}
+
+/// The requesting thread retains the native socket across the wait and any signal callbacks.
+pub(in crate::dynamic) struct Recv {
+    socket: crate::ObjectOwner,
+    size: usize,
+    flags: i32,
+}
+
+impl Recv {
+    /// # Safety
+    /// The registered caller owns the context on this thread through signal dispatch and return.
+    pub(in crate::dynamic) unsafe fn run(self, context: *mut Context) -> Result<Id> {
+        let bytes = native::recv_with_signals(&self.socket, self.size, self.flags, || {
+            // SAFETY: only the interrupted thread reenters Python after the syscall returns.
+            unsafe { (&mut *context).dispatch_signals() }
+        })?;
+        // SAFETY: the native wait and its signal callbacks have returned.
+        Ok(unsafe { (&mut *context).alloc(Value::Bytes(bytes)) })
+    }
 }
 
 const CONSTANTS: &[(&str, i32)] = &[
@@ -1654,37 +1704,12 @@ fn initialize(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result
 fn call_method(
     ctx: &mut Context,
     method: &str,
+    receiver: Id,
+    s: crate::ObjectOwner,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    if method == "__init__" {
-        return initialize(ctx, args, kwargs);
-    }
     let is_message = matches!(method, "sendmsg" | "recvmsg" | "recvmsg_into");
-    let descriptor = CLASS_METHODS.contains(&method);
-    let (receiver, args) = args.split_first().ok_or_else(|| {
-        if descriptor {
-            Error::new(
-                "TypeError",
-                format!("unbound method socket.{method}() needs an argument"),
-            )
-        } else {
-            Error::new("TypeError", "missing socket receiver")
-        }
-    })?;
-    let Some(handle) = ctx.heap.get(*receiver).socket_handle() else {
-        if descriptor {
-            return Err(Error::new(
-                "TypeError",
-                format!(
-                    "descriptor '{method}' for '_socket.socket' objects doesn't apply to a '{}' object",
-                    ctx.type_name(*receiver)
-                ),
-            ));
-        }
-        return Err(Error::new("TypeError", "expected a socket"));
-    };
-    let s = handle.clone();
     match method {
         "family" => return Ok(ctx.int(i64::from(native::family(&s)))),
         "type" => return Ok(ctx.int(i64::from(native::kind(&s)))),
@@ -1699,12 +1724,12 @@ fn call_method(
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     if is_message {
-        return message::call(ctx, &s, *receiver, method, args, kwargs);
+        return message::call(ctx, &s, receiver, method, args, kwargs);
     }
     if method == "_sendfile_owner" {
         check_args(method, args, kwargs, 0, &[])?;
         let raw = native::fd(&s);
-        if let Some((expected, _)) = sendfile_write_for(ctx, *receiver) {
+        if let Some((expected, _)) = sendfile_write_for(ctx, receiver) {
             native::check_sendfile_owner(&s, raw, &expected)?;
         }
         return if raw < 0 {
@@ -1726,7 +1751,7 @@ fn call_method(
             }
         };
         check_args(method, args, kwargs, 4, &[])?;
-        if sendfile_write_for(ctx, *receiver).is_some_and(|(_, active)| active != session) {
+        if sendfile_write_for(ctx, receiver).is_some_and(|(_, active)| active != session) {
             return Err(changed_transport());
         }
         let identity = sendfile_identity(ctx, owner)?;
@@ -1734,9 +1759,9 @@ fn call_method(
         ctx.sendfile_writes
             .try_reserve(1)
             .map_err(|_| Error::new("MemoryError", ""))?;
-        ctx.heap.keep(*receiver);
+        ctx.heap.keep(receiver);
         ctx.heap.keep(session);
-        ctx.sendfile_writes.push((*receiver, identity, session));
+        ctx.sendfile_writes.push((receiver, identity, session));
         let result = ctx.call(send, vec![data], Vec::new());
         ctx.sendfile_writes.pop();
         return result;
@@ -1756,7 +1781,7 @@ fn call_method(
             ));
         };
         check_args(method, args, kwargs, 4, &[])?;
-        active_sendfile_owner(ctx, *receiver)?;
+        active_sendfile_owner(ctx, receiver)?;
         let identity = sendfile_identity(ctx, owner)?;
         return super::os::sendfile_to(
             ctx,
@@ -1791,7 +1816,7 @@ fn call_method(
     if matches!(method, "connect" | "connect_ex") {
         let peer = super::super::builtins::one_positional_arg(method, args, kwargs)?;
         let addr = address(ctx, native::family(&s), peer, method)?;
-        super::audit::event(ctx, "socket.connect", &[*receiver, peer])?;
+        super::audit::event(ctx, "socket.connect", &[receiver, peer])?;
         let result = native::connect(&s, &addr, || ctx.dispatch_signals())?;
         if method == "connect" {
             result.map_err(crate::objects::errno_error)?;
@@ -1838,8 +1863,8 @@ fn call_method(
                 .transpose()?
                 .unwrap_or(0);
             let addr = address(ctx, native::family(&s), peer, method)?;
-            super::audit::event(ctx, "socket.sendto", &[*receiver, peer])?;
-            let owner = active_sendfile_owner(ctx, *receiver)?;
+            super::audit::event(ctx, "socket.sendto", &[receiver, peer])?;
+            let owner = active_sendfile_owner(ctx, receiver)?;
             retry(ctx, &s, |ctx, until| {
                 let bytes = ctx.native_buffer_bytes(data)?;
                 Ok(native::with_send_fd(&s, owner.as_ref(), |raw| {
@@ -1855,19 +1880,19 @@ fn call_method(
     }
     let max = match method {
         "bind" | "listen" | "setblocking" | "settimeout" | "shutdown" => 1,
-        "recv" | "recvfrom" | "send" | "sendall" => 2,
+        "recvfrom" | "send" | "sendall" => 2,
         _ => 0,
     };
     check_args(method, args, kwargs, max, &[])?;
     match method {
         "__del__" => {
             if native::fd(&s) >= 0 {
-                let warning = ctx.checked_format(*receiver, true).and_then(|repr| {
+                let warning = ctx.checked_format(receiver, true).and_then(|repr| {
                     ctx.emit_builtin_warning_with_source(
                         crate::objects::exceptions::Kind::ResourceWarning,
                         &format!("unclosed {repr}"),
                         1,
-                        *receiver,
+                        receiver,
                     )
                 });
                 if let Err(error) = warning {
@@ -1877,7 +1902,7 @@ fn call_method(
                             ctx,
                             error,
                             true,
-                            Some(*receiver),
+                            Some(receiver),
                             "Exception ignored while finalizing socket",
                         );
                     }
@@ -1911,19 +1936,12 @@ fn call_method(
             let peer = pack_socket_name(ctx, peer)?;
             return Ok(ctx.alloc(Value::Tuple(vec![data, peer])));
         }
-        "recv" => {
-            let n = usize::try_from(ctx.as_integer(argument(args, 0)?)?)
-                .map_err(|_| Error::new("ValueError", "negative buffersize in recv"))?;
-            let flags = int_option(ctx, args, kwargs, 1, "flags", 0)?;
-            let bytes = native::recv_with_signals(&s, n, flags, || ctx.dispatch_signals())?;
-            return Ok(ctx.alloc(Value::Bytes(bytes)));
-        }
         "send" | "sendall" => {
             let data = argument(args, 0)?;
             ctx.check_buffer_exporter(data)?;
             ctx.native_buffer_bytes(data)?;
             let flags = int_option(ctx, args, kwargs, 1, "flags", 0)?;
-            let owner = active_sendfile_owner(ctx, *receiver)?;
+            let owner = active_sendfile_owner(ctx, receiver)?;
             if method == "send" {
                 let sent = ctx.with_buffer_export(data, |ctx| {
                     retry(ctx, &s, |ctx, until| {

@@ -263,6 +263,7 @@ pub(super) enum RegisteredCall {
     },
     Join(thread_worker::Join),
     Acquire(thread_lock::Acquire),
+    Recv(stdlib::socket::Recv),
 }
 
 impl RegisteredCall {
@@ -286,6 +287,8 @@ impl RegisteredCall {
             // SAFETY: the interrupted caller remains rooted in this exclusively executing context.
             Self::Join(join) => unsafe { join.run(context) },
             Self::Acquire(wait) => Ok(wait.run()),
+            // SAFETY: the caller roots the frame and owns the context on this thread.
+            Self::Recv(recv) => unsafe { recv.run(context) },
         }
     }
 }
@@ -8210,6 +8213,11 @@ impl Context {
                     args = method_arguments(receiver, args)?;
                     callable = target;
                 }
+                Value::HeapTypeMethod { owner, name, .. }
+                    if self.heap.get(owner).heap_type() == Some(stdlib::socket::CLASS) =>
+                {
+                    return stdlib::socket::prepare_descriptor(self, owner, name, &args, &kwargs);
+                }
                 Value::Native(ref name) => {
                     let method = match name.as_str() {
                         "_thread._ThreadHandle.join" => {
@@ -8712,9 +8720,6 @@ impl Context {
             Value::CodecEncoder(codec) => stdlib::codecs::entry_encode(self, codec, &args, &kwargs),
             Value::CodecDecoder(codec) => stdlib::codecs::decode(self, codec, &args, &kwargs),
             Value::HeapTypeMethod { owner, name, .. } => {
-                if self.heap.get(owner).heap_type() == Some(stdlib::socket::CLASS) {
-                    return stdlib::socket::descriptor_call(self, owner, name, &args, &kwargs);
-                }
                 if self.heap.get(owner).heap_type() == Some(stdlib::unicodedata::CLASS) {
                     return stdlib::unicodedata::legacy_method(self, owner, name, &args, &kwargs);
                 }
