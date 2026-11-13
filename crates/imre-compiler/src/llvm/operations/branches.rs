@@ -1,5 +1,5 @@
 //! Branch plans and ownership transfers shared by fixed-layout values and Python frame entries.
-use super::{CheckedBody, CheckedValue, Entry, Value, ValueJoin};
+use super::{CheckedBody, CheckedValue, Entry, Value, ValueJoin, ValueUse};
 use crate::ir::control::{Context, Depth, Step, Steps, Target, needs_truth_plan, steps};
 use crate::ir::{Builtin, Expr, ExprKind, TruthPredicate, Type};
 
@@ -184,20 +184,12 @@ impl CheckedBody<'_, '_, '_, '_> {
             }
             return value.to_string();
         }
-        if let ExprKind::Builtin(Builtin::RegisteredLocation(range, position, ..), operands) =
-            &expr.kind
-            && let ExprKind::Compare(values, ops) = &operands[0].kind
-        {
-            return self.python().at_expression(*range, *position, |frame| {
-                CheckedBody::registered(frame.reborrow())
-                    .comparisons(values, ops, true)
-                    .into_condition()
-            });
-        }
         if matches!(self.0, Entry::Registered(_))
-            && let ExprKind::Compare(values, ops) = &expr.kind
+            && matches!(expr.without_location().kind, ExprKind::Compare(..))
         {
-            return self.comparisons(values, ops, true).into_condition();
+            return self
+                .value_for(expr, ValueUse::ComparisonTruth)
+                .into_condition();
         }
         let mark = if already_rooted {
             None
