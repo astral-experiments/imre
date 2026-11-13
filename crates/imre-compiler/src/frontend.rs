@@ -6969,13 +6969,15 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(Builtin::ExceptionArgument(kind), vec![v]),
             });
         }
-        Ok(Expr {
+        let exception = Expr {
             ty: Type::Exception,
             kind: ExprKind::Exception {
                 kind,
                 message: arg.map(Box::new),
             },
-        })
+        };
+        self.record_named_call(call, &exception);
+        Ok(exception)
     }
 
     fn fault_enabled(&self) -> bool {
