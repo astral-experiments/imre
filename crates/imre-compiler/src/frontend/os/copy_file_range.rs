@@ -19,7 +19,6 @@ impl Checker<'_> {
             &params,
             None,
             Some(&mut scope),
-            None,
             &mut |checker, _, input| input.value(checker),
         )?;
         let arg = |i: usize| args.values[args.order[i]].clone();

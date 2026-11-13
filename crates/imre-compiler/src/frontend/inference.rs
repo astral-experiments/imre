@@ -827,12 +827,15 @@ impl Inference {
 
     /// Stops when every signature is concrete, or no new type evidence is available.
     /// A slot can widen from a command to its common namespace only once.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the caller reuses the entry statements for lowering and owns the signature and layout tables"
+    )]
     pub fn solve(
-        &self,
+        &mut self,
         graph: &SourceGraph,
         entry_statements: &[ast::Stmt],
         owners: &[DefinitionId],
-        unresolved: &mut Vec<DefinitionId>,
         definitions: &mut [FunctionDefinition<'_>],
         signatures: &mut HashMap<DefinitionId, Signature>,
         classes: &mut ClassInfo,
@@ -1193,7 +1196,7 @@ impl Inference {
                         let pending = self.pending.borrow();
                         for (owner, signature) in signatures.iter() {
                             if pending[signature.id].params.iter().any(Option::is_none) {
-                                unresolved.push(*owner);
+                                self.source_checks.unresolved.push(*owner);
                             }
                         }
                     }
@@ -1554,10 +1557,9 @@ impl Checker<'_> {
         let direct_input = direct && scope.is_none();
         self.bind_eager_arguments(
             call,
-            &signature.params[skip..],
+            calls::CallParameters::Source { signature, skip },
             receiver,
             scope,
-            Some((signature, skip)),
             direct_input.then_some(signature.returns),
             &mut |checker, index, argument| {
                 let index = index + skip;

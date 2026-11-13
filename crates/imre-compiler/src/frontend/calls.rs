@@ -224,6 +224,15 @@ pub(super) struct Parameter {
     pub sign_only: bool,
 }
 
+/// A source call binds the declaration's parameters after any bound receiver.
+pub(super) enum CallParameters<'a> {
+    Source {
+        signature: &'a Signature,
+        skip: usize,
+    },
+    Slice(&'a [Parameter]),
+}
+
 /// Defaults have no user-visible effects or mutable identity. Checking them at
 /// definition time also rejects unsupported defaults in never-called functions.
 /// Only one optional sign on a numeric literal is accepted as an expression.
@@ -696,7 +705,6 @@ impl Checker<'_> {
             params,
             receiver,
             Some(scope),
-            None,
             &mut |checker, index, argument| {
                 argument.checked(checker, params[index].ty, params[index].sign_only, None)
             },
@@ -717,7 +725,6 @@ impl Checker<'_> {
             params,
             receiver,
             None,
-            None,
             &mut |checker, index, argument| {
                 let Supplied::Source(node) = argument else {
                     unreachable!("only source calls expand tuples")
@@ -734,11 +741,17 @@ impl Checker<'_> {
         params: &[Parameter],
         receiver: Option<Expr>,
         scope: Option<&mut ArgumentScope>,
-        source_signature: Option<(&Signature, usize)>,
         check: &mut dyn FnMut(&mut Self, usize, Supplied<'_>) -> Result<Expr, String>,
     ) -> Result<ir::CallArgs, String> {
         Ok(self
-            .bind_eager_arguments(call, params, receiver, scope, source_signature, None, check)?
+            .bind_eager_arguments(
+                call,
+                CallParameters::Slice(params),
+                receiver,
+                scope,
+                None,
+                check,
+            )?
             .continue_value()
             .expect("only direct source calls can stop during binding"))
     }
@@ -746,13 +759,18 @@ impl Checker<'_> {
     pub(super) fn bind_eager_arguments(
         &mut self,
         call: &ast::ExprCall,
-        params: &[Parameter],
+        parameters: CallParameters<'_>,
         receiver: Option<Expr>,
         mut scope: Option<&mut ArgumentScope>,
-        source_signature: Option<(&Signature, usize)>,
         stop_return: Option<Type>,
         check: &mut dyn FnMut(&mut Self, usize, Supplied<'_>) -> Result<Expr, String>,
     ) -> Result<ControlFlow<Expr, ir::CallArgs>, String> {
+        let (params, source_signature) = match parameters {
+            CallParameters::Slice(params) => (params, None),
+            CallParameters::Source { signature, skip } => {
+                (&signature.params[skip..], Some((signature, skip)))
+            }
+        };
         let default_owner = source_signature.map(|(sig, skip)| (sig.id, skip));
         let declaration = |index| {
             source_signature.and_then(|(sig, skip)| sig.parameter_declaration(index + skip))

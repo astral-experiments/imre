@@ -357,7 +357,6 @@ impl Checker<'_> {
             &params,
             None,
             Some(&mut scope),
-            None,
             &mut |checker, index, arg| {
                 if index == 0 {
                     arg.checked(checker, Type::Str, false, None)

@@ -277,7 +277,6 @@ pub(super) fn retain_generator(
 /// on their own parser and restore its diagnostic rules before selecting operand layouts.
 pub(super) fn finish_source_checks(
     graph: &mut SourceGraph,
-    owners: Vec<DefinitionId>,
     checks: SourceChecks,
     mut source_checks: Option<&mut crate::analysis::Session>,
 ) {
@@ -307,7 +306,7 @@ pub(super) fn finish_source_checks(
             graph.remove_registered_function(module, range.start());
         }
     }
-    for owner in owners {
+    for owner in checks.unresolved {
         let Some(definition) = generator_definition(&graph.modules, &graph.session, owner) else {
             continue;
         };
@@ -390,6 +389,8 @@ pub(super) fn lower_definition(
 /// operations satisfy the first-party source contract. Cache the check per physical module.
 #[derive(Default)]
 pub(super) struct SourceChecks {
+    /// Named startup checks these unresolved definitions for a generator body.
+    pub(super) unresolved: Vec<DefinitionId>,
     session: std::cell::OnceCell<Option<crate::analysis::RegisteredBodyChecks>>,
     pub(super) solved: Option<std::cell::RefCell<Vec<(ModuleId, TextRange)>>>,
 }
