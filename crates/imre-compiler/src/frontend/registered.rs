@@ -753,6 +753,7 @@ pub(super) fn capture(
         } else if recover_method {
             let mut fixed = checker();
             fixed.fixed_sites = Some(fixed_body_source::SourceSites::new(true));
+            fixed.placement_only = true;
             fixed.settled_attributes = Some(&mut attributes);
             let Some((body, _)) =
                 graph.try_registered_body(id, || lower_body(fixed, function, signature).ok())
