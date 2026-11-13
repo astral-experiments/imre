@@ -1638,7 +1638,7 @@ impl Emitter<'_, '_> {
                     continue;
                 }
                 let receiver = self.borrow_slot(slot);
-                let length = self.list_length(&receiver);
+                let length = self.container_length(&receiver);
                 let length = self.index_word(&length, true);
                 let data = self.instruction(format!(
                     "call ptr @imre_list_data_readonly(ptr {})",
@@ -1837,7 +1837,7 @@ impl Emitter<'_, '_> {
                     || crate::list_bounds::block_readonly(std::slice::from_ref(statement)));
             if needed && self.length_snapshots[root].is_none() {
                 let receiver = self.borrow_slot(root);
-                let length = self.list_length(&receiver);
+                let length = self.container_length(&receiver);
                 self.length_snapshots[root] = Some(LengthSnapshot {
                     receiver,
                     length,
@@ -1947,13 +1947,17 @@ impl Emitter<'_, '_> {
         name
     }
 
-    /// Exact list storage bounds its length below the tagged-small maximum.
-    /// Unlike bytes or strings, this read cannot allocate a BigInt owner.
-    fn list_length(&mut self, receiver: &Value) -> Value {
+    /// These containers store at least one word per entry, so their lengths fit
+    /// the tagged-small integer representation without acquiring an owner.
+    fn container_length(&mut self, receiver: &Value) -> Value {
         let helper = match receiver.ty {
             Type::ListInt => "imre_list_len",
             Type::List(_) => self.sequence_helper("imre_seq_len_fast"),
-            _ => unreachable!("only exact lists have nonallocating snapshots"),
+            Type::VarTuple(_) => "imre_tuple_len",
+            Type::Dict(_) | Type::ReadOnlyObjectMapping => "imre_dict_len",
+            Type::Deque(_) => "imre_deque_len",
+            Type::Set(_) | Type::StringKeys | Type::FrozenStrings => "imre_set_len",
+            _ => unreachable!("a word-sized container has a known length helper"),
         };
         let operand = self.instruction(format!("call i64 @{helper}(ptr {})", receiver.operand));
         if self.module.types.element(receiver.ty) == Some(Type::Str) {
@@ -2039,7 +2043,7 @@ impl Emitter<'_, '_> {
         let before = self.body.current.clone();
         self.branch(&same, &end, &fallback);
         self.start(&fallback);
-        let ordinary = self.list_length(receiver);
+        let ordinary = self.container_length(receiver);
         let fallback_end = self.body.current.clone();
         self.jump(&end);
         self.start(&end);
@@ -7528,24 +7532,14 @@ impl Emitter<'_, '_> {
                     && let Some(length) = self.snapshot_length(slot, &args[0].value)
                 {
                     length
-                } else if matches!(args[0].value.ty, Type::List(_) | Type::ListInt) {
-                    self.list_length(&args[0].value)
                 } else {
-                    self.call(
-                        match args[0].value.ty {
-                            Type::Str => "imre_str_len",
-                            Type::Bytes => "imre_bytes_len",
-                            Type::ByteArray => "imre_bytearray_len",
-                            Type::VarTuple(_) => "imre_tuple_len",
-                            Type::ListInt => "imre_list_len",
-                            Type::Dict(_) | Type::ReadOnlyObjectMapping => "imre_dict_len",
-                            Type::Deque(_) => "imre_deque_len",
-                            Type::Set(_) | Type::StringKeys | Type::FrozenStrings => "imre_set_len",
-                            _ => unreachable!("len input was checked"),
-                        },
-                        Type::Int,
-                        &[&args[0].value],
-                    )
+                    let receiver = &args[0].value;
+                    match receiver.ty {
+                        Type::Str => self.call("imre_str_len", Type::Int, &[receiver]),
+                        Type::Bytes => self.call("imre_bytes_len", Type::Int, &[receiver]),
+                        Type::ByteArray => self.call("imre_bytearray_len", Type::Int, &[receiver]),
+                        _ => self.container_length(receiver),
+                    }
                 }
             }
             Builtin::ListGetStable(_) => self

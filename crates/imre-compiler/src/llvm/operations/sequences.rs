@@ -156,7 +156,7 @@ impl Emitter<'_, '_> {
                         operand: e.instruction(format!("load i64, ptr {cursor}")),
                         small_integer: true,
                     };
-                    let length = e.list_length(source);
+                    let length = e.container_length(source);
                     let more = e.instruction(format!(
                         "icmp ult i64 {}, {}",
                         index.operand, length.operand
