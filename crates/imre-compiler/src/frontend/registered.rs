@@ -544,9 +544,7 @@ pub(super) fn capture(
         let owner = owners[slot];
         let method = physical_method(signature, checked, classes);
         let function = match method {
-            Some(physical) if checked_bodies.is_some_and(|ids| ids.contains(&slot)) => {
-                physical.as_ref()
-            }
+            Some(physical) => physical.as_ref(),
             None if signatures
                 .get(&owner)
                 .is_some_and(|original| original.id == slot) =>
@@ -574,8 +572,6 @@ pub(super) fn capture(
         if signature.registered_frame() {
             continue;
         }
-        // The fixed-layout checker owns the return contract. The registered activation returns a handle.
-        signature.returns = Type::PythonObject;
         let contract = SourceChecks::cached(graph, id, function);
         if contract == Some(false) {
             continue;
@@ -584,10 +580,22 @@ pub(super) fn capture(
         // A solved definition reads names from the Python namespace. Its trial
         // must not establish a native caller or consume a missing binding.
         let private = ModuleValues::default();
-        let mut checker = Checker::new(graph, id, signatures, classes, types, &helpers, &private);
+        let checker = || Checker::new(graph, id, signatures, classes, types, &helpers, &private);
+        let checked = checked_bodies.is_some_and(|ids| ids.contains(&slot));
+        // A revision can invalidate a physical method's last check. Check its settled
+        // signature before trying the registered return convention.
+        if method.is_some()
+            && !checked
+            && graph
+                .try_registered_body(id, || lower_body(checker(), function, &signature).ok())
+                .is_none()
+        {
+            continue;
+        }
+        signature.returns = Type::PythonObject;
+        let mut checker = checker();
         checker.registered_local_start = Some(signature.params.len());
-        checker.checked_callback_effects =
-            checked_bodies.is_some_and(|checked| checked.contains(&signature.id));
+        checker.checked_callback_effects = checked;
         let body =
             graph.try_registered_body(id, || lower_definition(checker, function, &signature).ok());
         if let Some(mut body) = body

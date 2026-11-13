@@ -1210,7 +1210,11 @@ impl Inference {
                             types,
                             self,
                             Some(&checked_bodies),
-                            checked_bodies.iter().copied().chain(staged_returns),
+                            checked_bodies.iter().copied().chain(
+                                staged_returns
+                                    .into_iter()
+                                    .filter(|&slot| definitions[slot].2.method.is_none()),
+                            ),
                         );
                     }
                     let primary = reports.remove(index);
