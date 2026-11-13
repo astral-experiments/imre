@@ -5187,9 +5187,10 @@ impl Emitter<'_, '_> {
                 self.call("imre_regex_groupdict", returns, &[&args[0].value])
             }
             Builtin::RegexCapture { operation, known } => {
-                let selector = &args[1].value;
-                let group = self.word(selector);
-                let named = u8::from(selector.ty == Type::Str);
+                let (group, named) = args.get(1).map_or_else(
+                    || (small(0).operand, 0),
+                    |arg| (self.word(&arg.value), u8::from(arg.value.ty == Type::Str)),
+                );
                 let receiver = &args[0].value.operand;
                 let call = match operation {
                     RegexCapture::Absent => format!(
