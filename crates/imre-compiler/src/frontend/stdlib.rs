@@ -928,7 +928,7 @@ impl Checker<'_> {
         } else {
             prompt
         };
-        let text = self.checked_string(prompt, call)?;
+        let text = self.checked_string(prompt, call, false)?;
         Ok(scope.finish(Expr {
             ty: Type::Str,
             kind: ExprKind::Builtin(Builtin::InputFinish, vec![output, text]),
@@ -936,7 +936,12 @@ impl Checker<'_> {
     }
 
     /// Render one checked value with builtin str, independent of a local binding named str.
-    pub(super) fn checked_string(&mut self, value: Expr, at: &impl Ranged) -> Result<Expr, String> {
+    pub(super) fn checked_string(
+        &mut self,
+        value: Expr,
+        at: &ast::ExprCall,
+        explicit: bool,
+    ) -> Result<Expr, String> {
         let ty = value.ty;
         if ty == Type::PythonObject {
             self.require_registered_operation(at)?;
@@ -997,10 +1002,14 @@ impl Checker<'_> {
                 });
             }
         };
-        Ok(Expr {
+        let text = Expr {
             ty: Type::Str,
             kind: ExprKind::Builtin(op, vec![value]),
-        })
+        };
+        if explicit {
+            self.record_named_call(at, &text);
+        }
+        Ok(text)
     }
 
     /// Preserve the checked representation and field checks of lists, tuples and records.
