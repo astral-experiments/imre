@@ -69,6 +69,8 @@ pub(crate) enum AnnotationScope<'a> {
     },
 }
 
+const ENTRY_SCOPE: &str = "%scope";
+
 /// The registered calling convention supplies object handles, scoped roots and pending errors.
 pub(crate) struct RegisteredFrame<'a, 'p> {
     pub(crate) output: &'a mut Output,
@@ -79,6 +81,8 @@ pub(crate) struct RegisteredFrame<'a, 'p> {
     pub(crate) current_range: TextRange,
     pub(super) regions: Vec<super::context::Region>,
     pub(crate) async_generator: bool,
+    /// Borrow the callable signature's local names while emitting its body.
+    pub(crate) function_locals: &'p [serde_json::Value],
     pub(crate) class_locals: Option<&'p ClassBindings>,
     pub(crate) annotation_values: Option<String>,
     pub(crate) annotation_scope: AnnotationScope<'p>,
@@ -130,6 +134,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
             current_range: TextRange::empty(start),
             regions: Vec::new(),
             async_generator: false,
+            function_locals: &[],
             class_locals: None,
             annotation_values: None,
             annotation_scope: AnnotationScope::Plain,
@@ -138,7 +143,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
             id,
             body: FunctionBody::new(if native_suspension { "start" } else { "entry" }, "failed"),
             pending_check: None,
-            scope: "%scope".into(),
+            scope: ENTRY_SCOPE.into(),
             live: Vec::new(),
             live_slots: Vec::new(),
             private_slot_count: 0,
@@ -985,6 +990,13 @@ impl<'p> RegisteredFrame<'_, 'p> {
             .is_some_and(|class| class.locals.contains(name))
         {
             "lookup_class_local"
+        } else if self.scope == ENTRY_SCOPE
+            && self
+                .function_locals
+                .iter()
+                .any(|local| local.as_str() == Some(name))
+        {
+            "lookup_local"
         } else {
             "lookup"
         };

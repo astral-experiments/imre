@@ -894,8 +894,8 @@ enum Body<'a> {
         &'a crate::frontend::function_scope::classes::ClassScope,
     ),
     CheckedProvider(&'a crate::frontend::CheckedProvider, AnnotationScope<'a>),
-    /// Named bodies carry their lexical global declarations into the checked frame.
-    Registered(RegisteredBody<'a>, Option<&'a BTreeSet<String>>),
+    /// A named body uses the bindings resolved for its own declaration.
+    Registered(RegisteredBody<'a>, Option<&'a NamedFunction<'a>>),
     Operand(
         TextRange,
         &'a crate::frontend::RegisteredOperand,
@@ -1053,7 +1053,10 @@ impl SourceMap<'_> {
         frame.async_generator = suspension == imre_ast::code_flags::ASYNC_GENERATOR;
         let empty = BTreeSet::new();
         let declared_globals = match &body {
-            Body::Registered(_, Some(globals)) => *globals,
+            Body::Registered(_, Some(header)) => {
+                frame.function_locals = header.metadata.local_names();
+                &header.globals
+            }
             Body::Namespace(_, class) => &class.bindings.globals,
             _ => &empty,
         };
@@ -1377,7 +1380,7 @@ impl LexicalDefinitions<'_, '_> {
                 } else {
                     format!("{qualname}.<locals>.")
                 },
-                Body::Registered(body, header.map(|h| &h.globals)),
+                Body::Registered(body, header),
                 true,
                 Some((site, suspension)),
             );
