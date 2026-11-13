@@ -130,14 +130,12 @@ pub(crate) fn operand_diagnostic(
     SourceFile::new(path, source).diagnostic_at(range, reason)
 }
 
-/// Check syntax and prepare the literal escapes that this module can emit.
-pub(crate) fn validate<'a>(
+fn validate_syntax(
     path: &Path,
     source: &str,
     parsed: &Parsed<ast::ModModule>,
-    checked: Option<&'a crate::modules::SourceModule>,
-    keep_docstrings: bool,
-) -> Result<Cow<'a, HashMap<TextRange, Vec<u32>>>, String> {
+    checked: Option<&crate::modules::SourceModule>,
+) -> Result<(), String> {
     if let Some((range, reason)) = imre_ast::comprehension::dict_unpacking_error(parsed) {
         let error = super::diagnostic_message(source, &range, &format!("SyntaxError: {reason}"));
         return Err(format!("{}:{error}", path.display()));
@@ -152,13 +150,37 @@ pub(crate) fn validate<'a>(
         let error = super::diagnostic_message(source, keyword, &reason);
         return Err(format!("{}:{error}", path.display()));
     }
+    Ok(())
+}
+
+/// During discovery only a docstring can require a surrogate diagnostic.
+pub(crate) fn validate_file(
+    path: &Path,
+    source: &str,
+    parsed: &Parsed<ast::ModModule>,
+    keep_docstrings: bool,
+) -> Result<(), String> {
+    validate_syntax(path, source, parsed, None)?;
+    super::validate_docstring_literals(source, parsed, keep_docstrings, None)
+        .map_err(|error| format!("{}:{error}", path.display()))
+}
+
+/// Check syntax and prepare the literal escapes that this module can emit.
+pub(crate) fn validate<'a>(
+    path: &Path,
+    source: &str,
+    parsed: &Parsed<ast::ModModule>,
+    checked: Option<&'a crate::modules::SourceModule>,
+    keep_docstrings: bool,
+) -> Result<Cow<'a, HashMap<TextRange, Vec<u32>>>, String> {
+    validate_syntax(path, source, parsed, checked)?;
     let replacements = checked
         .and_then(|module| module.cached_registered_values())
         .map_or_else(
             || Cow::Owned(super::literal_replacements(source, parsed.tokens())),
             |values| Cow::Borrowed(&values.replacements),
         );
-    super::validate_docstring_literals(source, parsed, keep_docstrings, &replacements)
+    super::validate_docstring_literals(source, parsed, keep_docstrings, Some(&replacements))
         .map_err(|error| format!("{}:{error}", path.display()))?;
     Ok(replacements)
 }

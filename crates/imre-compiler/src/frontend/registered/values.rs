@@ -164,15 +164,18 @@ pub(crate) fn validate_docstring_literals(
     source: &str,
     parsed: &ruff_python_parser::Parsed<ast::ModModule>,
     keep_docstrings: bool,
-    replacements: &HashMap<TextRange, Vec<u32>>,
+    replacements: Option<&HashMap<TextRange, Vec<u32>>>,
 ) -> StdResult<(), String> {
     if keep_docstrings
-        && !replacements.is_empty()
+        && replacements.is_none_or(|map| !map.is_empty())
         && let Some(range) = imre_ast::strings::find_docstring(&parsed.syntax().body, true, |doc| {
             doc.value
                 .iter()
+                .find(|part| match replacements {
+                    Some(map) => map.contains_key(&part.range()),
+                    None => has_surrogate(part, source),
+                })
                 .map(Ranged::range)
-                .find(|range| replacements.contains_key(range))
         })
     {
         return Err(diagnostic_message(
@@ -437,6 +440,13 @@ pub(crate) fn exec_source_operand(call: &ast::ExprCall) -> Option<&ast::Expr> {
     Some(source)
 }
 
+fn has_surrogate(part: &ast::StringLiteral, source: &str) -> bool {
+    part.as_str().contains(char::REPLACEMENT_CHARACTER)
+        && !part.flags.prefix().is_raw()
+        && imre_ast::strings::replacements(&source[part.content_range()])
+            .any(|point| point != u32::from(char::REPLACEMENT_CHARACTER))
+}
+
 /// Ruff replaces lone surrogates in its UTF-8 view. The compiled source must
 /// represent the actual Python string, including concatenated raw/cooked parts.
 pub(crate) fn exec_literal_text<'a>(
@@ -444,13 +454,7 @@ pub(crate) fn exec_literal_text<'a>(
     outer: &str,
 ) -> StdResult<&'a str, &'static str> {
     let text = literal.value.to_str();
-    if text.contains(char::REPLACEMENT_CHARACTER)
-        && literal.value.iter().any(|part| {
-            !part.flags.prefix().is_raw()
-                && imre_ast::strings::replacements(&outer[part.content_range()])
-                    .any(|point| point != u32::from(char::REPLACEMENT_CHARACTER))
-        })
-    {
+    if literal.value.iter().any(|part| has_surrogate(part, outer)) {
         return Err("exec source contains a surrogate that cannot be encoded as UTF-8");
     }
     Ok(text)
