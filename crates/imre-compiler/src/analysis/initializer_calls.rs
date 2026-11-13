@@ -398,16 +398,16 @@ impl Session {
             }
             _ => return None,
         };
-        let source = selected_module(name)?;
-        // The launcher name can also reimport the same source in a new namespace.
-        if source.module == entry {
-            return (name == "__main__").then_some(source);
+        if name == "__main__" {
+            return selected_module(name).filter(|source| source.module == entry);
         }
         // A package can execute parent initialization. A preloaded provider may already
         // occupy sys.modules even when search-path discovery found a Python file.
         if name.contains('.') || !unambiguous_file_module(name) {
             return None;
         }
+        // Importing the launcher by its file name creates a new namespace.
+        let source = selected_module(name).filter(|source| source.module != entry)?;
         let owner = model.resolve_module(Some(name), 0)?.file(&self.db)?;
         (self.files[source.module] == owner
             && source.path.extension().is_some_and(|ext| ext == "py")
