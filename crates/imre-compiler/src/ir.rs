@@ -3930,11 +3930,13 @@ pub(crate) fn walk_statements<'a>(body: &'a [Statement], visit: &mut impl FnMut(
 
 /// Includes loops in eager expression scopes when deciding whether a suite can be cloned.
 pub(crate) fn contains_loop(body: &[Statement]) -> bool {
-    let mut found = false;
-    walk_statements(body, &mut |statement| {
-        found |= matches!(statement, Statement::For { .. } | Statement::While(..));
+    let loop_free = all_nodes(body, &mut |node, _| {
+        !matches!(
+            node,
+            Node::Statement(Statement::For { .. } | Statement::While(..))
+        )
     });
-    found
+    !loop_free
 }
 
 /// Walk one expression with the same parent and nested-scope information as a suite.
