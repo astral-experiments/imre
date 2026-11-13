@@ -1519,11 +1519,26 @@ impl Checker<'_> {
         }
         let first_local = self.registered_local_start;
         let declarations = &self.classes.declarations.definitions;
-        let is_bound_method =
-            |callee: &ast::Expr| graph.session.operand_types(owner).is_bound_method(callee);
+        let operands = graph.session.operand_types(owner);
+        let is_bound_method = |callee: &ast::Expr| operands.is_bound_method(callee);
         let class = self.class;
         let mut live_receiver = false;
+        let mut callee = None;
         let attribute = self.settled_attributes.as_deref_mut().and_then(|sites| {
+            if let Some(call) = node.as_call_expr() {
+                if self.namespace.is_none()
+                    && let Some(field) = call.func.as_attribute_expr()
+                    && let Some(module) = field.value.as_name_expr()
+                    && !self.names.contains_key(module.id.as_str())
+                    && let Some(FixedAttribute::Call(saved)) = sites.remove(&call.range())
+                    && saved.1.suspended_name.is_none()
+                    && saved.1.callee_end == call.func.end()
+                    && operands.is_original_operand(&call.func)
+                {
+                    callee = Some((call.func.as_ref(), saved.0));
+                }
+                return None;
+            }
             let field = node.as_attribute_expr()?;
             let FixedAttribute::Operation {
                 operation,
@@ -1581,7 +1596,10 @@ impl Checker<'_> {
                         .as_call_expr()
                         .is_some_and(|call| is_bound_method(&call.func))
             },
-            |child| self.expr(child),
+            |child| match callee.take_if(|(target, _)| std::ptr::eq(*target, child)) {
+                Some((_, target)) => Ok(target),
+                None => self.expr(child),
+            },
         )?
         else {
             return Ok(None);
