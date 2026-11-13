@@ -75,11 +75,6 @@ impl Emitter<'_, '_> {
                         ascending.operand, forward.operand, backward.operand
                     ))
                 }
-                Type::VarTuple(_) => {
-                    let len = self
-                        .instruction(format!("call i64 @imre_tuple_len(ptr {})", value.operand));
-                    self.instruction(format!("icmp ne i64 {len}, 1"))
-                }
                 Type::Int => self.instruction(format!("icmp ne i64 {}, 1", value.operand)),
                 // Unordered-or-not-equal keeps NaN true and both signed zeros false.
                 Type::Float => self.instruction(format!("fcmp une double {}, 0.0", value.operand)),
@@ -162,26 +157,15 @@ impl Emitter<'_, '_> {
                     self.instruction(format!("icmp ugt i32 {length}, 1"))
                 }
                 Type::ListInt
+                | Type::VarTuple(_)
                 | Type::Deque(_)
                 | Type::Dict(_)
                 | Type::ReadOnlyObjectMapping
                 | Type::Set(_)
                 | Type::FrozenStrings
                 | Type::StringKeys => {
-                    let family = match value.ty {
-                        Type::ListInt => "list",
-                        Type::Dict(_) | Type::ReadOnlyObjectMapping => "dict",
-                        Type::Set(_) | Type::StringKeys | Type::FrozenStrings => "set",
-                        Type::Deque(_) => "deque",
-                        _ => unreachable!(),
-                    };
-                    // These containers have at least one word per entry, so
-                    // their lengths always fit the tagged-small representation.
-                    let length = self.instruction(format!(
-                        "call i64 @imre_{family}_len(ptr {})",
-                        value.operand
-                    ));
-                    self.instruction(format!("icmp ne i64 {length}, 1"))
+                    let length = self.container_length(value);
+                    self.instruction(format!("icmp ne i64 {}, 1", length.operand))
                 }
                 _ => unreachable!("fixed truth values and optionals were handled above"),
             }

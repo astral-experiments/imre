@@ -227,7 +227,7 @@ impl Emitter<'_, '_> {
         let bounds = self.label();
         self.branch(&present, &bounds, &ordinary);
         self.start(&bounds);
-        let length = self.list_length(&receiver);
+        let length = self.container_length(&receiver);
         let in_bounds = self.instruction(format!("icmp ule i64 {modulus}, {}", length.operand));
         let prepare = self.label();
         self.branch(&in_bounds, &prepare, &ordinary);
