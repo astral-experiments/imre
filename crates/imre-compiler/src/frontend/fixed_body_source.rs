@@ -55,9 +55,12 @@ impl FixedBodySource {
 }
 
 #[derive(Clone)]
-pub(crate) struct FixedAttribute {
-    pub(crate) operation: Box<Builtin>,
-    pub(crate) position: TextSize,
+pub(crate) enum FixedAttribute {
+    Operation {
+        operation: Box<Builtin>,
+        position: TextSize,
+    },
+    Call(Box<(Expr, ir::InvokeSite)>),
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -80,6 +83,7 @@ pub(crate) enum FixedNode {
     Integer(i64),
     Constant(ir::Constant),
     Binary(Binary, Type),
+    Copy(ir::CopyOperation, usize, Type),
     Text(ir::TextOperation, usize, Type),
     Path(ir::PathOperation, usize, Type),
     Builtin(std::mem::Discriminant<Builtin>, usize, Type),
@@ -137,6 +141,10 @@ impl FixedNode {
                     Self::indexed(&expr.kind, slot, expr.ty)
                 }
                 ExprKind::Binary(op, _, _) => Self::Binary(op, expr.ty),
+                ExprKind::Builtin(
+                    Builtin::Process(ir::ProcessOperation::Copy(op)),
+                    ref operands,
+                ) => Self::Copy(op, operands.len(), expr.ty),
                 ExprKind::Builtin(Builtin::Path(op), ref operands) => {
                     Self::Path(op, operands.len(), expr.ty)
                 }
@@ -246,22 +254,29 @@ impl SourceSites {
             })
     }
 
-    /// A Python caller loads the live name and supplies only the written arguments.
-    pub(super) fn named_call(&mut self, call: &ast::ExprCall, name: &ast::ExprName, value: &Expr) {
+    /// Place the Python callee beside the native operation. Both entries use its written operands.
+    pub(super) fn positional_call(
+        &mut self,
+        call: &ast::ExprCall,
+        value: &Expr,
+        target: impl FnOnce() -> Option<Expr>,
+    ) {
         if let Some(site) = self.site_at(call.range())
-            && call.start() == name.start()
-            && !ruff_python_stdlib::identifiers::is_mangled_private(name.id.as_str())
             && let Some(args) = value.named_call_arguments()
             && args.len() == call.arguments.args.len()
             && registered::values::fixed_positional_arguments(call)
             && let Some(node) = FixedNode::checked(&ir::Node::Expression(value))
+            && let Some(target) = target()
         {
-            self.python_operation(
-                site,
-                name.end(),
-                Builtin::RegisteredName(name.id.to_string()),
-                node,
-            );
+            let invoke = ir::InvokeSite {
+                range: call.range(),
+                callee_end: call.func.end(),
+                suspended_name: call.func.is_name_expr().then(|| call.func.range()),
+                scope: None,
+            };
+            self.attributes
+                .insert(site.range, FixedAttribute::Call(Box::new((target, invoke))));
+            self.commit(site, node);
         }
     }
 
@@ -310,7 +325,7 @@ impl SourceSites {
     ) {
         self.attributes.insert(
             site.range,
-            FixedAttribute {
+            FixedAttribute::Operation {
                 operation: Box::new(operation),
                 position,
             },
@@ -614,10 +629,17 @@ mod tests {
         assert!(source.clone().place(module.functions[id].clone()).is_ok());
         assert_eq!(source.attributes.len(), 2);
         for (range, field) in &source.attributes {
+            let FixedAttribute::Operation {
+                operation,
+                position,
+            } = field
+            else {
+                panic!("expected attribute load")
+            };
             assert!(
-                matches!(&*field.operation, Builtin::RegisteredAttribute { action: ir::AttributeAction::Load, name, range: target } if name == "text" && target == range)
+                matches!(&**operation, Builtin::RegisteredAttribute { action: ir::AttributeAction::Load, name, range: target } if name == "text" && target == range)
             );
-            assert_eq!(&text[TextRange::new(field.position, range.end())], "text");
+            assert_eq!(&text[TextRange::new(*position, range.end())], "text");
             assert!(text[*range].starts_with("self."));
         }
         let class = |name| {

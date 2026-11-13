@@ -848,10 +848,15 @@ impl Emitter<'_, '_> {
                 }
             }
             ProcessOperation::Copy(op) => {
-                let [src, dst, follow] = args else {
-                    unreachable!()
+                let (src, dst, follow) = match args {
+                    [src, dst] => (src, dst, "1".to_owned()),
+                    [src, dst, follow] => (
+                        src,
+                        dst,
+                        self.instruction(format!("zext i1 {} to i32", follow.value.operand)),
+                    ),
+                    _ => unreachable!(),
                 };
-                let follow = self.instruction(format!("zext i1 {} to i32", follow.value.operand));
                 let operand = self.checked_instruction(format!(
                     "call i64 @imre_shutil_copy(i32 {}, ptr {}, i32 {}, ptr {}, i32 {}, i32 {follow})",
                     op as u32,

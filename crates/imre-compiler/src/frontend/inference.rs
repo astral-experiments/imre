@@ -1185,7 +1185,7 @@ impl Inference {
                         && let Some(source) = checker.fixed_body_source(function, signature, function.body.len(), &body)
                         // A module read needs its initializing storage; a bound method may
                         // have consulted a different callee layout during discovery.
-                        && source.attributes.values().all(|attr| matches!(*attr.operation, Builtin::RegisteredAttribute { .. }))
+                        && source.attributes.values().all(|attr| matches!(attr, FixedAttribute::Operation { operation, .. } if matches!(**operation, Builtin::RegisteredAttribute { .. })))
                     {
                         let function = ir::Function {
                             params,

@@ -94,7 +94,7 @@ impl Checker<'_> {
             (Intrinsic::Copy(op), [src, dst]) if path(*src) && path(*dst) => (
                 ir::ProcessOperation::Copy(op),
                 self.copy_result(op, *dst),
-                vec![local(0), local(1), Expr::boolean(true)],
+                vec![local(0), local(1)],
             ),
             (Intrinsic::RmTree, [src] | [src, Type::Bool])
                 if matches!(*src, Type::Str | Type::Bytes) || src.is_path() =>
@@ -437,23 +437,17 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         calls::reject_unpacking(call, self.source)?;
         let params = [
-            ("src", Type::Str, ParameterKind::PositionalOrKeyword, None),
-            ("dst", Type::Str, ParameterKind::PositionalOrKeyword, None),
-            (
-                "follow_symlinks",
-                Type::Bool,
-                ParameterKind::KeywordOnly,
-                Some(Expr::boolean(true)),
-            ),
-        ]
-        .map(|(name, ty, kind, default)| Parameter {
-            name: name.into(),
-            ty,
-            kind,
-            default,
-            sign_only: false,
-        });
-        let args = self.arguments_with(call, &params, None, |checker, i, expr| {
+            calls::parameter("src", Type::Str, None),
+            calls::parameter("dst", Type::Str, None),
+            ParameterKind::KeywordOnly.parameter("follow_symlinks", Type::Bool, None),
+        ];
+        // The native copy ABI supplies its flag when Python supplied only the two paths.
+        let params = if call.arguments.find_keyword("follow_symlinks").is_some() {
+            &params[..]
+        } else {
+            &params[..2]
+        };
+        let args = self.arguments_with(call, params, None, |checker, i, expr| {
             if i == 2 {
                 return checker.expr_expected(expr, Type::Bool);
             }
@@ -470,10 +464,32 @@ impl Checker<'_> {
         })?;
         let dst = args.values[args.order[1]].ty;
         let result = self.copy_result(op, dst);
-        Ok(self.ordered_builtin(
+        let value = self.ordered_builtin(
             Builtin::Process(ir::ProcessOperation::Copy(op)),
             result,
             args,
-        ))
+        );
+        if let Some(sites) = &mut self.fixed_sites
+            && self.namespace.is_none()
+            && let Some(field) = call.func.as_attribute_expr()
+            && let Some(module) = field.value.as_name_expr()
+            && !self.names.contains_key(module.id.as_str())
+            && !ruff_python_stdlib::identifiers::is_mangled_private(module.id.as_str())
+        {
+            sites.positional_call(call, &value, || {
+                let source = self.graph.modules[self.module]
+                    .registered_values()
+                    .operands(self.source, self.graph.python_optimization());
+                // The ordinary binder loads an imported callable before either path.
+                // A direct method would need its separate receiver.
+                if source.direct_method(call).is_some() {
+                    return None;
+                }
+                registered::values::registered_value(&call.func, source)
+            });
+        } else {
+            self.record_named_call(call, &value);
+        }
+        Ok(value)
     }
 }
