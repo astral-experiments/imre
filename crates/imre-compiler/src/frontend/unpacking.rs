@@ -311,6 +311,8 @@ impl Checker<'_> {
             self.names
                 .get(name.id.as_str())
                 .map(|&slot| (self.locals[slot], self.declared_slots.get(&slot).copied()))
+        } else if self.registered.is_some() && target.is_attribute_expr() {
+            None
         } else {
             self.assignment_context(target, rhs)
         }
@@ -393,14 +395,18 @@ impl Checker<'_> {
                 return Err(self.scoped_builtin_error("the mutable re module binding", attribute));
             }
         }
-        if let [ast::Expr::Attribute(attribute)] = assignment.targets.as_slice()
+        let fixed_field = match assignment.targets.as_slice() {
+            [ast::Expr::Attribute(field)] if self.registered.is_none() => Some(field),
+            _ => None,
+        };
+        if let Some(attribute) = fixed_field
             && let Some(field) = self.mime_attribute(attribute)
         {
             let mut state_assignment = assignment.clone();
             state_assignment.targets[0] = ast::Expr::Attribute(field);
             return self.assignment_statement(&state_assignment);
         }
-        if let [ast::Expr::Attribute(attribute)] = assignment.targets.as_slice()
+        if let Some(attribute) = fixed_field
             && attribute.attr.as_str() == "default_factory"
             && (matches!(&*assignment.value, ast::Expr::NoneLiteral(_))
                 || self.unshadowed_builtin(&assignment.value, "list"))
@@ -420,7 +426,7 @@ impl Checker<'_> {
                 ));
             }
         }
-        if let [ast::Expr::Attribute(attribute)] = assignment.targets.as_slice()
+        if let Some(attribute) = fixed_field
             && attribute.attr.as_str() == "converter"
             && let Some(Binding::Intrinsic(Intrinsic::ClockConverter(utc))) =
                 self.resolve(&assignment.value)

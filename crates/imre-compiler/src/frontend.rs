@@ -5933,7 +5933,10 @@ impl<'a> Checker<'a> {
                     assign.targets.iter().all(ast::Expr::is_name_expr)
                         || matches!(
                             assign.targets.as_slice(),
-                            [ast::Expr::Subscript(_) | ast::Expr::Tuple(_) | ast::Expr::List(_)]
+                            [ast::Expr::Attribute(_)
+                                | ast::Expr::Subscript(_)
+                                | ast::Expr::Tuple(_)
+                                | ast::Expr::List(_)]
                         )
                 }
                 ast::Stmt::AugAssign(assign) => assign
