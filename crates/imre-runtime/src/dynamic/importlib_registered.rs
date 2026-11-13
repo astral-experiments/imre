@@ -75,30 +75,30 @@ impl Context {
         let stem = path.join(leaf);
         let init = stem.join("__init__.py");
         let file = stem.with_extension("py");
-        let contains = |path: &Path| self.file_sources(fullname).any(|entry| entry.path == path);
-        let has_init = contains(&init);
+        let selected = {
+            let sources = self.file_sources(fullname);
+            [init.as_path(), file.as_path(), stem.as_path()]
+                .into_iter()
+                .find(|path| sources.clone().any(|entry| entry.path == *path))
+        };
         // The bundled loader installs a native package's exports before executing its
         // registered __init__.py. Native extensions can also exist without a Python file.
         if self.config["bundled_root"].as_str().map(OsStr::new) == Some(path.as_os_str())
             && (imre_ast::providers::is_native_fallback(fullname)
-                || (has_init && imre_ast::providers::is_native_package(fullname)))
+                || (selected == Some(init.as_path())
+                    && imre_ast::providers::is_native_package(fullname)))
         {
             let loader = self.lookup_attr(self.bootstrap_module, "_BundledImporter")?;
             let find = self.lookup_attr(loader, "find_spec")?;
             return self.call(find, vec![name], Vec::new());
         }
 
-        let (origin, package) = if has_init {
-            (Some(init), true)
-        } else if contains(&file) {
-            (Some(file), false)
-        } else if contains(&stem) {
-            (None, true)
-        } else {
+        let Some(path) = selected else {
             return Ok(NONE);
         };
-
-        self.registered_source_spec(name, origin.as_deref(), package.then_some(stem.as_path()))
+        let origin = (path != stem).then_some(path);
+        let package = (path != file).then_some(stem.as_path());
+        self.registered_source_spec(name, origin, package)
     }
 
     pub(super) fn registered_source_spec(
