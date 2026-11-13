@@ -1494,46 +1494,36 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
         condition
     }
 
-    /// Acquire the cursor at the iterable's source position. A suspended activation
-    /// releases its operands once the cursor owns everything needed for the first pull.
-    pub(super) fn acquire_iterator(
-        &mut self,
-        op: ir::IteratorOp,
-        evaluate: impl FnOnce(&mut Self) -> String,
-    ) -> String {
-        let range = match op {
-            ir::IteratorOp::Loop(_)
-                if !self.native_suspension || self.iteration.expression_mark.is_some() =>
-            {
-                None
-            }
+    /// Acquire the evaluated iterator in the current operand scope.
+    pub(super) fn acquire_iterator(&mut self, op: ir::IteratorOp, value: &str) -> String {
+        match op {
             ir::IteratorOp::Loop(range)
             | ir::IteratorOp::Get(range)
-            | ir::IteratorOp::Async(range) => Some(range),
-            ir::IteratorOp::LoopCursor => None,
-        };
-        let Some(range) = range else {
-            let value = evaluate(self);
-            return self.op(op.runtime_op(), &[&value]);
-        };
-        self.iteration_result(|frame| {
-            let value = evaluate(frame);
-            frame.call_position(range);
-            frame.op(op.runtime_op(), &[&value])
-        })
+            | ir::IteratorOp::Async(range) => self.call_position(range),
+            ir::IteratorOp::LoopCursor => {}
+        }
+        self.op(op.runtime_op(), &[value])
     }
 
-    /// The activation keeps its live handles until the next Python statement.
-    /// Release the iterable when its cursor exists, and the cursor and local scope
-    /// when the comprehension delivers its result to the enclosing expression.
-    fn iteration_result(&mut self, emit: impl FnOnce(&mut Self) -> String) -> String {
-        if !self.native_suspension {
-            return emit(self);
+    pub(super) fn iterator_operand(&mut self, op: ir::IteratorOp, iterable: &Expr) -> String {
+        if matches!(op, ir::IteratorOp::Loop(_))
+            && (!self.native_suspension || self.iteration.expression_mark.is_some())
+        {
+            // The enclosing loop supplies the position and owns the operands.
+            let value = self.evaluate_scoped_handle(iterable);
+            return self.op(op.runtime_op(), &[&value]);
+        }
+        let acquire = |frame: &mut Self| {
+            let value = frame.evaluate_scoped_handle(iterable);
+            frame.acquire_iterator(op, &value)
+        };
+        if !self.native_suspension || matches!(op, ir::IteratorOp::LoopCursor) {
+            return acquire(self);
         }
         let mark = self.temporary_mark();
-        let result = self.unwind_operands(&mark, emit);
-        self.keep_operands(&mark, &result, "0");
-        result
+        let cursor = self.unwind_operands(&mark, acquire);
+        self.keep_operands(&mark, &cursor, "0");
+        cursor
     }
 
     pub(in crate::llvm) fn unwind_operands<T>(
