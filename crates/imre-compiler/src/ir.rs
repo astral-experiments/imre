@@ -685,6 +685,16 @@ impl Expr {
         }
     }
 
+    /// Written operands available to a direct named call. A module read has no call site.
+    pub(crate) fn named_call_arguments(&self) -> Option<&[Expr]> {
+        match &self.kind {
+            ExprKind::Call(_, args) => Some(&args.values),
+            ExprKind::Builtin(Builtin::GlobalGet(_), _) => None,
+            ExprKind::Builtin(_, args) => Some(args),
+            _ => None,
+        }
+    }
+
     /// A registered invocation carries the Python binder's position and source-ordered values.
     pub(crate) fn is_registered_invoke(&self) -> bool {
         let ExprKind::Invoke { callable, args } = &self.kind else {
