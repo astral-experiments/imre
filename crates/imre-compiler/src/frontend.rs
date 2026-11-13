@@ -1616,20 +1616,31 @@ fn lower_graph(
     };
     let validate_calls = |functions: &[ir::Function]| -> StdResult<(), Diagnostic> {
         typing::validate_functions(functions, &entry, &types)?;
-        let callable_targets = callables::targets(functions, &entry, &types)?;
-        for (function, calls) in functions.iter().zip(&mut call_graph) {
-            callables::validate_storage(function, &types, |value| {
+        let mut callable_targets = HashMap::new();
+        let mut indirect = Vec::new();
+        let mut storage = Ok(());
+        for (slot, function) in functions.iter().chain([&entry]).enumerate() {
+            let checked = callables::validate_storage(function, &types, |value| {
+                callables::record_target(value, &types, &mut callable_targets);
                 frame_use(value);
-                if let Some(targets) = globals.invoked_functions(value) {
-                    calls.extend(targets.iter().copied());
-                } else if let Some(signature) = callables::invoked_signature(value)
-                    && let Some(targets) = callable_targets.get(&signature)
-                {
-                    calls.extend(targets);
+                if let Some(calls) = call_graph.get_mut(slot) {
+                    if let Some(targets) = globals.invoked_functions(value) {
+                        calls.extend(targets.iter().copied());
+                    } else if let Some(signature) = callables::invoked_signature(value) {
+                        indirect.push((slot, signature));
+                    }
                 }
-            })?;
+            });
+            storage = storage.and(checked);
         }
-        callables::validate_storage(&entry, &types, &mut frame_use)?;
+        // An invalid coroutine adapter precedes a storage error anywhere in the program.
+        callables::validate_targets(functions, &types, &callable_targets)?;
+        storage?;
+        for (slot, signature) in indirect {
+            if let Some(targets) = callable_targets.get(&signature) {
+                call_graph[slot].extend(targets);
+            }
+        }
         if let Some(id) = recursive_call_root(&call_graph) {
             return Err(recursion_errors.swap_remove(id).into());
         }
