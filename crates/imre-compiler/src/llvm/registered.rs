@@ -288,10 +288,17 @@ pub(crate) fn frame_inputs(
                 protocol_reads += reads;
                 !ops.is_empty() && values.len() == ops.len() + 1
             }
-            ExprKind::Invoke { args, .. } => {
+            ExprKind::Invoke { callable, args } => {
                 uses_python_protocol = true;
                 if has_scalar {
-                    // Registered positional calls pass these handles to the Python binder in order.
+                    if args.site.python().is_some_and(|site| {
+                        matches!(
+                            site.call.arguments,
+                            ir::RegisteredArguments::Keywords { .. }
+                        )
+                    }) {
+                        protocol_reads += protocol_parameter(callable);
+                    }
                     protocol_reads += args.values.iter().map(&protocol_parameter).sum::<usize>();
                 }
                 expr.is_registered_invoke()

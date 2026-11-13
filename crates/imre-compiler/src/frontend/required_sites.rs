@@ -23,7 +23,7 @@ fn visit_expression_site(
     visit: &mut impl FnMut(RequiredSite),
 ) {
     let call = match &expr.kind {
-        ExprKind::Invoke { args, .. } => args.site.python().map(|site| site.range),
+        ExprKind::Invoke { args, .. } => args.site.python().map(|site| site.call.range),
         ExprKind::Builtin(Builtin::RegisteredCall(call), _) => Some(call.range),
         ExprKind::Builtin(op, operands) => {
             visit(match op {

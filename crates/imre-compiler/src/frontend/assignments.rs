@@ -602,7 +602,7 @@ impl Checker<'_> {
             ExprKind::Invoke { args, .. } => args
                 .site
                 .python()
-                .is_some_and(|site| self.namespace_calls.contains(&site.range)),
+                .is_some_and(|site| self.namespace_calls.contains(&site.call.range)),
             ExprKind::Local(slot) => self.module_namespace.aliases.contains(slot),
             _ => false,
         }

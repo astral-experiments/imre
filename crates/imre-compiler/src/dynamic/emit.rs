@@ -4494,20 +4494,23 @@ mod tests {
         let inputs = residual_selection(prepared.source.initializer.as_mut().unwrap())
             .physical()
             .unwrap();
-        use crate::ir::{Builtin, ExprKind, RegisteredArguments, RegisteredCallTarget};
-        let ExprKind::Builtin(Builtin::RegisteredCall(call), values) =
-            &inputs.value.without_location().kind
+        use crate::ir::{ExprKind, RegisteredArguments, RegisteredCallTarget};
+        let ExprKind::Invoke {
+            callable: owner,
+            args,
+        } = &inputs.value.without_location().kind
         else {
-            panic!("expected the prepared method call");
+            panic!("expected the prepared method invocation");
         };
+        let call = &args.site.python().unwrap().call;
         assert!(
             matches!(&call.target, RegisteredCallTarget::Method { name, .. } if name == "apply")
         );
         assert!(
             matches!(&call.arguments, RegisteredArguments::Keywords { positional: 1, names } if names == &["label", "tail"])
         );
-        let [owner, first, label, tail] = values.as_slice() else {
-            panic!("expected the receiver and three argument values");
+        let [first, label, tail] = args.values.as_slice() else {
+            panic!("expected three argument values");
         };
         assert_eq!(
             [named_call(owner).0, named_call(first).0, named_call(tail).0],
