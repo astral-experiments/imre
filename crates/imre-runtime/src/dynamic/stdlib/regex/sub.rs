@@ -379,20 +379,6 @@ fn expanded_sub(
         add(subject.slice(ctx, Span::from(cursor..length))?)?;
     }
 
-    let invalid = |ctx: &Context, i: usize, item: Id| {
-        let expected = if pattern.bytes {
-            "a bytes-like object"
-        } else {
-            "str instance"
-        };
-        Error::new(
-            "TypeError",
-            format!(
-                "sequence item {i}: expected {expected}, {} found",
-                ctx.type_name(item)
-            ),
-        )
-    };
     if pattern.bytes {
         if let [item] = pieces.as_slice()
             && matches!(ctx.heap.get(*item), Value::Bytes(_))
@@ -404,21 +390,21 @@ fn expanded_sub(
             ctx.check_buffer_exporter(item)?;
             let data = match ctx.heap.get(ctx.scalar_value(item)) {
                 Value::Array(array) => array.as_bytes(),
-                _ => ctx.bytes_like(item).map_err(|_| invalid(ctx, i, item))?,
+                _ => ctx.bytes_like(item).map_err(|_| {
+                    Error::new(
+                        "TypeError",
+                        format!(
+                            "sequence item {i}: expected a bytes-like object, {} found",
+                            ctx.type_name(item)
+                        ),
+                    )
+                })?,
             };
             append(&mut output, data)?;
         }
         return Ok((ctx.alloc(Value::Bytes(output)), count));
     }
-    for (i, &item) in pieces.iter().enumerate() {
-        if ctx.string_storage(item).is_none() {
-            return Err(invalid(ctx, i, item));
-        }
-    }
-    let parts = ctx.alloc(Value::List(pieces));
-    let empty = ctx.text("");
-    let join = ctx.lookup_attr(empty, "join")?;
-    let value = ctx.call(join, vec![parts], Vec::new())?;
+    let value = ctx.join_formatted(&pieces)?;
     Ok((value, count))
 }
 
