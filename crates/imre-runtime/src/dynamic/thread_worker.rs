@@ -607,7 +607,9 @@ fn launch(
         Registration::Thread(thread) => (Arc::clone(&thread.handle), Some(thread), None),
         Registration::Detached(label) => (Arc::default(), None, Some(label)),
     };
-    let (ready, started) = mpsc::sync_channel(0);
+    // The child's identity can arrive before the creator receives it. Dropping
+    // the queued publication cancels the worker through the same gate.
+    let (ready, started) = mpsc::sync_channel(1);
     let (release_status, released) = if matches!(
         operation,
         Operation::Acquire {
@@ -662,7 +664,13 @@ fn launch(
         let native_id = Some(crate::objects::locks::native_thread_id());
         #[cfg(not(any(target_os = "linux", target_os = "macos")))]
         let native_id = None;
-        if ready.send(Ok((thread_ident(), native_id))).is_ok() {
+        let publication = Started {
+            handle: Arc::clone(&starting),
+            ident: thread_ident(),
+            native_id,
+            released,
+        };
+        if ready.send(Ok(publication)).is_ok() {
             if starting.ident.wait().is_none() {
                 return Ok(());
             }
@@ -708,8 +716,8 @@ fn launch(
         }
         Ok(())
     })?;
-    let (ident, native_id) = match started.recv() {
-        Ok(Ok(identity)) => identity,
+    let started = match started.recv() {
+        Ok(Ok(publication)) => publication,
         failure => {
             let _ = handle.join(None);
             let reason = match failure {
@@ -718,12 +726,6 @@ fn launch(
             };
             return Err(Error::new("RuntimeError", reason));
         }
-    };
-    let started = Started {
-        handle,
-        ident,
-        native_id,
-        released,
     };
     ctx.workers.entries.push(Entry {
         active,
