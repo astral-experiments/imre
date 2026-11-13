@@ -1953,16 +1953,20 @@ fn lower_function(
             ),
         }));
     }
-    if falls_through && checker.registered.is_some() && signature.returns == Type::PythonObject {
-        body.push(Statement::Return(Expr::none()));
-    } else if falls_through && types.payload(signature.returns).is_some() {
-        body.push(Statement::Return(Expr::absent(signature.returns)));
-    } else if falls_through && signature.returns != Type::None {
-        return Err(error(
-            &module.source,
-            definition,
-            "not every path returns the declared type",
-        ));
+    if falls_through {
+        match signature.returns {
+            Type::None => {}
+            // A registered frame returns the None handle on fallthrough.
+            Type::PythonObject if checker.registered.is_some() => {}
+            ty @ Type::Optional(_) => body.push(Statement::Return(Expr::absent(ty))),
+            _ => {
+                return Err(error(
+                    &module.source,
+                    definition,
+                    "not every path returns the declared type",
+                ));
+            }
+        }
     }
     if classes.generators.contains(&signature.id) {
         body = checker.generator_body(body);

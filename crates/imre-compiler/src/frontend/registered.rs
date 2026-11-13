@@ -5307,10 +5307,9 @@ print(render('ok'), raw('ok'))
         let [
             Statement::Position(range, None),
             Statement::If(_, pass, fail),
-            Statement::Return(_),
         ] = &body[..]
         else {
-            panic!("expected the checked assertion and implicit return")
+            panic!("expected the checked assertion to fall through")
         };
         assert_eq!(*range, assertion.test.range());
         assert!(pass.is_empty());
