@@ -101,7 +101,7 @@ impl Checker<'_> {
                     Statement::Try {
                         body: vec![Statement::Assign(slot, getter)],
                         handlers: vec![ir::ExceptHandler {
-                            matcher: crate::ir::ExceptionMatcher::Categories(vec![]),
+                            matcher: crate::ir::ExceptionMatcher::Any,
                             name: None,
                             body: vec![Statement::Assign(failed, Expr::boolean(true))],
                         }],

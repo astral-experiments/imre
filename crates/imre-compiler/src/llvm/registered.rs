@@ -101,9 +101,13 @@ pub(crate) fn frame_inputs(
                         finalbody,
                         ..
                     } => {
-                        uses_python_protocol |= handlers
-                            .iter()
-                            .any(|h| !matches!(h.matcher, ir::ExceptionMatcher::Categories(_)));
+                        uses_python_protocol |= handlers.iter().any(|h| {
+                            matches!(
+                                h.matcher,
+                                ir::ExceptionMatcher::Object(..)
+                                    | ir::ExceptionMatcher::Subgroup(..)
+                            )
+                        });
                         handlers::supported(handlers, finalbody)
                             && handlers.iter().all(|h| {
                                 h.name.is_none_or(|slot| {

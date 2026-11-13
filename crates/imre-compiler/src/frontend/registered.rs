@@ -2739,8 +2739,11 @@ pub(super) fn exception_matcher<E>(
     operand: impl FnOnce(&ast::Expr, TextRange) -> StdResult<Expr, E>,
 ) -> StdResult<ir::ExceptionMatcher, E> {
     let Some(class) = handler.type_.as_deref() else {
-        return Ok(ir::ExceptionMatcher::Categories(Vec::new()));
+        return Ok(ir::ExceptionMatcher::Any);
     };
+    if !is_star && matches!(class, ast::Expr::Tuple(tuple) if tuple.elts.is_empty()) {
+        return Ok(ir::ExceptionMatcher::Categories(Vec::new()));
+    }
     let site = if is_star {
         handler.range()
     } else {
