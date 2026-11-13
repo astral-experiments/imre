@@ -749,15 +749,17 @@ impl Expr {
                 attribute.end()
             }
         };
-        let fixed = match &call.arguments {
+        let valid_layout = match &call.arguments {
             RegisteredArguments::Positional => true,
             RegisteredArguments::Keywords { positional, names } => {
                 !names.is_empty() && positional.checked_add(names.len()) == Some(args.values.len())
             }
-            RegisteredArguments::Packed(_) => false,
+            RegisteredArguments::Packed(pack) => {
+                pack.starred.len() + pack.keywords.len() == args.values.len()
+            }
         };
         self.ty == Type::PythonObject
-            && fixed
+            && valid_layout
             && call.range.start() < end
             && end < call.range.end()
             && site

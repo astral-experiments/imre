@@ -362,8 +362,8 @@ async def factory(seed, rows, mark):
         assert_eq!(names(value), ["reader", "x", "closed", "y"]);
         let mut calls = Vec::new();
         ir::walk_operand_expressions(value, &mut |node| {
-            if let ExprKind::Builtin(Builtin::RegisteredCall(site), _) = &node.kind {
-                calls.push(&site.arguments);
+            if let ExprKind::Invoke { args, .. } = &node.kind {
+                calls.push(&args.site.python().unwrap().call.arguments);
             }
         });
         assert_eq!(

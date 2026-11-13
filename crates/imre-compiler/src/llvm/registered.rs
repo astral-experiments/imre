@@ -292,10 +292,7 @@ pub(crate) fn frame_inputs(
                 uses_python_protocol = true;
                 if has_scalar {
                     if args.site.python().is_some_and(|site| {
-                        matches!(
-                            site.call.arguments,
-                            ir::RegisteredArguments::Keywords { .. }
-                        )
+                        !matches!(site.call.arguments, ir::RegisteredArguments::Positional)
                     }) {
                         protocol_reads += protocol_parameter(callable);
                     }
