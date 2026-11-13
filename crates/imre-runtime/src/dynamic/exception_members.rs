@@ -64,13 +64,9 @@ pub(super) fn read(ctx: &mut Context, kind: Kind, field: &str, object: Id) -> Re
         Kind::OSError => Ok(ctx
             .os_attribute(object, field)?
             .expect("declared OSError field")),
-        Kind::SyntaxError => Ok(error
-            .trace
-            .as_ref()
-            .and_then(|t| t.source_syntax.as_ref())
-            .map_or(NONE, |fields| {
-                fields[super::source_code::syntax_member(field).unwrap()].get()
-            })),
+        Kind::SyntaxError => Ok(ctx.syntax_members(error).map_or(NONE, |fields| {
+            fields[super::source_code::syntax_member(field).unwrap()]
+        })),
         _ => unreachable!("undeclared exception member"),
     }
 }

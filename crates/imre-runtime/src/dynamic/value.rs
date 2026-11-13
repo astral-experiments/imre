@@ -186,7 +186,7 @@ pub(super) struct Trace {
     /// Location of a compiler error before its Python exception can be built.
     pub pending_syntax: Option<super::source_code::SyntaxSpan>,
     /// Live members belong to the exception instance across traceback clones.
-    pub source_syntax: Option<crate::shared::Shared<[std::cell::Cell<Id>; 9]>>,
+    pub source_syntax: Option<Id>,
     pub import_names: [Option<Id>; 3],
     pub group: Option<GroupData>,
     pub name_error_name: Option<Id>,
@@ -343,12 +343,7 @@ impl Error {
                     .chain(trace.instance)
                     .chain(trace.cause)
                     .chain(trace.import_message)
-                    .chain(
-                        trace
-                            .source_syntax
-                            .iter()
-                            .flat_map(|fields| fields.iter().map(std::cell::Cell::get)),
-                    )
+                    .chain(trace.source_syntax)
                     .chain(trace.import_names.into_iter().flatten())
                     .chain(trace.group.iter().flat_map(|group| {
                         [group.message, group.exceptions]
@@ -1638,6 +1633,7 @@ pub(super) enum Value {
     ThreadHandle(std::sync::Arc<super::thread_worker::Handle>),
     PrimitiveLock(std::sync::Arc<crate::objects::locks::PrimitiveLock>),
     Raised(Error),
+    SyntaxMembers([Id; 9]),
     Traceback {
         frame: Id,
         next: Id,
@@ -2123,6 +2119,7 @@ impl Value {
             | Self::Code(_)
             | Self::Native(_)
             | Self::Scope(_)
+            | Self::SyntaxMembers(_)
             | Self::LoopIterator { .. }
             | Self::PythonBufferLease { .. }
             | Self::ProcessPreparation(_)
@@ -2223,6 +2220,7 @@ impl Value {
                 | Self::Code(_)
                 | Self::Scope(_)
                 | Self::Cell(_)
+                | Self::SyntaxMembers(_)
                 | Self::Class { .. }
                 | Self::Method { .. }
                 | Self::ClassMethod { .. }
@@ -2248,6 +2246,7 @@ impl Value {
         visit: &mut impl VisitReferences,
     ) -> std::result::Result<(), std::cell::BorrowError> {
         match self {
+            Self::SyntaxMembers(fields) => visit.extend(fields),
             Self::Deque(ring) => visit.extend(&ring.items),
             Self::StructUnpackIterator {
                 record,
@@ -3536,10 +3535,8 @@ impl VisitReferences for RootTraceBuilder<'_> {
         let value = self.heap.get(id);
         let direct = self.heap.slot_shapes[index].is_scalar_leaf()
             || value.directly_stores_children()
-            // Shared SyntaxError cells and lazy OSError fields can change through
-            // another handle without a mutable borrow of this exception slot.
-            || matches!(value, Value::Raised(error) if error.os_args.is_none()
-                && error.trace.as_ref().is_none_or(|trace| trace.source_syntax.is_none()))
+            // Lazy OSError fields can change through another handle.
+            || matches!(value, Value::Raised(error) if error.os_args.is_none())
             || matches!(
                 value,
                 Value::Module {
@@ -4441,17 +4438,16 @@ impl Heap {
     /// Allocate a distinct string result even when its value is a cached Latin-1 character.
     pub(super) fn fresh_string(&mut self, value: Value) -> Result<Id> {
         debug_assert!(matches!(value, Value::Str(_) | Value::SurrogateStr(_)));
+        self.try_alloc_slot(value, true)
+    }
+
+    pub(super) fn try_alloc_slot(&mut self, value: Value, trace: bool) -> Result<Id> {
         if self.free_head == END {
             self.reserve_slot()
                 .map_err(|_| Error::new("MemoryError", ""))?;
         }
-        self.frames
-            .last_mut()
-            .unwrap()
-            .live
-            .try_reserve(1)
-            .map_err(|_| Error::new("MemoryError", ""))?;
-        Ok(self.alloc_slot(value))
+        self.reserve_temporaries(1)?;
+        Ok(self.alloc_slot_with_trace(value, trace))
     }
 
     fn reserve_slot(&mut self) -> std::result::Result<(), std::collections::TryReserveError> {
@@ -7418,6 +7414,26 @@ impl Heap {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pending_syntax_error_traces_the_same_members_as_its_raised_instance() {
+        fn assert_send<T: Send>() {}
+        assert_send::<(Vec<Frame>, Option<Error>)>();
+
+        let mut ctx = super::super::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let mark = ctx.heap.temporary_mark();
+        let mut error = Error::new("SyntaxError", "test");
+        ctx.retain_syntax_fields(&mut error, [NONE; 9]).unwrap();
+        let raised = ctx.heap.alloc(Value::Raised(error.clone()));
+        let filename = ctx.heap.alloc(Value::List(Vec::new()));
+        assert!(ctx.update_syntax_member(raised, "filename", filename));
+        ctx.heap.release_temporaries_since(mark);
+        ctx.pending = Some(error);
+        ctx.collect_generation(2).unwrap();
+        let fields = ctx.syntax_members(ctx.pending.as_ref().unwrap()).unwrap();
+        assert_eq!(fields[1], filename);
+        assert!(matches!(ctx.heap.get(filename), Value::List(_)));
+    }
 
     #[test]
     fn worker_bootstrap_uses_its_interpreters_gc_and_tracing_settings() {

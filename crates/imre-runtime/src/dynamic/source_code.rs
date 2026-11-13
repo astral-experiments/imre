@@ -2108,16 +2108,29 @@ impl Context {
         fields
     }
 
-    pub(super) fn retain_syntax_fields(&self, error: &mut Error, fields: [Id; 9]) -> Result<()> {
-        let fields = crate::shared::Shared::try_new(fields.map(std::cell::Cell::new))
-            .map_err(|_| Error::new("MemoryError", ""))?;
+    pub(super) fn retain_syntax_fields(
+        &mut self,
+        error: &mut Error,
+        fields: [Id; 9],
+    ) -> Result<()> {
         if error.trace.is_none() {
             let trace = allocator_api2::boxed::Box::try_new(super::value::Trace::default())
                 .map_err(|_| Error::new("MemoryError", ""))?;
             error.trace = Some(trace);
         }
-        error.tracing().source_syntax = Some(fields);
+        error.tracing().source_syntax = Some(
+            self.heap
+                .try_alloc_slot(Value::SyntaxMembers(fields), false)?,
+        );
         Ok(())
+    }
+
+    pub(super) fn syntax_members(&self, error: &Error) -> Option<&[Id; 9]> {
+        let members = error.trace.as_ref()?.source_syntax?;
+        let Value::SyntaxMembers(fields) = self.heap.get(members) else {
+            unreachable!("syntax exception member storage")
+        };
+        Some(fields)
     }
 
     fn syntax_program_line(&mut self, filename: Id, lineno: usize) -> Option<Id> {
@@ -2279,21 +2292,23 @@ impl Context {
         Ok(error)
     }
 
-    pub(super) fn update_syntax_member(&self, object: Id, name: &str, value: Id) -> bool {
+    pub(super) fn update_syntax_member(&mut self, object: Id, name: &str, value: Id) -> bool {
         let Value::Raised(error) = self.heap.get(object) else {
             return false;
         };
-        let Some(fields) = error
-            .trace
-            .as_ref()
-            .and_then(|trace| trace.source_syntax.as_ref())
-        else {
+        let Some(members) = error.trace.as_ref().and_then(|trace| trace.source_syntax) else {
             return false;
         };
         let Some(slot) = syntax_member(name) else {
             return false;
         };
-        fields[slot].set(value);
+        let Value::SyntaxMembers(fields) = self.heap.get_mut(members) else {
+            unreachable!("syntax exception member storage")
+        };
+        let previous = std::mem::replace(&mut fields[slot], value);
+        if previous != value {
+            self.heap.weak_edge_removed(previous);
+        }
         true
     }
 
