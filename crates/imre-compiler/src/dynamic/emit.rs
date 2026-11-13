@@ -368,10 +368,9 @@ impl<'a> PreparedBody<'a> {
         ),
     ) -> Result<Self, String> {
         let (module, normalized) = module.into();
-        // Layouts can supply a different parser. Only the physical graph's own
-        // parser carries its successful scope check and cached module values.
+        // Layouts can parse the same physical bytes in another session.
         let checked_source = checked_source.filter(|source| {
-            source.is_program_source() && std::ptr::eq(&*source.parsed, &*module.parsed)
+            source.is_program_source() && std::ptr::eq(source.source.as_str(), module.text.as_ref())
         });
         let (body, _) = Self::prepare(
             name,
@@ -467,7 +466,9 @@ impl<'a> PreparedBody<'a> {
         } else {
             None
         };
-        let registered_values = checked_source.and_then(|source| source.cached_registered_values());
+        let registered_values = checked_source
+            .filter(|source| std::ptr::eq(source.parsed.syntax(), syntax))
+            .and_then(|source| source.cached_registered_values());
         let has_templates = registered_values.map_or_else(
             || {
                 tokens
