@@ -323,6 +323,19 @@ pub(in crate::frontend) fn located(
     )
 }
 
+/// A physical bound method reads its first argument from the Python frame.
+pub(in crate::frontend) fn method_receiver(
+    first_local: Option<usize>,
+    class: Option<usize>,
+    source: &ast::Expr,
+    operand: &Expr,
+) -> bool {
+    first_local.is_some_and(|first| first != 0)
+        && source.is_name_expr()
+        && matches!(operand.without_location().kind, ExprKind::Local(0))
+        && class.map(Type::Class) == Some(operand.ty)
+}
+
 pub(in crate::frontend) fn loaded_attribute(field: &ast::ExprAttribute, receiver: Expr) -> Expr {
     let value = super::operation(attribute_load(field), Type::PythonObject, vec![receiver]);
     located(field.range(), field.attr.start(), value)
@@ -1459,7 +1472,7 @@ impl Checker<'_> {
                 } else {
                     node.as_attribute_expr().is_some_and(|attribute| {
                         // A bound method reads this attribute on its live Python receiver.
-                        live_receiver = parameter && local == Some(0) && class.map(Type::Class) == Some(operand.ty);
+                        live_receiver = method_receiver(first_local, class, &attribute.value, operand);
                         parameter
                             || matches!((local, operand.ty), (Some(_), Type::Class(class))
                                 if declarations[class].fields.iter().any(|field| field.name == attribute.attr.as_str()))

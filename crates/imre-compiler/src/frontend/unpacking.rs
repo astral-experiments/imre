@@ -686,13 +686,20 @@ impl Checker<'_> {
             } else if let ast::Expr::Attribute(attribute) = target {
                 if self.registered.is_some() {
                     let receiver = self.expr(&attribute.value)?;
-                    if receiver.ty != Type::PythonObject {
+                    let method_receiver = registered::values::method_receiver(
+                        self.registered_local_start,
+                        self.class,
+                        &attribute.value,
+                        &receiver,
+                    );
+                    if receiver.ty != Type::PythonObject && !method_receiver {
                         return Err(error(
                             self.source,
                             attribute,
                             "expected a Python object target",
                         ));
                     }
+                    self.live_protocol_parameters |= method_receiver;
                     break 'place registered::attribute_statement(
                         ir::AttributeAction::Store,
                         attribute,
