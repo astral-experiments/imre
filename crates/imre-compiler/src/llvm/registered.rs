@@ -45,8 +45,14 @@ pub(crate) fn frame_inputs(
     live_parameters: bool,
 ) -> Option<(crate::frontend::FrameInputs, FrameSlots)> {
     use crate::frontend::{FrameInputs, FrameSite};
+    let has_scalar = live_parameters
+        && checked.function.params.iter().any(|&slot| {
+            checked.function.locals[slot]
+                .builtin_scalar_name()
+                .is_some()
+        });
     let scalar_parameter = |value: &Expr| {
-        live_parameters
+        has_scalar
             && value.ty != Type::PythonObject
             && matches!(value.kind, ExprKind::Local(slot)
                 if checked.function.params.contains(&slot) && checked.function.locals[slot].builtin_scalar_name().is_some())
@@ -218,7 +224,7 @@ pub(crate) fn frame_inputs(
             }
             ExprKind::Invoke { args, .. } => {
                 uses_python_protocol = true;
-                if live_parameters {
+                if has_scalar {
                     // Registered positional calls pass these handles to the Python binder in order.
                     protocol_reads += args.values.iter().map(&protocol_parameter).sum::<usize>();
                 }
@@ -231,7 +237,7 @@ pub(crate) fn frame_inputs(
             ExprKind::Builtin(Builtin::RegisteredCall(call), operands) => {
                 uses_python_protocol = true;
                 let scope = usize::from(call.explicit_scope);
-                if live_parameters {
+                if has_scalar {
                     // The method receiver and arguments are passed as their original handles.
                     protocol_reads += operands
                         .iter()
@@ -294,10 +300,12 @@ pub(crate) fn frame_inputs(
     });
     // Only an unresolved signature needs a Python operation to establish its
     // calling convention. Solved functions already have an ordinary checked caller.
-    let has_live_parameter = checked.function.params.iter().any(|slot| {
-        let ty = checked.function.locals[*slot];
-        ty == Type::PythonObject || live_parameters && ty.builtin_scalar_name().is_some()
-    });
+    let has_live_parameter = has_scalar
+        || checked
+            .function
+            .params
+            .iter()
+            .any(|&slot| checked.function.locals[slot] == Type::PythonObject);
     if !supported
         || required_private
             .iter()
