@@ -6783,6 +6783,36 @@ impl Context {
         self.heap.raw_instance_field(obj, name)
     }
 
+    /// Read a non-special field on an ordinary object only if lookup needs no Python call.
+    pub(super) fn plain_instance_field(&self, obj: Id, name: &str) -> Option<Id> {
+        let Value::Instance {
+            class,
+            fields,
+            namespace,
+            ..
+        } = self.heap.get(obj)
+        else {
+            return None;
+        };
+        if self.allocation_base(*class)? != *self.builtins.get("object")?
+            || self.class_attr(*class, "__getattribute__").is_some()
+            || self.class_attr(*class, "__getattr__").is_some()
+            || self.class_attr(*class, name).is_some()
+        {
+            return None;
+        }
+        let layout = self.instance_layout(*class, name);
+        if layout.active_slot {
+            return fields.get(name).copied();
+        }
+        if !layout.declared_slot
+            && let Some(&value) = fields.get(name)
+        {
+            return Some(value);
+        }
+        self.scalar_dict_name(self.dict_storage((*namespace)?)?, name)?
+    }
+
     /// Return the live instance dictionary for default object state, bypassing attribute hooks.
     pub(super) fn pickle_instance_state_dict(&mut self, obj: Id) -> Result<Id> {
         let dictionary = match *self.heap.get(obj) {
