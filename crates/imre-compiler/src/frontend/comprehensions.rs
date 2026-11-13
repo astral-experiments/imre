@@ -658,7 +658,8 @@ impl Checker<'_> {
                 self.source,
                 expression,
                 "asynchronous comprehensions are unsupported",
-            ));
+            )
+            .classify(Kind::AsyncComprehension));
         }
         let input = self.input(&display.clauses[0])?;
         let prepared = matches!(input, Iteration::Prepared(_));

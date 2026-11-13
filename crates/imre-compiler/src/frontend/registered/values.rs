@@ -1272,6 +1272,15 @@ impl Checker<'_> {
         module: &ModuleSource,
     ) -> Result<Option<Expr>, String> {
         let source = module.operands(self.source, self.graph.python_optimization());
+        if let ast::Expr::Await(awaited) = node
+            && self.asynchronous
+            && self.registered_local_start.is_some()
+        {
+            let value = self.expr(&awaited.value)?;
+            let value = self.task_await(value, false, awaited)?;
+            self.frame_arguments = FrameArguments::Python;
+            return Ok(Some(source.located(node, value)));
+        }
         if let ast::Expr::FString(value) = node
             && self.registered_local_start.is_some()
         {
@@ -1379,18 +1388,29 @@ impl Checker<'_> {
             }
             let target = self.expr(&call.func)?;
             let mut args = Vec::with_capacity(call.arguments.len());
-            for (arg, parameter) in call.arguments.args.iter().zip(written) {
+            for (index, (arg, parameter)) in call.arguments.args.iter().zip(written).enumerate() {
                 let value = self.expr(arg)?;
-                if value.ty != parameter.ty {
-                    return Err(self.scoped_builtin_error("declared Python argument", arg));
-                }
+                let expected = if let Some(inference) = self.inference {
+                    inference.learn_parameter(signature.id, index, value.checked_operand_type())
+                } else {
+                    parameter.ty
+                };
+                self.expect(expected, value.checked_operand_type(), arg).map_err(|error| {
+                    error.expected_from(signature.parameter_declaration(index), arg.range())
+                })?;
                 args.push(value);
             }
-            self.calls.insert(signature.id);
-            return Ok(Some(source.located_operation(
-                node,
-                self.call_with_values(call, target, args),
-            )));
+            let value = self.call_with_values(call, target, args);
+            let mut located = source.located_operation(node, value);
+            if !signature.asynchronous
+                && !self.classes.generators.contains(&signature.id)
+                && let ExprKind::Builtin(Builtin::RegisteredLocation(_, _, hint), _) = &mut located.kind
+            {
+                *hint = Some(self.enter_source_call(call, signature)?);
+            } else {
+                self.calls.insert(signature.id);
+            }
+            return Ok(Some(located));
         }
         let graph = self.graph;
         let owner = self.module;

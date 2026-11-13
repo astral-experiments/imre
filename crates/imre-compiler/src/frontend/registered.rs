@@ -496,13 +496,13 @@ pub(super) fn place_checked_definition(
     definition: &ast::StmtFunctionDef,
     signature: &Signature,
     inference: &inference::Inference,
-) -> Option<LoweredBody> {
+) -> Result<Option<LoweredBody>, String> {
     let graph = original.graph;
     let module = original.module;
     let checks = &inference.source_checks;
     let contract = SourceChecks::cached(graph, module, definition.range());
     if contract == Some(false) {
-        return None;
+        return Ok(None);
     }
     // A settled signature can use the source check that already owns this module.
     let deferred = checks.solved.as_ref().filter(|_| contract.is_none());
@@ -519,31 +519,40 @@ pub(super) fn place_checked_definition(
     );
     checker.nonreturning_functions = original.nonreturning_functions;
     checker.checked_call_contracts = true;
+    checker.inference = original.inference;
     if deferred.is_some() {
         checker.frame_arguments = FrameArguments::Pending;
     }
     checker.registered_local_start = Some(signature.params.len());
-    let (body, frame) = graph.try_registered_body(module, || {
-        let (mut body, names) = checked_definition(checker, definition, signature).ok()?;
-        let input = ir::Function {
-            params: body.function.params.clone(),
-            returns: body.function.returns,
-            locals: body.function.locals.clone(),
-            body: std::mem::take(&mut body.function.body),
-        };
-        let frame = RegisteredFunction::from_checked_body(input, names, body.frame_arguments)?;
-        body.function.returns = signature.returns;
-        Some((body, frame))
-    })?;
+    let placed = graph
+        .try_registered_body(module, || {
+            let (mut body, names) = match checked_definition(checker, definition, signature) {
+                Ok(checked) => checked,
+                Err(failure) => return Some(Err(failure)),
+            };
+            let input = ir::Function {
+                params: body.function.params.clone(),
+                returns: body.function.returns,
+                locals: body.function.locals.clone(),
+                body: std::mem::take(&mut body.function.body),
+            };
+            let frame = RegisteredFunction::from_checked_body(input, names, body.frame_arguments)?;
+            body.function.returns = signature.returns;
+            Some(Ok((body, frame)))
+        })
+        .transpose()?;
+    let Some((body, frame)) = placed else {
+        return Ok(None);
+    };
     if let Some(solved) = deferred {
         solved
             .borrow_mut()
             .push((module, definition.range(), SourceFrame::Registered));
     } else if contract.is_none() && !checks.accepts(graph, module, definition.range()) {
-        return None;
+        return Ok(None);
     }
     graph.register_function(module, definition.start(), frame);
-    Some(body)
+    Ok(Some(body))
 }
 
 fn checked_definition(
@@ -1905,6 +1914,7 @@ impl<'a> SuitePreparation<'a> {
         header.type_params = site.parameters;
         header.annotations = site.annotations;
         // A checked frame can reference lexical activations prepared at this definition.
+        let mut child_refusal = None;
         let checked = checked.filter(|body| {
             let (FrameInputs::Checked { sites }
             | FrameInputs::Deferred { sites, .. }
@@ -1915,7 +1925,15 @@ impl<'a> SuitePreparation<'a> {
                     .source
                     .lambdas
                     .and_then(|lambdas| lambdas.get(start))
-                    .is_some_and(|lambda| lambda.body.is_some()),
+                    .is_some_and(|lambda| {
+                        if lambda.body.is_some() {
+                            return true;
+                        }
+                        if let ExpressionSelection::Refused(range, reason) = lambda.binding.as_ref() {
+                            child_refusal = Some(PreparedRefusal::Operand((*range, reason)));
+                        }
+                        false
+                    }),
                 FrameSite::Generator(range) => self
                     .source
                     .generators
@@ -1954,7 +1972,8 @@ impl<'a> SuitePreparation<'a> {
         };
         header.prepare_signature(def, site.thread_entry, python_annotations, fixed_parameters);
         header.body = Some(body);
-        if let Some(refusal) = refusal {
+        // A residual suite may stop at a return before reaching a refused lexical child.
+        if let Some(refusal) = refusal.or(child_refusal) {
             self.declaration_refusals.insert(def.start(), refusal);
         }
     }
@@ -4025,12 +4044,16 @@ impl SourceScope<'_> {
             Some(operand) => self.ordinary_operand(operand)?,
             None => Expr::none(),
         };
-        Some(operation(
-            Builtin::RegisteredSuspend(kind, range),
-            Type::PythonObject,
-            vec![value],
-        ))
+        Some(suspend(kind, range, value))
     }
+}
+
+pub(super) fn suspend(kind: ir::SuspendValue, range: TextRange, value: Expr) -> Expr {
+    operation(
+        Builtin::RegisteredSuspend(kind, range),
+        Type::PythonObject,
+        vec![value],
+    )
 }
 
 impl ir::SuspendValue {
@@ -7478,25 +7501,70 @@ publish(5, callback)
 
     #[test]
     fn checked_async_display_owns_its_resumable_pull() {
-        let source = "async def collect(feed):
-    return [item async for item in feed]
-";
-        let graph = SourceGraph::single(source).unwrap();
-        let _ = super::super::lower(&graph);
-        let registered = graph.registered_functions();
-        let function = &registered[&graph.entry][&TextSize::default()].function;
-        let mut pulls = Vec::new();
-        ir::walk_statements(&function.body, &mut |stmt| {
-            if let Statement::IterNext {
-                kind: ir::IterNextKind::Async(pull),
-                ..
-            } = stmt
-            {
-                pulls.push(pull.range);
-            }
-        });
-        assert_eq!(pulls.len(), 1);
-        assert_eq!(&source[pulls[0]], "item");
+        for (source, owner) in [
+            (
+                "async def collect(feed):\n    return [item async for item in feed]\n",
+                0,
+            ),
+            (
+                concat!(
+                    "async def rows():\n    yield 1\n",
+                    "async def collect():\n    return [item async for item in rows() if item]\n",
+                ),
+                1,
+            ),
+        ] {
+            let mut graph = SourceGraph::single(source).unwrap();
+            crate::checked_lower(&mut graph).unwrap();
+            let start = graph.modules[graph.entry].parsed.syntax().body[owner].start();
+            let registered = graph.registered_functions();
+            let body = &registered[&graph.entry][&start];
+            crate::verify::registered(body.region()).unwrap();
+            let mut pulls = Vec::new();
+            ir::walk_statements(&body.function.body, &mut |stmt| {
+                if let Statement::IterNext {
+                    kind: ir::IterNextKind::Async(pull),
+                    ..
+                } = stmt
+                {
+                    pulls.push(pull.range);
+                }
+            });
+            assert_eq!(pulls.len(), 1);
+            assert_eq!(&source[pulls[0]], "item");
+        }
+    }
+
+    #[test]
+    fn an_uncalled_coroutine_checks_exact_operands_across_its_async_display() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = dir.path().join("app.py");
+        for body in [
+            "selected = [i async for i in rows()]\n    score(True)\n    return selected",
+            "return [score(True) async for i in rows()]",
+            "return [i async for i in rows() if False if score(True)]",
+            "return [i async for i in rows()]\n    score(True)",
+        ] {
+            let source = format!(
+                "def score(n: int) -> int:\n    return n\nasync def rows():\n    yield 1\nasync def collect():\n    {body}\n"
+            );
+            std::fs::write(&app, source).unwrap();
+            let diagnostic = crate::check_file(&app, None).unwrap_err();
+            assert!(diagnostic.contains("expected int, got bool"), "{diagnostic}");
+        }
+    }
+
+    #[test]
+    fn a_returning_async_display_keeps_an_unreachable_child_refusal() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = dir.path().join("app.py");
+        std::fs::write(&app, concat!(
+            "async def rows():\n    yield 1\n",
+            "async def collect():\n    return [i async for i in rows()]\n",
+            "    f = lambda row: -(not row)\nprint('uncalled')\n",
+        )).unwrap();
+        let error = crate::check_file(&app, None).unwrap_err();
+        assert!(error.contains("cannot compile this lambda body ahead of time"), "{error}");
     }
 
     #[test]
