@@ -388,6 +388,7 @@ pub(super) struct Inference {
 }
 
 pub(super) struct Solution {
+    pub(super) method_returns: HashMap<usize, RegisteredFunction>,
     pub(super) registered_parameters: HashMap<usize, Diagnostic>,
     /// Definitions checked to completion with the final input and return types.
     pub(super) checked_bodies: HashSet<usize>,
@@ -850,6 +851,7 @@ impl Inference {
         let mut registered = HashMap::new();
         let mut checked_bodies = HashSet::new();
         let mut registered_generators = HashSet::new();
+        let mut method_returns = HashMap::new();
         let mut checked_before_registration = HashSet::new();
         let unshadowed_builtin = |module: ModuleId, name: &str| {
             !graph.modules[module].bindings.contains_key(name)
@@ -863,6 +865,7 @@ impl Inference {
             if !widened && signatures_settled {
                 break;
             }
+            method_returns.clear();
             let previous_checks = std::mem::take(&mut checked_before_registration);
             checked_bodies.clear();
             if widened {
@@ -977,14 +980,33 @@ impl Inference {
                 checker.discover_document_return = document_return;
                 checker.inferred_returns = discover_returns.then(Vec::new);
                 let body_revision = self.revision.get();
+                // A physical method reached after the final signature change can keep the
+                // return it is about to check. Discovery still observes all calls and stores.
+                let keep_return = body_revision != before
+                    && !self.widened.get()
+                    && !discover_returns
+                    && !signature.registered_frame()
+                    && matches!(function.body.as_slice(), [ast::Stmt::Return(_)])
+                    && !checker.fault_enabled()
+                    && registered::physical_method(&signature, function, classes).is_some();
+                let mut return_body = keep_return.then(|| {
+                    checker.frame = LexicalFrame::Named(function.name.id.clone());
+                    checker.fixed_sites = Some(fixed_body_source::SourceSites::new(true));
+                    (Vec::new(), Vec::new())
+                });
                 let mut checked_return = false;
                 let mut implicit_none = false;
                 let mut superseded_returns = false;
                 let mut checked_call_cannot_return = false;
                 let result = (|| {
-                    checker.bind_function_signature(function, &signature, |_| {})?;
+                    checker.bind_function_signature(function, &signature, |slot| {
+                        if let Some((params, _)) = &mut return_body {
+                            params.push(slot);
+                        }
+                    })?;
                     checker.collect_local_definitions(&function.body)?;
-                    let falls_through = checker.lower_block(&function.body, None)?;
+                    let falls_through = checker
+                        .lower_block(&function.body, return_body.as_mut().map(|(_, body)| body))?;
                     // An outstanding call cannot establish an implicit return, even
                     // when checking subsequent statements reached the end of the body.
                     if matches!(
@@ -1040,6 +1062,7 @@ impl Inference {
                 })();
                 let revision = self.revision.get();
                 if revision != checked_revision {
+                    method_returns.clear();
                     checked_bodies.clear();
                     checked_revision = revision;
                 }
@@ -1141,6 +1164,27 @@ impl Inference {
                         self.pending.borrow_mut()[signature.id].discovery =
                             ReturnDiscovery::Checked;
                     }
+                    if let Some((params, body)) = return_body
+                        && checked_return && !checked_call_cannot_return && body_revision == revision
+                        && checker.calls.is_empty() && checker.class_reads.borrow().is_empty()
+                        && let Some(source) = checker.fixed_body_source(function, &signature, &body)
+                        // A module read needs its initializing storage; a bound method may
+                        // have consulted a different callee layout during discovery.
+                        && source.attributes.values().all(|attr| matches!(*attr.operation, Builtin::RegisteredAttribute { .. }))
+                    {
+                        let function = ir::Function {
+                            params,
+                            returns: signature.returns,
+                            locals: checker.locals,
+                            body,
+                        };
+                        if source.matches(&function) {
+                            method_returns.insert(
+                                signature.id,
+                                registered::place_fixed_function(function, source),
+                            );
+                        }
+                    }
                     if superseded_returns
                         && !graph.session.call_may_return_implicitly(*module, function)
                     {
@@ -1230,11 +1274,15 @@ impl Inference {
                             types,
                             self,
                             Some(&checked_bodies),
-                            checked_bodies.iter().copied().chain(
-                                staged_returns
-                                    .into_iter()
-                                    .filter(|&slot| definitions[slot].2.method.is_none()),
-                            ),
+                            checked_bodies
+                                .iter()
+                                .copied()
+                                .chain(
+                                    staged_returns
+                                        .into_iter()
+                                        .filter(|&slot| definitions[slot].2.method.is_none()),
+                                )
+                                .map(|slot| (slot, None)),
                         );
                     }
                     let primary = reports.remove(index);
@@ -1290,7 +1338,7 @@ impl Inference {
                             types,
                             self,
                             None,
-                            signatures.values().map(|signature| signature.id),
+                            signatures.values().map(|signature| (signature.id, None)),
                         );
                     }
                     return Err(primary.with_following(reports));
@@ -1319,7 +1367,7 @@ impl Inference {
                             types,
                             self,
                             None,
-                            signatures.values().map(|signature| signature.id),
+                            signatures.values().map(|signature| (signature.id, None)),
                         );
                     }
                     return Err(unresolved);
@@ -1329,6 +1377,7 @@ impl Inference {
                 || completed_calls.len() != initial_nonreturning
                 || classes.nonreturning_functions.len() != initial_nonreturning
             {
+                method_returns.clear();
                 checked_bodies.clear();
             }
         }
@@ -1351,6 +1400,7 @@ impl Inference {
             checked_bodies.clear();
         }
         Ok(Solution {
+            method_returns,
             registered_parameters: registered,
             checked_bodies,
             registered_generators,

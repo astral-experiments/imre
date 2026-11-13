@@ -27,7 +27,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn recovering_a_method_keeps_the_checked_field_and_its_python_receiver() {
+    fn discovery_supplies_the_checked_field_and_its_python_receiver() {
         let text = concat!(
             "import argparse, dataclasses\n",
             "@dataclasses.dataclass\n",
@@ -61,7 +61,7 @@ mod tests {
         assert!(matches!(&body.inputs, FrameInputs::Protocol { sites }
             if matches!(sites.as_ref(), [FrameSite::Method(method)]
                 if method.start() == start && method.name.as_str() == "pretty")));
-        assert_eq!(lowered.iter().filter(|name| *name == "pretty").count(), 1);
+        assert!(!lowered.iter().any(|name| name == "pretty"));
     }
 
     #[test]
