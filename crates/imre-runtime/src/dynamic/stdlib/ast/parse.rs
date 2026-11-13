@@ -1208,9 +1208,7 @@ fn parse_source(
     } else {
         source
     };
-    let lines = crate::dynamic::source_code::line_starts(
-        source.match_indices('\n').map(|(offset, _)| offset + 1),
-    )?;
+    let lines = crate::dynamic::source_code::line_starts(source)?;
     let load = ctx.builtins["ast._Load"];
     let store = ctx.builtins["ast._Store"];
     let mut parser = Parser {

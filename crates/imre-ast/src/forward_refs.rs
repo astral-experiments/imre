@@ -11,14 +11,24 @@ pub fn starred_expression(spelling: &str) -> String {
     format!("({spelling},)[0]")
 }
 
+/// A tokenizer guard or a grammar error in the decoded source.
+#[derive(Debug)]
+pub enum ParseError {
+    Token(&'static str),
+    Grammar(ruff_python_parser::ParseError),
+    Syntax(ruff_text_size::TextRange, &'static str),
+}
+
 /// Parse annotation text without evaluating it or constructing Python AST objects.
 pub fn parse(
     source: &str,
-) -> Result<ruff_python_parser::Parsed<ruff_python_ast::ModExpression>, String> {
+) -> Result<ruff_python_parser::Parsed<ruff_python_ast::ModExpression>, ParseError> {
     use ruff_python_ast::token::TokenKind;
 
     if source.contains('\0') {
-        return Err("source code string cannot contain null bytes".into());
+        return Err(ParseError::Token(
+            "source code string cannot contain null bytes",
+        ));
     }
     // CPython's tokenizer caps the combined nesting of (), [] and {} at 200.
     // Keep deeply nested input out of the recursive parser. Short references only lex once.
@@ -32,7 +42,7 @@ pub fn parse(
                 TokenKind::Lpar | TokenKind::Lsqb | TokenKind::Lbrace => {
                     depth += 1;
                     if depth > MAX_NESTING {
-                        return Err("too many nested parentheses".into());
+                        return Err(ParseError::Token("too many nested parentheses"));
                     }
                 }
                 TokenKind::Rpar | TokenKind::Rsqb | TokenKind::Rbrace => {
@@ -43,7 +53,11 @@ pub fn parse(
             }
         }
     }
-    ruff_python_parser::parse_expression(source).map_err(|error| error.to_string())
+    let parsed = ruff_python_parser::parse_expression(source).map_err(ParseError::Grammar)?;
+    if let Some((range, reason)) = crate::comprehension::dict_unpacking_error(&parsed) {
+        return Err(ParseError::Syntax(range, reason));
+    }
+    Ok(parsed)
 }
 
 /// Check a forward reference without evaluating names or converting the tree into Python AST objects.
