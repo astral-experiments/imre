@@ -29,9 +29,6 @@ impl Checker<'_> {
         call: &ast::ExprCall,
         result: Type,
     ) -> Result<Option<Expr>, String> {
-        if !self.is_defaultdict_constructor(&call.func) {
-            return Ok(None);
-        }
         let Some((factory, rest)) = call.arguments.args.split_first() else {
             return Ok(None);
         };
