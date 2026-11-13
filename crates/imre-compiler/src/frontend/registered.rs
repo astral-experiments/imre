@@ -963,7 +963,7 @@ impl TypeParameterValues {
         names: &imre_ast::Names,
         source: values::RegisteredSource<'_>,
         enclosing_class: Option<TextSize>,
-        scopes: &super::function_scope::ScopeFacts,
+        scopes: &super::function_scope::ScopeFacts<'_>,
     ) -> Self {
         let class = enclosing_class.map(|site| &scopes.classes[&site].bindings);
         Self {
@@ -1234,6 +1234,23 @@ fn bind_operand(operands: &mut Vec<PhysicalOperand>, value: PhysicalOperand, ty:
     Expr::registered_input(index, ty)
 }
 
+/// Both forms provide the checked function. A suite also supplies the operation
+/// inputs and child suites referenced by that function. Source preparation owns
+/// its suites, and emission borrows them.
+pub(crate) enum RegisteredBody<'p, S = &'p RegisteredSuite> {
+    Function(&'p RegisteredFunction),
+    Suite(S),
+}
+
+impl RegisteredBody<'_, Box<RegisteredSuite>> {
+    pub(crate) fn as_ref(&self) -> RegisteredBody<'_> {
+        match self {
+            Self::Function(body) => RegisteredBody::Function(body),
+            Self::Suite(suite) => RegisteredBody::Suite(suite),
+        }
+    }
+}
+
 pub(crate) struct RegisteredSuite {
     pub(crate) refusal: Option<PreparedRefusal>,
     falls_through: bool,
@@ -1394,7 +1411,7 @@ impl<'a> SuitePreparation<'a> {
         classes: Vec<&ast::StmtClassDef>,
         class_keywords: &[TextSize],
         names: &imre_ast::Names,
-        scopes: &super::function_scope::ScopeFacts,
+        scopes: &super::function_scope::ScopeFacts<'_>,
     ) -> HashMap<TextSize, RegisteredClass> {
         classes
             .into_iter()
@@ -1408,7 +1425,7 @@ impl<'a> SuitePreparation<'a> {
         class: &ast::StmtClassDef,
         class_keywords: &[TextSize],
         names: &imre_ast::Names,
-        scopes: &super::function_scope::ScopeFacts,
+        scopes: &super::function_scope::ScopeFacts<'_>,
     ) -> (TextSize, RegisteredClass) {
         let start = class.start();
         let header = class.type_params.as_deref().map(|params| {
@@ -1513,6 +1530,56 @@ impl<'a> SuitePreparation<'a> {
             SuiteSelection::All
         };
         self.selected_suite(stmts, kind, SuiteSelection::All, children, suspends)
+    }
+
+    pub(crate) fn prepare_function<'p>(
+        &mut self,
+        header: &mut super::function_scope::NamedFunction<'p>,
+        site: FunctionSite<'_>,
+        checked: Option<&'p RegisteredFunction>,
+        python_annotations: bool,
+    ) {
+        let def = site.def;
+        header.type_params = site.parameters.unwrap_or_default();
+        header.annotations = site.annotations;
+        header.prepare_signature(def, site.thread_entry, python_annotations);
+        // A checked frame can reference lexical activations prepared at this definition.
+        let checked = checked.filter(|body| match &body.inputs {
+            FrameInputs::Checked => true,
+            FrameInputs::Protocol { sites } => sites.iter().all(|site| match site {
+                FrameSite::Lambda(start) => self
+                    .source
+                    .lambdas
+                    .and_then(|lambdas| lambdas.get(start))
+                    .is_some_and(|lambda| lambda.body.is_some()),
+                FrameSite::Generator(range) => self
+                    .source
+                    .generators
+                    .is_some_and(|generators| generators.contains_key(range)),
+            }),
+        });
+        let (body, refusal) = if let Some(checked) = checked {
+            (
+                RegisteredBody::Function(checked),
+                self.checked_declaration_refusal(&checked.function.body),
+            )
+        } else {
+            let kind = RegisteredScope::Function {
+                is_async: def.is_async,
+            };
+            let suite = self.named_body(
+                &def.body,
+                kind,
+                header.metadata.suspension_flags() != 0,
+                site.prepare_entry,
+            );
+            let refusal = suite.refusal;
+            (RegisteredBody::Suite(Box::new(suite)), refusal)
+        };
+        header.body = Some(body);
+        if let Some(refusal) = refusal {
+            self.declaration_refusals.insert(def.start(), refusal);
+        }
     }
 
     pub(crate) fn named_body(

@@ -1,6 +1,7 @@
 //! Parameter binding and code-object metadata for Python callables.
 
 use super::FunctionScope;
+use crate::frontend::{RegisteredBody, RegisteredSuite};
 use imre_ast::code_flags;
 use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextSize};
@@ -38,7 +39,9 @@ fn parameter_layout(parameters: &ast::Parameters, layout: &mut Value) -> Vec<Str
     defaults
 }
 
-pub(crate) struct NamedFunction {
+pub(crate) struct NamedFunction<'p> {
+    /// Selected after lexical children have been prepared.
+    pub(crate) body: Option<RegisteredBody<'p, Box<RegisteredSuite>>>,
     /// Original spelling used by Python function metadata.
     pub(crate) name: String,
     /// Lookup and assignment use the lowered private name in class scopes.
@@ -53,7 +56,14 @@ pub(crate) struct NamedFunction {
         Vec<crate::ir::RegisteredTypeParameter<crate::frontend::ParameterEvaluator>>,
 }
 
-impl NamedFunction {
+impl NamedFunction<'_> {
+    pub(crate) fn body(&self) -> RegisteredBody<'_> {
+        self.body
+            .as_ref()
+            .expect("prepared named function")
+            .as_ref()
+    }
+
     pub(super) fn prepare(
         def: &ast::StmtFunctionDef,
         names: &imre_ast::Names,
@@ -63,6 +73,7 @@ impl NamedFunction {
         Self {
             name: names.definition(&def.name).to_owned(),
             binding: def.name.to_string(),
+            body: None,
             decorator_offsets: def
                 .decorator_list
                 .iter()

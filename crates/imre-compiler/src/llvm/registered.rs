@@ -9,8 +9,8 @@ mod sequences;
 pub(crate) mod sites;
 pub(crate) mod suspension;
 use crate::frontend::{
-    ExpressionSelection, LocalBinding, PhysicalOperand, RegisteredFunction, RegisteredOperand,
-    RegisteredRegion, RegisteredSuite,
+    ExpressionSelection, LocalBinding, PhysicalOperand, RegisteredBody, RegisteredFunction,
+    RegisteredOperand, RegisteredRegion, RegisteredSuite,
 };
 use crate::ir::DisplayKind;
 use crate::ir::{self, Builtin, Expr, ExprKind, Statement, Type};
@@ -362,14 +362,6 @@ fn emit_physical_operand<'a, 'p>(
     });
     owner.current_range = previous;
     result
-}
-
-/// Both forms provide the checked function. A suite also supplies the operation
-/// inputs and child suites referenced by that function. Source preparation owns
-/// its suites, and emission borrows them.
-pub(crate) enum RegisteredBody<'p, S = &'p crate::frontend::RegisteredSuite> {
-    Function(&'p RegisteredFunction),
-    Suite(S),
 }
 
 impl<'p> RegisteredBody<'p> {
