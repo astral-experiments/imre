@@ -17,13 +17,12 @@ use crate::frontend::module_source::ParsedModule;
 pub(crate) struct LiteralSite {
     pub(crate) call: TextRange,
     pub(crate) operand: TextSize,
-    /// Decoded operand before the child parser normalizes physical newlines.
-    pub(crate) text: Box<str>,
 }
 
 pub(super) struct PreparedLiteral {
     pub(super) body: PreparedBody<'static>,
-    pub(super) text: Box<str>,
+    /// Present only when the decoded operand differs from the body's normalized source.
+    pub(super) original_text: Option<Box<str>>,
 }
 
 /// One source slot's checked operands. Different modules named "<string>" have
@@ -34,15 +33,8 @@ pub(crate) struct LiteralSites {
 }
 
 impl LiteralSites {
-    fn insert(&mut self, site: LiteralSite, body: Result<PreparedBody<'static>, String>) {
-        let entry = body
-            .map(|body| {
-                Box::new(PreparedLiteral {
-                    body,
-                    text: site.text,
-                })
-            })
-            .map_err(|reason| (site.operand, reason));
+    fn insert(&mut self, site: LiteralSite, body: Result<PreparedLiteral, String>) {
+        let entry = body.map(Box::new).map_err(|reason| (site.operand, reason));
         self.sites.insert(site.call, entry);
     }
 
@@ -79,6 +71,7 @@ impl LiteralSites {
 pub(crate) struct ParsedLiteral {
     pub(crate) file: File,
     pub(crate) text: String,
+    original_text: Option<Box<str>>,
     pub(crate) parsed: ParsedModuleRef,
     pub(crate) flags: u32,
     inherited_flags: u32,
@@ -89,7 +82,8 @@ pub(crate) struct ParsedLiteral {
 impl ParsedLiteral {
     pub(crate) fn new(
         file: File,
-        text: String,
+        text: Cow<'_, str>,
+        original: &str,
         parsed: ParsedModuleRef,
         inherited_flags: u32,
     ) -> Self {
@@ -101,7 +95,8 @@ impl ParsedLiteral {
         imports.visit_body(body);
         Self {
             file,
-            text,
+            original_text: matches!(text, Cow::Owned(_)).then(|| original.into()),
+            text: text.into_owned(),
             parsed,
             flags,
             inherited_flags,
@@ -117,8 +112,8 @@ impl ParsedLiteral {
         self,
         python_optimization: i32,
         children: LiteralSites,
-    ) -> Result<PreparedBody<'static>, String> {
-        PreparedBody::from_parsed(
+    ) -> Result<PreparedLiteral, String> {
+        let body = PreparedBody::from_parsed(
             "<module>",
             Path::new("<string>"),
             ParsedModule {
@@ -129,7 +124,11 @@ impl ParsedLiteral {
             ModuleOrigin::ExecLiteral(self.inherited_flags),
             children,
             Default::default(),
-        )
+        )?;
+        Ok(PreparedLiteral {
+            body,
+            original_text: self.original_text,
+        })
     }
 }
 
