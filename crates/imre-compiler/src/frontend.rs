@@ -13820,10 +13820,11 @@ impl<'a> Checker<'a> {
             };
             if self.checked_call_contracts && !matches!(builtin, Builtin::JoinBufferAppend) {
                 self.frame_arguments = FrameArguments::Python;
+                let layout = registered::values::registered_argument_layout(&call.arguments);
                 return Ok(Expr {
                     ty: Type::PythonObject,
                     kind: ExprKind::Builtin(
-                        registered::values::bound_method_operation(call, attribute),
+                        registered::values::bound_method_operation(call, attribute, layout),
                         args,
                     ),
                 });
