@@ -787,11 +787,11 @@ impl Checker<'_> {
                     _ => 0,
                 }),
                 Type::Str,
-                vec![PositionalOnly.parameter(
-                    "chars",
-                    optional_string,
-                    Some(Expr::absent(optional_string)),
-                )],
+                if call.arguments.is_empty() {
+                    vec![]
+                } else {
+                    vec![PositionalOnly.parameter("chars", optional_string, None)]
+                },
             ),
             "startswith" | "endswith" => (
                 if name == "startswith" {

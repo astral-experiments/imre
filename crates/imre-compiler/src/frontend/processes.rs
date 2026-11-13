@@ -1588,7 +1588,7 @@ impl Checker<'_> {
     }
 
     pub(super) fn process_attribute(
-        &self,
+        &mut self,
         receiver: Expr,
         attribute: &ast::ExprAttribute,
     ) -> Result<Expr, String> {
@@ -1608,10 +1608,11 @@ impl Checker<'_> {
                 ));
             }
         };
-        Ok(Expr {
-            ty,
-            kind: ExprKind::Field(Box::new(receiver), field),
-        })
+        let kind = ExprKind::Field(Box::new(receiver), field);
+        if let Some(sites) = &mut self.fixed_sites {
+            sites.field(attribute, FixedNode::indexed(&kind, field, ty));
+        }
+        Ok(Expr { ty, kind })
     }
 
     pub(super) fn process_method(

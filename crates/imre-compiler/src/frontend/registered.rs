@@ -5474,6 +5474,37 @@ print(render('ok'), raw('ok'))
     }
 
     #[test]
+    fn checked_frame_keeps_the_process_field_and_receiver_only_method() {
+        let graph = checked_named_source(
+            r#"from subprocess import CompletedProcess
+
+def clean(result: CompletedProcess[str]) -> str:
+    text = result.stdout
+    return text.strip()
+
+print(clean(CompletedProcess([], 0, " data ")))
+"#,
+        );
+        let function = graph.modules[graph.entry].parsed.syntax().body[1]
+            .as_function_def_stmt()
+            .unwrap();
+        let functions = graph.registered_functions();
+        let body = &functions[&graph.entry][&function.start()];
+        assert!(matches!(
+            body.function.body.as_slice(),
+            [Statement::Assign(_, _), Statement::Return(_)]
+        ));
+        let attributes = body.fixed_attributes.as_ref().unwrap();
+        assert!(attributes.values().any(|field| matches!(field,
+            FixedAttribute::Operation { operation, .. }
+            if matches!(&**operation, Builtin::RegisteredAttribute { name, .. } if name == "stdout"))));
+        assert!(attributes.values().any(|field| matches!(field,
+            FixedAttribute::Operation { operation, .. }
+            if matches!(&**operation, Builtin::RegisteredCall(call)
+                if matches!(&call.target, ir::RegisteredCallTarget::Method { name, .. } if name == "strip")))));
+    }
+
+    #[test]
     fn checked_frames_call_the_live_imported_member() {
         let graph = checked_named_source(
             r#"import argparse
