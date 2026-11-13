@@ -2589,7 +2589,7 @@ pub(super) fn call(
             }
             ("compile_single", [compiler, source, filename, test], []) => {
                 if *compiler == ctx.builtin("compile")
-                    && ctx.config["optimize"].as_i64().unwrap_or(0) == 0
+                    && ctx.config["optimize"].as_i64().unwrap_or(0) < 2
                     && let Some(code) = registered_single_code(ctx, *source, *filename, *test)
                 {
                     return Ok(code);
