@@ -10926,8 +10926,10 @@ impl<'a> Checker<'a> {
                     });
                 }
                 let kind = ExprKind::Field(Box::new(receiver), field);
-                if let Some(sites) = &mut self.fixed_sites {
-                    sites.field(attribute, &kind, field, ty);
+                if let Some(sites) = &mut self.fixed_sites
+                    && sites.wrapper_fields
+                {
+                    sites.field(attribute, FixedNode::indexed(&kind, field, ty));
                 }
                 (ty, kind)
             }

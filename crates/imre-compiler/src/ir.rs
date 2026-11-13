@@ -2939,7 +2939,7 @@ pub(crate) enum TextPredicate {
 }
 
 /// Numeric selectors for the runtime's imre_path_query ABI.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
 pub(crate) enum PathQuery {
     Exists = 0,
@@ -2953,7 +2953,7 @@ pub(crate) enum PathQuery {
 }
 
 /// Operations on a link's stored target name and its destination (POSIX link ABI).
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
 pub(crate) enum PathLink {
     Symlink = 0,
@@ -2962,7 +2962,7 @@ pub(crate) enum PathLink {
 }
 
 /// Native path operations keep their exact result types in the checked IR.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PathOperation {
     Scripts,
     OsExists,
