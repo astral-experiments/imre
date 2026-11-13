@@ -1355,22 +1355,19 @@ impl Checker<'_> {
                 .map(|(_, op, _)| *op);
             frame_identity = matches!(frame_op, Some(ast::CmpOp::Is | ast::CmpOp::IsNot));
             let opaque = |operand: &ast::Expr| {
-                let object = match operand {
-                    ast::Expr::Subscript(subscript) => subscript.value.as_ref(),
-                    _ => operand,
-                };
-                if let ast::Expr::Name(name) = object
-                    && let Some(&slot) = self.names.get(name.id.as_str())
-                    && self.locals[slot] == Type::PythonObject
-                {
-                    return true;
-                }
                 let receiver = match operand {
                     ast::Expr::Call(call) => source.call_target(call).1,
                     ast::Expr::Attribute(field) => field.value.as_ref(),
                     _ => operand,
                 };
-                graph.session.is_dynamic_receiver(owner, receiver)
+                let selected = operand
+                    .as_subscript_expr()
+                    .map_or(receiver, |subscript| subscript.value.as_ref());
+                selected
+                    .as_name_expr()
+                    .and_then(|name| self.names.get(name.id.as_str()))
+                    .is_some_and(|&slot| self.locals[slot] == Type::PythonObject)
+                    || graph.session.is_dynamic_receiver(owner, receiver)
             };
             let mut previous_fixed = false;
             if matches!(frame_op, Some(ast::CmpOp::Eq | ast::CmpOp::NotEq))

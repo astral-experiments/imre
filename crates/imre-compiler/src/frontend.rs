@@ -4159,6 +4159,21 @@ impl<'a> Checker<'a> {
             } else {
                 self.expr(expression)?
             };
+            if value.ty == Type::PythonObject
+                && self.types.set_element(concrete).is_some()
+                && let ast::Expr::Call(call) = expression
+                && call.arguments.is_empty()
+                && self.graph.session.is_known_class(
+                    self.module,
+                    &call.func,
+                    ty_python_semantic::types::KnownClass::Set,
+                )
+            {
+                return Ok(Expr {
+                    ty: concrete,
+                    ..value
+                });
+            }
             return if alternative(self, value.ty) {
                 Ok(value)
             } else {
@@ -5951,7 +5966,9 @@ impl<'a> Checker<'a> {
                     .and_then(|name| self.registered_in_place_local(name.id.as_str()))
                     .is_some(),
                 ast::Stmt::For(loop_) => !loop_.is_async,
-                ast::Stmt::Assert(_) => self.registered_local_start.is_some(),
+                ast::Stmt::Assert(_) | ast::Stmt::FunctionDef(_) => {
+                    self.registered_local_start.is_some()
+                }
                 ast::Stmt::With(scope) => !scope.is_async,
                 ast::Stmt::While(_) => true,
                 ast::Stmt::If(_) => true,

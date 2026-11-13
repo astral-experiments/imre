@@ -3288,7 +3288,7 @@ fn class_site(class: &ast::StmtClassDef) -> ir::DefinitionSite {
     }
 }
 
-fn definition_value(site: ir::DefinitionSite, header: Vec<Expr>) -> Expr {
+pub(super) fn definition_value(site: ir::DefinitionSite, header: Vec<Expr>) -> Expr {
     operation(
         Builtin::RegisteredDefinition(site),
         Type::PythonObject,

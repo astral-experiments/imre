@@ -269,10 +269,12 @@ impl Checker<'_> {
         stmts: &[ast::Stmt],
         include_classes: bool,
     ) -> Result<(), String> {
-        let has_candidate = stmts
-            .iter()
-            .filter_map(ast::Stmt::as_function_def_stmt)
-            .any(cmp_keys::can_specialize);
+        let fixed_functions = self.registered_local_start.is_none();
+        let has_candidate = fixed_functions
+            && stmts
+                .iter()
+                .filter_map(ast::Stmt::as_function_def_stmt)
+                .any(cmp_keys::can_specialize);
         let cmp_inputs = if has_candidate {
             cmp_keys::local_comparators(stmts, |callee| {
                 self.resolve(callee)
@@ -285,7 +287,7 @@ impl Checker<'_> {
         for (index, statement) in stmts.iter().enumerate() {
             let name = match statement {
                 ast::Stmt::ClassDef(class) if include_classes => class.name.as_str(),
-                ast::Stmt::FunctionDef(function) => function.name.as_str(),
+                ast::Stmt::FunctionDef(function) if fixed_functions => function.name.as_str(),
                 _ => continue,
             };
             if let ast::Stmt::FunctionDef(function) = statement
