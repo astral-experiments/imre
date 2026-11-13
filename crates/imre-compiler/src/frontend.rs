@@ -603,6 +603,10 @@ fn reserved(name: &str) -> bool {
     RESERVED.contains(&name) || exception_kind(name).is_some()
 }
 
+fn debug_operand(name: &ast::ExprName, python_optimization: i32) -> Option<ExprKind> {
+    (name.id == "__debug__").then(|| ExprKind::Bool(python_optimization == 0))
+}
+
 fn pattern_elements(target: &ast::Expr) -> Option<&[ast::Expr]> {
     match target {
         ast::Expr::Tuple(tuple) => Some(&tuple.elts),
@@ -8434,7 +8438,7 @@ impl<'a> Checker<'a> {
             let source = self
                 .registered
                 .unwrap_or_else(|| self.graph.modules[self.module].registered_values())
-                .context(self.source);
+                .operands(self.source, self.graph.python_optimization());
             if let Some(value) = registered::values::registered_value(expression, source) {
                 self.require_registered_operation(expression)?;
                 return Ok(value);
@@ -8811,10 +8815,11 @@ impl<'a> Checker<'a> {
                     "a hash constructor used as a type requires native object dispatch",
                 ));
             }
-            ast::Expr::Name(name) if name.id == "__debug__" => (
-                Type::Bool,
-                ExprKind::Bool(self.graph.python_optimization() == 0),
-            ),
+            ast::Expr::Name(name)
+                if let Some(value) = debug_operand(name, self.graph.python_optimization()) =>
+            {
+                (Type::Bool, value)
+            }
             ast::Expr::Name(name)
                 if name.id == "__doc__" && !self.names.contains_key("__doc__") =>
             {

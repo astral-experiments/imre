@@ -20,8 +20,18 @@ impl ModuleSource {
                 .any(|token| token.kind() == ast::token::TokenKind::TStringStart),
         }
     }
+    #[cfg(test)]
     pub(in crate::frontend) fn context<'a>(&'a self, text: &'a str) -> RegisteredSource<'a> {
+        self.operands(text, 0)
+    }
+
+    pub(in crate::frontend) fn operands<'a>(
+        &'a self,
+        text: &'a str,
+        python_optimization: i32,
+    ) -> RegisteredSource<'a> {
         RegisteredSource {
+            python_optimization,
             operand_types: None,
             template_fields: None,
             generators: None,
@@ -37,6 +47,7 @@ impl ModuleSource {
 
 #[derive(Clone, Copy)]
 pub(crate) struct RegisteredSource<'a> {
+    pub(crate) python_optimization: i32,
     pub(crate) operand_types: Option<crate::analysis::OperandTypes<'a>>,
     pub(crate) text: &'a str,
     pub(crate) replacements: &'a HashMap<TextRange, Vec<u32>>,
@@ -489,7 +500,7 @@ impl Checker<'_> {
         let source = self
             .registered
             .expect("registered callback frame")
-            .context(self.source);
+            .operands(self.source, self.graph.python_optimization());
         let target = source.located(&call.func, callable);
         let mut value = positional_invoke(
             call.range(),
@@ -536,7 +547,7 @@ impl Checker<'_> {
         let source = self
             .registered
             .unwrap_or_else(|| self.graph.modules[self.module].registered_values())
-            .context(self.source);
+            .operands(self.source, self.graph.python_optimization());
         let (selection, receiver) = source.call_target(call);
         let target = registered_value(receiver, source).map_or_else(|| self.expr(receiver), Ok)?;
         let mut value = bound_call(call, selection, target, operands);
@@ -979,6 +990,11 @@ pub(super) fn operation<E>(
             }
             return Ok(Some(selected_operands(and, values)));
         }
+        ast::Expr::Name(name)
+            if let Some(value) = debug_operand(name, source.python_optimization) =>
+        {
+            value
+        }
         ast::Expr::Name(name) => return Ok(Some(name_binding(&name.id))),
         ast::Expr::NumberLiteral(lit) => number_literal(&lit.value, false),
         ast::Expr::StringLiteral(lit) => {
@@ -1236,7 +1252,7 @@ impl Checker<'_> {
         node: &ast::Expr,
         module: &ModuleSource,
     ) -> Result<Option<Expr>, String> {
-        let source = module.context(self.source);
+        let source = module.operands(self.source, self.graph.python_optimization());
         if let ast::Expr::FString(value) = node
             && self.registered_local_start.is_some()
         {
@@ -1480,6 +1496,7 @@ mod tests {
         let parsed = imre_ast::indentation::prepare(text).parse_module().unwrap();
         let imports = imre_ast::module_imports(&parsed.syntax().body);
         let source = RegisteredSource {
+            python_optimization: 0,
             operand_types: None,
             template_fields: None,
             generators: None,
@@ -1550,6 +1567,7 @@ mod tests {
         let text = "obj.emit(value, named=arg)\nf(first=a, *items, **mapping, last=b)\n";
         let parsed = imre_ast::indentation::prepare(text).parse_module().unwrap();
         let source = RegisteredSource {
+            python_optimization: 0,
             operand_types: None,
             template_fields: None,
             generators: None,
@@ -1641,6 +1659,7 @@ mod tests {
         };
         let call = assign.value.as_call_expr().unwrap();
         let source = RegisteredSource {
+            python_optimization: 0,
             operand_types: None,
             template_fields: None,
             generators: None,
@@ -1679,6 +1698,7 @@ mod tests {
                 panic!("expected expression")
             };
             let source = RegisteredSource {
+                python_optimization: 0,
                 operand_types: None,
                 template_fields: None,
                 generators: None,
@@ -1721,6 +1741,7 @@ mod tests {
                 panic!("expected expression")
             };
             let source = RegisteredSource {
+                python_optimization: 0,
                 operand_types: None,
                 template_fields: None,
                 generators: None,

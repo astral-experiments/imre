@@ -14,6 +14,7 @@ fn template_children_use_their_eager_bindings_after_source_is_dropped() {
         RegisteredOperand::prepare(
             &assignment.value,
             RegisteredSource {
+                python_optimization: 0,
                 operand_types: None,
                 text: &source,
                 private_names: None,
@@ -129,6 +130,7 @@ fn template_async_comprehension_uses_its_enclosing_activation() {
         .as_deref()
         .unwrap();
     let source = RegisteredSource {
+        python_optimization: 0,
         operand_types: None,
         text,
         private_names: None,
@@ -177,6 +179,7 @@ fn template_default_and_body_suspend_in_their_defining_frames() {
         let parsed = ruff_python_parser::parse_module(text).unwrap();
         let fields = imre_ast::strings::template_fields(text, parsed.tokens(), parsed.syntax());
         let source = RegisteredSource {
+            python_optimization: 0,
             operand_types: None,
             text,
             private_names: None,
@@ -258,6 +261,7 @@ fn unavailable_template_child_is_reported_at_its_own_range() {
     let module = parsed.syntax();
     let fields = imre_ast::strings::template_fields(text, parsed.tokens(), module);
     let source = RegisteredSource {
+        python_optimization: 0,
         operand_types: None,
         text,
         private_names: None,

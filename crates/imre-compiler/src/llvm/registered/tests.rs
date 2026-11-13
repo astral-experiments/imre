@@ -116,6 +116,7 @@ fn placed_field_uses_the_ordinary_descriptor_and_attribute_line() {
     let placed = crate::frontend::place_fixed_function(function, placement);
 
     let values = RegisteredSource {
+        python_optimization: 0,
         operand_types: None,
         text: source,
         replacements: &Default::default(),

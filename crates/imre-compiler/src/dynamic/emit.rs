@@ -535,6 +535,7 @@ impl<'a> PreparedBody<'a> {
         };
         module_source::validate_names(&path, source, &body, &private_names)?;
         let values = crate::frontend::RegisteredSource {
+            python_optimization,
             operand_types,
             text: source,
             private_names: Some(&private_names),
@@ -996,6 +997,7 @@ impl SourceInfo<'_> {
 
     fn registered_source(&self) -> crate::frontend::RegisteredSource<'_> {
         crate::frontend::RegisteredSource {
+            python_optimization: self.python_optimization,
             operand_types: None,
             text: &self.text,
             replacements: &self.replacements,

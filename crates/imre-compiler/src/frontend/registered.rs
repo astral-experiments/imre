@@ -333,7 +333,9 @@ fn retain_generator_body(
         &operations,
         RegisteredSource {
             operand_types: Some(graph.session.operand_types(id)),
-            ..module.registered_values().context(&module.source)
+            ..module
+                .registered_values()
+                .operands(&module.source, graph.python_optimization())
         },
         graph.python_optimization() == 0,
     );
@@ -4028,6 +4030,7 @@ mod tests {
             Some(ast::Expr::FString(_))
         ));
         let source = RegisteredSource {
+            python_optimization: 0,
             operand_types: None,
             template_fields: None,
             generators: None,
@@ -4423,6 +4426,7 @@ mod tests {
         let replacements = HashMap::new();
         let imports = imre_ast::module_imports(&stmts);
         let source = RegisteredSource {
+            python_optimization: 0,
             operand_types: None,
             template_fields: None,
             generators: None,
@@ -6562,6 +6566,7 @@ publish(5, callback)
                 .find(|def| def.name.as_str() == name)
                 .unwrap();
             let source = RegisteredSource {
+                python_optimization: 0,
                 operand_types: None,
                 template_fields: None,
                 generators: None,

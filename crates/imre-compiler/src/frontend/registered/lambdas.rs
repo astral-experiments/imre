@@ -80,6 +80,7 @@ async def factory(seed, rows, mark):
             .body;
         let names = imre_ast::lower(&mut body);
         let source = values::RegisteredSource {
+            python_optimization: 0,
             operand_types: None,
             text,
             method_imports: &Default::default(),
@@ -300,6 +301,7 @@ async def factory(seed, rows, mark):
             unreachable!()
         };
         let source = values::RegisteredSource {
+            python_optimization: 0,
             operand_types: None,
             text,
             method_imports: &Default::default(),
@@ -378,6 +380,7 @@ async def factory(seed, rows, mark):
             .body;
         let lambda = expression.as_lambda_expr().unwrap();
         let source = values::RegisteredSource {
+            python_optimization: 0,
             operand_types: None,
             text,
             method_imports: &Default::default(),

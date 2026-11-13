@@ -128,6 +128,7 @@ pub(super) fn test_annotation_body(
     parsed: &Parsed<ast::ModExpression>,
 ) -> Option<AnnotationBody<()>> {
     let source = RegisteredSource {
+        python_optimization: 0,
         operand_types: None,
         text,
         replacements: &HashMap::new(),
@@ -193,6 +194,7 @@ mod tests {
         let text = "class C:\n    field: '(lambda: 1)()'\n    def f(self, arg: 'list[int]') -> 'Name':\n        local: 'skip[T]'\n        async def nested(arg: 'list[int]'): pass\n";
         let parsed = ruff_python_parser::parse_module(text).unwrap();
         let source = RegisteredSource {
+            python_optimization: 0,
             operand_types: None,
             text,
             replacements: &HashMap::new(),
@@ -226,6 +228,7 @@ mod tests {
         let text = "class C:\n    field: mark(1)\n    deferred: (lambda: 2)\n    def f(self, *args: *items) -> token: pass\n";
         let parsed = ruff_python_parser::parse_module(text).unwrap();
         let source = RegisteredSource {
+            python_optimization: 0,
             operand_types: None,
             text,
             replacements: &HashMap::new(),
@@ -273,6 +276,7 @@ after: K[L]
 ";
         let parsed = ruff_python_parser::parse_module(text).unwrap();
         let source = RegisteredSource {
+            python_optimization: 0,
             operand_types: None,
             text,
             replacements: &HashMap::new(),
