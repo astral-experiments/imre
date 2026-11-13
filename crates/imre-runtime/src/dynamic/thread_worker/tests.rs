@@ -128,11 +128,7 @@ fn launch(
 }
 
 fn registered(handle: &Arc<Handle>, daemon: bool, owner: Option<Id>) -> Registration {
-    Registration::Thread(RegisteredThread {
-        handle: Arc::clone(handle),
-        daemon,
-        owner,
-    })
+    Registration::Thread(Arc::clone(handle), RegisteredThread { daemon, owner })
 }
 
 #[test]
@@ -152,7 +148,7 @@ fn native_start_and_join_publish_the_worker_lifetime() {
         .unwrap();
         handle.join(Some(Duration::ZERO)).unwrap();
         assert!(handle.alive());
-        assert!(ctx.workers.entries[0].active.load(Ordering::Acquire));
+        assert!(ctx.workers.entries[0].handle.awaiting_exit());
         assert_eq!(ctx.threads.count.load(Ordering::Acquire), 1);
         assert_eq!(ident, handle.ident());
         assert_ne!(ident, thread_ident());
@@ -167,7 +163,7 @@ fn native_start_and_join_publish_the_worker_lifetime() {
     handle.join(None).unwrap();
     handle.join(None).unwrap();
     assert!(!handle.alive());
-    assert!(!ctx.workers.entries[0].active.load(Ordering::Acquire));
+    assert!(!ctx.workers.entries[0].handle.awaiting_exit());
     assert_eq!(ctx.threads.count.load(Ordering::Acquire), 0);
 }
 
@@ -331,11 +327,11 @@ fn joined_and_detached_operands_are_released_at_their_own_checkpoints() {
         ctx.heap.keep(weak);
         ctx.collect_unreachable();
         assert!(matches!(ctx.heap.get(weak), Value::Weak(wr) if wr.target == Some(operand)));
-        Arc::clone(&ctx.workers.entries[0].active)
+        Arc::clone(&ctx.workers.entries[0].handle)
     });
 
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
-    while active.load(Ordering::Acquire) {
+    while active.awaiting_exit() {
         assert!(std::time::Instant::now() < deadline);
         thread::yield_now();
     }
@@ -379,7 +375,7 @@ fn zero_timeout_applies_to_worker_exit_and_all_observers_share_native_join() {
     let (completed, completion) = mpsc::channel();
     let handle = Arc::<Handle>::default();
     handle
-        .spawn(move || {
+        .spawn(move |_| {
             let gate = ExitGate {
                 entered,
                 poll,
@@ -478,10 +474,10 @@ fn detached_handle_keeps_the_non_daemon_worker_registered_until_exit() {
         assert!(handle.awaiting_exit());
         ctx.reap_thread_operands();
         assert_eq!(ctx.workers.entries.len(), 1);
-        Arc::clone(&ctx.workers.entries[0].active)
+        Arc::clone(&ctx.workers.entries[0].handle)
     });
     ctx.workers.join_non_daemon();
-    assert!(!active.load(Ordering::Acquire));
+    assert!(!active.awaiting_exit());
     assert!(!handle.awaiting_exit());
     ctx.reap_thread_operands();
     assert!(ctx.workers.entries.is_empty());
@@ -490,7 +486,7 @@ fn detached_handle_keeps_the_non_daemon_worker_registered_until_exit() {
 #[test]
 fn set_done_after_body_exit_releases_the_unclaimed_native_handle() {
     let handle = Arc::<Handle>::default();
-    handle.spawn(|| Ok(())).unwrap();
+    handle.spawn(|_| Ok(())).unwrap();
     assert!(handle.wait(Some(Duration::from_secs(5)), State::join_pending));
     // The body signalled exit, but no Python observer has joined its OS thread.
     assert!(handle.native.lock().unwrap().thread.is_some());

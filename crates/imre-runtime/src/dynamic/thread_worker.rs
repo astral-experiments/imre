@@ -1,13 +1,12 @@
 //! Native worker startup and creator-heap ownership for joinable and detached calls.
 
-use super::lowlevel_threads::Running;
 use super::thread_callback::Callback;
 use super::value::Heap;
 use std::io::Write;
 use std::ops::ControlFlow;
 use std::sync::{
     Arc, Condvar, Mutex, MutexGuard, Weak,
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicUsize, Ordering},
     mpsc,
 };
 use std::thread::{self, JoinHandle};
@@ -85,12 +84,28 @@ impl Join {
 }
 
 // A detached worker must not keep its own join handle alive.
-struct WorkerExit(Weak<Handle>);
+struct WorkerExit {
+    handle: Weak<Handle>,
+    count: Option<Arc<AtomicUsize>>,
+}
+
+impl WorkerExit {
+    fn enter(&mut self, count: Arc<AtomicUsize>) {
+        count.fetch_add(1, Ordering::SeqCst);
+        self.count = Some(count);
+    }
+}
 
 impl Drop for WorkerExit {
     fn drop(&mut self) {
-        if let Some(handle) = self.0.upgrade() {
-            *handle.state.lock().unwrap() = State::Done;
+        let handle = self.handle.upgrade();
+        let state = handle.as_ref().map(|handle| handle.state.lock().unwrap());
+        // A count observer that reaps roots must see this same exit publication.
+        if let Some(count) = &self.count {
+            count.fetch_sub(1, Ordering::SeqCst);
+        }
+        if let Some((mut state, handle)) = state.zip(handle.as_ref()) {
+            *state = State::Done;
             handle.exiting.notify_all();
         }
     }
@@ -107,7 +122,7 @@ impl Handle {
 
     fn spawn(
         self: &Arc<Self>,
-        worker: impl FnOnce() -> WorkerStatus + Send + 'static,
+        worker: impl FnOnce(&mut WorkerExit) -> WorkerStatus + Send + 'static,
     ) -> Result<()> {
         let mut native = self.native.lock().unwrap();
         {
@@ -117,13 +132,15 @@ impl Handle {
             }
             *state = State::Running;
         }
-        let exit = WorkerExit(Arc::downgrade(self));
+        let mut exit = WorkerExit {
+            handle: Arc::downgrade(self),
+            count: None,
+        };
         native.thread = Some(
             thread::Builder::new()
                 .spawn(move || {
                     // Publish exit after the worker drops its Context, also when unwinding.
-                    let _exit = exit;
-                    worker()
+                    worker(&mut exit)
                 })
                 .map_err(|_| Error::new("RuntimeError", "can't start new thread"))?,
         );
@@ -156,8 +173,7 @@ impl Handle {
         if *state == State::New {
             return Err(Error::new("RuntimeError", "thread not started"));
         }
-        // Detach without waiting. Running still owns the callback's counted roots
-        // until the actual OS worker exits, independently of the Python handle.
+        // Detach without waiting. The worker still owns its creator roots until actual exit.
         // Exit notification can precede the first join or detach of the OS handle.
         let detached = native.thread.take().is_some();
         if *state == State::Running {
@@ -266,15 +282,14 @@ impl Handle {
 }
 
 struct RegisteredThread {
-    handle: Arc<Handle>,
     daemon: bool,
     owner: Option<Id>,
 }
 
 struct Entry {
-    active: Arc<AtomicBool>,
+    // The handle tracks actual worker exit even when Python has already detached its join.
+    handle: Arc<Handle>,
     operands: Vec<Id>,
-    // A low-level detached call has neither a threading.Thread nor a join handle here.
     thread: Option<RegisteredThread>,
 }
 
@@ -403,10 +418,10 @@ impl Context {
 
 impl RegisteredThread {
     /// Complete default Thread.run cleanup on the creator heap before releasing its bound operands.
-    fn release_owner(&mut self, heap: &mut Heap) -> bool {
+    fn release_owner(&mut self, heap: &mut Heap, published: bool) -> bool {
         let Some(owner) = self.owner else { return true };
         // Only a published worker entered Thread.run and owes its target cleanup.
-        if self.handle.ident.get().is_none_or(Option::is_none) {
+        if !published {
             self.owner = None;
             heap.weak_edge_removed(owner);
             return true;
@@ -458,21 +473,18 @@ impl Registry {
 
     fn reap_where(&mut self, heap: &mut Heap, include: impl Fn(&Entry) -> bool) {
         self.entries.retain_mut(|entry| {
-            if !include(entry) || entry.active.load(Ordering::Acquire) {
+            if !include(entry) || entry.handle.awaiting_exit() {
                 return true;
             }
             if let Some(thread) = &mut entry.thread
-                && !thread.release_owner(heap)
+                && !thread.release_owner(heap, entry.handle.ident() != 0)
             {
                 return true;
             }
             for operand in entry.operands.drain(..) {
                 heap.weak_edge_removed(operand);
             }
-            entry
-                .thread
-                .as_ref()
-                .is_some_and(|thread| thread.handle.awaiting_exit())
+            false
         });
     }
 
@@ -488,14 +500,15 @@ impl Registry {
     pub(super) fn detached_active(&self) -> bool {
         self.entries
             .iter()
-            .any(|entry| entry.thread.is_none() && entry.active.load(Ordering::Acquire))
+            .any(|entry| entry.thread.is_none() && entry.handle.awaiting_exit())
     }
 
-    fn live_threads(&self) -> impl Iterator<Item = &RegisteredThread> {
+    fn live_threads(&self) -> impl Iterator<Item = (usize, Id)> + '_ {
         self.entries
             .iter()
-            .filter(|entry| entry.active.load(Ordering::Acquire))
-            .filter_map(|entry| entry.thread.as_ref())
+            .filter_map(|entry| Some((&entry.handle, entry.thread.as_ref()?.owner?)))
+            .filter(|(handle, _)| handle.awaiting_exit())
+            .map(|(handle, owner)| (handle.ident(), owner))
     }
 
     pub(super) fn roots(&self) -> impl Iterator<Item = &Id> {
@@ -525,9 +538,9 @@ impl Registry {
         let caller = thread_ident();
         self.entries
             .iter()
-            .filter_map(|entry| entry.thread.as_ref())
-            .filter(move |worker| !worker.daemon && worker.handle.ident() != caller)
-            .map(|worker| &worker.handle)
+            .filter(|entry| entry.thread.as_ref().is_some_and(|worker| !worker.daemon))
+            .map(|entry| &entry.handle)
+            .filter(move |handle| handle.ident() != caller)
     }
 
     fn join_non_daemon(&self) {
@@ -562,7 +575,7 @@ pub(super) enum Operation {
 }
 
 enum Registration {
-    Thread(RegisteredThread),
+    Thread(Arc<Handle>, RegisteredThread),
     Detached(String),
 }
 
@@ -663,7 +676,7 @@ fn launch(
     operands: Vec<Id>,
 ) -> Result<Ready> {
     let (handle, thread, detached_label) = match registration {
-        Registration::Thread(thread) => (Arc::clone(&thread.handle), Some(thread), None),
+        Registration::Thread(handle, thread) => (handle, Some(thread), None),
         Registration::Detached(label) => (Arc::default(), None, Some(label)),
     };
     // The child's identity can arrive before the creator receives it. Dropping
@@ -682,14 +695,11 @@ fn launch(
         (None, None)
     };
     let count = Arc::clone(&ctx.threads.count);
-    let active = Arc::new(AtomicBool::new(true));
-    let worker_active = Arc::clone(&active);
     let starting = Arc::clone(&handle);
     let fault_workers =
         matches!(operation, Operation::Python(_)).then(|| ctx.heap.begin_fault_worker());
     let interpreter = fault_workers.as_ref().map(|_| ctx.finalizing.clone());
-    handle.spawn(move || {
-        let mut running = Running::bootstrap(worker_active);
+    handle.spawn(move |exit| {
         let _publication = interpreter.map(crate::fault_handler::FramePublication::enter);
         // A failed bootstrap publishes no identity and contributes nothing to the live count.
         let mut prefix = None;
@@ -719,7 +729,7 @@ fn launch(
                 (None, Some(lock))
             }
         };
-        running.enter(count);
+        exit.enter(count);
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         let native_id = Some(crate::objects::locks::native_thread_id());
         #[cfg(not(any(target_os = "linux", target_os = "macos")))]
@@ -777,7 +787,7 @@ fn launch(
         Ok(())
     })?;
     ctx.workers.entries.push(Entry {
-        active,
+        handle: Arc::clone(&handle),
         operands,
         thread,
     });
@@ -797,6 +807,8 @@ pub(super) fn start_detached(
     let label = ctx.repr(function);
     let started = launch(ctx, callback, Registration::Detached(label), operands)?.wait()?;
     let ident = started.ident;
+    // No Python handle can join this worker. Release its native JoinHandle immediately.
+    started.handle.set_done()?;
     started.publish()?;
     Ok(ident)
 }
@@ -960,11 +972,10 @@ pub(super) fn prepare_start(
     }
     ctx.workers.reserve_entry()?;
     let thread = RegisteredThread {
-        handle,
         daemon,
         owner: Some(owner),
     };
-    let ready = launch(ctx, operation, Registration::Thread(thread), roots);
+    let ready = launch(ctx, operation, Registration::Thread(handle, thread), roots);
     match ready {
         Ok(ready) => Ok(Start {
             ready,
@@ -1058,8 +1069,7 @@ pub(super) fn call(
             }
             ctx.workers
                 .live_threads()
-                .find(|thread| thread.handle.ident() == ident)
-                .and_then(|entry| entry.owner)
+                .find_map(|(id, owner)| (id == ident).then_some(owner))
                 .ok_or_else(|| {
                     Error::new(
                         "NotImplementedError",
@@ -1068,11 +1078,7 @@ pub(super) fn call(
                 })
         }
         ("threads", []) => {
-            let owners = ctx
-                .workers
-                .live_threads()
-                .filter_map(|entry| entry.owner)
-                .collect();
+            let owners = ctx.workers.live_threads().map(|(_, owner)| owner).collect();
             Ok(ctx.alloc(Value::List(owners)))
         }
         _ => Err(Error::new(

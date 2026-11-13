@@ -1,7 +1,7 @@
 //! Count only the Python callbacks launched by this interpreter.
 use super::{Context, Error, Id, Result, Value, thread_callback::Callback};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 pub(super) fn function_name(symbol: &str) -> Option<&'static str> {
     match symbol {
@@ -77,35 +77,6 @@ impl Context {
             self.check_thread_reporter_mutable()?;
         }
         Ok(())
-    }
-}
-
-/// The registration owns its creator roots during bootstrap, even before the child is counted.
-pub(super) struct Running {
-    count: Option<Arc<AtomicUsize>>,
-    roots_active: Arc<AtomicBool>,
-}
-
-impl Running {
-    pub(super) fn bootstrap(roots_active: Arc<AtomicBool>) -> Self {
-        Self {
-            count: None,
-            roots_active,
-        }
-    }
-
-    pub(super) fn enter(&mut self, count: Arc<AtomicUsize>) {
-        count.fetch_add(1, Ordering::SeqCst);
-        self.count = Some(count);
-    }
-}
-
-impl Drop for Running {
-    fn drop(&mut self) {
-        self.roots_active.store(false, Ordering::Release);
-        if let Some(count) = &self.count {
-            count.fetch_sub(1, Ordering::SeqCst);
-        }
     }
 }
 
