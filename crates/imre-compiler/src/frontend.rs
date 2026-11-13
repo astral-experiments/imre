@@ -5352,7 +5352,9 @@ impl<'a> Checker<'a> {
         if iterable.ty == Type::PythonObject && self.graph.modules[self.module].is_program_source()
         {
             self.require_registered_operation(node)?;
-            return Ok(Iteration::Prepared(self.python_cursor(iterable, node.range())));
+            return Ok(Iteration::Prepared(
+                self.python_cursor(iterable, node.range()),
+            ));
         }
         if let Some(element) = self.types.cursor_element(iterable.ty) {
             return Ok(Iteration::Prepared(self.prepare_cursor(iterable, element)));
@@ -5437,22 +5439,6 @@ impl<'a> Checker<'a> {
             if let Some(slot) = self.names.get(&name) {
                 self.narrowed.remove_mut(slot);
             }
-        }
-        // A Python frame stores each pulled object in the same lexical binding.
-        // At an outermost loop, earlier uses of its inferred layout cannot be re-entered.
-        if let Some(first_local) = self.registered_local_start
-            && self.block_depth == 1
-            && let Iteration::Prepared(row) = &input
-            && self.locals[row.value] == Type::PythonObject
-            && !self.narrowed.contains_key(&row.value)
-            && let Some(slot) = loop_
-                .target
-                .as_name_expr()
-                .and_then(|name| self.names.get(name.id.as_str()))
-            && *slot >= first_local
-            && !self.declared_slots.contains_key(slot)
-        {
-            self.locals[*slot] = Type::PythonObject;
         }
         self.lower_iteration(&loop_.target, input, &loop_.orelse, |checker, body| {
             checker.lower_block(&loop_.body, Some(body))?;
@@ -7907,6 +7893,22 @@ impl<'a> Checker<'a> {
             ));
         };
         let value = if let Some(&slot) = self.names.get(name.id.as_str()) {
+            // A pulled object replaces the value in the same unannotated Python
+            // binding. An empty loop leaves its previous value there.
+            if value.ty == Type::PythonObject
+                && self.locals[slot] != Type::PythonObject
+                && !self.declared_slots.contains_key(&slot)
+                && self.registered_local_start.map_or_else(
+                    || self.graph.modules[self.module].is_program_source(),
+                    // On a backedge earlier fixed-layout reads can execute again.
+                    |first| slot >= first && self.block_depth == 1,
+                )
+            {
+                if self.registered_local_start.is_none() {
+                    self.require_registered_operation(target)?;
+                }
+                self.locals[slot] = Type::PythonObject;
+            }
             self.coerce(value, self.locals[slot], target)?
         } else if let Some(partial) = self.types.partial_function(value.ty) {
             // Different partials can share a call signature without sharing a capture frame.
