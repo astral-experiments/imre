@@ -108,39 +108,51 @@ impl ExpressionSites {
     pub(crate) fn take_lexical(&mut self) -> Self {
         std::mem::take(self)
     }
+}
+
+impl SuitePreparation<'_> {
+    /// Only a complete, occurrence-owned expression can move into the consuming
+    /// frame. Shared lexical sites and operands with private slots stay in place.
+    pub(super) fn bind_value(
+        &self,
+        inputs: &mut Vec<PhysicalOperand>,
+        input: PhysicalOperand,
+    ) -> ir::Expr {
+        if let PhysicalOperand::Residual(mut occurrence) = input {
+            if let Some(Selection::Checked(value)) = Rc::get_mut(&mut occurrence.selected)
+                && self.literal_refusal(RegionRoot::Operand(value)).is_none()
+            {
+                return std::mem::replace(value, ir::Expr::none());
+            }
+            super::bind_operand(
+                inputs,
+                PhysicalOperand::Residual(occurrence),
+                ir::Type::PythonObject,
+            )
+        } else {
+            super::bind_operand(inputs, input, ir::Type::PythonObject)
+        }
+    }
 
     pub(super) fn owned_input(
         &self,
         expr: &ast::Expr,
-        source: RegisteredSource<'_>,
         scope: super::RegisteredScope,
         suspended: bool,
     ) -> OwnedExpression {
-        PhysicalPreparation::new(self, source, scope, suspended).owned(expr)
+        PhysicalPreparation {
+            suite: self,
+            scope,
+            suspended,
+        }
+        .owned(expr)
     }
 }
 
 struct PhysicalPreparation<'a, 's> {
-    sites: &'a ExpressionSites,
-    source: RegisteredSource<'s>,
+    suite: &'a SuitePreparation<'s>,
     scope: super::RegisteredScope,
     suspended: bool,
-}
-
-impl<'a, 's> PhysicalPreparation<'a, 's> {
-    fn new(
-        sites: &'a ExpressionSites,
-        source: RegisteredSource<'s>,
-        scope: super::RegisteredScope,
-        suspended: bool,
-    ) -> Self {
-        Self {
-            sites,
-            source,
-            scope,
-            suspended,
-        }
-    }
 }
 
 impl PhysicalPreparation<'_, '_> {
@@ -156,7 +168,11 @@ impl PhysicalPreparation<'_, '_> {
         // Lexical bindings and template fields have already been compiled in their own scope.
         let kind = ast::AnyNodeRef::from(node).kind();
         let lexical = if node.is_lambda_expr() || node.is_t_string_expr() {
-            self.sites.lexical.get(&(node.range(), kind))
+            self.suite
+                .sites
+                .expressions
+                .lexical
+                .get(&(node.range(), kind))
         } else {
             None
         };
@@ -174,9 +190,9 @@ impl PhysicalPreparation<'_, '_> {
 
     fn checked_value(&self, node: &ast::Expr) -> Option<ir::Expr> {
         if self.suspended {
-            values::suspended_operand(node, self.source)
+            values::suspended_operand(node, self.suite.source)
         } else {
-            values::registered_value(node, self.source)
+            values::registered_value(node, self.suite.source)
         }
     }
 
@@ -193,7 +209,7 @@ impl PhysicalPreparation<'_, '_> {
         if !self.suspended && ExpressionSites::governs(node) {
             return self.residual(node);
         }
-        match super::inline_operand(node, self.source, self.scope, self.suspended) {
+        match super::inline_operand(node, self.suite.source, self.scope, self.suspended) {
             Ok(Some(operand)) => return Some(Selection::Operand(Box::new(operand))),
             Err((range, reason)) => return Some(Selection::Refused(range, reason)),
             Ok(None) => {}
@@ -201,21 +217,22 @@ impl PhysicalPreparation<'_, '_> {
         if self.suspended
             && let Some((kind, Some(child))) = ir::SuspendValue::operand(node)
         {
-            let selected =
-                match super::RegisteredOperand::prepare_with(self.source, self.scope, |scope| {
-                    scope.with_suspending_operands(|scope| scope.operand(node))
-                }) {
-                    Some(operand) => Selection::Operand(Box::new(operand)),
-                    None => {
-                        let input = self.ordinary_input(child);
-                        let value = super::operation(
-                            ir::Builtin::RegisteredSuspend(kind, node.range()),
-                            ir::Type::PythonObject,
-                            vec![ir::Expr::registered_input(0, ir::Type::PythonObject)],
-                        );
-                        Selection::Operand(self.inputs(node, value, Box::new([input])))
-                    }
-                };
+            let selected = match super::RegisteredOperand::prepare_with(
+                self.suite.source,
+                self.scope,
+                |scope| scope.with_suspending_operands(|scope| scope.operand(node)),
+            ) {
+                Some(operand) => Selection::Operand(Box::new(operand)),
+                None => {
+                    let input = self.ordinary_input(child);
+                    let value = super::operation(
+                        ir::Builtin::RegisteredSuspend(kind, node.range()),
+                        ir::Type::PythonObject,
+                        vec![ir::Expr::registered_input(0, ir::Type::PythonObject)],
+                    );
+                    Selection::Operand(self.inputs(node, value, Box::new([input])))
+                }
+            };
             return Some(selected);
         }
         // The lambda site owns the complete binding or its build diagnostic.
@@ -236,25 +253,25 @@ impl PhysicalPreparation<'_, '_> {
         inputs: &mut Vec<PhysicalOperand>,
     ) -> ir::Expr {
         if ExpressionSites::governs(node) || node.is_compare_expr() {
-            let value = bound_operation(node, self.source, &mut |child| {
+            let value = bound_operation(node, self.suite.source, &mut |child| {
                 self.logical_operation(child, inputs)
             })
             .expect("a logical or comparison expression has a checked operation");
-            return self.source.located(node, value);
+            return self.suite.source.located(node, value);
         }
         let checked = match self.checked_value(node) {
             Some(value) if ir::control::boolean_literal(&value).is_some() => return value,
             checked => checked,
         };
         let input = self.input(node, checked);
-        self.source.located(
+        self.suite.source.located(
             node,
             super::bind_operand(inputs, input, ir::Type::PythonObject),
         )
     }
 
     fn residual(&mut self, node: &ast::Expr) -> Option<Selection> {
-        let source = self.source;
+        let source = self.suite.source;
         if ExpressionSites::governs(node) {
             let mut inputs = Vec::new();
             let operation = self.logical_operation(node, &mut inputs);
@@ -280,18 +297,35 @@ impl PhysicalPreparation<'_, '_> {
             value
         } else {
             bound_operation(node, source, &mut |child| {
-                super::bind_operand(
-                    &mut children,
-                    self.ordinary_input(child),
-                    ir::Type::PythonObject,
-                )
+                self.bound_value(child, &mut children)
             })?
         };
+        if children.is_empty() {
+            return Some(Selection::Checked(source.located_operation(node, op)));
+        }
         Some(Selection::Operand(self.inputs(
             node,
             op,
             children.into_boxed_slice(),
         )))
+    }
+
+    /// Check the original child before placing it. A mixed child keeps its own
+    /// frame, and a refused child keeps its position among the physical inputs.
+    fn bound_value(&mut self, node: &ast::Expr, inputs: &mut Vec<PhysicalOperand>) -> ir::Expr {
+        if let Some(value) = self.checked_value(node) {
+            if self
+                .suite
+                .literal_refusal(RegionRoot::Operand(&value))
+                .is_none()
+            {
+                return value;
+            }
+            let input = self.input(node, Some(value));
+            return super::bind_operand(inputs, input, ir::Type::PythonObject);
+        }
+        let child = PhysicalOperand::Residual(self.occurrence(node, Self::select_remaining));
+        self.suite.bind_value(inputs, child)
     }
 
     fn inputs(
@@ -301,7 +335,7 @@ impl PhysicalPreparation<'_, '_> {
         children: Box<[PhysicalOperand]>,
     ) -> Box<RegisteredOperand> {
         Box::new(RegisteredOperand::with_inputs(
-            self.source.located_operation(node, operation),
+            self.suite.source.located_operation(node, operation),
             children,
         ))
     }
@@ -327,7 +361,7 @@ fn bound_operation(
         node,
         source,
         None,
-        |_, _, _| false,
+        |_, _, _| true,
         ir::control::boolean_literal,
         |_| true,
         |node| Ok::<_, std::convert::Infallible>(child(node)),
@@ -466,13 +500,13 @@ mod tests {
 
         let context = values::ModuleSource::new(module);
         let source = context.context(text);
-        let sites = ExpressionSites::default();
-        let mut prepare = PhysicalPreparation::new(
-            &sites,
-            source,
-            super::super::RegisteredScope::Function { is_async: false },
-            false,
-        );
+        let operations = HashMap::new();
+        let suite = SuitePreparation::new(&operations, source, true);
+        let mut prepare = PhysicalPreparation {
+            suite: &suite,
+            scope: super::super::RegisteredScope::Function { is_async: false },
+            suspended: false,
+        };
         // Prepare each original normalized occurrence before inspecting either selected load.
         assert!(
             loads
@@ -516,13 +550,13 @@ mod tests {
         };
         let range = first.range();
         second.as_compare_expr_mut().unwrap().range = range;
-        let sites = ExpressionSites::default();
-        let mut prepare = PhysicalPreparation::new(
-            &sites,
-            context.context(text),
-            super::super::RegisteredScope::Module,
-            false,
-        );
+        let operations = HashMap::new();
+        let suite = SuitePreparation::new(&operations, context.context(text), true);
+        let mut prepare = PhysicalPreparation {
+            suite: &suite,
+            scope: super::super::RegisteredScope::Module,
+            suspended: false,
+        };
         let Selection::Operand(inputs) = prepare.select_value(&root).unwrap() else {
             panic!("expected a checked logical operation with prepared inputs");
         };
