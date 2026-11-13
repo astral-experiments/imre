@@ -72,7 +72,7 @@ impl Join {
             // SAFETY: the wait released both native locks. The interrupted Python frame and
             // its exception are still current while the handler runs.
             #[cfg(unix)]
-            if let Err(error) = unsafe { Context::dispatch_pending_signals(context) } {
+            if let Err(error) = unsafe { Context::dispatch_pending_calls(context) } {
                 break Err(error);
             }
         };
@@ -1032,7 +1032,8 @@ pub(super) fn call(
                 };
                 while handle.wait_interruptible(None).is_continue() {
                     #[cfg(unix)]
-                    if let Err(error) = ctx.dispatch_signals() {
+                    // SAFETY: shutdown waits synchronously on the thread that owns the context.
+                    if let Err(error) = unsafe { Context::dispatch_pending_calls(ctx) } {
                         super::unraisable::report(
                             ctx,
                             error,

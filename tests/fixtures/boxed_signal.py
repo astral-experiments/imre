@@ -271,6 +271,7 @@ def check_recursive_wakeup_error():
         assert record.exc_traceback is not None
         events.append("enter")
         if events == ["enter"]:
+            signal.signal(sig, lambda *args: events.append("replacement"))
             os.kill(os.getpid(), sig)
         events.append("leave")
 
@@ -282,7 +283,7 @@ def check_recursive_wakeup_error():
     try:
         sys.unraisablehook = hook
         os.kill(os.getpid(), sig)
-        assert events == ["enter", "signal", "leave", "enter", "leave", "signal"]
+        assert events == ["enter", "replacement", "leave", "enter", "leave", "signal"]
     finally:
         sys.unraisablehook = old_hook
         signal.set_wakeup_fd(old_fd)

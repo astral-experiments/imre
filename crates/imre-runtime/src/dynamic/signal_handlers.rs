@@ -43,35 +43,50 @@ impl Context {
     }
 
     /// # Safety
-    /// The caller owns the context on this thread with the interrupted frame still active.
-    pub(super) unsafe fn dispatch_pending_signals(context: *mut Self) -> Result<()> {
-        if !signals::begin_dispatch() {
-            return Ok(());
+    /// The caller owns this context and its active frame throughout the checkpoint.
+    pub(super) unsafe fn dispatch_pending_calls(context: *mut Self) -> Result<()> {
+        if signals::begin_dispatch() {
+            // SAFETY: a registered handler returns to the interrupted caller on this thread.
+            unsafe { Self::dispatch_pending_signals(context)? };
+            // SAFETY: delivery has completed, including any nested callbacks.
+            unsafe { &mut *context }.report_wakeup_errors();
         }
-        let mut pending = (1..signals::nsig()).filter(|&number| signals::take(number));
-        // Claim the first delivery before entering Python. A signal raised in
-        // the error hook may have the same number and must remain deliverable.
-        let first = pending.next();
-        // SAFETY: wakeup reporting and initialization finish before delivery of the handler.
-        let ctx = unsafe { &mut *context };
-        if !ctx.reporting_wakeup_errors && signals::has_wakeup_errors() {
-            ctx.reporting_wakeup_errors = true;
+        Ok(())
+    }
+
+    fn report_wakeup_errors(&mut self) {
+        if !self.reporting_wakeup_errors && signals::has_wakeup_errors() {
+            self.reporting_wakeup_errors = true;
             for error in signals::wakeup_errors() {
                 super::unraisable::report(
-                    ctx,
+                    self,
                     stdlib::os_error(error),
                     true,
                     None,
                     "Exception ignored while trying to write to the signal wakeup fd",
                 );
             }
-            ctx.reporting_wakeup_errors = false;
+            self.reporting_wakeup_errors = false;
             if signals::has_wakeup_errors() {
                 signals::resume_dispatch();
             }
         }
+    }
+
+    /// # Safety
+    /// The caller owns the context on this thread with the interrupted frame still active.
+    pub(super) unsafe fn dispatch_pending_signals(context: *mut Self) -> Result<()> {
+        if !signals::begin_signal_dispatch() {
+            return Ok(());
+        }
+        // A queued wakeup-fd report belongs to the next Python checkpoint, even inside a handler.
+        if signals::has_wakeup_errors() {
+            signals::resume_dispatch();
+        }
+        // SAFETY: the thread owns its handler table and initialization finishes before delivery.
+        let ctx = unsafe { &mut *context };
         ctx.initialize_signal_handlers();
-        for number in first.into_iter().chain(pending) {
+        for number in (1..signals::nsig()).filter(|&number| signals::take(number)) {
             // SAFETY: the preceding delivery has returned to this thread.
             let ctx = unsafe { &mut *context };
             let handler = ctx.signal_handlers[number as usize];
@@ -80,7 +95,7 @@ impl Context {
                 // SAFETY: preparation has returned and the interrupted caller stays on the heap.
                 if let Err(error) = call.and_then(|call| unsafe { call.run(context) }) {
                     // A raising handler leaves later pending signals for the next checkpoint.
-                    signals::resume_dispatch();
+                    signals::resume_signals();
                     return Err(error);
                 }
             } else {

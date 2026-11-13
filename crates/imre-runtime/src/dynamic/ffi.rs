@@ -28,7 +28,8 @@ impl Context {
         {
             // A Python handler can delete the last other reference and force collection.
             self.heap.keep(result);
-            self.dispatch_signals()?;
+            // SAFETY: the caller retained the result on this thread's active frame.
+            unsafe { Self::dispatch_pending_calls(self)? };
         }
         Ok(result)
     }
@@ -3467,7 +3468,8 @@ impl Context {
             caught,
         );
         #[cfg(unix)]
-        self.dispatch_signals()?;
+        // SAFETY: the statement has published this frame and its live operands.
+        unsafe { Self::dispatch_pending_calls(self)? };
         Ok(())
     }
 
