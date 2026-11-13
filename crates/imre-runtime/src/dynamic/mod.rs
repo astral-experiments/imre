@@ -304,6 +304,17 @@ fn copy_ids<T: Copy>(values: &[T]) -> Result<Vec<T>> {
     Ok(copied)
 }
 
+/// Reserve the entire destination before copying either sequence's object references.
+fn concat_ids(left: &[Id], right: &[Id]) -> Result<Vec<Id>> {
+    let mut items = Vec::new();
+    items
+        .try_reserve_exact(left.len() + right.len())
+        .map_err(|_| Error::new("MemoryError", ""))?;
+    items.extend_from_slice(left);
+    items.extend_from_slice(right);
+    Ok(items)
+}
+
 /// Captured locals certified by the compiler for an ordinary frame.
 #[derive(Debug)]
 enum CellLayout {

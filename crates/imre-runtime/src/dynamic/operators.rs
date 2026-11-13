@@ -51,17 +51,6 @@ fn render_allocation(_: std::collections::TryReserveError) -> Error {
     Error::new("MemoryError", "")
 }
 
-/// Reserve the entire destination before copying either sequence's object references.
-fn concat_ids(left: &[Id], right: &[Id]) -> Result<Vec<Id>> {
-    let mut items = Vec::new();
-    items
-        .try_reserve_exact(left.len() + right.len())
-        .map_err(render_allocation)?;
-    items.extend_from_slice(left);
-    items.extend_from_slice(right);
-    Ok(items)
-}
-
 fn push_frame<T>(stack: &mut Vec<T>, value: T) -> Result<()> {
     stack.try_reserve(1).map_err(render_allocation)?;
     stack.push(value);
