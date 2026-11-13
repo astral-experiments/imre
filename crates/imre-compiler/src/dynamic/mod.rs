@@ -2731,6 +2731,9 @@ pub(crate) fn compile(
     });
     let used_archive = output.emit_registered(
         prepared,
+        module_body
+            .filter(|(id, _, _)| bound_path0 && !registrations.python_providers.contains(id))
+            .map(|(id, _, _)| id),
         &config.to_string(),
         python_optimization,
         &providers.symbols,
