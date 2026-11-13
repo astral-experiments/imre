@@ -160,12 +160,6 @@ def _text_encoding():
     return getencoding()
 
 
-def _decode(data, stream):
-    if data is None:
-        return None
-    return data.decode(stream.encoding, stream.errors).replace("\r\n", "\n").replace("\r", "\n")
-
-
 def _pipe_replaced(stream, original_ref):
     if stream is None:
         return original_ref is not None
@@ -495,50 +489,63 @@ class Popen:
             raise
         return stdout, stderr
 
+    def _translate_newlines(self, data, encoding, errors):
+        return data.decode(encoding, errors).replace("\r\n", "\n").replace("\r", "\n")
+
     def _communicate(self, input, endtime, orig_timeout):
         use_select = _PopenSelector is not selectors.PollSelector
         if use_select and _PopenSelector is not getattr(selectors, "SelectSelector", None):
             raise NotImplementedError("unsupported subprocess selector")
-        if self._replacement_output is not None or (not self._communication_started and (
-                _pipe_replaced(self.stdin, self._stdin_ref)
-                or _pipe_replaced(self.stdout, self._stdout_ref)
-                or _pipe_replaced(self.stderr, self._stderr_ref))):
-            return self._communicate_replaced_pipes(input, endtime, orig_timeout)
-        if not self._communication_started and self.stdin is not None:
-            # Publish earlier writes even if converting the new input raises.
-            _flush_stdin(self.stdin)
-        if self.stdin is not None and self._input is None:
-            if input is not None and self.text_mode:
-                # A false input closes stdin before encoding, even for a codec
-                # that produces a BOM from the empty string.
-                if not input:
-                    try:
-                        self.stdin.close()
-                    except BrokenPipeError:
-                        pass
-                input = input.encode(self.stdin.encoding, self.stdin.errors)
-            self._input = input
+        replaced = self._replacement_output is not None or (not self._communication_started and (
+            _pipe_replaced(self.stdin, self._stdin_ref)
+            or _pipe_replaced(self.stdout, self._stdout_ref)
+            or _pipe_replaced(self.stderr, self._stderr_ref)))
+        if replaced:
+            out, err = self._communicate_replaced_pipes(input, endtime, orig_timeout)
+        else:
+            if not self._communication_started and self.stdin is not None:
+                # Publish earlier writes even if converting the new input raises.
+                _flush_stdin(self.stdin)
+            if self.stdin is not None and self._input is None:
+                if input is not None and self.text_mode:
+                    # A false input closes stdin before encoding, even for a codec
+                    # that produces a BOM from the empty string.
+                    if not input:
+                        try:
+                            self.stdin.close()
+                        except BrokenPipeError:
+                            pass
+                    input = input.encode(self.stdin.encoding, self.stdin.errors)
+                self._input = input
 
-        # Retain the exporter for retries, but only pin its storage while this
-        # call is using it. The native pipe loop owns the byte offset.
-        input = self._input
-        if not input:
-            input = None
-        elif isinstance(input, memoryview):
-            input = input.cast("B")
-        elif type(input) is not bytes:
-            input = memoryview(input)
-        timeout = None if endtime is None else endtime - _time()
-        out, err, expired = _process.communicate(self._handle, input, timeout, use_select)
-        if expired:
-            raise TimeoutExpired(self.args, orig_timeout, output=out, stderr=err)
+            # Retain the exporter for retries, but only pin its storage while this
+            # call is using it. The native pipe loop owns the byte offset.
+            input = self._input
+            if not input:
+                input = None
+            elif isinstance(input, memoryview):
+                input = input.cast("B")
+            elif type(input) is not bytes:
+                input = memoryview(input)
+            timeout = None if endtime is None else endtime - _time()
+            out, err, expired = _process.communicate(self._handle, input, timeout, use_select)
+            if expired:
+                raise TimeoutExpired(self.args, orig_timeout, output=out, stderr=err)
         try:
             self.wait(timeout=None if endtime is None else endtime - _time())
         except TimeoutExpired as exc:
             exc.timeout = orig_timeout
             raise
+        if replaced:
+            if out is not None:
+                out = b"".join(out)
+            if err is not None:
+                err = b"".join(err)
         if self.text_mode:
-            out, err = _decode(out, self.stdout), _decode(err, self.stderr)
+            if out is not None:
+                out = self._translate_newlines(out, self.stdout.encoding, self.stdout.errors)
+            if err is not None:
+                err = self._translate_newlines(err, self.stderr.encoding, self.stderr.errors)
         return out, err
 
     def _communicate_replaced_pipes(self, input, deadline, timeout):
@@ -551,7 +558,6 @@ class Popen:
             self._replacement_output = {stream: [] for stream in (self.stdout, self.stderr) if stream}
             self._replacement_input = b""
             self._replacement_offset = 0
-            self._communication_started = True
             if self.stdin:
                 _flush_stdin(self.stdin)
                 if not input:
@@ -613,17 +619,6 @@ class Popen:
                     selector.unregister(key.fileobj)
                     key.fileobj.close()
                     pending -= 1
-        try:
-            self.wait(timeout=None if deadline is None else deadline - _time())
-        except TimeoutExpired as exc:
-            exc.timeout = timeout
-            raise
-        if stdout is not None:
-            stdout = b"".join(stdout)
-        if stderr is not None:
-            stderr = b"".join(stderr)
-        if self.text_mode:
-            return _decode(stdout, self.stdout), _decode(stderr, self.stderr)
         return stdout, stderr
 
     def send_signal(self, sig):
