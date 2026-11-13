@@ -50,7 +50,11 @@ pub(crate) fn write(directory: &Path) -> Result<(), String> {
                     Default::default(),
                 )
             })
-            .and_then(|body| body.has_statements.then(|| body.standalone()).transpose());
+            .and_then(|body| {
+                body.has_body_statements
+                    .then(|| body.standalone())
+                    .transpose()
+            });
         match compiled {
             // The launcher emits entries for statement-free modules in its own unit.
             Ok(None) => Ok(()),
