@@ -102,15 +102,8 @@ class _Arg:
         return self.text
 
 
-def _format_call_args(args: list[_Arg]) -> list[str]:
-    parts: list[str] = []
-    for arg in args:
-        parts.append(repr(arg))
-    return parts
-
-
-def _format_call_signature(name: str, args: list[str], kwargs: dict[str, _Arg]) -> str:
-    positional = ", ".join(args)
+def _format_call_signature(name: str, args: list[_Arg], kwargs: dict[str, _Arg]) -> str:
+    positional = ", ".join([repr(arg) for arg in args])
     parts: list[str] = []
     for key, value in kwargs.items():
         parts.append(f"{key!s}={value!r}")
