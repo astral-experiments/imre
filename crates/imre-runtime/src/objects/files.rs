@@ -27,6 +27,31 @@ pub(super) use buffered::decode_text_lines;
 pub(crate) use buffered::peek_bytes;
 use buffered::{Input, Output};
 
+/// Append a raw read result before its caller advances the input cursor.
+pub(crate) fn append_read_bytes(out: &mut Bytes, bytes: &[u8]) -> Result<()> {
+    out.try_reserve(bytes.len())
+        .map_err(|_| Error::allocation())?;
+    out.extend_from_slice(bytes);
+    Ok(())
+}
+
+/// Copy the available prefix up to the requested limit, including the first LF for a line.
+pub(crate) fn append_read_ahead(
+    out: &mut Bytes,
+    available: &[u8],
+    limit: usize,
+    line: bool,
+) -> Result<usize> {
+    let bytes = &available[..limit.min(available.len())];
+    let count = if line {
+        memchr::memchr(b'\n', bytes).map_or(bytes.len(), |i| i + 1)
+    } else {
+        bytes.len()
+    };
+    append_read_bytes(out, &bytes[..count])?;
+    Ok(count)
+}
+
 pub(super) type BoxedFile = allocator_api2::boxed::Box<FileState>;
 
 pub(crate) struct FileState {

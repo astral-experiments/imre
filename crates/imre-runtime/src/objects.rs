@@ -59,7 +59,7 @@ pub(crate) mod exceptions;
 mod files;
 #[cfg(test)]
 pub(crate) use files::open_file;
-pub(crate) use files::peek_bytes;
+pub(crate) use files::{append_read_ahead, append_read_bytes, peek_bytes};
 mod text_file;
 pub(crate) use text_file::{MemoryText, TextFile};
 pub(crate) mod fnmatch;
