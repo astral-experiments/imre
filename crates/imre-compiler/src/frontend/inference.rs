@@ -1561,20 +1561,20 @@ impl Checker<'_> {
                 && class.methods[method.index].name.as_str() == "select"
         });
         let inference = self.inference;
-        let direct_input = direct && scope.is_none();
+        let can_stop = direct && scope.is_none() && !self.nonreturning_functions.is_empty();
         self.bind_eager_arguments(
             call,
             calls::CallParameters::Source { signature, skip },
             receiver,
             scope,
-            direct_input.then_some(signature.returns),
+            can_stop.then_some(signature.returns),
             &mut |checker, index, argument| {
                 let index = index + skip;
                 let parameter = &signature.params[index];
                 let declaration = signature.parameter_declaration(index);
                 let direct_value =
                     |checker: &Checker<'_>, value: Expr, expected, site: &ast::Expr| {
-                        if direct_input && checker.terminating_operand(&value) {
+                        if can_stop && checker.terminating_operand(&value) {
                             Ok(value)
                         } else {
                             checker.direct_value(value, site, expected, parameter.sign_only)
@@ -1748,7 +1748,7 @@ impl Checker<'_> {
                     checker.keep_module_list_layout(&value);
                     value
                 };
-                if !direct_input || !checker.terminating_operand(&value) {
+                if !can_stop || !checker.terminating_operand(&value) {
                     inference.learn_parameter(signature.id, index, value.ty);
                 }
                 Ok(value)
