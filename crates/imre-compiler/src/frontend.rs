@@ -4360,6 +4360,10 @@ impl<'a> Checker<'a> {
             }
         }
         let value = match expression {
+            ast::Expr::Dict(dict) if concrete == Type::PythonObject && dict.items.is_empty() => {
+                self.require_registered_operation(expression)?;
+                Expr::unrepresented()
+            }
             ast::Expr::Dict(dict) if concrete == Type::ReadOnlyObjectMapping => {
                 let value = self.dictionary(dict, Some((Type::Str, Type::ObjectValue)), None)?;
                 self.coerce(value, concrete, expression)?
