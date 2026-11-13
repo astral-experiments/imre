@@ -793,7 +793,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
             let first = run[0];
             let len = run.len();
             let offset = prefix + copied;
-            let dst = self.value(&format!("getelementptr i64, ptr %live, i64 {offset}"));
+            let dst = self.handle_address(offset);
             if len == 1 {
                 let value = self.value(&format!("load i64, ptr %ir_slot{first}"));
                 self.line(&format!("store i64 {value}, ptr {dst}"));
@@ -807,6 +807,14 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         }
         let (ptr, count) = self.write_handles_at(prefix + copied, trailing);
         (Cow::Borrowed(ptr), count)
+    }
+
+    /// Return the address of one handle in this activation's operand array.
+    fn handle_address(&mut self, offset: usize) -> Cow<'static, str> {
+        if offset == 0 {
+            return Cow::Borrowed("%live");
+        }
+        Cow::Owned(self.value(&format!("getelementptr i64, ptr %live, i64 {offset}")))
     }
 
     /// Copy evaluated handles into reusable storage in this activation's entry block.
@@ -823,7 +831,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         self.max_live = self.max_live.max(count);
         for (i, value) in (offset..).zip(values) {
             let value = value.as_ref();
-            let ptr = self.value(&format!("getelementptr i64, ptr %live, i64 {i}"));
+            let ptr = self.handle_address(i);
             self.line(&format!("store i64 {value}, ptr {ptr}"));
         }
         (if count == 0 { "null" } else { "%live" }, count)
