@@ -612,8 +612,8 @@ mod tests {
 
     #[test]
     fn cleared_unpacking_roots_do_not_materialize_tuples() {
-        // A list-pattern assignment exercises tuple scalarization, while a plain
-        // tuple of local targets already stages each RHS directly in the frontend.
+        // The tuple display assigns its fields directly. The enumerate row still
+        // reaches scalarization with a tuple root.
         let source = r#"
 def total(values: list[int]) -> int:
     [number, name, payload] = (1000000000000000000000000000000, "snapshot", [1])
@@ -634,7 +634,7 @@ print(total([10, 20]))
             before
                 .matches("call ptr @imre_record_try_new_sized(")
                 .count(),
-            2
+            1
         );
         scalarize(&mut module);
         let after = crate::llvm::emit(&module, &crate::ranges::analyze(&module), false).unwrap();
