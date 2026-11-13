@@ -487,6 +487,29 @@ pub(in super::super) fn update_set(ctx: &mut Context, target: Id, source: Id) ->
     updated
 }
 
+/// Release each yielded key before requesting the next one or dropping the iterator.
+fn iterable_members_match(ctx: &mut Context, receiver: Id, other: Id, present: bool) -> Result<Id> {
+    let iterator = ctx.iterator(other)?;
+    ctx.heap.keep(iterator);
+    let mark = ctx.heap.temporary_mark();
+    let mut limit = ctx.heap.streaming_collection_limit();
+    loop {
+        ctx.collect_streaming_garbage(&mut limit);
+        let Some(item) = ctx.next_item(iterator)? else {
+            return Ok(TRUE);
+        };
+        ctx.heap.keep(item);
+        let member = match set_member(ctx, receiver, item, false) {
+            Ok(member) => member,
+            Err(error) => return ctx.release_with_result(mark, Err(error)),
+        };
+        ctx.discard_truth(mark);
+        if member != present {
+            return Ok(FALSE);
+        }
+    }
+}
+
 fn set_issubset(ctx: &mut Context, receiver: Id, other: Id) -> Result<Id> {
     let storage = ctx.scalar_value(other);
     if matches!(ctx.heap.get(storage), Value::Set { .. }) {
@@ -1205,21 +1228,7 @@ pub(super) fn method(
                     };
                 return ctx.set_members_match(source, probe, false);
             }
-            let iterator = ctx.iterator(other)?;
-            ctx.heap.keep(iterator);
-            let mark = ctx.heap.temporary_mark();
-            let mut limit = ctx.heap.streaming_collection_limit();
-            loop {
-                ctx.collect_streaming_garbage(&mut limit);
-                let Some(item) = ctx.next_item(iterator)? else {
-                    return Ok(TRUE);
-                };
-                let member = set_member(ctx, receiver, item, false)?;
-                ctx.discard_truth(mark);
-                if member {
-                    return Ok(FALSE);
-                }
-            }
+            iterable_members_match(ctx, receiver, other, false)
         }
         "set.issuperset" | "frozenset.issuperset" | "set.issubset" | "frozenset.issubset" => {
             let [source] = args else {
@@ -1235,13 +1244,7 @@ pub(super) fn method(
             if matches!(ctx.heap.get(other), Value::Set { .. }) {
                 return ctx.order_sets(">=", receiver, other);
             }
-            let iterator = ctx.iterator(*source)?;
-            while let Some(item) = ctx.next_item(iterator)? {
-                if !set_member(ctx, receiver, item, false)? {
-                    return Ok(FALSE);
-                }
-            }
-            Ok(TRUE)
+            iterable_members_match(ctx, receiver, *source, true)
         }
         "set.intersection" | "frozenset.intersection" => set_intersection(ctx, receiver, args),
         "set.difference" | "frozenset.difference" => ctx.set_difference(receiver, args),
