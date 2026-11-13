@@ -24,43 +24,37 @@ pub(crate) fn analyze(module: &Module, targets: &Targets) -> Vec<FunctionBorrows
     let private = private::analyze(module);
     let (preserves, initializes) = summaries(module, true, targets, &private);
     let (readonly, readonly_initializes) = summaries(module, false, targets, &private);
-    module
-        .functions
-        .iter()
-        .chain([&module.entry])
-        .zip(&private)
-        .map(|(function, private)| {
-            let mut facts = if preserves_edges(
-                function,
-                &preserves,
-                &initializes,
-                false,
-                true,
-                targets,
-                private,
-            ) {
-                local_roots(function, &module.types, &module.functions)
-            } else {
-                FunctionBorrows {
-                    rooted: vec![false; function.locals.len()],
-                    locals: vec![false; function.locals.len()],
-                    length_roots: vec![None; function.locals.len()],
-                }
-            };
-            if preserves_edges(
-                function,
-                &readonly,
-                &readonly_initializes,
-                false,
-                false,
-                targets,
-                private,
-            ) {
-                facts.length_roots = length_roots(function, &facts, &module.types);
+    let mut result = Vec::with_capacity(private.len());
+    for (id, function) in module.functions.iter().chain([&module.entry]).enumerate() {
+        // Named callees have settled summaries. Entry is outside the call graph.
+        let safe = |summaries: &[bool], initializers: &[bool], append| {
+            summaries.get(id).copied().unwrap_or_else(|| {
+                preserves_edges(
+                    function,
+                    summaries,
+                    initializers,
+                    false,
+                    append,
+                    targets,
+                    &private[id],
+                )
+            })
+        };
+        let mut facts = if safe(&preserves, &initializes, true) {
+            local_roots(function, &module.types, &module.functions)
+        } else {
+            FunctionBorrows {
+                rooted: vec![false; function.locals.len()],
+                locals: vec![false; function.locals.len()],
+                length_roots: vec![None; function.locals.len()],
             }
-            facts
-        })
-        .collect()
+        };
+        if safe(&readonly, &readonly_initializes, false) {
+            facts.length_roots = length_roots(function, &facts, &module.types);
+        }
+        result.push(facts);
+    }
+    result
 }
 
 /// Appending preserves element owners. Incoming lengths and buffers also stay
