@@ -86,7 +86,6 @@ impl Callback {
             scope,
             defaults,
             kwdefaults,
-            closure,
             ..
         } = *ctx.heap.get(function)
         else {
@@ -152,18 +151,13 @@ impl Callback {
         if receiver.is_some() && !code.freevars.is_empty() {
             return Ok(None);
         }
-        let captured = match ctx.heap.get(closure) {
-            Value::Tuple(cells) => Some(cells.as_slice()),
-            Value::Cell(_) => Some(std::slice::from_ref(&closure)),
-            _ => None,
-        };
+        let bindings = &ctx.scope_data(scope).closure;
         if let [name] = code.freevars.as_slice()
             && pos.is_empty()
             && kwargs.is_none_or(
                 |id| matches!(ctx.heap.get(id), Value::Dict(entries) if entries.is_empty()),
             )
-            && let Some(cells) = captured
-            && let [cell] = cells
+            && let Some(cell) = bindings.cells.get(name)
             && let Value::Cell(Some(id)) = *ctx.heap.get(*cell)
         {
             let entry = match &code.body {
@@ -189,17 +183,12 @@ impl Callback {
                 && let Some(kwargs) = kwargs
                 && matches!(ctx.heap.get(kwargs), Value::Dict(entries) if entries.is_empty())
                 && let Some(names) = meta["thread_captured_locks"].as_array()
-                && let Some(cells) = captured
-                && cells.len() == code.freevars.len()
-                && cells.len() == names.len()
+                && bindings.cells.len() == code.freevars.len()
+                && bindings.cells.len() == names.len()
             {
-                // Code freevars are in canonical name order; the proof is in execution order.
                 let operand = |name: &serde_json::Value| {
-                    let index = code
-                        .freevars
-                        .iter()
-                        .position(|n| Some(n.as_str()) == name.as_str())?;
-                    let Value::Cell(Some(id)) = *ctx.heap.get(cells[index]) else {
+                    let cell = bindings.cells.get(name.as_str()?)?;
+                    let Value::Cell(Some(id)) = *ctx.heap.get(*cell) else {
                         return None;
                     };
                     let Value::PrimitiveLock(lock) = ctx.heap.get(id) else {
@@ -242,9 +231,7 @@ impl Callback {
         let Body::Native(entry, NONE) = code.body else {
             return Ok(None);
         };
-        if closure != NONE
-            && !matches!(ctx.heap.get(closure), Value::Tuple(items) if items.is_empty())
-        {
+        if bindings.environment {
             return Ok(None);
         }
         let legacy = meta["thread_parameters"].as_array();

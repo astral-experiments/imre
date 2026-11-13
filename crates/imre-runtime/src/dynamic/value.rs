@@ -1508,7 +1508,7 @@ pub(super) enum Value {
     },
     Function {
         fields: super::function_fields::FunctionFields,
-        /// The Python closure tuple, a lone cell awaiting tuple access, or NONE.
+        /// A supplied or already exposed Python closure tuple. The scope owns the cells.
         closure: Id,
         code: Id,
         scope: Id,

@@ -4406,8 +4406,15 @@ impl Context {
                             "code lacks closure metadata",
                         ));
                     }
-                    if matches!(self.heap.get(closure), Value::Cell(_)) {
-                        let tuple = self.alloc(Value::Tuple(vec![closure]));
+                    if closure == NONE && self.scope_data(scope).closure.environment {
+                        let cells = self
+                            .scope_data(scope)
+                            .closure
+                            .cells
+                            .values()
+                            .copied()
+                            .collect();
+                        let tuple = self.alloc(Value::Tuple(cells));
                         let Value::Function { closure, .. } = self.heap.get_mut(obj) else {
                             unreachable!()
                         };
