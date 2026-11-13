@@ -897,7 +897,7 @@ mod tests {
     #[test]
     fn registered_namespace_checks_the_optional_parent_before_emission() {
         let mut frame = crate::frontend::RegisteredFunction {
-            inputs: crate::frontend::FrameInputs::Checked,
+            inputs: Default::default(),
             frame_slots: Default::default(),
             fixed_sites: Box::default(),
             fixed_attributes: None,
@@ -927,7 +927,7 @@ mod tests {
     #[test]
     fn registered_display_handoff_rejects_a_misplaced_or_malformed_spread() {
         let mut frame = crate::frontend::RegisteredFunction {
-            inputs: crate::frontend::FrameInputs::Checked,
+            inputs: Default::default(),
             frame_slots: Default::default(),
             fixed_sites: Box::default(),
             fixed_attributes: None,

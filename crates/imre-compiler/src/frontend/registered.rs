@@ -209,15 +209,26 @@ pub(crate) enum FrameArguments {
 
 /// Argument binding and lexical dependencies of a retained Python frame.
 pub(crate) enum FrameInputs {
-    Checked,
+    Checked {
+        sites: Box<[FrameSite]>,
+    },
     /// A solved body keeps its checked binder until its source contract settles.
     Deferred {
-        live_sites: Option<Box<[FrameSite]>>,
+        sites: Box<[FrameSite]>,
+        live: bool,
     },
     /// Scalar parameters reach Python call operands without native coercion.
     Protocol {
         sites: Box<[FrameSite]>,
     },
+}
+
+impl Default for FrameInputs {
+    fn default() -> Self {
+        Self::Checked {
+            sites: Box::default(),
+        }
+    }
 }
 
 /// The logical slots and cursor operations selected by this physical region.
@@ -293,7 +304,7 @@ impl RegisteredFunction {
         arguments: FrameArguments,
     ) -> Option<Self> {
         let mut checked = Self {
-            inputs: FrameInputs::Checked,
+            inputs: FrameInputs::default(),
             frame_slots: FrameSlots::default(),
             fixed_sites: Box::default(),
             fixed_attributes: None,
@@ -322,7 +333,7 @@ impl RegisteredFunction {
     fn expression(range: TextRange, value: Expr) -> Self {
         let body = Self::returning(range, value);
         Self {
-            inputs: FrameInputs::Checked,
+            inputs: FrameInputs::default(),
             frame_slots: FrameSlots::default(),
             fixed_sites: Box::default(),
             fixed_attributes: None,
@@ -1175,7 +1186,7 @@ impl DeferredAnnotation {
             values,
         ))];
         Ok(RegisteredFunction {
-            inputs: FrameInputs::Checked,
+            inputs: FrameInputs::default(),
             frame_slots: bindings.slots,
             fixed_sites: Box::default(),
             fixed_attributes: None,
@@ -1912,9 +1923,11 @@ impl<'a> SuitePreparation<'a> {
         header.type_params = site.parameters.unwrap_or_default();
         header.annotations = site.annotations;
         // A checked frame can reference lexical activations prepared at this definition.
-        let checked = checked.filter(|body| match &body.inputs {
-            FrameInputs::Checked | FrameInputs::Deferred { .. } => true,
-            FrameInputs::Protocol { sites } => sites.iter().all(|site| match site {
+        let checked = checked.filter(|body| {
+            let (FrameInputs::Checked { sites }
+            | FrameInputs::Deferred { sites, .. }
+            | FrameInputs::Protocol { sites }) = &body.inputs;
+            sites.iter().all(|site| match site {
                 FrameSite::Method(declaration) => declaration.as_ref() == def,
                 FrameSite::Lambda(start) => self
                     .source
@@ -1925,7 +1938,7 @@ impl<'a> SuitePreparation<'a> {
                     .source
                     .generators
                     .is_some_and(|generators| generators.contains_key(range)),
-            }),
+            })
         });
         let (body, refusal) = if let Some(checked) = checked {
             (
@@ -3381,7 +3394,7 @@ impl<'a> SourceScope<'a> {
     fn finish(self, body: Vec<Statement>) -> RegisteredFunction {
         let bindings = self.bindings();
         RegisteredFunction {
-            inputs: FrameInputs::Checked,
+            inputs: FrameInputs::default(),
             frame_slots: bindings.slots,
             fixed_sites: Box::default(),
             fixed_attributes: None,
