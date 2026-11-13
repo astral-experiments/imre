@@ -346,7 +346,7 @@ pub(super) fn retain_generator(
     let Some(definition) = generator_definition(&graph.modules, &graph.session, owner) else {
         return false;
     };
-    checks.accepts(graph, owner.module, definition)
+    checks.accepts(graph, owner.module, definition.range())
         && retain_generator_body(graph, owner.module, definition)
 }
 
@@ -480,23 +480,19 @@ impl SourceChecks {
             .all(|error| !definition.contains_range(*error))
     }
 
-    fn cached(
-        graph: &SourceGraph,
-        module: ModuleId,
-        definition: &ast::StmtFunctionDef,
-    ) -> Option<bool> {
+    fn cached(graph: &SourceGraph, module: ModuleId, definition: TextRange) -> Option<bool> {
         graph
             .registered_source_errors
             .borrow()
             .get(&module)
-            .map(|errors| Self::accepts_range(errors, definition.range()))
+            .map(|errors| Self::accepts_range(errors, definition))
     }
 
     pub(super) fn accepts(
         &self,
         graph: &SourceGraph,
         module: ModuleId,
-        definition: &ast::StmtFunctionDef,
+        definition: TextRange,
     ) -> bool {
         if let Some(accepted) = Self::cached(graph, module, definition) {
             return accepted;
@@ -509,7 +505,7 @@ impl SourceChecks {
         else {
             return false;
         };
-        let accepted = Self::accepts_range(&errors, definition.range());
+        let accepted = Self::accepts_range(&errors, definition);
         graph
             .registered_source_errors
             .borrow_mut()
@@ -554,30 +550,30 @@ pub(super) fn selected_operands(and: bool, mut operands: Vec<Expr>) -> Expr {
 #[derive(Default)]
 pub(super) struct FixedFunctions {
     pub(super) functions: Vec<ir::Function>,
-    pub(super) frames: Vec<(usize, DefinitionId, FixedBodySource)>,
+    pub(super) frames: crate::FixedFrameSources,
 }
 
 impl FixedFunctions {
-    pub(super) fn place(&mut self, graph: &SourceGraph, checks: &SourceChecks) {
-        // Functions were appended in slot order. Removing in reverse leaves every
-        // earlier slot intact, including when helper functions have since been added.
-        for (slot, owner, source) in self.frames.drain(..).rev() {
-            let definition = graph.modules[owner.module].parsed.syntax().body[owner.statement]
-                .as_function_def_stmt()
-                .expect("a physical function definition");
+    pub(super) fn place(
+        &mut self,
+        graph: &SourceGraph,
+        owners: &[ModuleId],
+        checks: &SourceChecks,
+    ) {
+        // Only a terminating layout uses this path. Reverse order keeps earlier slots
+        // intact while their functions move into their original Python frames.
+        for (slot, definition, source) in self.frames.drain(..).rev() {
+            let module = owners[slot];
+            let start = definition.start();
             if !graph
                 .registered_functions()
-                .get(&owner.module)
-                .is_some_and(|entries| entries.contains_key(&definition.start()))
+                .get(&module)
+                .is_some_and(|entries| entries.contains_key(&start))
                 && source.matches(&self.functions[slot])
-                && checks.accepts(graph, owner.module, definition)
+                && checks.accepts(graph, module, definition)
             {
                 let function = self.functions.swap_remove(slot);
-                graph.register_function(
-                    owner.module,
-                    definition.start(),
-                    place_fixed_function(function, source, FrameInputs::Checked),
-                );
+                graph.register_function(module, start, place_fixed_function(function, source));
             }
         }
     }
@@ -648,7 +644,7 @@ pub(super) fn capture(
         if signature.registered_frame() {
             continue;
         }
-        let contract = SourceChecks::cached(graph, id, function);
+        let contract = SourceChecks::cached(graph, id, function.range());
         if contract == Some(false) {
             continue;
         }
@@ -660,8 +656,7 @@ pub(super) fn capture(
         let checked = checked_bodies.is_some_and(|ids| ids.contains(&slot));
         // A revision can invalidate a physical method's last check. Check its settled
         // signature before trying the registered return convention.
-        let mut method_site = method.map(|declaration| FrameSite::Method(Arc::clone(declaration)));
-        let placed = if method_site.is_some() && !checked {
+        let placed = if method.is_some() && !checked {
             let mut fixed = checker();
             fixed.fixed_sites = Some(fixed_body_source::SourceSites::new(true));
             let Some((body, _)) =
@@ -671,14 +666,7 @@ pub(super) fn capture(
             };
             body.source
                 .filter(|source| source.matches(&body.function))
-                .and_then(|source| {
-                    // Transfer the lexical site with the matched operations. Their field
-                    // and bound-call operands use the live receiver in the Python frame.
-                    let inputs = FrameInputs::Protocol {
-                        sites: Box::new([method_site.take()?]),
-                    };
-                    Some(place_fixed_function(body.function, source, inputs))
-                })
+                .map(|source| place_fixed_function(body.function, source))
         } else {
             None
         };
@@ -687,9 +675,19 @@ pub(super) fn capture(
             let mut checker = checker();
             checker.registered_local_start = Some(signature.params.len());
             checker.checked_callback_effects = checked;
-            graph.try_registered_body(id, || lower_definition(checker, function, &signature).ok())
+            let mut body = graph
+                .try_registered_body(id, || lower_definition(checker, function, &signature).ok())?;
+            if let Some(method) = method {
+                let FrameInputs::Protocol { sites } = &mut body.inputs else {
+                    return None;
+                };
+                let mut required = std::mem::take(sites).into_vec();
+                required.push(FrameSite::Method(Arc::clone(method)));
+                *sites = required.into_boxed_slice();
+            }
+            Some(body)
         });
-        if let Some(mut body) = body
+        if let Some(body) = body
             && contract.unwrap_or_else(|| {
                 let checks = &inference.source_checks;
                 // No unresolved caller can depend on a solved frame's ABI. The fixed sibling
@@ -700,19 +698,10 @@ pub(super) fn capture(
                     solved.borrow_mut().push((id, function.range()));
                     true
                 } else {
-                    checks.accepts(graph, id, function)
+                    checks.accepts(graph, id, function.range())
                 }
             })
         {
-            if let Some(site) = method_site {
-                // The writer must retain the method's lexical names when binding the live receiver.
-                let FrameInputs::Protocol { sites } = &mut body.inputs else {
-                    continue;
-                };
-                let mut required = std::mem::take(sites).into_vec();
-                required.push(site);
-                *sites = required.into_boxed_slice();
-            }
             graph.register_function(id, function.start(), body);
         }
     }

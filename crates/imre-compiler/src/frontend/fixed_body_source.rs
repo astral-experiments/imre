@@ -4,6 +4,7 @@ use super::*;
 
 #[derive(Clone)]
 pub(crate) struct FixedBodySource {
+    pub(crate) method: Option<Arc<ast::StmtFunctionDef>>,
     pub(crate) attributes: HashMap<TextRange, FixedAttribute>,
     pub(crate) positions: Vec<TextRange>,
     pub(crate) operations: Vec<Option<FixedNode>>,
@@ -191,7 +192,7 @@ impl SourceSites {
         body: &[Statement],
         names: HashMap<String, usize>,
         locals: &[Type],
-        method: bool,
+        method: Option<&Arc<ast::StmtFunctionDef>>,
     ) -> Option<FixedBodySource> {
         if self.current.is_some()
             || self.statements != source_statements
@@ -205,7 +206,7 @@ impl SourceSites {
             .into_iter()
             .map(|(name, slot)| {
                 // The Python binder spells private method locals with their class prefix.
-                if method && ruff_python_stdlib::identifiers::is_mangled_private(&name) {
+                if method.is_some() && ruff_python_stdlib::identifiers::is_mangled_private(&name) {
                     return None;
                 }
                 Some((
@@ -221,6 +222,7 @@ impl SourceSites {
             return None;
         }
         Some(FixedBodySource {
+            method: method.cloned(),
             attributes: self.attributes,
             positions: self.positions,
             operations: self.operations,
@@ -255,7 +257,7 @@ mod tests {
         let crate::CheckedProgram::Native(fixed) = crate::checked_lower(&mut graph).unwrap() else {
             panic!("expected fixed checked operations")
         };
-        assert!(fixed.frame_sources.is_empty());
+        assert_eq!(fixed.frame_sources.capacity(), 0);
         assert!(matches!(
             fixed.ir.0.functions[0].body.as_slice(),
             [Statement::Return(Expr {
@@ -300,13 +302,15 @@ mod tests {
         assert!(
             !sources
                 .iter()
-                .any(|(id, start, source)| usize::from(*start) == native
-                    && source.matches(&module.functions[*id]))
+                .any(
+                    |(id, definition, source)| usize::from(definition.start()) == native
+                        && source.matches(&module.functions[*id])
+                )
         );
         let both = text.find("def both").unwrap();
         let &(id, _, ref source) = sources
             .iter()
-            .find(|(_, start, _)| usize::from(*start) == both)
+            .find(|(_, definition, _)| usize::from(definition.start()) == both)
             .unwrap();
         assert!(source.matches(&module.functions[id]));
         assert_eq!(source.attributes.len(), 2);
@@ -365,23 +369,50 @@ mod tests {
         let project = tempfile::tempdir().unwrap();
         let entry = project.path().join("app.py");
         std::fs::write(&entry, text).unwrap();
-        let mut graph = SourceGraph::load(&entry, Some(project.path()), &[]).unwrap();
-        let crate::CheckedProgram::Native(fixed) = crate::checked_lower(&mut graph).unwrap() else {
-            panic!("expected a fixed wrapper graph")
-        };
-        let mut owners: Vec<_> = fixed
-            .frame_sources
-            .iter()
-            .filter(|(_, _, body)| body.local_names.contains_key(&1))
-            .map(|(_, start, _)| usize::from(*start))
+        let declarations: Vec<_> = text
+            .match_indices("def send(")
+            .map(|(at, _)| TextSize::try_from(at).unwrap())
             .collect();
-        owners.sort_unstable();
-        assert_eq!(
-            owners,
-            text.match_indices("def send(")
-                .map(|(at, _)| at)
-                .collect::<Vec<_>>()
-        );
+        for early in [true, false] {
+            let mut graph = SourceGraph::load(&entry, Some(project.path()), &[]).unwrap();
+            let crate::CheckedProgram::Native(fixed) = crate::checked_lower(&mut graph).unwrap()
+            else {
+                panic!("expected a fixed wrapper graph")
+            };
+            let methods: Vec<_> = fixed
+                .frame_sources
+                .iter()
+                .filter_map(|(slot, range, source)| {
+                    let method = source.method.as_ref()?;
+                    assert_eq!(method.range(), *range);
+                    Some((
+                        method.start(),
+                        Arc::as_ptr(method),
+                        fixed.ir.0.functions[*slot].body.as_ptr(),
+                        source.positions.as_ptr(),
+                    ))
+                })
+                .collect();
+            assert!(methods.iter().map(|m| m.0).eq(declarations.iter().copied()));
+            if early {
+                let (module, owners) = fixed.ir;
+                registered::FixedFunctions {
+                    functions: module.functions,
+                    frames: fixed.frame_sources,
+                }
+                .place(&graph, &owners, &registered::SourceChecks::default());
+            } else {
+                fixed.register_definitions(&graph);
+            }
+            let registered = graph.registered_functions();
+            for (start, declaration, operations, positions) in methods {
+                let placed = &registered[&graph.entry][&start];
+                assert_eq!(placed.function.body.as_ptr(), operations);
+                assert_eq!(placed.fixed_sites.as_ptr(), positions);
+                assert!(matches!(&placed.inputs, FrameInputs::Protocol { sites }
+                    if matches!(sites.as_ref(), [FrameSite::Method(method)] if Arc::as_ptr(method) == declaration)));
+            }
+        }
     }
 
     #[test]

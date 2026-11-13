@@ -6,10 +6,14 @@ use super::*;
 pub(crate) fn place_fixed_function(
     function: ir::Function,
     source: FixedBodySource,
-    inputs: FrameInputs,
 ) -> RegisteredFunction {
     RegisteredFunction {
-        inputs,
+        inputs: match source.method {
+            Some(method) => FrameInputs::Protocol {
+                sites: Box::new([FrameSite::Method(method)]),
+            },
+            None => FrameInputs::Checked,
+        },
         function,
         local_names: source.local_names,
         frame_slots: Default::default(),
@@ -86,6 +90,23 @@ mod tests {
                 "31415927",
                 "17"
             ]
+        );
+    }
+
+    #[test]
+    fn late_registered_entry_places_only_existing_frames() {
+        let text = "def scale(x: int) -> int: return x + x\ndef startup(source: str) -> None: exec(source)\nprint(scale(3))\n";
+        let mut graph = SourceGraph::single(text).unwrap();
+        let (program, lowered) =
+            caller_cache::observe_lowerings(|| crate::checked_lower(&mut graph).unwrap());
+        assert!(matches!(program, crate::CheckedProgram::Registered(_)));
+        assert_eq!(lowered.iter().filter(|name| *name == "startup").count(), 1);
+        let functions = graph.registered_functions();
+        assert_eq!(functions[&graph.entry].len(), 1);
+        assert!(
+            !functions[&graph.entry][&TextSize::default()]
+                .fixed_sites
+                .is_empty()
         );
     }
 
@@ -211,7 +232,7 @@ mod tests {
             panic!("expected fixed checked operations")
         };
         let body = fixed.ir.0.functions[0].body.as_ptr();
-        let &(_, start, ref source) = fixed
+        let &(_, definition, ref source) = fixed
             .frame_sources
             .iter()
             .find(|(id, ..)| *id == 0)
@@ -229,7 +250,7 @@ mod tests {
         let functions = graph.registered_functions();
         let definitions = &functions[&graph.entry];
         assert!(!definitions.contains_key(&changed));
-        let placed = &definitions[&start];
+        let placed = &definitions[&definition.start()];
         assert_eq!(placed.function.returns, Type::Str);
         assert_eq!(placed.fixed_sites.as_ptr(), positions);
         assert_eq!(placed.function.body.as_ptr(), body);

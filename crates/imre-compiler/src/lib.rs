@@ -1077,7 +1077,7 @@ pub fn compile_file_units(
 
 type CheckedIr = (ir::Module, Vec<modules::ModuleId>);
 
-type FixedFrameSources = Vec<(usize, ruff_text_size::TextSize, frontend::FixedBodySource)>;
+type FixedFrameSources = Vec<(usize, ruff_text_size::TextRange, frontend::FixedBodySource)>;
 
 pub(crate) struct FixedProgram {
     ir: CheckedIr,
@@ -1099,11 +1099,8 @@ impl FixedProgram {
         let (module, owners) = self.ir;
         let mut functions = module.functions.into_iter();
         let mut next = 0;
-        let mut sources = self.frame_sources;
-        // Top-level and method sites were collected separately. Keep the first
-        // checked definition at a source position, in original function order.
-        sources.sort_unstable_by_key(|(id, ..)| *id);
-        for (id, start, source) in sources {
+        for (id, definition, source) in self.frame_sources {
+            let start = definition.start();
             let function = functions.nth(id - next).expect("checked function slot");
             next = id + 1;
             let owner = owners[id];
@@ -1118,7 +1115,7 @@ impl FixedProgram {
             graph.register_function(
                 owner,
                 start,
-                frontend::place_fixed_function(function, source, frontend::FrameInputs::Checked),
+                frontend::place_fixed_function(function, source),
             );
         }
     }
