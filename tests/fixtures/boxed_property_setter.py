@@ -58,6 +58,16 @@ def current():
         except AttributeError as exc:
             print(exc.args)
 
+    class RenamingProperty(property):
+        def __init__(self, fget, fset=None, fdel=None, doc=None):
+            super().__init__(fget, fset, fdel, doc)
+            if fset is not None:
+                source_property.__name__ = "renamed"
+
+    source_property = RenamingProperty(Cell.first.fget)
+    source_property.__name__ = "original"
+    assert source_property.setter(Cell.value.fset).__name__ == "renamed"
+
     class Wrong:
         field = copy.setter(5)
 
