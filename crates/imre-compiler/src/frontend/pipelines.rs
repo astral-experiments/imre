@@ -405,17 +405,19 @@ impl Checker<'_> {
 /// These constructors have observable acquisition timing and cannot be passed
 /// into an eager comprehension helper as ordinary captured container values.
 pub(super) fn is_pipeline_expression(checker: &Checker<'_>, expression: &ast::Expr) -> bool {
-    matches!(expression, ast::Expr::Generator(_))
-        || matches!(expression, ast::Expr::Call(call)
-            if checker.generator_signature(call).is_some()
-            || checker.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::Chain))
-            || checker.is_chain_from_iterable(call)
-            || checker.is_builtin_iter(call)
-            || matches!(&*call.func, ast::Expr::Name(name)
-                if checker.resolve(&call.func).is_none()
-                    && matches!(name.id.as_str(), "zip" | "reversed" | "map" | "filter" | "enumerate"))
-            || matches!(&*call.func, ast::Expr::Attribute(attribute)
-                if matches!(attribute.attr.as_str(), "iterdir" | "glob" | "rglob" | "walk")))
+    let ast::Expr::Call(call) = expression else {
+        return matches!(expression, ast::Expr::Generator(_));
+    };
+    let binding = checker.resolve(&call.func);
+    checker.generator_signature(binding).is_some()
+        || binding == Some(Binding::Intrinsic(Intrinsic::Chain))
+        || checker.is_chain_from_iterable(call)
+        || checker.is_builtin_iter(call)
+        || matches!(&*call.func, ast::Expr::Name(name)
+            if binding.is_none()
+                && matches!(name.id.as_str(), "zip" | "reversed" | "map" | "filter" | "enumerate"))
+        || matches!(&*call.func, ast::Expr::Attribute(attribute)
+            if matches!(attribute.attr.as_str(), "iterdir" | "glob" | "rglob" | "walk"))
 }
 
 fn binary(operation: Binary, left: Expr, right: Expr) -> Expr {
@@ -581,9 +583,9 @@ impl Checker<'_> {
         }
     }
 
-    pub(super) fn is_accumulate(&self, call: &ast::ExprCall) -> bool {
+    pub(super) fn is_accumulate(&self, call: &ast::ExprCall, binding: Option<Binding>) -> bool {
         matches!(
-            self.resolve(&call.func),
+            binding,
             Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(
                 "itertools.accumulate"
             )))
@@ -803,7 +805,8 @@ impl Checker<'_> {
         let ast::Expr::Call(call) = expression else {
             return Ok(None);
         };
-        if self.is_accumulate(call) {
+        let binding = self.resolve(&call.func);
+        if self.is_accumulate(call, binding) {
             let args = self.accumulate_args(call)?;
             return Ok(Some(Iteration::Prepared(
                 self.prepare_accumulate(call, args)?,
@@ -813,7 +816,7 @@ impl Checker<'_> {
             return Ok(Some(Iteration::Prepared(self.sentinel_input(call)?)));
         }
         if matches!(
-            self.resolve(&call.func),
+            binding,
             Some(Binding::Intrinsic(
                 Intrinsic::Repeat
                     | Intrinsic::Count
@@ -828,13 +831,13 @@ impl Checker<'_> {
                 self.prepare_cursor(cursor, element),
             )));
         }
-        if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::Chain)) {
+        if binding == Some(Binding::Intrinsic(Intrinsic::Chain)) {
             return Ok(Some(Iteration::Prepared(self.chain_input(call, element)?)));
         }
         if self.is_chain_from_iterable(call) {
             return Ok(Some(Iteration::Prepared(self.chain_from_iterable(call)?)));
         }
-        if let Some((signature, element)) = self.generator_signature(call) {
+        if let Some((signature, element)) = self.generator_signature(binding) {
             let frame = self.source_call(call, &signature, None, 0)?;
             let handle = self.hidden(Type::GeneratorContext);
             let value = self.hidden(element);
@@ -864,7 +867,7 @@ impl Checker<'_> {
                 clear: vec![handle, value, ready],
             })));
         }
-        if self.resolve(&call.func).is_some() {
+        if binding.is_some() {
             return Ok(None);
         }
         if let ast::Expr::Attribute(attribute) = &*call.func

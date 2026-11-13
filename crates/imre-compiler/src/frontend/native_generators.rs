@@ -87,14 +87,15 @@ pub(super) fn item_type(
 }
 
 impl Checker<'_> {
-    pub(super) fn generator_signature(&self, call: &ast::ExprCall) -> Option<(Signature, Type)> {
-        let Binding::Definition(id) = self.resolve(&call.func)? else {
+    pub(super) fn generator_signature(
+        &self,
+        binding: Option<Binding>,
+    ) -> Option<(Signature, Type)> {
+        let Binding::Definition(id) = binding? else {
             return None;
         };
         let signature = self.functions.get(&id)?;
-        Some((
-            signature.clone(),
-            *self.classes.producer_items.get(&signature.id)?,
-        ))
+        let element = *self.classes.producer_items.get(&signature.id)?;
+        Some((signature.clone(), element))
     }
 }
