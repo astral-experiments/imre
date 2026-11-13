@@ -948,9 +948,15 @@ impl Inference {
                     checked_bodies.insert(signature.id);
                     continue;
                 }
-                // Calls earlier in this round can have supplied new parameters.
-                let mut signature = signature.clone();
-                self.update(&mut signature);
+                // The round already updated each signature. Earlier calls can refine its inputs.
+                let mut updated;
+                let signature = if self.revision.get() == before {
+                    signature
+                } else {
+                    updated = signature.clone();
+                    self.update(&mut updated);
+                    &updated
+                };
                 let discover_returns = infer_return || document_return.is_some();
                 // Local scalar and Python values cannot refine another declaration.
                 // Let the ordinary body checker retain their operations and positions.
@@ -987,7 +993,7 @@ impl Inference {
                     && !signature.registered_frame()
                     && matches!(function.body.as_slice(), [ast::Stmt::Return(_)])
                     && !checker.fault_enabled()
-                    && registered::physical_method(&signature, function, classes).is_some();
+                    && registered::physical_method(signature, function, classes).is_some();
                 checker.placement_only = !keep_return;
                 let mut return_body = keep_return.then(|| {
                     checker.frame = LexicalFrame::Named(function.name.id.clone());
@@ -999,7 +1005,7 @@ impl Inference {
                 let mut superseded_returns = false;
                 let mut checked_call_cannot_return = false;
                 let result = (|| {
-                    checker.bind_function_signature(function, &signature, |slot| {
+                    checker.bind_function_signature(function, signature, |slot| {
                         if let Some((params, _)) = &mut return_body {
                             params.push(slot);
                         }
@@ -1176,7 +1182,7 @@ impl Inference {
                     if let Some((params, body)) = return_body
                         && checked_return && !checked_call_cannot_return && body_revision == revision
                         && checker.calls.is_empty() && checker.class_reads.borrow().is_empty()
-                        && let Some(source) = checker.fixed_body_source(function, &signature, function.body.len(), &body)
+                        && let Some(source) = checker.fixed_body_source(function, signature, function.body.len(), &body)
                         // A module read needs its initializing storage; a bound method may
                         // have consulted a different callee layout during discovery.
                         && source.attributes.values().all(|attr| matches!(*attr.operation, Builtin::RegisteredAttribute { .. }))
