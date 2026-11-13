@@ -145,7 +145,7 @@ pub(super) const INTERPOLATION_TYPE: &str = "string.templatelib.Interpolation";
 pub(super) enum TracebackAnchor {
     Uniform,
     Column(u32),
-    Operator(u32),
+    Operator(u32, u8),
     Hidden,
 }
 

@@ -322,7 +322,12 @@ fn checked_floor_division_can_call_a_python_override() {
     );
     assert!(body.contains("icmp ugt i64"));
     assert!(body.contains("call i64 @int_floordiv("));
-    assert!(body.contains(&format!("call i64 @imre_dyn_op_at(ptr %ctx, ptr {floor},")));
+    let fallback = body
+        .lines()
+        .find(|line| line.contains(&format!("call i64 @imre_dyn_op_at(ptr %ctx, ptr {floor},")))
+        .unwrap();
+    let position = output.positions[&[2, 9, 11, 15]];
+    assert!(fallback.ends_with(&format!("ptr @pos{position})")));
 }
 
 #[test]

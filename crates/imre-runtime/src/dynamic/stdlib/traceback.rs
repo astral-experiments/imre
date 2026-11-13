@@ -148,7 +148,9 @@ impl<'a> FrameLine<'a> {
                 let (split, caret_end) = match s.anchor {
                     TracebackAnchor::Uniform => (s.start as usize, end),
                     TracebackAnchor::Column(column) => (column as usize, end),
-                    TracebackAnchor::Operator(column) => (column as usize, column as usize + 1),
+                    TracebackAnchor::Operator(column, width) => {
+                        (column as usize, column as usize + usize::from(width))
+                    }
                     TracebackAnchor::Hidden => return None,
                 };
                 Some([s.start as usize, split, caret_end, end])
