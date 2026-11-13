@@ -2813,9 +2813,14 @@ pub(super) fn raised_value<E>(
 impl statements::StatementLowering for SourceScope<'_> {
     type Error = ();
 
-    fn assignment(&mut self, assign: &ast::StmtAssign) -> StdResult<statements::Block, ()> {
+    fn assignment(
+        &mut self,
+        assign: &ast::StmtAssign,
+        body: &mut Vec<Statement>,
+    ) -> StdResult<bool, ()> {
         let value = self.frame_value(&assign.value).ok_or(())?;
-        Ok((self.assignment_targets(&assign.targets, value)?, true))
+        unpacking::bind_assignment(self, &assign.targets, value, body)?;
+        Ok(true)
     }
 
     fn branch(&mut self, branch: &ast::StmtIf) -> StdResult<statements::Block, ()> {
@@ -3366,7 +3371,9 @@ impl SourceScope<'_> {
         targets: &[ast::Expr],
         value: Expr,
     ) -> StdResult<Vec<Statement>, ()> {
-        unpacking::bind_assignment(self, targets, value)
+        let mut body = Vec::with_capacity(1);
+        unpacking::bind_assignment(self, targets, value, &mut body)?;
+        Ok(body)
     }
 
     fn with_binding_operands<T>(&mut self, lower: impl FnOnce(&mut Self) -> T) -> T {

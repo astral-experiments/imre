@@ -153,11 +153,11 @@ pub(super) fn bind_assignment<B: PatternBinder>(
     binder: &mut B,
     targets: &[ast::Expr],
     value: Expr,
-) -> StdResult<Vec<Statement>, B::Error> {
+    output: &mut Vec<Statement>,
+) -> StdResult<(), B::Error> {
     if let [target] = targets {
-        let mut body = Vec::with_capacity(1);
-        bind_input(binder, target, value, None, &mut body)?;
-        return Ok(body);
+        bind_input(binder, target, value, None, output)?;
+        return Ok(());
     }
     let slot = binder.pattern_hidden(value.ty);
     let mut body = vec![Statement::Assign(slot, value)];
@@ -170,10 +170,11 @@ pub(super) fn bind_assignment<B: PatternBinder>(
         };
         bind_input(binder, target, value, None, &mut body)?;
     }
-    Ok(vec![Statement::Scope {
+    output.push(Statement::Scope {
         body,
         clear: vec![slot],
-    }])
+    });
+    Ok(())
 }
 
 /// A projected fixed tuple or a checked Python pull that owns the source row.
@@ -371,7 +372,8 @@ impl Checker<'_> {
     pub(super) fn assignment_statement(
         &mut self,
         assignment: &ast::StmtAssign,
-    ) -> Result<statements::Block, String> {
+        output: &mut Vec<Statement>,
+    ) -> Result<bool, String> {
         // The live namespace owns later lookups. An enclosing call may already
         // have loaded its callable before an argument mutates this attribute.
         for target in &assignment.targets {
@@ -400,7 +402,7 @@ impl Checker<'_> {
         {
             let mut state_assignment = assignment.clone();
             state_assignment.targets[0] = ast::Expr::Attribute(field);
-            return self.assignment_statement(&state_assignment);
+            return self.assignment_statement(&state_assignment, output);
         }
         if let Some(attribute) = fixed_field
             && attribute.attr.as_str() == "default_factory"
@@ -410,16 +412,11 @@ impl Checker<'_> {
             let receiver = self.expr(&attribute.value)?;
             if self.types.is_default_list_dict(receiver.ty) {
                 let enabled = !matches!(&*assignment.value, ast::Expr::NoneLiteral(_));
-                return Ok((
-                    vec![Statement::Expr(Expr {
-                        ty: Type::None,
-                        kind: ExprKind::Builtin(
-                            Builtin::DefaultFactorySet { enabled },
-                            vec![receiver],
-                        ),
-                    })],
-                    true,
-                ));
+                output.push(Statement::Expr(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(Builtin::DefaultFactorySet { enabled }, vec![receiver]),
+                }));
+                return Ok(true);
             }
         }
         if let Some(attribute) = fixed_field
@@ -429,10 +426,8 @@ impl Checker<'_> {
         {
             let receiver = self.expr(&attribute.value)?;
             if receiver.ty == Type::LogFormatter {
-                return Ok((
-                    vec![self.formatter_set(receiver, attribute, Expr::boolean(utc))?],
-                    true,
-                ));
+                output.push(self.formatter_set(receiver, attribute, Expr::boolean(utc))?);
+                return Ok(true);
             }
         }
         // A literal tuple assigned to plain locals can stage its elements in native
@@ -462,12 +457,14 @@ impl Checker<'_> {
                 let value = self.take_temporary(slot);
                 self.store_value(target, value, None, Some(&mut body))?;
             }
-            return Ok((vec![Statement::Scope { body, clear: slots }], true));
+            output.push(Statement::Scope { body, clear: slots });
+            return Ok(true);
         }
         if let [target] = assignment.targets.as_slice() {
             if pattern_elements(target).is_some() {
                 let value = self.unpacking_value(target, &assignment.value)?;
-                return Ok((bind_assignment(self, &assignment.targets, value)?, true));
+                bind_assignment(self, &assignment.targets, value, output)?;
+                return Ok(true);
             }
             let local = target.as_name_expr().filter(|_| {
                 !self.module_scope && self.block_depth == 1 && self.local_functions.is_empty()
@@ -498,12 +495,14 @@ impl Checker<'_> {
                 self.typed_expr(&assignment.value)?
             };
             if self.ends_before_assignment(&assignment.value, &value, &assignment.targets)? {
-                return Ok((vec![Statement::Expr(value)], false));
+                output.push(Statement::Expr(value));
+                return Ok(false);
             }
             if let Some((name, old)) = previous
                 && value.ty != self.locals[old]
             {
-                return Ok((self.replace_local(name, old, value.ty, value), true));
+                statements::append_block(output, self.replace_local(name, old, value.ty, value));
+                return Ok(true);
             }
             let value = if context.is_none()
                 && let ast::Expr::Name(name) = target
@@ -514,15 +513,15 @@ impl Checker<'_> {
                 value
             };
             let value_site = scalar_item.map(|_| assignment.value.as_ref());
-            let mut body = Vec::with_capacity(1);
-            self.store_value(target, value, value_site, Some(&mut body))?;
+            let start = output.len();
+            self.store_value(target, value, value_site, Some(output))?;
             if let Some(sites) = &mut self.fixed_sites
                 && local.is_some()
-                && let [Statement::Assign(slot, _)] = body.as_slice()
+                && let [Statement::Assign(slot, _)] = &output[start..]
             {
                 sites.statement(assignment.value.range(), FixedNode::Store(*slot));
             }
-            return Ok((body, true));
+            return Ok(true);
         }
         let context = assignment.targets.iter().find_map(|target| {
             self.target_expectation(target, Some(&assignment.value))
@@ -539,9 +538,11 @@ impl Checker<'_> {
             self.unpacking_value(target, &assignment.value)?
         };
         if self.ends_before_assignment(&assignment.value, &value, &assignment.targets)? {
-            return Ok((vec![Statement::Expr(value)], false));
+            output.push(Statement::Expr(value));
+            return Ok(false);
         }
-        Ok((bind_assignment(self, &assignment.targets, value)?, true))
+        bind_assignment(self, &assignment.targets, value, output)?;
+        Ok(true)
     }
 
     pub(super) fn store_value(
