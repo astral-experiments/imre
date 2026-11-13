@@ -758,10 +758,6 @@ pub(crate) fn fixed_frame_entry(function: &ast::StmtFunctionDef) -> bool {
         && function.type_params.is_none()
         && function.parameters.vararg.is_none()
         && function.parameters.kwarg.is_none()
-        && function
-            .parameters
-            .iter_non_variadic_params()
-            .all(|p| p.default.is_none())
 }
 
 fn lower_graph(
