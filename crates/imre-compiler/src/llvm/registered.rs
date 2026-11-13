@@ -1003,7 +1003,12 @@ impl<'f> Frame<'f, '_, '_> {
         self.code.release_integer_owners(owner..owner + 1, true);
     }
 
-    pub(crate) fn builtin(&mut self, op: &Builtin, operands: &[Expr]) -> CheckedValue {
+    pub(super) fn builtin(
+        &mut self,
+        op: &Builtin,
+        operands: &[Expr],
+        usage: ValueUse,
+    ) -> CheckedValue {
         let handle = match (op, operands) {
             (Builtin::RegisteredCall(call), [target, args @ ..]) => {
                 self.call_value(call, target, args)
@@ -1015,7 +1020,7 @@ impl<'f> Frame<'f, '_, '_> {
                     range,
                 },
                 _,
-            ) => self.attribute_operation(*action, name, *range, operands.iter()),
+            ) => self.attribute_operation(*action, name, *range, operands.iter(), usage),
             (Builtin::RegisteredInput(index), []) => self.registered_input(*index),
             (op, args) if let Some(iteration) = op.iteration_operands(args) => {
                 use ir::IterationOperands::*;

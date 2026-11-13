@@ -1782,14 +1782,24 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
         mut next: String,
     ) -> Vec<String> {
         args.iter()
-            .map(|expr| {
-                let value = self.evaluate_handle(expr);
-                if permanent_handle(expr).is_none() {
-                    next = self.keep_operands(&next, &value, "0");
-                }
-                value
-            })
+            .map(|expr| self.kept_call_value(expr, &mut next))
             .collect()
+    }
+
+    /// A producer that releases its own intermediates can place its result
+    /// directly above the preceding arguments and return that root boundary.
+    pub(in crate::llvm) fn kept_call_value(&mut self, expr: &Expr, next: &mut String) -> String {
+        use crate::llvm::operations::{CheckedBody, ValueUse};
+        let retained = std::cell::OnceCell::new();
+        let value = CheckedBody::registered(self.reborrow())
+            .value_for(expr, ValueUse::CallOperand(next, &retained));
+        let value = self.materialize_owned(value);
+        if let Some(boundary) = retained.into_inner() {
+            *next = boundary;
+        } else if permanent_handle(expr).is_none() {
+            *next = self.keep_operands(next, &value, "0");
+        }
+        value
     }
 
     /// Evaluate the callable before its arguments. A lone *iterable is converted
@@ -1814,20 +1824,26 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
         {
             self.call_position(*name);
         }
+        let keyword_call = matches!(call.arguments, RegisteredArguments::Keywords { .. });
+        let mut next = mark.clone();
         let (scope, target) = if call.explicit_scope {
-            let scope = self.evaluate_handle(target);
+            let scope = if keyword_call {
+                self.kept_call_value(target, &mut next)
+            } else {
+                self.evaluate_handle(target)
+            };
             (Some(scope), args.next().expect("scoped call has a target"))
         } else {
             (None, target)
         };
-        let keyword_call = matches!(call.arguments, RegisteredArguments::Keywords { .. });
-        let scope_root = scope
-            .as_deref()
-            .filter(|_| keyword_call)
-            .map(|scope| self.keep_operands(&mark, scope, "0"));
         let (callable, receiver, callee_end) = match &call.target {
             RegisteredCallTarget::Callable { end, .. } => {
-                (self.evaluate_handle(target), None, *end)
+                let target = if keyword_call {
+                    self.kept_call_value(target, &mut next)
+                } else {
+                    self.evaluate_handle(target)
+                };
+                (target, None, *end)
             }
             RegisteredCallTarget::Method {
                 name, attribute, ..
@@ -1843,9 +1859,7 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
                 } else {
                     self.method_target(&receiver, name, *attribute, direct)
                 };
-                if !keyword_call {
-                    self.keep_operands(&mark, &callee, bound.as_deref().unwrap_or("0"));
-                }
+                next = self.keep_operands(&next, &callee, bound.as_deref().unwrap_or("0"));
                 (callee, bound, attribute.end())
             }
         };
@@ -1882,8 +1896,6 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
                 }
             }
             RegisteredArguments::Keywords { positional, names } => {
-                let next =
-                    self.keep_operands(scope_root.as_deref().unwrap_or(&mark), &callable, "0");
                 let values = self.kept_call_values(args.as_slice(), next);
                 let (array, _) = self.fixed_call_arguments(&callable, values, exec);
                 let operands = CallArguments::FixedKeywords {
@@ -1928,18 +1940,29 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
         name: &str,
         range: ruff_text_size::TextRange,
         mut operands: impl Iterator<Item = &'e Expr>,
+        usage: crate::llvm::operations::ValueUse,
     ) -> String {
         use ir::AttributeAction;
         let first = operands.next().expect("attribute operand");
-        let mark = self.temporary_mark();
         if action == AttributeAction::Load {
-            return self.unwind_operands(&mark, |code| {
+            let owned;
+            let mark = if let crate::llvm::operations::ValueUse::CallOperand(mark, _) = usage {
+                mark
+            } else {
+                owned = self.temporary_mark();
+                &owned
+            };
+            return self.unwind_operands(mark, |code| {
                 let receiver = code.evaluate_handle(first);
                 let value = code.attribute_value(&receiver, name, range);
-                code.keep_operands(&mark, &value, "0");
+                let next = code.keep_operands(mark, &value, "0");
+                if let crate::llvm::operations::ValueUse::CallOperand(_, retained) = usage {
+                    retained.set(next).expect("one result per call operand");
+                }
                 value
             });
         }
+        let mark = self.temporary_mark();
         self.unwind_operands(&mark, |code| {
             match action {
                 AttributeAction::Store => {
