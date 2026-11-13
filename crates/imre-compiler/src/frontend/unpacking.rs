@@ -72,7 +72,7 @@ pub(super) trait PatternBinder {
         Ok(protocol_snapshot(
             self,
             target.range(),
-            elements.len(),
+            elements.iter().map(|_| Type::PythonObject),
             star,
             value,
             Type::PythonObject,
@@ -99,7 +99,7 @@ impl PatternSnapshot {
 fn protocol_snapshot(
     binder: &mut (impl PatternBinder + ?Sized),
     target: TextRange,
-    count: usize,
+    item_types: impl ExactSizeIterator<Item = Type>,
     star: Option<usize>,
     value: Expr,
     sequence_type: Type,
@@ -108,7 +108,7 @@ fn protocol_snapshot(
     let sequence = builtin(
         sequence_type,
         Builtin::RegisteredUnpack {
-            count,
+            count: item_types.len(),
             star,
             target: Some(target),
         },
@@ -120,13 +120,13 @@ fn protocol_snapshot(
         body: vec![Statement::Assign(root, consume_row(sequence, row))],
         clear: vec![root],
     };
-    for index in 0..count {
+    for (index, ty) in item_types.enumerate() {
         // Python packs the starred remainder into a list even when its items are opaque.
         let item = builtin(
             if star == Some(index) {
                 sequence_type
             } else {
-                Type::PythonObject
+                ty
             },
             Builtin::ListGet(None),
             vec![binder.pattern_local(root), Expr::integer(index)],
@@ -280,7 +280,15 @@ impl Checker<'_> {
         let sequence = self.types.list(Type::PythonObject);
         let PatternSnapshot {
             mut body, clear, ..
-        } = protocol_snapshot(self, site, 2, None, item, sequence, None);
+        } = protocol_snapshot(
+            self,
+            site,
+            [Type::PythonObject; 2].into_iter(),
+            None,
+            item,
+            sequence,
+            None,
+        );
         let &[key, value] = clear.last_chunk().expect("captured both pair items");
         body.push(Statement::assign_item(
             self.local(target),
@@ -1218,7 +1226,7 @@ impl PatternBinder for Checker<'_> {
             return Ok(protocol_snapshot(
                 self,
                 target.range(),
-                targets.len(),
+                targets.iter().map(|_| Type::PythonObject),
                 star,
                 value,
                 sequence,
@@ -1247,6 +1255,24 @@ impl PatternBinder for Checker<'_> {
                 self.source,
                 target,
                 "unpacking target has the wrong number of fields",
+            ));
+        }
+        // A Python cursor yields a handle even when its element contract is a tuple.
+        // Unpack that handle once, then check each target with its declared field type.
+        if let Some(Row::Projected(slot)) = row
+            && self.registered.is_some()
+            && self.locals[slot] == Type::PythonObject
+            && star.is_none()
+            && let Some(fields) = fields.as_ref()
+        {
+            return Ok(protocol_snapshot(
+                self,
+                target.range(),
+                fields.iter().copied(),
+                None,
+                self.local(slot),
+                self.types.list(Type::PythonObject),
+                None,
             ));
         }
         let (captured, mut body) = if let Some(Row::Projected(captured)) = row {
