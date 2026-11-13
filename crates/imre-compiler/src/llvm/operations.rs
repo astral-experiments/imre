@@ -838,7 +838,8 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                         ExprKind::Builtin(_, args) => args,
                         _ => unreachable!("placed attribute has its checked operands"),
                     };
-                    return frame.builtin(operation, operands, usage);
+                    return CheckedBody::registered(frame.reborrow())
+                        .builtin(operation, operands, expr.ty, usage);
                 }
                 CheckedBody::registered(frame.reborrow()).emit_operation(
                     expr,
@@ -1006,50 +1007,14 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             }
             ExprKind::Conditional(test, yes, no) => self.conditional_value(test, yes, no),
             ExprKind::Boolean(..) | ExprKind::BooleanValue(..) => self.boolean_expression(expr),
-            ExprKind::Builtin(
-                op @ (Builtin::ListGet(_)
-                | Builtin::TupleGet
-                | Builtin::TupleIndex
-                | Builtin::StringGet
-                | Builtin::BytesGet
-                | Builtin::DictGet
-                | Builtin::RegisteredSubscript(..)),
-                args,
-            ) => self.subscript(op, args, expr.ty),
-            ExprKind::Builtin(Builtin::DeleteItem, args) => {
-                let [receiver, key] = args.as_slice() else {
-                    unreachable!("checked deletion operands")
-                };
-                self.delete_item(receiver, key)
-            }
-            ExprKind::Builtin(op @ (Builtin::Append | Builtin::SetAdd), args) => {
-                self.insert(op, args)
-            }
             ExprKind::Binary(op, left, right) => {
                 self.binary_expression(*op, left, right, expr, site, usage)
             }
-            ExprKind::Builtin(Builtin::FormatJoin, parts) => match &mut self.0 {
-                Entry::Native(emitter) => {
-                    CheckedValue::owned(emitter.concat(parts.iter().collect()))
-                }
-                Entry::Registered(frame) => {
-                    let mark = frame.temporary_mark();
-                    CheckedValue::handle(frame.unwind_stack_operands(&mark, |frame| {
-                        let (values, count) = frame.evaluate_handle_array(parts);
-                        frame.checked(&format!(
-                            "call i64 @imre_dyn_format_parts(ptr %ctx, i64 {mark}, ptr {values}, i64 {count})"
-                        ))
-                    }))
-                }
-            },
             ExprKind::Invoke { callable, args } => self.invoke(callable, args, expr.ty),
             ExprKind::Unary(op, value) => self.unary_expression(*op, value, expr),
             ExprKind::Scope { body, value, clear } => self.scoped_expression(body, value, clear),
             ExprKind::Dict(entries) => self.dictionary(expr.ty, entries),
-            ExprKind::Builtin(op, args) => match &mut self.0 {
-                Entry::Native(emitter) => CheckedValue::owned(emitter.builtin(op, args, expr.ty)),
-                Entry::Registered(frame) => frame.builtin(op, args, usage),
-            },
+            ExprKind::Builtin(op, args) => self.builtin(op, args, expr.ty, usage),
             // Python handles already represent both the payload and None. Evaluating
             // the original operand also preserves effects of a None-valued call.
             ExprKind::Present(value) | ExprKind::Absent(value) | ExprKind::Unwrap(value)
@@ -1104,6 +1069,77 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         }
     }
 
+    /// Placed operations and registered expressions evaluate the same checked operands.
+    fn builtin(
+        &mut self,
+        op: &Builtin,
+        args: &[Expr],
+        returns: Type,
+        usage: ValueUse,
+    ) -> CheckedValue {
+        match op {
+            Builtin::RegisteredAttribute {
+                action: ir::AttributeAction::Load,
+                name,
+                range,
+            } => {
+                let [receiver] = args else {
+                    unreachable!("checked attribute receiver")
+                };
+                // A call argument can keep the descriptor result directly above its siblings.
+                let owned;
+                let (mark, retained) = if let ValueUse::CallOperand(mark, retained) = usage {
+                    (mark, Some(retained))
+                } else {
+                    owned = self.python().temporary_mark();
+                    (owned.as_str(), None)
+                };
+                let unwind = self.python().begin_operand_scope();
+                let receiver = self.rooted_operand(receiver);
+                let frame = self.python();
+                let value = frame.attribute_value(receiver.rooted_handle(), name, *range);
+                let next = frame.keep_operands(mark, &value, "0");
+                if let Some(retained) = retained {
+                    retained.set(next).expect("one result per call operand");
+                }
+                frame.finish_operand_scope(mark, unwind);
+                CheckedValue::handle(value)
+            }
+            Builtin::ListGet(_)
+            | Builtin::TupleGet
+            | Builtin::TupleIndex
+            | Builtin::StringGet
+            | Builtin::BytesGet
+            | Builtin::DictGet
+            | Builtin::RegisteredSubscript(..) => self.subscript(op, args, returns),
+            Builtin::DeleteItem => {
+                let [receiver, key] = args else {
+                    unreachable!("checked deletion operands")
+                };
+                self.delete_item(receiver, key)
+            }
+            Builtin::Append | Builtin::SetAdd => self.insert(op, args),
+            Builtin::FormatJoin => match &mut self.0 {
+                Entry::Native(emitter) => {
+                    CheckedValue::owned(emitter.concat(args.iter().collect()))
+                }
+                Entry::Registered(frame) => {
+                    let mark = frame.temporary_mark();
+                    CheckedValue::handle(frame.unwind_stack_operands(&mark, |frame| {
+                        let (values, count) = frame.evaluate_handle_array(args);
+                        frame.checked(&format!(
+                            "call i64 @imre_dyn_format_parts(ptr %ctx, i64 {mark}, ptr {values}, i64 {count})"
+                        ))
+                    }))
+                }
+            },
+            _ => match &mut self.0 {
+                Entry::Native(emitter) => CheckedValue::owned(emitter.builtin(op, args, returns)),
+                Entry::Registered(frame) => frame.builtin(op, args),
+            },
+        }
+    }
+
     pub(crate) fn emit_statement(&mut self, stmt: &Statement) {
         if let Entry::Registered(frame) = &mut self.0 {
             match (stmt, frame.next_fixed_site(ir::Node::Statement(stmt))) {
@@ -1118,11 +1154,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                     else {
                         unreachable!("placed field store retains its attribute operation");
                     };
-                    frame.attribute_operation(
-                        operation,
-                        [value, receiver].into_iter(),
-                        ValueUse::General,
-                    );
+                    frame.mutate_attribute(operation, [value, receiver].into_iter());
                     return;
                 }
                 (_, Some(range)) => frame.statement_site(range, None),
