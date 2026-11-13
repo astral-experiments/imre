@@ -1657,6 +1657,14 @@ pub(crate) enum Constant {
 }
 
 impl Constant {
+    pub(crate) fn text(text: &str) -> Self {
+        Self::Text(
+            text.chars()
+                .flat_map(|c| u32::from(c).to_le_bytes())
+                .collect(),
+        )
+    }
+
     /// A constant key contains only immutable literals and distinguishes Python types and float bits.
     pub(crate) fn from_expr(value: &Expr) -> Option<Self> {
         Some(match &value.kind {
@@ -1669,11 +1677,7 @@ impl Constant {
             ExprKind::Int(n) => Constant::Int(n.clone()),
             ExprKind::Float(n) => Constant::Float(n.to_bits()),
             ExprKind::Bytes(b) => Constant::Bytes(b.clone()),
-            ExprKind::Str(text) => Constant::Text(
-                text.chars()
-                    .flat_map(|c| u32::from(c).to_le_bytes())
-                    .collect(),
-            ),
+            ExprKind::Str(text) => Constant::text(text),
             ExprKind::Builtin(Builtin::RegisteredString(points), _) => {
                 Constant::Text(points.clone())
             }

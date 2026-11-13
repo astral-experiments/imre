@@ -1021,12 +1021,11 @@ impl<'p> RegisteredFrame<'_, 'p> {
                 level,
                 names,
             } => {
-                let fromlist = self.op("list", &[]);
+                let slot = self.constant_slot(Constant::Tuple(
+                    names.iter().map(|(name, _)| Constant::text(name)).collect(),
+                ));
                 let members: Vec<_> = names.iter().map(|(name, _)| self.code_name(name)).collect();
-                for member in &members {
-                    self.op("append", &[&fromlist, member]);
-                }
-                let fromlist = self.op("tuple", &[&fromlist]);
+                let fromlist = self.build_sequence(&members, true, Some(&slot));
                 let module = self.import_name(module, &fromlist, *level);
                 for ((name, binding), member) in names.iter().zip(members) {
                     if name == "*" {
