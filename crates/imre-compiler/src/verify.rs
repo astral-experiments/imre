@@ -70,7 +70,7 @@ pub(crate) fn module(module: &Module) -> Result<(), String> {
 /// checked native scalar or a Python handle as a display operand. They have no native
 /// container layout table. Validate this handoff before the emitter indexes its operands.
 pub(crate) fn registered(frame: crate::frontend::RegisteredRegion<'_>) -> Result<(), String> {
-    let private = frame.frame_layout(|_| {});
+    let private = frame.frame_layout(|_| true).unwrap();
     let local = |slot: usize| {
         require(
             slot < frame.locals.len()

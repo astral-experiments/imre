@@ -3855,29 +3855,51 @@ pub(crate) fn walk_nodes<'a>(
     body: &'a [Statement],
     visit: &mut impl FnMut(Node<'a>, Option<&'a Expr>),
 ) {
-    for statement in body {
-        visit(Node::Statement(statement), None);
-        statement_children!(
-            statement,
-            |value| walk_expression(value, None, visit),
-            |suite| { walk_nodes(suite, visit) }
-        );
-    }
+    all_nodes(body, &mut |node, parent| {
+        visit(node, parent);
+        true
+    });
 }
 
-fn walk_expression<'a>(
+/// Visit a suite until its caller rejects an operation.
+pub(crate) fn all_nodes<'a>(
+    body: &'a [Statement],
+    visit: &mut impl FnMut(Node<'a>, Option<&'a Expr>) -> bool,
+) -> bool {
+    for statement in body {
+        if !visit(Node::Statement(statement), None) {
+            return false;
+        }
+        let mut complete = true;
+        statement_children!(
+            statement,
+            |value| { complete = complete && all_operand_nodes(value, None, visit) },
+            |suite| { complete = complete && all_nodes(suite, visit) }
+        );
+        if !complete {
+            return false;
+        }
+    }
+    true
+}
+
+/// Visit an operand and its scoped statements until the caller declines one.
+pub(crate) fn all_operand_nodes<'a>(
     expression: &'a Expr,
     parent: Option<&'a Expr>,
-    visit: &mut impl FnMut(Node<'a>, Option<&'a Expr>),
-) {
-    visit(Node::Expression(expression), parent);
+    visit: &mut impl FnMut(Node<'a>, Option<&'a Expr>) -> bool,
+) -> bool {
+    if !visit(Node::Expression(expression), parent) {
+        return false;
+    }
     if let ExprKind::Scope { body, value, .. } = &expression.kind {
-        walk_nodes(body, visit);
-        walk_expression(value, Some(expression), visit);
+        all_nodes(body, visit) && all_operand_nodes(value, Some(expression), visit)
     } else {
+        let mut complete = true;
         children(expression, |child| {
-            walk_expression(child, Some(expression), visit)
+            complete = complete && all_operand_nodes(child, Some(expression), visit);
         });
+        complete
     }
 }
 
@@ -3904,7 +3926,10 @@ pub(crate) fn walk_operand_nodes<'a>(
     value: &'a Expr,
     visit: &mut impl FnMut(Node<'a>, Option<&'a Expr>),
 ) {
-    walk_expression(value, None, visit);
+    all_operand_nodes(value, None, &mut |node, parent| {
+        visit(node, parent);
+        true
+    });
 }
 
 /// Visits an operand and its nested expressions, including eager scope bodies.
@@ -4151,7 +4176,7 @@ pub(crate) fn walk_writes(body: &[Statement], mut visit: impl FnMut(usize, Optio
 
 /// Visits writes during operand evaluation, including assignments in eager scopes.
 pub(crate) fn walk_expression_writes(value: &Expr, mut visit: impl FnMut(usize, Option<&Expr>)) {
-    walk_expression(value, None, &mut |node, _| node_writes(node, &mut visit));
+    walk_operand_nodes(value, &mut |node, _| node_writes(node, &mut visit));
 }
 
 /// Whether evaluating an operand leaves the previously loaded local in place.
