@@ -78,8 +78,12 @@ pub(super) fn annotation_operand<R>(
     let text = if string_annotations {
         annotation_spelling(expr)
     } else if let ast::Expr::StringLiteral(literal) = expr
-        && !source.has_templates
-        && source.replacements.is_empty()
+        // Ruff substitutes U+FFFD for surrogates. Only this literal's own
+        // parts can require the code-point-preserving operand below.
+        && !literal
+            .value
+            .iter()
+            .any(|part| source.replacements.contains_key(&part.range()))
     {
         literal.value.to_str().to_owned()
     } else {
@@ -221,6 +225,35 @@ mod tests {
         );
         assert!(!sites.children.contains_key(&site("'Name'")));
         assert!(!sites.values.contains_key(&site("'skip")));
+    }
+
+    #[test]
+    fn quoted_children_use_their_own_literal_parts() {
+        let text = r#"def f(a: "call" "(x)", b: "keep" "\ud800"): pass
+def dormant(): return f"\ud801{1}", t"{x}"
+"#;
+        let parsed = ruff_python_parser::parse_module(text).unwrap();
+        let replacements = crate::frontend::literal_replacements(text, parsed.tokens());
+        let source = RegisteredSource {
+            python_optimization: 0,
+            operand_types: None,
+            text,
+            replacements: &replacements,
+            has_templates: true,
+            method_imports: &Default::default(),
+            private_names: None,
+            template_fields: None,
+            generators: None,
+            lambdas: None,
+        };
+        let sites = observe(&parsed.syntax().body, source, false, false);
+        let site = TextSize::try_from(text.find(r#""call""#).unwrap()).unwrap();
+        assert_eq!(sites.children.len(), 1);
+        assert!(sites.children.contains_key(&site));
+        assert!(matches!(
+            &sites.values[&site].kind,
+            ExprKind::Builtin(Builtin::BindAnnotationExpression { spelling, .. }, _) if spelling == "call(x)"
+        ));
     }
 
     #[test]
