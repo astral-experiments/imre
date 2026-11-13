@@ -336,6 +336,14 @@ pub(super) struct IterationState {
     expression_mark: Option<String>,
 }
 
+impl IterationState {
+    fn physical_slot(&self, slot: usize) -> Option<usize> {
+        self.storage
+            .index(&slot)
+            .map(|index| self.first_slot + index)
+    }
+}
+
 pub(super) struct ExpressionScope {
     mark: String,
     outer_expression: Option<String>,
@@ -582,8 +590,8 @@ impl<'f> Frame<'f, '_, '_> {
     }
 
     pub(crate) fn lookup_local(&mut self, slot: usize) -> String {
-        if self.code.iteration.storage.index(&slot).is_some() {
-            return self.load_private(slot);
+        if let Some(slot) = self.code.iteration.physical_slot(slot) {
+            return self.code.load_frame_slot(slot);
         }
         let binding = &self.names.expect("registered local names")[&slot];
         if let Some(slot) = binding.namespace {
@@ -597,8 +605,8 @@ impl<'f> Frame<'f, '_, '_> {
 
     pub(crate) fn assign(&mut self, slot: usize, value: CheckedValue) {
         let handle = self.materialize(&value);
-        if self.code.iteration.storage.index(&slot).is_some() {
-            self.store_private(slot, &handle);
+        if let Some(slot) = self.code.iteration.physical_slot(slot) {
+            self.code.store_frame_slot(slot, &handle);
             return;
         }
         let (scope, name) = self.assignment_name(slot);
@@ -721,10 +729,10 @@ impl<'f> Frame<'f, '_, '_> {
             .remove(&scope.error_targets.0)
             .filter(|slots| !slots.is_empty());
         self.code.finish_unwind(scope.error_targets, |code| {
-            let slots = clear.iter().rev().filter_map(|slot| {
-                let index = code.iteration.storage.index(slot)?;
-                Some(code.iteration.first_slot + index)
-            });
+            let slots = clear
+                .iter()
+                .rev()
+                .filter_map(|&slot| code.iteration.physical_slot(slot));
             if let Some(nested) = nested {
                 // Pending targets sit below the failed receiver or index. Retain
                 // them in lexical unwind order until those operands are gone.
@@ -740,8 +748,7 @@ impl<'f> Frame<'f, '_, '_> {
                 ));
             } else {
                 for slot in clear {
-                    if let Some(index) = code.iteration.storage.index(slot) {
-                        let physical = code.iteration.first_slot + index;
+                    if let Some(physical) = code.iteration.physical_slot(*slot) {
                         code.line(&format!("store i64 0, ptr %ir_slot{physical}"));
                     }
                 }
@@ -769,8 +776,8 @@ impl<'f> Frame<'f, '_, '_> {
         // Stack bottom first: an inner scope unwinds before its parent, and
         // each scope consumes its pending slots in the declared clear order.
         for slot in clear.iter().rev() {
-            if let Some(index) = frame.iteration.storage.index(slot) {
-                slots.insert(frame.iteration.first_slot + index);
+            if let Some(physical) = frame.iteration.physical_slot(*slot) {
+                slots.insert(physical);
             }
         }
     }
@@ -1510,8 +1517,15 @@ impl RegisteredFrame<'_, '_> {
     }
 
     fn load_private(&mut self, slot: usize) -> String {
-        let slot = self.physical_slot(slot);
-        self.value(&format!("load i64, ptr %ir_slot{slot}"))
+        let physical = self
+            .iteration
+            .physical_slot(slot)
+            .expect("checked private slot");
+        self.load_frame_slot(physical)
+    }
+
+    fn load_frame_slot(&mut self, physical: usize) -> String {
+        self.value(&format!("load i64, ptr %ir_slot{physical}"))
     }
     pub(super) fn owns_sync_cursor(&self, slots: &[usize]) -> bool {
         self.iteration.expression_mark.is_none()
@@ -1522,33 +1536,31 @@ impl RegisteredFrame<'_, '_> {
 
     pub(crate) fn clear_slots(&mut self, slots: &[usize]) {
         for &slot in slots {
-            if self.iteration.storage.index(&slot).is_none() {
+            let Some(physical) = self.iteration.physical_slot(slot) else {
                 continue;
-            }
+            };
             if self.iteration.storage.cursor(&slot).is_some() {
-                let old = self.load_private(slot);
-                self.store_private(slot, "0");
+                let old = self.load_frame_slot(physical);
+                self.store_frame_slot(physical, "0");
                 self.op("break_iter", &[&old]);
             } else {
-                self.store_private(slot, "0");
+                self.store_frame_slot(physical, "0");
             }
         }
         if self.owns_sync_cursor(slots) {
             self.release_target();
         }
     }
-    fn physical_slot(&self, slot: usize) -> usize {
-        self.iteration.first_slot
-            + self
-                .iteration
-                .storage
-                .index(&slot)
-                .expect("checked private slot")
+    pub(crate) fn store_private(&mut self, slot: usize, value: &str) {
+        let physical = self
+            .iteration
+            .physical_slot(slot)
+            .expect("checked private slot");
+        self.store_frame_slot(physical, value);
     }
 
-    pub(crate) fn store_private(&mut self, slot: usize, value: &str) {
-        let slot = self.physical_slot(slot);
-        self.line(&format!("store i64 {value}, ptr %ir_slot{slot}"));
+    fn store_frame_slot(&mut self, physical: usize, value: &str) {
+        self.line(&format!("store i64 {value}, ptr %ir_slot{physical}"));
     }
 
     fn store_item_pair(&mut self, items: [usize; 2]) {
