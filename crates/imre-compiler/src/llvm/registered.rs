@@ -1084,8 +1084,8 @@ impl<'f> Frame<'f, '_, '_> {
                             frame.format_conversion(&value, *conversion)
                         }
                         (Builtin::FormatField(_), [value, spec @ ..]) if spec.len() <= 1 => {
-                            let value = frame.evaluate_handle(value);
-                            frame.keep_operands(&mark, &value, "0");
+                            let mut operand_mark = mark.clone();
+                            let value = frame.kept_call_value(value, &mut operand_mark);
                             let spec = spec.first().map(|spec| frame.evaluate_handle(spec));
                             frame.format_field(&value, spec.as_deref().unwrap_or("0"))
                         }
