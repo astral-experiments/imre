@@ -1064,14 +1064,9 @@ impl<'f> Frame<'f, '_, '_> {
             (Builtin::RegisteredCall(call), [target, args @ ..]) => {
                 self.call_value(call, target, args)
             }
-            (
-                Builtin::RegisteredAttribute {
-                    action,
-                    name,
-                    range,
-                },
-                _,
-            ) => self.attribute_operation(*action, name, *range, operands.iter(), usage),
+            (Builtin::RegisteredAttribute { .. }, _) => {
+                self.attribute_operation(op, operands.iter(), usage)
+            }
             (Builtin::RegisteredInput(index), []) => self.registered_input(*index),
             (op, args) if let Some(iteration) = op.iteration_operands(args) => {
                 use ir::IterationOperands::*;

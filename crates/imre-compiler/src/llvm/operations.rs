@@ -1078,6 +1078,20 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 (Statement::Break(Some(range)) | Statement::Continue(range), _) => {
                     frame.statement_site(*range, None)
                 }
+                (Statement::SetField(receiver, _, value), Some(site)) => {
+                    frame.statement_site(site, None);
+                    let Some(crate::frontend::FixedAttribute::Operation { operation, .. }) =
+                        frame.fixed_attribute(site)
+                    else {
+                        unreachable!("placed field store retains its attribute operation");
+                    };
+                    frame.attribute_operation(
+                        operation,
+                        [value, receiver].into_iter(),
+                        ValueUse::General,
+                    );
+                    return;
+                }
                 (_, Some(range)) => frame.statement_site(range, None),
                 (_, None) => {}
             }

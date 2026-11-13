@@ -489,6 +489,12 @@ impl Checker<'_> {
                 && self.names.get(name.id.as_str()) == Some(slot)
             {
                 sites.statement(assignment.value.range(), FixedNode::Store(*slot));
+            } else if self.class.is_some()
+                && let Some(sites) = &mut self.fixed_sites
+                && let ast::Expr::Attribute(attribute) = target
+                && let [Statement::SetField(_, field, _)] = &output[start..]
+            {
+                sites.store_field(attribute, assignment.value.range(), *field);
             }
             return Ok(true);
         }

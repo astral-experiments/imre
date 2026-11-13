@@ -2793,7 +2793,7 @@ pub(super) fn attribute_statement(
     ))
 }
 
-fn attribute_opcode(action: ir::AttributeAction, field: &ast::ExprAttribute) -> Builtin {
+pub(super) fn attribute_opcode(action: ir::AttributeAction, field: &ast::ExprAttribute) -> Builtin {
     Builtin::RegisteredAttribute {
         action,
         name: field.attr.to_string(),

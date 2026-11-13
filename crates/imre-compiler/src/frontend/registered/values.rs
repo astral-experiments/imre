@@ -122,7 +122,10 @@ impl RegisteredSource<'_> {
                 Ok(Some(value))
             }
             ast::Expr::Attribute(field) => Ok(receiver(&field.value, true, None)?.map(|value| {
-                let op = attribute.map_or_else(|| attribute_load(field), |op| *op);
+                let op = attribute.map_or_else(
+                    || super::attribute_opcode(ir::AttributeAction::Load, field),
+                    |op| *op,
+                );
                 super::operation(op, Type::PythonObject, vec![value])
             })),
             _ => Ok(None),
@@ -344,7 +347,11 @@ pub(in crate::frontend) fn method_receiver(
 }
 
 pub(in crate::frontend) fn loaded_attribute(field: &ast::ExprAttribute, receiver: Expr) -> Expr {
-    let value = super::operation(attribute_load(field), Type::PythonObject, vec![receiver]);
+    let value = super::operation(
+        super::attribute_opcode(ir::AttributeAction::Load, field),
+        Type::PythonObject,
+        vec![receiver],
+    );
     located(field.range(), field.attr.start(), value)
 }
 
@@ -382,14 +389,6 @@ pub(in crate::frontend) fn subscript(
         Type::PythonObject,
         vec![value, key],
     )
-}
-
-pub(in crate::frontend) fn attribute_load(field: &ast::ExprAttribute) -> Builtin {
-    Builtin::RegisteredAttribute {
-        action: ir::AttributeAction::Load,
-        name: field.attr.to_string(),
-        range: field.range(),
-    }
 }
 
 fn method_target(field: &ast::ExprAttribute) -> ir::RegisteredCallTarget {

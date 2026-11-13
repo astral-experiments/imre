@@ -1920,15 +1920,22 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
     /// Execute a descriptor operation at the original target, using the same live receiver
     /// for both halves of augmented assignment. A mutation releases its operand window on
     /// success and unwinds it before transferring an exception to the handler.
-    pub(super) fn attribute_operation<'e>(
+    pub(in crate::llvm) fn attribute_operation<'e>(
         &mut self,
-        action: ir::AttributeAction,
-        name: &str,
-        range: ruff_text_size::TextRange,
+        operation: &ir::Builtin,
         mut operands: impl Iterator<Item = &'e Expr>,
         usage: crate::llvm::operations::ValueUse,
     ) -> String {
         use ir::AttributeAction;
+        let ir::Builtin::RegisteredAttribute {
+            action,
+            name,
+            range,
+        } = operation
+        else {
+            unreachable!("attribute operation");
+        };
+        let (action, range) = (*action, *range);
         let first = operands.next().expect("attribute operand");
         if action == AttributeAction::Load {
             let owned;
