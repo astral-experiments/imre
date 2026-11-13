@@ -11004,7 +11004,7 @@ impl<'a> Checker<'a> {
             }
             return Err(self.scoped_builtin_error(name, call));
         }
-        let mut binding = self.resolve(&call.func);
+        let binding = self.resolve(&call.func);
         if binding == Some(Binding::Intrinsic(Intrinsic::BuiltinsAscii)) {
             return self.ascii_call(call);
         }
@@ -11027,8 +11027,10 @@ impl<'a> Checker<'a> {
         // A method result becomes the next receiver before its arguments are
         // evaluated. Check such chains in that order without retaining a full
         // expression and call-dispatch frame for every intermediate receiver.
+        // Every queued call has already been checked for a static binding.
         let mut chain = Vec::new();
-        while let ast::Expr::Attribute(method) = &*call.func
+        while binding.is_none()
+            && let ast::Expr::Attribute(method) = &*call.func
             && let ast::Expr::Call(inner) = &*method.value
             && inner.func.is_attribute_expr()
             && self.resolve(&inner.func).is_none()
@@ -11037,14 +11039,13 @@ impl<'a> Checker<'a> {
         {
             chain.push(call);
             call = inner;
-            binding = None;
         }
         let mut value = self.call_with_binding(call, None, binding)?;
         for call in chain.into_iter().rev() {
             if matches!(value.ty, Type::StrLiteral(_)) {
                 value = literals::view(value, Type::Str);
             }
-            value = self.call_on(call, Some(value))?;
+            value = self.call_with_binding(call, Some(value), None)?;
         }
         Ok(value)
     }
