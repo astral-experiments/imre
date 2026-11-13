@@ -8188,26 +8188,28 @@ impl Context {
     /// Return the bound Python frame to the caller that owns execution of this heap.
     pub(super) fn prepare_call(
         &mut self,
-        callable: Id,
-        args: Vec<Id>,
+        mut callable: Id,
+        mut args: Vec<Id>,
         kwargs: Vec<(String, Id)>,
     ) -> Result<RegisteredCall> {
-        let (function, args) = match *self.heap.get(callable) {
-            Value::Function { .. } => (callable, args),
-            Value::Method {
-                callable: function,
-                receiver,
-                ..
-            } if matches!(self.heap.get(function), Value::Function { .. }) => {
-                (function, method_arguments(receiver, args)?)
+        loop {
+            match *self.heap.get(callable) {
+                Value::Function { .. } => {
+                    return self.prepare_function_call(callable, args, kwargs, None);
+                }
+                Value::Method {
+                    callable: target,
+                    receiver,
+                    ..
+                } => {
+                    args = method_arguments(receiver, args)?;
+                    callable = target;
+                }
+                _ => break,
             }
-            _ => {
-                return self
-                    .call_other(callable, args, kwargs)
-                    .map(RegisteredCall::Returned);
-            }
-        };
-        self.prepare_function_call(function, args, kwargs, None)
+        }
+        self.call_other(callable, args, kwargs)
+            .map(RegisteredCall::Returned)
     }
 
     /// Bind the call's private keyword dictionary directly when every key belongs in **kwargs.
@@ -8797,9 +8799,6 @@ impl Context {
                 let result = self.call(function, positional, merged);
                 self.release_with_result(mark, result)
             }
-            Value::Method {
-                callable, receiver, ..
-            } => self.call(callable, method_arguments(receiver, args)?, kwargs),
             Value::AttrGetter(paths) => self.apply_attrgetter(&paths, &args, &kwargs),
             Value::ItemGetter(keys) => self.apply_itemgetter(keys, &args, &kwargs),
             Value::MethodCaller { .. } => self.apply_methodcaller(callable, &args, &kwargs),
