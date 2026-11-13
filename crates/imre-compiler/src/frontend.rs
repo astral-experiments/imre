@@ -1263,9 +1263,9 @@ fn lower_graph(
     let named = graph.registered_startup && !needs_registered_entry;
     let mut completed = registered::FixedFunctions::default();
     let recover_completed = std::cell::Cell::new(named);
-    let place_completed = |completed: &mut registered::FixedFunctions| {
+    let place_completed = |completed: &mut registered::FixedFunctions, owners: &[ModuleId]| {
         if recover_completed.get() {
-            completed.place(graph, &inference.source_checks);
+            completed.place(graph, owners, &inference.source_checks);
             capture();
         }
     };
@@ -1287,7 +1287,6 @@ fn lower_graph(
             recover_completed.set(true);
         }
     };
-    let mut frame_sources = Vec::new();
     let mut has_wrapper_link = false;
     let mut refused_body = None;
     let mut completed_calls = classes.nonreturning_functions.clone();
@@ -1330,7 +1329,7 @@ fn lower_graph(
         let accepted = signature.registered_frame()
             && inference
                 .source_checks
-                .accepts(graph, *module_id, definition);
+                .accepts(graph, *module_id, definition.range());
         if accepted || original.is_some() {
             // A checked Python frame binds its imports when the function runs. A
             // callable read also establishes this namespace for a recovered signature.
@@ -1351,7 +1350,7 @@ fn lower_graph(
                 }
                 Err(error) if error.is_object() => {}
                 Err(error) => {
-                    place_completed(&mut completed);
+                    place_completed(&mut completed, &owners);
                     let report = error.terminal_in(graph, *module_id);
                     refused_body = Some(called_body(report)?);
                     break;
@@ -1390,7 +1389,7 @@ fn lower_graph(
             Ok(Some(body)) => body,
             Ok(None) => continue,
             Err(report) => {
-                place_completed(&mut completed);
+                place_completed(&mut completed, &owners);
                 refused_body = Some(called_body(report)?);
                 break;
             }
@@ -1422,13 +1421,7 @@ fn lower_graph(
             && signature.physical_frame
         {
             let slot = completed.functions.len();
-            if signature.method.is_none() {
-                completed
-                    .frames
-                    .push((slot, callable_definitions[signature.id], source));
-            } else if can_transfer_frames || graph.registered_startup {
-                frame_sources.push((slot, definition.start(), source));
-            }
+            completed.frames.push((slot, definition.range(), source));
         }
         graph.ordered_reads(*module_id, &definition.body, true, &mut reads);
         let (function, calls, reads) = if let Some(&policy) = classes.cached.get(&signature.id) {
@@ -1474,7 +1467,7 @@ fn lower_graph(
                 &mut unavailable,
                 request_recovery,
             )
-            .inspect_err(|_| place_completed(&mut completed))?;
+            .inspect_err(|_| place_completed(&mut completed, &owners))?;
             if let Some(helper) = body {
                 factories.push(helper);
             }
@@ -1511,12 +1504,12 @@ fn lower_graph(
             // its completed functions can move to the Python binder before ordinary recovery.
             if !named {
                 if failure.is_object() && !captured.get() {
-                    completed.place(graph, &inference.source_checks);
+                    completed.place(graph, &owners, &inference.source_checks);
                 }
                 capture_on_object(failure);
             }
         })
-        .inspect_err(|_| place_completed(&mut completed))?
+        .inspect_err(|_| place_completed(&mut completed, &owners))?
         .is_some()
             && let Some(body) = fixed_entry
         {
@@ -1538,26 +1531,18 @@ fn lower_graph(
             .pop_first()
             .map(|(_, reason)| reason)
     }) {
-        place_completed(&mut completed);
+        place_completed(&mut completed, &owners);
         return Err(reason);
     }
     if needs_registered_entry {
         return Ok(crate::CheckedProgram::Registered(None));
     }
     if let Some(error) = graph.deferred_object_error.take() {
-        completed.place(graph, &inference.source_checks);
+        completed.place(graph, &owners, &inference.source_checks);
         if named || error.kind.is_object() {
             capture();
         }
         return Err(error);
-    }
-    // A checked constructor can admit registered emission if native code generation
-    // declines. Keep the original frame sites of its completed siblings.
-    if !named && (can_transfer_frames || graph.has_object_constructor_fallback.get()) {
-        for (slot, owner, source) in completed.frames.drain(..) {
-            let definition = &graph.modules[owner.module].parsed.syntax().body[owner.statement];
-            frame_sources.push((slot, definition.start(), source));
-        }
     }
     let functions = &mut completed.functions;
     let fault_enabled = graph
@@ -1644,7 +1629,7 @@ fn lower_graph(
     validate_calls(functions).inspect_err(|_| {
         // A failed layout trial goes through ordinary lowering before registration.
         if graph.layout_hint.get() != crate::modules::LayoutHint::Applied {
-            place_completed(&mut completed);
+            place_completed(&mut completed, &owners);
         }
     })?;
     let functions = &mut completed.functions;
@@ -1672,7 +1657,7 @@ fn lower_graph(
         classes.missing_key_reprs(functions, &entry, graph, &types, key_reprs);
     }
     let json_records = json::schemas(graph, &classes, &types, functions, &entry)
-        .inspect_err(|_| place_completed(&mut completed))?;
+        .inspect_err(|_| place_completed(&mut completed, &owners))?;
     let functions = &mut completed.functions;
     // Fusing adjacent sums also inlines their generator bodies and scalar calls.
     if !track_frames {
@@ -1683,10 +1668,17 @@ fn lower_graph(
     if let Some(cache) = cache {
         cache.finish(&types);
     }
-    let selected = registered_entry(graph, functions, &entry);
-    place_completed(&mut completed);
-    if let Some(registered) = selected? {
+    let selected = registered_entry(graph, functions, &entry)
+        .inspect_err(|_| place_completed(&mut completed, &owners))?;
+    if let Some(registered) = selected {
+        completed.place(graph, &owners, &inference.source_checks);
+        if recover_completed.get() {
+            capture();
+        }
         return Ok(registered);
+    }
+    if !can_transfer_frames && !graph.has_object_constructor_fallback.get() {
+        completed.frames = Vec::new();
     }
     let mut functions = completed.functions;
     // Checkpoints above refer to the source operations. Insert native startup
@@ -1772,7 +1764,7 @@ fn lower_graph(
     Ok(crate::CheckedProgram::Native(Box::new(
         crate::FixedProgram {
             ir: lowered,
-            frame_sources,
+            frame_sources: completed.frames,
             uses_builtin_module_names,
         },
     )))
@@ -2007,15 +1999,19 @@ fn lower_function(
         }
     } else if module.archive.is_none() {
         checker.fault_frame(&mut body, definition.name.as_str(), definition.start());
-        if let Some(sites) = checker.fixed_sites {
-            source = sites.finish(
+        source = checker.fixed_sites.and_then(|sites| {
+            let method = match signature.method {
+                Some(_) => Some(registered::physical_method(signature, definition, classes)?),
+                None => None,
+            };
+            sites.finish(
                 definition.body.len(),
                 &body,
                 checker.names,
                 &checker.locals,
-                signature.method.is_some(),
-            );
-        }
+                method,
+            )
+        });
     }
     Ok((
         LoweredBody {

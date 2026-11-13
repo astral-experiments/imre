@@ -85,9 +85,11 @@ fn placed_field_uses_the_ordinary_descriptor_and_attribute_line() {
         "main()\n",
     );
     let mut graph = SourceGraph::single(source).unwrap();
-    let crate::CheckedProgram::Native(mut fixed) = crate::checked_lower(&mut graph).unwrap() else {
-        panic!("expected fixed field access");
-    };
+    graph.registered_startup = true;
+    assert!(matches!(
+        crate::checked_lower(&mut graph).unwrap(),
+        crate::CheckedProgram::Registered(_)
+    ));
     let statements = &graph.modules[graph.entry].parsed.syntax().body;
     let class = statements
         .iter()
@@ -99,20 +101,15 @@ fn placed_field_uses_the_ordinary_descriptor_and_attribute_line() {
         .filter_map(|stmt| stmt.as_function_def_stmt())
         .find(|function| function.name.as_str() == "read")
         .unwrap();
-    let (id, _, placement) = fixed
-        .frame_sources
-        .into_iter()
-        .find(|(_, start, _)| *start == definition.start())
-        .unwrap();
-    assert!(placement.matches(&fixed.ir.0.functions[id]));
-    let function = fixed.ir.0.functions.swap_remove(id);
+    let functions = graph.registered_functions();
+    let placed = &functions[&graph.entry][&definition.start()];
     assert!(
-        matches!(function.body.as_slice(), [Statement::Return(value)] if matches!(value.kind, ExprKind::Field(_, 0)))
+        matches!(placed.function.body.as_slice(), [Statement::Return(value)] if matches!(value.kind, ExprKind::Field(_, 0)))
     );
-    let placed = crate::frontend::place_fixed_function(
-        function,
-        placement,
-        crate::frontend::FrameInputs::Checked,
+    assert!(
+        matches!(&placed.inputs, crate::frontend::FrameInputs::Protocol { sites }
+        if matches!(sites.as_ref(), [crate::frontend::FrameSite::Method(method)]
+            if method.range() == definition.range()))
     );
 
     let values = RegisteredSource {
@@ -132,7 +129,7 @@ fn placed_field_uses_the_ordinary_descriptor_and_attribute_line() {
     let ordinary =
         RegisteredFunction::from_suite(&definition.body, scope, values, &operations, true).unwrap();
     let expected = emit_registered_body(source, &ordinary);
-    let actual = emit_registered_body(source, &placed);
+    let actual = emit_registered_body(source, placed);
     assert_eq!(actual.functions, expected.functions);
     assert_eq!(actual.constants, expected.constants);
     assert!(actual.interned_identifiers.contains("text"));
@@ -461,11 +458,7 @@ fn placed_arithmetic_keeps_the_python_operator_and_integer_guards() {
             &value.kind,
             ExprKind::Binary(actual, ..) if *actual == op
         ));
-        let placed = crate::frontend::place_fixed_function(
-            function,
-            frame,
-            crate::frontend::FrameInputs::Checked,
-        );
+        let placed = crate::frontend::place_fixed_function(function, frame);
         let mut output = Output::default();
         let file = output.data(b"combine.py");
         let positions = SourcePositions::new(Path::new("combine.py"), &source, &file);
