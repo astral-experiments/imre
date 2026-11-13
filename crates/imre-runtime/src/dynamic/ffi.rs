@@ -338,10 +338,7 @@ impl Context {
                 };
                 self.template_interpolation(a, b, conversion, spec)
             }
-            "build_template" => {
-                let interpolations = self.items(b)?;
-                Ok(self.template_from_literal(a, interpolations))
-            }
+            "build_template" => self.template_from_literal(a, b),
             "linked_string_tuple" => {
                 let items = self.items(a)?;
                 self.linked_constant(|ctx| {

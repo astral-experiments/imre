@@ -1047,12 +1047,8 @@ impl<'f> Frame<'f, '_, '_> {
             (Builtin::RegisteredString(points), []) => self.code.linked_string(points.clone()),
             (Builtin::RegisteredTemplate(segments), fields) => {
                 let strings = self.emit_string_tuple(segments.to_vec());
-                let parts = self.code.op("list", &[]);
-                for field in fields {
-                    let value = self.evaluate_handle(field);
-                    self.code.op("append", &[&parts, &value]);
-                }
-                self.code.op("build_template", &[&strings, &parts])
+                let fields = self.sequence(fields, ir::DisplayKind::Tuple);
+                self.code.op("build_template", &[&strings, &fields])
             }
             (
                 Builtin::RegisteredInterpolation {
