@@ -5178,6 +5178,26 @@ print(message('x'))
     }
 
     #[test]
+    fn a_display_keeps_its_live_scalar_elements() {
+        let text = "def show(label: str) -> str:
+    return f'{[label]} {(label,)} { {label} }'
+def raw(label: str) -> str:
+    message = f'{[label]}'
+    return label
+print(show('ok'), raw('ok'))
+";
+        let graph = checked_named_source(text);
+        let functions = graph.registered_functions();
+        let entries = &functions[&graph.entry];
+        assert!(matches!(
+            entries[&TextSize::default()].inputs,
+            FrameInputs::Protocol { .. }
+        ));
+        let raw = &graph.modules[graph.entry].parsed.syntax().body[1];
+        assert!(!entries.contains_key(&raw.start()));
+    }
+
+    #[test]
     fn a_generator_iterates_the_live_scalar_argument() {
         let text = "def render(words: str) -> str:
     return ''.join(word.upper() for word in words)
