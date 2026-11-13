@@ -771,10 +771,10 @@ impl BuiltinDescriptor {
             "__text_signature__" if self.name == "__call__" => {
                 ctx.text("($self, /, *args, **kwargs)")
             }
-            "__doc__" if self.name == "__getitem__" && self.owner == "mappingproxy" => {
+            "__doc__" if self.name == "__getitem__" && matches!(self.owner, "mappingproxy" | "str") => {
                 ctx.text("Return self[key].")
             }
-            "__text_signature__" if self.name == "__getitem__" && self.owner == "mappingproxy" => {
+            "__text_signature__" if self.name == "__getitem__" && matches!(self.owner, "mappingproxy" | "str") => {
                 ctx.text("($self, key, /)")
             }
             "__doc__" if self.name == "__hash__" => ctx.text("Return hash(self)."),
