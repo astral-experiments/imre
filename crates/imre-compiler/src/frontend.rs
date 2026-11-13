@@ -1373,6 +1373,7 @@ fn lower_graph(
             && (signature.method.is_none() || python_method)
             && signature.physical_frame)
             .then(|| fixed_body_source::SourceSites::new(python_method));
+        checker.placement_only = unavailable.is_some() && cache.is_none();
         let result = match cache.as_deref_mut() {
             Some(cache) if signature.method.is_none() => cache.body(checker, definition, signature),
             _ => lower_body(checker, definition, signature),
@@ -1394,9 +1395,10 @@ fn lower_graph(
         if body.cannot_return && completed_calls.insert(signature.id) && !needs_registered_entry {
             body_checks = None;
         }
-        if needs_registered_entry {
-            // The fixed-layout checks have supplied their diagnostics. Registered
-            // definitions and the registered initializer already own this program.
+        has_wrapper_link |= body.wrapper_link;
+        if needs_registered_entry || (unavailable.is_some() && body.source.is_none()) {
+            // After a fixed layout fails, only bodies with a source frame can be placed.
+            // Later definitions still receive the checked transfer and wrapper facts above.
             continue;
         }
         let recursion_error = module.error(
@@ -1407,7 +1409,6 @@ fn lower_graph(
         if retries_failed_layout(graph) && body.calls.contains(&signature.id) {
             return Err(recursion_error.into());
         }
-        has_wrapper_link |= body.wrapper_link;
         let LoweredBody {
             function,
             calls,
@@ -3174,6 +3175,8 @@ struct Checker<'a> {
     unhighlighted_call: Option<TextRange>,
     wrapper_link: std::cell::Cell<bool>,
     fixed_sites: Option<fixed_body_source::SourceSites>,
+    /// After a layout refusal the outer fixed body can only be used with its source sites.
+    placement_only: bool,
     /// During physical method recovery, forward completed attribute operations to the live frame.
     settled_attributes: Option<&'a mut HashMap<TextRange, FixedAttribute>>,
     nonreturning_functions: &'a HashSet<usize>,
@@ -3279,6 +3282,7 @@ impl<'a> Checker<'a> {
             unhighlighted_call: None,
             wrapper_link: Default::default(),
             fixed_sites: None,
+            placement_only: false,
             settled_attributes: None,
             nonreturning_functions: &classes.nonreturning_functions,
             registered: None,
@@ -5839,6 +5843,13 @@ impl<'a> Checker<'a> {
                 lowered.push(Statement::Assign(*flag, Expr::boolean(true)));
             }
             self.leave_fixed_site(parent);
+            if self.placement_only
+                && self.block_depth == 1
+                && self.fixed_sites.is_none()
+                && let Some(body) = output.take()
+            {
+                *body = Vec::new();
+            }
             if let Some(body) = output.as_deref_mut() {
                 if self.registered.is_some() {
                     // Assertions own the test checkpoint and disappear under Python optimization.
