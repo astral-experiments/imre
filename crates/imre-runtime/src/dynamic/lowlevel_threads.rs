@@ -161,9 +161,9 @@ pub(super) fn call(
     if !ctx.callable(*function) {
         return Err(Error::new("TypeError", "first arg must be callable"));
     }
-    let Some(values) = ctx.tuple_items(*positional)? else {
+    if ctx.tuple_elements(*positional).is_none() {
         return Err(Error::new("TypeError", "2nd arg must be a tuple"));
-    };
+    }
     let keyword = rest.first().copied();
     if keyword.is_some_and(|id| ctx.dict_storage(id).is_none()) {
         return Err(Error::new(
@@ -177,7 +177,7 @@ pub(super) fn call(
         &[*function, *positional, keyword.unwrap_or(super::NONE)],
     )?;
     super::thread_worker::check_start(ctx)?;
-    let Some((callback, roots)) = Callback::capture(ctx, *function, *positional, &values, keyword)?
+    let Some((callback, roots)) = Callback::capture(ctx, *function, *positional, keyword)?
     else {
         return Err(Error::new(
             "NotImplementedError",
