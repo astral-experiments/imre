@@ -308,22 +308,25 @@ fn decode_source_with<'a>(
 }
 
 /// Compile scans physical lines after universal newline translation, before decoding.
-fn compile_input(bytes: &[u8]) -> Result<Cow<'_, [u8]>, SourceDecodeError> {
+fn compile_input(mut bytes: Cow<'_, [u8]>) -> Result<Cow<'_, [u8]>, SourceDecodeError> {
     if bytes.contains(&0) {
         return Err(SourceDecodeError::Null);
     }
     if bytes.contains(&b'\r') || !bytes.ends_with(b"\n") {
-        let mut normalized = Vec::new();
-        normalized.try_reserve_exact(bytes.len().saturating_add(1))?;
-        normalized.extend_from_slice(bytes);
-        normalize_newlines(&mut normalized);
+        if let Cow::Borrowed(slice) = bytes {
+            let mut normalized = Vec::new();
+            normalized.try_reserve_exact(slice.len().saturating_add(1))?;
+            normalized.extend_from_slice(slice);
+            bytes = Cow::Owned(normalized);
+        }
+        let normalized = bytes.to_mut();
+        normalize_newlines(normalized);
         if !normalized.ends_with(b"\n") {
+            normalized.try_reserve_exact(1)?;
             normalized.push(b'\n');
         }
-        Ok(Cow::Owned(normalized))
-    } else {
-        Ok(Cow::Borrowed(bytes))
     }
+    Ok(bytes)
 }
 
 fn compile_text<'a>(
@@ -364,11 +367,21 @@ fn owned_text(text: Cow<'_, str>) -> Result<String, SourceDecodeError> {
     }
 }
 
-pub fn decode_compile_source(
-    bytes: &[u8],
+/// Decode Python compile input, transferring a reader's buffer when the codec borrows it whole.
+pub fn decode_compile_source<'a>(
+    bytes: impl Into<Cow<'a, [u8]>>,
     utf8_error: impl FnOnce(&[u8], std::str::Utf8Error) -> String,
 ) -> Result<String, SourceDecodeError> {
-    owned_text(compile_text(&compile_input(bytes)?, utf8_error, None)?)
+    let input = compile_input(bytes.into())?;
+    let text = compile_text(&input, utf8_error, None)?;
+    if std::ptr::eq(text.as_bytes(), input.as_ref())
+        && let Cow::Owned(mut bytes) = input
+    {
+        bytes.shrink_to_fit();
+        // SAFETY: the complete allocation is exactly the UTF-8 slice returned by the decoder.
+        return Ok(unsafe { String::from_utf8_unchecked(bytes) });
+    }
+    owned_text(text)
 }
 
 /// Keep the original read buffer when the codec preserved every prepared byte.
@@ -377,7 +390,7 @@ pub fn decode_disk_source(
     bytes: Vec<u8>,
     path: &std::path::Path,
 ) -> Result<(String, Option<Vec<u8>>), SourceDecodeError> {
-    let input = compile_input(&bytes)?;
+    let input = compile_input(Cow::Borrowed(&bytes))?;
     let decoded = compile_text(&input, |_, error| error.to_string(), Some(path))?;
     if std::ptr::eq(decoded.as_bytes(), input.as_ref()) || decoded.as_bytes() == input.as_ref() {
         return Ok((
@@ -419,4 +432,22 @@ fn normalize_newlines(bytes: &mut Vec<u8>) {
         written += 1;
     }
     bytes.truncate(written);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compile_input_transfers_the_whole_utf8_buffer() {
+        let bytes = b"answer = 42\n".to_vec();
+        let original = bytes.as_ptr();
+        let text = decode_compile_source(bytes, |_, err| err.to_string()).unwrap();
+        assert_eq!(text.as_ptr(), original);
+        let bom = b"\xef\xbb\xbfanswer = 42\r\n".to_vec();
+        assert_eq!(
+            decode_compile_source(bom, |_, err| err.to_string()).unwrap(),
+            text
+        );
+    }
 }

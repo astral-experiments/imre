@@ -244,7 +244,7 @@ impl ZipSources {
             .ok()?;
         let digest = Sha256::digest(&bytes).into();
         let source =
-            imre_ast::source_encoding::decode_compile_source(&bytes, |_, error| error.to_string())
+            imre_ast::source_encoding::decode_compile_source(bytes, |_, error| error.to_string())
                 .ok()?;
         Some(Member {
             path,

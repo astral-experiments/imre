@@ -2063,8 +2063,9 @@ pub(crate) fn compile(
                         ));
                         if wheel_origins.is_some() {
                             use sha2::{Digest, Sha256};
+                            let digest = Sha256::digest(&bytes).into();
                             let Ok(text) = imre_ast::source_encoding::decode_compile_source(
-                                &bytes,
+                                bytes,
                                 |_, error| error.to_string(),
                             ) else {
                                 continue;
@@ -2074,7 +2075,7 @@ pub(crate) fn compile(
                                 .entry(path.clone())
                                 .or_default()
                                 .source_kind = Some(SourceKind::DecodedFile);
-                            (text, Some(Sha256::digest(&bytes).into()))
+                            (text, Some(digest))
                         } else {
                             let source = match crate::DiskSource::decode(&path, bytes) {
                                 Ok(text) => text,
