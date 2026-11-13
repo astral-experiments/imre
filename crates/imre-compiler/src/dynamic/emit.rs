@@ -83,6 +83,7 @@ impl crate::ProgramOutput {
     pub(super) fn emit_registered<'a>(
         &mut self,
         units_to_emit: impl Iterator<Item = Result<PreparedUnit<'a>, String>>,
+        application_entry: Option<usize>,
         config: &str,
         python_optimization: i32,
         providers: &HashSet<String>,
@@ -99,6 +100,8 @@ impl crate::ProgramOutput {
             split,
             (root, None::<ModuleLauncher>),
             |(root, whole), unit, prepared, separate| -> Result<_, String> {
+                // The selected project entry shares its launcher's native object.
+                let separate = separate && (whole_requested || application_entry != Some(unit));
                 let (name, path, source) = prepared.module;
                 let initializer = match &prepared.initializer {
                     Ok(initializer) => initializer,
@@ -1942,7 +1945,8 @@ mod tests {
             Vec::new(),
         );
         let mut output = crate::ProgramOutput::new(layout);
-        let used_archive = output.emit_registered(units, config, python_optimization, providers)?;
+        let used_archive =
+            output.emit_registered(units, None, config, python_optimization, providers)?;
         Ok((output.compilation.units, used_archive, output.whole))
     }
 
