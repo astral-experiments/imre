@@ -4145,13 +4145,10 @@ mod tests {
         let file = output.data(b"example.py");
         module.emit(&mut output, 0, &file).unwrap();
         for literal in ["raised child", "cause child", "handled child"] {
-            assert!(output.strings.contains_key(literal.as_bytes()), "{literal}");
+            assert!(output.strings.contains(literal.as_bytes()), "{literal}");
         }
         for literal in ["dead handler body", "dead module body"] {
-            assert!(
-                !output.strings.contains_key(literal.as_bytes()),
-                "{literal}"
-            );
+            assert!(!output.strings.contains(literal.as_bytes()), "{literal}");
         }
     }
 
@@ -5315,7 +5312,7 @@ mod tests {
             "template_interpolation",
             "build_template",
         ] {
-            let symbol = output.strings[operation.as_bytes()];
+            let symbol = output.strings.get_index_of(operation.as_bytes()).unwrap();
             assert!(
                 output.functions.contains(&format!(
                     "call i64 @imre_dyn_op_at(ptr %ctx, ptr @str{symbol},"
@@ -7359,7 +7356,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             let file = output.data(b"remove.py");
             prepared.emit(&mut output, 0, &file).unwrap();
             for op in ["delname", "delattr", "delitem"] {
-                let symbol = output.strings[op.as_bytes()];
+                let symbol = output.strings.get_index_of(op.as_bytes()).unwrap();
                 assert!(
                     output.functions.contains(&format!("ptr @str{symbol},")),
                     "{op}"

@@ -107,7 +107,7 @@ fn template_children_use_their_eager_bindings_after_source_is_dropped() {
     );
     assert_eq!(code.matches("call i64 @imre_dyn_format_parts(").count(), 3);
     assert!(code.contains("call void @imre_dyn_unwind_operands("));
-    let symbol = output.strings[spelling.as_bytes()];
+    let symbol = output.strings.get_index_of(spelling.as_bytes()).unwrap();
     assert!(code.contains(&format!("ptr @str{symbol},")));
 }
 
