@@ -61,9 +61,7 @@ _tuple_call_names = {
 
 
 def _format_recorded_call(value, name):
-    parts = [repr(arg) for arg in value.args]
-    parts.extend(key + "=" + repr(arg) for key, arg in value.kwargs.items())
-    return name + "(" + ", ".join(parts) + ")"
+    return _format_call_signature(name, _format_call_args(value.args), value.kwargs)
 
 
 class _Call(tuple):
