@@ -495,15 +495,15 @@ fn positional_invoke(
         ty: Type::PythonObject,
         kind: ExprKind::Invoke {
             callable: Box::new(target),
-            args: ir::CallArgs {
-                site: ir::CallSite::Python(ir::InvokeSite {
+            args: ir::CallArgs::positional_at(
+                arguments,
+                ir::CallSite::Python(ir::InvokeSite {
                     range,
                     callee_end,
                     suspended_name,
                     scope: None,
                 }),
-                ..ir::CallArgs::positional(arguments)
-            },
+            ),
         },
     }
 }
@@ -1657,7 +1657,7 @@ mod tests {
         assert!(
             matches!(operation_and_position(argument).0, Builtin::RegisteredName(name) if name == "argument")
         );
-        assert_eq!(args.order, [0]);
+        assert!(args.order.is_empty());
     }
 
     #[test]
