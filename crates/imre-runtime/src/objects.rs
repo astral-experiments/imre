@@ -1524,8 +1524,32 @@ fn plain_ascii_line(bytes: &[u8]) -> bool {
 }
 
 /// Recognize the line boundaries used by Python's str.splitlines.
-pub(crate) fn is_line_boundary(point: u32) -> bool {
+fn is_line_boundary(point: u32) -> bool {
     matches!(point, 0x0a..=0x0d | 0x1c..=0x1e | 0x85 | 0x2028 | 0x2029)
+}
+
+/// Split the next field of a string retaining lone Python surrogates.
+pub(crate) fn codepoint_line<'a>(
+    points: &'a [u32],
+    start: &mut usize,
+    keep: bool,
+) -> Option<&'a [u32]> {
+    let points = &points[*start..];
+    if points.is_empty() {
+        return None;
+    }
+    let end = points
+        .iter()
+        .position(|&p| is_line_boundary(p))
+        .unwrap_or(points.len());
+    let next = end
+        + match &points[end..] {
+            [0x0d, 0x0a, ..] => 2,
+            [] => 0,
+            _ => 1,
+        };
+    *start += next;
+    Some(&points[..if keep { next } else { end }])
 }
 
 /// Python line offsets computed once per delimiter, with the common physical

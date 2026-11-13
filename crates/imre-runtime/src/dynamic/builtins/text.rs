@@ -15,7 +15,7 @@ use super::super::stdlib::codecs::{decode_named, encode_text_object};
 use super::*;
 
 use crate::objects::{
-    Case, is_line_boundary, python_whitespace, split_parts, translate,
+    Case, codepoint_line, python_whitespace, split_parts, translate,
     visit_line_fields as split_lines,
 };
 
@@ -1778,28 +1778,16 @@ fn split_string_lines(ctx: &mut Context, receiver: Id, keep: bool) -> Result<Id>
         let mut start = 0;
         loop {
             let points = ctx.string_codepoints(storage)?;
-            let rest = &points[start..];
-            if rest.is_empty() {
+            let Some(field) = codepoint_line(&points, &mut start, keep) else {
                 break;
-            }
-            let boundary = rest
-                .iter()
-                .position(|&point| is_line_boundary(point))
-                .unwrap_or(rest.len());
-            let ending = match &rest[boundary..] {
-                [0x0d, 0x0a, ..] => 2,
-                [] => 0,
-                _ => 1,
             };
-            let end = if keep { boundary + ending } else { boundary };
-            let line = if receiver == storage && end == points.len() {
+            let line = if receiver == storage && field.len() == points.len() {
                 storage
             } else {
-                let field = super::super::copy_ids(&rest[..end])?;
+                let field = super::super::copy_ids(field)?;
                 ctx.text_codepoints(field)
             };
             values.push(line);
-            start += boundary + ending;
         }
     } else {
         let source = ctx.str_value(storage)?.to_owned();
