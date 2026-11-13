@@ -98,6 +98,21 @@ mod tests {
     }
 
     #[test]
+    fn fixed_float_sites_distinguish_zero_signs_and_nan_payloads() {
+        let key = |bits| {
+            let value = Expr {
+                ty: Type::Float,
+                kind: ExprKind::Float(f64::from_bits(bits)),
+            };
+            FixedNode::checked(&ir::Node::Expression(&value)).unwrap()
+        };
+        let first_nan = f64::NAN.to_bits();
+        assert!(key(0.0_f64.to_bits()) != key((-0.0_f64).to_bits()));
+        assert!(key(first_nan) == key(first_nan));
+        assert!(key(first_nan) != key(first_nan + 1));
+    }
+
+    #[test]
     fn fallthrough_keeps_each_executable_source_position() {
         let text = "def nothing():\n    pass\n    pass\nprint(nothing())\n";
         let dir = tempfile::tempdir().unwrap();

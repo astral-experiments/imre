@@ -8426,6 +8426,7 @@ impl<'a> Checker<'a> {
                 && matches!(
                     (expression, &value.kind),
                     (ast::Expr::StringLiteral(_), ExprKind::Str(_))
+                        | (ast::Expr::NumberLiteral(_), ExprKind::Float(_))
                         | (ast::Expr::BooleanLiteral(_), ExprKind::Bool(_))
                         | (ast::Expr::NoneLiteral(_), ExprKind::None)
                         | (ast::Expr::List(_), ExprKind::List(_))
