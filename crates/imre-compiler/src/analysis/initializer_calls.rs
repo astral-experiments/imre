@@ -239,10 +239,14 @@ impl Session {
         // A suspended initializer exposes the declarations preceding its import.
         // Once it completes, all of its final declarations may be read.
         let mut progress = HashMap::from([(entry.0, Some(TextSize::default()))]);
-        let mut pending = vec![(entry, 0, Vec::new(), None::<(InitializerSource, usize)>)];
-        'initializers: while let Some(((module, path), mut start, mut imports, binding)) =
-            pending.pop()
-        {
+        let mut pending = vec![(
+            InitializerSource::application(entry),
+            0,
+            Vec::new(),
+            None::<(InitializerSource, usize)>,
+        )];
+        'initializers: while let Some((source, mut start, mut imports, binding)) = pending.pop() {
+            let InitializerSource { module, path, .. } = source;
             let file = self.files[module];
             let parsed = self.parsed(file);
             let model = SemanticModel::new(&self.db, self.db.program_file(file));
@@ -296,20 +300,22 @@ impl Session {
                 if let Some(owner) =
                     self.initializer_import(stmt, member, &model, entry.0, &selected_module)
                 {
-                    pending.push(((module, path), i + 1, imports, Some((owner, member))));
+                    pending.push((source, i + 1, imports, Some((owner, member))));
                     if let std::collections::hash_map::Entry::Vacant(slot) =
                         progress.entry(owner.module)
                     {
-                        if owner.declares_signatures {
-                            slot.insert(Some(TextSize::default()));
-                            pending.push(((owner.module, owner.path), 0, Vec::new(), None));
-                        } else if self.passive_initializer(owner.module) {
-                            slot.insert(None);
-                        } else {
-                            return None;
-                        }
+                        slot.insert(Some(TextSize::default()));
+                        pending.push((owner, 0, Vec::new(), None));
                     }
                     continue 'initializers;
+                }
+                // Imported providers participate in import order. Their own call
+                // contracts do not belong to the application being checked.
+                if !source.declares_signatures {
+                    if passive(stmt) {
+                        continue;
+                    }
+                    return None;
                 }
                 if let Some(stmt) = stmt.as_expr_stmt()
                     && let Some(error) =
@@ -379,10 +385,6 @@ impl Session {
                         .is_some()
                 })
         })
-    }
-
-    fn passive_initializer(&self, module: usize) -> bool {
-        self.parsed(self.files[module]).suite().iter().all(passive)
     }
 
     fn initializer_import<'a>(
