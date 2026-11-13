@@ -1767,11 +1767,15 @@ impl<'a> SuitePreparation<'a> {
         if self.declaration_refusals.is_empty() && self.literal_refusals.is_none() {
             return None;
         }
-        self.check_required_sites(root).err()
+        self.check_required_sites(root, false).err()
     }
 
     /// A successful check returns whether the declaration scanner reaches the next statement.
-    fn check_required_sites(&self, root: RegionRoot<'_>) -> StdResult<bool, PreparedRefusal> {
+    fn check_required_sites(
+        &self,
+        root: RegionRoot<'_>,
+        physical: bool,
+    ) -> StdResult<bool, PreparedRefusal> {
         let mut refusal = None;
         let mut visit = |site| {
             refusal = refusal.or_else(|| match site {
@@ -1798,7 +1802,7 @@ impl<'a> SuitePreparation<'a> {
         };
         let continues = match root {
             RegionRoot::Suite(block) => {
-                RequiredSite::visit(block, self.literal_refusals, &mut visit)
+                RequiredSite::visit_block(block, physical, self.literal_refusals, &mut visit)
             }
             RegionRoot::Operand(value) => {
                 RequiredSite::visit_operand(value, self.literal_refusals, &mut visit);
@@ -3261,11 +3265,7 @@ impl SourceScope<'_> {
             // A suspended conditional can prune literal arms. If every arm exits,
             // the checked body must also stop the search for later declarations.
             PhysicalRegion::Fallthrough => {
-                !continues
-                    && matches!(
-                        preparation.check_required_sites(RegionRoot::Suite(checked)),
-                        Ok(false)
-                    )
+                preparation.check_required_sites(RegionRoot::Suite(checked), true) == Ok(continues)
             }
             // A disabled loop takes the normal edge of its selected else suite.
             PhysicalRegion::Loop
