@@ -32,7 +32,7 @@ impl Site {
     ) -> Self {
         Self {
             range: function.range,
-            cmp_input: cmp_input && cmp_keys::can_specialize(function),
+            cmp_input,
             value_read: reads_function_value(
                 following,
                 |expr| matches!(expr, ast::Expr::Name(n) if n.id == function.name.as_str()),
@@ -270,24 +270,26 @@ impl Checker<'_> {
         include_classes: bool,
     ) -> Result<(), String> {
         let fixed_functions = self.registered_local_start.is_none();
-        let has_candidate = fixed_functions
-            && stmts
-                .iter()
-                .filter_map(ast::Stmt::as_function_def_stmt)
-                .any(cmp_keys::can_specialize);
-        let cmp_inputs = if has_candidate {
-            cmp_keys::local_comparators(stmts, |callee| {
-                self.resolve(callee)
-                    == Some(crate::modules::Binding::Intrinsic(Intrinsic::CmpToKey))
-            })
-        } else {
-            HashSet::new()
-        };
+        let mut cmp_inputs = None;
         let mut suite_functions = HashSet::new();
         for (index, statement) in stmts.iter().enumerate() {
-            let name = match statement {
-                ast::Stmt::ClassDef(class) if include_classes => class.name.as_str(),
-                ast::Stmt::FunctionDef(function) if fixed_functions => function.name.as_str(),
+            let (name, cmp_input) = match statement {
+                ast::Stmt::ClassDef(class) if include_classes => (class.name.as_str(), false),
+                ast::Stmt::FunctionDef(function) if fixed_functions => {
+                    let name = function.name.as_str();
+                    let cmp_input = cmp_keys::can_specialize(function)
+                        && cmp_inputs
+                            .get_or_insert_with(|| {
+                                cmp_keys::local_comparators(stmts, |callee| {
+                                    self.resolve(callee)
+                                        == Some(crate::modules::Binding::Intrinsic(
+                                            Intrinsic::CmpToKey,
+                                        ))
+                                })
+                            })
+                            .contains(name);
+                    (name, cmp_input)
+                }
                 _ => continue,
             };
             if let ast::Stmt::FunctionDef(function) = statement
@@ -297,7 +299,7 @@ impl Checker<'_> {
                 binding.sites.push_back(Site::new(
                     function,
                     &stmts[index + 1..],
-                    cmp_inputs.contains(name),
+                    cmp_input,
                     self.graph.modules[self.module].checks_source_contracts(),
                 ));
                 continue;
@@ -335,7 +337,7 @@ impl Checker<'_> {
                     sites: VecDeque::from([Site::new(
                         function,
                         &stmts[index + 1..],
-                        cmp_inputs.contains(name),
+                        cmp_input,
                         self.graph.modules[self.module].checks_source_contracts(),
                     )]),
                     active_comparator: None,
