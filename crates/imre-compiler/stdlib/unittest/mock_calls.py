@@ -1,15 +1,6 @@
 from _imre_mock import is_call_list, mark_call_list
 
 
-def _call_text(args: list[_Arg], kwargs: dict[str, _Arg]) -> str:
-    parts: list[str] = []
-    for arg in args:
-        parts.append(arg.text)
-    for key in kwargs:
-        parts.append(key + "=" + kwargs[key].text)
-    return "call(" + ", ".join(parts) + ")"
-
-
 @dataclass(repr=False)
 class _Call:
     _args: list[_Arg]
@@ -19,7 +10,7 @@ class _Call:
     def __init__(self, args: list[_Arg], kwargs: dict[str, _Arg]) -> None:
         self._args = args
         self._kwargs = kwargs
-        self._text = _call_text(args, kwargs)
+        self._text = _format_call_signature("call", _format_call_args(args), kwargs)
 
     @staticmethod
     def _represent(value: _Call | None) -> str:

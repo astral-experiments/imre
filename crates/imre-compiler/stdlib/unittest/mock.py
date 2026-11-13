@@ -94,6 +94,27 @@ class _Arg:
         self.text = text
         self.key = _key(text, kind)
 
+    def __repr__(self) -> str:
+        return self.text
+
+
+def _format_call_args(args: list[_Arg]) -> list[str]:
+    parts: list[str] = []
+    for arg in args:
+        parts.append(repr(arg))
+    return parts
+
+
+def _format_call_signature(name: str, args: list[str], kwargs: dict[str, _Arg]) -> str:
+    positional = ", ".join(args)
+    parts: list[str] = []
+    for key, value in kwargs.items():
+        parts.append(f"{key!s}={value!r}")
+    keywords = ", ".join(parts)
+    if positional and keywords:
+        positional += ", "
+    return name + "(" + positional + keywords + ")"
+
 
 class _Ancestor:
     prefix: str
