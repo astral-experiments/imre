@@ -689,6 +689,9 @@ impl Expr {
     pub(crate) fn named_call_arguments(&self) -> Option<&[Expr]> {
         match &self.kind {
             ExprKind::Call(_, args) => Some(&args.values),
+            ExprKind::Exception { message, .. } => {
+                Some(message.as_deref().map_or(&[], std::slice::from_ref))
+            }
             ExprKind::Builtin(Builtin::GlobalGet(_), _) => None,
             ExprKind::Builtin(_, args) => Some(args),
             _ => None,

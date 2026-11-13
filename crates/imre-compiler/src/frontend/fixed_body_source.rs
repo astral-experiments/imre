@@ -38,6 +38,13 @@ pub(crate) struct FixedAttribute {
 pub(crate) enum FixedNode {
     Return,
     Effect,
+    Raise {
+        cause: bool,
+    },
+    Exception {
+        kind: u32,
+        message: bool,
+    },
     Store(usize),
     Branch(usize, usize),
     /// The operation keeps its checked slot or operand count, and its native type.
@@ -68,6 +75,9 @@ impl FixedNode {
             ir::Node::Statement(Statement::If(_, yes, no)) => Self::Branch(yes.len(), no.len()),
             ir::Node::Statement(Statement::Return(_)) => Self::Return,
             ir::Node::Statement(Statement::Expr(_)) => Self::Effect,
+            ir::Node::Statement(Statement::Raise(Some(raised))) => Self::Raise {
+                cause: raised.cause.is_some(),
+            },
             ir::Node::Statement(Statement::Assign(slot, _)) => Self::Store(*slot),
             ir::Node::Expression(expr) => match expr.kind {
                 ExprKind::Str(_) | ExprKind::Bool(_) => {
@@ -80,6 +90,10 @@ impl FixedNode {
                     Self::indexed(&expr.kind, items.len(), expr.ty)
                 }
                 ExprKind::Int(ref text) => Self::Integer(text.parse().ok()?),
+                ExprKind::Exception { kind, ref message } => Self::Exception {
+                    kind,
+                    message: message.is_some(),
+                },
                 ExprKind::Call(id, ref args)
                     if !args.exhaustive_enum_match
                         && args.order.iter().copied().eq(0..args.values.len()) =>

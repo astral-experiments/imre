@@ -287,6 +287,14 @@ impl StatementLowering for Checker<'_> {
             None => (raised, None),
         };
         let origin = self.fixed_origin(raise.range(), None);
+        if let Some(sites) = &mut self.fixed_sites {
+            sites.statement(
+                value.range(),
+                FixedNode::Raise {
+                    cause: cause.is_some(),
+                },
+            );
+        }
         Ok(Statement::raise_at(raised, cause, Some(origin)))
     }
 
