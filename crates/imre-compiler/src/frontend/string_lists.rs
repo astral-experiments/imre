@@ -295,7 +295,7 @@ impl Checker<'_> {
         let mut clear = vec![source];
         let value = if matches!(plan.output, Output::Generator(_)) {
             let result = self.hidden(ty);
-            body.push(self.generator_frame(Statement::Assign(result, value)));
+            body.push(self.generator_frame(vec![Statement::Assign(result, value)]));
             clear.push(result);
             self.local(result)
         } else {
