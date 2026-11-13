@@ -38,7 +38,6 @@ impl ModuleSource {
             lambdas: None,
             text,
             replacements: &self.replacements,
-            has_templates: self.has_templates,
             method_imports: &self.method_imports,
             private_names: None,
         }
@@ -51,7 +50,6 @@ pub(crate) struct RegisteredSource<'a> {
     pub(crate) operand_types: Option<crate::analysis::OperandTypes<'a>>,
     pub(crate) text: &'a str,
     pub(crate) replacements: &'a HashMap<TextRange, Vec<u32>>,
-    pub(crate) has_templates: bool,
     pub(crate) template_fields: Option<&'a HashMap<TextSize, imre_ast::strings::TemplateFieldText>>,
     pub(crate) generators: Option<&'a HashMap<TextRange, RegisteredGenerator>>,
     pub(crate) lambdas: Option<&'a HashMap<TextSize, RegisteredLambda>>,
@@ -223,7 +221,7 @@ impl RegisteredSource<'_> {
     /// their constant identity, including a surrogate after an ordinary UTF-8 prefix.
     pub(crate) fn string<'a>(self, pieces: impl Iterator<Item = FStringLiteral<'a>>) -> Expr {
         let mut text = String::new();
-        let mut encoded = self.has_templates.then(Vec::new);
+        let mut encoded = None;
         for piece in pieces {
             let middle;
             let replacement = match piece {
@@ -1590,7 +1588,6 @@ mod tests {
             lambdas: None,
             text,
             replacements: &HashMap::new(),
-            has_templates: false,
             method_imports: &imports,
             private_names: None,
         };
@@ -1661,7 +1658,6 @@ mod tests {
             lambdas: None,
             text,
             replacements: &HashMap::new(),
-            has_templates: false,
             method_imports: &BTreeSet::new(),
             private_names: None,
         };
@@ -1753,7 +1749,6 @@ mod tests {
             lambdas: None,
             text,
             replacements: &HashMap::new(),
-            has_templates: false,
             method_imports: &imports,
             private_names: Some(&names),
         };
@@ -1792,7 +1787,6 @@ mod tests {
                 lambdas: None,
                 text: &text,
                 replacements: &replacements,
-                has_templates: false,
                 method_imports: &imports,
                 private_names: None,
             };
@@ -1835,7 +1829,6 @@ mod tests {
                 lambdas: None,
                 text,
                 replacements: &replacements,
-                has_templates: false,
                 method_imports: &imports,
                 private_names: None,
             };

@@ -540,7 +540,6 @@ impl<'a> PreparedBody<'a> {
             text: source,
             private_names: Some(&private_names),
             replacements: &replacements,
-            has_templates,
             method_imports: &method_imports,
             template_fields: Some(&template_fields),
             generators: None,
@@ -684,8 +683,6 @@ impl<'a> PreparedBody<'a> {
             #[cfg(test)]
             class_keywords,
             docs,
-            #[cfg(test)]
-            has_templates,
             #[cfg(test)]
             template_fields,
             #[cfg(test)]
@@ -969,8 +966,6 @@ struct SourceInfo<'a> {
     class_keywords: Vec<ruff_text_size::TextSize>,
     docs: Option<crate::modules::doctest::SealedDocs>,
     #[cfg(test)]
-    has_templates: bool,
-    #[cfg(test)]
     template_fields: HashMap<TextSize, imre_ast::strings::TemplateFieldText>,
     #[cfg(test)]
     replacements: HashMap<ruff_text_size::TextRange, Vec<u32>>,
@@ -1003,7 +998,6 @@ impl SourceInfo<'_> {
             operand_types: None,
             text: &self.text,
             replacements: &self.replacements,
-            has_templates: self.has_templates,
             template_fields: Some(&self.template_fields),
             lambdas: Some(&self.lambdas),
             generators: Some(&self.generators),

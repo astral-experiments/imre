@@ -117,7 +117,6 @@ fn placed_field_uses_the_ordinary_descriptor_and_attribute_line() {
         operand_types: None,
         text: source,
         replacements: &Default::default(),
-        has_templates: false,
         template_fields: None,
         generators: None,
         lambdas: None,

@@ -872,7 +872,6 @@ mod tests {
             text,
             private_names: None,
             replacements: &Default::default(),
-            has_templates: false,
             method_imports: &Default::default(),
         };
         let operations = Default::default();
