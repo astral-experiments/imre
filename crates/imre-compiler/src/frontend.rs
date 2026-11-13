@@ -9909,7 +9909,6 @@ impl<'a> Checker<'a> {
                     ops.push(op);
                 }
                 let result = if live_scalar_operands {
-                    self.live_protocol_parameters = true;
                     Type::PythonObject
                 } else {
                     Type::Bool
