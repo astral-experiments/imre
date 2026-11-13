@@ -373,8 +373,10 @@ impl SourceSites {
         }
     }
 
-    pub(super) fn statement(&mut self, operand: TextRange, node: FixedNode) {
-        if let Some(site) = self.statement_site(operand) {
+    pub(super) fn statement(&mut self, operand: TextRange, statement: &Statement) {
+        if let Some(site) = self.statement_site(operand)
+            && let Some(node) = FixedNode::checked(&ir::Node::Statement(statement))
+        {
             self.commit(site, node);
         }
     }
@@ -384,17 +386,13 @@ impl SourceSites {
         &mut self,
         field: &ast::ExprAttribute,
         rhs: TextRange,
-        offset: usize,
+        statement: &Statement,
     ) {
         if self.wrapper_fields
             && let Some(site) = self.statement_site(rhs)
+            && let Some(node) = FixedNode::checked(&ir::Node::Statement(statement))
         {
-            self.attribute(
-                site,
-                ir::AttributeAction::Store,
-                field,
-                FixedNode::StoreField(offset),
-            );
+            self.attribute(site, ir::AttributeAction::Store, field, node);
         }
     }
 

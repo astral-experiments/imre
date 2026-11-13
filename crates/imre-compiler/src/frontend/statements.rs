@@ -215,10 +215,10 @@ impl StatementLowering for Checker<'_> {
         let value = self.expr(expr)?;
         // Only a direct call selects one implementation; a dispatched override may return.
         let continues = !self.terminating_call(&value);
-        if let Some(sites) = &mut self.fixed_sites {
-            sites.statement(expr.range(), FixedNode::Effect);
-        }
-        Ok((Some(Statement::Expr(value)), continues))
+        Ok((
+            Some(self.statement_at(expr, Statement::Expr(value))),
+            continues,
+        ))
     }
 
     fn returned(&mut self, ret: &ast::StmtReturn) -> Result<Statement, String> {
@@ -262,10 +262,11 @@ impl StatementLowering for Checker<'_> {
         };
         let terminates = self.terminating_call(&value);
         self.explicit_return |= !terminates;
-        if let Some(types) = &mut self.inferred_returns {
+        let operand = if let Some(types) = &mut self.inferred_returns {
             if !terminates {
                 types.push(value.ty);
             }
+            None
         } else {
             if !terminates {
                 value = self
@@ -278,19 +279,16 @@ impl StatementLowering for Checker<'_> {
                         }
                     })?;
             }
-            if let (Some(sites), Some(operand)) = (&mut self.fixed_sites, &ret.value) {
-                let kind = if terminates {
-                    FixedNode::Effect
-                } else {
-                    FixedNode::Return
-                };
-                sites.statement(operand.range(), kind);
-            }
-        }
-        Ok(if terminates {
+            ret.value.as_deref()
+        };
+        let statement = if terminates {
             Statement::Expr(value)
         } else {
             Statement::Return(value)
+        };
+        Ok(match operand {
+            Some(operand) => self.statement_at(operand, statement),
+            None => statement,
         })
     }
 
@@ -315,15 +313,7 @@ impl StatementLowering for Checker<'_> {
             None => (raised, None),
         };
         let origin = self.fixed_origin(raise.range(), None);
-        if let Some(sites) = &mut self.fixed_sites {
-            sites.statement(
-                value.range(),
-                FixedNode::Raise {
-                    cause: cause.is_some(),
-                },
-            );
-        }
-        Ok(Statement::raise_at(raised, cause, Some(origin)))
+        Ok(self.statement_at(value, Statement::raise_at(raised, cause, Some(origin))))
     }
 
     fn record_loop_transfer(&mut self, transfer: &Statement) -> bool {
