@@ -76,23 +76,42 @@ impl RequiredSite {
         literals: Option<&LiteralSites>,
         visit: &mut impl FnMut(RequiredSite),
     ) -> bool {
+        Self::visit_block(statements, false, literals, visit)
+    }
+
+    pub(super) fn visit_block(
+        statements: &[Statement],
+        physical: bool,
+        literals: Option<&LiteralSites>,
+        visit: &mut impl FnMut(RequiredSite),
+    ) -> bool {
         for stmt in statements {
             match stmt {
                 Statement::If(test, yes, no) => {
                     Self::visit_operand(test, literals, visit);
-                    let yes_continues = Self::visit(yes, literals, visit);
-                    let no_continues = Self::visit(no, literals, visit);
-                    if !yes_continues && !no_continues {
+                    let yes_continues = Self::visit_block(yes, physical, literals, visit);
+                    let no_continues = Self::visit_block(no, physical, literals, visit);
+                    let literal = if physical {
+                        ir::control::boolean_literal(test)
+                    } else {
+                        None
+                    };
+                    let continues = match literal {
+                        Some(true) => yes_continues,
+                        Some(false) => no_continues,
+                        None => yes_continues || no_continues,
+                    };
+                    if !continues {
                         return false;
                     }
                 }
                 Statement::While(test, body, otherwise) => {
                     Self::visit_operand(test, literals, visit);
-                    Self::visit(body, literals, visit);
-                    Self::visit(otherwise, literals, visit);
+                    Self::visit_block(body, physical, literals, visit);
+                    Self::visit_block(otherwise, physical, literals, visit);
                 }
                 Statement::Scope { body, .. } => {
-                    if !Self::visit(body, literals, visit) {
+                    if !Self::visit_block(body, physical, literals, visit) {
                         return false;
                     }
                 }
