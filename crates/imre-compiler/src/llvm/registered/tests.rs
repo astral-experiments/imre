@@ -693,7 +693,7 @@ fn inner_handler_preserves_the_enclosing_cursor_slot() {
     let mut code = RegisteredFrame::new(&mut output, &positions, true, 0, 0.into());
     let mut owner = TestFrame(&mut code, CheckedSites::default());
     let mut frame = super::Frame::for_expression(&mut owner);
-    frame.iteration.private_slots = vec![2, 8];
+    frame.iteration.storage = crate::frontend::FrameSlots::new([2, 8].into(), Default::default());
     frame.iteration.first_slot = 3;
     frame.body.error_target = "outer".into();
     frame.enter_scope(&[2]);

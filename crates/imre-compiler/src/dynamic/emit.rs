@@ -2520,7 +2520,8 @@ mod tests {
             }
         });
         assert_eq!(generators, ["word.title() for word in words"]);
-        checked.inputs = crate::llvm::registered::frame_inputs(&checked, true).unwrap();
+        (checked.inputs, checked.frame_slots) =
+            crate::llvm::registered::frame_inputs(&checked, true).unwrap();
         let bodies = HashMap::from([(site, checked)]);
         for (source, retained) in [
             (source, true),
@@ -2553,7 +2554,8 @@ mod tests {
         let mut original =
             PreparedBody::module("example", path, source, 0, ModuleOrigin::Program(None)).unwrap();
         let mut checked = original.source.take_prepared_function(site);
-        checked.inputs = crate::llvm::registered::frame_inputs(&checked, true).unwrap();
+        (checked.inputs, checked.frame_slots) =
+            crate::llvm::registered::frame_inputs(&checked, true).unwrap();
         let bodies = HashMap::from([(site, checked)]);
         for (text, retained) in [(source, true), (refused, false)] {
             let module = PreparedBody::module(

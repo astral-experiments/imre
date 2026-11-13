@@ -70,11 +70,11 @@ pub(crate) fn module(module: &Module) -> Result<(), String> {
 /// checked native scalar or a Python handle as a display operand. They have no native
 /// container layout table. Validate this handoff before the emitter indexes its operands.
 pub(crate) fn registered(frame: crate::frontend::RegisteredRegion<'_>) -> Result<(), String> {
-    let private = frame.private_slots();
+    let private = frame.frame_layout(|_| {});
     let local = |slot: usize| {
         require(
             slot < frame.locals.len()
-                && (frame.local_names.contains_key(&slot) || private.contains(&slot)),
+                && (frame.local_names.contains_key(&slot) || private.index(&slot).is_some()),
             "invalid registered frame slot or missing Python name",
         )
     };
@@ -96,7 +96,7 @@ pub(crate) fn registered(frame: crate::frontend::RegisteredRegion<'_>) -> Result
                 ..
             }) => require(
                 frame.locals.get(binding.entered) == Some(&Type::PythonObject)
-                    && private.contains(&binding.entered),
+                    && private.index(&binding.entered).is_some(),
                 "context binding needs a private entered-value slot",
             ),
             ir::Node::Statement(Statement::IterNext {
@@ -111,14 +111,14 @@ pub(crate) fn registered(frame: crate::frontend::RegisteredRegion<'_>) -> Result
                         && slot != *iterator
                         && slot != *key
                         && slot != *ready
-                        && private.contains(&slot)
+                        && private.index(&slot).is_some()
                         && frame.locals.get(slot) == Some(&Type::PythonObject)
                 }) && iterator != key
                     && key != ready
                     && iterator != ready
                     && [iterator, key, ready]
                         .iter()
-                        .all(|slot| private.contains(*slot))
+                        .all(|slot| private.index(slot).is_some())
                     && frame.locals.get(*iterator) == Some(&Type::PythonObject)
                     && frame.locals.get(*key) == Some(&Type::PythonObject)
                     && frame.locals.get(*ready) == Some(&Type::Bool),
@@ -890,6 +890,7 @@ mod tests {
     fn registered_namespace_checks_the_optional_parent_before_emission() {
         let mut frame = crate::frontend::RegisteredFunction {
             inputs: crate::frontend::FrameInputs::Checked,
+            frame_slots: Default::default(),
             fixed_sites: Vec::new(),
             fixed_attributes: None,
             function: empty().entry,
@@ -919,6 +920,7 @@ mod tests {
     fn registered_display_handoff_rejects_a_misplaced_or_malformed_spread() {
         let mut frame = crate::frontend::RegisteredFunction {
             inputs: crate::frontend::FrameInputs::Checked,
+            frame_slots: Default::default(),
             fixed_sites: Vec::new(),
             fixed_attributes: None,
             function: empty().entry,
