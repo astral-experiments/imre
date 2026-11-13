@@ -5,6 +5,7 @@ use super::*;
 #[derive(Clone)]
 pub(crate) struct FixedBodySource {
     pub(crate) method: Option<Arc<ast::StmtFunctionDef>>,
+    arguments: FrameArguments,
     pub(crate) attributes: HashMap<TextRange, FixedAttribute>,
     sites: Vec<(TextRange, Option<FixedNode>)>,
     pub(crate) local_names: HashMap<usize, registered::LocalBinding>,
@@ -17,14 +18,6 @@ impl FixedBodySource {
         self,
         function: ir::Function,
     ) -> StdResult<RegisteredFunction, HashMap<TextRange, FixedAttribute>> {
-        self.place_if(function, || true)
-    }
-
-    pub(crate) fn place_if(
-        self,
-        function: ir::Function,
-        accepted: impl FnOnce() -> bool,
-    ) -> StdResult<RegisteredFunction, HashMap<TextRange, FixedAttribute>> {
         if self.local_names.len() != function.locals.len() {
             return Err(self.attributes);
         }
@@ -35,10 +28,10 @@ impl FixedBodySource {
                 (FixedNode::checked(&node).as_ref() == Some(expected.as_ref()?)).then_some(rest)
             });
         });
-        if !matches!(remaining, Some([])) || !accepted() {
+        if !matches!(remaining, Some([])) {
             return Err(self.attributes);
         }
-        Ok(RegisteredFunction {
+        let mut frame = RegisteredFunction {
             fixed_sites: self.sites.into_iter().map(|(range, _)| range).collect(),
             inputs: match self.method {
                 Some(method) => FrameInputs::Protocol {
@@ -50,7 +43,26 @@ impl FixedBodySource {
             local_names: self.local_names,
             frame_slots: Default::default(),
             fixed_attributes: (!self.attributes.is_empty()).then(|| Box::new(self.attributes)),
-        })
+        };
+        if matches!(frame.inputs, FrameInputs::Checked)
+            && self.arguments == FrameArguments::Python
+            && frame
+                .function
+                .params
+                .iter()
+                .any(|&slot| frame.function.locals[slot].builtin_scalar_name().is_some())
+        {
+            let Some((inputs, slots)) =
+                crate::llvm::registered::frame_inputs(&frame, self.arguments)
+            else {
+                return Err(frame
+                    .fixed_attributes
+                    .map_or_else(HashMap::new, |attrs| *attrs));
+            };
+            frame.inputs = inputs;
+            frame.frame_slots = slots;
+        }
+        Ok(frame)
     }
 }
 
@@ -349,6 +361,7 @@ impl SourceSites {
         names: HashMap<String, usize>,
         locals: &[Type],
         method: Option<&Arc<ast::StmtFunctionDef>>,
+        arguments: FrameArguments,
     ) -> Option<FixedBodySource> {
         if body.is_empty()
             || self.current.is_some()
@@ -378,6 +391,7 @@ impl SourceSites {
         }
         Some(FixedBodySource {
             method: method.cloned(),
+            arguments,
             attributes: self.attributes,
             sites: self.sites,
             local_names,
@@ -542,6 +556,7 @@ mod tests {
         });
         let source = FixedBodySource {
             method: None,
+            arguments: FrameArguments::Checked,
             attributes: Default::default(),
             sites,
             local_names: Default::default(),
@@ -731,7 +746,7 @@ mod tests {
                     functions: module.functions,
                     frames: fixed.frame_sources,
                 }
-                .register(&graph, &owners, |module, range| {
+                .register(&graph, &owners, |module, range, _| {
                     checks.accepts(&graph, module, range)
                 });
             } else {

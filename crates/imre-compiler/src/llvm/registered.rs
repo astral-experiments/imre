@@ -72,7 +72,11 @@ pub(crate) fn frame_inputs(
         true
     };
     // Scope declarations can follow uses in the walk. Check their complete set afterward.
+    let mut positions = checked.fixed_sites.iter();
     let private = checked.region().frame_layout(|node| {
+        let attribute = positions
+            .next()
+            .and_then(|&range| checked.fixed_attribute(range));
         let expr = match node {
             ir::Node::Statement(stmt) => {
                 return match stmt {
@@ -153,6 +157,28 @@ pub(crate) fn frame_inputs(
             }
             ir::Node::Expression(expr) => expr,
         };
+        if let ExprKind::Builtin(operation, operands) = &expr.kind
+            && let Builtin::RegisteredCall(call) = match attribute {
+                Some(crate::frontend::FixedAttribute::Operation { operation, .. }) => &**operation,
+                Some(crate::frontend::FixedAttribute::Call(_)) => return false,
+                None => operation,
+            }
+        {
+            uses_python_protocol = true;
+            let scope = usize::from(call.explicit_scope);
+            if has_scalar {
+                // The method receiver and arguments are passed as their original handles.
+                protocol_reads += operands
+                    .iter()
+                    .skip(scope)
+                    .map(&protocol_parameter)
+                    .sum::<usize>();
+            }
+            return operands.len() > scope;
+        }
+        if attribute.is_some() {
+            return false;
+        }
         match &expr.kind {
             ExprKind::Local(slot) => {
                 scalar_reads += usize::from(scalar_parameter(expr));
@@ -261,19 +287,6 @@ pub(crate) fn frame_inputs(
             ExprKind::Builtin(Builtin::RegisteredImport(_), operands) => {
                 uses_python_protocol = true;
                 operands.is_empty()
-            }
-            ExprKind::Builtin(Builtin::RegisteredCall(call), operands) => {
-                uses_python_protocol = true;
-                let scope = usize::from(call.explicit_scope);
-                if has_scalar {
-                    // The method receiver and arguments are passed as their original handles.
-                    protocol_reads += operands
-                        .iter()
-                        .skip(scope)
-                        .map(&protocol_parameter)
-                        .sum::<usize>();
-                }
-                operands.len() > scope
             }
             ExprKind::Builtin(Builtin::RegisteredIndexConstant(_), args) => args.len() == 1,
             ExprKind::Builtin(Builtin::RegisteredSlice, args) => matches!(args.len(), 2 | 3),
@@ -547,7 +560,7 @@ impl<'f> Frame<'f, '_, '_> {
         range: TextRange,
     ) -> Option<&'f crate::frontend::FixedAttribute> {
         let (function, _) = self.fixed_sites?;
-        function.fixed_attributes.as_ref()?.get(&range)
+        function.fixed_attribute(range)
     }
 
     pub(super) fn statement_site(&mut self, range: TextRange, simple: Option<TextRange>) {

@@ -1101,7 +1101,7 @@ impl FixedProgram {
             functions: module.functions,
             frames: self.frame_sources,
         }
-        .register(graph, &owners, |_, _| true);
+        .register(graph, &owners, |_, _, _| true);
     }
 }
 

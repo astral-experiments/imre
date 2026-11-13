@@ -346,16 +346,23 @@ impl Checker<'_> {
         })
     }
 
-    /// A receiver-only text operation can bind the same operand in a Python frame.
+    /// Keep the source method binding when the Python frame can pass the original operands.
     pub(super) fn bound_text_result(
         &mut self,
         call: &ast::ExprCall,
         field: &ast::ExprAttribute,
         value: Expr,
     ) -> Expr {
-        if call.arguments.is_empty()
-            && matches!(&value.kind, ExprKind::Builtin(Builtin::Text(_), args) if args.len() == 1)
-        {
+        let bound = match &value.kind {
+            ExprKind::Builtin(Builtin::Text(_), args) => {
+                call.arguments.is_empty() && args.len() == 1
+            }
+            ExprKind::Builtin(Builtin::StringReplace, _) => {
+                registered::values::fixed_positional_arguments(call)
+            }
+            _ => false,
+        };
+        if bound {
             self.frame_arguments = FrameArguments::Python;
             if let Some(sites) = &mut self.fixed_sites {
                 sites.method(call, field, &value);
