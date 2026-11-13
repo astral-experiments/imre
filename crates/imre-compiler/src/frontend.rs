@@ -8417,7 +8417,17 @@ impl<'a> Checker<'a> {
         }
         match binding {
             Some(Binding::Value(definition)) => {
-                return self.read_module_value(definition, None, expression);
+                let value = self.read_module_value(definition, None, expression)?;
+                if let Some(sites) = &mut self.fixed_sites
+                    && definition.module == self.module
+                    && let ast::Expr::Name(name) = expression
+                    && (self.class.is_none()
+                        || !ruff_python_stdlib::identifiers::is_mangled_private(&name.id))
+                    && let ExprKind::Builtin(Builtin::GlobalGet(slot), _) = value.kind
+                {
+                    sites.module_read(name, slot, value.ty);
+                }
+                return Ok(value);
             }
             Some(Binding::ImportedValue(definition, member)) => {
                 return self.read_module_value(definition, Some(member), expression);

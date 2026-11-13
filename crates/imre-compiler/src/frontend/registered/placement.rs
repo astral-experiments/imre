@@ -65,6 +65,46 @@ mod tests {
     }
 
     #[test]
+    fn placed_module_read_keeps_its_slot_and_lexical_name() {
+        let text = "other = 'old'\nKey = 'start'\ndef read() -> str: return Key\nprint(read())\n";
+        let mut graph = SourceGraph::single(text).unwrap();
+        graph.registered_startup = true;
+        crate::checked_lower(&mut graph).unwrap();
+        let functions = graph.registered_functions();
+        let start = TextSize::try_from(text.find("def read").unwrap()).unwrap();
+        let body = &functions[&graph.entry][&start];
+        let [Statement::Return(value)] = &body.function.body[..] else {
+            panic!("expected the placed module read")
+        };
+        let slot = match &value.kind {
+            ExprKind::Builtin(Builtin::GlobalGet(slot), args) if args.is_empty() => *slot,
+            _ => panic!("expected the original global slot"),
+        };
+        let [statement, name] = body.fixed_sites[..] else {
+            panic!("expected the placed statement and expression")
+        };
+        assert_eq!(&text[statement], "return Key");
+        assert_eq!(&text[name], "Key");
+        let read = &body.fixed_attributes.as_ref().unwrap()[&name];
+        assert!(matches!(&*read.operation, Builtin::RegisteredName(key) if key == "Key"));
+        let original = FixedNode::ModuleRead(slot, Type::Str);
+        let stale = [Some(FixedNode::ModuleRead(slot + 1, Type::Str))];
+        let node = ir::Node::Expression(value);
+        assert!(FixedNode::checked(&node) == Some(original));
+        assert!(FixedNode::consume(Some(&stale), &node).is_none());
+
+        let project = tempfile::tempdir().unwrap();
+        let entry = project.path().join("app.py");
+        std::fs::write(&entry, text).unwrap();
+        let options = crate::CompileOptions {
+            module_entry: Some("app".into()),
+            extension_paths: vec![project.path().to_owned()],
+            ..Default::default()
+        };
+        crate::compile_file(&entry, None, &options).unwrap();
+    }
+
+    #[test]
     fn named_entry_places_the_checked_arithmetic_body() {
         let text = "def scale(n: int) -> int:\n    return n * 31415927 + 17\n\nprint(scale(3))\n";
         let dir = tempfile::tempdir().unwrap();

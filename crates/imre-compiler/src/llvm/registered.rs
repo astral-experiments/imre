@@ -952,6 +952,14 @@ impl<'f> Frame<'f, '_, '_> {
 
     pub(crate) fn builtin(&mut self, op: &Builtin, operands: &[Expr]) -> CheckedValue {
         let handle = match (op, operands) {
+            (
+                Builtin::RegisteredCall(_)
+                | Builtin::RegisteredAttribute { .. }
+                | Builtin::RegisteredDeleteItem,
+                _,
+            ) => {
+                return self.object_operation(op, operands);
+            }
             (Builtin::RegisteredInput(index), []) => self.registered_input(*index),
             (op, args) if let Some(iteration) = op.iteration_operands(args) => {
                 use ir::IterationOperands::*;
