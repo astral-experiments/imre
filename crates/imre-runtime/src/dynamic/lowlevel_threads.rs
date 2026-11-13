@@ -1,7 +1,6 @@
 //! Count only the Python callbacks launched by this interpreter.
 use super::{Context, Error, Id, Result, Value, thread_callback::Callback};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::Ordering;
 
 pub(super) fn function_name(symbol: &str) -> Option<&'static str> {
     match symbol {
@@ -33,7 +32,6 @@ pub(super) fn doc(function: &str) -> &'static str {
 
 #[derive(Default)]
 pub(super) struct Workers {
-    pub(super) count: Arc<AtomicUsize>,
     pub(super) private_context: bool,
     // Thread errors use the original sys module when its registry entry changes.
     pub(super) system_module: Option<Id>,
@@ -112,7 +110,7 @@ pub(super) fn call(
         if name == "_thread._shutdown" {
             return super::thread_worker::call(ctx, "shutdown", args, kwargs);
         }
-        let count = ctx.threads.count.load(Ordering::SeqCst);
+        let count = ctx.interpreter.worker_count.load(Ordering::SeqCst);
         ctx.workers.reap_finished(&mut ctx.heap);
         return Ok(ctx.int(count as i64));
     }

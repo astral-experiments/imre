@@ -152,7 +152,7 @@ pub(in crate::dynamic) fn warnings_attr(
     attr: &str,
     try_import: bool,
 ) -> Result<Option<Id>> {
-    let module = if try_import && !ctx.finalizing.load(Ordering::Acquire) {
+    let module = if try_import && !ctx.interpreter.finalizing.load(Ordering::Acquire) {
         match ctx.import_with_builtins("warnings") {
             Ok(module) => module,
             Err(error) if ctx.is_builtin_error(&error, "ImportError") => return Ok(None),

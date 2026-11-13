@@ -1430,14 +1430,14 @@ pub(super) fn setdefaulttimeout(
     let value =
         super::super::builtins::one_positional_arg("_socket.setdefaulttimeout", args, kwargs)?;
     let timeout = parse_socket_timeout(ctx, value)?;
-    *ctx.socket_default_timeout.lock().unwrap() = timeout;
+    *ctx.interpreter.socket_default_timeout.lock().unwrap() = timeout;
     Ok(NONE)
 }
 
 /// Apply the current default to a new endpoint unless its type requested nonblocking I/O.
 fn apply_default_timeout(ctx: &Context, socket: &crate::objects::Object) -> Result<()> {
     if native::get_timeout(socket).is_none()
-        && let Some(timeout) = *ctx.socket_default_timeout.lock().unwrap()
+        && let Some(timeout) = *ctx.interpreter.socket_default_timeout.lock().unwrap()
         && let Err(error) = native::set_timeout(socket, Some(timeout))
     {
         // The initializer has already adopted the fd. Its receiver may outlive this error.
