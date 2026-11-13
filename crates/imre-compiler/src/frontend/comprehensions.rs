@@ -7,7 +7,7 @@ use std::cell::{Cell, RefCell};
 
 pub(crate) use imre_ast::comprehension::collect_target_names as target_names;
 use imre_ast::comprehension::{Output, Plan};
-use ruff_python_ast::visitor::{Visitor, walk_expr, walk_stmt};
+use ruff_python_ast::visitor::{Visitor, walk_stmt};
 
 use super::*;
 
@@ -454,32 +454,20 @@ fn repeated_writes(plan: &Plan<'_>, depth: usize) -> HashSet<String> {
         .collect()
 }
 
-/// Free reads respect nested comprehension scopes: only their leftmost iterable
-/// belongs to the surrounding scope; all target names shadow throughout the rest.
+/// Fixed local functions capture reads outside their own enclosing function bindings.
 #[derive(Default)]
-struct Reads {
+struct FunctionReads {
     names: HashSet<String>,
     bound: Vec<HashSet<String>>,
 }
 
-/// Finds lexical free reads for capture rejection, including through nested
-/// lambdas. Comprehension targets and each lambda's own locals shadow normally.
-pub(super) fn free_reads(expression: &ast::Expr, bound: HashSet<String>) -> HashSet<String> {
-    let mut reads = Reads {
-        names: HashSet::new(),
-        bound: vec![bound],
-    };
-    reads.visit_expr(expression);
-    reads.names
-}
-
 pub(super) fn function_reads(function: &ast::StmtFunctionDef) -> HashSet<String> {
-    let mut reads = Reads::default();
+    let mut reads = FunctionReads::default();
     reads.visit_function(function);
     reads.names
 }
 
-impl Reads {
+impl FunctionReads {
     fn visit_function(&mut self, function: &ast::StmtFunctionDef) {
         let mut bound = narrowing::assigned_names(&function.body);
         bound.extend(closed_calls::parameters(&function.parameters).map(|p| p.name.to_string()));
@@ -489,7 +477,7 @@ impl Reads {
     }
 }
 
-impl<'a> Visitor<'a> for Reads {
+impl<'a> Visitor<'a> for FunctionReads {
     fn visit_stmt(&mut self, statement: &'a ast::Stmt) {
         if let ast::Stmt::FunctionDef(function) = statement {
             self.visit_function(function);
@@ -499,36 +487,11 @@ impl<'a> Visitor<'a> for Reads {
     }
 
     fn visit_expr(&mut self, expression: &'a ast::Expr) {
-        if let ast::Expr::Lambda(lambda) = expression {
-            let mut bound = narrowing::expression_assignments(&lambda.body);
-            if let Some(parameters) = &lambda.parameters {
-                for parameter in parameters.iter_non_variadic_params() {
-                    if let Some(default) = &parameter.default {
-                        self.visit_expr(default);
-                    }
-                    bound.insert(parameter.name().to_string());
-                }
-            }
-            self.bound.push(bound);
-            self.visit_expr(&lambda.body);
-            self.bound.pop();
-        } else if let Some(plan) = Plan::from_expr(expression) {
-            self.visit_expr(plan.outer);
-            self.bound.push(plan.target_names());
-            plan.visit_body(|expr| self.visit_expr(expr));
-            self.bound.pop();
-        } else if let ast::Expr::Name(name) = expression {
-            if name.ctx == ast::ExprContext::Load
-                && !self
-                    .bound
-                    .iter()
-                    .any(|scope| scope.contains(name.id.as_str()))
-            {
-                self.names.insert(name.id.to_string());
-            }
-        } else {
-            walk_expr(self, expression);
-        }
+        self.names.extend(
+            function_scope::expression_reads(expression)
+                .into_iter()
+                .filter(|name| !self.bound.iter().any(|scope| scope.contains(name))),
+        );
     }
 }
 
@@ -707,17 +670,13 @@ impl Checker<'_> {
             || !writes.is_empty()
             || pipelines::is_pipeline_expression(self, display.outer)
             || !self.local_functions.is_empty()
-                && free_reads(expression, HashSet::new())
+                && function_scope::expression_reads(expression)
                     .iter()
                     .any(|name| self.local_functions.contains_key(name))
         {
             return self.inline_comprehension(display, collector, input, writes);
         }
-        let mut reads = Reads::default();
-        let targets: HashSet<String> = display.scope_bindings(|expr| reads.visit_expr(expr));
-        reads.names.retain(|name| !targets.contains(name));
-        let mut captures = reads.names.into_iter().collect::<Vec<_>>();
-        captures.sort();
+        let (targets, captures) = function_scope::display_bindings(display);
         let id = self.helpers.reserve();
         // Eager displays share the enclosing Python frame, even when lowered to a helper.
         let omitted_locals = self.omitted_assert_locals.clone();

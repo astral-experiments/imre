@@ -130,7 +130,7 @@ impl<'ast> Visitor<'ast> for Reads<'_, 'ast> {
             }
         }
         if let ast::Expr::Lambda(lambda) = expr
-            && !comprehensions::free_reads(expr, HashSet::new()).contains(self.parameter)
+            && !function_scope::expression_reads(expr).contains(self.parameter)
         {
             if let Some(parameters) = &lambda.parameters {
                 self.visit_parameters(parameters);
