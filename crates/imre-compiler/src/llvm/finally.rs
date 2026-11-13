@@ -57,8 +57,21 @@ impl<V> Finalbody<V> {
     pub(super) fn completions<T: PartialEq>(
         &self,
         out: &mut FunctionBody,
+        pending_error: Option<&str>,
         returned: impl Fn(&V) -> T,
     ) -> (Vec<Completion<T>>, String) {
+        // A captured Python exception is None on the ordinary edge. Reuse that
+        // handle for the dispatch instead of carrying another tag across cleanup.
+        if let Some(error) = pending_error
+            && let [ordinary, failed] = self.edges.as_slice()
+            && ordinary.exception.is_none()
+            && failed.exception.is_some()
+        {
+            return (
+                vec![ordinary.completion.map_return(&returned), Completion::Error],
+                format!("i64 {error}"),
+            );
+        }
         let mut targets = Vec::new();
         let tag = self.phi(out, "i32", |edge| {
             let target = edge.completion.map_return(&returned);
@@ -72,7 +85,7 @@ impl<V> Finalbody<V> {
                 });
             index.to_string()
         });
-        (targets, tag)
+        (targets, format!("i32 {tag}"))
     }
 
     pub(super) fn phi(
@@ -159,7 +172,7 @@ impl Emitter<'_, '_> {
         }
         let before = self.body.code.len();
         let previous_bytes = self.cleanup_bytes;
-        let (targets, tag) = region.completions(&mut self.body, |value| value.ty);
+        let (targets, tag) = region.completions(&mut self.body, None, |value| value.ty);
         let returned = targets.iter().find_map(|target| match target {
             Completion::Return(ty) => {
                 Some(region.owner(self, *ty, |edge| match &edge.completion {

@@ -73,14 +73,15 @@ impl<'f, 'p> Frame<'f, '_, 'p> {
     pub(super) fn finish_exits<T>(
         &mut self,
         region: Finalbody<String>,
-        cleanup: impl FnOnce(&mut Self, &Finalbody<String>) -> T,
+        cleanup: impl FnOnce(&mut Self, &Finalbody<String>, String) -> T,
         mut finish: impl FnMut(&mut RegisteredFrame<'_, '_>, &Completion<()>, &T),
     ) -> bool {
         if region.is_empty() {
             return false;
         }
         self.label(&region.entry);
-        let (targets, tag) = region.completions(&mut self.body, |_| ());
+        let error = region.pending_error(self);
+        let (targets, tag) = region.completions(&mut self.body, Some(&error), |_| ());
         let returned = targets.contains(&Completion::Return(())).then(|| {
             region.phi(&mut self.body, "i64", |edge| match &edge.completion {
                 Completion::Return(value) => value.clone(),
@@ -92,7 +93,7 @@ impl<'f, 'p> Frame<'f, '_, 'p> {
         if let Some(value) = &returned {
             self.keep_pending_exit(value, None);
         }
-        let result = cleanup(self, &region);
+        let result = cleanup(self, &region, error);
         self.live.truncate(live);
         self.regions.truncate(depth);
         if self.body.terminated {
@@ -137,8 +138,7 @@ impl<'f, 'p> Frame<'f, '_, 'p> {
         );
         let resumes = self.finish_exits(
             region,
-            |frame, region| {
-                let error = region.pending_error(frame);
+            |frame, region, error| {
                 let active = if outer == "0" {
                     error.clone()
                 } else {

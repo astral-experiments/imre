@@ -264,8 +264,7 @@ impl Frame<'_, '_, '_> {
         );
         self.finish_exits(
             region,
-            |frame, region| {
-                let error = region.pending_error(frame);
+            |frame, _, error| {
                 let outer_roots = frame.live.len() + frame.live_slots.len();
                 let result = if site.is_async {
                     frame.exit_async(&context, &error, outer_roots)
