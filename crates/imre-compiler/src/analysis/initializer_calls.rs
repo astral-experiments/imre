@@ -8,6 +8,7 @@ use ruff_text_size::{Ranged, TextRange, TextSize};
 use std::{collections::HashMap, path::Path};
 use ty_python_core::FileScopeId;
 use ty_python_core::definition::{Definition, DefinitionKind};
+use ty_python_core::reachability_constraints::ScopedReachabilityConstraintId;
 use ty_python_semantic::{Db, HasType, SemanticModel, types::Type};
 
 /// Result of following the reached module prefix with one set of import bindings.
@@ -275,7 +276,7 @@ impl Session {
                             import,
                             (owner.module, owner.path),
                             before,
-                            captures.entry(module).or_default(),
+                            &mut captures.entry(module).or_default().functions,
                         );
                     }
                     imports.push((site, owner.module));
@@ -305,6 +306,21 @@ impl Session {
                         progress.entry(owner.module)
                     {
                         slot.insert(Some(TextSize::default()));
+                        if let Some(captures) = captures.as_deref_mut() {
+                            let file = self.db.program_file(self.files[owner.module]);
+                            let index = ty_python_core::semantic_index(&self.db, file);
+                            if index
+                                .use_def_map(FileScopeId::global())
+                                .end_of_scope_reachability()
+                                == ScopedReachabilityConstraintId::ALWAYS_FALSE
+                            {
+                                // Every importer on the stack is waiting for this fresh import.
+                                for (parent, _, _, _) in &pending {
+                                    captures.entry(parent.module).or_default().stop =
+                                        progress[&parent.module];
+                                }
+                            }
+                        }
                         pending.push((owner, 0, Vec::new(), None));
                     }
                     continue 'initializers;
