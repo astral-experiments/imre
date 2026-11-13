@@ -5,6 +5,17 @@ use crate::ir::{ExceptHandler, ExceptionMatcher, Statement};
 use crate::llvm::operations::CheckedBody;
 use crate::llvm::{Completion, finally::Finalbody};
 
+impl Finalbody<String> {
+    /// The actual exception on the failing predecessor, or None on an ordinary transfer.
+    pub(super) fn pending_error(&self, frame: &mut RegisteredFrame<'_, '_>) -> String {
+        self.phi(&mut frame.body, "i64", |edge| {
+            edge.exception
+                .as_ref()
+                .map_or_else(|| "0".into(), |(error, _)| error.clone())
+        })
+    }
+}
+
 impl RegisteredFrame<'_, '_> {
     /// The normal else edge skips the handlers. On the error edge, keep the
     /// pending exception live and active until handler dispatch is complete.
@@ -59,10 +70,11 @@ impl<'f, 'p> Frame<'f, '_, 'p> {
 
     /// Keep the pending return across cleanup, then resume the original transfer.
     /// A Python context handles its exceptional exit separately because it can suppress it.
-    pub(super) fn finish_exits(
+    pub(super) fn finish_exits<T>(
         &mut self,
         region: Finalbody<String>,
-        cleanup: impl FnOnce(&mut Self, &Finalbody<String>) -> Option<String>,
+        cleanup: impl FnOnce(&mut Self, &Finalbody<String>) -> T,
+        mut resume_error: impl FnMut(&mut RegisteredFrame<'_, '_>, &T),
     ) -> bool {
         if region.is_empty() {
             return false;
@@ -80,7 +92,7 @@ impl<'f, 'p> Frame<'f, '_, 'p> {
         if let Some(value) = &returned {
             self.keep_pending_exit(value, None);
         }
-        let error = cleanup(self, &region);
+        let result = cleanup(self, &region);
         self.live.truncate(live);
         self.regions.truncate(depth);
         if self.body.terminated {
@@ -98,9 +110,7 @@ impl<'f, 'p> Frame<'f, '_, 'p> {
                     Completion::Jump { label, depth } => {
                         frame.jump_from_regions(label.clone(), *depth)
                     }
-                    Completion::Error => {
-                        frame.raise(error.as_deref().expect("pending exception"), None, true)
-                    }
+                    Completion::Error => resume_error(frame, &result),
                 }
             },
         );
@@ -124,27 +134,27 @@ impl<'f, 'p> Frame<'f, '_, 'p> {
             Completion::Error,
             Some((raised, outer.clone())),
         );
-        let resumes = self.finish_exits(region, |frame, region| {
-            let error = region.phi(&mut frame.body, "i64", |edge| {
-                edge.exception
-                    .as_ref()
-                    .map_or_else(|| "0".into(), |(error, _)| error.clone())
-            });
-            let active = if outer == "0" {
-                error.clone()
-            } else {
-                region.phi(&mut frame.body, "i64", |edge| {
-                    edge.exception
-                        .as_ref()
-                        .map_or_else(|| outer.clone(), |(error, _)| error.clone())
-                })
-            };
-            frame.keep_pending_exit(&error, Some(outer));
-            frame.caught.push(active);
-            frame.emit_suite(body);
-            frame.caught.pop();
-            Some(error)
-        });
+        let resumes = self.finish_exits(
+            region,
+            |frame, region| {
+                let error = region.pending_error(frame);
+                let active = if outer == "0" {
+                    error.clone()
+                } else {
+                    region.phi(&mut frame.body, "i64", |edge| {
+                        edge.exception
+                            .as_ref()
+                            .map_or_else(|| outer.clone(), |(error, _)| error.clone())
+                    })
+                };
+                frame.keep_pending_exit(&error, Some(outer));
+                frame.caught.push(active);
+                frame.emit_suite(body);
+                frame.caught.pop();
+                error
+            },
+            |frame, error| frame.raise(error, None, true),
+        );
         if normal && resumes {
             self.label(&done);
         }
