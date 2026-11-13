@@ -1517,17 +1517,13 @@ fn lower_graph(
         let mut checker = checker_for(module_id);
         checker.module_scope = true;
         checker.nonreturning_functions = &completed_calls;
-        let mut fixed_entry = (!needs_registered_entry).then(Vec::new);
+        let mut fixed_entry = (!needs_registered_entry && unavailable.is_none()).then(Vec::new);
         let result = checker.lower_block(&entry_statements, fixed_entry.as_mut());
         let result = checker.finish_region(result);
         if checked_region(result, graph, module_id, &mut unavailable, |failure| {
-            // Entry checking has finished. An object refusal discards the fixed graph, so
-            // its completed functions can move to the Python binder before ordinary recovery.
-            if !named {
-                if failure.is_object() && pending_capture.borrow().is_some() {
-                    register(std::mem::take(&mut completed), &owners);
-                }
-                capture_on_object(failure);
+            // A FILE entry can select the same recovery as a checked function.
+            if pending_capture.borrow().is_some() {
+                request_recovery(failure);
             }
         })
         .inspect_err(|_| place_completed(&mut completed, &owners))?
