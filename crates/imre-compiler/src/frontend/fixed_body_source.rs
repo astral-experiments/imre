@@ -227,6 +227,20 @@ impl SourceSites {
         }
     }
 
+    /// A fused operation can supply the written arguments only when its source sites
+    /// are exactly those operands. Nested or synthesized input uses the ordinary binder.
+    pub(super) fn has_written_operands(&self, call: &ast::ExprCall) -> bool {
+        self.site_at(call.range())
+            .and_then(|site| self.sites.get(site.index + 1..))
+            .is_some_and(|sites| {
+                sites.iter().map(|(range, _)| *range).eq(call
+                    .arguments
+                    .args
+                    .iter()
+                    .map(Ranged::range))
+            })
+    }
+
     /// A Python caller loads the live name and supplies only the written arguments.
     pub(super) fn named_call(&mut self, call: &ast::ExprCall, name: &ast::ExprName, value: &Expr) {
         if let Some(site) = self.site_at(call.range())
