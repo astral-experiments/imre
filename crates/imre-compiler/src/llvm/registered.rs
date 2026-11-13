@@ -857,7 +857,11 @@ impl<'f> Frame<'f, '_, '_> {
         let reset_on_exhaustion = exhaust
             && kind == ir::IterNextKind::Generic
             && !self.code.native_suspension
-            && self.code.unwinds_slot(self.code.physical_slot(ready));
+            && self
+                .code
+                .iteration
+                .physical_slot(ready)
+                .is_some_and(|slot| self.code.unwinds_slot(slot));
         if !reset_on_exhaustion {
             self.store_private(ready, &permanent::FALSE.to_string());
         }
