@@ -105,6 +105,15 @@ pub(in crate::dynamic) struct Pattern {
     split_retry: OnceCell<std::result::Result<regex_automata::nfa::thompson::NFA, String>>,
 }
 
+impl Matcher {
+    fn capture_buffer<'a>(
+        &self,
+        storage: &'a OnceCell<Box<RefCell<Captures>>>,
+    ) -> &'a RefCell<Captures> {
+        storage.get_or_init(|| Box::new(RefCell::new(self.create_captures())))
+    }
+}
+
 impl Pattern {
     /// Synthetic Scanner patterns do not have a Python pattern object to compare.
     pub(in crate::dynamic) fn same_program(&self, other: &Self) -> bool {
@@ -1877,9 +1886,7 @@ fn search_pattern(
     } else {
         &pattern.captures
     };
-    let mut captures = storage
-        .get_or_init(|| Box::new(RefCell::new(matcher.create_captures())))
-        .borrow_mut();
+    let mut captures = matcher.capture_buffer(storage).borrow_mut();
     matcher
         .captures(input, &mut captures)
         .map_err(|message| Error::new("RuntimeError", message))?;
