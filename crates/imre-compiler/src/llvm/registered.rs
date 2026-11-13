@@ -171,6 +171,10 @@ pub(crate) fn frame_inputs(
             ExprKind::Conditional(..) | ExprKind::BooleanValue(..) | ExprKind::Boolean(..) => true,
             ExprKind::Dict(entries) => expr.ty == Type::PythonObject || entries.is_empty(),
             ExprKind::Builtin(op, args) if let Some(iteration) = op.iteration_operands(args) => {
+                if let Ok(ir::IterationOperands::Iter(value, ir::IteratorOp::Loop(_))) = &iteration
+                {
+                    protocol_reads += protocol_parameter(value);
+                }
                 uses_python_protocol |= matches!(iteration, Ok(ir::IterationOperands::Iter(..)));
                 iteration.is_ok()
             }
