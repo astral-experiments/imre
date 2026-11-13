@@ -2470,6 +2470,7 @@ pub(super) fn method(
             "__add__"
                 | "__contains__"
                 | "__eq__"
+                | "__ne__"
                 | "__getitem__"
                 | "__hash__"
                 | "__mod__"
@@ -2517,9 +2518,11 @@ pub(super) fn method(
         if name == "__add__" {
             return ctx.concat_str(receiver, other);
         }
-        if name == "__eq__" {
+        if matches!(name, "__eq__" | "__ne__") {
             return Ok(match ctx.string_storage(other) {
-                Some(other) => boolean(ctx.equal(ctx.scalar_value(receiver), other)),
+                Some(other) => {
+                    boolean(ctx.equal(ctx.scalar_value(receiver), other) == (name == "__eq__"))
+                }
                 None => NOT_IMPLEMENTED,
             });
         }
