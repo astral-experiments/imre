@@ -35,12 +35,7 @@ impl CheckedBody<'_, '_, '_, '_> {
                 Entry::Native(code) => code.instruction(test),
                 Entry::Registered(frame) => frame.value(&test),
             };
-            let arm = self.block_name();
-            let next = self.block_name();
-            self.body().branch(&selected, &arm, &next);
-            self.body().start(&arm);
-            resume(self, target);
-            self.body().start(&next);
+            self.when(&selected, |code| resume(code, target));
         }
         resume(self, last);
     }
@@ -177,36 +172,6 @@ impl CheckedBody<'_, '_, '_, '_> {
         self.emit_block(otherwise);
     }
 
-    fn matches_exception(&mut self, exception: &str, matcher: &ExceptionMatcher) -> Option<String> {
-        if matches!(matcher, ExceptionMatcher::Any) {
-            return None;
-        }
-        match &mut self.0 {
-            Entry::Native(code) => {
-                let ExceptionMatcher::Categories(kinds) = matcher else {
-                    unreachable!("a live Python matcher requires the registered frame")
-                };
-                let mut matched = None;
-                for kind in kinds {
-                    let byte = code.instruction(format!(
-                        "call i32 @imre_exception_matches(ptr {exception}, i32 {kind})"
-                    ));
-                    let test = code.instruction(format!("icmp ne i32 {byte}, 0"));
-                    matched = Some(match matched {
-                        None => test,
-                        Some(previous) => code.instruction(format!("or i1 {previous}, {test}")),
-                    });
-                }
-                matched
-            }
-            Entry::Registered(frame) => {
-                let class = frame.handler_class(matcher)?;
-                let matches = frame.op("matches", &[exception, &class]);
-                Some(frame.value(&format!("icmp eq i64 {matches}, 2")))
-            }
-        }
-    }
-
     /// Enter the handler's binding, emit its checked suite, then unwind a normal
     /// exit through the same lexical cleanup as an explicit loop transfer.
     fn caught_arm(&mut self, handler: &ExceptHandler, caught: &Caught, done: &str, depth: usize) {
@@ -246,16 +211,32 @@ impl CheckedBody<'_, '_, '_, '_> {
             Entry::Registered(_) => Vec::new(),
         };
         for handler in handlers {
-            if matches!(&handler.matcher, ExceptionMatcher::Categories(kinds) if kinds.is_empty()) {
-                continue;
-            }
-            // A Python exception matcher can allocate blocks of its own.
-            let next = self.block_name();
-            let Some(condition) = self.matches_exception(exception, &handler.matcher) else {
-                self.caught_arm(handler, caught, done, depth);
-                return false;
+            let condition = match &handler.matcher {
+                ExceptionMatcher::Any => {
+                    self.caught_arm(handler, caught, done, depth);
+                    return false;
+                }
+                ExceptionMatcher::Categories(kinds) => {
+                    let Some((&first, rest)) = kinds.split_first() else {
+                        continue;
+                    };
+                    let code = self.fixed();
+                    let mut matched = code.exception_matches(exception, first);
+                    for &kind in rest {
+                        let next = code.exception_matches(exception, kind);
+                        matched = code.instruction(format!("or i1 {matched}, {next}"));
+                    }
+                    matched
+                }
+                ExceptionMatcher::Object(site, class) => {
+                    let frame = self.python();
+                    let class = frame.handler_class(*site, class);
+                    let matched = frame.op("matches", &[exception, &class]);
+                    frame.value(&format!("icmp eq i64 {matched}, 2"))
+                }
+                ExceptionMatcher::Subgroup(..) => unreachable!("subgroups use group dispatch"),
             };
-            self.when(&condition, Some(next), |code| {
+            self.when(&condition, |code| {
                 code.caught_arm(handler, caught, done, depth)
             });
             if let Entry::Native(code) = &mut self.0 {

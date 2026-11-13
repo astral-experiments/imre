@@ -218,9 +218,9 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
 
     /// Emit a conditional suite and continue on the false edge when the true
     /// suite transfers control elsewhere.
-    fn when(&mut self, test: &str, otherwise: Option<String>, yes: impl FnOnce(&mut Self)) {
+    fn when(&mut self, test: &str, yes: impl FnOnce(&mut Self)) {
         let take = self.block_name();
-        let end = otherwise.unwrap_or_else(|| self.block_name());
+        let end = self.block_name();
         let body = self.body();
         if !body.terminated {
             body.branch(test, &take, &end);

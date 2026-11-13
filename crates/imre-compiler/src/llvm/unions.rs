@@ -137,6 +137,13 @@ impl Emitter<'_, '_> {
         ))
     }
 
+    pub(super) fn exception_matches(&mut self, exception: &str, kind: u32) -> String {
+        let matched = self.instruction(format!(
+            "call i32 @imre_exception_matches(ptr {exception}, i32 {kind})"
+        ));
+        self.instruction(format!("icmp ne i32 {matched}, 0"))
+    }
+
     /// Inspect exception and record layouts only after proving the payload is present
     /// and selecting its tag if it is part of a finite union.
     pub(super) fn instance_test(&mut self, value: &Value, classes: &[InstanceType]) -> String {
@@ -360,11 +367,7 @@ impl Emitter<'_, '_> {
                         | Type::NamedException(_)
                 )
             {
-                let matched = self.instruction(format!(
-                    "call i32 @imre_exception_matches(ptr {}, i32 {kind})",
-                    value.operand
-                ));
-                self.instruction(format!("icmp ne i32 {matched}, 0"))
+                self.exception_matches(&value.operand, kind)
             } else {
                 u8::from(class.accepts(value.ty, &self.module.types)).to_string()
             };

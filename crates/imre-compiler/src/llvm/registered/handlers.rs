@@ -1,9 +1,10 @@
 //! Exception handlers entered through a registered Python frame.
 
 use super::{Frame, RegisteredFrame, context::Region};
-use crate::ir::{ExceptHandler, ExceptionMatcher, Statement};
+use crate::ir::{ExceptHandler, ExceptionMatcher, Expr, Statement};
 use crate::llvm::operations::CheckedBody;
 use crate::llvm::{Completion, finally::Finalbody};
+use ruff_text_size::TextRange;
 
 impl Finalbody<String> {
     /// The actual exception on the failing predecessor, or None on an ordinary transfer.
@@ -212,9 +213,10 @@ impl<'f, 'p> Frame<'f, '_, 'p> {
         let mut active = exc.to_owned();
         for handler in handlers {
             self.live.extend([remainder.clone(), active.clone()]);
-            let matcher = self
-                .handler_class(&handler.matcher)
-                .expect("except* requires a type");
+            let ExceptionMatcher::Subgroup(site, class) = &handler.matcher else {
+                unreachable!("except* requires a subgroup matcher")
+            };
+            let matcher = self.handler_class(*site, class);
             let name = self.handler_name(handler);
             let pair = self.op("except_star_split", &[&remainder, &matcher]);
             let zero = self.code.integer(0);
@@ -278,14 +280,9 @@ impl<'f, 'p> Frame<'f, '_, 'p> {
         self.raise(&merged, None, true);
     }
 
-    pub(in crate::llvm) fn handler_class(&mut self, matcher: &ExceptionMatcher) -> Option<String> {
-        match matcher {
-            ExceptionMatcher::Any | ExceptionMatcher::Categories(_) => None,
-            ExceptionMatcher::Object(site, class) | ExceptionMatcher::Subgroup(site, class) => {
-                self.checkpoint(*site);
-                Some(self.evaluate_handle(class))
-            }
-        }
+    pub(in crate::llvm) fn handler_class(&mut self, site: TextRange, class: &Expr) -> String {
+        self.checkpoint(site);
+        self.evaluate_handle(class)
     }
 
     fn handler_name(&self, handler: &ExceptHandler) -> Option<&'f str> {
@@ -307,17 +304,6 @@ impl RegisteredFrame<'_, '_> {
         let key = self.code_name(name);
         self.op("clearname", &[&self.scope.clone(), &key]);
     }
-}
-
-/// Numeric categories belong to fixed-layout exceptions. Registered catches
-/// use live class objects. Both frames handle bare and empty-tuple matchers.
-pub(super) fn supported(handlers: &[ExceptHandler], finalbody: &[Statement]) -> bool {
-    (!handlers.is_empty() || !finalbody.is_empty())
-        && handlers.iter().all(|h| match &h.matcher {
-            ExceptionMatcher::Any => true,
-            ExceptionMatcher::Categories(kinds) => kinds.is_empty(),
-            ExceptionMatcher::Object(..) | ExceptionMatcher::Subgroup(..) => true,
-        })
 }
 
 impl Frame<'_, '_, '_> {

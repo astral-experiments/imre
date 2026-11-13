@@ -157,7 +157,7 @@ impl Emitter<'_, '_> {
 
     /// A specialized pull uses the same guarded-success edge as the Python iterator.
     pub(in crate::llvm) fn when(&mut self, condition: &str, success: impl FnOnce(&mut Self)) {
-        CheckedBody::native(self).when(condition, None, |body| success(body.fixed()));
+        CheckedBody::native(self).when(condition, |body| success(body.fixed()));
     }
 }
 

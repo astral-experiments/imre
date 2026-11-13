@@ -105,15 +105,18 @@ pub(crate) fn frame_inputs(
                         finalbody,
                         ..
                     } => {
-                        uses_python_protocol |= handlers.iter().any(|h| {
-                            matches!(
-                                h.matcher,
-                                ir::ExceptionMatcher::Object(..)
-                                    | ir::ExceptionMatcher::Subgroup(..)
-                            )
-                        });
-                        handlers::supported(handlers, finalbody)
+                        (!handlers.is_empty() || !finalbody.is_empty())
                             && handlers.iter().all(|h| {
+                                match &h.matcher {
+                                    ir::ExceptionMatcher::Any => {}
+                                    ir::ExceptionMatcher::Categories(kinds) if kinds.is_empty() => {
+                                    }
+                                    ir::ExceptionMatcher::Categories(_) => return false,
+                                    ir::ExceptionMatcher::Object(..)
+                                    | ir::ExceptionMatcher::Subgroup(..) => {
+                                        uses_python_protocol = true;
+                                    }
+                                }
                                 h.name.is_none_or(|slot| {
                                     checked
                                         .local_names
