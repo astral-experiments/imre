@@ -2990,20 +2990,18 @@ impl Context {
             .expect("initialized builtins dictionary"))
     }
 
-    fn linked_expression_code(&mut self, text: Id) -> Result<Option<Id>> {
-        let Some(&LinkedSource::Expression(entry)) = self.heap.linked_sources.get(&text) else {
-            return Ok(None);
-        };
-        self.module_code(
-            ModuleInitializer::Native(entry),
-            std::path::Path::new("<string>"),
-        )
-        .map(Some)
+    fn linked_expression(&self, text: Id) -> Option<Code> {
+        match self.heap.linked_sources.get(&text) {
+            Some(&LinkedSource::Expression(entry)) => Some(entry),
+            _ => None,
+        }
     }
 
     /// Evaluate one forward-reference expression in its defining Python namespaces.
     pub(super) fn eval_type_expression(&mut self, text: Id, globals: Id, locals: Id) -> Result<Id> {
-        if let Some(code) = self.linked_expression_code(text)? {
+        if let Some(entry) = self.linked_expression(text) {
+            let filename = self.text("<string>");
+            let code = self.native_module_code(entry, filename, None);
             return self.eval_namespace_code(code, globals, locals);
         }
         let source = self.str_value(text)?;
@@ -3295,22 +3293,31 @@ impl Context {
                 ));
             }
             Value::Str(_) | Value::Bytes(_) | Value::ByteArray(_) => {
-                let filename = self.text("<string>");
-                let mode_id = self.text(mode);
-                self.prepare_source_program(
-                    source,
-                    filename,
-                    mode_id,
-                    mode == "eval",
-                    self.inherited_compile_flags(),
-                )?;
-                if mode == "eval"
-                    && let Some(code) = self.linked_expression_code(source)?
-                {
-                    code
+                let inherited = self.inherited_compile_flags();
+                let entry = if mode == "eval" {
+                    self.linked_expression(source)
                 } else {
-                    return Err(Self::missing_body_error("<module>", "<string>", 1));
+                    None
+                };
+                // Annotation bodies are prepared without inherited flags. The raw text of a
+                // starred annotation owns the native entry for its expanded expression.
+                let exact = entry.is_some()
+                    && inherited == 0
+                    && !imre_ast::forward_refs::is_starred(self.str_value(source)?);
+                let filename = self.text("<string>");
+                if !exact {
+                    let mode_id = self.text(mode);
+                    self.prepare_source_program(
+                        source,
+                        filename,
+                        mode_id,
+                        mode == "eval",
+                        inherited,
+                    )?;
                 }
+                let entry =
+                    entry.ok_or_else(|| Self::missing_body_error("<module>", "<string>", 1))?;
+                self.native_module_code(entry, filename, exact.then_some(inherited))
             }
             _ => {
                 return Err(Error::new(
