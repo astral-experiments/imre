@@ -117,12 +117,25 @@ impl Checker<'_> {
         &mut self,
         input: Iteration,
         convert: bool,
+        element: Option<Type>,
+        call: &impl Ranged,
+    ) -> Result<Expr, String> {
+        self.collect_list_with(input, element, call, |checker, value| {
+            checker.consumer_value(value, convert, call)
+        })
+    }
+
+    /// Keep the partial list rooted while pulling and converting its elements.
+    pub(super) fn collect_list_with(
+        &mut self,
+        input: Iteration,
         mut element: Option<Type>,
         call: &impl Ranged,
+        mut convert: impl FnMut(&mut Self, Expr) -> Result<Expr, String>,
     ) -> Result<Expr, String> {
         let result = self.hidden(Type::None);
         let mut body = self.expand_items(input, call, |checker, value| {
-            let value = checker.consumer_value(value, convert, call)?;
+            let value = convert(checker, value)?;
             checker.expansion_insert(result, &mut element, value, false, call)
         })?;
         let ty = self.types.list(element.unwrap_or(Type::Int));
