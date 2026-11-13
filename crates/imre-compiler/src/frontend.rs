@@ -1875,6 +1875,14 @@ fn lower_function(
     checker.consuming_lists = consuming_lists::find(&definition.body, |func| {
         checker.unshadowed_builtin(func, "sorted")
     });
+    // A function header owns its leading docstring. Keep a sole statement for the
+    // implicit return and keep instrumented bodies on their ordinary line path.
+    let statements =
+        if checker.fixed_sites.is_some() && definition.body.len() > 1 && !checker.fault_enabled() {
+            ast::helpers::body_without_leading_docstring(&definition.body)
+        } else {
+            &definition.body
+        };
     let mut cannot_return = false;
     let (mut body, falls_through) = if module.archive.is_some() {
         let args = params.iter().map(|&slot| checker.local(slot)).collect();
@@ -1924,7 +1932,7 @@ fn lower_function(
         (vec![], true)
     } else {
         let mut body = Vec::new();
-        match checker.function_body(&definition.body, Some(&mut body)) {
+        match checker.function_body(statements, Some(&mut body)) {
             Ok(falls) => {
                 cannot_return = checker.checked_call_cannot_return(definition, falls);
                 (body, falls)
@@ -1980,7 +1988,7 @@ fn lower_function(
         }
     } else if module.archive.is_none() {
         checker.fault_frame(&mut body, definition.name.as_str(), definition.start());
-        source = checker.fixed_body_source(definition, signature, &body);
+        source = checker.fixed_body_source(definition, signature, statements.len(), &body);
     }
     Ok((
         LoweredBody {
@@ -3355,6 +3363,7 @@ impl<'a> Checker<'a> {
         &mut self,
         definition: &ast::StmtFunctionDef,
         signature: &Signature,
+        source_statements: usize,
         body: &[Statement],
     ) -> Option<FixedBodySource> {
         let sites = self.fixed_sites.take()?;
@@ -3377,7 +3386,7 @@ impl<'a> Checker<'a> {
             None => None,
         };
         sites.finish(
-            definition.body.len(),
+            source_statements,
             body,
             std::mem::take(&mut self.names),
             &self.locals,
