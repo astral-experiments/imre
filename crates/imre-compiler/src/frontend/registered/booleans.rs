@@ -364,7 +364,7 @@ impl PhysicalPreparation<'_, '_> {
         children: Box<[PhysicalOperand]>,
     ) -> Box<RegisteredOperand> {
         Box::new(RegisteredOperand::with_inputs(
-            self.source.located(node, operation),
+            self.source.located_operation(node, operation),
             children,
         ))
     }

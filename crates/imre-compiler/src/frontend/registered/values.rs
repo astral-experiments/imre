@@ -123,6 +123,25 @@ impl RegisteredSource<'_> {
         }
     }
 
+    /// Ordinary object calls select their own source target before evaluating the operands.
+    pub(super) fn located_operation(self, node: &ast::Expr, value: Expr) -> Expr {
+        let range = node.range();
+        let callable = match &value.kind {
+            ExprKind::Invoke { args, .. } => args.site.python().map(|site| site.range),
+            ExprKind::Builtin(Builtin::RegisteredCall(call), _)
+                if matches!(call.target, ir::RegisteredCallTarget::Callable { .. }) =>
+            {
+                Some(call.range)
+            }
+            _ => None,
+        };
+        if callable == Some(range) {
+            located(range, range.start(), value)
+        } else {
+            self.located(node, value)
+        }
+    }
+
     pub(super) fn located(self, node: &ast::Expr, value: Expr) -> Expr {
         let range = node.range();
         let position = match &value.kind {
@@ -1154,7 +1173,7 @@ impl Region {
             )
             .ok()??,
         };
-        Some(source.located(node, value))
+        Some(source.located_operation(node, value))
     }
 }
 
@@ -1447,7 +1466,7 @@ impl Checker<'_> {
         {
             *element = known;
         }
-        Ok(Some(source.located(node, value)))
+        Ok(Some(source.located_operation(node, value)))
     }
 }
 #[cfg(test)]

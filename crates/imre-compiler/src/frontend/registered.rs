@@ -3704,7 +3704,7 @@ impl SourceScope<'_> {
         if let Some(scope) = &self.comprehension {
             values::in_namespace(&mut value, Expr::local(scope.slot, Type::PythonObject));
         }
-        Some(self.source.located(expr, value))
+        Some(self.source.located_operation(expr, value))
     }
 
     fn suspend_operand(
