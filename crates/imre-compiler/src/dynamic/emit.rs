@@ -29,7 +29,6 @@ use serde_json::json;
 pub(super) struct PhysicalFile {
     pub(super) source_kind: Option<crate::SourceKind>,
     pub(super) digest: Option<[u8; 32]>,
-    pub(super) future_flags: u32,
 }
 
 /// Frontend inputs for one resolved source slot. Syntax can be shared even if
@@ -51,7 +50,7 @@ pub(super) struct RegisteredBodies<'a> {
     pub(super) modules: &'a [crate::modules::SourceModule],
     // Decoded installed files retain the fingerprint of their original loader bytes.
     pub(super) physical_files: HashMap<PathBuf, PhysicalFile>,
-    pub(super) archive_members: HashMap<PathBuf, ([u8; 32], u32)>,
+    pub(super) archive_members: HashMap<PathBuf, [u8; 32]>,
     // Each source slot has its own ownership, even if two names resolve to one file.
     // Providers contribute declarations to the checked program. Their Python bodies
     // retain Python argument binding, including annotations available to reflection.
@@ -111,17 +110,19 @@ impl crate::ProgramOutput {
                                 error.position,
                                 error.in_args,
                                 error.parse_error,
-                                prepared.zip.map(|(digest, _)| digest),
+                                prepared.zip,
                             );
                         }
                         return Ok((name.as_str(), None));
                     }
                 };
-                let (bundled, prompts) = match initializer {
-                    Initializer::Checked(body) => (body.source.bundled, body.prompts),
-                    Initializer::Archived(_) => (true, &[][..]),
+                let (bundled, future_flags, prompts) = match initializer {
+                    Initializer::Checked(body) => {
+                        (body.source.bundled, body.source.future_flags, body.prompts)
+                    }
+                    Initializer::Archived(_) => (true, 0, &[][..]),
                 };
-                let registration = prepared.registration(bundled);
+                let registration = prepared.registration(bundled, future_flags);
                 let check_archive = bundled && !providers.is_empty();
                 let mut placed = None;
                 let mut whole_entry = None;
@@ -228,12 +229,12 @@ pub(super) struct PreparedBody<'a> {
 }
 
 impl<'a> PreparedUnit<'a> {
-    fn registration(&self, bundled: bool) -> crate::ir::ModuleRegistration<'a> {
+    fn registration(&self, bundled: bool, future_flags: u32) -> crate::ir::ModuleRegistration<'a> {
         use crate::ir::{ModuleLoader, ModuleRegistration, PhysicalModuleKind};
         use sha2::{Digest, Sha256};
 
         let (name, path, original_source) = self.module;
-        let loader = if let Some(&(digest, future_flags)) = self.zip {
+        let loader = if let Some(&digest) = self.zip {
             ModuleLoader::Physical {
                 kind: PhysicalModuleKind::Zip,
                 digest,
@@ -246,7 +247,7 @@ impl<'a> PreparedUnit<'a> {
                 digest: file
                     .digest
                     .unwrap_or_else(|| Sha256::digest(original_source.as_bytes()).into()),
-                future_flags: file.future_flags,
+                future_flags,
             }
         } else {
             ModuleLoader::Source {
@@ -6626,7 +6627,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             (
                 "driver".into(),
                 PathBuf::from("driver.py"),
-                "import helper\n".into(),
+                "from __future__ import annotations\nimport helper\n".into(),
             ),
             (
                 "helper".into(),
@@ -6661,11 +6662,10 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
                 modules[0].1.clone(),
                 PhysicalFile {
                     digest: Some([b'F'; 32]),
-                    future_flags: 8,
                     ..Default::default()
                 },
             )]),
-            archive_members: HashMap::from([(modules[1].1.clone(), ([b'Z'; 32], 16))]),
+            archive_members: HashMap::from([(modules[1].1.clone(), [b'Z'; 32])]),
             ..Default::default()
         };
         let errors = HashMap::from([(
@@ -6732,7 +6732,10 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
                     .unwrap()
                     .0
             };
-            for (i, payload, flags) in [(0, "F".repeat(32), 8), (1, "Z".repeat(32), 16)] {
+            for (i, payload, flags) in [
+                (0, "F".repeat(32), imre_ast::code_flags::FUTURE_ANNOTATIONS),
+                (1, "Z".repeat(32), 0),
+            ] {
                 assert!(
                     calls[i]
                         .1

@@ -1314,7 +1314,6 @@ pub(crate) fn compile(
             .physical_files
             .entry(sources[0].1.clone())
             .or_default();
-        physical.future_flags = first.module_flags;
         physical.source_kind = Some(SourceKind::DiskFile);
         physical.digest = digest;
         if module_entry.is_none() && options.include_modules.contains("__main__") {
@@ -1860,10 +1859,9 @@ pub(crate) fn compile(
                                 if !initial[..path0_len].contains(root) {
                                     registrations.python_providers.insert(sources.len());
                                 }
-                                registrations.archive_members.insert(
-                                    member.path.clone(),
-                                    (member.digest, imports.module_flags),
-                                );
+                                registrations
+                                    .archive_members
+                                    .insert(member.path.clone(), member.digest);
                                 if let Some(error) = imports.invalid_executable {
                                     module_errors.insert(member.path.clone(), error);
                                 } else {
@@ -2128,7 +2126,6 @@ pub(crate) fn compile(
                         .physical_files
                         .entry(path.clone())
                         .or_default();
-                    physical.future_flags = imports.module_flags;
                     physical.source_kind = Some(kind);
                     physical.digest = digest.or(physical.digest);
                     // Later alternatives remain available to the runtime finder. Only the
@@ -2289,9 +2286,7 @@ pub(crate) fn compile(
                     }
                     registrations.python_providers.insert(sources.len());
                     if let Some(digest) = digest {
-                        registrations
-                            .archive_members
-                            .insert(path.clone(), (digest, imports.module_flags));
+                        registrations.archive_members.insert(path.clone(), digest);
                     }
                     if winner {
                         entry_sources.insert(prefix.clone(), (bundled_root.into(), package));
