@@ -155,10 +155,7 @@ fn prefix_local(value: &Expr) -> Option<usize> {
             source
         }
         (Builtin::ListGet(_), [split, index]) => {
-            let (false, [source, separator, _]) = split.selected_split_args(index)? else {
-                return None;
-            };
-            let ExprKind::Present(separator) = &separator.kind else {
+            let (false, [source, separator]) = split.selected_split_args(index)? else {
                 return None;
             };
             if !matches!(&separator.kind, ExprKind::Str(text) if !text.is_empty()) {

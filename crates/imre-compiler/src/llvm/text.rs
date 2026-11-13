@@ -143,20 +143,18 @@ impl Emitter<'_, '_> {
             (true, true) => "imre_str_unquote_rsplit_last",
             (false, true) => return None,
         };
-        let args = args.iter().map(|arg| self.operand(arg)).collect::<Vec<_>>();
-        let separator = self.instruction(format!("inttoptr i64 {} to ptr", args[1].value.operand));
+        let [source, separator] = args.map(|arg| self.operand(arg));
         let operand = self.checked_instruction(format!(
-            "call ptr @{function}(ptr {}, ptr {separator})",
-            args[0].value.operand,
+            "call ptr @{function}(ptr {}, ptr {})",
+            source.value.operand, separator.value.operand,
         ));
         let result = self.owned(Value {
             ty: Type::Str,
             operand,
             small_integer: false,
         });
-        for arg in &args {
-            self.release_operand(arg);
-        }
+        self.release_operand(&source);
+        self.release_operand(&separator);
         Some(result)
     }
 
