@@ -13,6 +13,7 @@ use crate::llvm::operations::CheckedValue;
 use indexmap::IndexSet;
 use ruff_python_ast::UnaryOp;
 use ruff_text_size::{TextRange, TextSize};
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::path::Path;
@@ -773,7 +774,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
     }
 
     /// Pass consecutive private roots in place. Mixed or discontiguous roots need a snapshot.
-    fn live_handles(&mut self, trailing: &[&str]) -> (String, usize) {
+    fn live_handles(&mut self, trailing: &[&str]) -> (Cow<'static, str>, usize) {
         if trailing.is_empty()
             && self.live.is_empty()
             && let Some(first) = self.live_slots.first()
@@ -782,9 +783,14 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
                 .windows(2)
                 .all(|pair| pair[1] == pair[0] + 1)
         {
-            return (format!("%ir_slot{first}"), self.live_slots.len());
+            return (
+                Cow::Owned(format!("%ir_slot{first}")),
+                self.live_slots.len(),
+            );
         }
-        let (_, prefix) = self.handle_array(&self.live.clone());
+        let handles = std::mem::take(&mut self.live);
+        let (_, prefix) = self.handle_array(&handles);
+        self.live = handles;
         let mut copied = 0;
         while let Some(run) = self.live_slots[copied..]
             .chunk_by(|a, b| *b == *a + 1)
@@ -806,7 +812,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
             copied += len;
         }
         let (ptr, count) = self.write_handles_at(prefix + copied, trailing);
-        (ptr.to_owned(), count)
+        (Cow::Borrowed(ptr), count)
     }
 
     /// Copy evaluated handles into reusable storage in this activation's entry block.
