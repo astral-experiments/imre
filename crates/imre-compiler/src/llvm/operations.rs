@@ -41,6 +41,7 @@ pub(crate) enum CheckedValue {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum ValueUse<'a> {
     General,
+    ComparisonTruth,
     PythonHandle,
     CallOperand(&'a str, &'a std::cell::OnceCell<String>),
     IntegerOperand,
@@ -968,7 +969,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 }
             },
             ExprKind::Compare(values, ops) => {
-                let truth = matches!(self.0, Entry::Native(_));
+                let truth = matches!(self.0, Entry::Native(_)) || usage == ValueUse::ComparisonTruth;
                 self.comparisons(values, ops, truth)
             }
             ExprKind::Conditional(test, yes, no) => self.conditional_value(test, yes, no),
