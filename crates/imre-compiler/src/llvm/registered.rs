@@ -1013,9 +1013,7 @@ impl<'f> Frame<'f, '_, '_> {
             (op, args) if let Some(iteration) = op.iteration_operands(args) => {
                 use ir::IterationOperands::*;
                 match iteration.expect("checked iteration operands") {
-                    Iter(value, op) => {
-                        self.acquire_iterator(op, |frame| frame.evaluate_scoped_handle(value))
-                    }
+                    Iter(value, op) => self.iterator_operand(op, value),
                     PairNeedsRow(value) => {
                         let cursor = self.evaluate_handle(value);
                         let plain = self.code.plain_items_cursor(&cursor);
@@ -1116,8 +1114,8 @@ impl<'f> Frame<'f, '_, '_> {
                 let mark = self.temporary_mark();
                 self.unwind_operands(&mark, |frame| {
                     let acquire = frame.code.frame_and_sites().1.generators[site].acquire;
-                    let cursor =
-                        frame.acquire_iterator(acquire, |frame| frame.evaluate_handle(iterable));
+                    let iterable = frame.evaluate_handle(iterable);
+                    let cursor = frame.acquire_iterator(acquire, &iterable);
                     frame.keep_operands(&mark, &cursor, "0");
                     let (code, sites) = frame.code.frame_and_sites();
                     let result = sites.bind_generator(code, *site, &scope, &cursor);
