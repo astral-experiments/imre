@@ -156,7 +156,12 @@ pub(super) fn prepare_start(
         &[*function, *positional, keyword.unwrap_or(super::NONE)],
     )?;
     super::thread_worker::check_start(ctx)?;
-    let Some((callback, roots)) = Callback::capture(ctx, *function, *positional, keyword)? else {
+    // The registered caller owns the original target, positional tuple and optional dict.
+    let pos = ctx
+        .tuple_elements(*positional)
+        .expect("validated thread arguments");
+    let Some((callback, roots)) = Callback::capture(ctx, *function, args, pos, keyword, false)?
+    else {
         return Err(super::thread_callback::unsupported());
     };
     if let Some(sys) = ctx.threads.system_module
