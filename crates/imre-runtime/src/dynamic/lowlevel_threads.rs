@@ -87,32 +87,37 @@ pub(super) fn call(
     if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
-            format!(
-                "{}() takes no keyword arguments",
-                if name == "_thread.start_new_thread" {
-                    "start_new_thread"
-                } else {
-                    name
-                }
-            ),
+            format!("{name}() takes no keyword arguments"),
         ));
     }
-    if name != "_thread.start_new_thread" {
-        if !args.is_empty() {
-            return Err(Error::new(
-                "TypeError",
-                format!("{name}() takes no arguments ({} given)", args.len()),
-            ));
+    if !args.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            format!("{name}() takes no arguments ({} given)", args.len()),
+        ));
+    }
+    match name {
+        "_thread.exit" | "_thread.exit_thread" => Err(ctx.exception("SystemExit", &[])),
+        "_thread._shutdown" => super::thread_worker::call(ctx, "shutdown", args, kwargs),
+        "_thread._count" => {
+            let count = ctx.interpreter.worker_count.load(Ordering::SeqCst);
+            ctx.workers.reap_finished(&mut ctx.heap);
+            Ok(ctx.int(count as i64))
         }
-        if matches!(name, "_thread.exit" | "_thread.exit_thread") {
-            return Err(ctx.exception("SystemExit", &[]));
-        }
-        if name == "_thread._shutdown" {
-            return super::thread_worker::call(ctx, "shutdown", args, kwargs);
-        }
-        let count = ctx.interpreter.worker_count.load(Ordering::SeqCst);
-        ctx.workers.reap_finished(&mut ctx.heap);
-        return Ok(ctx.int(count as i64));
+        _ => unreachable!("thread startup is prepared by the registered caller"),
+    }
+}
+
+pub(super) fn prepare_start(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<super::thread_worker::Start> {
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "start_new_thread() takes no keyword arguments",
+        ));
     }
     let [function, positional, rest @ ..] = args else {
         return Err(Error::new(
@@ -173,6 +178,5 @@ pub(super) fn call(
             "custom thread exception reporting requires the boxed Python heap",
         ));
     }
-    let ident = super::thread_worker::start_detached(ctx, callback, *function, roots)?;
-    Ok(ctx.int(ident as i64))
+    super::thread_worker::prepare_detached(ctx, callback, *function, roots)
 }

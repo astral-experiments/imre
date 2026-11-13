@@ -558,7 +558,11 @@ pub(super) enum Operation {
 }
 
 enum Registration {
-    Thread(Arc<Handle>, RegisteredThread),
+    Thread {
+        handle: Arc<Handle>,
+        handle_id: Id,
+        thread: RegisteredThread,
+    },
     Detached(String),
 }
 
@@ -652,7 +656,7 @@ impl Ready {
 }
 
 /// Everything needed to spawn the worker after releasing the selection borrow.
-struct Launch {
+pub(super) struct Start {
     operation: Operation,
     registration: Registration,
     operands: Vec<Id>,
@@ -660,7 +664,7 @@ struct Launch {
     fault_workers: Option<(Arc<()>, Arc<AtomicBool>)>,
 }
 
-impl Launch {
+impl Start {
     fn new(
         ctx: &Context,
         operation: Operation,
@@ -683,9 +687,9 @@ impl Launch {
     }
 }
 
-fn launch(request: Launch) -> Result<(Ready, Entry)> {
+fn launch(request: Start) -> Result<(Ready, Entry)> {
     let (handle, thread, detached_label) = match request.registration {
-        Registration::Thread(handle, thread) => (handle, Some(thread), None),
+        Registration::Thread { handle, thread, .. } => (handle, Some(thread), None),
         Registration::Detached(label) => (Arc::default(), None, Some(label)),
     };
     // The child's identity can arrive before the creator receives it. Dropping
@@ -799,25 +803,22 @@ fn launch(request: Launch) -> Result<(Ready, Entry)> {
 }
 
 /// A low-level caller owns only the bootstrap roots after the native worker is detached.
-pub(super) fn start_detached(
+pub(super) fn prepare_detached(
     ctx: &mut Context,
     callback: Operation,
     function: Id,
     operands: Vec<Id>,
-) -> Result<usize> {
+) -> Result<Start> {
     ctx.workers
         .reap_where(&mut ctx.heap, |entry| entry.thread.is_none());
     ctx.workers.reserve_entry()?;
     let label = ctx.repr(function);
-    let request = Launch::new(ctx, callback, Registration::Detached(label), operands);
-    let (ready, entry) = launch(request)?;
-    ctx.workers.entries.push(entry);
-    let started = ready.wait()?;
-    let ident = started.ident;
-    // No Python handle can join this worker. Release its native JoinHandle immediately.
-    started.handle.set_done()?;
-    started.publish()?;
-    Ok(ident)
+    Ok(Start::new(
+        ctx,
+        callback,
+        Registration::Detached(label),
+        operands,
+    ))
 }
 
 // Validate the actual bound method and its operands before starting an OS
@@ -891,18 +892,17 @@ fn worker_target(ctx: &Context, target: Id, args: Id, kwargs: Id) -> Result<(Ope
     Err(super::thread_callback::unsupported_target())
 }
 
-/// The caller retains the receiver and its selected operands until launch registers them.
-pub(super) struct Start {
-    owner: Id,
-    handle: Id,
-    request: Launch,
-}
-
 impl Start {
     /// # Safety
     /// Run immediately after preparation, before reentering Python on the owning frame.
     pub(super) unsafe fn run(self, context: *mut Context) -> Result<Id> {
-        let ready = match launch(self.request) {
+        let receiver = match &self.registration {
+            Registration::Thread {
+                handle_id, thread, ..
+            } => Some((thread.owner, *handle_id)),
+            Registration::Detached(_) => None,
+        };
+        let ready = match launch(self) {
             Ok((ready, entry)) => {
                 // SAFETY: spawn runs no Python on the creator. Register the selected roots in
                 // the reserved slot before a callback, wait or collection can run here.
@@ -913,32 +913,44 @@ impl Start {
                 // SAFETY: the failed native spawn returned to the registered caller.
                 let ctx = unsafe { &mut *context };
                 // CPython consumes the handle even if the OS refuses to create a worker.
-                let error = ctx
-                    .set_attr(self.owner, "_handle", self.handle)
-                    .err()
-                    .unwrap_or(error);
+                let error = if let Some((owner, handle)) = receiver {
+                    ctx.set_attr(owner, "_handle", handle)
+                        .err()
+                        .unwrap_or(error)
+                } else {
+                    error
+                };
                 return Err(super::stdlib::io::qualify_error(ctx, error, None));
             }
         };
         let ready = ready.wait();
+        let Some((owner, handle)) = receiver else {
+            let started = ready?;
+            let ident = started.ident;
+            // Detached callers receive only the ident. Actual exit still owns the roots.
+            started.handle.set_done()?;
+            started.publish()?;
+            // SAFETY: publication has returned to the caller on its own thread.
+            return Ok(unsafe { &mut *context }.int(ident as i64));
+        };
         let (started, ident, tid) = {
             // SAFETY: the native wait has returned to the registered caller.
             let ctx = unsafe { &mut *context };
-            ctx.set_attr(self.owner, "_handle", self.handle)?;
+            ctx.set_attr(owner, "_handle", handle)?;
             let started = ready?;
             let ident = ctx.alloc(Value::Int(crate::Int::from_usize(started.ident)));
             let tid = started.native_id.map_or(NONE, |id| {
                 ctx.alloc(Value::Int(crate::Int::from_usize(id as usize)))
             });
-            ctx.set_attr(self.owner, "_ident", ident)?;
-            ctx.set_attr(self.owner, "_native_id", tid)?;
+            ctx.set_attr(owner, "_ident", ident)?;
+            ctx.set_attr(owner, "_native_id", tid)?;
             (started, ident, tid)
         };
         // Ordinary writes attach the IDs to the receiver. Allocation temporaries in the
         // current frame also keep them live if an attribute hook redirects a write.
         started.publish()?;
         // SAFETY: native publication has finished and the caller again owns the context.
-        Ok(unsafe { &mut *context }.alloc(Value::Tuple(vec![self.handle, ident, tid])))
+        Ok(unsafe { &mut *context }.alloc(Value::Tuple(vec![handle, ident, tid])))
     }
 }
 
@@ -997,11 +1009,16 @@ pub(super) fn prepare_start(
     }
     ctx.workers.reserve_entry()?;
     let thread = RegisteredThread { daemon, owner };
-    Ok(Start {
-        owner,
-        handle: handle_id,
-        request: Launch::new(ctx, operation, Registration::Thread(handle, thread), roots),
-    })
+    Ok(Start::new(
+        ctx,
+        operation,
+        Registration::Thread {
+            handle,
+            handle_id,
+            thread,
+        },
+        roots,
+    ))
 }
 
 pub(super) fn call(

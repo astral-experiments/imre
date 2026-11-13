@@ -8234,6 +8234,11 @@ impl Context {
                                 .map(|start| RegisteredCall::Start(Box::new(start)))
                                 .map_err(|error| stdlib::io::qualify_error(self, error, None));
                         }
+                        "_thread.start_new_thread" => {
+                            return super::lowlevel_threads::prepare_start(self, &args, &kwargs)
+                                .map(|start| RegisteredCall::Start(Box::new(start)))
+                                .map_err(|error| stdlib::io::qualify_error(self, error, None));
+                        }
                         "_thread._ThreadHandle.join" => {
                             return thread_handle::prepare_join(self, &args, &kwargs);
                         }

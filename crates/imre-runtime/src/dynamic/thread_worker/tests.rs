@@ -121,7 +121,7 @@ fn launch(
     registration: Registration,
     roots: Vec<Id>,
 ) -> Result<(usize, Option<u64>)> {
-    let request = super::Launch::new(ctx, operation, registration, roots);
+    let request = super::Start::new(ctx, operation, registration, roots);
     let (ready, entry) = super::launch(request)?;
     ctx.workers.entries.push(entry);
     let started = ready.wait()?;
@@ -131,7 +131,11 @@ fn launch(
 }
 
 fn registered(handle: &Arc<Handle>, daemon: bool, owner: Id) -> Registration {
-    Registration::Thread(Arc::clone(handle), RegisteredThread { daemon, owner })
+    Registration::Thread {
+        handle: Arc::clone(handle),
+        handle_id: NONE,
+        thread: RegisteredThread { daemon, owner },
+    }
 }
 
 #[test]
@@ -193,7 +197,7 @@ fn worker_waits_for_the_creator_to_publish_its_receiver() {
         let prefix = Arc::<PrimitiveLock>::default();
         let body = Arc::<PrimitiveLock>::default();
         assert!(prefix.acquire(false, None));
-        let request = super::Launch::new(
+        let request = super::Start::new(
             &ctx,
             Operation::Acquire {
                 wait: Acquire::blocking(&body),
@@ -300,7 +304,7 @@ fn joined_and_detached_operands_are_released_at_their_own_checkpoints() {
     let weak = ctx.heap.native_weak_reference(operand).unwrap();
 
     let active = while_lock_held(|gate| {
-        let ident = start_detached(
+        let start = prepare_detached(
             &mut ctx,
             Operation::Acquire {
                 wait: Acquire::blocking(gate),
@@ -310,7 +314,10 @@ fn joined_and_detached_operands_are_released_at_their_own_checkpoints() {
             vec![operand],
         )
         .unwrap();
-        assert_ne!(ident, thread_ident());
+        // SAFETY: the prepared request belongs to this exclusively owned context.
+        let ident = unsafe { start.run(&raw mut ctx) }.unwrap();
+        let main = ctx.int(thread_ident() as i64);
+        assert!(!ctx.equal(ident, main));
         assert!(ctx.workers.has_unreaped_workers());
         assert!(ctx.workers.shutdown_handles().next().is_none());
         assert!(ctx.workers.live_threads().next().is_none());
