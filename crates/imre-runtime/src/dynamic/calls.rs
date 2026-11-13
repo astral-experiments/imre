@@ -261,6 +261,7 @@ pub(super) enum RegisteredCall {
         module: bool,
         discard: bool,
     },
+    Start(Box<thread_worker::Start>),
     Join(thread_worker::Join),
     Acquire(thread_lock::Acquire),
     Recv(stdlib::socket::Recv),
@@ -286,6 +287,8 @@ impl RegisteredCall {
             }
             // SAFETY: the interrupted caller remains rooted in this exclusively executing context.
             Self::Join(join) => unsafe { join.run(context) },
+            // SAFETY: the native worker takes no reference into its creator's heap.
+            Self::Start(start) => unsafe { start.run(context) },
             Self::Acquire(wait) => Ok(wait.run()),
             // SAFETY: the caller roots the frame and owns the context on this thread.
             Self::Recv(recv) => unsafe { recv.run(context) },
@@ -8220,6 +8223,11 @@ impl Context {
                 }
                 Value::Native(ref name) => {
                     let method = match name.as_str() {
+                        "_imre_thread.start" => {
+                            return thread_worker::prepare_start(self, &args, &kwargs)
+                                .map(|start| RegisteredCall::Start(Box::new(start)))
+                                .map_err(|error| stdlib::io::qualify_error(self, error, None));
+                        }
                         "_thread._ThreadHandle.join" => {
                             return thread_handle::prepare_join(self, &args, &kwargs);
                         }

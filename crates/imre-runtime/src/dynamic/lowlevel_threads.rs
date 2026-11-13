@@ -80,25 +80,32 @@ impl Context {
     }
 }
 
+/// The registration owns its creator roots during bootstrap, even before the child is counted.
 pub(super) struct Running {
-    count: Arc<AtomicUsize>,
+    count: Option<Arc<AtomicUsize>>,
     roots_active: Arc<AtomicBool>,
 }
+
 impl Running {
-    pub(super) fn enter(count: Arc<AtomicUsize>, roots_active: Arc<AtomicBool>) -> Self {
-        count.fetch_add(1, Ordering::SeqCst);
+    pub(super) fn bootstrap(roots_active: Arc<AtomicBool>) -> Self {
         Self {
-            count,
+            count: None,
             roots_active,
         }
     }
+
+    pub(super) fn enter(&mut self, count: Arc<AtomicUsize>) {
+        count.fetch_add(1, Ordering::SeqCst);
+        self.count = Some(count);
+    }
 }
+
 impl Drop for Running {
     fn drop(&mut self) {
-        // Release bootstrap references before publishing the lower count, even
-        // when the detached OS thread is still destroying its private context.
         self.roots_active.store(false, Ordering::Release);
-        self.count.fetch_sub(1, Ordering::SeqCst);
+        if let Some(count) = &self.count {
+            count.fetch_sub(1, Ordering::SeqCst);
+        }
     }
 }
 
