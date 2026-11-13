@@ -110,16 +110,8 @@ impl RegisteredSource<'_> {
                 let Some(target) = receiver(target, method.is_some(), method)? else {
                     return Ok(None);
                 };
-                let mut value = bound_call(call, selection, target, None);
-                let arguments = match &mut value.kind {
-                    ExprKind::Invoke { args, .. } => &mut args.values,
-                    ExprKind::Builtin(Builtin::RegisteredCall(_), operands) => operands,
-                    _ => unreachable!("bound call owns its evaluated arguments"),
-                };
-                for argument in imre_ast::argument_values(&call.arguments) {
-                    arguments.push(child(argument)?);
-                }
-                Ok(Some(value))
+                let arguments = call_arguments(call, child)?;
+                Ok(Some(bound_call(call, selection, target, arguments)))
             }
             ast::Expr::Attribute(field) => Ok(receiver(&field.value, true, None)?.map(|value| {
                 let op = attribute.map_or_else(
@@ -135,16 +127,9 @@ impl RegisteredSource<'_> {
     /// Ordinary object calls select their own source target before evaluating the operands.
     pub(super) fn located_operation(self, node: &ast::Expr, value: Expr) -> Expr {
         let range = node.range();
-        let callable = match &value.kind {
-            ExprKind::Invoke { args, .. } => args.site.python().map(|site| site.range),
-            ExprKind::Builtin(Builtin::RegisteredCall(call), _)
-                if matches!(call.target, ir::RegisteredCallTarget::Callable { .. }) =>
-            {
-                Some(call.range)
-            }
-            _ => None,
-        };
-        if callable == Some(range) {
+        if value.python_call().is_some_and(|call| {
+            call.range == range && matches!(call.target, ir::RegisteredCallTarget::Callable { .. })
+        }) {
             located(range, range.start(), value)
         } else {
             self.located(node, value)
@@ -153,15 +138,12 @@ impl RegisteredSource<'_> {
 
     pub(super) fn located(self, node: &ast::Expr, value: Expr) -> Expr {
         let range = node.range();
-        let position = match &value.kind {
-            ExprKind::Builtin(
-                Builtin::RegisteredCall(ir::RegisteredCall {
-                    target: ir::RegisteredCallTarget::Method { name_start, .. },
-                    range: selected,
-                    ..
-                }),
-                _,
-            ) if *selected == range => *name_start,
+        let position = match value.python_call() {
+            Some(ir::RegisteredCall {
+                target: ir::RegisteredCallTarget::Method { name_start, .. },
+                range: selected,
+                ..
+            }) if *selected == range => *name_start,
             _ => imre_ast::expression_position(node, self.method_imports, self.private_names),
         };
         located(range, position, value)
@@ -404,10 +386,14 @@ pub(in crate::frontend) fn bound_method_operation(
     field: &ast::ExprAttribute,
     arguments: ir::RegisteredArguments,
 ) -> Builtin {
-    call_operation(call, method_target(field), arguments)
+    Builtin::RegisteredCall(ir::RegisteredCall::new(
+        call.range(),
+        method_target(field),
+        arguments,
+    ))
 }
 
-fn callable_target(call: &ast::ExprCall) -> ir::RegisteredCallTarget {
+pub(in crate::frontend) fn callable_target(call: &ast::ExprCall) -> ir::RegisteredCallTarget {
     ir::RegisteredCallTarget::Callable {
         end: call.func.end(),
         suspended_name: call.func.is_name_expr().then(|| call.func.range()),
@@ -469,73 +455,48 @@ pub(in crate::frontend) fn fixed_positional_arguments(call: &ast::ExprCall) -> b
     )
 }
 
-/// Invoke a checked callable value with its positional operands. Method resolution
-/// and argument packing carry additional binding data in the registered call.
+fn call_arguments<E>(
+    call: &ast::ExprCall,
+    check: impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
+) -> StdResult<Vec<Expr>, E> {
+    imre_ast::argument_values(&call.arguments)
+        .map(check)
+        .collect()
+}
+
+/// Bounded keywords carry their checked names and values on the same invocation as positional calls.
 fn bound_call(
     call: &ast::ExprCall,
     selection: ir::RegisteredCallTarget,
     target: Expr,
-    arguments: Option<Vec<Expr>>,
+    mut arguments: Vec<Expr>,
 ) -> Expr {
-    let arguments =
-        |prefix| arguments.unwrap_or_else(|| Vec::with_capacity(call.arguments.len() + prefix));
     let layout = match selection {
-        // A direct method target already established the bounded, unexpanded arguments.
         ir::RegisteredCallTarget::Method { .. } => fixed_argument_layout(&call.arguments),
         ir::RegisteredCallTarget::Callable { .. } => registered_argument_layout(&call.arguments),
     };
-    if target.ty == Type::PythonObject
-        && matches!(layout, ir::RegisteredArguments::Positional)
-        && let ir::RegisteredCallTarget::Callable {
-            end,
-            suspended_name,
-        } = selection
-    {
-        return positional_invoke(call.range(), end, suspended_name, target, arguments(0));
+    let invoke = match selection {
+        ir::RegisteredCallTarget::Callable { .. } => {
+            target.ty == Type::PythonObject && !matches!(layout, ir::RegisteredArguments::Packed(_))
+        }
+        ir::RegisteredCallTarget::Method { .. } => {
+            matches!(layout, ir::RegisteredArguments::Keywords { .. })
+        }
+    };
+    let site = ir::RegisteredCall::new(call.range(), selection, layout);
+    if invoke {
+        return invoke_value(site, target, arguments);
     }
-    let mut arguments = arguments(1);
     arguments.insert(0, target);
-    super::operation(
-        call_operation(call, selection, layout),
-        Type::PythonObject,
-        arguments,
-    )
+    super::operation(Builtin::RegisteredCall(site), Type::PythonObject, arguments)
 }
 
-fn call_operation(
-    call: &ast::ExprCall,
-    target: ir::RegisteredCallTarget,
-    arguments: ir::RegisteredArguments,
-) -> Builtin {
-    Builtin::RegisteredCall(ir::RegisteredCall {
-        range: call.range(),
-        target,
-        arguments,
-        partition_field: None,
-        explicit_scope: false,
-    })
-}
-
-fn positional_invoke(
-    range: TextRange,
-    callee_end: TextSize,
-    suspended_name: Option<TextRange>,
-    target: Expr,
-    arguments: Vec<Expr>,
-) -> Expr {
+fn invoke_value(site: ir::RegisteredCall, target: Expr, arguments: Vec<Expr>) -> Expr {
     Expr {
         ty: Type::PythonObject,
         kind: ExprKind::Invoke {
             callable: Box::new(target),
-            args: ir::CallArgs::positional_at(
-                arguments,
-                ir::CallSite::Python(ir::InvokeSite {
-                    range,
-                    callee_end,
-                    suspended_name,
-                    scope: None,
-                }),
-            ),
+            args: ir::CallArgs::positional_at(arguments, ir::CallSite::Python(site.invoke_site())),
         },
     }
 }
@@ -553,13 +514,12 @@ impl Checker<'_> {
             .expect("registered callback frame")
             .operands(self.source, self.graph.python_optimization());
         let target = source.located(&call.func, callable);
-        let mut value = positional_invoke(
+        let site = ir::RegisteredCall::new(
             call.range(),
-            call.func.end(),
-            Some(call.func.range()),
-            target,
-            arguments,
+            callable_target(call),
+            ir::RegisteredArguments::Positional,
         );
+        let mut value = invoke_value(site, target, arguments);
         if let Some(slot) = self.namespace {
             in_namespace(&mut value, self.local(slot));
         }
@@ -571,18 +531,12 @@ impl Checker<'_> {
         call: &ast::ExprCall,
         target: Expr,
     ) -> Result<Expr, String> {
-        let arguments = self.registered_call_arguments(call)?;
+        let arguments = call_arguments(call, |arg| self.expr(arg))?;
         Ok(self.call_with_values(call, target, arguments))
     }
 
-    fn registered_call_arguments(&mut self, call: &ast::ExprCall) -> Result<Vec<Expr>, String> {
-        imre_ast::argument_values(&call.arguments)
-            .map(|arg| self.expr(arg))
-            .collect()
-    }
-
     fn call_with_values(&self, call: &ast::ExprCall, target: Expr, arguments: Vec<Expr>) -> Expr {
-        let mut value = bound_call(call, callable_target(call), target, Some(arguments));
+        let mut value = bound_call(call, callable_target(call), target, arguments);
         if let Some(slot) = self.namespace {
             in_namespace(&mut value, self.local(slot));
         }
@@ -601,7 +555,7 @@ impl Checker<'_> {
             .operands(self.source, self.graph.python_optimization());
         let (selection, receiver) = source.call_target(call);
         let target = registered_value(receiver, source).map_or_else(|| self.expr(receiver), Ok)?;
-        let mut value = bound_call(call, selection, target, Some(operands));
+        let mut value = bound_call(call, selection, target, operands);
         if let Some(slot) = self.namespace {
             in_namespace(&mut value, self.local(slot));
         }
@@ -617,7 +571,7 @@ impl Checker<'_> {
         receiver: Expr,
         fixed_result: Type,
     ) -> Result<Expr, String> {
-        let arguments = self.registered_call_arguments(call)?;
+        let arguments = call_arguments(call, |arg| self.expr(arg))?;
         self.registered_method_call_with_values(call, method, receiver, fixed_result, arguments)
     }
 
@@ -649,12 +603,7 @@ pub(in crate::frontend) fn name_call(
     name: &str,
     arguments: Vec<Expr>,
 ) -> Expr {
-    bound_call(
-        call,
-        callable_target(call),
-        name_binding(name),
-        Some(arguments),
-    )
+    bound_call(call, callable_target(call), name_binding(name), arguments)
 }
 
 pub(super) fn number_literal(number: &ast::Number, minus: bool) -> ExprKind {
@@ -1430,7 +1379,7 @@ impl Checker<'_> {
             // Let the list method check its written operands before binding the live method.
             let receiver = self.expr(&method.value)?;
             let mut value = self.call_on(call, Some(receiver))?;
-            if !matches!(value.kind, ExprKind::Builtin(Builtin::RegisteredCall(_), _)) {
+            if value.python_call().is_none() {
                 return Err(self.scoped_builtin_error("declared list method", call));
             }
             if let Some(slot) = self.namespace {
@@ -1675,7 +1624,7 @@ mod tests {
         assert!(
             matches!(callable.kind, ExprKind::Builtin(Builtin::RegisteredName(ref name), _) if name == "globals")
         );
-        assert_eq!(args.site.python().unwrap().range, call.range());
+        assert_eq!(args.site.python().unwrap().call.range, call.range());
     }
 
     #[test]
@@ -1770,9 +1719,10 @@ mod tests {
             registered_value(expr, source).unwrap()
         });
         let method = calls.next().unwrap();
-        let (Builtin::RegisteredCall(method), operands, _) = operation_and_position(&method) else {
-            panic!("expected a complete method call");
+        let (ExprKind::Invoke { callable, args }, _) = value_and_position(&method) else {
+            panic!("expected a checked method invocation");
         };
+        let method = &args.site.python().unwrap().call;
         assert!(
             matches!(&method.target, ir::RegisteredCallTarget::Method { name, .. } if name == "emit")
         );
@@ -1783,7 +1733,14 @@ mod tests {
                 names: vec!["named".into()],
             }
         );
-        assert_eq!(operands.len(), 3);
+        let names: Vec<_> = std::iter::once(callable.as_ref())
+            .chain(&args.values)
+            .map(|value| match operation_and_position(value).0 {
+                Builtin::RegisteredName(name) => name.as_str(),
+                _ => panic!("expected named operand"),
+            })
+            .collect();
+        assert_eq!(names, ["obj", "value", "arg"]);
         let call = calls.next().unwrap();
         let (Builtin::RegisteredCall(call), operands, _) = operation_and_position(&call) else {
             panic!("expected a complete packed call");

@@ -965,7 +965,7 @@ mod tests {
                 assert!(expr.is_registered_invoke());
                 assert!(matches!(callable.ty, Type::Callable(_)));
                 assert_eq!(args.values[0].ty, Type::Int);
-                let range = args.site.python().unwrap().range;
+                let range = args.site.python().unwrap().call.range;
                 assert_eq!(&source[range], "sink(n + 1)");
                 invokes += 1;
             }
@@ -1018,7 +1018,7 @@ mod tests {
             if expr.is_registered_invoke()
                 && let ir::ExprKind::Invoke { args, .. } = &expr.kind
             {
-                calls.push(&source[args.site.python().unwrap().range]);
+                calls.push(&source[args.site.python().unwrap().call.range]);
             }
         });
         assert_eq!(

@@ -162,7 +162,7 @@ pub(crate) fn registered(frame: crate::frontend::RegisteredRegion<'_>) -> Result
                 ),
                 ExprKind::Invoke { .. } => require(
                     value.is_registered_invoke(),
-                    "registered invocation needs a Python callable, call position and positional arguments",
+                    "registered invocation needs a Python callable, call position and fixed argument layout",
                 ),
                 ExprKind::Builtin(Builtin::RegisteredLocation(..), args) => match args.as_slice() {
                     [inner] => same(value.ty, inner.ty),
@@ -1053,12 +1053,17 @@ mod tests {
         module.entry.body = vec![invoke(CallArgs::positional(vec![Expr::integer(1)]))];
         super::module(&module).unwrap();
         let mut frame_args = CallArgs::positional(vec![Expr::integer(1)]);
-        frame_args.site = ir::CallSite::Python(ir::InvokeSite {
-            range: ruff_text_size::TextRange::new(0.into(), 4.into()),
-            callee_end: 1.into(),
-            suspended_name: None,
-            scope: None,
-        });
+        frame_args.site = ir::CallSite::Python(
+            ir::RegisteredCall::new(
+                ruff_text_size::TextRange::new(0.into(), 4.into()),
+                ir::RegisteredCallTarget::Callable {
+                    end: 1.into(),
+                    suspended_name: None,
+                },
+                ir::RegisteredArguments::Positional,
+            )
+            .invoke_site(),
+        );
         module.entry.body = vec![invoke(frame_args)];
         reject(&module, "fixed invocation cannot use a Python call site");
         module.entry.body = vec![invoke(CallArgs::positional(Vec::new()))];

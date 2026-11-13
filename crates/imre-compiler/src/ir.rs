@@ -708,28 +708,66 @@ impl Expr {
         }
     }
 
-    /// A registered invocation carries the Python binder's position and source-ordered values.
+    /// The checked call supplies its physical target and source-ordered arguments.
+    pub(crate) fn python_call(&self) -> Option<&RegisteredCall> {
+        match &self.kind {
+            ExprKind::Invoke { args, .. } => Some(&args.site.python()?.call),
+            ExprKind::Builtin(Builtin::RegisteredCall(call), _) => Some(call),
+            _ => None,
+        }
+    }
+
     pub(crate) fn is_registered_invoke(&self) -> bool {
         let ExprKind::Invoke { callable, args } = &self.kind else {
             return false;
         };
+        let Some(site) = args.site.python() else {
+            return false;
+        };
+        let call = &site.call;
+        let end = match &call.target {
+            RegisteredCallTarget::Callable {
+                end,
+                suspended_name,
+            } => {
+                if !callable.registered_invoke_target(*suspended_name)
+                    || suspended_name
+                        .is_some_and(|name| !call.range.contains_range(name) || name.end() != *end)
+                {
+                    return false;
+                }
+                *end
+            }
+            RegisteredCallTarget::Method {
+                attribute,
+                name_start,
+                ..
+            } => {
+                if !call.range.contains_range(*attribute) || !attribute.contains(*name_start) {
+                    return false;
+                }
+                attribute.end()
+            }
+        };
+        let fixed = match &call.arguments {
+            RegisteredArguments::Positional => true,
+            RegisteredArguments::Keywords { positional, names } => {
+                !names.is_empty() && positional.checked_add(names.len()) == Some(args.values.len())
+            }
+            RegisteredArguments::Packed(_) => false,
+        };
         self.ty == Type::PythonObject
-            && args.site.python().is_some_and(|site| {
-                callable.registered_invoke_target(site)
-                    && site.range.start() < site.callee_end
-                    && site.callee_end < site.range.end()
-                    && site.suspended_name.is_none_or(|name| {
-                        site.range.contains_range(name) && name.end() == site.callee_end
-                    })
-                    && site
-                        .scope
-                        .as_ref()
-                        .is_none_or(|scope| scope.ty == Type::PythonObject)
-            })
+            && fixed
+            && call.range.start() < end
+            && end < call.range.end()
+            && site
+                .scope
+                .as_ref()
+                .is_none_or(|scope| scope.ty == Type::PythonObject)
             && args.order.is_empty()
     }
 
-    fn registered_invoke_target(&self, site: &InvokeSite) -> bool {
+    fn registered_invoke_target(&self, suspended_name: Option<ruff_text_size::TextRange>) -> bool {
         if self.ty == Type::PythonObject {
             return true;
         }
@@ -742,7 +780,7 @@ impl Expr {
         matches!(self.ty, Type::Callable(_))
             && local.ty == self.ty
             && matches!(local.kind, ExprKind::Local(_))
-            && site.suspended_name == Some(*range)
+            && suspended_name == Some(*range)
     }
 
     pub(crate) fn unrepresented() -> Self {
@@ -989,9 +1027,7 @@ pub(crate) enum DisplayKind {
 /// The Python call position and, for an inline comprehension, its lexical namespace.
 #[derive(Clone)]
 pub(crate) struct InvokeSite {
-    pub range: ruff_text_size::TextRange,
-    pub callee_end: ruff_text_size::TextSize,
-    pub suspended_name: Option<ruff_text_size::TextRange>,
+    pub call: Box<RegisteredCall>,
     pub scope: Option<Box<Expr>>,
 }
 
@@ -1596,6 +1632,29 @@ pub(crate) struct RegisteredCall {
     pub(crate) arguments: RegisteredArguments,
     /// A comprehension supplies its Python namespace before the callable operand.
     pub(crate) explicit_scope: bool,
+}
+
+impl RegisteredCall {
+    pub(crate) fn new(
+        range: ruff_text_size::TextRange,
+        target: RegisteredCallTarget,
+        arguments: RegisteredArguments,
+    ) -> Self {
+        Self {
+            range,
+            target,
+            arguments,
+            partition_field: None,
+            explicit_scope: false,
+        }
+    }
+
+    pub(crate) fn invoke_site(self) -> InvokeSite {
+        InvokeSite {
+            call: Box::new(self),
+            scope: None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

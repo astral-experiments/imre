@@ -258,28 +258,13 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             return CheckedValue::owned(native.native_call(target, args, values, returns));
         };
 
-        self.python_invoke(site, &args.values, |frame, next| {
-            frame.kept_call_value(callable, next)
-        })
-    }
-
-    fn python_invoke(
-        &mut self,
-        site: &ir::InvokeSite,
-        args: &[Expr],
-        callable: impl FnOnce(&mut CheckedFrame<'_, '_, '_>, &mut String) -> String,
-    ) -> CheckedValue {
-        let call = ir::RegisteredCall {
-            target: ir::RegisteredCallTarget::Callable {
-                end: site.callee_end,
-                suspended_name: site.suspended_name,
-            },
-            range: site.range,
-            arguments: ir::RegisteredArguments::Positional,
-            explicit_scope: site.scope.is_some(),
-            partition_field: None,
-        };
-        self.python_call(&call, site.scope.as_deref(), args, callable)
+        self.python_call(
+            &site.call,
+            site.scope.as_deref(),
+            callable,
+            &args.values,
+            CheckedFrame::kept_call_value,
+        )
     }
 
     pub(super) fn registered_call(
@@ -294,15 +279,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         } else {
             (None, operand, args)
         };
-        self.python_call(call, scope, args, |frame, next| {
-            if matches!(call.target, ir::RegisteredCallTarget::Callable { .. })
-                && !matches!(call.arguments, ir::RegisteredArguments::Packed(_))
-            {
-                frame.kept_call_value(target, next)
-            } else {
-                frame.evaluate_handle(target)
-            }
-        })
+        self.python_call(call, scope, target, args, CheckedFrame::kept_call_value)
     }
 
     /// Resolve the callable and any bound receiver before capturing the written arguments.
@@ -310,8 +287,9 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         &mut self,
         call: &ir::RegisteredCall,
         scope: Option<&Expr>,
+        target: &Expr,
         args: &[Expr],
-        target: impl FnOnce(&mut CheckedFrame<'_, '_, '_>, &mut String) -> String,
+        load_callable: fn(&mut CheckedFrame<'f, 'a, 'p>, &Expr, &mut String) -> String,
     ) -> CheckedValue {
         use super::registered::CallArguments;
         use ir::{RegisteredArguments, RegisteredCallTarget};
@@ -337,7 +315,11 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 frame.kept_call_value(scope, &mut next)
             }
         });
-        let target = target(frame, &mut next);
+        let target = if matches!(call.target, RegisteredCallTarget::Callable { .. }) && !packed {
+            load_callable(frame, target, &mut next)
+        } else {
+            frame.evaluate_handle(target)
+        };
         let (callable, receiver, end) = match &call.target {
             RegisteredCallTarget::Callable { end, .. } => (target, None, *end),
             RegisteredCallTarget::Method {
@@ -932,10 +914,12 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                     let args = expr
                         .named_call_arguments()
                         .expect("placed call has its written operands");
-                    return CheckedBody::registered(frame.reborrow()).python_invoke(
-                        site,
+                    return CheckedBody::registered(frame.reborrow()).python_call(
+                        &site.call,
+                        None,
+                        target,
                         args,
-                        |frame, next| frame.source_callee(target, next),
+                        CheckedFrame::source_callee,
                     );
                 }
                 if let Some(FixedAttribute::Operation { operation, .. }) = attribute {

@@ -594,7 +594,11 @@ impl SourceChecks {
             .all(|error| !definition.contains_range(*error))
     }
 
-    pub(super) fn cached(graph: &SourceGraph, module: ModuleId, definition: TextRange) -> Option<bool> {
+    pub(super) fn cached(
+        graph: &SourceGraph,
+        module: ModuleId,
+        definition: TextRange,
+    ) -> Option<bool> {
         graph
             .registered_source_errors
             .borrow()
@@ -5578,15 +5582,19 @@ print(capture(["echo", "capture"], cwd=Path(".")))
             let body = retained.unwrap_or_else(|| panic!("missing {}", definition.name));
             let mut calls = Vec::new();
             ir::walk_expressions(&body.function.body, &mut |value| {
-                let ExprKind::Builtin(Builtin::RegisteredCall(site), operands) = &value.kind else {
+                let Some(site) = value.python_call() else {
                     return;
                 };
                 let name: &str = match &site.target {
                     ir::RegisteredCallTarget::Callable { .. } => {
+                        let ExprKind::Invoke { callable, .. } = &value.kind else {
+                            panic!("expected a checked invocation")
+                        };
                         let ExprKind::Builtin(Builtin::RegisteredAttribute { name, .. }, _) =
-                            &operands[0].without_location().kind
+                            &callable.without_location().kind
                         else {
-                            panic!("expected a live module member")
+                            // Other positional invocations are unrelated to the imported member.
+                            return;
                         };
                         name
                     }
@@ -5631,8 +5639,8 @@ main()
         main.region().walk(&mut |node, _| match node {
             ir::Node::Expression(value) => match &value.kind {
                 ExprKind::Builtin(Builtin::RegisteredAttribute { name, .. }, _) if name == "ArgumentParser" => constructed = true,
-                ExprKind::Builtin(Builtin::RegisteredCall(site), _) => {
-                    registered |= matches!(&site.target, ir::RegisteredCallTarget::Method { name, .. } if name == "add_argument");
+                ExprKind::Invoke { args, .. } => {
+                    registered |= matches!(&args.site.python().unwrap().call.target, ir::RegisteredCallTarget::Method { name, .. } if name == "add_argument");
                 }
                 ExprKind::Unary(ast::UnaryOp::Not, operand) => {
                     negated |= matches!(&operand.kind, ExprKind::Builtin(Builtin::Bool, args)
@@ -6188,10 +6196,16 @@ publish(5, callback)
             }) => {
                 let site = args.site.python().unwrap();
                 let source = &graph.modules[graph.entry].source;
-                assert_eq!(&source[site.range], "sink(answer)");
-                let name = site.suspended_name.unwrap();
+                assert_eq!(&source[site.call.range], "sink(answer)");
+                let ir::RegisteredCallTarget::Callable {
+                    end,
+                    suspended_name: Some(name),
+                } = site.call.target
+                else {
+                    panic!("expected a named callable")
+                };
                 assert_eq!(&source[name], "sink");
-                assert_eq!(name.end(), site.callee_end);
+                assert_eq!(name.end(), end);
                 assert!(args.order.is_empty());
                 assert_eq!(*ty, Type::PythonObject);
                 invokes += 1;
@@ -6226,14 +6240,16 @@ publish(5, callback)
                 else {
                     panic!("expected the checked callable operand");
                 };
-                assert_eq!(site.callee_end, range.end());
+                assert!(
+                    matches!(&site.call.target, ir::RegisteredCallTarget::Callable { end, .. } if *end == range.end())
+                );
                 let kind = match &callee[0].kind {
                     ExprKind::Local(_) => "local",
                     ExprKind::Invoke { .. } => "result",
                     ExprKind::Conditional(..) => "conditional",
                     _ => panic!("unexpected positional callable"),
                 };
-                calls.push((&source[site.range], kind));
+                calls.push((&source[site.call.range], kind));
             }
             ExprKind::Builtin(Builtin::RegisteredCall(site), _) => {
                 let kind = match (&site.target, &site.arguments) {
@@ -6515,7 +6531,8 @@ publish(5, callback)
                 assert_eq!(receiver[0].ty, Type::Str);
                 methods.push(name.as_str());
             }
-            ExprKind::Builtin(Builtin::RegisteredCall(call), operands) => {
+            ExprKind::Invoke { args, .. } => {
+                let call = &args.site.python().unwrap().call;
                 assert_eq!(
                     &source[call.range],
                     "template.format(left + right, name=label)"
@@ -6527,7 +6544,7 @@ publish(5, callback)
                         names: vec!["name".into()],
                     }
                 );
-                assert_eq!(operands.len(), 3);
+                assert_eq!(args.values.len(), 2);
                 calls += 1;
             }
             ExprKind::Local(slot) => slots.push(*slot),
@@ -7390,7 +7407,7 @@ publish(5, callback)
                     panic!("expected the comprehension's namespace slot")
                 };
                 scoped_calls += 1;
-                if &graph.modules[graph.entry].source[site.range]
+                if &graph.modules[graph.entry].source[site.call.range]
                     == "(locals if observed else globals)()"
                 {
                     assert!(checked.local_names.values().any(|binding| {
