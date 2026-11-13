@@ -2515,6 +2515,10 @@ impl Context {
         if let Some(namespace) = scope.binding_namespace(name) {
             return self.dict_named_item(namespace, name);
         }
+        self.frame_binding(scope, name)
+    }
+
+    fn frame_binding(&self, scope: &Scope, name: &str) -> Option<Id> {
         let middle = name.as_bytes().get(name.len() / 2).copied().unwrap_or(0);
         let bucket = name.len() ^ usize::from(middle);
         let slot = &self.scope_name_slots[bucket % self.scope_name_slots.len()];
@@ -2973,15 +2977,21 @@ impl Context {
                 }
             }
             let s = self.scope_data(scope);
-            if s.closure.cells.contains_key(name) {
-                return self
-                    .scope_name(scope, name)
-                    .ok_or_else(|| self.missing_binding(origin, scope, name));
+            if let Some(&cell) = s.closure.cells.get(name) {
+                let value = match self.heap.get(cell) {
+                    Value::Cell(value) => *value,
+                    _ => self.namespace_binding(s, name),
+                };
+                return value.ok_or_else(|| self.missing_binding(origin, scope, name));
             }
             if let Some(globals) = s.exec_globals {
                 return self.source_global(globals, name);
             }
-            if let Some(id) = self.lookup_scope_name(scope, name)? {
+            let binding = match s.binding_namespace(name) {
+                Some(dict) => self.lookup_dict_name(dict, name)?,
+                None => self.frame_binding(s, name),
+            };
+            if let Some(id) = binding {
                 return Ok(id);
             }
             let s = self.scope_data(scope);
