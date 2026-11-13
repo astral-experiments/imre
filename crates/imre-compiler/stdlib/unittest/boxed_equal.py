@@ -3,7 +3,8 @@
 def _baseAssertEqual(self, first, second, msg=None):
     if not first == second:
         difference = _inequality_message(_safe_repr(first), _safe_repr(second))
-        raise self.failureException(self._formatMessage(msg, difference))
+        msg = self._formatMessage(msg, difference)
+        raise self.failureException(msg)
 
 
 _text_equal = TestCase.assertMultiLineEqual
