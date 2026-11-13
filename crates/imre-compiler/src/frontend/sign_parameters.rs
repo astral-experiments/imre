@@ -59,8 +59,7 @@ impl<'a> Visitor<'a> for Reads<'_> {
             | ast::Expr::ListComp(_)
             | ast::Expr::SetComp(_)
             | ast::Expr::DictComp(_) => {
-                self.other |=
-                    comprehensions::free_reads(expr, HashSet::new()).contains(self.parameter);
+                self.other |= function_scope::expression_reads(expr).contains(self.parameter);
             }
             _ => walk_expr(self, expr),
         }

@@ -512,8 +512,9 @@ impl Checker<'_> {
             })
             .collect::<Vec<_>>();
         bound.extend(variadics.iter().map(|(param, _)| param.name.to_string()));
-        let mut captures = comprehensions::free_reads(&lambda.body, bound.clone())
+        let mut captures = function_scope::expression_reads(&lambda.body)
             .into_iter()
+            .filter(|name| !bound.contains(name))
             .filter_map(|name| self.names.get(&name).map(|&slot| (slot, name)))
             .collect::<Vec<_>>();
         if !pull && !captures.is_empty() {
