@@ -7600,7 +7600,13 @@ impl<'a> Checker<'a> {
         if let Some(joined) = joined {
             self.restore_state(joined);
         }
-        Ok((statements::if_arms(arms, no), falls))
+        let body = statements::if_arms(arms, no);
+        if let Some(sites) = &mut self.fixed_sites
+            && let [Statement::If(_, yes, no)] = body.as_slice()
+        {
+            sites.statement(branch.test.range(), FixedNode::Branch(yes.len(), no.len()));
+        }
+        Ok((body, falls))
     }
 
     /// A call or expression can supply its own concrete collection layout.

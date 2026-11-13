@@ -173,7 +173,14 @@ impl CheckedBody<'_, '_, '_, '_> {
         {
             return self.test_operand_in_scope(&args[0], already_rooted);
         }
+        let at = match &self.0 {
+            Entry::Registered(frame) => frame.operand_range(expr),
+            Entry::Native(_) => None,
+        };
         if let ExprKind::Bool(value) = expr.kind {
+            if let Entry::Registered(frame) = &self.0 {
+                frame.next_fixed_site();
+            }
             return value.to_string();
         }
         if let ExprKind::Builtin(Builtin::RegisteredLocation(range, position, ..), operands) =
@@ -197,7 +204,7 @@ impl CheckedBody<'_, '_, '_, '_> {
             self.root_mark()
         };
         let value = self.operand(expr);
-        let bit = self.operand_truth(expr, &value, None);
+        let bit = self.operand_truth(expr, &value, at);
         self.release_input(value);
         self.end_roots(mark);
         bit
