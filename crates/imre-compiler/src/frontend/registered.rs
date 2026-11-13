@@ -1265,18 +1265,27 @@ fn bind_operand(operands: &mut Vec<PhysicalOperand>, value: PhysicalOperand, ty:
     Expr::registered_input(index, ty)
 }
 
-/// Both forms provide the checked function. A suite also supplies the operation
-/// inputs and child suites referenced by that function. Source preparation owns
-/// its suites, and emission borrows them.
-pub(crate) enum RegisteredBody<'p, S = &'p RegisteredSuite> {
+/// The graph lends its checked function. Source preparation owns either a complete
+/// lexical function or a suite with additional operands and child frames.
+pub(crate) enum RegisteredBody<'p, S = &'p RegisteredSuite, P = &'p RegisteredFunction> {
     Function(&'p RegisteredFunction),
+    Prepared(P),
     Suite(S),
 }
 
-impl RegisteredBody<'_, Box<RegisteredSuite>> {
+impl RegisteredBody<'_, Box<RegisteredSuite>, Box<RegisteredFunction>> {
+    pub(crate) fn from_suite(suite: RegisteredSuite) -> Self {
+        if suite.fully_checked() {
+            Self::Prepared(Box::new(suite.checked))
+        } else {
+            Self::Suite(Box::new(suite))
+        }
+    }
+
     pub(crate) fn as_ref(&self) -> RegisteredBody<'_> {
         match self {
             Self::Function(body) => RegisteredBody::Function(body),
+            Self::Prepared(body) => RegisteredBody::Prepared(body),
             Self::Suite(suite) => RegisteredBody::Suite(suite),
         }
     }
@@ -1291,7 +1300,6 @@ pub(crate) struct RegisteredSuite {
 }
 
 impl RegisteredSuite {
-    #[cfg(test)]
     pub(crate) fn fully_checked(&self) -> bool {
         self.operands.is_empty() && self.suites.is_empty()
     }
@@ -1606,7 +1614,7 @@ impl<'a> SuitePreparation<'a> {
                 site.prepare_entry,
             );
             let refusal = suite.refusal;
-            (RegisteredBody::Suite(Box::new(suite)), refusal)
+            (RegisteredBody::from_suite(suite), refusal)
         };
         header.body = Some(body);
         if let Some(refusal) = refusal {
