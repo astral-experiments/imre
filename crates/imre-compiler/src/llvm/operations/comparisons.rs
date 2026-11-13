@@ -112,29 +112,45 @@ impl<'f, 'a, 'p, 'm> CheckedBody<'f, 'a, 'p, 'm> {
                 } else if integer_pair && let Some(order) = Compare::from_operator(op) {
                     let (x, _) = self.integer_operand(left);
                     let (y, _) = self.integer_operand(right);
-                    // Only two tagged integers have their Python ordering directly in the words.
-                    let tags = self.body().instruction(format!("and i64 {x}, {y}"));
-                    let small = self.body().instruction(format!("trunc i64 {tags} to i1"));
-                    ValueJoin::select(
-                        self,
-                        Self::body,
-                        |code, yes, no| code.body().branch(&small, yes, no),
-                        |code| {
-                            let predicate = order.signed_predicate();
-                            let bit = code
-                                .body()
-                                .instruction(format!("icmp {predicate} i64 {x}, {y}"));
-                            code.python().boolean_result(&bit, false)
-                        },
-                        |code| CheckedValue::handle(code.python().op(op.as_str(), &[a, b])),
-                    )
-                    .expect("a comparison has a normal edge")
+                    self.integer_relation(order, &x, &y, |code| {
+                        CheckedValue::handle(code.python().op(op.as_str(), &[a, b]))
+                    })
                 } else {
                     CheckedValue::handle(self.python().op(op.as_str(), &[a, b]))
                 }
             }
             _ => unreachable!("comparison operands follow the selected representation"),
         }
+    }
+
+    /// The tagged words preserve signed integer order. A heap value takes the
+    /// calling convention's original integer or Python comparison.
+    pub(in crate::llvm) fn integer_relation(
+        &mut self,
+        order: Compare,
+        x: &str,
+        y: &str,
+        fallback: impl FnOnce(&mut Self) -> CheckedValue,
+    ) -> CheckedValue {
+        let both = self.body().instruction(format!("and i64 {x}, {y}"));
+        let tagged = self.body().instruction(format!("trunc i64 {both} to i1"));
+        ValueJoin::select(
+            self,
+            Self::body,
+            |code, yes, no| code.body().conditional(&tagged, yes, no, Some(true)),
+            |code| {
+                let predicate = order.signed_predicate();
+                let bit = code
+                    .body()
+                    .instruction(format!("icmp {predicate} i64 {x}, {y}"));
+                match &mut code.0 {
+                    Entry::Native(_) => CheckedValue::condition(bit),
+                    Entry::Registered(frame) => frame.boolean_result(&bit, false),
+                }
+            },
+            fallback,
+        )
+        .expect("a comparison has a normal edge")
     }
 
     fn release_comparison(&mut self, value: &CheckedValue) {

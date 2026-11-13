@@ -481,7 +481,7 @@ mod tests {
         assert!(fast.contains("select i1"));
         assert!(fast.contains("icmp sgt i64"));
         assert!(!fast.contains("call "));
-        assert!(body[fallback..].contains("call i32 @compare_int("));
+        assert!(body[fallback..].contains("call i32 @imre_int_compare("));
         assert!(body[fallback..].contains("call void @release_int_nonzero("));
         assert!(body[fallback..].contains("phi i1"));
         assert!(!body.contains("phi i64"));

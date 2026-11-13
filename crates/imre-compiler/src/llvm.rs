@@ -3835,8 +3835,18 @@ impl Emitter<'_, '_> {
                     format!("icmp {predicate} i64 {}, {}", left.operand, right.operand),
                 ),
                 Type::Int => {
-                    let order = self.integer_order(left, right);
-                    self.instruction(format!("icmp {predicate} i32 {order}, 0"))
+                    let (a, b) = (&left.operand, &right.operand);
+                    operations::CheckedBody::native(self)
+                        .integer_relation(op, a, b, |code| {
+                            let rank = code.fixed().instruction(format!(
+                                "call i32 @imre_int_compare(i64 {a}, i64 {b}) cold"
+                            ));
+                            let bit = code
+                                .fixed()
+                                .instruction(format!("icmp {predicate} i32 {rank}, 0"));
+                            operations::CheckedValue::condition(bit)
+                        })
+                        .into_condition()
                 }
                 Type::Float => {
                     let predicate = match op {
