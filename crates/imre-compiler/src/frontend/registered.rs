@@ -7213,6 +7213,32 @@ publish(5, callback)
     }
 
     #[test]
+    fn set_comprehensions_keep_their_checked_key_representation() {
+        let graph = SourceGraph::single(concat!(
+            "def collect(items: list[int], load):\n",
+            "    return {x for x in items}, {x for x in load()}\n",
+        ))
+        .unwrap();
+        let _ = super::super::lower(&graph);
+        let functions = graph.registered_functions();
+        let body = &functions[&graph.entry][&TextSize::default()];
+        crate::verify::registered(body.region()).unwrap();
+        let mut sets = Vec::new();
+        ir::walk_expressions(&body.function.body, &mut |expr| {
+            if let ExprKind::Set { element, .. } = &expr.kind {
+                sets.push((expr.ty, *element));
+            }
+        });
+        assert!(matches!(
+            sets.as_slice(),
+            [
+                (Type::Set(_), Type::Int),
+                (Type::PythonObject, Type::PythonObject)
+            ]
+        ));
+    }
+
+    #[test]
     fn registered_iteration_preserves_known_operand_contracts() {
         for source in [
             "def post(batches: tuple[int, int], sink):\n    for batch in batches:\n        for item in batch:\n            sink(item)\n",

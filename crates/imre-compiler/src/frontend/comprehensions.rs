@@ -432,7 +432,13 @@ impl EagerDisplay for Checker<'_> {
                             "set elements must be int, str, bytes, Path, or immutable scalar tuples",
                         ));
                     }
-                    self.types.set(value.ty)
+                    // A registered iterator can yield arbitrary Python keys. The set
+                    // must hash and retain their actual objects at insertion.
+                    if value.ty == Type::PythonObject {
+                        Type::PythonObject
+                    } else {
+                        self.types.set(value.ty)
+                    }
                 } else {
                     self.types.list(value.ty)
                 };
