@@ -913,17 +913,6 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             ExprKind::Builtin(op @ (Builtin::Append | Builtin::SetAdd), args) => {
                 self.insert(op, args)
             }
-            ExprKind::Builtin(op @ Builtin::Bool, args) => match &mut self.0 {
-                Entry::Native(emitter) => CheckedValue::owned(emitter.builtin(op, args, expr.ty)),
-                Entry::Registered(_) => {
-                    let Some(Ok(crate::ir::IterationOperands::Truth(value))) =
-                        op.iteration_operands(args)
-                    else {
-                        unreachable!("checked truth operand");
-                    };
-                    self.predicate(value, false)
-                }
-            },
             ExprKind::Binary(op, left, right) => {
                 self.binary_expression(*op, left, right, expr, site, usage)
             }

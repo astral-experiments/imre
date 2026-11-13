@@ -1018,8 +1018,8 @@ impl<'f> Frame<'f, '_, '_> {
                         return self.code.boolean_result(&plain, true);
                     }
                     Truth(value) => {
-                        let value = self.evaluate_handle(value);
-                        self.code.op("truth", &[&value])
+                        let bit = CheckedBody::registered(self.reborrow()).test_operand(value);
+                        return self.code.boolean_result(&bit, false);
                     }
                     Insert(_) => unreachable!("checked collection insertion"),
                     Unpack(value, count, star, target) => {

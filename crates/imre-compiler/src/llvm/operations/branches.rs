@@ -186,6 +186,11 @@ impl CheckedBody<'_, '_, '_, '_> {
         expr: &Expr,
         already_rooted: bool,
     ) -> String {
+        if matches!(self.0, Entry::Registered(_))
+            && let ExprKind::Builtin(Builtin::Bool, args) = &expr.kind
+        {
+            return self.test_operand_in_scope(&args[0], already_rooted);
+        }
         if let ExprKind::Bool(value) = expr.kind {
             return value.to_string();
         }
@@ -350,21 +355,6 @@ impl CheckedBody<'_, '_, '_, '_> {
         };
         let (edges, inputs) = edges(expr, Context::Condition, depth);
         Logical::branch(self.body(), edges, yes, no).emit(self, &inputs);
-    }
-
-    pub(crate) fn predicate(&mut self, expr: &Expr, negate: bool) -> CheckedValue {
-        let bit = self.test_operand(expr);
-        match &mut self.0 {
-            Entry::Native(_) => {
-                let result = if negate {
-                    self.body().instruction(format!("xor i1 {bit}, true"))
-                } else {
-                    bit
-                };
-                Self::bit(result)
-            }
-            Entry::Registered(frame) => frame.boolean_result(&bit, negate),
-        }
     }
 
     fn logical_operand(
