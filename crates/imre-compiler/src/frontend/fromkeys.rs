@@ -201,7 +201,7 @@ impl Checker<'_> {
             let insert = if list_key {
                 Statement::Expr(fromkeys_error("unhashable type: 'list'".into(), Type::None))
             } else {
-                Statement::SetItem(checker.local(target), key, checker.local(kept))
+                Statement::assign_item(checker.local(target), key, checker.local(kept))
             };
             Ok(vec![insert])
         })?;

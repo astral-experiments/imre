@@ -161,7 +161,7 @@ impl Checker<'_> {
             body.extend(
                 entries
                     .into_iter()
-                    .map(|(name, value)| Statement::SetItem(self.local(slot), name, value)),
+                    .map(|(name, value)| Statement::assign_item(self.local(slot), name, value)),
             );
             Expr {
                 ty,

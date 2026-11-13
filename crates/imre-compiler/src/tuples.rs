@@ -208,7 +208,7 @@ fn inspect(
             // Clearing the aggregate releases exactly the component owners.
             // It neither observes tuple identity nor lets the aggregate escape.
             Statement::Clear(_) => {}
-            Statement::SetItem(dict, key, value)
+            Statement::SetItem(_, dict, key, value)
                 if matches!(dict.ty, Type::Dict(_))
                     && let ExprKind::Local(slot) = key.kind
                     && matches!(key.ty, Type::Tuple(_)) =>
@@ -219,7 +219,7 @@ fn inspect(
                 inspect_expression(dict, candidates, producers);
                 inspect_expression(value, candidates, producers);
             }
-            Statement::SetItem(a, b, c) | Statement::AugmentItem(a, b, _, c) => {
+            Statement::SetItem(_, a, b, c) | Statement::AugmentItem(a, b, _, c) => {
                 for value in [a, b, c] {
                     inspect_expression(value, candidates, producers);
                 }

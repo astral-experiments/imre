@@ -208,7 +208,7 @@ impl Checker<'_> {
 }
 
 pub(super) fn preserves(guard: Guard, statements: &[Statement]) -> bool {
-    if !matches!(statements, [Statement::SetItem(receiver, _, _)] if matches!(receiver.kind, ExprKind::Local(slot) if slot == guard.slot))
+    if !matches!(statements, [Statement::SetItem(_, receiver, _, _)] if matches!(receiver.kind, ExprKind::Local(slot) if slot == guard.slot))
     {
         return false;
     }

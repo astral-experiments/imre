@@ -118,9 +118,8 @@ impl EagerDisplay for SourceScope<'_> {
         key: &ast::Expr,
         _: Option<Type>,
         _: Option<(usize, usize)>,
-    ) -> StdResult<(usize, Expr), ()> {
-        let value = self.ordinary_operand(key).ok_or(())?;
-        Ok((self.hidden(Type::PythonObject), value))
+    ) -> StdResult<Expr, ()> {
+        self.ordinary_operand(key).ok_or(())
     }
 
     fn collection_value(

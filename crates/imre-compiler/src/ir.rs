@@ -3508,6 +3508,32 @@ pub(crate) enum IterNextKind {
     Utf8Byte,
 }
 
+/// Operand evaluation order for a subscript assignment or a dictionary display.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ItemOrder {
+    Assignment,
+    Display,
+}
+
+impl ItemOrder {
+    /// Return the receiver, index and value in their storage roles after evaluation.
+    pub(crate) fn evaluate<T, R>(
+        self,
+        receiver: T,
+        index: T,
+        value: T,
+        mut evaluate: impl FnMut(T) -> R,
+    ) -> (R, R, R) {
+        match self {
+            Self::Assignment => {
+                let value = evaluate(value);
+                (evaluate(receiver), evaluate(index), value)
+            }
+            Self::Display => (evaluate(receiver), evaluate(index), evaluate(value)),
+        }
+    }
+}
+
 /// A fixed-layout update has a checked arithmetic operation. A live Python item
 /// uses its in-place protocol, including the fallback to the binary operator.
 #[derive(Clone, Copy)]
@@ -3566,7 +3592,7 @@ pub(crate) enum Statement {
         body: Vec<Statement>,
         clear: Vec<usize>,
     },
-    SetItem(Expr, Expr, Expr),
+    SetItem(ItemOrder, Expr, Expr, Expr),
     AugmentItem(Expr, Expr, ItemUpdate, Expr),
     SetField(Expr, usize, Expr),
     AugmentField(Expr, usize, Binary, Expr),
@@ -3659,7 +3685,10 @@ macro_rules! statement_children {
             Statement::Assign(_, value) | Statement::Expr(value) | Statement::Return(value) => {
                 ($expression)(value)
             }
-            Statement::SetItem(a, b, c) | Statement::AugmentItem(a, b, _, c) => {
+            Statement::SetItem(order, receiver, index, value) => {
+                order.evaluate(receiver, index, value, $expression);
+            }
+            Statement::AugmentItem(a, b, _, c) => {
                 for value in [a, b, c] {
                     ($expression)(value);
                 }
@@ -3750,6 +3779,10 @@ macro_rules! statement_children {
 }
 
 impl Statement {
+    pub(crate) fn assign_item(receiver: Expr, key: Expr, value: Expr) -> Self {
+        Self::SetItem(ItemOrder::Assignment, receiver, key, value)
+    }
+
     pub(crate) fn store_global(slot: usize, value: Expr) -> Self {
         Self::Expr(Expr {
             ty: Type::None,

@@ -1,6 +1,5 @@
 //! Eager display expansion keeps every copy before the following source entry.
 
-use super::comprehensions::dict_entry;
 use super::*;
 use ruff_python_ast::UnaryOp;
 
@@ -316,7 +315,7 @@ impl Checker<'_> {
                 value_type,
                 &site,
             )?;
-            Ok(vec![Statement::SetItem(c.local(target), key, value)])
+            Ok(vec![Statement::assign_item(c.local(target), key, value)])
         })?;
         if let Some(owner) = keywords {
             body.push(Statement::Expr(Expr {
@@ -1090,7 +1089,7 @@ impl Checker<'_> {
                 vec![Statement::Exhaust],
                 Vec::new(),
             ),
-            Statement::SetItem(self.local(result), self.local(key), value_expr),
+            Statement::assign_item(self.local(result), self.local(key), value_expr),
             Statement::Clear(key),
             Statement::Clear(value),
         ];
@@ -1170,7 +1169,6 @@ impl Checker<'_> {
                         "dictionary keys must be int, str, bytes, Path, or immutable scalar tuples",
                     ));
                 }
-                let captured = self.hidden(key_expr.ty);
                 let value = if let Some((_, value_type)) = types {
                     self.expr_expected(&item.value, value_type)?
                 } else {
@@ -1178,7 +1176,12 @@ impl Checker<'_> {
                 };
                 let (key_type, value_type) = *types.get_or_insert((key_expr.ty, value.ty));
                 self.locals[result] = self.types.dict(key_type, value_type);
-                body.push(dict_entry(&self.locals, result, captured, key_expr, value));
+                body.push(Statement::SetItem(
+                    ir::ItemOrder::Display,
+                    self.local(result),
+                    key_expr,
+                    value,
+                ));
             } else {
                 let hint = types.map(|(key, value)| self.types.dict(key, value));
                 let value = self.boolean_operand(&item.value, hint)?;

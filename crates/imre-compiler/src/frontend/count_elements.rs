@@ -184,7 +184,7 @@ impl Checker<'_> {
                         target,
                     )?)
                 } else {
-                    Statement::SetItem(mapped.clone(), key, count)
+                    Statement::assign_item(mapped.clone(), key, count)
                 }])
             },
         )?;

@@ -3179,7 +3179,7 @@ impl unpacking::PatternBinder for SourceScope<'_> {
                     .in_binding(self)
                     .ok_or(())?;
                 let key = TargetInput::Index(&sub.slice).in_binding(self).ok_or(())?;
-                Statement::SetItem(receiver, key, value)
+                Statement::assign_item(receiver, key, value)
             }
             _ => return Err(()),
         };
@@ -4784,7 +4784,7 @@ else:
         .unwrap();
         let [
             _,
-            Statement::SetItem(receiver, key, rhs),
+            Statement::SetItem(_, receiver, key, rhs),
             _,
             Statement::Expr(deletion),
         ] = plan.function.body.as_slice()
@@ -6530,7 +6530,7 @@ publish(5, callback)
         let [
             Statement::Assign(slot, _),
             Statement::Expr(store),
-            Statement::SetItem(_, _, last),
+            Statement::SetItem(_, _, _, last),
         ] = body.as_slice()
         else {
             panic!("expected one RHS followed by the two target stores")

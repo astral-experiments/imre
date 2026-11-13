@@ -517,7 +517,7 @@ mod tests {
         assert!(facts[2].locals[2]);
         assert!(facts[2].length_roots.iter().all(Option::is_none));
 
-        module.functions[1].body = vec![Statement::SetItem(
+        module.functions[1].body = vec![Statement::assign_item(
             Expr::local(0, list),
             integer.clone(),
             integer,

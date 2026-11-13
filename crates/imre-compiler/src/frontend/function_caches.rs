@@ -262,7 +262,7 @@ fn build_wrapper(
     if policy.capacity < 0 {
         // A callback can clear its own cache. Use the table installed after it returns.
         body.push(Statement::Assign(table_slot, cache()));
-        body.push(Statement::SetItem(
+        body.push(Statement::assign_item(
             Expr::local(table_slot, table),
             key,
             entry,

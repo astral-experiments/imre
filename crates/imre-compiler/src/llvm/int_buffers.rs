@@ -28,6 +28,7 @@ pub(super) fn fixed_locals(f: &Function) -> Vec<bool> {
     let mut uses = vec![0_isize; f.locals.len()];
     ir::walk_statements(&f.body, &mut |s| {
         if let Statement::SetItem(
+            _,
             Expr {
                 kind: ExprKind::Local(slot),
                 ..
@@ -79,7 +80,7 @@ fn scalar(e: &Expr) -> bool {
 
 fn updates(emit: &Emitter<'_, '_>, st: &Statement, targets: &mut BTreeSet<usize>) -> bool {
     match st {
-        Statement::SetItem(receiver, index, item) => {
+        Statement::SetItem(_, receiver, index, item) => {
             let ExprKind::Local(slot) = receiver.kind else {
                 return false;
             };
@@ -123,7 +124,7 @@ impl Emitter<'_, '_> {
                 Statement::Assign(slot, value) => {
                     matches!(types[*slot], Type::Int | Type::Bool) && scalar(value)
                 }
-                Statement::SetItem(receiver, index, value) => {
+                Statement::SetItem(_, receiver, index, value) => {
                     matches!(receiver.kind, ExprKind::Local(_))
                         && receiver.ty == Type::ListInt
                         && scalar(index)

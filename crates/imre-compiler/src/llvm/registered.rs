@@ -113,7 +113,7 @@ pub(crate) fn frame_inputs(
                             .as_ref()
                             .is_none_or(|binding| uses_slot(&binding.entered, true))
                     }
-                    Statement::SetItem(receiver, _, _)
+                    Statement::SetItem(_, receiver, _, _)
                     | Statement::AugmentItem(receiver, _, ir::ItemUpdate::Protocol(_), _) => {
                         uses_python_protocol |= receiver.ty == Type::PythonObject;
                         matches!(receiver.ty, Type::Dict(_) | Type::PythonObject)

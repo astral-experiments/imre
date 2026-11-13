@@ -271,7 +271,7 @@ impl Checker<'_> {
                     if let Some(key) = &item.key {
                         let key = self.expr_expected(key, Type::Str)?;
                         let value = self.expr_expected(&item.value, ANY)?;
-                        body.push(Statement::SetItem(
+                        body.push(Statement::assign_item(
                             self.document_map(self.local(slot)),
                             key,
                             value,

@@ -86,25 +86,6 @@ impl Helpers {
     }
 }
 
-/// A mapping display saves its key before evaluating the value. The ordinary
-/// subscript store evaluates its RHS first, then hashes and inserts the saved key.
-pub(super) fn dict_entry(
-    locals: &[Type],
-    result: usize,
-    captured: usize,
-    key: Expr,
-    value: Expr,
-) -> Statement {
-    let local = |slot| Expr::local(slot, locals[slot]);
-    Statement::Scope {
-        body: vec![
-            Statement::Assign(captured, key),
-            Statement::SetItem(local(result), local(captured), value),
-        ],
-        clear: vec![captured],
-    }
-}
-
 /// The creating frame acquires the outer iterator before the target names shadow it.
 pub(super) fn acquire_in_namespace(
     input: &mut pipelines::Prepared,
@@ -181,7 +162,7 @@ pub(super) trait EagerDisplay: Sized {
         key: &ast::Expr,
         expected: Option<Type>,
         guarded: Option<(usize, usize)>,
-    ) -> StdResult<(usize, Expr), Self::Error>;
+    ) -> StdResult<Expr, Self::Error>;
     fn collection_value(
         &mut self,
         output: Output<'_>,
@@ -213,13 +194,7 @@ pub(super) trait EagerDisplay: Sized {
                 }
                 _ => None,
             };
-            let item = scope.collection_value(
-                output,
-                collector,
-                result,
-                key.as_ref().map(|(_, key)| key),
-                guarded,
-            )?;
+            let item = scope.collection_value(output, collector, result, key.as_ref(), guarded)?;
             if replaces_loop(scope, &item) {
                 body = None;
             }
@@ -227,9 +202,14 @@ pub(super) trait EagerDisplay: Sized {
                 return Ok(Vec::new());
             };
             let (empty, store) = match (collector, output, key) {
-                (Collector::Display(_), Output::Dict(..), Some((captured, key))) => (
+                (Collector::Display(_), Output::Dict(..), Some(key)) => (
                     ExprKind::Dict(Vec::new()),
-                    dict_entry(scope.collection_locals(), result, captured, key, item),
+                    Statement::SetItem(
+                        ir::ItemOrder::Display,
+                        Expr::local(result, scope.collection_locals()[result]),
+                        key,
+                        item,
+                    ),
                 ),
                 (Collector::Display(_), Output::List(_) | Output::Set(_), None) => {
                     let ty = scope.collection_locals()[result];
@@ -385,13 +365,13 @@ impl EagerDisplay for Checker<'_> {
         key: &ast::Expr,
         expected: Option<Type>,
         guarded: Option<(usize, usize)>,
-    ) -> Result<(usize, Expr), String> {
+    ) -> Result<Expr, String> {
         let expected = expected
             .and_then(|ty| self.types.mapping(ty))
             .map(|(key, _)| key);
         let value = self.guarded_element(key, expected, guarded)?;
         self.check_dictionary_key(value.ty, key)?;
-        Ok((self.hidden(value.ty), value))
+        Ok(value)
     }
 
     fn collection_value(
