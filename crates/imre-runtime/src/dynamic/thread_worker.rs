@@ -1,6 +1,7 @@
 //! Native worker startup and creator-heap ownership for joinable and detached calls.
 
 use super::thread_callback::Callback;
+use super::thread_lock::Acquire;
 use super::value::Heap;
 use std::io::Write;
 use std::ops::ControlFlow;
@@ -551,7 +552,7 @@ pub(super) enum Operation {
         data: Vec<u8>,
     },
     Acquire {
-        lock: Arc<PrimitiveLock>,
+        wait: Acquire,
         release: Option<Arc<PrimitiveLock>>,
     },
 }
@@ -706,9 +707,9 @@ fn launch(
                 update = Some((hash, data));
                 (None, None)
             }
-            Operation::Acquire { lock, release } => {
+            Operation::Acquire { wait, release } => {
                 prefix = release;
-                (None, Some(lock))
+                (None, Some(wait))
             }
         };
         exit.enter(count);
@@ -758,8 +759,8 @@ fn launch(
                         return Err(error.report(&worker.heap).to_string());
                     }
                 }
-            } else if let Some(lock) = acquire {
-                lock.acquire(true, None);
+            } else if let Some(wait) = acquire {
+                wait.run();
             } else if let Some((hash, data)) = update {
                 hash.lock()
                     .update(&data)
@@ -840,7 +841,7 @@ fn worker_target(ctx: &Context, target: Id, args: Id, kwargs: Id) -> Result<(Ope
         let operation = match (ctx.heap.get(storage), pos.as_slice()) {
             (Value::PrimitiveLock(lock), []) if symbol == "_thread.lock.acquire" => {
                 Some(Operation::Acquire {
-                    lock: Arc::clone(lock),
+                    wait: Acquire::blocking(lock),
                     release: None,
                 })
             }

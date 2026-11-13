@@ -141,7 +141,7 @@ fn native_start_and_join_publish_the_worker_lifetime() {
         let (ident, native_id) = launch(
             &mut ctx,
             Operation::Acquire {
-                lock: Arc::clone(lock),
+                wait: Acquire::blocking(lock),
                 release: None,
             },
             registered(&handle, false, owner),
@@ -193,7 +193,7 @@ fn worker_waits_for_the_creator_to_publish_its_receiver() {
         let ready = super::launch(
             &mut ctx,
             Operation::Acquire {
-                lock: body.clone(),
+                wait: Acquire::blocking(&body),
                 release: Some(prefix.clone()),
             },
             registered(&handle, false, owner),
@@ -299,7 +299,7 @@ fn joined_and_detached_operands_are_released_at_their_own_checkpoints() {
         let ident = start_detached(
             &mut ctx,
             Operation::Acquire {
-                lock: Arc::clone(gate),
+                wait: Acquire::blocking(gate),
                 release: None,
             },
             NONE,
@@ -428,7 +428,7 @@ fn shutdown_joins_non_daemon_workers_and_leaves_daemon_workers_running() {
         launch(
             &mut ctx,
             Operation::Acquire {
-                lock: Arc::clone(lock),
+                wait: Acquire::blocking(lock),
                 release: None,
             },
             registered(&daemon, true, daemon_owner),
@@ -463,7 +463,7 @@ fn detached_handle_keeps_the_non_daemon_worker_registered_until_exit() {
         let (ident, _) = launch(
             &mut ctx,
             Operation::Acquire {
-                lock: Arc::clone(gate),
+                wait: Acquire::blocking(gate),
                 release: None,
             },
             registered(&handle, false, owner),
