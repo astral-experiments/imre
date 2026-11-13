@@ -759,6 +759,8 @@ impl<'a> PreparedBody<'a> {
     }
 
     fn emit(&self, output: &mut Output, unit: usize, file: &str) -> Result<String, String> {
+        #[cfg(test)]
+        crate::single_emission_tests::record_llvm_start(Some(&self.source.path));
         // Frozen code exposes its origin independently of the module's registered source path.
         let code_file = match (self.source.bundled, self.name) {
             (true, "_frozen_importlib") => output.data(b"<frozen importlib._bootstrap>"),
