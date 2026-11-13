@@ -11618,7 +11618,7 @@ impl<'a> Checker<'a> {
             if let Some(Binding::Definition(definition)) = binding
                 && let Some(signature) = self.functions.get(&definition)
             {
-                return self.source_call(call, &signature.clone(), None, 0);
+                return self.source_call(call, signature, None, 0);
             }
             if let ast::Expr::Attribute(method) = &*call.func
                 && binding.is_none()
@@ -12816,8 +12816,7 @@ impl<'a> Checker<'a> {
             let signature = self
                 .functions
                 .get(&definition)
-                .ok_or_else(|| error(self.source, call, "definition is not a callable function"))?
-                .clone();
+                .ok_or_else(|| error(self.source, call, "definition is not a callable function"))?;
             if self.classes.producer_items.contains_key(&signature.id) {
                 return Err(error(
                     self.source,
@@ -12825,7 +12824,7 @@ impl<'a> Checker<'a> {
                     "generator functions require direct iteration",
                 ));
             }
-            let value = self.source_call(call, &signature, None, 0)?;
+            let value = self.source_call(call, signature, None, 0)?;
             self.record_named_call(call, &value);
             return Ok(value);
         }
