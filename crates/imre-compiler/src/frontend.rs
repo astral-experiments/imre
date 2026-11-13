@@ -1375,7 +1375,7 @@ fn lower_graph(
             && (signature.method.is_none() || python_method)
             && signature.physical_frame)
             .then(|| fixed_body_source::SourceSites::new(python_method));
-        checker.placement_only = unavailable.is_some() && cache.is_none();
+        checker.placement_only = (named || unavailable.is_some()) && cache.is_none();
         let result = match cache.as_deref_mut() {
             Some(cache) if signature.method.is_none() => cache.body(checker, definition, signature),
             _ => lower_body(checker, definition, signature),
