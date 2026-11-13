@@ -30,7 +30,7 @@ impl CheckedBody<'_, '_, '_, '_> {
     ) {
         let (last, tested) = targets.split_last().expect("reachable finalbody");
         for (index, target) in tested.iter().enumerate() {
-            let test = format!("icmp eq i32 {tag}, {index}");
+            let test = format!("icmp eq {tag}, {index}");
             let selected = match &mut self.0 {
                 Entry::Native(code) => code.instruction(test),
                 Entry::Registered(frame) => frame.value(&test),
