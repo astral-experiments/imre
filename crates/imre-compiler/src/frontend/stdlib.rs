@@ -733,71 +733,53 @@ impl Checker<'_> {
                 format!("'{name}' object is not iterable"),
             );
         }
-        if let Iteration::Container {
-            iterable,
-            items: false,
-            start: None,
-        } = &input
-            && style == JoinStyle::Plain
-            && matches!(
-                self.types.element(iterable.ty),
-                Some(Type::Str | Type::StrLiteral(_))
-            )
-        {
-            // Exact lists have no iteration callbacks; the runtime can borrow
-            // their complete string buffer after both call arguments finish.
-            return Ok(Expr {
-                ty: Type::Str,
-                kind: ExprKind::Builtin(Builtin::StringJoin, vec![receiver, iterable.clone()]),
-            });
-        }
-        let separator = self.hidden(Type::Str);
-        let list = self.types.list(Type::Str);
-        let parts = self.hidden(list);
-        let mut body = vec![
-            Statement::Assign(separator, receiver),
-            Statement::Assign(
-                parts,
-                Expr {
-                    ty: list,
-                    kind: ExprKind::List(Vec::new()),
-                },
-            ),
-        ];
-        body.extend(self.expand_items(input, call, |checker, value| {
-            let value = match style {
-                JoinStyle::Plain => checker.coerce(value, Type::Str, call)?,
-                JoinStyle::Shell => checker.shlex_quote_value(value, call)?,
-                JoinStyle::WindowsCommand => {
-                    let path = Self::string_value(checker.fspath(value, source)?);
-                    Expr {
-                        ty: Type::Str,
-                        kind: ExprKind::Builtin(
-                            Builtin::Process(ir::ProcessOperation::QuoteCommandArgument),
-                            vec![path],
-                        ),
-                    }
-                }
-            };
-            Ok(vec![Statement::Expr(Expr {
-                ty: Type::None,
-                kind: ExprKind::Builtin(Builtin::Append, vec![checker.local(parts), value]),
-            })])
-        })?);
-        Ok(Expr {
+        let mut scope = calls::ArgumentScope::default();
+        let (separator, parts) = match input {
+            Iteration::Container {
+                iterable,
+                items: false,
+                start: None,
+            } if style == JoinStyle::Plain
+                && matches!(
+                    self.types.element(iterable.ty),
+                    Some(Type::Str | Type::StrLiteral(_))
+                ) =>
+            {
+                (receiver, iterable)
+            }
+            input => {
+                // Pool roots live for the program. Hold any computed separator before pulling.
+                let separator = if matches!(receiver.kind, ExprKind::Str(_)) {
+                    receiver
+                } else {
+                    scope.hold(self, receiver)
+                };
+                let parts =
+                    self.collect_list_with(input, Some(Type::Str), call, |checker, value| {
+                        match style {
+                            JoinStyle::Plain => Ok(value),
+                            JoinStyle::Shell => checker.shlex_quote_value(value, call),
+                            JoinStyle::WindowsCommand => {
+                                let path = Self::string_value(checker.fspath(value, source)?);
+                                Ok(Expr {
+                                    ty: Type::Str,
+                                    kind: ExprKind::Builtin(
+                                        Builtin::Process(
+                                            ir::ProcessOperation::QuoteCommandArgument,
+                                        ),
+                                        vec![path],
+                                    ),
+                                })
+                            }
+                        }
+                    })?;
+                (separator, parts)
+            }
+        };
+        Ok(scope.finish(Expr {
             ty: Type::Str,
-            kind: ExprKind::Scope {
-                body,
-                value: Box::new(Expr {
-                    ty: Type::Str,
-                    kind: ExprKind::Builtin(
-                        Builtin::StringJoin,
-                        vec![self.local(separator), self.local(parts)],
-                    ),
-                }),
-                clear: vec![separator, parts],
-            },
-        })
+            kind: ExprKind::Builtin(Builtin::StringJoin, vec![separator, parts]),
+        }))
     }
 
     /// Evaluate every argument before rendering any field, including unused
