@@ -127,13 +127,15 @@ fn launch(
     Ok(identity)
 }
 
-fn registered(handle: &Arc<Handle>, daemon: bool, owner: Option<Id>) -> Registration {
+fn registered(handle: &Arc<Handle>, daemon: bool, owner: Id) -> Registration {
     Registration::Thread(Arc::clone(handle), RegisteredThread { daemon, owner })
 }
 
 #[test]
 fn native_start_and_join_publish_the_worker_lifetime() {
     let mut ctx = context();
+    let object = ctx.builtin("object");
+    let owner = ctx.instance(object, None);
     let handle = Arc::<Handle>::default();
     while_lock_held(|lock| {
         let (ident, native_id) = launch(
@@ -142,7 +144,7 @@ fn native_start_and_join_publish_the_worker_lifetime() {
                 lock: Arc::clone(lock),
                 release: None,
             },
-            registered(&handle, false, None),
+            registered(&handle, false, owner),
             Vec::new(),
         )
         .unwrap();
@@ -194,7 +196,7 @@ fn worker_waits_for_the_creator_to_publish_its_receiver() {
                 lock: body.clone(),
                 release: Some(prefix.clone()),
             },
-            registered(&handle, false, Some(owner)),
+            registered(&handle, false, owner),
             vec![target],
         )
         .unwrap();
@@ -252,7 +254,7 @@ fn bound_hash_worker_owns_expanded_input_while_running() {
     let (ident, _) = launch(
         &mut ctx,
         operation,
-        registered(&handle, false, Some(owner)),
+        registered(&handle, false, owner),
         operands,
     )
     .unwrap();
@@ -315,7 +317,7 @@ fn joined_and_detached_operands_are_released_at_their_own_checkpoints() {
         launch(
             &mut ctx,
             Operation::Empty,
-            registered(&joined, false, Some(owner)),
+            registered(&joined, false, owner),
             Vec::new(),
         )
         .unwrap();
@@ -417,6 +419,9 @@ fn zero_timeout_applies_to_worker_exit_and_all_observers_share_native_join() {
 #[test]
 fn shutdown_joins_non_daemon_workers_and_leaves_daemon_workers_running() {
     let mut ctx = context();
+    let object = ctx.builtin("object");
+    let daemon_owner = ctx.instance(object, None);
+    let normal_owner = ctx.instance(object, None);
     let daemon = Arc::<Handle>::default();
     let normal = Arc::<Handle>::default();
     while_lock_held(|lock| {
@@ -426,14 +431,14 @@ fn shutdown_joins_non_daemon_workers_and_leaves_daemon_workers_running() {
                 lock: Arc::clone(lock),
                 release: None,
             },
-            registered(&daemon, true, None),
+            registered(&daemon, true, daemon_owner),
             Vec::new(),
         )
         .unwrap();
         launch(
             &mut ctx,
             Operation::Empty,
-            registered(&normal, false, None),
+            registered(&normal, false, normal_owner),
             Vec::new(),
         )
         .unwrap();
@@ -448,6 +453,8 @@ fn shutdown_joins_non_daemon_workers_and_leaves_daemon_workers_running() {
 #[test]
 fn detached_handle_keeps_the_non_daemon_worker_registered_until_exit() {
     let mut ctx = context();
+    let object = ctx.builtin("object");
+    let owner = ctx.instance(object, None);
     let handle = Arc::<Handle>::default();
     assert_eq!(handle.ident(), 0);
     assert!(!handle.is_done());
@@ -459,7 +466,7 @@ fn detached_handle_keeps_the_non_daemon_worker_registered_until_exit() {
                 lock: Arc::clone(gate),
                 release: None,
             },
-            registered(&handle, false, None),
+            registered(&handle, false, owner),
             Vec::new(),
         )
         .unwrap();
