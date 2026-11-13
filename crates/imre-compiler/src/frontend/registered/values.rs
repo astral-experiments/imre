@@ -1430,6 +1430,41 @@ impl Checker<'_> {
         {
             return Ok(Some(source.located(node, self.local(slot))));
         }
+        if self.checked_call_contracts
+            && let ast::Expr::Call(call) = node
+            && let Some(Binding::Definition(id)) = self.resolve(&call.func)
+        {
+            let refused = || self.scoped_builtin_error("declared Python call", call);
+            let signature = self
+                .functions
+                .get(&id)
+                .filter(|s| {
+                    call.func.is_name_expr()
+                        && fixed_positional_arguments(call)
+                        && call.arguments.len() == s.params.len()
+                        && s.params.iter().all(|p| {
+                            matches!(
+                                p.kind,
+                                ParameterKind::PositionalOnly | ParameterKind::PositionalOrKeyword
+                            )
+                        })
+                })
+                .ok_or_else(refused)?;
+            let target = self.expr(&call.func)?;
+            let mut args = Vec::with_capacity(call.arguments.len());
+            for (arg, parameter) in call.arguments.args.iter().zip(&signature.params) {
+                let value = self.expr(arg)?;
+                if value.ty != parameter.ty {
+                    return Err(self.scoped_builtin_error("declared Python argument", arg));
+                }
+                args.push(value);
+            }
+            self.calls.insert(signature.id);
+            return Ok(Some(source.located_operation(
+                node,
+                self.call_with_values(call, target, args),
+            )));
+        }
         let graph = self.graph;
         let owner = self.module;
         let mut frame_identity = false;
