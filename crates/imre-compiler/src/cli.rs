@@ -148,17 +148,6 @@ impl BuildOptions {
         } else {
             None
         };
-        let process_pth = user_site.as_ref().is_some_and(|p| {
-            std::fs::read_dir(p).is_ok_and(|mut entries| {
-                entries.any(|e| {
-                    e.is_ok_and(|e| {
-                        let name = e.file_name();
-                        name.to_str()
-                            .is_some_and(|name| !name.starts_with('.') && name.ends_with(".pth"))
-                    })
-                })
-            })
-        });
         let mut prefix_sites = layout.site_packages(!flags.no_site);
         let mut site_dirs = Vec::new();
         if venv.is_some() {
@@ -172,14 +161,29 @@ impl BuildOptions {
             root.join("sitecustomize.py").is_file() || root.join("sitecustomize").is_dir()
         };
         let stdlib_sitecustomize = !flags.no_site && stdlib.as_ref().is_some_and(has_hook);
-        options.compile.sitecustomize = process_pth
-            || (!flags.no_site
-                && options
-                    .compile
-                    .extension_paths
-                    .iter()
-                    .chain(&site_dirs)
-                    .any(has_hook));
+        let sitecustomize = !flags.no_site
+            && options
+                .compile
+                .extension_paths
+                .iter()
+                .chain(&site_dirs)
+                .any(has_hook);
+        // A selected hook already runs site. Let addsitedir read the live user
+        // directory before the hook, including in a subsequently deployed image.
+        options.compile.user_site_pth = user_site.filter(|dir| {
+            sitecustomize
+                || std::fs::read_dir(dir).is_ok_and(|mut entries| {
+                    entries.any(|entry| {
+                        entry.is_ok_and(|entry| {
+                            let name = entry.file_name();
+                            name.to_str().is_some_and(|name| {
+                                !name.starts_with('.') && name.ends_with(".pth")
+                            })
+                        })
+                    })
+                })
+        });
+        options.compile.sitecustomize = sitecustomize || options.compile.user_site_pth.is_some();
         options.compile.stdlib_sitecustomize = stdlib_sitecustomize;
         #[cfg(unix)]
         if layout.stdlib_archive.is_file() {
@@ -187,7 +191,6 @@ impl BuildOptions {
         } else {
             options.compile.stdlib_fallback = Some(super::build_cache::stdlib_archive_path()?);
         }
-        options.compile.user_site_pth = user_site.filter(|_| process_pth);
         options.compile.stdlib_dir = stdlib;
         options.compile.site_dirs = site_dirs;
         Ok(options)
