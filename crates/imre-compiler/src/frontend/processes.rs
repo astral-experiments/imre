@@ -860,6 +860,10 @@ impl Checker<'_> {
                 ));
             }
         };
+        // The launch ABI already accepts a concrete path owner as a pointer.
+        if value.ty == ty {
+            return Ok(value);
+        }
         self.coerce(value, self.types.optional(ty), expression)
     }
 
