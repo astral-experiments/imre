@@ -15,7 +15,7 @@ pub(crate) struct RegisteredGenerator {
 pub(crate) struct LexicalOperands {
     pub(crate) generators: HashMap<TextRange, RegisteredGenerator>,
     pub(crate) lambdas: HashMap<TextSize, RegisteredLambda>,
-    pub(crate) expressions: ExpressionSites,
+    pub(crate) expressions: Option<ExpressionSites>,
 }
 
 impl LexicalOperands {
@@ -42,12 +42,15 @@ impl LexicalOperands {
             LexicalSite::Lambda(lambda, owner, yields) => {
                 let scope = FunctionScope::lambda(lambda, strings);
                 let plan = RegisteredLambda::prepare(lambda, source, &scope, owner, yields);
-                self.expressions
-                    .register_lexical(lambda.into(), std::rc::Rc::clone(&plan.binding));
+                if let Some(expressions) = &mut self.expressions {
+                    expressions.register_lexical(lambda.into(), std::rc::Rc::clone(&plan.binding));
+                }
                 self.lambdas.insert(lambda.start(), plan);
             }
             LexicalSite::Template(template, owner) => {
-                self.expressions.prepare_template(template, source, owner);
+                if let Some(expressions) = &mut self.expressions {
+                    expressions.prepare_template(template, source, owner);
+                }
             }
         }
     }

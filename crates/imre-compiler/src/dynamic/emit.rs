@@ -546,7 +546,11 @@ impl<'a> PreparedBody<'a> {
             lambdas: None,
         };
         let mut aliases = Vec::new();
-        let mut lexical = crate::frontend::LexicalOperands::default();
+        // A decoded annotation owns its operand directly and has no statement suite.
+        let mut lexical = crate::frontend::LexicalOperands {
+            expressions: (!expression).then(Default::default),
+            ..Default::default()
+        };
         let mut scopes = crate::frontend::function_scope::ScopeFacts::prepare(
             &body,
             &private_names,
@@ -602,7 +606,7 @@ impl<'a> PreparedBody<'a> {
         let mut prepare =
             crate::frontend::SuitePreparation::new(&operations, values, python_optimization == 0);
         prepare.literal_refusals = exec_literals.has_refusals().then_some(&exec_literals);
-        prepare.sites.expressions = expressions;
+        prepare.sites.expressions = expressions.unwrap_or_default();
         // Preparing inner declarations first lets their binding sites consume
         // the selected body's decision in the enclosing suite.
         use crate::frontend::DeclarationSite;
