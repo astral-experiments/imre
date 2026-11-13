@@ -1084,29 +1084,10 @@ impl Emitter<'_, '_> {
         )
     }
 
-    /// A value-struct field reader can use a snapshot of its receiver.
-    fn direct_call(&mut self, id: usize, args: &CallArgs, ty: Type) -> Value {
-        if let [arg] = args.values.as_slice()
-            && self.module.types.is_value_struct(arg.ty)
-            && structs::field_reader(&self.module.functions[id])
-            && let Some(snapshot) = self.struct_snapshot(arg)
-        {
-            return self.user_call(
-                id,
-                ty,
-                &[&snapshot],
-                args.exhaustive_enum_match,
-                args.site.fixed(),
-            );
-        }
-        let values = self.call_operands(args);
-        self.native_call(callables::NativeCallTarget::Function(id), args, values, ty)
-    }
-
     /// Captures in source order, preserving earlier owners across later argument
     /// effects and errors. Parameter reordering happens only after this step.
     fn call_operands(&mut self, args: &CallArgs) -> Vec<Operand> {
-        args.capture(|arg| self.operand(arg))
+        operations::capture_call_operands(&args.values, None, |arg| self.operand(arg))
     }
 
     /// Once every argument is evaluated, the callee takes an owner of each

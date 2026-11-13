@@ -1780,13 +1780,9 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
             // Lookup initialized slot zero and no argument can have reused it.
             return self.write_handles_at(1, &[] as &[&str]);
         }
-        let values = receiver
-            .into_iter()
-            .chain(
-                args.iter()
-                    .map(|expr| self.kept_call_value(expr, &mut next)),
-            )
-            .collect();
+        let values = crate::llvm::operations::capture_call_operands(args, receiver, |expr| {
+            self.kept_call_value(expr, &mut next)
+        });
         self.fixed_call_arguments(callable, values, exec)
     }
 
