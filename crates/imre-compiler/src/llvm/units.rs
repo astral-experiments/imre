@@ -30,7 +30,7 @@ impl<'units> Output<'units> {
         split: bool,
     ) -> Self {
         #[cfg(test)]
-        crate::single_emission_tests::record_llvm_start();
+        crate::single_emission_tests::record_llvm_start(None);
         let count = units.len();
         let mut next = vec![0; count];
         let functions = functions

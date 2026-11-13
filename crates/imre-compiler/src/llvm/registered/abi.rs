@@ -81,8 +81,6 @@ pub(crate) struct Declarations {
 
 #[derive(Clone, Default)]
 pub(crate) struct Output {
-    #[cfg(test)]
-    pub(crate) _observer: crate::single_emission_tests::RegisteredOutputStarted,
     pub(crate) declarations: Declarations,
     pub(crate) diagnostic: Option<String>,
     pub(crate) keep_docstrings: bool,

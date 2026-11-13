@@ -3,7 +3,7 @@ use std::cell::{Cell, RefCell};
 
 enum Phase {
     Prepared(PathBuf, bool),
-    Llvm,
+    Llvm(Option<PathBuf>),
 }
 
 thread_local! {
@@ -24,22 +24,12 @@ pub(crate) fn record_preparation(path: &Path, borrowed: bool) {
     });
 }
 
-pub(crate) fn record_llvm_start() {
+pub(crate) fn record_llvm_start(path: Option<&Path>) {
     PHASES.with_borrow_mut(|events| {
         if let Some(events) = events {
-            events.push(Phase::Llvm);
+            events.push(Phase::Llvm(path.map(Path::to_path_buf)));
         }
     });
-}
-
-#[derive(Clone)]
-pub(crate) struct RegisteredOutputStarted;
-
-impl Default for RegisteredOutputStarted {
-    fn default() -> Self {
-        record_llvm_start();
-        Self
-    }
 }
 
 fn assert_source_diagnostic(actual: &str, file: &Path, expected: &str) {
@@ -52,20 +42,20 @@ fn assert_source_diagnostic(actual: &str, file: &Path, expected: &str) {
     );
 }
 
-fn assert_refusal_before_llvm(
-    entry: &Path,
-    file: &Path,
-    expected: &str,
-    builds: &[CompileOptions],
-) {
+fn assert_source_refusal(entry: &Path, file: &Path, expected: &str, builds: &[CompileOptions]) {
     let (diagnostic, events) = observe_preparation(|| check_file(entry, None).unwrap_err());
     assert_source_diagnostic(&diagnostic, file, expected);
-    assert!(!events.iter().any(|event| matches!(event, Phase::Llvm)));
+    assert!(!events.iter().any(|event| matches!(event, Phase::Llvm(_))));
     for options in builds {
         let (diagnostic, events) =
             observe_preparation(|| compile_file(entry, None, options).err().unwrap());
         assert_source_diagnostic(&diagnostic, file, expected);
-        assert!(!events.iter().any(|event| matches!(event, Phase::Llvm)));
+        let rejected = file.canonicalize().unwrap();
+        assert!(events.iter().all(|event| match event {
+            Phase::Llvm(Some(path)) => path.canonicalize().ok().as_ref() != Some(&rejected),
+            Phase::Llvm(None) => false,
+            Phase::Prepared(..) => true,
+        }));
     }
 }
 
@@ -92,7 +82,7 @@ fn imported_operand_refusal_precedes_llvm_emission() {
         script_startup: Some((flags, "imre".into())),
         ..Default::default()
     };
-    assert_refusal_before_llvm(
+    assert_source_refusal(
         &main,
         &source,
         ":4:15: cannot compile this comprehension ahead of time (through 4:57)",
@@ -108,17 +98,7 @@ fn imported_operand_refusal_precedes_llvm_emission() {
                 check_file(&main, None).unwrap();
             }
         });
-        // Both physical files use their original parse exactly once, before any output.
-        let prepared = events
-            .iter()
-            .position(|event| matches!(event, Phase::Llvm))
-            .unwrap_or(events.len());
-        assert!(
-            events[prepared..]
-                .iter()
-                .all(|event| matches!(event, Phase::Llvm))
-        );
-        assert_eq!(prepared < events.len(), build);
+        // Each physical file uses its original parse before emitting that module's body.
         for file in [&main, &source] {
             let identity = file.canonicalize().unwrap();
             let observed: Vec<_> = events
@@ -127,12 +107,26 @@ fn imported_operand_refusal_precedes_llvm_emission() {
                     Phase::Prepared(path, borrowed)
                         if path.canonicalize().ok().as_ref() == Some(&identity) =>
                     {
-                        Some(*borrowed)
+                        Some(("prepare", *borrowed))
+                    }
+                    Phase::Llvm(Some(path))
+                        if path.canonicalize().ok().as_ref() == Some(&identity) =>
+                    {
+                        Some(("emit", true))
                     }
                     _ => None,
                 })
                 .collect();
-            assert_eq!(observed, [true], "preparations of {}", file.display());
+            if build {
+                assert_eq!(
+                    observed,
+                    [("prepare", true), ("emit", true)],
+                    "{}",
+                    file.display()
+                );
+            } else {
+                assert_eq!(observed, [("prepare", true)], "{}", file.display());
+            }
         }
     }
 }
@@ -174,7 +168,7 @@ print(earlier(), take(text()))
         std::fs::write(&entry, program).unwrap();
         let error =
             format!(":9:{column}: Imre: expected int, got str; annotations are enforced contracts");
-        assert_refusal_before_llvm(&entry, &entry, &error, &[CompileOptions::default()]);
+        assert_source_refusal(&entry, &entry, &error, &[CompileOptions::default()]);
     }
 }
 
@@ -216,7 +210,7 @@ fn conditional_operands_refuse_only_on_reachable_edges() {
         (assertion, "assert False,", "assert True,", 5, 22, 64),
     ] {
         std::fs::write(&entry, source).unwrap();
-        assert_refusal_before_llvm(
+        assert_source_refusal(
             &entry,
             &entry,
             &format!(
@@ -249,7 +243,7 @@ fn indirect_literal_operand_refusal_precedes_llvm_emission() {
     let nested = format!("exec({}, globals())", serde_json::to_string(body).unwrap());
     for (child, prefix) in [(body, ""), (nested.as_str(), "<string>:1:6: Imre: ")] {
         std::fs::write(&entry, caller(child)).unwrap();
-        assert_refusal_before_llvm(
+        assert_source_refusal(
             &entry,
             &entry,
             &format!(
@@ -309,7 +303,7 @@ fn imported_checked_function_retains_its_literal_call_site() {
         "def invoke() -> None:\n    exec(\"exec(input())\", {})\n",
     )
     .unwrap();
-    assert_refusal_before_llvm(
+    assert_source_refusal(
         &entry,
         &rules,
         concat!(
@@ -383,7 +377,7 @@ fn suspended_assignment_refusal_precedes_llvm_emission() {
     let assignment = augmented.replace("values +=", "values =");
     for (body, col, end) in [(augmented, 15, 54), (assignment.as_str(), 14, 53)] {
         std::fs::write(&main, body).unwrap();
-        assert_refusal_before_llvm(
+        assert_source_refusal(
             &main,
             &main,
             &format!(
@@ -410,7 +404,7 @@ def run() -> None:
 run()
 "#;
     std::fs::write(&path, source).unwrap();
-    assert_refusal_before_llvm(
+    assert_source_refusal(
         &path,
         &path,
         ":7:18: Imre: expected int, got str; annotations are enforced contracts",
@@ -477,7 +471,7 @@ fn bound_wrapper_emits_once_with_its_fixed_callable_layout() {
         assert_eq!(
             phases
                 .iter()
-                .filter(|phase| matches!(phase, Phase::Llvm))
+                .filter(|phase| matches!(phase, Phase::Llvm(_)))
                 .count(),
             1
         );
@@ -663,7 +657,7 @@ fn dormant_thread_preserves_the_declared_call_diagnostic_across_edits() {
     let expected = ":5:17: Imre: expected int, got str; annotations are enforced contracts";
     let mut compiler = IncrementalCompiler::default();
     std::fs::write(&scores, source).unwrap();
-    assert_refusal_before_llvm(&entry, &scores, expected, &[CompileOptions::default()]);
+    assert_source_refusal(&entry, &scores, expected, &[CompileOptions::default()]);
     assert_source_diagnostic(
         &compiler.check_file(&entry, None).unwrap_err(),
         &scores,
@@ -806,7 +800,7 @@ fn dormant_thread_keeps_an_imported_modules_exact_types() {
         let error = format!(
             ":{position}: Imre: expected int, got bool; annotations are enforced contracts"
         );
-        assert_refusal_before_llvm(&entry, &scores, &error, &[CompileOptions::default()]);
+        assert_source_refusal(&entry, &scores, &error, &[CompileOptions::default()]);
     }
     for source in [
         "def measure():\n    value = 1\n    value = 'ready'\n    print(value)\n",
@@ -864,5 +858,5 @@ fn retained_generator_propagates_its_nested_definition_refusal() {
     );
     std::fs::write(&entry, source).unwrap();
     let expected = ":7:19: cannot compile this comprehension ahead of time (through 7:61)";
-    assert_refusal_before_llvm(&entry, &entry, expected, &[CompileOptions::default()]);
+    assert_source_refusal(&entry, &entry, expected, &[CompileOptions::default()]);
 }
