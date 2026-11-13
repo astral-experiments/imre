@@ -185,12 +185,7 @@ impl Context {
         // root the receiver and current error before resolving the current class slot.
         let mark = self.heap.temporary_mark();
         self.heap.keep(owner);
-        let pending = self.pending.take();
-        if let Some(error) = &pending {
-            for root in error.roots() {
-                self.heap.keep(root);
-            }
-        }
+        let pending = self.heap.execution.take_rooted_error();
         if let Some(scan) = scan {
             super::stdlib::os::scandir::finalize(self, owner, &scan);
         } else if unpack_iterator {
@@ -242,7 +237,7 @@ impl Context {
                 }
             }
         }
-        self.pending = pending;
+        self.heap.execution.pending = pending;
         self.heap.release_temporaries_since(mark);
     }
 }

@@ -398,7 +398,7 @@ impl Context {
 
     /// A resumed frame chains to its own handled exception, regardless of the caller's handler.
     pub(super) fn chain_generator_input(&mut self, error: &mut Error) {
-        let frame = self.heap.frames.last().unwrap();
+        let frame = self.heap.execution.current();
         if frame.has_local_exception && frame.active != NONE {
             if error
                 .trace
@@ -468,8 +468,8 @@ impl Context {
             return NONE;
         }
         let mut frames = Vec::new();
-        for index in (0..self.heap.frames.len()).rev() {
-            let frame = &self.heap.frames[index];
+        for index in (0..self.heap.execution.frames.len()).rev() {
+            let frame = &self.heap.execution.frames[index];
             let Some(location) = &frame.location else {
                 continue;
             };
@@ -492,6 +492,7 @@ impl Context {
     pub(super) fn frame_position(&self, object: Id) -> Option<[u32; 4]> {
         let frame = self
             .heap
+            .execution
             .frames
             .iter()
             .rev()
@@ -506,6 +507,7 @@ impl Context {
     pub(super) fn active_frame(&mut self, depth: usize) -> Result<Option<(Location, Id)>> {
         let Some((index, _)) = self
             .heap
+            .execution
             .frames
             .iter()
             .enumerate()
@@ -519,7 +521,7 @@ impl Context {
     }
 
     fn materialize_frame(&mut self, index: usize) -> Result<Option<(Location, Id)>> {
-        let frame = &self.heap.frames[index];
+        let frame = &self.heap.execution.frames[index];
         if frame.code == NONE {
             return Ok(None);
         }
@@ -532,7 +534,7 @@ impl Context {
         // An escaped ordinary frame owns its caller even after both functions return.
         // Materialize the missing prefix iteratively, stopping at a cached frame or
         // a generator whose resumer is meaningful only during this activation.
-        let start = self.heap.frames[..=index]
+        let start = self.heap.execution.frames[..=index]
             .iter()
             .rposition(|frame| {
                 frame.object.is_some()
@@ -541,7 +543,7 @@ impl Context {
             .unwrap_or(0);
         let mut previous = NONE;
         for position in start..=index {
-            let frame = &self.heap.frames[position];
+            let frame = &self.heap.execution.frames[position];
             if let Some(object) = frame.object {
                 previous = object;
                 continue;
@@ -574,7 +576,7 @@ impl Context {
                 };
                 *frame = Some(object);
             }
-            self.heap.frames[position].object = Some(object);
+            self.heap.execution.frames[position].object = Some(object);
             previous = object;
         }
         Ok(Some((location, previous)))
@@ -599,7 +601,7 @@ impl Context {
             return Ok(NONE);
         }
         if let Some(index) =
-            self.heap.frames.iter().rposition(
+            self.heap.execution.frames.iter().rposition(
                 |frame| matches!(frame.owner, FrameOwner::Generator(owner) if owner == id),
             )
             && let Some((_, frame)) = self.materialize_frame(index)?
@@ -630,13 +632,14 @@ impl Context {
     pub(super) fn generator_frame_back(&mut self, object: Id) -> Result<Id> {
         let Some(index) = self
             .heap
+            .execution
             .frames
             .iter()
             .rposition(|frame| frame.object == Some(object))
         else {
             return Ok(NONE);
         };
-        let Some(caller) = self.heap.frames[..index]
+        let Some(caller) = self.heap.execution.frames[..index]
             .iter()
             .rposition(|frame| frame.code != NONE && frame.location.is_some())
         else {
@@ -650,7 +653,7 @@ impl Context {
         if let Some((line, _)) = position {
             self.heap.set_statement_line(line);
         }
-        let failure = match self.materialize_frame(self.heap.frames.len() - 1) {
+        let failure = match self.materialize_frame(self.heap.execution.frames.len() - 1) {
             Err(failure) => failure,
             Ok(None) => return,
             Ok(Some((mut loc, frame))) => {
@@ -666,8 +669,7 @@ impl Context {
                     loc.span = Some(span);
                 } else if let Some(span) = &mut loc.span
                     && span.anchor == TracebackAnchor::Hidden
-                    && let ExpressionPosition::Line(line) =
-                        self.heap.frames.last().unwrap().expression
+                    && let ExpressionPosition::Line(line) = self.heap.execution.current().expression
                     && line == loc.line
                 {
                     // An eager expression shares the published range of a definition,
@@ -3411,7 +3413,7 @@ impl RootTrace {
                 largest = (id, items.as_slice());
             }
         };
-        for frame in &heap.frames {
+        for frame in &heap.execution.frames {
             let Value::Scope(scope) = heap.get(frame.scope) else {
                 continue;
             };
@@ -3754,9 +3756,7 @@ pub(super) struct Heap {
     text_position: Cell<TextPosition>,
     // Weak loader identities. The executable owns the initializer and any embedded bytes.
     pub(super) linked_sources: HashMap<Id, super::LinkedSource>,
-    frames: Vec<Frame>,
-    // Empty storage that the next native activation can reuse.
-    spare_frame_roots: Vec<Id>,
+    pub(super) execution: ExecutionState,
     fault_generation: Cell<Option<u32>>,
     fault_workers: RefCell<Option<Weak<()>>>,
     next_collection: usize,
@@ -3847,6 +3847,49 @@ pub(super) struct Frame {
     has_local_exception: bool,
     // This activation or one of its calls opened a buffered output file.
     created_finalizer: bool,
+}
+
+/// The live Python stack and error indicator of the thread executing this heap.
+pub(super) struct ExecutionState {
+    frames: Vec<Frame>,
+    pub(super) pending: Option<Error>,
+    // Empty storage that the next native activation can reuse.
+    spare_frame_roots: Vec<Id>,
+}
+
+impl ExecutionState {
+    fn new(reserved: Option<WorkerStack>) -> Self {
+        let mut frames = reserved.map_or_else(|| Vec::with_capacity(1), |stack| stack.0);
+        frames.push(Frame::new(NONE, NONE, FrameOwner::Module(NONE), NONE));
+        Self {
+            frames,
+            pending: None,
+            spare_frame_roots: Vec::new(),
+        }
+    }
+
+    fn current(&self) -> &Frame {
+        self.frames.last().unwrap()
+    }
+
+    fn current_mut(&mut self) -> &mut Frame {
+        self.frames.last_mut().unwrap()
+    }
+
+    fn roots(&self) -> impl Iterator<Item = Id> + '_ {
+        self.pending.iter().flat_map(Error::roots).chain(
+            self.frames
+                .iter()
+                .flat_map(|frame| std::iter::once(frame.owner.root()).chain(frame.roots())),
+        )
+    }
+
+    /// Clear the error indicator for a callback and keep its objects in the calling frame.
+    pub(super) fn take_rooted_error(&mut self) -> Option<Error> {
+        let error = self.pending.take()?;
+        self.current_mut().live.extend(error.roots());
+        Some(error)
+    }
 }
 
 /// Empty frame storage reserved before a native worker is spawned.
@@ -4018,12 +4061,7 @@ impl Heap {
             immutable_hashes: HashMap::new(),
             text_position: Cell::default(),
             linked_sources: HashMap::new(),
-            spare_frame_roots: Vec::new(),
-            frames: {
-                let mut frames = reserved.map_or_else(|| Vec::with_capacity(1), |stack| stack.0);
-                frames.push(Frame::new(NONE, NONE, FrameOwner::Module(NONE), NONE));
-                frames
-            },
+            execution: ExecutionState::new(reserved),
             fault_generation: Cell::new(None),
             fault_workers: RefCell::new(None),
             next_collection: FIRST_DYNAMIC_SLOT + 4096,
@@ -4243,7 +4281,7 @@ impl Heap {
 
     /// Inspect names in surviving frames without invoking Python attribute or mapping hooks.
     fn active_binding_matches(&self, mut predicate: impl FnMut(Id) -> bool) -> bool {
-        self.frames.iter().rev().any(|frame| {
+        self.execution.frames.iter().rev().any(|frame| {
             let Value::Scope(scope) = self.get(frame.scope) else {
                 return false;
             };
@@ -4365,7 +4403,7 @@ impl Heap {
 
     pub(super) fn constant_at(&self, key: &ConstantSlot) -> Option<Id> {
         if let ConstantSlot::Linked(slot) = key
-            && let Some(frame) = self.frames.last()
+            && let Some(frame) = self.execution.frames.last()
             && let Value::Code(code) = self.get(frame.code)
         {
             return code
@@ -4388,7 +4426,7 @@ impl Heap {
             return Ok(value);
         }
         if let ConstantSlot::Linked(slot) = key
-            && let Some(code) = self.frames.last().map(|frame| frame.code)
+            && let Some(code) = self.execution.frames.last().map(|frame| frame.code)
             && let Value::Code(code) = self.get_mut(code)
         {
             let pool = code
@@ -4566,7 +4604,7 @@ impl Heap {
             } else {
                 self.allocation_traces.record(
                     id,
-                    self.frames.iter().rev().filter_map(|frame| {
+                    self.execution.frames.iter().rev().filter_map(|frame| {
                         let location = frame.location.as_ref()?;
                         Some((location.file.as_ref(), frame.line(location)))
                     }),
@@ -4763,20 +4801,24 @@ impl Heap {
     }
     pub fn enter(&mut self, scope: Id, code: Id, owner: FrameOwner) {
         let mut activation = Frame::new(scope, code, owner, self.active_exception());
-        activation.live = std::mem::take(&mut self.spare_frame_roots);
+        activation.live = std::mem::take(&mut self.execution.spare_frame_roots);
         if let FrameOwner::Generator(id) = owner {
             let Value::Generator { frame, .. } = self.get(id) else {
                 unreachable!()
             };
             activation.object = *frame;
         }
-        self.frames.push(activation);
+        self.execution.frames.push(activation);
         if self.fault_frames_current() {
             self.publish_fault_frame(self.python_depth() - 1);
         }
     }
     fn pop_native_frame(&mut self) -> Frame {
-        let frame = self.frames.pop().expect("returning native activation");
+        let frame = self
+            .execution
+            .frames
+            .pop()
+            .expect("returning native activation");
         if let FrameOwner::Generator(id) = frame.owner
             && let Some(location) = &frame.location
             && let Value::Generator { lineno, .. } = self.get_mut(id)
@@ -4802,8 +4844,8 @@ impl Heap {
     /// Root a yielded value or a failed delegate lookup while the generator
     /// releases its operands. The resumer reserved one slot before entering.
     pub(super) fn publish_to_resumer(&mut self, result: Result<Id>) -> Result<Id> {
-        let caller = self.frames.len() - 2;
-        let live = &mut self.frames[caller].live;
+        let caller = self.execution.frames.len() - 2;
+        let live = &mut self.execution.frames[caller].live;
         match &result {
             Ok(value) => live.push(*value),
             Err(error) => {
@@ -4825,7 +4867,7 @@ impl Heap {
         {
             return false;
         }
-        let [.., caller, frame] = self.frames.as_slice() else {
+        let [.., caller, frame] = self.execution.frames.as_slice() else {
             return false;
         };
         let Some(delegate) = frame.operand(delegate) else {
@@ -4857,7 +4899,7 @@ impl Heap {
         if !frame.has_local_exception {
             frame.active = frame.inherited;
         }
-        self.frames.push(frame);
+        self.execution.frames.push(frame);
         if self.fault_frames_current() {
             self.publish_fault_frame(self.python_depth() - 1);
         }
@@ -4868,7 +4910,7 @@ impl Heap {
         let mut frame = self.pop_native_frame();
         let opened = frame.created_finalizer && self.tracks_finalizers();
         if opened {
-            self.frames.last_mut().unwrap().created_finalizer = true;
+            self.execution.current_mut().created_finalizer = true;
         }
         let finalizer_released = opened && returning && self.has_unbound_finalizer(value);
         let check_coroutines = returning && self.has_unstarted_coroutines();
@@ -4898,9 +4940,9 @@ impl Heap {
             }
         }
         // Bound the retained allocation even after a call with many live temporaries.
-        if self.spare_frame_roots.capacity() == 0 && frame.live.capacity() <= 64 {
+        if self.execution.spare_frame_roots.capacity() == 0 && frame.live.capacity() <= 64 {
             frame.live.clear();
-            self.spare_frame_roots = frame.live;
+            self.execution.spare_frame_roots = frame.live;
         }
         self.keep(value);
         finalizer_released
@@ -4908,7 +4950,7 @@ impl Heap {
 
     /// Drop the caller's temporary reference to a completed function or generator scope.
     pub(super) fn release_scope_temporary(&mut self, scope: Id) {
-        let caller = &mut self.frames.last_mut().unwrap().live;
+        let caller = &mut self.execution.current_mut().live;
         if let Some(index) = caller.iter().position(|&id| id == scope) {
             caller[index] = NONE;
         }
@@ -4916,37 +4958,36 @@ impl Heap {
 
     /// Reserve temporary roots before taking a snapshot that may outlive a Python callback.
     pub(super) fn reserve_temporaries(&mut self, additional: usize) -> Result<()> {
-        self.frames
-            .last_mut()
-            .unwrap()
+        self.execution
+            .current_mut()
             .live
             .try_reserve(additional)
             .map_err(|_| Error::new("MemoryError", ""))
     }
 
     pub fn keep(&mut self, value: Id) {
-        self.frames.last_mut().unwrap().live.push(value);
+        self.execution.current_mut().live.push(value);
     }
 
     /// Place restored lexical and operand roots below the frame's evaluation temporaries.
     pub(super) fn insert_temporaries(&mut self, mark: usize, roots: &[Id]) {
-        let live = &mut self.frames.last_mut().unwrap().live;
+        let live = &mut self.execution.current_mut().live;
         live.splice(mark..mark, roots.iter().copied());
     }
 
     /// Insert a root below newer temporaries so they can be released before it.
     pub(super) fn keep_at(&mut self, mark: usize, value: Id) {
-        self.frames.last_mut().unwrap().live.insert(mark, value);
+        self.execution.current_mut().live.insert(mark, value);
     }
 
     /// Access a reserved operand slot below the current expression's temporaries.
     pub(super) fn temporary_root(&mut self, index: usize) -> &mut Id {
-        &mut self.frames.last_mut().unwrap().live[index]
+        &mut self.execution.current_mut().live[index]
     }
 
     /// Mark temporary roots that must survive the next iteration of a native loop.
     pub fn temporary_mark(&self) -> usize {
-        self.frames.last().unwrap().live.len()
+        self.execution.current().live.len()
     }
 
     fn finalizer_free_scalar(&self, id: Id) -> bool {
@@ -5013,7 +5054,7 @@ impl Heap {
         {
             return false;
         }
-        let Some(dropped) = self.frames.last().unwrap().live.get(mark..) else {
+        let Some(dropped) = self.execution.current().live.get(mark..) else {
             return false;
         };
         if dropped.len() > 64 {
@@ -5139,28 +5180,21 @@ impl Heap {
         if !self.tracks_finalizers() {
             return false;
         }
-        let could_own_finalizer = self
-            .frames
-            .last()
-            .unwrap()
-            .live
-            .iter()
-            .skip(mark)
-            .any(|&id| {
-                // A one-argument call roots its operand through a private list.
-                let operand = match self.get(id) {
-                    Value::List(items) if items.len() == 1 => items[0],
-                    _ => id,
-                };
-                // The import registry already keeps this exact module and its globals alive.
-                if matches!(self.get(operand), Value::Module { .. })
-                    && let Value::Dict(entries) = self.get(modules)
-                    && entries.iter().any(|&(_, module)| module == operand)
-                {
-                    return false;
-                }
-                self.could_own_finalizer(operand, false)
-            });
+        let could_own_finalizer = self.execution.current().live.iter().skip(mark).any(|&id| {
+            // A one-argument call roots its operand through a private list.
+            let operand = match self.get(id) {
+                Value::List(items) if items.len() == 1 => items[0],
+                _ => id,
+            };
+            // The import registry already keeps this exact module and its globals alive.
+            if matches!(self.get(operand), Value::Module { .. })
+                && let Value::Dict(entries) = self.get(modules)
+                && entries.iter().any(|&(_, module)| module == operand)
+            {
+                return false;
+            }
+            self.could_own_finalizer(operand, false)
+        });
         if !could_own_finalizer {
             return false;
         }
@@ -5182,9 +5216,8 @@ impl Heap {
     pub(super) fn discard_truth_operands(&mut self, mark: usize, modules: Id) -> bool {
         let weak_release = self.has_weak_values
             && self
-                .frames
-                .last()
-                .unwrap()
+                .execution
+                .current()
                 .live
                 .iter()
                 .skip(mark)
@@ -5203,25 +5236,25 @@ impl Heap {
     }
 
     pub fn release_temporaries_since(&mut self, mark: usize) {
-        self.frames.last_mut().unwrap().live.truncate(mark);
+        self.execution.current_mut().live.truncate(mark);
     }
 
     /// Drop an upgraded proxy's temporary root without discarding results returned by its hooks.
     pub(super) fn release_weak_target(&mut self, mark: usize, target: Id) {
-        let root = &mut self.frames.last_mut().unwrap().live[mark];
+        let root = &mut self.execution.current_mut().live[mark];
         debug_assert_eq!(*root, target);
         *root = NONE;
         self.weak_edge_removed(target);
     }
 
     pub fn active_exception(&self) -> Id {
-        self.frames.last().unwrap().active
+        self.execution.current().active
     }
 
     /// Use the caller's exception when no lexical handler encloses this operation.
     pub(super) fn caught_exception(&self, caught: Id) -> Id {
         if caught == NONE {
-            self.frames.last().unwrap().inherited
+            self.execution.current().inherited
         } else {
             caught
         }
@@ -5229,13 +5262,13 @@ impl Heap {
 
     pub(super) fn restore_caught(&mut self, caught: Id) {
         let active = self.caught_exception(caught);
-        let frame = self.frames.last_mut().unwrap();
+        let frame = self.execution.current_mut();
         frame.active = active;
         frame.has_local_exception = caught != NONE;
     }
 
     pub fn replace_active(&mut self, exception: Id) -> Id {
-        std::mem::replace(&mut self.frames.last_mut().unwrap().active, exception)
+        std::mem::replace(&mut self.execution.current_mut().active, exception)
     }
 
     /// Release a cold or completed frame. Later close calls see it as exhausted.
@@ -5334,7 +5367,13 @@ impl Heap {
             self.collect_next_statement |= data.closure.extra_locals.take().is_some();
             return Ok(());
         }
-        if scope != NONE && self.frames.iter().any(|frame| frame.scope == scope) {
+        if scope != NONE
+            && self
+                .execution
+                .frames
+                .iter()
+                .any(|frame| frame.scope == scope)
+        {
             return Err(Error::new(
                 "RuntimeError",
                 "cannot clear an executing frame",
@@ -5396,7 +5435,7 @@ impl Heap {
     }
 
     pub fn caller_module_at(&self, depth: usize) -> Option<Id> {
-        let mut owner = self.frames.iter().rev().nth(depth)?.owner;
+        let mut owner = self.execution.frames.iter().rev().nth(depth)?.owner;
         if let FrameOwner::Generator(id) = owner {
             let Value::Generator {
                 owner: function, ..
@@ -5462,7 +5501,7 @@ impl Heap {
     }
 
     fn publish_fault_frame(&self, index: usize) {
-        let frame = &self.frames[index + 1];
+        let frame = &self.execution.frames[index + 1];
         let Value::Code(code) = self.get(frame.code) else {
             unreachable!("Python frame owns its code");
         };
@@ -5515,20 +5554,20 @@ impl Heap {
 
     /// The first activation is a sentinel outside the Python frame stack.
     pub(super) fn python_depth(&self) -> usize {
-        self.frames.len() - 1
+        self.execution.frames.len() - 1
     }
 
     pub fn current_code(&self) -> Id {
-        self.frames.last().unwrap().code
+        self.execution.current().code
     }
 
     pub fn current_scope(&self) -> Id {
-        self.frames.last().unwrap().scope
+        self.execution.current().scope
     }
 
     /// Iterate over live Python warning locations, starting at the innermost caller.
     pub(super) fn warning_frames(&self) -> impl Iterator<Item = (Location, Id)> {
-        self.frames.iter().rev().filter_map(|frame| {
+        self.execution.frames.iter().rev().filter_map(|frame| {
             let mut location = frame.location.clone()?;
             // The executing expression can be on a later line than the start of its call span.
             location.line = frame.line(&location);
@@ -5542,22 +5581,22 @@ impl Heap {
     }
 
     pub(super) fn take_call_position(&mut self) -> Option<[u32; 4]> {
-        self.frames.last_mut().unwrap().call_position.take()
+        self.execution.current_mut().call_position.take()
     }
 
     pub(super) fn set_call_position(&mut self, position: Option<[u32; 4]>) {
-        self.frames.last_mut().unwrap().call_position = position;
+        self.execution.current_mut().call_position = position;
     }
 
     pub(super) fn replace_expression(
         &mut self,
         position: ExpressionPosition,
     ) -> ExpressionPosition {
-        std::mem::replace(&mut self.frames.last_mut().unwrap().expression, position)
+        std::mem::replace(&mut self.execution.current_mut().expression, position)
     }
 
     pub fn current_location(&self) -> Option<Location> {
-        self.frames.last()?.location.clone()
+        self.execution.frames.last()?.location.clone()
     }
 
     /// Trace the same roots for collection and for a weak interning lookup between collections.
@@ -5634,10 +5673,7 @@ impl Heap {
                 .filter(|entry| entry.literal)
                 .map(|entry| entry.id),
         );
-        for frame in &self.frames {
-            pending.push(frame.owner.root());
-            frame.visit(pending);
-        }
+        pending.extend(self.execution.roots());
     }
 
     /// The singleton and small-integer prefix is permanently marked and has no children.
@@ -5823,7 +5859,7 @@ impl Heap {
         if self.slots[id as usize].finalization == Finalization::None {
             self.slots[id as usize].finalization = Finalization::Pending;
             self.ordinary_finalizers.push(id);
-            if let Some(frame) = self.frames.last_mut() {
+            if let Some(frame) = self.execution.frames.last_mut() {
                 frame.created_finalizer = true;
             }
         }
@@ -5951,21 +5987,28 @@ impl Heap {
     /// A suspended caller keeps its operands when the current frame releases temporaries.
     fn caller_keeps_generator(&self, owner: Id) -> bool {
         matches!(self.get(owner), Value::Generator { .. })
-            && self.frames.iter().rev().take(24).skip(1).any(|frame| {
-                // Context manager exits and loop iterators survive at the front of a
-                // caller's operands as newer expression temporaries fill the other end.
-                frame.live.iter().take(8).any(|id| {
-                    matches!(
-                        self.get(*id),
-                        Value::Method { .. } | Value::LoopIterator { .. }
-                    ) && self.short_path_keeps_owner(*id, owner)
+            && self
+                .execution
+                .frames
+                .iter()
+                .rev()
+                .take(24)
+                .skip(1)
+                .any(|frame| {
+                    // Context manager exits and loop iterators survive at the front of a
+                    // caller's operands as newer expression temporaries fill the other end.
+                    frame.live.iter().take(8).any(|id| {
+                        matches!(
+                            self.get(*id),
+                            Value::Method { .. } | Value::LoopIterator { .. }
+                        ) && self.short_path_keeps_owner(*id, owner)
+                    })
                 })
-            })
     }
 
     /// Look for a short strong path from a current frame to an owner.
     fn frame_keeps_owner(&self, owner: Id) -> bool {
-        self.frames.iter().rev().take(8).any(|frame| {
+        self.execution.frames.iter().rev().take(8).any(|frame| {
             let locals = match self.get(frame.scope) {
                 Value::Scope(scope) => Some(&scope.names),
                 _ => None,
@@ -5984,7 +6027,7 @@ impl Heap {
     fn bound_finalizer_chains(&self) -> [Option<[Id; 3]>; 2] {
         self.finalizer_bindings.get().map(|position| {
             let (frame, slot) = position?;
-            let Value::Scope(scope) = self.get(self.frames.get(frame)?.scope) else {
+            let Value::Scope(scope) = self.get(self.execution.frames.get(frame)?.scope) else {
                 return None;
             };
             let owner = match slot {
@@ -5999,7 +6042,7 @@ impl Heap {
 
     /// Remember the binding position so later checks can validate its current occupant.
     fn find_finalizer_binding(&self, owner: Id) -> bool {
-        for (frame_index, frame) in self.frames.iter().enumerate().rev() {
+        for (frame_index, frame) in self.execution.frames.iter().enumerate().rev() {
             let Value::Scope(scope) = self.get(frame.scope) else {
                 continue;
             };
@@ -6152,6 +6195,7 @@ impl Heap {
         // Scan the callers once when only one finalizer needs a reachability check.
         if let [owner] = self.ordinary_finalizers.as_slice()
             && self
+                .execution
                 .frames
                 .iter()
                 .rev()
@@ -6299,7 +6343,7 @@ impl Heap {
                     next: END,
                     mode: MarkMode::CycleEdges,
                 };
-                pending.extend(&self.frames.last().unwrap().live[mark..]);
+                pending.extend(&self.execution.current().live[mark..]);
                 while let Some(id) = pending.pop() {
                     self.traces[id as usize].set(*visited);
                     *visited = id as usize;
@@ -6337,7 +6381,7 @@ impl Heap {
                 .try_reserve(1)
                 .map_err(|_| Error::new("MemoryError", ""))?;
             self.descriptor_owners.push(id);
-            self.frames.last_mut().unwrap().created_finalizer = true;
+            self.execution.current_mut().created_finalizer = true;
         }
         Ok(())
     }
@@ -6349,7 +6393,7 @@ impl Heap {
             .map_err(|_| Error::new("MemoryError", ""))?;
         let id = self.alloc(value);
         self.descriptor_owners.push(id);
-        self.frames.last_mut().unwrap().created_finalizer = true;
+        self.execution.current_mut().created_finalizer = true;
         Ok(id)
     }
 
@@ -6370,6 +6414,7 @@ impl Heap {
         // Frames, operand slots, and fields can all be removed or reused.
         if let Some((frame, operand, field)) = self.caller_finalizer_field
             && self
+                .execution
                 .frames
                 .get(frame)
                 .and_then(|frame| frame.live.get(operand))
@@ -6382,7 +6427,7 @@ impl Heap {
 
         // Earlier operands hold outer expressions such as pending context manager exits.
         // Learn the position while its frame is the immediate caller, before recursion.
-        if let Some((frame_index, caller)) = self.frames.iter().enumerate().rev().nth(1) {
+        if let Some((frame_index, caller)) = self.execution.frames.iter().enumerate().rev().nth(1) {
             for (operand_index, operand) in caller.live.iter().take(8).enumerate() {
                 if let Some(fields) = receiver_fields(operand)
                     && let Some(field) = fields.values().take(8).position(|value| value == owner)
@@ -6455,7 +6500,7 @@ impl Heap {
         if !replaced || !self.has_unbound_finalizer(NONE) {
             return false;
         }
-        let temporaries = &mut self.frames.last_mut().unwrap().live;
+        let temporaries = &mut self.execution.current_mut().live;
         temporaries.truncate(mark);
         temporaries.extend_from_slice(live);
         true
@@ -6490,7 +6535,7 @@ impl Heap {
 
     pub(super) fn publish_statement(&mut self, live: &[Id], location: Location, caught: Id) {
         self.restore_caught(caught);
-        let frame = self.frames.last_mut().unwrap();
+        let frame = self.execution.current_mut();
         let line = location.line;
         frame.location = Some(location);
         frame.expression = ExpressionPosition::Statement;
@@ -6512,9 +6557,8 @@ impl Heap {
                 anchor: TracebackAnchor::Hidden,
             }
         });
-        self.frames
-            .last_mut()
-            .unwrap()
+        self.execution
+            .current_mut()
             .location
             .as_mut()
             .expect("active statement")
@@ -6523,7 +6567,7 @@ impl Heap {
 
     /// Attribute a fault to the operand currently executing in this activation.
     pub(super) fn use_expression_line(&mut self) {
-        if let Some(frame) = self.frames.last()
+        if let Some(frame) = self.execution.frames.last()
             && let Some(location) = &frame.location
         {
             let line = frame.line(location);
@@ -6535,7 +6579,7 @@ impl Heap {
 
     /// Update the current source line without crossing a statement boundary.
     pub(super) fn set_statement_line(&mut self, line: u32) {
-        let frame = self.frames.last_mut().unwrap();
+        let frame = self.execution.current_mut();
         frame
             .location
             .as_mut()
@@ -6752,7 +6796,7 @@ impl Heap {
             Value::Tuple(items) => {
                 items.pop();
                 let pending = std::mem::take(items);
-                self.frames.last_mut().unwrap().live.extend(pending);
+                self.execution.current_mut().live.extend(pending);
             }
             Value::PythonFrame { scope, back, .. } => {
                 *scope = NONE;
@@ -7156,7 +7200,7 @@ impl Heap {
         // Clear non-owning handles before any dead target slot can be reused. Dead wrappers
         // never receive callbacks, and every live wrapper is cleared before any callback runs.
         let mut callbacks = Vec::new();
-        let live = &mut self.frames.last_mut().unwrap().live;
+        let live = &mut self.execution.current_mut().live;
         self.weak.retain(|&target, refs| {
             if dealloc.is_some_and(|owner| owner != target) {
                 return true;
@@ -7451,9 +7495,11 @@ mod tests {
         let filename = ctx.heap.alloc(Value::List(Vec::new()));
         assert!(ctx.update_syntax_member(raised, "filename", filename));
         ctx.heap.release_temporaries_since(mark);
-        ctx.pending = Some(error);
+        ctx.heap.execution.pending = Some(error);
         ctx.collect_generation(2).unwrap();
-        let fields = ctx.syntax_members(ctx.pending.as_ref().unwrap()).unwrap();
+        let fields = ctx
+            .syntax_members(ctx.heap.execution.pending.as_ref().unwrap())
+            .unwrap();
         assert_eq!(fields[1], filename);
         assert!(matches!(ctx.heap.get(filename), Value::List(_)));
     }
@@ -7510,7 +7556,8 @@ mod tests {
         assert!(heap.take_sweep_request());
         heap.release_temporaries_since(0);
         heap.keep(reference);
-        heap.frames
+        heap.execution
+            .frames
             .push(Frame::new(NONE, NONE, FrameOwner::Module(NONE), NONE));
 
         heap.keep(delegate);
@@ -7528,7 +7575,7 @@ mod tests {
             let before = heap.temporary_mark();
             heap.keep(other);
             assert!(!heap.forwarded_roots_survive(0, mark, yielded));
-            assert_eq!(heap.frames.last().unwrap().live.last(), Some(&other));
+            assert_eq!(heap.execution.current().live.last(), Some(&other));
             heap.release_temporaries_since(before);
         }
 
@@ -7556,8 +7603,11 @@ mod tests {
         heap.end_full_collection();
         assert!(heap.forwarded_roots_survive(0, mark, yielded));
         heap.release_temporaries_since(mark);
-        assert_eq!(heap.frames[1].live.as_slice(), &[delegate]);
-        assert_eq!(heap.frames[0].live.as_slice(), &[reference, yielded]);
+        assert_eq!(heap.execution.frames[1].live.as_slice(), &[delegate]);
+        assert_eq!(
+            heap.execution.frames[0].live.as_slice(),
+            &[reference, yielded]
+        );
         assert!(heap.is_pending_finalizer(finalizer));
         assert_eq!(heap.weak_references(weak_target), &[reference]);
     }
@@ -7692,7 +7742,7 @@ mod tests {
         let mut scope = Scope::new(String::new(), None);
         scope.namespace = Some(namespace);
         let scope = heap.alloc(Value::Scope(allocator_api2::boxed::Box::new(scope)));
-        heap.frames[0].scope = scope;
+        heap.execution.frames[0].scope = scope;
 
         assert!(heap.find_finalizer_binding(owner));
         assert_eq!(heap.bound_finalizer_chains(), [Some([owner; 3]), None]);
@@ -7751,7 +7801,7 @@ mod tests {
         let capacity = buffer.capacity();
         let live = heap.alloc(Value::Bytes(buffer));
         assert!(heap.collection_requested());
-        heap.frames.last_mut().unwrap().live.clear();
+        heap.execution.current_mut().live.clear();
         assert!(heap.take_sweep_request());
         heap.collect([live].into_iter());
         assert_eq!(heap.byte_buffer_allowance, capacity);
@@ -7759,7 +7809,7 @@ mod tests {
         let mut buffer = Vec::with_capacity(capacity);
         buffer.extend_from_slice(b"dead");
         let dead = heap.bytes_from_data(buffer);
-        heap.frames.last_mut().unwrap().live.clear();
+        heap.execution.current_mut().live.clear();
         assert!(heap.take_sweep_request());
         heap.collect([live].into_iter());
         assert!(heap.slots[dead as usize].value.is_none());
@@ -7979,7 +8029,7 @@ mod tests {
         let mut frame = Scope::new(String::new(), None);
         frame.names.insert(crate::Str::new("items"), original);
         let scope = heap.alloc(Value::Scope(allocator_api2::boxed::Box::new(frame)));
-        heap.frames[0].scope = scope;
+        heap.execution.frames[0].scope = scope;
         heap.release_temporaries_since(0);
         heap.collect(std::iter::empty());
         assert!(heap.root_trace.roots.contains(&original));
@@ -8027,7 +8077,7 @@ mod tests {
         assert!(heap.slots[latest as usize].value.is_none());
         assert!(heap.slots[final_child as usize].value.is_some());
         assert!(!heap.root_trace.roots.contains(&replacement));
-        heap.frames[0].scope = NONE;
+        heap.execution.frames[0].scope = NONE;
         heap.collect(std::iter::empty());
         assert!(heap.slots[replacement as usize].value.is_none());
         assert!(heap.slots[final_child as usize].value.is_none());
@@ -8040,7 +8090,8 @@ mod tests {
         let owner = heap.alloc(Value::List(vec![child; RootTrace::MIN_CONTAINER]));
         let mut frame = Scope::new(String::new(), None);
         frame.names.insert(crate::Str::new("items"), owner);
-        heap.frames[0].scope = heap.alloc(Value::Scope(allocator_api2::boxed::Box::new(frame)));
+        heap.execution.frames[0].scope =
+            heap.alloc(Value::Scope(allocator_api2::boxed::Box::new(frame)));
         heap.release_temporaries_since(0);
         heap.collect(std::iter::empty());
 
@@ -8091,17 +8142,17 @@ mod tests {
         let mut heap = Heap::new();
         heap.enter(NONE, NONE, FrameOwner::Function(NONE));
         let temporary = heap.alloc(Value::List(Vec::new()));
-        let allocation = heap.frames.last().unwrap().live.as_ptr();
+        let allocation = heap.execution.current().live.as_ptr();
         heap.leave(NONE, true);
         heap.collect(std::iter::empty());
         assert!(heap.slots[temporary as usize].value.is_none());
 
         heap.enter(NONE, NONE, FrameOwner::Function(NONE));
         assert_eq!(heap.temporary_mark(), 0);
-        assert_eq!(heap.frames.last().unwrap().live.as_ptr(), allocation);
+        assert_eq!(heap.execution.current().live.as_ptr(), allocation);
         heap.reserve_temporaries(1024).unwrap();
         heap.leave(NONE, true);
-        assert_eq!(heap.spare_frame_roots.capacity(), 0);
+        assert_eq!(heap.execution.spare_frame_roots.capacity(), 0);
     }
 
     #[test]
@@ -8143,7 +8194,7 @@ mod tests {
         heap.keep(arguments);
         heap.keep(types);
         assert!(heap.discard_scalar_call(mark, TRUE, arguments, NONE));
-        assert_eq!(&heap.frames.last().unwrap().live[mark..], &[TRUE]);
+        assert_eq!(&heap.execution.current().live[mark..], &[TRUE]);
 
         let Value::List(items) = heap.get_mut(arguments) else {
             unreachable!()
@@ -8185,7 +8236,7 @@ mod tests {
                 ctx.heap.discard_scalar_call(mark, result, args, method),
                 release
             );
-            let live = &ctx.heap.frames.last().unwrap().live[mark..];
+            let live = &ctx.heap.execution.current().live[mark..];
             if release {
                 assert_eq!(live, &[result]);
             } else {
@@ -8223,7 +8274,7 @@ mod tests {
 
         let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
         let scope = ctx.scope("__main__", None);
-        ctx.heap.frames.last_mut().unwrap().scope = scope;
+        ctx.heap.execution.current_mut().scope = scope;
         let class = ctx.builtin("object");
         let root = ctx.instance(class, None);
         let owner = ctx.alloc(Value::List(Vec::new()));
@@ -8260,7 +8311,7 @@ mod tests {
 
         let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
         let scope = ctx.scope("__main__", None);
-        ctx.heap.frames.last_mut().unwrap().scope = scope;
+        ctx.heap.execution.current_mut().scope = scope;
         let owner = ctx.alloc(Value::List(Vec::new()));
         let writer = ctx.alloc(Value::List(Vec::new()));
         ctx.heap.register_finalizer(owner);
@@ -8295,7 +8346,7 @@ mod tests {
                 .frame_keeps_stream_finalizers(input.as_ref(), &[writer])
         );
         let replacement = ctx.scope("replacement", None);
-        ctx.heap.frames.last_mut().unwrap().scope = replacement;
+        ctx.heap.execution.current_mut().scope = replacement;
         assert!(
             !ctx.heap
                 .frame_keeps_stream_finalizers(input.as_ref(), &[writer])

@@ -9,6 +9,70 @@ fn context() -> Context {
 }
 
 #[test]
+fn each_execution_traces_its_pending_error_until_it_is_consumed() {
+    fn check(ctx: &mut Context, wait: impl FnOnce()) -> (bool, bool) {
+        // External interpreter roots stay the same while this execution raises and clears.
+        let globals: Vec<_> = ctx.heap_and_roots().1.collect();
+        let mark = ctx.heap.temporary_mark();
+        let value = ctx.alloc(Value::Set {
+            entries: Default::default(),
+            frozen: false,
+        });
+        let watch = ctx
+            .heap
+            .new_weak_reference(value, NONE, crate::dynamic::weakref::Kind::Reference, None)
+            .unwrap();
+        let mut error = Error::new("ValueError", "");
+        error.args = Some(ctx.alloc(Value::Tuple(vec![value])));
+        ctx.heap.execution.pending = Some(error);
+        ctx.heap.release_temporaries_since(mark);
+        ctx.heap.keep(watch);
+        wait();
+        ctx.heap.collect(globals.iter().copied());
+        let held = ctx.heap.get(watch).weak_reference().unwrap().target == Some(value);
+        ctx.heap.execution.pending = None;
+        ctx.heap.collect(globals.into_iter());
+        let cleared = ctx
+            .heap
+            .get(watch)
+            .weak_reference()
+            .unwrap()
+            .target
+            .is_none();
+        (held, cleared)
+    }
+
+    let mut creator = context();
+    let config = creator.config.clone();
+    let interpreter = creator.interpreter.clone();
+    let (ready, started) = mpsc::channel();
+    let (release, released) = mpsc::channel();
+    let timeout = Duration::from_secs(3);
+    thread::scope(|scope| {
+        let child = scope.spawn(move || {
+            let mut child = ffi::new_context_with_heap(
+                config,
+                std::iter::empty::<String>(),
+                Heap::new(),
+                Some(interpreter),
+            );
+            check(&mut child, || {
+                ready.send(thread_ident()).unwrap();
+                released.recv_timeout(timeout).unwrap();
+            })
+        });
+        let creator = check(&mut creator, || {
+            assert_ne!(started.recv_timeout(timeout).unwrap(), thread_ident())
+        });
+        release.send(()).unwrap();
+        assert_eq!(
+            (creator, child.join().unwrap()),
+            ((true, true), (true, true))
+        );
+    });
+}
+
+#[test]
 fn bound_release_signals_the_selected_native_waiter() {
     let mut ctx = context();
     let gate = Arc::<PrimitiveLock>::default();
@@ -49,7 +113,7 @@ fn owned_registered_entry_roots_bound_slots_and_restores_its_frame() {
         match result {
             Ok(value) => value,
             Err(error) => {
-                ctx.pending = Some(error);
+                ctx.heap.execution.pending = Some(error);
                 NONE
             }
         }
@@ -107,7 +171,7 @@ fn owned_registered_entry_roots_bound_slots_and_restores_its_frame() {
         let ctx = worker.borrow();
         assert_eq!(ctx.heap.python_depth(), 0);
         assert_eq!(ctx.call_depth, 0);
-        assert!(ctx.pending.is_none());
+        assert!(ctx.heap.execution.pending.is_none());
         if fails {
             let error = result.unwrap_err();
             assert_eq!(error.kind, "ValueError");

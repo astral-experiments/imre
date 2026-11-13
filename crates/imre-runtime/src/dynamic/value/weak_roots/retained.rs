@@ -107,12 +107,8 @@ impl Heap {
     ) -> bool {
         let mut cache = std::mem::take(&mut self.retained_paths);
         cache.anchors.clear();
-        let frames = self
-            .frames
-            .iter()
-            .flat_map(|frame| std::iter::once(frame.owner.root()).chain(frame.roots()));
         for id in roots
-            .chain(frames)
+            .chain(self.execution.roots())
             .filter(|&id| !self.slot_shapes[id as usize].is_scalar_leaf())
         {
             if cache.anchors.try_reserve(1).is_err() {

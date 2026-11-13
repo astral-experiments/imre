@@ -288,7 +288,6 @@ pub(crate) struct Context {
     sources: HashMap<String, Vec<SourceModule>>,
     call_depth: usize,
     deque_comparison_repeats: usize,
-    pending: Option<Error>,
     // Fallback for targets whose native stack bounds cannot be queried.
     slot_depth: usize,
 }
@@ -3608,15 +3607,15 @@ impl Context {
         let result = unsafe { entry(context, scope) };
         // SAFETY: the native initializer has returned to the owner of the context.
         let ctx = unsafe { &mut *context };
-        if module && ctx.pending.is_none() {
+        if module && ctx.heap.execution.pending.is_none() {
             ctx.register_decimal_class(ctx.heap.current_code(), entry, scope);
         }
         ctx.finish_native_frame(result)
     }
 
     fn finish_native_frame(&mut self, result: Id) -> Result<Id> {
-        self.leave_frame(result, self.pending.is_none());
-        self.pending.take().map_or(Ok(result), Err)
+        self.leave_frame(result, self.heap.execution.pending.is_none());
+        self.heap.execution.pending.take().map_or(Ok(result), Err)
     }
 
     /// Resolve a named import from a loaded module, including package children.

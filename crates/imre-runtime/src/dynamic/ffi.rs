@@ -733,6 +733,8 @@ impl Context {
             }
             "take_error" => {
                 let error = self
+                    .heap
+                    .execution
                     .pending
                     .take()
                     .ok_or_else(|| Error::new("RuntimeError", "no active exception"))?;
@@ -1001,7 +1003,6 @@ pub(super) fn new_context_with_heap<S: Into<crate::Str>>(
         sources: HashMap::new(),
         call_depth: 0,
         deque_comparison_repeats: 0,
-        pending: None,
         slot_depth: 0,
     };
     ctx.modules = ctx.dict(Vec::new());
@@ -1579,7 +1580,7 @@ fn finish_at(ctx: &mut Context, result: Result<Id>, span: Option<&[u32; 4]>) -> 
         }
         Err(mut error) => {
             ctx.record_exception_frame(&mut error, span);
-            ctx.pending = Some(error);
+            ctx.heap.execution.pending = Some(error);
             NONE
         }
     }
@@ -1597,7 +1598,7 @@ pub(super) unsafe extern "C" fn imre_dyn_unpack_pair(
 ) -> Id {
     // SAFETY: the emitter allocates both slots in the active native frame.
     let (ctx, items) = unsafe { (&mut *ctx, &mut *items) };
-    if ctx.pending.is_some() {
+    if ctx.heap.execution.pending.is_some() {
         return NONE;
     }
     let result = snapshot_pair(ctx, value, items);
@@ -1642,7 +1643,7 @@ pub(super) unsafe extern "C" fn imre_dyn_list_cursor_pull(
 ) -> i32 {
     // SAFETY: the caller keeps the context and cursor live throughout the pull.
     let ctx = unsafe { &mut *ctx };
-    if ctx.pending.is_some() {
+    if ctx.heap.execution.pending.is_some() {
         return 0;
     }
     let next = match ctx.heap.get(iter) {
@@ -1660,7 +1661,7 @@ pub(super) unsafe extern "C" fn imre_dyn_list_cursor_pull(
     if let Some(value) = value {
         // The loop body can remove this item and collect its former owner.
         let value = finish(ctx, Ok(value));
-        if ctx.pending.is_some() {
+        if ctx.heap.execution.pending.is_some() {
             return 0;
         }
         // SAFETY: generated code supplies the slot for the rooted item.
@@ -1711,7 +1712,7 @@ pub(super) unsafe extern "C" fn imre_dyn_next_pair(
 ) -> Id {
     // SAFETY: generated code owns these scratch slots in the active frame.
     let (ctx, items) = unsafe { (&mut *ctx, &mut *items) };
-    if ctx.pending.is_some() {
+    if ctx.heap.execution.pending.is_some() {
         return NONE;
     }
     let result = next_loop_pair(ctx, iter, items, has_else);
@@ -1782,7 +1783,7 @@ pub(super) unsafe extern "C" fn imre_dyn_build_sequence(
 ) -> Id {
     // SAFETY: generated code supplies its active context.
     let ctx = unsafe { &mut *ctx };
-    if ctx.pending.is_some() {
+    if ctx.heap.execution.pending.is_some() {
         return NONE;
     }
     let items = || -> Result<Vec<Id>> {
@@ -1835,7 +1836,7 @@ pub(super) unsafe extern "C" fn imre_dyn_build_set(
 ) -> Id {
     // SAFETY: the caller keeps this frame and its handle array live across hash/equality callbacks.
     let ctx = unsafe { &mut *ctx };
-    if ctx.pending.is_some() {
+    if ctx.heap.execution.pending.is_some() {
         return NONE;
     }
     // SAFETY: the compiler roots each key and keeps its native operand array live for this call.
@@ -1872,7 +1873,7 @@ pub(super) unsafe extern "C" fn imre_dyn_linked_value(
 ) -> Id {
     // SAFETY: generated code keeps the value rooted in its live context.
     let ctx = unsafe { &mut *ctx };
-    if ctx.pending.is_some() {
+    if ctx.heap.execution.pending.is_some() {
         return NONE;
     }
     let result = ctx
@@ -1941,7 +1942,7 @@ pub(super) unsafe extern "C" fn imre_dyn_masked_remainder(
 ) -> Id {
     // SAFETY: the generated frame owns the context and both operands.
     let context = unsafe { &*ctx };
-    if context.pending.is_some() {
+    if context.heap.execution.pending.is_some() {
         return NONE;
     }
     if let Value::Int(integer) = context.heap.get(dividend)
@@ -1980,7 +1981,7 @@ pub(super) unsafe extern "C" fn imre_dyn_get_int_item(
     // SAFETY: the checked frame owns the context and supplies its static range.
     let (ctx, span) = unsafe { (&mut *ctx, span.as_ref()) };
     let index = (word != 0).then(|| crate::Int(word));
-    if ctx.pending.is_some() {
+    if ctx.heap.execution.pending.is_some() {
         return NONE;
     }
     let key = if let Some(index) = index {
@@ -1989,7 +1990,7 @@ pub(super) unsafe extern "C" fn imre_dyn_get_int_item(
         }
         let object = ctx.alloc(Value::Int(index));
         let object = finish(ctx, Ok(object));
-        if ctx.pending.is_some() {
+        if ctx.heap.execution.pending.is_some() {
             return NONE;
         }
         object
@@ -2148,7 +2149,7 @@ pub(super) unsafe extern "C" fn imre_dyn_lookup(
 ) -> Id {
     // SAFETY: the emitter supplies a live context and a constant of exactly len bytes.
     let (ctx, name) = unsafe { (&mut *ctx, slice::from_raw_parts(name, len)) };
-    if ctx.pending.is_some() {
+    if ctx.heap.execution.pending.is_some() {
         return NONE;
     }
     let mut result = std::str::from_utf8(name)
@@ -2173,7 +2174,7 @@ pub(super) unsafe extern "C" fn imre_dyn_lookup_local(
             std::str::from_utf8_unchecked(slice::from_raw_parts(name, len)),
         )
     };
-    if ctx.pending.is_none()
+    if ctx.heap.execution.pending.is_none()
         && ctx.scope_data(scope).namespace.is_none()
         && let Some(value) = ctx.scope_name(scope, key)
     {
@@ -2195,7 +2196,7 @@ pub(super) unsafe extern "C" fn imre_dyn_assign_target(
 ) -> Id {
     // SAFETY: the compiled frame supplies its active context and the linked identifier bytes.
     let (ctx, name) = unsafe { (&mut *ctx, slice::from_raw_parts(name, len)) };
-    if ctx.pending.is_some() {
+    if ctx.heap.execution.pending.is_some() {
         return NONE;
     }
     let result = std::str::from_utf8(name)
@@ -2216,7 +2217,7 @@ pub(super) unsafe extern "C" fn imre_dyn_import_name(
 ) -> Id {
     // SAFETY: generated code passes its current interpreter and live Python handles.
     let ctx = unsafe { &mut *ctx };
-    if ctx.pending.is_some() {
+    if ctx.heap.execution.pending.is_some() {
         return NONE;
     }
     let result = ctx.import_in_scope(ctx.heap.current_code(), scope, name, fromlist, level);
@@ -2247,7 +2248,7 @@ pub(super) unsafe extern "C" fn imre_dyn_get_linked_slice_at(
 ) -> Id {
     // SAFETY: generated native code owns its context and supplies a static span or null.
     let (ctx, span) = unsafe { (&mut *ctx, span.as_ref()) };
-    if ctx.pending.is_some() {
+    if ctx.heap.execution.pending.is_some() {
         return NONE;
     }
     let result = ctx.get_slice(
@@ -2322,7 +2323,7 @@ pub(super) unsafe extern "C" fn imre_dyn_op_at(
 ) -> Id {
     // SAFETY: generated native code owns its context and supplies a static opcode.
     let (ctx, op) = unsafe { (&mut *ctx, cstr(opcode)) };
-    if ctx.pending.is_some() && op != "take_error" {
+    if ctx.heap.execution.pending.is_some() && op != "take_error" {
         return NONE;
     }
     let reraise = op == "reraise" && (a != NONE || ctx.heap.active_exception() != NONE);
@@ -2353,7 +2354,7 @@ pub(super) unsafe extern "C" fn imre_dyn_op_at(
         );
     }
     if reraise && let Err(error) = result {
-        ctx.pending = Some(error);
+        ctx.heap.execution.pending = Some(error);
         return NONE;
     }
     // SAFETY: the emitter supplies null or a native [4 x i32] module constant.
@@ -2496,7 +2497,7 @@ fn method_target(
     bound_receiver: &mut Id,
     lookup: impl FnOnce(&mut Context) -> Result<(Id, Id)>,
 ) -> Id {
-    if ctx.pending.is_some() {
+    if ctx.heap.execution.pending.is_some() {
         return NONE;
     }
     let mut result = lookup(ctx).map(|(callable, receiver)| {
@@ -2522,7 +2523,7 @@ pub(super) unsafe extern "C" fn imre_dyn_contains_literal_tuple(
 ) -> Id {
     // SAFETY: the caller owns this context and retains the array through rich comparisons.
     let (ctx, values) = unsafe { (&mut *ctx, live_handles(values, count)) };
-    if ctx.pending.is_some() {
+    if ctx.heap.execution.pending.is_some() {
         return NONE;
     }
     let mut candidates = values.iter().copied();
@@ -2613,7 +2614,7 @@ pub(super) unsafe extern "C" fn imre_dyn_partition_field_at(
     };
     // SAFETY: the call has returned, so its borrow of this context has ended.
     let ctx = unsafe { &mut *context };
-    if ctx.pending.is_some() {
+    if ctx.heap.execution.pending.is_some() {
         return NONE;
     }
     let key = ctx.int(i64::from(index));
@@ -2735,7 +2736,7 @@ unsafe fn scoped_call(
 ) -> Id {
     // SAFETY: restrict preparation's borrow to its own phase of the call.
     let ctx = unsafe { &mut *context };
-    if ctx.pending.is_some() {
+    if ctx.heap.execution.pending.is_some() {
         ctx.heap.set_call_position(None);
         return NONE;
     }
@@ -3224,7 +3225,7 @@ impl Context {
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_failed(ctx: *const Context) -> bool {
     // SAFETY: the generated caller holds the context throughout this query.
-    unsafe { (*ctx).pending.is_some() }
+    unsafe { (*ctx).heap.execution.pending.is_some() }
 }
 
 /// Record the caller's temporary root boundary before an expression runs.
@@ -3276,7 +3277,7 @@ pub(super) unsafe extern "C" fn imre_dyn_interpolation(
 ) -> Id {
     // SAFETY: the generated caller owns the active context.
     let ctx = unsafe { &mut *ctx };
-    if ctx.pending.is_some() {
+    if ctx.heap.execution.pending.is_some() {
         return NONE;
     }
     let result = ctx.template_interpolation(value, expression, conversion, format_spec);
@@ -3299,7 +3300,7 @@ pub(super) unsafe extern "C" fn imre_dyn_format_parts(
     let (ctx, values) = unsafe { (&mut *ctx, live_handles(values, count)) };
     let joined = ctx.join_formatted(values);
     let result = finish(ctx, joined);
-    if ctx.pending.is_none() {
+    if ctx.heap.execution.pending.is_none() {
         if ctx.heap.observes_released_roots() {
             for slot in (mark + 1..ctx.heap.temporary_mark()).rev() {
                 ctx.discard_temporaries(slot, [result]);
@@ -3366,7 +3367,7 @@ pub(super) unsafe extern "C" fn imre_dyn_unwind_frame(
 ) {
     // SAFETY: the caller owns the context and provides len initialized handles.
     let (ctx, live) = unsafe { (&mut *ctx, live_handles(live, len)) };
-    debug_assert!(retained <= len && ctx.pending.is_none());
+    debug_assert!(retained <= len && ctx.heap.execution.pending.is_none());
     ctx.heap.insert_temporaries(0, live);
     ctx.unwind_operands(retained);
 }
@@ -3435,7 +3436,7 @@ pub(super) unsafe extern "C" fn namedtuple_constructor(raw: *mut Context, scope:
     };
     // SAFETY: the caller retains exclusive ownership until this code entry returns.
     let ctx = unsafe { &mut *raw };
-    if ctx.pending.is_some() {
+    if ctx.heap.execution.pending.is_some() {
         return NONE;
     }
     let result = super::namedtuple::construct(ctx, scope);
@@ -3543,7 +3544,6 @@ impl Context {
                 .chain(self.fault_user_files.values().copied())
                 .chain(self.contexts.iter().copied())
                 .chain(self.buffer_exports.iter().copied())
-                .chain(self.pending.iter().flat_map(Error::roots))
                 .chain(self.original_builtins)
                 .chain(self.source_builtins)
                 .chain([
@@ -3704,11 +3704,11 @@ impl Context {
 
     /// Publish the surviving roots before the next operand can observe a discarded writer.
     pub(super) fn discard_truth(&mut self, mark: usize) {
-        if let Some(error) = self.pending.take() {
+        if let Some(error) = self.heap.execution.pending.take() {
             // A weak callback may reenter Python during unwind. Keep the original
             // exception alive without exposing it as a failure of the callback.
             self.discard_temporaries(mark, error.roots());
-            self.pending = Some(error);
+            self.heap.execution.pending = Some(error);
             self.heap.release_temporaries_since(mark);
         } else {
             self.discard_temporaries(mark, None);
@@ -3972,7 +3972,7 @@ mod tests {
             // SAFETY: exhaustion uses the same live context and slot.
             let status = unsafe { imre_dyn_list_cursor_pull(&mut ctx, iter, &mut item, true) };
             assert_eq!(status, 0);
-            assert!(ctx.pending.is_none());
+            assert!(ctx.heap.execution.pending.is_none());
         }
     }
 

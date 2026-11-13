@@ -61,12 +61,7 @@ pub(in crate::dynamic) fn deallocate_exact_pair(ctx: &mut Context, owner: Id) ->
     ctx.heap.take_finalizer(owner, true);
     let mark = ctx.heap.temporary_mark();
     ctx.heap.keep(owner);
-    let pending = ctx.pending.take();
-    if let Some(error) = &pending {
-        for root in error.roots() {
-            ctx.heap.keep(root);
-        }
-    }
+    let pending = ctx.heap.execution.take_rooted_error();
     let result = (|| {
         let callback_roots = ctx.heap.temporary_mark();
         let (heap, roots) = ctx.heap_and_roots();
@@ -96,7 +91,7 @@ pub(in crate::dynamic) fn deallocate_exact_pair(ctx: &mut Context, owner: Id) ->
         );
         release_child(ctx, pair.writer)
     })();
-    ctx.pending = pending;
+    ctx.heap.execution.pending = pending;
     ctx.heap.release_temporaries_since(mark);
     result.map(|()| true)
 }
