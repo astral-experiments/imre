@@ -69,8 +69,7 @@ impl RequiredSite {
         });
     }
 
-    /// A block stops emitting after a transfer. Unreachable declaration bodies must
-    /// not compile (or raise diagnostics) merely because their identity is in the IR.
+    #[cfg(test)]
     pub(crate) fn visit(
         statements: &[Statement],
         literals: Option<&LiteralSites>,
@@ -79,6 +78,8 @@ impl RequiredSite {
         Self::visit_block(statements, false, literals, visit)
     }
 
+    /// A block stops emitting after a transfer. Unreachable declaration bodies must
+    /// not compile (or raise diagnostics) merely because their identity is in the IR.
     pub(super) fn visit_block(
         statements: &[Statement],
         physical: bool,
