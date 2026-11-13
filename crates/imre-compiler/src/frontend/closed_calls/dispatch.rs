@@ -143,19 +143,22 @@ pub(super) fn specialize(
     prior
         .0
         .extend(parameters(&function.parameters).map(|p| p.name.to_string()));
-    let writes = narrowing::assigned_names(&function.body);
+    let mut writes = None;
+    let mut visited = 0;
     for index in 0..function.body.len().saturating_sub(1) {
-        let stmt = &function.body[index];
-        if let ast::Stmt::Match(branch) = stmt
-            && let Some(plans) = dispatch_plans(
-                graph,
-                module,
-                branch,
-                &function.body[index + 1..],
-                &prior.0,
-                &writes,
-            )
-        {
+        let ast::Stmt::Match(branch) = &function.body[index] else {
+            continue;
+        };
+        prior.visit_body(&function.body[visited..index]);
+        visited = index;
+        if let Some(plans) = dispatch_plans(
+            graph,
+            module,
+            branch,
+            &function.body[index + 1..],
+            &prior.0,
+            writes.get_or_insert_with(|| narrowing::assigned_names(&function.body)),
+        ) {
             let function = function.to_mut();
             let tail = function.body.split_off(index + 1);
             let ast::Stmt::Match(branch) = &mut function.body[index] else {
@@ -169,7 +172,6 @@ pub(super) fn specialize(
             }
             return true;
         }
-        prior.visit_stmt(stmt);
     }
     false
 }
