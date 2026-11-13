@@ -5,16 +5,18 @@ use super::*;
 use ruff_python_ast::visitor::{Visitor, walk_expr, walk_stmt};
 
 pub(crate) fn only_compares_zero(body: &[ast::Stmt], parameter: &str) -> bool {
-    if narrowing::assigned_names(body).contains(parameter) {
-        return false;
-    }
     let mut reads = Reads {
         parameter,
         compared: false,
         other: false,
     };
-    reads.visit_body(body);
-    reads.compared && !reads.other
+    for statement in body {
+        reads.visit_stmt(statement);
+        if reads.other {
+            return false;
+        }
+    }
+    reads.compared && !narrowing::assigned_names(body).contains(parameter)
 }
 
 struct Reads<'a> {
