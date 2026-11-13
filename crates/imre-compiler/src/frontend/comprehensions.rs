@@ -982,7 +982,7 @@ impl Checker<'_> {
             prefix = acquire_in_namespace(cursor, slot, enclosing, declared);
             self.namespace = Some(slot);
         }
-        let scope = self.enter_comprehension(targets.clone());
+        let scope = self.enter_comprehension(targets);
         let result = self.hidden(Type::None);
         // The outer loop can only invalidate a narrowing when the display writes a name.
         // Displays checked in a private helper have already proved this set empty.
@@ -997,19 +997,6 @@ impl Checker<'_> {
             Some(&mut prefix),
             |_, _| false,
         );
-        if let Some(namespace) = self.namespace {
-            for name in &targets {
-                if let Some(&slot) = self.names.get(name) {
-                    self.namespace_bindings.insert(
-                        slot,
-                        registered::LocalBinding {
-                            name: name.clone(),
-                            namespace: Some(namespace),
-                        },
-                    );
-                }
-            }
-        }
         self.namespace = enclosing;
         let exports = self.leave_comprehension(scope);
         checked?;
