@@ -172,26 +172,33 @@ mod tests {
             values: HashMap::new(),
             children: HashMap::new(),
         };
-        super::super::registered::collect_sites(stmts, &names, source, |expr, module| {
-            let value = annotation_operand(
-                expr,
-                module,
-                source,
-                postponed,
-                bundled,
-                &mut observed.children,
-                test_annotation_body,
-            );
-            if let Some(value) = &value {
-                assert!(
-                    observed
-                        .values
-                        .insert(expr.start(), value.clone())
-                        .is_none()
+        let (_, children) =
+            super::super::function_scope::ScopeFacts::prepare(stmts, &names, |_, _| {}, |_| {});
+        super::super::registered::collect_sites(
+            (stmts, children),
+            &names,
+            source,
+            |expr, module| {
+                let value = annotation_operand(
+                    expr,
+                    module,
+                    source,
+                    postponed,
+                    bundled,
+                    &mut observed.children,
+                    test_annotation_body,
                 );
-            }
-            value
-        });
+                if let Some(value) = &value {
+                    assert!(
+                        observed
+                            .values
+                            .insert(expr.start(), value.clone())
+                            .is_none()
+                    );
+                }
+                value
+            },
+        );
         observed
     }
 

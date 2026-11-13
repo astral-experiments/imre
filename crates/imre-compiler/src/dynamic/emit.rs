@@ -552,7 +552,7 @@ impl<'a> PreparedBody<'a> {
             expressions: (!expression).then(Default::default),
             ..Default::default()
         };
-        let mut scopes = crate::frontend::function_scope::ScopeFacts::prepare(
+        let (mut scopes, children) = crate::frontend::function_scope::ScopeFacts::prepare(
             &body,
             &private_names,
             |alias, class| aliases.push((alias, class)),
@@ -570,7 +570,7 @@ impl<'a> PreparedBody<'a> {
         };
         // Annotation providers use the completed lambda sites for this source unit.
         let (sites, annotation_children) = crate::frontend::registered_sites(
-            &body,
+            (&body, children),
             &private_names,
             values,
             bundled,
@@ -1968,7 +1968,7 @@ mod tests {
             ..prepared.source.registered_source()
         };
         let mut lexical = crate::frontend::LexicalOperands::default();
-        crate::frontend::function_scope::ScopeFacts::prepare(
+        let (_, children) = crate::frontend::function_scope::ScopeFacts::prepare(
             body,
             &prepared.source.private_names,
             |_, _| {},
@@ -1991,7 +1991,7 @@ mod tests {
             ..source
         };
         let classes = crate::frontend::registered_sites(
-            body,
+            (body, children),
             &prepared.source.private_names,
             source,
             prepared.source.bundled,

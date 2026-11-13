@@ -1150,7 +1150,7 @@ pub(crate) struct RegisteredSites<'a> {
 }
 
 pub(crate) fn registered_sites<'a, R>(
-    body: &'a [ast::Stmt],
+    body: (&'a [ast::Stmt], super::function_scope::FunctionChildren<'a>),
     names: &imre_ast::Names,
     source: values::RegisteredSource<'_>,
     bundled: bool,
@@ -1175,7 +1175,7 @@ pub(crate) fn registered_sites<'a, R>(
 }
 
 pub(super) fn collect_sites<'a>(
-    body: &'a [ast::Stmt],
+    (body, children): (&'a [ast::Stmt], super::function_scope::FunctionChildren<'a>),
     names: &imre_ast::Names,
     source: values::RegisteredSource<'_>,
     mut operand: impl FnMut(&ast::Expr, bool) -> Option<Expr>,
@@ -1188,6 +1188,7 @@ pub(super) fn collect_sites<'a>(
         conditional: bool,
     }
     struct Collector<'s, 'a> {
+        children: &'s [&'a ast::Stmt],
         names: &'s imre_ast::Names,
         source: values::RegisteredSource<'s>,
         operand: &'s mut dyn FnMut(&ast::Expr, bool) -> Option<Expr>,
@@ -1288,7 +1289,19 @@ pub(super) fn collect_sites<'a>(
                             is_async: def.is_async,
                         },
                     );
-                    walk_stmt(self, stmt);
+                    // Local annotations and executable statements belong to the function body.
+                    let after = self
+                        .children
+                        .partition_point(|child| child.start() <= def.start());
+                    let mut children = &self.children[after..];
+                    while let Some((&child, rest)) = children.split_first() {
+                        if child.start() >= def.end() {
+                            break;
+                        }
+                        self.visit_stmt(child);
+                        // The child just visited owns all declarations within its range.
+                        children = &rest[rest.partition_point(|next| next.start() < child.end())..];
+                    }
                     self.scope = outer;
                     self.in_unprepared_generic = outer_generic;
                 }
@@ -1367,6 +1380,7 @@ pub(super) fn collect_sites<'a>(
     }
     let operations = HashMap::new();
     let mut sites = Collector {
+        children: &children,
         names,
         source,
         operand: &mut operand,
@@ -3862,8 +3876,10 @@ mod tests {
     ) -> RegisteredSites<'a> {
         let default_names = imre_ast::Names::default();
         let names = source.private_names.unwrap_or(&default_names);
+        let (_, children) =
+            super::super::function_scope::ScopeFacts::prepare(stmts, names, |_, _| {}, |_| {});
         registered_sites(
-            stmts,
+            (stmts, children),
             names,
             source,
             bundled,
@@ -4096,8 +4112,10 @@ mod tests {
         let mut body = module.parsed.syntax().body.clone();
         let names = imre_ast::lower(&mut body);
         let literals = values::ModuleSource::new(module);
+        let (_, children) =
+            super::super::function_scope::ScopeFacts::prepare(&body, &names, |_, _| {}, |_| {});
         let sites = registered_sites(
-            &body,
+            (&body, children),
             &names,
             literals.context(source),
             false,
@@ -4416,6 +4434,47 @@ mod tests {
                 .map(|field| field.name.as_str())
                 .collect();
             assert_eq!(names, expected);
+        }
+    }
+
+    #[test]
+    fn registering_try_else_keeps_nested_declarations_in_earlier_handlers() {
+        let suites = "\
+try:
+    pass
+except ValueError:
+    def handler():
+        def caught(): pass
+        return caught
+else:
+    def otherwise():
+        def normal(): pass
+        return normal
+";
+        let class = format!(
+            "class C:\n{}",
+            suites
+                .lines()
+                .map(|line| format!("    {line}\n"))
+                .collect::<String>()
+        );
+        for text in [suites, class.as_str()] {
+            let graph = SourceGraph::single(text).unwrap();
+            let module = &graph.modules[graph.entry];
+            let sites = prepared_sites(
+                &module.parsed.syntax().body,
+                values::ModuleSource::new(module).context(text),
+                false,
+            );
+            let functions: Vec<_> = sites
+                .declarations
+                .iter()
+                .filter_map(|site| match site {
+                    DeclarationSite::Function(function) => Some(function.def.name.as_str()),
+                    DeclarationSite::Class(_) => None,
+                })
+                .collect();
+            assert_eq!(functions, ["otherwise", "normal", "handler", "caught"]);
         }
     }
 
