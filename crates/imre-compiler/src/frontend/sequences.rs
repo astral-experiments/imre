@@ -109,25 +109,12 @@ impl<'ast> Visitor<'ast> for Reads<'_, 'ast> {
     }
 
     fn visit_expr(&mut self, expr: &'ast ast::Expr) {
-        let clauses = match expr {
-            ast::Expr::ListComp(value) => Some(value.generators.as_slice()),
-            ast::Expr::SetComp(value) => Some(value.generators.as_slice()),
-            ast::Expr::DictComp(value) => Some(value.generators.as_ref()),
-            ast::Expr::Generator(value) => Some(value.generators.as_slice()),
-            _ => None,
-        };
-        if let Some(clauses) = clauses {
-            let mut targets = HashSet::new();
-            for clause in clauses {
-                comprehensions::target_names(&clause.target, &mut targets);
-            }
-            if targets.contains(self.parameter) {
-                // Only the first iterable is evaluated outside the
-                // comprehension's private scope.
-                self.allow(&clauses[0].iter);
-                self.visit_expr(&clauses[0].iter);
-                return;
-            }
+        if let Some(plan) = imre_ast::comprehension::Plan::from_expr(expr)
+            && plan.binds_name(self.parameter)
+        {
+            self.allow(plan.outer);
+            self.visit_expr(plan.outer);
+            return;
         }
         if let ast::Expr::Lambda(lambda) = expr
             && !function_scope::expression_reads(expr).contains(self.parameter)

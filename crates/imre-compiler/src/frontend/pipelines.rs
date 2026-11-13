@@ -2,10 +2,10 @@
 //! iterator acquisition, and each pull stay separate so composition preserves
 //! Python's lazy evaluation and mutation checks without escaping iterator values.
 
-use imre_ast::comprehension::Plan;
+use imre_ast::comprehension::{Output, Plan};
 use ruff_python_ast::UnaryOp;
 
-use super::comprehensions::{EagerDisplay, filter_suite};
+use super::comprehensions::{ClauseLowering, filter_suite};
 use super::*;
 use crate::ir::TextOperation;
 
@@ -66,6 +66,70 @@ pub(super) struct Prepared {
 pub(super) struct EagerList {
     pub(super) value: usize,
     pub(super) selected: usize,
+}
+
+/// A suspended pipeline resumes at the innermost active pull.
+struct GeneratorPull {
+    input: Prepared,
+    binding: Vec<Statement>,
+    filters: Vec<Expr>,
+}
+
+struct GeneratorClauses<'a, 'g> {
+    checker: &'a mut Checker<'g>,
+    pulls: Vec<GeneratorPull>,
+}
+
+impl ClauseLowering for GeneratorClauses<'_, '_> {
+    type Input = Prepared;
+    type Error = Failure;
+    type Body = Expr;
+
+    fn before_pull(&mut self, plan: &Plan<'_>, depth: usize) {
+        // Only private target slots remain stable while paused inside an inner iterator.
+        let checker = &mut *self.checker;
+        let stable = checker
+            .comprehension_targets
+            .iter()
+            .filter_map(|name| checker.names.get(name).copied())
+            .collect::<HashSet<_>>();
+        for (slot, _) in &checker.narrowed.clone() {
+            if !stable.contains(slot) {
+                checker.narrowed.remove_mut(slot);
+            }
+        }
+        checker.forget_comprehension_writes(plan, depth);
+    }
+
+    fn input(&mut self, clause: &ast::Comprehension) -> Result<Prepared, String> {
+        let source = self.checker.expansion_input(&clause.iter, None)?;
+        self.checker.prepare_iteration(source, &clause.iter, false)
+    }
+
+    fn with_target(
+        &mut self,
+        target: &ast::Expr,
+        input: Prepared,
+        _: Output<'_>,
+        body: impl FnOnce(&mut Self) -> Result<(Vec<Expr>, Expr), String>,
+    ) -> Result<Expr, String> {
+        let row = self.checker.local(input.value);
+        let projected =
+            matches!(row.ty, Type::Tuple(_)).then_some(unpacking::Row::Projected(input.value));
+        let mut binding = Vec::new();
+        unpacking::bind_input(self.checker, target, row, projected, &mut binding)?;
+        let (filters, yielded) = body(self)?;
+        self.pulls.push(GeneratorPull {
+            input,
+            binding,
+            filters,
+        });
+        Ok(yielded)
+    }
+
+    fn filter(&mut self, test: &ast::Expr) -> Result<Expr, String> {
+        self.checker.filter(test)
+    }
 }
 
 impl Prepared {
@@ -2409,55 +2473,21 @@ impl Checker<'_> {
         // Suspended generators can observe later enclosing writes. Facts about
         // those mutable slots must be proved again inside the lazy body.
         self.narrowed = assignments::Narrowed::new();
-        // Each live iterator has one resume case, in clause order.
-        struct Pull {
-            input: Prepared,
-            binding: Vec<Statement>,
-            filters: Vec<Expr>,
-        }
         first.evaluate.append(&mut first.acquire);
-        let mut input = first;
-        let mut pulls: Vec<Pull> = Vec::with_capacity(plan.clauses.len());
-        let yielded = loop {
-            let depth = pulls.len();
-            let clause = &plan.clauses[depth];
-            if depth != 0 {
-                // Only private target slots remain stable while execution
-                // pauses inside a nested iterator.
-                let stable = self
-                    .comprehension_targets
-                    .iter()
-                    .filter_map(|name| self.names.get(name).copied())
-                    .collect::<HashSet<_>>();
-                for (slot, _) in &self.narrowed.clone() {
-                    if !stable.contains(slot) {
-                        self.narrowed.remove_mut(slot);
-                    }
-                }
-            }
-            self.forget_comprehension_writes(&plan, depth);
-            let row = self.local(input.value);
-            let stable =
-                matches!(row.ty, Type::Tuple(_)).then_some(unpacking::Row::Projected(input.value));
-            let mut binding = Vec::new();
-            unpacking::bind_input(self, &clause.target, row, stable, &mut binding)?;
-            let filters = self.eager_filters(clause)?;
-            pulls.push(Pull {
-                input,
-                binding,
-                filters,
-            });
-            if let Some(inner) = plan.clauses.get(depth + 1) {
-                let source = self.expansion_input(&inner.iter, None)?;
-                input = self.prepare_iteration(source, &inner.iter, false)?;
-            } else {
-                let item = plan.output.value();
-                break match element {
-                    Some(ty) => self.expr_expected(item, ty)?,
-                    None => self.expr(item)?,
-                };
-            }
+        let mut clauses = GeneratorClauses {
+            checker: self,
+            pulls: Vec::with_capacity(plan.clauses.len()),
         };
+        let yielded = clauses.comprehension_loop(&plan, 0, first, &mut |scope, output, _| {
+            let item = output.value();
+            match element {
+                Some(ty) => scope.checker.expr_expected(item, ty),
+                None => scope.checker.expr(item),
+            }
+        })?;
+        let mut pulls = clauses.pulls;
+        // The nested scopes finish inside out. Resume PCs are numbered in source order.
+        pulls.reverse();
         let value = self.hidden(yielded.ty);
         if let (Some(out), Some((lists, targets))) = (zip_sum, lists)
             && yielded.ty == Type::Int

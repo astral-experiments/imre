@@ -2,7 +2,8 @@
 
 use super::*;
 use crate::frontend::comprehensions::{
-    Collector, EagerDisplay, acquire_in_namespace, async_pull, scoped_result,
+    ClauseLowering, Collector, EagerDisplay, acquire_in_namespace, async_pull, filter_suite,
+    scoped_result,
 };
 use crate::frontend::statements::StatementLowering;
 use imre_ast::comprehension::{Output, Plan};
@@ -73,9 +74,10 @@ impl SourceScope<'_> {
     }
 }
 
-impl EagerDisplay for SourceScope<'_> {
+impl ClauseLowering for SourceScope<'_> {
     type Input = pipelines::Prepared;
     type Error = ();
+    type Body = Vec<Statement>;
 
     fn input(&mut self, clause: &ast::Comprehension) -> StdResult<pipelines::Prepared, ()> {
         if clause.is_async && !self.async_iteration() {
@@ -90,10 +92,11 @@ impl EagerDisplay for SourceScope<'_> {
         target: &ast::Expr,
         mut input: Self::Input,
         output: Output<'_>,
-        body: impl FnOnce(&mut Self) -> StdResult<Vec<Statement>, ()>,
+        body: impl FnOnce(&mut Self) -> StdResult<(Vec<Expr>, Vec<Statement>), ()>,
     ) -> StdResult<Vec<Statement>, ()> {
         input.bind_loop_target(self, target, false)?;
-        let body = self.in_loop(LoopScope::WithCursor, body)?;
+        let (conditions, body) = self.in_loop(LoopScope::WithCursor, body)?;
+        let body = filter_suite(conditions, body);
         Ok(match output {
             Output::Generator(item) => generators::clause(
                 input,
@@ -108,7 +111,9 @@ impl EagerDisplay for SourceScope<'_> {
     fn filter(&mut self, test: &ast::Expr) -> StdResult<Expr, ()> {
         self.ordinary_operand(test).ok_or(())
     }
+}
 
+impl EagerDisplay for SourceScope<'_> {
     fn collection_locals(&self) -> &[Type] {
         &self.locals
     }

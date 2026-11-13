@@ -128,6 +128,23 @@ impl<'a> Plan<'a> {
         self.collect_target_names()
     }
 
+    /// A target in any clause shadows this name throughout the private scope.
+    /// The first iterable still resolves the name in the enclosing scope.
+    pub fn binds_name(&self, name: &str) -> bool {
+        self.clauses.iter().any(|clause| {
+            let mut bound = false;
+            visit_target_leaves(
+                &clause.target,
+                |_| Ok(()),
+                |leaf| {
+                    bound |= matches!(leaf, ast::Expr::Name(target) if target.id.as_str() == name);
+                },
+            )
+            .expect("collecting names without validation");
+            bound
+        })
+    }
+
     /// Collect binding names in clause and unpacking order using the caller's collection.
     pub fn collect_target_names<T: Default + Extend<String>>(&self) -> T {
         self.target_bindings(|_| {})
@@ -451,6 +468,12 @@ mod tests {
         let parsed = ruff_python_parser::parse_expression(text).unwrap();
         let plan = Plan::from_expr(parsed.expr()).unwrap();
         let expected = HashSet::from(["first".to_owned(), "rest".to_owned(), "item".to_owned()]);
+        for name in ["first", "rest", "item"] {
+            assert!(plan.binds_name(name));
+        }
+        for name in ["items", "index", "box", "value", "rows"] {
+            assert!(!plan.binds_name(name));
+        }
         assert_eq!(plan.target_names(), expected);
         assert_eq!(plan.try_target_names(), Ok(expected));
         assert_eq!(
