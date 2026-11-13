@@ -890,7 +890,7 @@ impl ProgramOutput {
     /// dependencies. A failed fixed emission leaves the registered retry untouched.
     fn emit_sources<'a, S, W, E>(
         &mut self,
-        sources: impl IntoIterator<Item = S>,
+        sources: impl IntoIterator<Item = Result<S, E>>,
         entry: (usize, &str),
         split: bool,
         mut writer: W,
@@ -899,10 +899,18 @@ impl ProgramOutput {
     ) -> Result<(), E> {
         let mut units = Vec::new();
         let mut startup = None;
-        for (id, source) in sources.into_iter().enumerate() {
+        let mut sources = sources.into_iter().enumerate();
+        while let Some((id, source)) = sources.next() {
             let is_entry = id == entry.0;
             let separate = split && !is_entry;
-            let (name, body) = emit(&mut writer, id, source, separate)?;
+            let (name, body) = match emit(&mut writer, id, source?, separate) {
+                Ok(placed) => placed,
+                Err(error) => {
+                    // Preparation errors precede an emission refusal in an earlier module.
+                    sources.try_for_each(|(_, source)| source.map(drop))?;
+                    return Err(error);
+                }
+            };
             let (name, body) = if is_entry {
                 startup = Some(units.len());
                 (entry.1, body.unwrap_or_default())
@@ -1405,6 +1413,21 @@ impl DiskSource {
 #[cfg(test)]
 mod tests {
     use super::{CompileOptions, compile};
+
+    #[test]
+    fn preparation_errors_precede_earlier_emission_errors() {
+        let mut output = super::ProgramOutput::new(super::CodegenLayout::Split);
+        let result = output.emit_sources(
+            [Ok("entry"), Err("invalid second"), Err("invalid third")],
+            (0, "__main__"),
+            true,
+            (),
+            |_, _, _, _| Err("cannot emit entry"),
+            |_, _, _| unreachable!(),
+        );
+        assert_eq!(result, Err("invalid second"));
+        assert!(output.compilation.units.is_empty());
+    }
 
     #[test]
     fn selected_disk_source_uses_physical_bytes_and_decoded_spans() {

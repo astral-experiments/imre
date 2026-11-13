@@ -2663,7 +2663,6 @@ pub(crate) fn compile(
         prepared.try_for_each(|unit| unit.map(drop))?;
         return Ok(Some(inputs));
     };
-    let units = prepared.collect::<Result<Vec<_>, _>>()?;
     // The bundle lives in the launcher. This absolute, non-directory path can neither
     // expose the working directory under -I nor collide with an explicit source root.
     let bundle_entry = startup
@@ -2696,10 +2695,12 @@ pub(crate) fn compile(
             path0_bytes = Some(std::mem::take(first).into_os_string().into_encoded_bytes());
         }
     }
+    // Report a source preparation error before a malformed startup path.
+    let mut config_error = |error| prepared.find_map(Result::err).unwrap_or(error);
     let paths = serde_json::to_value(initial)
-        .map_err(|e| format!("cannot represent startup search path: {e}"))?;
+        .map_err(|e| config_error(format!("cannot represent startup search path: {e}")))?;
     let stdlib_fallback =
-        serde_json::to_value(&options.stdlib_fallback).map_err(|e| e.to_string())?;
+        serde_json::to_value(&options.stdlib_fallback).map_err(|e| config_error(e.to_string()))?;
     let config = serde_json::json!({
         "bundled_root":bundled_root,
         "stdlib_fallback":stdlib_fallback,
@@ -2729,7 +2730,7 @@ pub(crate) fn compile(
         "command":in_memory,"module_entry":module_entry,"path_entry":options.path_entry,"paths":paths,
     });
     let used_archive = output.emit_registered(
-        units,
+        prepared,
         &config.to_string(),
         python_optimization,
         &providers.symbols,

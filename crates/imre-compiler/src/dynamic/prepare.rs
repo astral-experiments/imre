@@ -50,8 +50,7 @@ pub(super) fn check_shipped(
     .map(drop)
 }
 
-/// Check consumes this iterator one unit at a time. A build retains the same
-/// initializers until every source has passed preparation.
+/// Lower each source on demand for checking or native emission.
 pub(super) fn units<'a>(
     (files, builtins): (&'a [ModuleSource<'a>], &'a [ModuleSource<'a>]),
     SourceInputs {
