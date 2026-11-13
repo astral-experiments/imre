@@ -1367,7 +1367,7 @@ impl<'a> ArgumentPack<'a> {
         } else {
             ArgumentSlot::Mapping {
                 mark: frame.temporary_mark(),
-                edge: frame.open_operand_unwind(),
+                edge: frame.begin_operand_scope(),
             }
         }
     }
@@ -1396,7 +1396,7 @@ impl<'a> ArgumentPack<'a> {
             ArgumentSlot::Mapping { mark, edge } => {
                 self.merge(frame, value);
                 frame.discard_truth(&mark);
-                frame.close_unwind(edge, |frame| frame.discard_truth(&mark));
+                frame.finish_operand_scope(&mark, edge);
             }
         }
     }
@@ -2163,26 +2163,6 @@ impl RegisteredFrame<'_, '_> {
         } else {
             (self.named_op("method", receiver, name, "0"), None)
         }
-    }
-
-    pub(super) fn open_operand_unwind(&mut self) -> (String, String) {
-        let failed = self.name("b");
-        let outer = std::mem::replace(&mut self.body.error_target, failed.clone());
-        (failed, outer)
-    }
-
-    pub(super) fn close_unwind(
-        &mut self,
-        (failed, outer): (String, String),
-        release: impl FnOnce(&mut Self),
-    ) {
-        let ready = self.name("b");
-        self.jump(&ready);
-        self.label(&failed);
-        release(self);
-        self.jump(&outer);
-        self.label(&ready);
-        self.body.error_target = outer;
     }
 
     pub(crate) fn pack_operand(&mut self, operation: &str, args: &[&str]) -> String {
