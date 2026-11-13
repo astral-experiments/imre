@@ -2084,6 +2084,27 @@ mod tests {
         assert!(call.without_location().is_registered_invoke(), "{spelling}");
     }
 
+    fn named_call(value: &crate::ir::Expr) -> (&str, &[crate::ir::Expr]) {
+        use crate::ir::{Builtin, ExprKind};
+
+        let ExprKind::Invoke { callable, args } = &value.without_location().kind else {
+            panic!("expected a positioned Python call");
+        };
+        let ExprKind::Builtin(Builtin::RegisteredName(name), _) = &callable.without_location().kind
+        else {
+            panic!("expected a call to a loaded name");
+        };
+        (name, &args.values)
+    }
+
+    fn assert_input(value: &crate::ir::Expr, index: usize) {
+        use crate::ir::{Builtin, ExprKind};
+
+        assert!(
+            matches!(value.kind, ExprKind::Builtin(Builtin::RegisteredInput(slot), _) if slot == index)
+        );
+    }
+
     fn input_statements(
         suite: &crate::frontend::RegisteredSuite,
     ) -> impl Iterator<Item = (usize, &crate::ir::Statement)> {
@@ -2790,7 +2811,7 @@ mod tests {
         let before = module.standalone().unwrap();
         module.syntax = None;
         assert_eq!(module.standalone().unwrap(), before);
-        replace_residual_input(&mut module, 1);
+        replace_residual_input(&mut module, 0);
         assert_ne!(module.standalone().unwrap(), before);
     }
 
@@ -4325,7 +4346,7 @@ mod tests {
     fn a_mixed_comparison_keeps_its_operators_and_only_the_residual_child() {
         use crate::frontend::ExpressionInput;
         use crate::frontend::ExpressionSelection::Operand;
-        use crate::frontend::SourceOperand::{Checked, Residual};
+        use crate::frontend::SourceOperand::Residual;
 
         let text = concat!(
             "good = left() < right()\n",
@@ -4356,37 +4377,38 @@ mod tests {
             panic!("expected the physical comparison location");
         };
         assert_eq!(*range, root.range);
-        let crate::ir::ExprKind::Compare(slots, ops) = &located[0].kind else {
+        let crate::ir::ExprKind::Compare(values, ops) = &located[0].kind else {
             panic!("expected a registered comparison");
         };
         assert_eq!(ops.as_slice(), [ast::CmpOp::Lt, ast::CmpOp::LtE]);
-        assert_eq!(slots.len(), 3);
-        assert!(
-            slots.iter().enumerate().all(
-                |(i, value)| matches!(value.kind, crate::ir::ExprKind::Builtin(crate::ir::Builtin::RegisteredInput(slot), _) if slot == i)
-            )
-        );
-        assert!(matches!(inputs.operands().next().unwrap(), Checked(_)));
-        assert!(matches!(inputs.operands().nth(2).unwrap(), Checked(_)));
-        let Residual(ExpressionInput {
-            range,
-            selected: Operand(_),
-            ..
-        }) = inputs.operands().nth(1).unwrap()
+        let [first, middle, last] = values.as_slice() else {
+            panic!("expected three comparison operands");
+        };
+        assert_eq!(named_call(first).0, "first");
+        assert_input(middle, 0);
+        assert_eq!(named_call(last).0, "last");
+        let parts = inputs.operands().collect::<Vec<_>>();
+        let [
+            Residual(ExpressionInput {
+                range,
+                selected: Operand(_),
+                ..
+            }),
+        ] = parts.as_slice()
         else {
             panic!("expected the comparison to own its middle call");
         };
-        assert_eq!(&text[range], "(lambda v: v)(middle())");
+        assert_eq!(&text[*range], "(lambda v: v)(middle())");
 
         prepared.syntax = None;
         assert_eq!(prepared.standalone().unwrap(), original);
-        replace_residual_input(&mut prepared, 1);
+        replace_residual_input(&mut prepared, 0);
         assert_ne!(prepared.standalone().unwrap(), original);
     }
 
     #[test]
     fn a_physical_binary_keeps_its_operation_and_checked_input() {
-        use crate::frontend::SourceOperand::{Checked, Residual};
+        use crate::frontend::SourceOperand::Residual;
 
         let path = Path::new("store.py");
         let text = "good = before() + after()\nresult = (lambda v: v)(hi()) + more()\n";
@@ -4399,10 +4421,16 @@ mod tests {
         let inputs = residual_selection(prepared.source.initializer.as_mut().unwrap())
             .physical()
             .unwrap();
-        assert!(matches!(
-            inputs.operands().collect::<Vec<_>>().as_slice(),
-            [Residual(_), Checked(_)]
-        ));
+        let crate::ir::ExprKind::Binary(crate::ir::Binary::Add, left, right) =
+            &inputs.value.without_location().kind
+        else {
+            panic!("expected the addition");
+        };
+        assert_input(left, 0);
+        assert_eq!(named_call(right).0, "more");
+        assert!(
+            matches!(inputs.operands().collect::<Vec<_>>().as_slice(), [Residual(input)] if &text[input.range()] == "(lambda v: v)(hi())")
+        );
         prepared.syntax = None;
         assert_eq!(prepared.standalone().unwrap(), original);
         replace_residual_input(&mut prepared, 0);
@@ -4411,7 +4439,7 @@ mod tests {
 
     #[test]
     fn a_physical_method_retains_lookup_keywords_and_checked_inputs() {
-        use crate::frontend::SourceOperand::{Checked, Residual};
+        use crate::frontend::SourceOperand::Residual;
 
         let mut prepared = PreparedBody::module(
             "store",
@@ -4436,13 +4464,32 @@ mod tests {
         let inputs = residual_selection(prepared.source.initializer.as_mut().unwrap())
             .physical()
             .unwrap();
-        let operands = inputs.operands().collect::<Vec<_>>();
+        use crate::ir::{Builtin, ExprKind, RegisteredArguments, RegisteredCallTarget};
+        let ExprKind::Builtin(Builtin::RegisteredCall(call), values) =
+            &inputs.value.without_location().kind
+        else {
+            panic!("expected the prepared method call");
+        };
         assert!(
-            matches!(operands.as_slice(), [Checked(_), Checked(_), Residual(arg), Checked(_)] if arg.range() == expected)
+            matches!(&call.target, RegisteredCallTarget::Method { name, .. } if name == "apply")
+        );
+        assert!(
+            matches!(&call.arguments, RegisteredArguments::Keywords { positional: 1, names } if names == &["label", "tail"])
+        );
+        let [owner, first, label, tail] = values.as_slice() else {
+            panic!("expected the receiver and three argument values");
+        };
+        assert_eq!(
+            [named_call(owner).0, named_call(first).0, named_call(tail).0],
+            ["owner", "first", "last"]
+        );
+        assert_input(label, 0);
+        assert!(
+            matches!(inputs.operands().collect::<Vec<_>>().as_slice(), [Residual(arg)] if arg.range() == expected)
         );
         prepared.syntax = None;
         assert_eq!(prepared.standalone().unwrap(), original);
-        replace_residual_input(&mut prepared, 2);
+        replace_residual_input(&mut prepared, 0);
         assert_ne!(prepared.standalone().unwrap(), original);
     }
 
@@ -4532,7 +4579,7 @@ mod tests {
         };
         std::rc::Rc::get_mut(&mut call.selected)
             .expect("the expression statement owns the selected call")
-            .replace_residual_input(1, crate::ir::Expr::none());
+            .replace_residual_input(0, crate::ir::Expr::none());
         assert_ne!(prepared.standalone().unwrap(), original);
     }
 
@@ -6888,10 +6935,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
 
     #[test]
     fn a_residual_statement_uses_its_prepared_call_and_inline_operand() {
-        use crate::frontend::{
-            ExpressionInput, ExpressionSelection,
-            SourceOperand::{Checked, Residual},
-        };
+        use crate::frontend::{ExpressionInput, ExpressionSelection, SourceOperand::Residual};
 
         let mut prepared = PreparedBody::module(
             "store",
@@ -6912,15 +6956,21 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         let inputs = residual_selection(prepared.source.initializer.as_mut().unwrap())
             .physical()
             .unwrap();
+        let (callee, arguments) = named_call(&inputs.value);
+        assert_eq!(callee, "record");
+        let [first, target, dictionary] = arguments else {
+            panic!("expected three arguments to record");
+        };
+        assert_eq!(named_call(target).0, "target");
+        assert_input(first, 0);
+        assert_input(dictionary, 1);
         let parts = inputs.operands().collect::<Vec<_>>();
         let [
-            Checked(_),
             Residual(ExpressionInput {
                 range: first,
                 selected: ExpressionSelection::Operand(_),
                 ..
             }),
-            Checked(_),
             Residual(ExpressionInput {
                 range: dictionary,
                 selected: ExpressionSelection::Operand(operand),
@@ -6935,10 +6985,10 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         assert!(!operand.region().private_slots().is_empty());
         prepared.syntax = None;
         assert_eq!(prepared.standalone().unwrap(), original);
-        replace_residual_input(&mut prepared, 3);
+        replace_residual_input(&mut prepared, 1);
         let changed = prepared.standalone().unwrap();
         assert_ne!(changed, original);
-        replace_residual_input(&mut prepared, 1);
+        replace_residual_input(&mut prepared, 0);
         assert_ne!(prepared.standalone().unwrap(), changed);
     }
 
@@ -7417,10 +7467,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
 
     #[test]
     fn a_residual_assignment_uses_the_prepared_tuple_after_its_elements_are_erased() {
-        use crate::frontend::{
-            ExpressionInput, ExpressionSelection,
-            SourceOperand::{Checked, Residual},
-        };
+        use crate::frontend::{ExpressionInput, ExpressionSelection, SourceOperand::Residual};
 
         let mut prepared = PreparedBody::module(
             "worker",
@@ -7442,9 +7489,15 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         let inputs = residual_selection(prepared.source.initializer.as_mut().unwrap())
             .physical()
             .unwrap();
+        let (callee, arguments) = named_call(&inputs.value);
+        assert_eq!(callee, "consume");
+        let [tuple, lambda] = arguments else {
+            panic!("expected the tuple and lambda arguments");
+        };
+        assert_input(tuple, 0);
+        assert_input(lambda, 1);
         let parts = inputs.operands().collect::<Vec<_>>();
         let [
-            Checked(_),
             Residual(ExpressionInput {
                 range,
                 selected: ExpressionSelection::Operand(_),
@@ -7458,7 +7511,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         assert_eq!(*range, call.arguments.args[0].range());
         prepared.syntax = None;
         assert_eq!(prepared.standalone().unwrap(), original);
-        replace_residual_input(&mut prepared, 2);
+        replace_residual_input(&mut prepared, 1);
         assert_ne!(prepared.standalone().unwrap(), original);
     }
 }

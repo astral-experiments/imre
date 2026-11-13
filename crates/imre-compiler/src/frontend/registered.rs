@@ -2020,12 +2020,7 @@ impl<'a> SuitePreparation<'a> {
     ) -> PhysicalOperand {
         match operand {
             Some(value) => PhysicalOperand::Checked(Box::new(value)),
-            None => PhysicalOperand::Residual(self.sites.expressions.owned_input(
-                expr,
-                self.source,
-                kind,
-                suspended,
-            )),
+            None => PhysicalOperand::Residual(self.owned_input(expr, kind, suspended)),
         }
     }
 
@@ -2547,7 +2542,8 @@ impl<'a> SuitePreparation<'a> {
                     Ok(targets) => {
                         let rhs = frame_value(rhs);
                         let refusal = self.operand_refusal(&rhs);
-                        body.mixed(self, Statement::Assign(input, keep(rhs)), refusal);
+                        let value = self.bind_value(&mut operands, rhs);
+                        body.mixed(self, Statement::Assign(input, value), refusal);
                         targets
                     }
                     Err(()) => {
