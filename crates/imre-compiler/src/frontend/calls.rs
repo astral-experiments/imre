@@ -111,22 +111,21 @@ fn keyword_slot<'a>(
     }
 }
 
-/// Bind supplied values in evaluation order, then fill omitted defaults. Checked
+/// Bind supplied values in evaluation order, leaving omitted slots for the caller. Checked
 /// lowering and the initializer proof use different value consumers for the same
 /// slots. Checking one supplied value can fail before a later binding error.
 fn bind_fixed<'a, P, E, B>(
     call: &'a ast::ExprCall,
     parameters: &[P],
-    shape: impl Fn(&P) -> (&str, ParameterKind, bool),
+    shape: impl Fn(&P) -> (&str, ParameterKind),
     offset: usize,
-    mut bind: impl FnMut(usize, Option<&'a ast::Expr>) -> std::result::Result<ControlFlow<B>, E>,
+    mut bind: impl FnMut(usize, &'a ast::Expr) -> std::result::Result<ControlFlow<B>, E>,
     error: impl Fn(TextRange, String) -> E,
 ) -> std::result::Result<ControlFlow<B, Vec<usize>>, E> {
     let mut order = vec![usize::MAX; parameters.len() + offset];
     if offset > 0 {
         order[0] = 0;
     }
-    let mut next = offset;
     for (position, supplied) in call.arguments.iter_source_order().enumerate() {
         let index = match supplied {
             ast::ArgOrKeyword::Arg(value) => {
@@ -140,39 +139,16 @@ fn bind_fixed<'a, P, E, B>(
             }
             ast::ArgOrKeyword::Keyword(keyword) => {
                 let name = keyword.arg.as_deref().expect("fixed keyword");
-                keyword_slot(
-                    parameters.iter().map(|p| {
-                        let (name, kind, _) = shape(p);
-                        (name, kind)
-                    }),
-                    name,
-                    None,
-                    |i| order[i + offset] != usize::MAX,
-                )
+                keyword_slot(parameters.iter().map(&shape), name, None, |i| {
+                    order[i + offset] != usize::MAX
+                })
                 .map_err(|reason| error(keyword.range(), reason))?
             }
         };
-        if let ControlFlow::Break(stop) = bind(index, Some(supplied.value()))? {
+        if let ControlFlow::Break(stop) = bind(index, supplied.value())? {
             return Ok(ControlFlow::Break(stop));
         }
-        order[index + offset] = next;
-        next += 1;
-    }
-    for (index, p) in parameters.iter().enumerate() {
-        if order[index + offset] == usize::MAX {
-            let (name, _, has_default) = shape(p);
-            if !has_default {
-                return Err(error(
-                    call.range(),
-                    format!("missing required argument {name:?}"),
-                ));
-            }
-            if let ControlFlow::Break(stop) = bind(index, None)? {
-                return Ok(ControlFlow::Break(stop));
-            }
-            order[index + offset] = next;
-            next += 1;
-        }
+        order[index + offset] = position + offset;
     }
     Ok(ControlFlow::Continue(order))
 }
@@ -192,21 +168,26 @@ pub(crate) fn fixed_call_arguments<'a>(
         .map(|(i, p)| (p, ParameterKind::fixed(parameters, i)))
         .collect();
     let mut bound = Vec::with_capacity(call.arguments.len());
-    bind_fixed(
+    let order = bind_fixed(
         call,
         &fixed,
-        |(p, k)| (p.name().as_str(), *k, p.default.is_some()),
+        |(p, k)| (p.name().as_str(), *k),
         0,
         |index, value| {
-            if let Some(value) = value {
-                bound.push((fixed[index].0, value));
-            }
+            bound.push((fixed[index].0, value));
             Ok(ControlFlow::<()>::Continue(()))
         },
         |_, _| (),
     )
     .ok()?
     .continue_value()?;
+    if fixed
+        .iter()
+        .zip(order)
+        .any(|((p, _), slot)| slot == usize::MAX && p.default.is_none())
+    {
+        return None;
+    }
     Some(bound)
 }
 
@@ -800,37 +781,29 @@ impl Checker<'_> {
             let order = bind_fixed(
                 call,
                 params,
-                |p| (&p.name, p.kind, p.default.is_some()),
+                |p| (&p.name, p.kind),
                 offset,
                 |index, supplied| {
-                    let value = if let Some(supplied) = supplied {
-                        let value = check(self, index, Supplied::Source(supplied))?;
-                        if let Some(returns) = stop_return
-                            && self.terminating_operand(&value)
-                        {
-                            let stop = if values.is_empty() {
-                                value
-                            } else {
-                                ArgumentScope::stopped(
-                                    self,
-                                    std::mem::take(&mut values),
-                                    value,
-                                    returns,
-                                )
-                            };
-                            return Ok(ControlFlow::Break(stop));
-                        }
-                        if let Some(scope) = scope.as_deref_mut() {
-                            scope.hold(self, value)
-                        } else {
+                    let value = check(self, index, Supplied::Source(supplied))?;
+                    if let Some(returns) = stop_return
+                        && self.terminating_operand(&value)
+                    {
+                        let stop = if values.is_empty() {
                             value
-                        }
+                        } else {
+                            ArgumentScope::stopped(
+                                self,
+                                std::mem::take(&mut values),
+                                value,
+                                returns,
+                            )
+                        };
+                        return Ok(ControlFlow::Break(stop));
+                    }
+                    let value = if let Some(scope) = scope.as_deref_mut() {
+                        scope.hold(self, value)
                     } else {
-                        self.call_default(
-                            params[index].default.as_ref().expect("bound default"),
-                            default_owner,
-                            index,
-                        )
+                        value
                     };
                     values.push(value);
                     Ok(ControlFlow::Continue(()))
@@ -841,12 +814,7 @@ impl Checker<'_> {
                 ControlFlow::Continue(order) => order,
                 ControlFlow::Break(stop) => return Ok(ControlFlow::Break(stop)),
             };
-            return Ok(ControlFlow::Continue(ir::CallArgs {
-                values,
-                order,
-                site: ir::CallSite::None,
-                exhaustive_enum_match: false,
-            }));
+            return self.complete_call_arguments(call, params, values, order, default_owner);
         }
         let mut order = vec![usize::MAX; params.len() + offset];
         if offset > 0 {
@@ -1063,6 +1031,20 @@ impl Checker<'_> {
             };
             values.push(dictionary);
         }
+        self.complete_call_arguments(call, params, values, order, default_owner)
+    }
+
+    /// Supply omitted formals only on the native call, after all written operands have bound.
+    fn complete_call_arguments(
+        &mut self,
+        call: &ast::ExprCall,
+        params: &[Parameter],
+        mut values: Vec<Expr>,
+        mut order: Vec<usize>,
+        default_owner: Option<(usize, usize)>,
+    ) -> Result<ControlFlow<Expr, ir::CallArgs>, String> {
+        let offset = order.len() - params.len();
+        values.reserve_exact(order.len() - values.len());
         for (index, parameter) in params.iter().enumerate() {
             if order[index + offset] == usize::MAX {
                 let default = parameter.default.as_ref().ok_or_else(|| {
@@ -1302,7 +1284,7 @@ impl Checker<'_> {
         &mut self,
         operation: Builtin,
         returns: Type,
-        arguments: ir::CallArgs,
+        mut arguments: ir::CallArgs,
     ) -> Expr {
         if arguments
             .order
@@ -1316,32 +1298,21 @@ impl Checker<'_> {
             };
         }
         let mut scope = ArgumentScope::default();
-        let values: Vec<_> = arguments
-            .values
-            .into_iter()
-            .map(|value| {
-                // Singleton and tagged constants need no owner while the other operands run.
-                let immediate = match &value.kind {
-                    ExprKind::Bool(_) | ExprKind::None => true,
-                    ExprKind::Absent(inner) => matches!(inner.kind, ExprKind::None),
-                    ExprKind::Int(_) => value.tagged_integer_literal().is_some(),
-                    _ => false,
-                };
-                if immediate {
-                    value
-                } else {
-                    scope.hold(self, value)
-                }
-            })
-            .collect();
-        let args = arguments
-            .order
-            .into_iter()
-            .map(|index| values[index].clone())
-            .collect();
+        for value in &mut arguments.values {
+            // Singleton and tagged constants need no owner while the other operands run.
+            let immediate = match &value.kind {
+                ExprKind::Bool(_) | ExprKind::None => true,
+                ExprKind::Absent(inner) => matches!(inner.kind, ExprKind::None),
+                ExprKind::Int(_) => value.tagged_integer_literal().is_some(),
+                _ => false,
+            };
+            if !immediate {
+                *value = scope.hold(self, std::mem::replace(value, Expr::none()));
+            }
+        }
         scope.finish(Expr {
             ty: returns,
-            kind: ExprKind::Builtin(operation, args),
+            kind: ExprKind::Builtin(operation, arguments.into_formal_order()),
         })
     }
 

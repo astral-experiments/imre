@@ -1063,6 +1063,24 @@ pub(crate) struct CallArgs {
 }
 
 impl CallArgs {
+    /// The binder maps each formal to its unique operand. Move whole operands,
+    /// following each permutation cycle once, after their effects have been held.
+    pub(crate) fn into_formal_order(mut self) -> Vec<Expr> {
+        debug_assert_eq!(self.values.len(), self.order.len());
+        for start in 0..self.order.len() {
+            let mut index = start;
+            loop {
+                let next = std::mem::replace(&mut self.order[index], index);
+                if next == start {
+                    break;
+                }
+                self.values.swap(index, next);
+                index = next;
+            }
+        }
+        self.values
+    }
+
     /// Uses the existing positional order for calls that need no argument binding.
     pub(crate) fn positional(values: Vec<Expr>) -> Self {
         Self::positional_at(values, CallSite::None)
