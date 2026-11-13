@@ -125,7 +125,7 @@ impl Checker<'_> {
                     body: vec![Statement::Try {
                         body: vec![Statement::Assign(slot, result)],
                         handlers: vec![ir::ExceptHandler {
-                            matcher: crate::ir::ExceptionMatcher::Categories(Vec::new()),
+                            matcher: crate::ir::ExceptionMatcher::Any,
                             name: None,
                             body: vec![Statement::Expr(invalid_id(group, &actual))],
                         }],

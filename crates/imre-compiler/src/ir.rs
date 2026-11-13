@@ -3519,7 +3519,9 @@ pub(crate) struct ContextBinding {
 
 #[derive(Clone)]
 pub(crate) enum ExceptionMatcher {
-    /// Empty for a bare handler; otherwise fixed builtin exception categories.
+    /// A bare handler matches every pending exception.
+    Any,
+    /// An empty tuple matches none of the fixed builtin categories.
     Categories(Vec<u32>),
     /// Evaluate the Python class only when a pending exception reaches this handler.
     Object(ruff_text_size::TextRange, Box<Expr>),

@@ -7452,13 +7452,6 @@ impl<'a> Checker<'a> {
                 } else {
                     std::slice::from_ref(&**target)
                 };
-                if expressions.is_empty() {
-                    return Err(error(
-                        self.source,
-                        target.as_ref(),
-                        "an exception handler requires at least one builtin category",
-                    ));
-                }
                 let mut kinds = Vec::with_capacity(expressions.len());
                 for expression in expressions {
                     if let Some(kind) = self
@@ -7491,7 +7484,7 @@ impl<'a> Checker<'a> {
                 if index + 1 != try_.handlers.len() {
                     return Err(error(self.source, handler, "a bare handler must be last"));
                 }
-                Some(Vec::new())
+                None
             };
             let matcher = if let Some(kinds) = categories {
                 ir::ExceptionMatcher::Categories(kinds)

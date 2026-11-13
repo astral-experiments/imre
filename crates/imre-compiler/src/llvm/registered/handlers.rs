@@ -280,7 +280,7 @@ impl<'f, 'p> Frame<'f, '_, 'p> {
 
     pub(in crate::llvm) fn handler_class(&mut self, matcher: &ExceptionMatcher) -> Option<String> {
         match matcher {
-            ExceptionMatcher::Categories(_) => None,
+            ExceptionMatcher::Any | ExceptionMatcher::Categories(_) => None,
             ExceptionMatcher::Object(site, class) | ExceptionMatcher::Subgroup(site, class) => {
                 self.checkpoint(*site);
                 Some(self.evaluate_handle(class))
@@ -310,10 +310,11 @@ impl RegisteredFrame<'_, '_> {
 }
 
 /// Numeric categories belong to fixed-layout exceptions. Registered catches
-/// use live class objects, or the unconditional empty category list.
+/// use live class objects. Both frames handle bare and empty-tuple matchers.
 pub(super) fn supported(handlers: &[ExceptHandler], finalbody: &[Statement]) -> bool {
     (!handlers.is_empty() || !finalbody.is_empty())
         && handlers.iter().all(|h| match &h.matcher {
+            ExceptionMatcher::Any => true,
             ExceptionMatcher::Categories(kinds) => kinds.is_empty(),
             ExceptionMatcher::Object(..) | ExceptionMatcher::Subgroup(..) => true,
         })

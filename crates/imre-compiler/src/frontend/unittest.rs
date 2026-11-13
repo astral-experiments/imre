@@ -963,21 +963,16 @@ impl Checker<'_> {
                     ]),
                 ),
             });
-            if expected.kinds.is_empty() {
-                // An empty tuple never catches, unlike a bare except clause.
-                body.extend([action, failure]);
-            } else {
-                body.push(Statement::Try {
-                    body: vec![action],
-                    handlers: vec![ir::ExceptHandler {
-                        matcher: crate::ir::ExceptionMatcher::Categories(expected.kinds),
-                        name: None,
-                        body: vec![],
-                    }],
-                    orelse: vec![failure],
-                    finalbody: vec![],
-                });
-            }
+            body.push(Statement::Try {
+                body: vec![action],
+                handlers: vec![ir::ExceptHandler {
+                    matcher: crate::ir::ExceptionMatcher::Categories(expected.kinds),
+                    name: None,
+                    body: vec![],
+                }],
+                orelse: vec![failure],
+                finalbody: vec![],
+            });
             Ok(())
         })();
         let mut clear = vec![case];
@@ -1063,7 +1058,7 @@ impl Checker<'_> {
             ],
             protected,
             vec![ir::ExceptHandler {
-                matcher: crate::ir::ExceptionMatcher::Categories(vec![]),
+                matcher: crate::ir::ExceptionMatcher::Any,
                 name: Some(exc),
                 body: vec![Statement::If(handled, vec![], vec![Statement::Raise(None)])],
             }],
@@ -1144,7 +1139,7 @@ impl Checker<'_> {
             enter,
             protected,
             vec![ir::ExceptHandler {
-                matcher: crate::ir::ExceptionMatcher::Categories(vec![]),
+                matcher: crate::ir::ExceptionMatcher::Any,
                 name: Some(exc),
                 body: vec![
                     Statement::Assign(exceptional, Expr::boolean(true)),

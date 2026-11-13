@@ -521,7 +521,7 @@ def integers(values: list[int]) -> int:
                     Vec::new()
                 },
                 handlers: vec![ExceptHandler {
-                    matcher: crate::ir::ExceptionMatcher::Categories(Vec::new()),
+                    matcher: crate::ir::ExceptionMatcher::Any,
                     name: None,
                     body: if part == 1 {
                         raises.clone()

@@ -178,6 +178,9 @@ impl CheckedBody<'_, '_, '_, '_> {
     }
 
     fn matches_exception(&mut self, exception: &str, matcher: &ExceptionMatcher) -> Option<String> {
+        if matches!(matcher, ExceptionMatcher::Any) {
+            return None;
+        }
         match &mut self.0 {
             Entry::Native(code) => {
                 let ExceptionMatcher::Categories(kinds) = matcher else {
@@ -243,6 +246,9 @@ impl CheckedBody<'_, '_, '_, '_> {
             Entry::Registered(_) => Vec::new(),
         };
         for handler in handlers {
+            if matches!(&handler.matcher, ExceptionMatcher::Categories(kinds) if kinds.is_empty()) {
+                continue;
+            }
             // A Python exception matcher can allocate blocks of its own.
             let next = self.block_name();
             let Some(condition) = self.matches_exception(exception, &handler.matcher) else {

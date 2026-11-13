@@ -24,6 +24,19 @@ def upstream_support_payloads() -> str:
 
 
 ACCEPTED = {
+    "empty_exception_tuple": """
+        def select(value: int) -> int:
+            try:
+                if value:
+                    raise ValueError("raised")
+            except ():
+                return 1
+            except:
+                return 2
+            return 3
+
+        print(select(0), select(1))
+    """,
     "deep_context_default_repr": """
 from contextvars import Context, ContextVar
 n = 3000
