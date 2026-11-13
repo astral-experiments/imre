@@ -81,7 +81,7 @@ pub(super) struct PendingSite {
 
 #[derive(Default)]
 pub(super) struct SourceSites {
-    attributes: HashMap<TextRange, FixedAttribute>,
+    pub(super) attributes: HashMap<TextRange, FixedAttribute>,
     wrapper_fields: bool,
     positions: Vec<TextRange>,
     operations: Vec<Option<FixedNode>>,

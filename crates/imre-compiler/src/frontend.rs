@@ -3191,6 +3191,8 @@ struct Checker<'a> {
     unhighlighted_call: Option<TextRange>,
     wrapper_link: std::cell::Cell<bool>,
     fixed_sites: Option<fixed_body_source::SourceSites>,
+    /// During physical method recovery, forward completed attribute operations to the live frame.
+    settled_attributes: Option<&'a mut HashMap<TextRange, FixedAttribute>>,
     observed_definition: Option<Box<CalledDefinition>>,
     nonreturning_functions: &'a HashSet<usize>,
     /// Locals in this body are bound in an existing Python activation.
@@ -3295,6 +3297,7 @@ impl<'a> Checker<'a> {
             unhighlighted_call: None,
             wrapper_link: Default::default(),
             fixed_sites: None,
+            settled_attributes: None,
             observed_definition: None,
             nonreturning_functions: &classes.nonreturning_functions,
             registered: None,
@@ -5830,11 +5833,7 @@ impl<'a> Checker<'a> {
             {
                 lowered.push(Statement::Assign(*flag, Expr::boolean(true)));
             }
-            if let Some(sites) = &mut self.fixed_sites
-                && !sites.leave(parent)
-            {
-                self.fixed_sites = None;
-            }
+            self.leave_fixed_site(parent);
             if let Some(body) = output.as_deref_mut() {
                 if self.registered.is_some() {
                     // Assertions own the test checkpoint and disappear under Python optimization.
@@ -8181,12 +8180,18 @@ impl<'a> Checker<'a> {
             .as_mut()
             .and_then(|sites| sites.enter(expression.range()));
         let value = lower(self)?;
+        self.leave_fixed_site(parent);
+        Ok(value)
+    }
+
+    fn leave_fixed_site(&mut self, parent: Option<fixed_body_source::PendingSite>) {
         if let Some(sites) = &mut self.fixed_sites
             && !sites.leave(parent)
+            && let Some(partial) = self.fixed_sites.take()
+            && let Some(saved) = &mut self.settled_attributes
         {
-            self.fixed_sites = None;
+            **saved = partial.attributes;
         }
-        Ok(value)
     }
 
     fn lower_expression(&mut self, expression: &ast::Expr) -> Result<Expr, String> {

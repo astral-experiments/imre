@@ -240,6 +240,7 @@ impl PhysicalPreparation<'_, '_> {
             let value = values::operation(
                 node,
                 self.source,
+                None,
                 |_, _, _| false,
                 ir::control::boolean_literal,
                 |_| true,
@@ -314,6 +315,7 @@ impl PhysicalPreparation<'_, '_> {
         } else {
             let Ok(value) = source.object_operation(
                 node,
+                None,
                 |_, _, _| true,
                 |_| true,
                 |child| {
