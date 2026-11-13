@@ -49,7 +49,7 @@ REJECTED = {
     "dead_dynamic_code": 'def f() -> None:\n    if False:\n        eval("1 + 2")\nf()\n',
     "unknown_module": 'import missing_imre_test_module\nprint(1)\n',
     "recursive": 'def f(x: int) -> int:\n    return f(x)\nf(1)\n',
-    "global_read": 'def f() -> int:\n    return x\nx = 1\nf()\n',
+    "undefined_global": 'def f() -> int:\n    return x\nf()\n',
     "missing_return": 'def f(x: bool) -> int:\n    if x:\n        return 1\nf(False)\n',
     "inplace_list_repeat": 'def f() -> None:\n    x = [1]\n    x *= 2\nf()\n',
     "surrogate_literal": 'print("\\ud800")\n',
@@ -57,8 +57,6 @@ REJECTED = {
     "surrogate_after_crlf": 'x = 1\r\nprint("\\ud800")\r\n',
     "source_null_literal": 'print("abc\0def")\n',
     "source_null_comment": 'print(1)  # \0\n',
-    "latin1_cookie": '# coding: latin-1\nprint("é")\n',
-    "second_line_cookie": '# comment\n# coding=latin-1\nprint("é")\n',
     "ascii_cookie": '# coding: ascii\nprint("é")\n',
     "tab_indentation": 'if True:\n\tif True:\n   print(1)\n',
     "ambiguous_tab": 'if True:\n        print(1)\n\tprint(2)\n',
@@ -72,6 +70,8 @@ REJECTED = {
 }
 
 SOURCE_BOUNDARIES = {
+    "latin1_cookie": '# coding: latin-1\nprint("é")\n',
+    "second_line_cookie": '# comment\n# coding=latin-1\nprint("é")\n',
     "mixed_suite": 'if True:\n  \tif True:\n \t  print(1)\n  \tprint(2)\n',
     "joined_tab": 'if True:\n\t\\\n print(1)\n        print(2)\n',
     "crlf_literal": 'x = """a\r\nb"""\r\nprint(len(x))\r\nprint(x == "a\\nb")\r\n',
