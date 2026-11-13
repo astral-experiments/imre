@@ -5,7 +5,7 @@ use std::path::Path;
 use std::rc::Rc;
 
 use ruff_db::{files::File, parsed::ParsedModuleRef};
-use ruff_python_ast::{Stmt, visitor::Visitor};
+use ruff_python_ast::visitor::Visitor;
 use ruff_text_size::{TextRange, TextSize};
 
 use super::Imports;
@@ -95,7 +95,7 @@ impl ParsedLiteral {
         inherited_flags: u32,
     ) -> Self {
         let body = &parsed.syntax().body;
-        let flags = future_flags(body, inherited_flags);
+        let flags = inherited_flags | imre_ast::future_flags(body);
         let mut imports = Imports::default();
         imports.private_names.string_annotations =
             flags & imre_ast::code_flags::FUTURE_ANNOTATIONS != 0;
@@ -246,16 +246,4 @@ impl LiteralForest {
         }
         self.roots.into_iter().collect()
     }
-}
-
-pub(crate) fn future_flags(body: &[Stmt], inherited: u32) -> u32 {
-    use imre_ast::code_flags::{FUTURE_ANNOTATIONS, FUTURE_BARRY_AS_BDFL};
-    let mut flags = inherited;
-    if imre_ast::future_annotations(body) {
-        flags |= FUTURE_ANNOTATIONS;
-    }
-    if imre_ast::future_import(body, "barry_as_FLUFL") {
-        flags |= FUTURE_BARRY_AS_BDFL;
-    }
-    flags
 }

@@ -163,24 +163,6 @@ pub(crate) fn validate<'a>(
     Ok(replacements)
 }
 
-pub(crate) fn lower(
-    path: &Path,
-    source: &str,
-    body: &mut [ast::Stmt],
-) -> Result<imre_ast::Names, String> {
-    let private_names = lower_with_future(body, false);
-    validate_names(path, source, body, &private_names)?;
-    Ok(private_names)
-}
-
-pub(crate) fn lower_with_future(
-    body: &mut [ast::Stmt],
-    inherited_annotations: bool,
-) -> imre_ast::Names {
-    let string_annotations = inherited_annotations || imre_ast::future_annotations(body);
-    imre_ast::lower_in(body, "", string_annotations)
-}
-
 pub(crate) fn validate_names(
     path: &Path,
     source: &str,
