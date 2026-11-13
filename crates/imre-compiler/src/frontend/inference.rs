@@ -921,7 +921,7 @@ impl Inference {
                     {
                         fixed_dependencies.get_or_insert_with(Vec::new);
                     }
-                    errors.push((module, diagnostic));
+                    errors.push((module, None, diagnostic));
                 }
             }
             for (module, function, signature) in definitions.iter() {
@@ -1156,7 +1156,8 @@ impl Inference {
                         self.pending.borrow_mut()[signature.id].discovery =
                             ReturnDiscovery::Waiting(callee);
                     }
-                    errors.push((*module, diagnostic));
+                    let owner = signature.method.is_none().then(|| owners[signature.id]);
+                    errors.push((*module, owner, diagnostic));
                 } else {
                     if (checked_return || implicit_none)
                         && revision == body_revision + usize::from(implicit_none)
@@ -1247,7 +1248,7 @@ impl Inference {
                     ..
                 }) => Some(signature),
                 Err(diagnostic) => {
-                    errors.push((graph.entry, diagnostic));
+                    errors.push((graph.entry, None, diagnostic));
                     None
                 }
                 Ok(_) => None,
@@ -1261,10 +1262,22 @@ impl Inference {
                     self.revisit_checked_returns();
                     continue;
                 }
+                if conflicting_returns.is_none() && !self.unresolved() {
+                    break fixed_dependencies;
+                }
                 let mut reports = errors
                     .into_iter()
-                    .filter_map(|(module, failure)| match failure {
-                        Failure::Diagnostic(report) => Some(report.in_module(graph, module)),
+                    .filter_map(|(module, owner, failure)| match failure {
+                        Failure::Diagnostic(mut report) => {
+                            if let Some(owner) = owner {
+                                report.in_function(
+                                    graph,
+                                    owner,
+                                    super::phase::BodyCheck::Inference,
+                                );
+                            }
+                            Some(report.in_module(graph, module))
+                        }
                         Failure::PendingSignature { .. } => None,
                     })
                     .collect::<Vec<_>>();
@@ -1278,9 +1291,6 @@ impl Inference {
                     return Err(report
                         .in_module(graph, module)
                         .with_following(reports.into_iter()));
-                }
-                if !self.unresolved() {
-                    break fixed_dependencies;
                 }
                 if let Some(index) = reports
                     .iter()
@@ -1786,6 +1796,31 @@ impl Checker<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn named_startup_keeps_each_refused_function_operand() {
+        let text = concat!(
+            "def unused() -> int:\n    values: list[int] = [1]\n    values.append(True)\n    return 1\n",
+            "def called() -> int:\n    values: list[int] = [2]\n    values.append('two')\n    return 2\n",
+            "print(called())\n",
+        );
+        let mut graph = SourceGraph::single(text).unwrap();
+        graph.registered_startup = true;
+        let report = super::super::lower_with_caller_cache(&mut graph, None, None)
+            .err()
+            .unwrap();
+        let suite = graph.modules[graph.entry].parsed.suite();
+        assert_eq!(
+            report
+                .function_reports()
+                .map(|(site, _)| site)
+                .collect::<Vec<_>>(),
+            [
+                (graph.entry, suite[0].range()),
+                (graph.entry, suite[1].range())
+            ],
+        );
+    }
 
     #[test]
     fn an_independent_opaque_result_does_not_hide_a_checked_operand() {
