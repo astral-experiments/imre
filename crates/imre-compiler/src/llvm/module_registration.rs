@@ -125,18 +125,47 @@ impl ModuleLauncher {
 
     pub(crate) fn finish(mut self) -> String {
         self.output.integer_prelude();
-        let mut llvm_ir = format!(
-            "{ABI}\n{}\n{}\n",
-            self.output.constants, self.output.functions
-        );
+        let mut entry = String::from("\n");
         write_main(
-            &mut llvm_ir,
+            &mut entry,
             &self.main,
             true,
             "",
             "@imre_dyn_finish(ptr %ctx)",
         );
-        llvm_ir
+        module_parts(&self.output.constants, &self.output.functions, &entry).concat()
+    }
+}
+
+/// The ABI, constants and functions precede either the executable entry or a provider alias.
+fn module_parts<'a>(constants: &'a str, functions: &'a str, entry: &'a str) -> [&'a str; 6] {
+    [ABI, "\n", constants, "\n", functions, entry]
+}
+
+/// An initializer whose content determines its link name before its alias is written.
+pub(crate) struct ProviderBody {
+    constants: String,
+    functions: String,
+    entry: String,
+}
+
+impl ProviderBody {
+    pub(crate) fn new(mut output: Output, entry: String) -> Self {
+        output.integer_prelude();
+        Self {
+            constants: output.constants,
+            functions: output.functions,
+            entry,
+        }
+    }
+
+    pub(crate) fn parts<'a>(&'a self, alias: &'a str) -> [&'a str; 6] {
+        module_parts(&self.constants, &self.functions, alias)
+    }
+
+    pub(crate) fn llvm_ir(&self, symbol: &str, seal: &str) -> String {
+        let alias = format!("@{symbol} = alias i64 (ptr, i64), ptr {}\n{seal}", self.entry);
+        self.parts(&alias).concat()
     }
 }
 

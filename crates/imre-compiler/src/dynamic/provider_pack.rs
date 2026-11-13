@@ -81,17 +81,20 @@ pub(crate) fn write(directory: &Path) -> Result<(), String> {
             })
             .and_then(|body| {
                 body.has_body_statements
-                    .then(|| body.standalone())
+                    .then(|| body.provider_body(None))
                     .transpose()
             });
         match compiled {
             // The launcher emits entries for statement-free modules in its own unit.
             Ok(None) => Ok(()),
-            Ok(Some((symbol, mut ir))) => {
-                if checked.is_some() {
-                    super::provider_archive::seal(&mut ir, &symbol, name, path, source);
-                }
-                fs::write(directory.join(format!("{symbol}.ll")), ir)
+            Ok(Some((symbol, body))) => {
+                let seal = checked
+                    .as_ref()
+                    .and_then(|_| super::provider_archive::seal(&symbol, name, path, source));
+                fs::write(
+                    directory.join(format!("{symbol}.ll")),
+                    body.llvm_ir(&symbol, seal.as_deref().unwrap_or_default()),
+                )
             }
             Err(reason) => {
                 // The ordinary compiler still diagnoses a module it cannot lower when selected.

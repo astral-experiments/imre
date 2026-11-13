@@ -2,7 +2,6 @@
 
 use std::borrow::Cow;
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use ruff_python_ast as ast;
@@ -16,13 +15,11 @@ use crate::frontend::{
     ParameterEvaluator, RegisteredBody, RegisteredGenerator, RegisteredLambda, RequiredSite,
 };
 use crate::ir::RegisteredTypeParameter;
-use crate::llvm::ModuleLauncher;
 use crate::llvm::registered::sites::{
     CheckedSites, CompiledAlias, CompiledDefinition, CompiledTypeParameters, Declaration,
 };
-use crate::llvm::registered::{
-    ABI, AnnotationScope, Output, RegisteredFrame, SourcePositions, sites,
-};
+use crate::llvm::registered::{AnnotationScope, Output, RegisteredFrame, SourcePositions, sites};
+use crate::llvm::{ModuleLauncher, ProviderBody};
 use serde_json::json;
 
 #[derive(Clone, Copy, Default)]
@@ -148,7 +145,7 @@ impl crate::ProgramOutput {
                         if whole.is_none() && whole_requested {
                             *whole = Some(fork.unwrap_or_else(|| root.clone()));
                         }
-                        placed = Some(body.llvm_ir(&symbol));
+                        placed = Some(body.llvm_ir(&symbol, ""));
                     }
                     if archived || separate {
                         external = Some(symbol);
@@ -797,14 +794,15 @@ impl<'a> PreparedBody<'a> {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn standalone(&self) -> Result<(String, String), String> {
         let (symbol, body) = self.provider_body(None)?;
-        let ir = body.llvm_ir(&symbol);
+        let ir = body.llvm_ir(&symbol, "");
         Ok((symbol, ir))
     }
 
     /// Hash the emitted module before deciding whether its native object is already available.
-    fn provider_body(
+    pub(super) fn provider_body(
         &self,
         mut placement: Option<(&mut Output, usize, &mut String)>,
     ) -> Result<(String, ProviderBody), String> {
@@ -822,12 +820,7 @@ impl<'a> PreparedBody<'a> {
         if let Some((target, _, whole_entry)) = placement {
             output.finish_placement(target, &mut entry, whole_entry);
         }
-        output.integer_prelude();
-        let body = ProviderBody {
-            constants: output.constants,
-            functions: output.functions,
-            entry,
-        };
+        let body = ProviderBody::new(output, entry);
         let mut hash = blake3::Hasher::new();
         for field in [
             std::env::consts::ARCH.as_bytes(),
@@ -838,7 +831,7 @@ impl<'a> PreparedBody<'a> {
             hash.update(&(field.len() as u64).to_le_bytes());
             hash.update(field);
         }
-        let parts = body.parts();
+        let parts = body.parts("");
         let length: usize = parts.iter().map(|part| part.len()).sum();
         hash.update(&(length as u64).to_le_bytes());
         for part in parts {
@@ -847,24 +840,6 @@ impl<'a> PreparedBody<'a> {
         hash.update(&[u8::from(self.source.python_optimization < 2)]);
         let symbol = format!("imre_provider_{}", hash.finalize().to_hex());
         Ok((symbol, body))
-    }
-}
-
-struct ProviderBody {
-    constants: String,
-    functions: String,
-    entry: String,
-}
-
-impl ProviderBody {
-    fn parts(&self) -> [&str; 5] {
-        [ABI, "\n", &self.constants, "\n", &self.functions]
-    }
-
-    fn llvm_ir(&self, symbol: &str) -> String {
-        let mut ir = self.parts().concat();
-        writeln!(ir, "@{symbol} = alias i64 (ptr, i64), ptr {}", self.entry).unwrap();
-        ir
     }
 }
 
