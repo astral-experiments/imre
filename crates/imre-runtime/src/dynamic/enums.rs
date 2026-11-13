@@ -411,7 +411,7 @@ impl Context {
         let Value::Scope(fields) = self.heap.get_mut(scope) else {
             unreachable!()
         };
-        fields.class_body = Some(Vec::new());
+        fields.in_class_body = true;
         let qualname = self.text(&name);
         self.bind_local(scope, "__qualname__", qualname);
         let mut declarations = Vec::new();

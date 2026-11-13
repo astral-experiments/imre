@@ -608,7 +608,7 @@ impl Context {
                 Ok(local)
             }
             "class_base_scope" => {
-                if self.scope_data(b).class_body.is_none() {
+                if !self.scope_data(b).in_class_body {
                     return Ok(a);
                 }
                 // A generic class's bases can read its enclosing class dictionary. Its
@@ -641,7 +641,7 @@ impl Context {
                 Ok(NONE)
             }
             "annotate" => {
-                if self.scope_data(a).class_body.is_some() {
+                if self.scope_data(a).in_class_body {
                     let mapping = self.lookup_class_local(a, "__annotations__")?;
                     self.put_item(mapping, b, c)?;
                 } else {
@@ -2899,7 +2899,7 @@ impl Context {
             if frame.exec_locals.is_some() {
                 return Some(false);
             }
-            if frame.class_body.is_none() {
+            if !frame.in_class_body {
                 if frame.globals.contains(name) {
                     return Some(false);
                 }
@@ -2924,7 +2924,7 @@ impl Context {
             if let Some(&cell) = frame.closure.cells.get(name) {
                 return cell;
             }
-            if frame.class_body.is_none() && frame.closure.declared.contains(name) {
+            if !frame.in_class_body && frame.closure.declared.contains(name) {
                 let Value::Scope(frame) = self.heap.get_mut(cursor) else {
                     unreachable!()
                 };
@@ -2937,7 +2937,7 @@ impl Context {
                 frame.closure.cells.insert(name.to_owned(), cell);
                 return cell;
             }
-            if frame.class_body.is_none()
+            if !frame.in_class_body
                 && name == "__class__"
                 && let Some(cell) = frame.class_cell
             {
@@ -3087,7 +3087,7 @@ impl Context {
                     .any(|name| name == "__class__")
         });
         let scope = if owner.exec_locals.is_some()
-            || ((owner.class_body.is_some() || owner.class_namespace.is_some())
+            || ((owner.in_class_body || owner.class_namespace.is_some())
                 && !annotation_scope)
         {
             owner.parent.unwrap_or(scope)

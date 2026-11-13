@@ -162,6 +162,21 @@ def current():
 
     print(Names.later is None, order[-1])
 
+    class Qualname(str):
+        def __set_name__(self, owner, name):
+            raise AssertionError("type metadata received a descriptor callback")
+
+    class Ordered:
+        __qualname__ = Qualname("Ordered")
+        first = Forward()
+        second = Forward()
+        third = Forward()
+        del first
+        second = Forward()
+        first = Forward()
+
+    assert order[-3:] == [("Ordered", "second"), ("Ordered", "third"), ("Ordered", "first")]
+
     class Missing(AttributeError, Exception):
         pass
 

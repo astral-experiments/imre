@@ -2456,7 +2456,7 @@ impl Context {
         let enclosing = self.scope_data(parent);
         let module = enclosing.module.clone();
         let (parent, kind) =
-            if enclosing.class_body.is_some() || enclosing.class_namespace.is_some() {
+            if enclosing.in_class_body || enclosing.class_namespace.is_some() {
                 (
                     enclosing.parent.expect("class has an enclosing scope"),
                     ComprehensionKind::ClassBody,
@@ -2677,10 +2677,9 @@ impl Context {
         {
             Some(existing) => existing,
             None => {
-                let names = frame.names.clone();
-                let entries = names
+                let entries = frame
+                    .class_namespace_entries(building)
                     .into_iter()
-                    .filter(|(name, _)| building || name != "__qualname__")
                     .map(|(name, value)| (self.text(name), value))
                     .collect();
                 let dictionary = self.dict(entries);
@@ -2713,7 +2712,7 @@ impl Context {
     /// Share the class namespace cell across source-loaded and precompiled method providers.
     pub(super) fn class_annotation_dict_cell(&mut self, scope: Id) -> Id {
         let owner = self.scope_data(scope);
-        if owner.class_body.is_none()
+        if !owner.in_class_body
             && let Some(&cell) = owner.closure.cells.get("__classdict__")
         {
             return cell;
@@ -2759,7 +2758,6 @@ impl Context {
         let Value::Scope(frame) = self.heap.get_mut(scope) else {
             unreachable!()
         };
-        frame.class_body = Some(names.keys().map(|name| name.as_str().to_owned()).collect());
         frame.names = names;
         frame.namespace = None;
         frame.class_namespace.as_mut().unwrap().dictionary = None;
@@ -2829,9 +2827,6 @@ impl Context {
         let Value::Scope(data) = self.heap.get_mut(scope) else {
             unreachable!()
         };
-        if let Some(order) = &mut data.class_body {
-            order.retain(|member| member != name);
-        }
         let Some(previous) = data.names.shift_remove(name) else {
             return Ok(false);
         };
@@ -2858,7 +2853,7 @@ impl Context {
         let Value::Scope(frame) = self.heap.get_mut(scope) else {
             unreachable!("function call scope")
         };
-        debug_assert!(frame.class_body.is_none());
+        debug_assert!(!frame.in_class_body);
         debug_assert!(frame.class_namespace.is_none());
         debug_assert!(frame.namespace.is_none());
         if !frame.names.contains_key(name.as_str()) {
@@ -2902,9 +2897,6 @@ impl Context {
         let previous = if let Some(binding) = s.names.get_mut(name) {
             Some(std::mem::replace(binding, value))
         } else {
-            if let Some(order) = &mut s.class_body {
-                order.push(name.to_owned());
-            }
             s.names.insert(crate::Str::new(name), value);
             None
         };
@@ -2912,7 +2904,7 @@ impl Context {
             .class_namespace
             .as_ref()
             .and_then(|class| class.dictionary);
-        let mirror = dictionary.filter(|_| s.class_body.is_some() || name != "__qualname__");
+        let mirror = dictionary.filter(|_| s.in_class_body || name != "__qualname__");
         let displaced = previous.filter(|&old| old != value);
         if let Some(old) = displaced {
             self.heap.weak_edge_removed(old);
@@ -2928,7 +2920,7 @@ impl Context {
     /// Describe a missing binding in the scope that owns it.
     fn missing_binding(&mut self, origin: Id, scope: Id, name: &str) -> Error {
         let frame = self.scope_data(scope);
-        let declared = frame.class_body.is_none() && frame.closure.declared.contains(name);
+        let declared = !frame.in_class_body && frame.closure.declared.contains(name);
         let mut error = if declared && origin == scope {
             Error::new(
                 "UnboundLocalError",
@@ -3015,7 +3007,7 @@ impl Context {
                 return Ok(id);
             }
             let s = self.scope_data(scope);
-            if s.class_body.is_none() && s.closure.declared.contains(name) {
+            if !s.in_class_body && s.closure.declared.contains(name) {
                 return Err(self.missing_binding(origin, scope, name));
             }
             // An eager comprehension in a class cannot capture an outer function's __class__.
@@ -3024,7 +3016,7 @@ impl Context {
                 continue;
             }
             if name == "__class__"
-                && s.class_body.is_none()
+                && !s.in_class_body
                 && let Some(cell) = s.class_cell
                 && let Value::Cell(value) = self.heap.get(cell)
             {

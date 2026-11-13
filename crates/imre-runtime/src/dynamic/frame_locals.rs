@@ -101,7 +101,9 @@ fn frame_scope(ctx: &mut Context, frame: Id) -> Result<(Id, Id, bool)> {
 /// A class proxy exposes its captured slots, independently of the class namespace.
 pub(super) fn class_cells(ctx: &mut Context, scope: Id, code: Id) -> Option<Id> {
     let data = ctx.scope_data(scope);
-    data.class_body.as_ref()?;
+    if !data.in_class_body {
+        return None;
+    }
     let parent = data.parent?;
     #[derive(serde::Deserialize)]
     struct Bindings {
@@ -147,7 +149,7 @@ pub(super) fn class_cells(ctx: &mut Context, scope: Id, code: Id) -> Option<Id> 
 /// Capture the actual namespace while a class body or other unoptimized scope is still active.
 pub(super) fn unoptimized_namespace(ctx: &mut Context, scope: Id, code: Id) -> Result<Option<Id>> {
     let data = ctx.scope_data(scope);
-    if data.parent.is_none() || data.exec_locals.is_some() || data.class_body.is_some() {
+    if data.parent.is_none() || data.exec_locals.is_some() || data.in_class_body {
         return ctx.locals_for_code(scope, code).map(Some);
     }
     Ok(None)
