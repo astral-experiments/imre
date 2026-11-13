@@ -72,9 +72,8 @@ impl ExpressionSites {
             || matches!(node, ast::Expr::UnaryOp(unary) if unary.op == ast::UnaryOp::Not)
     }
 
-    pub(super) fn register_lexical(&mut self, node: &ast::Expr, selected: Rc<Selection>) {
-        self.lexical
-            .insert((node.range(), ast::AnyNodeRef::from(node).kind()), selected);
+    pub(super) fn register_lexical(&mut self, node: ast::AnyNodeRef<'_>, selected: Rc<Selection>) {
+        self.lexical.insert((node.range(), node.kind()), selected);
     }
 
     /// A template owns its lexical operand and any refusal in its interpolation.
@@ -95,7 +94,7 @@ impl ExpressionSites {
             Ok(operand) => Selection::Operand(Box::new(operand)),
             Err((range, reason)) => Selection::Refused(range, reason),
         };
-        self.register_lexical(node, Rc::new(selection));
+        self.register_lexical(node.into(), Rc::new(selection));
     }
 
     #[cfg(test)]

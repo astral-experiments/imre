@@ -416,7 +416,8 @@ impl<'p> ScopeFacts<'p> {
 
 /// A lexical operand is ready after the scopes of its children have closed.
 pub(crate) enum LexicalSite<'a, 's> {
-    Operand(&'a ast::Expr, super::RegisteredScope),
+    Lambda(&'a ast::ExprLambda, super::RegisteredScope, bool),
+    Template(&'a ast::Expr, super::RegisteredScope),
     Generator(TextRange, &'s Plan<'a>, bool, &'s FunctionScope),
 }
 
@@ -593,11 +594,11 @@ where
                     self.visit_parameters(parameters);
                 }
                 let parent = std::mem::replace(&mut self.scope, Scope::Lambda);
-                let parent_yields = self.yields;
+                let parent_yields = std::mem::take(&mut self.yields);
                 self.visit_expr(&lambda.body);
-                self.yields = parent_yields;
+                let yields = std::mem::replace(&mut self.yields, parent_yields);
                 self.scope = parent;
-                (self.expression)(LexicalSite::Operand(expr, parent.registered()));
+                (self.expression)(LexicalSite::Lambda(lambda, parent.registered(), yields));
             }
             ast::Expr::Generator(generator) => {
                 let plan = Plan::generator(generator);
@@ -622,7 +623,7 @@ where
             }
             ast::Expr::TString(_) => {
                 visitor::walk_expr(self, expr);
-                (self.expression)(LexicalSite::Operand(expr, self.scope.registered()));
+                (self.expression)(LexicalSite::Template(expr, self.scope.registered()));
             }
             _ => visitor::walk_expr(self, expr),
         });

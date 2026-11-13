@@ -39,14 +39,14 @@ impl LexicalOperands {
                     self.generators.insert(range, child);
                 }
             }
-            LexicalSite::Operand(expr @ ast::Expr::Lambda(lambda), owner) => {
+            LexicalSite::Lambda(lambda, owner, yields) => {
                 let scope = FunctionScope::lambda(lambda, strings);
-                let plan = RegisteredLambda::prepare(lambda, source, &scope, owner);
+                let plan = RegisteredLambda::prepare(lambda, source, &scope, owner, yields);
                 self.expressions
-                    .register_lexical(expr, std::rc::Rc::clone(&plan.binding));
+                    .register_lexical(lambda.into(), std::rc::Rc::clone(&plan.binding));
                 self.lambdas.insert(lambda.start(), plan);
             }
-            LexicalSite::Operand(template, owner) => {
+            LexicalSite::Template(template, owner) => {
                 self.expressions.prepare_template(template, source, owner);
             }
         }

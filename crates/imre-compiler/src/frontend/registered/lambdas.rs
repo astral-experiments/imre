@@ -2,7 +2,6 @@
 
 use super::*;
 use crate::frontend::function_scope::{CallableMetadata, FunctionScope};
-use imre_ast::code_flags;
 
 pub(crate) struct RegisteredLambda {
     pub(crate) metadata: CallableMetadata,
@@ -30,6 +29,7 @@ impl RegisteredLambda {
         source: values::RegisteredSource<'_>,
         scope: &FunctionScope,
         owner: RegisteredScope,
+        yields: bool,
     ) -> Self {
         let body = Self::body(lambda, source);
         let binding = if body.is_some() {
@@ -51,11 +51,7 @@ impl RegisteredLambda {
             )
         };
         Self {
-            metadata: CallableMetadata::lambda(
-                lambda.parameters.as_deref(),
-                scope,
-                code_flags::yields_in_expression(&lambda.body),
-            ),
+            metadata: CallableMetadata::lambda(lambda.parameters.as_deref(), scope, yields),
             binding: std::rc::Rc::new(binding),
             body,
         }
@@ -65,6 +61,7 @@ impl RegisteredLambda {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use imre_ast::code_flags;
     use serde_json::json;
 
     #[test]
@@ -184,6 +181,7 @@ async def factory(seed, rows, mark):
             },
             &FunctionScope::lambda(residual, false),
             owner,
+            false,
         );
         assert!(
             matches!(mixed.binding.as_ref(), ExpressionSelection::Refused(range, "cannot compile this lambda body ahead of time") if *range == thunk.range())
@@ -220,6 +218,7 @@ async def factory(seed, rows, mark):
             literals.context(&module.source),
             &FunctionScope::lambda(lambda, false),
             RegisteredScope::Function { is_async: true },
+            false,
         );
 
         let ExpressionSelection::Operand(binding) = plan.binding.as_ref() else {
@@ -263,12 +262,14 @@ async def factory(seed, rows, mark):
         let expr = &module.parsed.syntax().body[0].as_expr_stmt().unwrap().value;
         let lambda = expr.as_lambda_expr().unwrap();
         assert!(values::has_checked_lambda_body(lambda, source));
-        let plan = RegisteredLambda::prepare(
-            lambda,
-            source,
-            &FunctionScope::lambda(lambda, false),
-            RegisteredScope::Module,
+        let mut lexical = LexicalOperands::default();
+        crate::frontend::function_scope::ScopeFacts::prepare(
+            &module.parsed.syntax().body,
+            &imre_ast::Names::default(),
+            |_, _| {},
+            |site| lexical.prepare(site, source, false),
         );
+        let plan = lexical.lambdas.remove(&lambda.start()).unwrap();
         assert_eq!(plan.metadata.suspension_flags(), code_flags::GENERATOR);
         let checked = plan.body.unwrap();
         assert!(
@@ -319,6 +320,7 @@ async def factory(seed, rows, mark):
             source,
             &FunctionScope::lambda(lambda, false),
             RegisteredScope::Module,
+            false,
         );
         let sites = HashMap::from([(lambda.start(), plan)]);
         let source = values::RegisteredSource {
@@ -396,6 +398,7 @@ async def factory(seed, rows, mark):
             source,
             &FunctionScope::lambda(lambda, false),
             RegisteredScope::Module,
+            false,
         );
         let nested = values::lambda_defaults(lambda)
             .nth(1)
