@@ -1134,48 +1134,6 @@ fn lower_graph(
                 .diagnostic(class.node.as_ref(), "__bool__ must return bool"));
         }
     }
-    for (module, function, signature) in &definitions {
-        types.bind_function_site(
-            *module,
-            function.name.range().start().to_u32(),
-            signature.id,
-        );
-        let annotated = function
-            .parameters
-            .iter_non_variadic_params()
-            .zip(&signature.params)
-            .filter_map(|(p, inferred)| p.annotation().map(|value| (value, inferred.ty)))
-            .chain(
-                function
-                    .returns
-                    .as_deref()
-                    .map(|value| (value, signature.returns)),
-            );
-        for (annotation, ty) in annotated {
-            if let Some(definition) = namedtuples::annotation(graph, *module, annotation, &types)
-                && types.namedtuple_definition(ty) != Some(definition)
-            {
-                return Err(graph.modules[*module].diagnostic(
-                    annotation,
-                    "inferred value must be an instance of the annotated namedtuple",
-                ));
-            }
-            if graph.resolve(*module, annotation)
-                == Some(Binding::Intrinsic(Intrinsic::ArgparseNamespace))
-                && !matches!(ty, Type::Class(id) if classes.parsers.namespace(id))
-            {
-                return Err(graph.modules[*module].diagnostic(
-                    annotation,
-                    "argparse.Namespace requires an inferred native parser namespace",
-                ));
-            }
-        }
-    }
-    let entry_declarations = classes.declarations.has_class_values(graph.entry)
-        || graph.modules[graph.entry].parsed.syntax().body.iter().any(|stmt| {
-            matches!(stmt, ast::Stmt::FunctionDef(def) if inspect::marks_function(graph, graph.entry, def))
-        });
-    let helpers = Helpers::new(inference.len() + graph.initializers(entry_declarations).count());
     let needs_registered_entry =
         !registered_generators.is_empty() || signatures.values().any(Signature::registered_frame);
     if needs_registered_entry {
@@ -1186,7 +1144,6 @@ fn lower_graph(
                 == Some(definition)
         });
     }
-    let globals = ModuleValues::for_initializers(needs_registered_entry);
     // Fixed FILE compilations need no secondary body. A registered launch or an
     // actual representation failure can still use functions whose signatures solved.
     let captured = std::cell::Cell::new(false);
@@ -1203,6 +1160,51 @@ fn lower_graph(
             );
         }
     };
+    for (module, function, signature) in &definitions {
+        types.bind_function_site(
+            *module,
+            function.name.range().start().to_u32(),
+            signature.id,
+        );
+        let annotated = function
+            .parameters
+            .iter_non_variadic_params()
+            .zip(&signature.params)
+            .filter_map(|(p, inferred)| p.annotation().map(|value| (value, inferred.ty, false)))
+            .chain(
+                function
+                    .returns
+                    .as_deref()
+                    .map(|value| (value, signature.returns, true)),
+            );
+        for (annotation, ty, is_return) in annotated {
+            let mismatch = if let Some(definition) =
+                namedtuples::annotation(graph, *module, annotation, &types)
+                && types.namedtuple_definition(ty) != Some(definition)
+            {
+                "inferred value must be an instance of the annotated namedtuple"
+            } else if graph.resolve(*module, annotation)
+                == Some(Binding::Intrinsic(Intrinsic::ArgparseNamespace))
+                && !matches!(ty, Type::Class(id) if classes.parsers.namespace(id))
+            {
+                "argparse.Namespace requires an inferred native parser namespace"
+            } else {
+                continue;
+            };
+            // The registered frame can return a handle even when the fixed layout fails.
+            // Keep the original diagnostic for callers that require the fixed contract.
+            if is_return && ty == Type::PythonObject && graph.modules[*module].is_program_source() {
+                capture();
+            }
+            return Err(graph.modules[*module].diagnostic(annotation, mismatch));
+        }
+    }
+    let entry_declarations = classes.declarations.has_class_values(graph.entry)
+        || graph.modules[graph.entry].parsed.syntax().body.iter().any(|stmt| {
+            matches!(stmt, ast::Stmt::FunctionDef(def) if inspect::marks_function(graph, graph.entry, def))
+        });
+    let helpers = Helpers::new(inference.len() + graph.initializers(entry_declarations).count());
+    let globals = ModuleValues::for_initializers(needs_registered_entry);
     let capture_on_object = |failure: &Failure| {
         if failure.is_object() || needs_registered_entry {
             capture();
