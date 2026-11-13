@@ -3406,6 +3406,7 @@ impl Context {
                 return super::frame_locals::get(self, obj);
             }
             Value::PythonFrame { globals, .. } if name == "f_globals" => return Ok(globals),
+            Value::PythonFrame { builtins, .. } if name == "f_builtins" => return Ok(builtins),
             Value::PythonFrame { code, .. } if name == "f_code" => {
                 if !self.audit_hooks.is_empty() {
                     let attribute = self.text(name);

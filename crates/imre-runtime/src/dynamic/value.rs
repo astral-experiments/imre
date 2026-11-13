@@ -538,6 +538,7 @@ impl Context {
             }
             let (scope, code, owner) = (frame.scope, frame.code, frame.owner);
             let globals = self.module_globals(scope)?;
+            let builtins = self.function_builtins(scope)?;
             let unoptimized_locals = super::frame_locals::unoptimized_namespace(self, scope, code)?;
             let class_proxy_scope = super::frame_locals::class_cells(self, scope, code);
             let object = self.alloc(Value::PythonFrame {
@@ -547,6 +548,7 @@ impl Context {
                 scope,
                 code,
                 globals,
+                builtins,
                 back: (!matches!(owner, FrameOwner::Generator(_))).then_some(previous),
                 lineno: line,
             });
@@ -589,6 +591,7 @@ impl Context {
             return Ok(frame);
         }
         let globals = self.module_globals(scope)?;
+        let builtins = self.function_builtins(scope)?;
         let object = self.alloc(Value::PythonFrame {
             unoptimized_locals: None,
             class_proxy_scope: None,
@@ -596,6 +599,7 @@ impl Context {
             scope,
             code,
             globals,
+            builtins,
             back: None,
             lineno,
         });
@@ -1640,6 +1644,7 @@ pub(super) enum Value {
         scope: Id,
         code: Id,
         globals: Id,
+        builtins: Id,
         // Ordinary frames retain their caller. Generator frames resolve their live resumer.
         back: Option<Id>,
         lineno: u32,
@@ -2682,13 +2687,14 @@ impl Value {
                 scope,
                 code,
                 globals,
+                builtins,
                 back,
                 ..
             } => {
                 visit.extend(*unoptimized_locals);
                 visit.extend(*class_proxy_scope);
                 visit.extend(overwritten_fast_locals.iter().rev());
-                visit.extend([*scope, *code, *globals]);
+                visit.extend([*scope, *code, *globals, *builtins]);
                 visit.extend(*back);
             }
             Self::IoOpen { types, unsupported } => visit.extend([
