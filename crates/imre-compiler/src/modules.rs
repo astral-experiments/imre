@@ -2920,7 +2920,7 @@ impl SearchRoots {
 static BOXED_DECIMAL_EXPORTS: LazyLock<HashSet<String>> = LazyLock::new(|| {
     let (_, source) =
         crate::dynamic::bundled_module_source("_pydecimal", true).expect("bundled _pydecimal.py");
-    let provider = ruff_python_parser::parse_module(&source).expect("valid bundled _pydecimal.py");
+    let provider = ruff_python_parser::parse_module(source).expect("valid bundled _pydecimal.py");
     let exports = provider
         .syntax()
         .body

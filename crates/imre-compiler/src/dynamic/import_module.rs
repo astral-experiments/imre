@@ -1,8 +1,11 @@
 use super::{Expr, Visitor, ast, visitor};
 use crate::modules::{Binding, Intrinsic, IntrinsicModule, SourceGraph, bundled_source};
 
-/// Prefer boxed module implementations over the common bundled sources.
-pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
+/// Borrow the shipped Python module selected by this target and entry point.
+pub(crate) fn bundled_module_source(
+    name: &str,
+    standalone: bool,
+) -> Option<(&'static str, &'static str)> {
     if let Some(path) = crate::modules::charmap_provider_path(name, true) {
         return Some((path, include_str!("../../stdlib/encodings/charmap.py")));
     }
@@ -13,6 +16,8 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
         return Some((path, include_str!("../../stdlib/encodings/utf_fixed.py")));
     }
     match name {
+        // Standalone executables can run without the launcher's installed stdlib ZIP.
+        "_pydecimal" if standalone => bundled_source!("_pydecimal.py"),
         "types" => bundled_source!("types.py"),
         "reprlib" => bundled_source!("reprlib.py"),
         // The scalar Decimal stays available for checked serializers.
@@ -335,11 +340,11 @@ fn target(call: &ast::ExprCall) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::boxed_source;
+    use super::bundled_module_source;
 
     #[test]
     fn inspect_compiles_the_tracked_python_verbatim() {
-        let (filename, source) = boxed_source("inspect").unwrap();
+        let (filename, source) = bundled_module_source("inspect", false).unwrap();
         assert_eq!(filename, "inspect.py");
         assert!(source == include_str!("../../stdlib/inspect.py"));
     }

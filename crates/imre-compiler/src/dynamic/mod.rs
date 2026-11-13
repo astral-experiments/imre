@@ -3,6 +3,8 @@
 mod emit;
 pub(crate) use emit::Prompt;
 mod import_module;
+
+pub(crate) use import_module::bundled_module_source;
 pub(crate) mod literal;
 mod prepare;
 pub(crate) use prepare::ModuleSource;
@@ -1707,7 +1709,7 @@ pub(crate) fn compile(
                     && startup.is_none()
                     && let Some(member) = crate::zip_entry::standalone_member(&prefix)
                 {
-                    bundled = Some((member, crate::zip_entry::installed_source(member)?.into()));
+                    bundled = Some((member, crate::zip_entry::installed_source(member)?));
                 }
                 let installed = if bundled.is_some() {
                     None
@@ -1750,7 +1752,7 @@ pub(crate) fn compile(
                         sources.len(),
                         &prefix,
                         &path,
-                        &source,
+                        source,
                         SourceKind::File,
                         Some(&mut getter),
                     )
@@ -1790,7 +1792,7 @@ pub(crate) fn compile(
                         && let Some(graph) = checked_graph
                         && let Some(id) = graph.bundled_module(&prefix)
                     {
-                        if graph.modules[id].original_source() == source.as_ref() {
+                        if graph.modules[id].original_source() == source {
                             checked = Some(id);
                         } else {
                             checked_sdk_providers.push((id, sources.len()));
@@ -1799,7 +1801,7 @@ pub(crate) fn compile(
                     if select_member && on_sdk_path && !project_parent && !builtin {
                         bundled_winner = Some((sources.len(), checked));
                     }
-                    sources.push((prefix.clone(), path, source));
+                    sources.push((prefix.clone(), path, source.into()));
                 }
                 // Frozen runpy drives -m before a project runpy on sys.path.
                 if frozen && (!file_alternatives || prefix == "runpy") {
@@ -2851,7 +2853,7 @@ fn runtime_sources(
                 .chain(threading)
                 .filter(move |name| !seen(name))
                 .filter_map(|name| {
-                    let (file, source) = import_module::boxed_source(name)?;
+                    let (file, source) = bundled_module_source(name, false)?;
                     Some((name, file, source))
                 }),
         )
@@ -2998,20 +3000,6 @@ const RUNTIME_PROVIDERS: &[&str] = &[
     "warnings",
     "zipimport",
 ];
-
-/// Return the effective source used for a discovered bundled module on this target.
-pub(crate) fn bundled_module_source(
-    name: &str,
-    standalone: bool,
-) -> Option<(&'static str, std::borrow::Cow<'static, str>)> {
-    let (file, source) = if standalone && name == "_pydecimal" {
-        // Standalone executables can run without the Python launcher's installed stdlib ZIP.
-        crate::modules::bundled_source!("_pydecimal.py")?
-    } else {
-        import_module::boxed_source(name)?
-    };
-    Some((file, source.into()))
-}
 
 #[test]
 fn a_shipped_getter_keeps_its_body_and_executable_source_offsets() {

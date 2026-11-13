@@ -37,7 +37,7 @@ impl Session {
         let Some((filename, body)) = crate::dynamic::bundled_module_source(owner, false) else {
             return Ok(None);
         };
-        self.prepare_shipped_file(owner, filename, &body).map(Some)
+        self.prepare_shipped_file(owner, filename, body).map(Some)
     }
 
     fn prepare_shipped_file(
@@ -64,7 +64,7 @@ impl Session {
                     let path = root.join(filename);
                     if system_path_to_file(&self.db, path.to_str().expect("SDK filename")).is_err()
                     {
-                        self.seed(&path, &body)?;
+                        self.seed(&path, body)?;
                     }
                 }
             }
