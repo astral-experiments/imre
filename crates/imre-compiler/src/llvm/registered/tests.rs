@@ -68,7 +68,7 @@ fn emit_registered_body(source: &str, function: &crate::frontend::RegisteredFunc
 
 #[test]
 fn placed_field_uses_the_ordinary_descriptor_and_attribute_line() {
-    use crate::frontend::{RegisteredScope, RegisteredSource, SuitePreparation};
+    use crate::frontend::{RegisteredFunction, RegisteredScope, RegisteredSource};
     use crate::ir::{ExprKind, Statement};
     use ruff_text_size::Ranged;
 
@@ -129,10 +129,9 @@ fn placed_field_uses_the_ordinary_descriptor_and_attribute_line() {
     };
     let operations = Default::default();
     let scope = RegisteredScope::Function { is_async: false };
-    let ordinary = SuitePreparation::new(&operations, values, true)
-        .complete(&definition.body, scope)
-        .unwrap();
-    let expected = emit_registered_body(source, &ordinary.checked);
+    let ordinary =
+        RegisteredFunction::from_suite(&definition.body, scope, values, &operations, true).unwrap();
+    let expected = emit_registered_body(source, &ordinary);
     let actual = emit_registered_body(source, &placed);
     assert_eq!(actual.functions, expected.functions);
     assert_eq!(actual.constants, expected.constants);

@@ -869,12 +869,13 @@ mod tests {
         };
         let operations = Default::default();
         let body = &graph.modules[graph.entry].parsed.syntax().body;
-        let prepare = frontend::SuitePreparation::new(&operations, source, true);
         for scope in [
             frontend::RegisteredScope::Module,
             frontend::RegisteredScope::Function { is_async: false },
         ] {
-            let mut frame = prepare.complete(body, scope).unwrap().checked;
+            let mut frame =
+                frontend::RegisteredFunction::from_suite(body, scope, source, &operations, true)
+                    .unwrap();
             registered(frame.region()).unwrap();
             frame.local_names.clear();
             assert!(

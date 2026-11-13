@@ -205,6 +205,23 @@ pub(crate) struct RegisteredFunction {
 }
 
 impl RegisteredFunction {
+    /// Graph admission needs a complete function. The lexical owner prepares residual operands.
+    pub(crate) fn from_suite(
+        stmts: &[ast::Stmt],
+        kind: RegisteredScope,
+        source: values::RegisteredSource<'_>,
+        operations: &HashMap<TextRange, Expr>,
+        assertions_enabled: bool,
+    ) -> Option<Self> {
+        let sites = StatementSites {
+            omit_assertions: !assertions_enabled,
+            ..StatementSites::default()
+        };
+        let mut scope = SourceScope::new(kind, source, operations, &sites);
+        let (body, _) = scope.block(stmts).ok()?;
+        Some(scope.finish(body))
+    }
+
     pub(super) fn expression(range: TextRange, value: Expr) -> Self {
         let body = Self::returning(range, value);
         Self {
@@ -328,24 +345,21 @@ fn retain_generator_body(
     physical: &ast::StmtFunctionDef,
 ) -> bool {
     let module = &graph.modules[id];
-    let operations = HashMap::new();
-    let preparation = SuitePreparation::new(
-        &operations,
+    let Some(body) = RegisteredFunction::from_suite(
+        &physical.body,
+        RegisteredScope::Function { is_async: false },
         RegisteredSource {
             operand_types: Some(graph.session.operand_types(id)),
             ..module
                 .registered_values()
                 .operands(&module.source, graph.python_optimization())
         },
+        &HashMap::new(),
         graph.python_optimization() == 0,
-    );
-    let Some(suite) = preparation.complete(
-        &physical.body,
-        RegisteredScope::Function { is_async: false },
     ) else {
         return false;
     };
-    graph.register_function(id, physical.start(), suite.checked);
+    graph.register_function(id, physical.start(), body);
     true
 }
 
@@ -2498,18 +2512,6 @@ impl<'a> SuitePreparation<'a> {
             self.operand_refusals(&operands[start..]),
         )
     }
-
-    pub(crate) fn complete(
-        &self,
-        stmts: &[ast::Stmt],
-        kind: RegisteredScope,
-    ) -> Option<RegisteredSuite> {
-        let lowered = self.lower(stmts, kind, SuiteSelection::All, false);
-        lowered.pending.is_empty().then(|| RegisteredSuite {
-            falls_through: lowered.checked_exit.is_none(),
-            ..lowered.suite
-        })
-    }
 }
 
 pub(super) fn exception_matcher<E>(
@@ -3764,9 +3766,7 @@ mod tests {
         source: values::RegisteredSource<'_>,
     ) -> Option<RegisteredFunction> {
         let operations = prepared_sites(stmts, source, false).operations;
-        SuitePreparation::new(&operations, source, true)
-            .complete(stmts, kind)
-            .map(|plan| plan.checked)
+        RegisteredFunction::from_suite(stmts, kind, source, &operations, true)
     }
 
     #[test]
