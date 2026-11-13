@@ -74,7 +74,7 @@ impl Checker<'_> {
                 checker.coerce(value, Type::Int, node)
             },
         )?;
-        let mut values: Vec<_> = args.order.iter().map(|&i| args.values[i].clone()).collect();
+        let mut values = args.into_formal_order();
         let value = match op {
             Op::Shuffle | Op::Seed => random(op, Type::None, values),
             Op::Float => random(op, Type::Float, values),
