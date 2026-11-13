@@ -39,11 +39,11 @@ pub(crate) enum FixedNode {
     Return,
     Effect,
     Store(usize),
-    Read(usize, Type),
+    /// The operation keeps its checked slot or operand count, and its native type.
+    Indexed(std::mem::Discriminant<ExprKind>, usize, Type),
     ModuleRead(usize, Type),
     Integer(i64),
     Constant(ir::Constant),
-    Field(usize, Type),
     Binary(Binary, Type),
     Builtin(std::mem::Discriminant<Builtin>, Type),
 }
@@ -57,6 +57,10 @@ impl FixedNode {
         (Self::checked(node).as_ref() == Some(expected.as_ref()?)).then_some(rest)
     }
 
+    pub(super) fn indexed(kind: &ExprKind, index: usize, ty: Type) -> Self {
+        Self::Indexed(std::mem::discriminant(kind), index, ty)
+    }
+
     pub(crate) fn checked(node: &ir::Node<'_>) -> Option<Self> {
         Some(match node {
             ir::Node::Statement(Statement::Return(_)) => Self::Return,
@@ -66,9 +70,16 @@ impl FixedNode {
                 ExprKind::Str(_) | ExprKind::Bool(_) => {
                     Self::Constant(ir::Constant::from_expr(expr)?)
                 }
+                ExprKind::List(ref items) if matches!(expr.ty, Type::List(_) | Type::ListInt) => {
+                    Self::indexed(&expr.kind, items.len(), expr.ty)
+                }
+                ExprKind::Tuple(ref items) if matches!(expr.ty, Type::Tuple(_)) => {
+                    Self::indexed(&expr.kind, items.len(), expr.ty)
+                }
                 ExprKind::Int(ref text) => Self::Integer(text.parse().ok()?),
-                ExprKind::Local(slot) => Self::Read(slot, expr.ty),
-                ExprKind::Field(_, slot) => Self::Field(slot, expr.ty),
+                ExprKind::Local(slot) | ExprKind::Field(_, slot) => {
+                    Self::indexed(&expr.kind, slot, expr.ty)
+                }
                 ExprKind::Builtin(Builtin::GlobalGet(slot), ref args) if args.is_empty() => {
                     Self::ModuleRead(slot, expr.ty)
                 }
@@ -146,7 +157,13 @@ impl SourceSites {
         }
     }
 
-    pub(super) fn field(&mut self, field: &ast::ExprAttribute, slot: usize, result: Type) {
+    pub(super) fn field(
+        &mut self,
+        field: &ast::ExprAttribute,
+        kind: &ExprKind,
+        slot: usize,
+        result: Type,
+    ) {
         // Private names require the registered class's lexical mangling.
         if self.wrapper_fields
             && !ruff_python_stdlib::identifiers::is_mangled_private(field.attr.as_str())
@@ -156,7 +173,7 @@ impl SourceSites {
                 site,
                 field.attr.start(),
                 registered::values::attribute_load(field),
-                FixedNode::Field(slot, result),
+                FixedNode::indexed(kind, slot, result),
             );
         }
     }
@@ -266,6 +283,33 @@ mod tests {
             assert!(FixedNode::consume(Some(&expected), &node).is_some());
             assert!(FixedNode::consume(Some(&expected), &ir::Node::Expression(&changed)).is_none());
         }
+    }
+
+    #[test]
+    fn display_elements_cannot_change_owners() {
+        let list = |items| Expr {
+            ty: Type::ListInt,
+            kind: ExprKind::List(items),
+        };
+        // Both trees visit four identical list operations in the same preorder.
+        let empty = || list(Vec::new());
+        let original = list(vec![empty(), list(vec![empty()])]);
+        let changed = list(vec![list(vec![empty()]), empty()]);
+        let body = |value| vec![Statement::Return(value)];
+        let original = body(original);
+        let mut sites = Vec::new();
+        ir::walk_nodes(&original, &mut |node, _| {
+            sites.push((TextRange::default(), FixedNode::checked(&node)));
+        });
+        let matches = |body: &[Statement]| {
+            let mut remaining = Some(sites.as_slice());
+            ir::walk_nodes(body, &mut |node, _| {
+                remaining = FixedNode::consume(remaining, &node);
+            });
+            matches!(remaining, Some([]))
+        };
+        assert!(matches(&original));
+        assert!(!matches(&body(changed)));
     }
 
     #[test]
@@ -500,7 +544,7 @@ mod tests {
         assert!(matches!(source.sites[10].1, Some(FixedNode::Store(2))));
         assert!(matches!(
             source.sites[13].1,
-            Some(FixedNode::Read(2, Type::Int))
+            Some(FixedNode::Indexed(kind, 2, Type::Int)) if kind == std::mem::discriminant(&ExprKind::Local(2))
         ));
         assert!(matches!(
             program.ir.0.functions[1].body.as_slice(),

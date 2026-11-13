@@ -4531,15 +4531,14 @@ impl<'a> Checker<'a> {
                         .expanded_sequence(&list.elts, Some(element), false, list)
                         .and_then(|value| coerce(self, value, expected, expression));
                 }
-                let values = list
-                    .elts
-                    .iter()
-                    .map(|value| self.expr_expected_from(value, element, declaration))
-                    .collect::<StdResult<Vec<_>, _>>()?;
-                Expr {
-                    ty: concrete,
-                    kind: ExprKind::List(values),
-                }
+                self.contextual_display(
+                    expression,
+                    concrete,
+                    &list.elts,
+                    std::iter::repeat(element),
+                    declaration,
+                    ExprKind::List,
+                )?
             }
             ast::Expr::Tuple(tuple) if self.types.fields(concrete).is_some() => {
                 let fields = self.types.fields(concrete).unwrap();
@@ -4558,16 +4557,14 @@ impl<'a> Checker<'a> {
                         "tuple literal has the wrong number of fields",
                     ));
                 }
-                let values = tuple
-                    .elts
-                    .iter()
-                    .zip(fields)
-                    .map(|(value, ty)| self.expr_expected_from(value, ty, declaration))
-                    .collect::<StdResult<Vec<_>, _>>()?;
-                Expr {
-                    ty: concrete,
-                    kind: ExprKind::Tuple(values),
-                }
+                self.contextual_display(
+                    expression,
+                    concrete,
+                    &tuple.elts,
+                    fields.into_iter(),
+                    declaration,
+                    ExprKind::Tuple,
+                )?
             }
             ast::Expr::BinOp(binary)
                 if binary.op == ast::Operator::Add && self.types.element(concrete).is_some() =>
@@ -4599,6 +4596,29 @@ impl<'a> Checker<'a> {
             return Ok(value);
         }
         coerce(self, value, expected, expression)
+    }
+
+    /// The display and its elements use the same source positions in either frame.
+    fn contextual_display(
+        &mut self,
+        expression: &ast::Expr,
+        ty: Type,
+        items: &[ast::Expr],
+        fields: impl Iterator<Item = Type>,
+        declaration: Option<TypeDeclaration>,
+        build: fn(Vec<Expr>) -> ExprKind,
+    ) -> Result<Expr, String> {
+        self.with_expression_site(expression, |checker| {
+            let values = items
+                .iter()
+                .zip(fields)
+                .map(|(value, ty)| checker.expr_expected_from(value, ty, declaration))
+                .collect::<StdResult<Vec<_>, _>>()?;
+            Ok(Expr {
+                ty,
+                kind: build(values),
+            })
+        })
     }
 
     /// Checks both arms under their own narrowing facts, while contextual types
@@ -8182,12 +8202,15 @@ impl<'a> Checker<'a> {
         let value = lower(self)?;
         if let Some(sites) = &mut self.fixed_sites
             && matches!(
-                expression,
-                ast::Expr::StringLiteral(_) | ast::Expr::BooleanLiteral(_)
+                (expression, &value.kind),
+                (ast::Expr::StringLiteral(_), ExprKind::Str(_))
+                    | (ast::Expr::BooleanLiteral(_), ExprKind::Bool(_))
+                    | (ast::Expr::List(_), ExprKind::List(_))
+                    | (ast::Expr::Tuple(_), ExprKind::Tuple(_))
             )
-            && let Some(constant) = ir::Constant::from_expr(&value)
+            && let Some(node) = FixedNode::checked(&ir::Node::Expression(&value))
         {
-            sites.expression(expression.range(), FixedNode::Constant(constant));
+            sites.expression(expression.range(), node);
         }
         self.leave_fixed_site(parent);
         Ok(value)
@@ -9018,7 +9041,10 @@ impl<'a> Checker<'a> {
                     && matches!(value.kind, ExprKind::Local(read) if read == slot)
                     && value.ty == self.locals[slot]
                 {
-                    sites.expression(expression.range(), FixedNode::Read(slot, value.ty));
+                    sites.expression(
+                        expression.range(),
+                        FixedNode::indexed(&value.kind, slot, value.ty),
+                    );
                 }
                 return Ok(value);
             }
@@ -10777,10 +10803,11 @@ impl<'a> Checker<'a> {
                         })),
                     });
                 }
+                let kind = ExprKind::Field(Box::new(receiver), field);
                 if let Some(sites) = &mut self.fixed_sites {
-                    sites.field(attribute, field, ty);
+                    sites.field(attribute, &kind, field, ty);
                 }
-                (ty, ExprKind::Field(Box::new(receiver), field))
+                (ty, kind)
             }
             ast::Expr::Call(_) | ast::Expr::BinOp(_) => unreachable!("dispatched by typed_expr"),
             ast::Expr::Generator(_) => {
