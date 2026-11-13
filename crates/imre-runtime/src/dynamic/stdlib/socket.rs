@@ -169,7 +169,7 @@ impl Recv {
     pub(in crate::dynamic) unsafe fn run(self, context: *mut Context) -> Result<Id> {
         let bytes = native::recv_with_signals(&self.socket, self.size, self.flags, || {
             // SAFETY: only the interrupted thread reenters Python after the syscall returns.
-            unsafe { (&mut *context).dispatch_signals() }
+            unsafe { Context::dispatch_pending_signals(context) }
         })?;
         // SAFETY: the native wait and its signal callbacks have returned.
         Ok(unsafe { (&mut *context).alloc(Value::Bytes(bytes)) })

@@ -72,7 +72,7 @@ impl Join {
             // SAFETY: the wait released both native locks. The interrupted Python frame and
             // its exception are still current while the handler runs.
             #[cfg(unix)]
-            if let Err(error) = unsafe { (&mut *context).dispatch_signals() } {
+            if let Err(error) = unsafe { Context::dispatch_pending_signals(context) } {
                 break Err(error);
             }
         };
