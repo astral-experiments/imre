@@ -13772,6 +13772,16 @@ impl<'a> Checker<'a> {
                     ));
                 }
             };
+            if self.checked_call_contracts && !matches!(builtin, Builtin::JoinBufferAppend) {
+                self.frame_arguments = FrameArguments::Python;
+                return Ok(Expr {
+                    ty: Type::PythonObject,
+                    kind: ExprKind::Builtin(
+                        registered::values::bound_method_operation(call, attribute),
+                        args,
+                    ),
+                });
+            }
             let value = Expr {
                 ty,
                 kind: ExprKind::Builtin(builtin, args),

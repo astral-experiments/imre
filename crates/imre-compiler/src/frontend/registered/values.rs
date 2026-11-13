@@ -1431,6 +1431,24 @@ impl Checker<'_> {
             return Ok(Some(source.located(node, self.local(slot))));
         }
         if self.checked_call_contracts
+            && let Some(call) = node.as_call_expr()
+            && let Some(method) = source.direct_method(call)
+            && let Some(receiver) = method.value.as_name_expr()
+            && let Some(&slot) = self.names.get(receiver.id.as_str())
+            && self.types.element(self.locals[slot]).is_some()
+        {
+            // Let the list method check its written operands before binding the live method.
+            let receiver = self.expr(&method.value)?;
+            let mut value = self.call_on(call, Some(receiver))?;
+            if !matches!(value.kind, ExprKind::Builtin(Builtin::RegisteredCall(_), _)) {
+                return Err(self.scoped_builtin_error("declared list method", call));
+            }
+            if let Some(slot) = self.namespace {
+                in_namespace(&mut value, self.local(slot));
+            }
+            return Ok(Some(source.located_operation(node, value)));
+        }
+        if self.checked_call_contracts
             && let ast::Expr::Call(call) = node
             && let Some(Binding::Definition(id)) = self.resolve(&call.func)
         {
