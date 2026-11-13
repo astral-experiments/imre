@@ -4213,9 +4213,14 @@ mod tests {
     #[test]
     fn physical_branches_check_the_declarations_on_their_normal_edge() {
         let path = Path::new("example.py");
-        for (branch, otherwise, continues) in [
+        for (branch, otherwise, checks_declaration) in [
             ("if flag", "", true),
             ("if flag", "        else:\n            pass\n", true),
+            (
+                "if flag",
+                "        else:\n            if True:\n                yield 1\n                return 2\n",
+                true,
+            ),
             (
                 "if flag",
                 "        else:\n            raise SystemExit(2)\n",
@@ -4254,7 +4259,7 @@ mod tests {
                 LiteralSites::default(),
                 Default::default(),
             );
-            if continues {
+            if checks_declaration {
                 let error = module.err().expect("reachable declaration must be checked");
                 assert!(
                     error.contains("cannot compile this comprehension"),
