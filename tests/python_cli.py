@@ -209,6 +209,37 @@ def check_registered_entry_operand(imre, root, run):
     assert (result.returncode, result.stdout, result.stderr) == (0, b"L:ab\nL:12\nL:13\n", b""), result
 
 
+def check_installed_package_data(imre, root, run):
+    site = root / "invoice-site"
+    package = site / "prices"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("from .rates import price\n")
+    (package / "rates.py").write_text("price = 63\n")
+    data = package / "currency"
+    data.write_bytes(b"EUR")
+    metadata = site / "prices-1.0.dist-info"
+    metadata.mkdir()
+    (metadata / "RECORD").write_text("prices/__init__.py,,\nprices/rates.py,,\nprices/currency,,\n")
+    entry = root / "read_price.py"
+    entry.write_text(
+        "from importlib.resources import files\nimport prices\n"
+        "print(prices.price)\nprint(files(prices).joinpath('currency').read_bytes())\n"
+    )
+    exe = root / "read-price"
+    built = run(imre, "build", entry, "--extension-path", site, "--opt-level", "0", "-o", exe,
+                "--no-cache", timeout=300)
+    assert built.returncode == 0, built.stderr
+    entry.unlink()
+    shutil.rmtree(site)
+    missing = run(exe)
+    assert (missing.returncode, missing.stdout) == (1, b"63\n"), missing
+    assert b"FileNotFoundError" in missing.stderr and os.fsencode(data) in missing.stderr, missing
+    package.mkdir(parents=True)
+    data.write_bytes(b"USD")
+    result = run(exe)
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"63\nb'USD'\n", b""), result
+
+
 def check_module_search_root(imre, root, run):
     app = root / "application"
     app.mkdir()
@@ -2143,6 +2174,7 @@ def main():
                 timeout=timeout,
             )
 
+        check_installed_package_data(imre, root, run)
         check_module_search_root(imre, root, run)
         check_registered_entry_operand(imre, root, run)
         check_tracemalloc_startup(imre, run)
