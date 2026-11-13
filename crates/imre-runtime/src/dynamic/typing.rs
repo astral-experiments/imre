@@ -2571,9 +2571,7 @@ pub(super) fn call(
             let entry = match ctx.heap.linked_sources.get(original) {
                 Some(&super::LinkedSource::Expression(entry))
                     if ctx.str_value(*original)? == source
-                        && source
-                            .trim_start_matches(imre_ast::strings::python_whitespace)
-                            .starts_with('*') =>
+                        && imre_ast::forward_refs::is_starred(source) =>
                 {
                     Some(entry)
                 }

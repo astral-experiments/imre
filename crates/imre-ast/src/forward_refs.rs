@@ -6,6 +6,13 @@ pub enum Error {
     Scope,
 }
 
+/// A raw unpacked annotation needs a different spelling for ordinary eval.
+pub fn is_starred(spelling: &str) -> bool {
+    spelling
+        .trim_start_matches(crate::strings::python_whitespace)
+        .starts_with('*')
+}
+
 /// Turn an unpacked annotation such as `*Ts` into an expression suitable for `eval`.
 pub fn starred_expression(spelling: &str) -> String {
     format!("({spelling},)[0]")

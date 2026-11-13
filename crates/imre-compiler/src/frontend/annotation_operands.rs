@@ -97,10 +97,7 @@ pub(super) fn annotation_operand<R>(
         None
     } else {
         let expanded;
-        let expression = if text
-            .trim_start_matches(imre_ast::strings::python_whitespace)
-            .starts_with('*')
-        {
+        let expression = if imre_ast::forward_refs::is_starred(&text) {
             expanded = imre_ast::forward_refs::starred_expression(&text);
             expanded.as_str()
         } else {
