@@ -316,6 +316,7 @@ mod tests {
             panic!("expected an f-string");
         };
         let source = RegisteredSource {
+            python_optimization: 0,
             operand_types: None,
             template_fields: None,
             generators: None,

@@ -2890,7 +2890,10 @@ impl Context {
             ("None", NONE),
             ("False", value::FALSE),
             ("True", value::TRUE),
-            ("__debug__", value::TRUE),
+            (
+                "__debug__",
+                builtins::boolean(self.config["optimize"].as_i64().unwrap_or(0) == 0),
+            ),
             ("Ellipsis", value::ELLIPSIS),
             ("NotImplemented", value::NOT_IMPLEMENTED),
         ] {
