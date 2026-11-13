@@ -89,6 +89,7 @@ impl RegisteredSource<'_> {
     pub(super) fn object_operation<E>(
         self,
         node: &ast::Expr,
+        attribute: Option<Box<Builtin>>,
         allow_typed_receiver: impl FnOnce(Option<&ast::Expr>, &ast::Expr, &Expr) -> bool,
         dynamic_receiver: impl FnOnce(&ast::Expr) -> bool,
         mut child: impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
@@ -117,7 +118,8 @@ impl RegisteredSource<'_> {
                 Ok(Some(bound_call(call, selection, target, args)))
             }
             ast::Expr::Attribute(field) => Ok(receiver(&field.value, true, None)?.map(|value| {
-                super::operation(attribute_load(field), Type::PythonObject, vec![value])
+                let op = attribute.map_or_else(|| attribute_load(field), |op| *op);
+                super::operation(op, Type::PythonObject, vec![value])
             })),
             _ => Ok(None),
         }
@@ -924,6 +926,7 @@ pub(in crate::frontend) fn binary(
 pub(super) fn operation<E>(
     node: &ast::Expr,
     source: RegisteredSource<'_>,
+    attribute: Option<Box<Builtin>>,
     allow_typed_receiver: impl FnOnce(Option<&ast::Expr>, &ast::Expr, &Expr) -> bool,
     literal: impl Fn(&Expr) -> Option<bool>,
     dynamic_receiver: impl FnOnce(&ast::Expr) -> bool,
@@ -968,9 +971,13 @@ pub(super) fn operation<E>(
             || value.ty == Type::PythonObject)
             .then(|| Expr::unary(unary.op, value, Type::PythonObject)));
     }
-    if let Some(value) =
-        source.object_operation(node, allow_typed_receiver, dynamic_receiver, &mut child)?
-    {
+    if let Some(value) = source.object_operation(
+        node,
+        attribute,
+        allow_typed_receiver,
+        dynamic_receiver,
+        &mut child,
+    )? {
         return Ok(Some(value));
     }
     let kind = match node {
@@ -1166,6 +1173,7 @@ impl Region {
             _ => operation(
                 node,
                 source,
+                None,
                 |_, _, _| false,
                 ir::control::boolean_literal,
                 |_| true,
@@ -1393,9 +1401,20 @@ impl Checker<'_> {
             |callee: &ast::Expr| graph.session.operand_types(owner).is_bound_method(callee);
         let class = self.class;
         let mut live_receiver = false;
+        let attribute = self.settled_attributes.as_deref_mut().and_then(|sites| {
+            let field = node.as_attribute_expr()?;
+            // A rewritten operand can inherit the physical range under a different name.
+            let site = sites.remove(&field.range())?;
+            (site.position == field.attr.start()
+                && matches!(&*site.operation, Builtin::RegisteredAttribute {
+                    action: ir::AttributeAction::Load, name, ..
+                } if name == field.attr.as_str()))
+            .then_some(site.operation)
+        });
         let Some(mut value) = operation(
             node,
             source,
+            attribute,
             |method, receiver, operand| {
                 let Some(first) = first_local else {
                     return false;

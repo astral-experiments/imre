@@ -656,17 +656,24 @@ pub(super) fn capture(
         let checked = checked_bodies.is_some_and(|ids| ids.contains(&slot));
         // A revision can invalidate a physical method's last check. Check its settled
         // signature before trying the registered return convention.
+        let mut attributes = HashMap::new();
         let placed = if method.is_some() && !checked {
             let mut fixed = checker();
             fixed.fixed_sites = Some(fixed_body_source::SourceSites::new(true));
+            fixed.settled_attributes = Some(&mut attributes);
             let Some((body, _)) =
                 graph.try_registered_body(id, || lower_body(fixed, function, &signature).ok())
             else {
                 continue;
             };
-            body.source
-                .filter(|source| source.matches(&body.function))
-                .map(|source| place_fixed_function(body.function, source))
+            body.source.and_then(|source| {
+                if source.matches(&body.function) {
+                    Some(place_fixed_function(body.function, source))
+                } else {
+                    attributes = source.attributes;
+                    None
+                }
+            })
         } else {
             None
         };
@@ -674,6 +681,7 @@ pub(super) fn capture(
             signature.returns = Type::PythonObject;
             let mut checker = checker();
             checker.registered_local_start = Some(signature.params.len());
+            checker.settled_attributes = (!attributes.is_empty()).then_some(&mut attributes);
             checker.checked_callback_effects = checked;
             let mut body = graph
                 .try_registered_body(id, || lower_definition(checker, function, &signature).ok())?;
@@ -3764,6 +3772,7 @@ impl SourceScope<'_> {
             values::operation(
                 expr,
                 self.source,
+                None,
                 |method, _, value| {
                     class
                         || value.ty == Type::Str
