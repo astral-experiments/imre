@@ -131,7 +131,7 @@ impl MainModuleFrame {
     /// initializer remains loaded until it returns.
     unsafe fn run(self, context: *mut Context) -> Result<Id> {
         // SAFETY: the caller keeps the initializer loaded and the prepared frame active.
-        let result = unsafe { Context::run_module_frame(context, self.entry) };
+        let result = unsafe { Context::run_code_frame(context, self.entry, true) };
         // SAFETY: the module initializer has returned to the owner of the live Context.
         unsafe { &mut *context }.finish_initialization(self.module);
         result.map(|_| self.module)
@@ -3528,33 +3528,51 @@ impl Context {
         value
     }
     fn execute(&mut self, code: Id, scope: Id, owner: FrameOwner) -> Result<Id> {
-        let entry = match &self.code_object(code).body {
-            value::Body::Native(entry, _) => *entry,
-            value::Body::Suspended(_) => return self.new_suspended(code, scope, owner),
-            value::Body::Parsed { .. } => return self.missing_compiled_body(code),
-        };
-        self.heap.enter(scope, code, owner);
-        if matches!(owner, FrameOwner::Module(_)) {
-            // SAFETY: the module frame is active and its native entry remains loaded.
-            return unsafe { Self::run_module_frame(self, entry) };
-        }
-        // SAFETY: the entered function owns this scope until the native callback returns.
-        let result = unsafe { entry(self, scope) };
-        self.finish_native_frame(result)
+        let call = self.prepare_execution(code, scope, owner, false)?;
+        // SAFETY: this synchronous caller owns the context with the prepared frame.
+        unsafe { call.run(self) }
     }
 
-    /// Run the linked initializer against the already-entered module frame.
+    fn prepare_execution(
+        &mut self,
+        code: Id,
+        scope: Id,
+        owner: FrameOwner,
+        discard: bool,
+    ) -> Result<calls::RegisteredCall> {
+        match self.code_object(code).body {
+            value::Body::Native(entry, _) => {
+                self.heap.enter(scope, code, owner);
+                Ok(calls::RegisteredCall::Code {
+                    entry,
+                    module: matches!(owner, FrameOwner::Module(_)),
+                    discard,
+                })
+            }
+            value::Body::Suspended(_) => {
+                let result = self.new_suspended(code, scope, owner)?;
+                Ok(calls::RegisteredCall::Returned(if discard {
+                    NONE
+                } else {
+                    result
+                }))
+            }
+            value::Body::Parsed { .. } => self.missing_compiled_body(code),
+        }
+    }
+
+    /// Run a linked code body against its already-entered frame.
     ///
     /// # Safety
     /// The caller owns the context and keeps the initializer loaded until it returns.
-    unsafe fn run_module_frame(context: *mut Self, entry: Code) -> Result<Id> {
-        // SAFETY: the module frame roots the scope through native reentry.
+    unsafe fn run_code_frame(context: *mut Self, entry: Code, module: bool) -> Result<Id> {
+        // SAFETY: the entered frame roots the scope through native reentry.
         let scope = unsafe { &*context }.heap.current_scope();
         // SAFETY: the caller keeps the entry loaded, and no context borrow spans the native call.
         let result = unsafe { entry(context, scope) };
         // SAFETY: the native initializer has returned to the owner of the context.
         let ctx = unsafe { &mut *context };
-        if ctx.pending.is_none() {
+        if module && ctx.pending.is_none() {
             ctx.register_decimal_class(ctx.heap.current_code(), entry, scope);
         }
         ctx.finish_native_frame(result)
