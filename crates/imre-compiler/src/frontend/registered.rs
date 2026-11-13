@@ -2955,22 +2955,27 @@ impl statements::StatementLowering for SourceScope<'_> {
         Ok(true)
     }
 
-    fn branch(&mut self, branch: &ast::StmtIf) -> StdResult<statements::Block, ()> {
-        let mut arms = Vec::new();
-        let mut otherwise = (Vec::new(), true);
+    fn branch(
+        &mut self,
+        branch: &ast::StmtIf,
+        mut output: &mut Vec<Statement>,
+    ) -> StdResult<bool, ()> {
         let mut falls = false;
         for (test, suite) in statements::if_clauses(branch) {
-            if let Some(test) = test {
-                // The branch writer consumes the checked operand as a condition.
-                let condition = self.condition_operand(test).ok_or(())?;
-                let (body, continues) = self.block(suite)?;
-                arms.push((condition, body));
-                falls |= continues;
-            } else {
-                otherwise = self.block(suite)?;
-            }
+            let Some(test) = test else {
+                let continues = self.block_into(suite, output)?;
+                return Ok(falls || continues);
+            };
+            let condition = self.condition_operand(test).ok_or(())?;
+            let Statement::If(_, body, otherwise) =
+                output.push_mut(Statement::If(condition, Vec::new(), Vec::new()))
+            else {
+                unreachable!()
+            };
+            falls |= self.block_into(suite, body)?;
+            output = otherwise;
         }
-        Ok((statements::if_arms(arms, otherwise.0), falls || otherwise.1))
+        Ok(true)
     }
 
     fn definition(&mut self, def: &ast::StmtFunctionDef) -> StdResult<Option<Statement>, ()> {
