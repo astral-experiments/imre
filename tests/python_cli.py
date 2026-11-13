@@ -205,6 +205,14 @@ def check_module_search_root(imre, root, run):
     result = run(imre, "-B", "-m", "launch", extra={"PYTHONPATH": str(app)})
     assert (result.returncode, result.stdout, result.stderr) == (0, b"second argument\n6\n", b""), result
 
+    entry.write_text(
+        "def model() -> int:\n    values: list[int] = [3]\n    values.append('bad')\n    return values[0]\n"
+        "print('reached')\nprint(model())\n"
+    )
+    result = run(imre, "-B", "-m", "launch", extra={"PYTHONPATH": str(app)})
+    assert result.returncode and not result.stdout, result
+    assert os.fsencode(entry) + b":3:19: Imre: expected int, got str" in result.stderr, result
+
     # The entry comes from app even when the ordinary lookup of scores prefers the wheel.
     wheel = root / "score-wheel"
     wheel.mkdir()
