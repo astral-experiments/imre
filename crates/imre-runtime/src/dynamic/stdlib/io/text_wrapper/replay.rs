@@ -13,7 +13,7 @@ fn count(
     bytes: &[u8],
     end: bool,
 ) -> Result<usize> {
-    let chunk = input.borrow_mut().chunk(bytes, decoder.codec, end)?;
+    let chunk = input.borrow().chunk(bytes, decoder.codec)?;
     let mark = ctx.heap.temporary_mark();
     let result = decode_chunk(ctx, input, decoder, newline, chunk, end);
     ctx.heap.release_temporaries_since(mark);

@@ -723,7 +723,7 @@ impl Wrapper {
                 raw.extend_from_slice(bytes);
             }
             let byte_count = bytes.len();
-            let chunk = w.input.borrow_mut().chunk(bytes, decoder.codec, end)?;
+            let chunk = w.input.borrow().chunk(bytes, decoder.codec)?;
             let count = decode_chunk(ctx, &w.input, decoder, newline, chunk, end)?;
             let mut input = w.input.borrow_mut();
             if !all {
@@ -766,6 +766,26 @@ fn decode_chunk(
     let errors = ctx.scalar_value(decoder.errors);
     // Registered error handlers can reenter the stream; no reader borrow spans decoding.
     let decoded = match codec {
+        StreamCodec::Registered(Codec::Utf8 { signature }) => {
+            let errors = codecs::error_name(ctx, Some(errors))?.to_owned();
+            let data = ctx.bytes_like(raw)?;
+            let first = signature && input.borrow().beginning;
+            if first && data.len() < 3 && b"\xef\xbb\xbf".starts_with(data) {
+                // UTF-8-SIG defers a partial signature even on the final call.
+                input.borrow_mut().save_tail(data)?;
+                ctx.text("")
+            } else {
+                // The signature decision precedes decoding, but BufferedIncrementalDecoder
+                // changes its pending bytes only after the call succeeds.
+                input.borrow_mut().beginning = false;
+                let (text, consumed) = codecs::stateful_utf8(ctx, raw, &errors, first, end)?;
+                let data = ctx.bytes_like(raw)?;
+                input
+                    .borrow_mut()
+                    .save_tail(&data[consumed.min(data.len())..])?;
+                text
+            }
+        }
         StreamCodec::Registered(Codec::DoubleByte(format)) => {
             let previous = std::mem::take(&mut input.borrow_mut().tail);
             let mut truncated = false;
@@ -1151,7 +1171,7 @@ pub(super) fn call(
                 let decoder = w.decoder.get();
                 let mut input = w.input.borrow_mut();
                 input.seek_input(state.flags, bytes)?;
-                let chunk = input.chunk(bytes, decoder.codec, state.eof)?;
+                let chunk = input.chunk(bytes, decoder.codec)?;
                 drop(input);
                 let chars = decode_chunk(
                     ctx,

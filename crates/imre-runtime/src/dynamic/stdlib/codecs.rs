@@ -752,7 +752,7 @@ mod transform;
 pub(super) use transform::transform;
 pub(in crate::dynamic) use transform::{decode_named, encode_text_object};
 
-fn error_name(ctx: &Context, errors: Option<Id>) -> Result<&str> {
+pub(super) fn error_name(ctx: &Context, errors: Option<Id>) -> Result<&str> {
     let name = errors
         .map(|id| ctx.str_value(id))
         .transpose()?
@@ -849,7 +849,7 @@ fn registered_utf8(ctx: &mut Context, input: Id, name: &str, signature: bool) ->
 }
 
 /// Consume complete sequences and leave a trailing partial character for the next call.
-fn stateful_utf8(
+pub(super) fn stateful_utf8(
     ctx: &mut Context,
     input: Id,
     name: &str,
@@ -858,11 +858,13 @@ fn stateful_utf8(
 ) -> Result<(Id, usize)> {
     let data = ctx.native_buffer_bytes(input)?;
     // The utf-8-sig codec passes the slice after the BOM to utf_8_decode.
+    let size = data.len();
     let data = if signature {
         data.strip_prefix(b"\xef\xbb\xbf").unwrap_or(data)
     } else {
         data
     };
+    let signature_bytes = size - data.len();
     let mut consumed = 0;
     let mut prefix =
         |text: &mut String, data: &[u8], offset: usize| -> Result<Option<DecodeIssue>> {
@@ -883,7 +885,7 @@ fn stateful_utf8(
         };
     let mut text = String::new();
     let Some(issue) = prefix(&mut text, data, 0)? else {
-        return Ok((ctx.text(text), consumed));
+        return Ok((ctx.text(text), signature_bytes + consumed));
     };
     let points = text.chars().map(u32::from).collect();
     let error = issue.error(data);
@@ -909,7 +911,7 @@ fn stateful_utf8(
             Ok(issue)
         },
     )?;
-    Ok((result, consumed))
+    Ok((result, signature_bytes.saturating_add(consumed)))
 }
 
 #[derive(Clone, Copy)]
