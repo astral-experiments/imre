@@ -859,11 +859,11 @@ impl Inference {
                     || imre_ast::providers::BUILTIN_TYPES.contains(&name))
         };
         let mut before = self.revision.get();
-        loop {
+        let fixed_dependencies = loop {
             let widened = self.widened.replace(false);
             let signatures_settled = !self.unresolved();
             if !widened && signatures_settled {
-                break;
+                break None;
             }
             method_returns.clear();
             let previous_checks = std::mem::take(&mut checked_before_registration);
@@ -895,6 +895,7 @@ impl Inference {
             let mut conflicting_returns = None;
             let mut opaque_returns = Vec::new();
             let mut staged_returns = Vec::new();
+            let mut fixed_dependencies = None;
             for (module, range) in graph.initializers(class_globals) {
                 let mut checker = Checker::new(
                     graph, module, signatures, classes, types, &helpers, &globals,
@@ -902,6 +903,12 @@ impl Inference {
                 checker.inference = Some(self);
                 if let Err(diagnostic) = Initialization::lower(checker, &mut available, range, None)
                 {
+                    if registered.is_empty()
+                        && graph.modules[module].is_program_source()
+                        && diagnostic.is_representation()
+                    {
+                        fixed_dependencies.get_or_insert_with(Vec::new);
+                    }
                     errors.push((module, diagnostic));
                 }
             }
@@ -1141,6 +1148,15 @@ impl Inference {
                                 && !checker.calls.contains(&signature.id))
                     {
                         checked_bodies.insert(signature.id);
+                        if let Some(dependencies) = &mut fixed_dependencies
+                            && (!signature.physical_frame
+                                || signature.method.is_some()
+                                || !checker.calls.is_empty()
+                                || checked_call_cannot_return
+                                || checker.wrapper_link.get())
+                        {
+                            dependencies.push(signature.id);
+                        }
                     }
                     if infer_return
                         && signature.params.is_empty()
@@ -1246,7 +1262,7 @@ impl Inference {
                         .with_following(reports.into_iter()));
                 }
                 if !self.unresolved() {
-                    break;
+                    break fixed_dependencies;
                 }
                 if let Some(index) = reports
                     .iter()
@@ -1380,7 +1396,7 @@ impl Inference {
                 method_returns.clear();
                 checked_bodies.clear();
             }
-        }
+        };
         for (_, _, signature) in definitions.iter_mut() {
             self.update(signature);
         }
@@ -1394,10 +1410,17 @@ impl Inference {
         }
         let needs_registered_entry = !registered_generators.is_empty()
             || signatures.values().any(Signature::registered_frame);
-        // Registered captures use a complete unchanged round. In fixed recovery only the
-        // physical checks after the final signature change may replace another body check.
+        // Registered captures use the complete unchanged round. A failed fixed
+        // initializer can keep independent checks. Its callee and wrapper facts
+        // must still be published by the ordinary fixed pass.
         if needs_registered_entry != (before == self.revision.get()) {
-            checked_bodies.clear();
+            if let Some(dependencies) = fixed_dependencies.filter(|_| !needs_registered_entry) {
+                for id in dependencies {
+                    checked_bodies.remove(&id);
+                }
+            } else {
+                checked_bodies.clear();
+            }
         }
         Ok(Solution {
             method_returns,
