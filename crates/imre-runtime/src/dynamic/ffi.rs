@@ -2373,7 +2373,11 @@ pub(super) unsafe extern "C" fn imre_dyn_op_at(
     let span = unsafe { span.as_ref() };
     if let Err(error) = &mut result
         && let Some(&[line, start, operator, end]) = span
-        && matches!(op, "+" | "-" | "*" | "%")
+        && let Some(width) = match op {
+            "+" | "-" | "*" | "/" | "%" | "&" | "|" | "^" | "@" => Some(1),
+            "//" | "**" | "<<" | ">>" => Some(2),
+            _ => None,
+        }
     {
         error.tracing().source_position = Some((
             line,
@@ -2381,7 +2385,7 @@ pub(super) unsafe extern "C" fn imre_dyn_op_at(
                 start,
                 end,
                 end_line: line,
-                anchor: value::TracebackAnchor::Operator(operator),
+                anchor: value::TracebackAnchor::Operator(operator, width),
             },
         ));
         return finish(ctx, result);

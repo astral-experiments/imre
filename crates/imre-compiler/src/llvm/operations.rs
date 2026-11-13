@@ -712,9 +712,12 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         // On a placed body the cursor follows execution's preorder walk. Read
         // each operand's range before evaluating it, including an entire nested lhs.
         let mut operand = |expr, usage| {
-            let range = match &self.0 {
-                Entry::Registered(frame) => frame.operand_range(expr),
-                Entry::Native(_) => None,
+            let range = match (&self.0, site) {
+                (
+                    Entry::Registered(frame),
+                    OperationSite::Placed(_) | OperationSite::Registered(_),
+                ) => frame.operand_range(expr),
+                _ => None,
             };
             (self.operand_for(expr, usage), range)
         };
@@ -726,7 +729,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 OperationSite::Placed(range) | OperationSite::Registered(range),
                 Some(lhs),
                 Some(rhs),
-            ) if positioned => frame.binary_span(range, lhs, rhs, op),
+            ) => frame.binary_span(range, lhs, rhs, op),
             _ => None,
         };
         let result = if let Entry::Native(emitter) = &mut self.0
