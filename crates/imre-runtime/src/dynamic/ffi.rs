@@ -3668,7 +3668,7 @@ impl Context {
 
     /// Release expression operands from the stack top. A dead sequence transfers its
     /// elements to the stack, keeping earlier siblings alive across Python callbacks.
-    fn unwind_operands(&mut self, mark: usize) {
+    pub(super) fn unwind_operands(&mut self, mark: usize) {
         if !self.heap.observes_released_roots() || self.can_skip_finalizer_sweep(mark) {
             self.discard_truth(mark);
             return;

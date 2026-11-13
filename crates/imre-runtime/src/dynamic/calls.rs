@@ -6408,10 +6408,10 @@ impl Context {
         }
         if member.is_none()
             && matches!(name, "__name__" | "fget" | "fset" | "fdel")
-            && let Some(property) = self.heap.get_mut(obj).property_mut()
+            && self.heap.get(obj).property().is_some()
         {
             if name == "__name__" {
-                property.name = None;
+                self.replace_property_name(obj, None);
                 return Ok(());
             }
             return Err(Error::new("AttributeError", "readonly attribute"));
@@ -7564,11 +7564,11 @@ impl Context {
         }
         if member.is_none()
             && matches!(name, "__name__" | "fget" | "fset" | "fdel")
-            && let Some(property) = self.heap.get_mut(obj).property_mut()
+            && self.heap.get(obj).property().is_some()
         {
             match name {
                 "__name__" => {
-                    property.name = Some(value);
+                    self.replace_property_name(obj, Some(value));
                     return Ok(());
                 }
                 "fget" | "fset" | "fdel" => {
@@ -9757,10 +9757,7 @@ impl Context {
         for (key, value) in members {
             if matches!(self.heap.get(value), Value::Property(_)) {
                 let name = key_object(self, key);
-                let Value::Property(property) = self.heap.get_mut(value) else {
-                    unreachable!()
-                };
-                property.name = Some(name);
+                self.replace_property_name(value, Some(name));
             } else if let Some(set_name) = self.bound_slot(value, "__set_name__")? {
                 let name = key_object(self, key);
                 if let Err(error) = self.call(set_name, vec![class, name], Vec::new()) {

@@ -18,7 +18,7 @@ pub(super) struct Property {
     set: Id,
     delete: Id,
     pub(super) doc: Id,
-    pub(super) name: Option<Id>,
+    name: Option<Id>,
     getter_doc: bool,
 }
 
@@ -36,6 +36,22 @@ impl Value {
             Self::Property(property) => Some(property),
             Self::Instance { property, .. } => property.as_deref_mut(),
             _ => None,
+        }
+    }
+}
+
+impl Context {
+    /// Install the new strong edge before releasing the previous name to Python.
+    pub(super) fn replace_property_name(&mut self, receiver: Id, name: Option<Id>) {
+        let property = self.heap.get_mut(receiver).property_mut().unwrap();
+        if let Some(old) = std::mem::replace(&mut property.name, name)
+            && Some(old) != name
+            && self.heap.observes_released_roots()
+            && self.heap.could_release_callback_result(old)
+        {
+            let mark = self.heap.temporary_mark();
+            self.heap.keep(old);
+            self.unwind_operands(mark);
         }
     }
 }
@@ -232,7 +248,7 @@ pub(super) fn method(
             Ok(NONE)
         }
         ("__set_name__", [_, value]) => {
-            ctx.heap.get_mut(receiver).property_mut().unwrap().name = Some(*value);
+            ctx.replace_property_name(receiver, Some(*value));
             Ok(NONE)
         }
         ("__get__", _) if count == 0 => Err(Error::new(
@@ -285,8 +301,10 @@ fn copy_accessor(
         vec![property.get, property.set, property.delete, doc],
         Vec::new(),
     )?;
-    if let Some(copy) = ctx.heap.get_mut(new).property_mut() {
-        copy.name = property.name;
+    if ctx.heap.get(new).property().is_some() {
+        // The subtype constructor can rename the source property.
+        let name = ctx.heap.get(receiver).property().unwrap().name;
+        ctx.replace_property_name(new, name);
     }
     Ok(new)
 }
