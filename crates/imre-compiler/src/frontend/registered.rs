@@ -4169,7 +4169,6 @@ mod tests {
             private_names: None,
             method_imports: &imre_ast::module_imports(body),
             replacements: &HashMap::new(),
-            has_templates: false,
         };
         let stmts = std::slice::from_ref(stmt);
         let operations = HashMap::new();
@@ -4604,7 +4603,6 @@ else:
             text,
             private_names: Some(&names),
             replacements: &replacements,
-            has_templates: false,
             method_imports: &imports,
         };
         let operands = prepared_sites(&stmts, source, false);
@@ -6814,7 +6812,6 @@ publish(5, callback)
                 private_names: None,
                 method_imports: &imre_ast::module_imports(body),
                 replacements: &HashMap::new(),
-                has_templates: false,
             };
             registered_suite(
                 &function.body,

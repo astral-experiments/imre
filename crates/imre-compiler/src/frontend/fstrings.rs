@@ -328,7 +328,6 @@ mod tests {
             lambdas: None,
             text,
             replacements: &literal_replacements(text, module.parsed.tokens()),
-            has_templates: false,
             method_imports: &Default::default(),
             private_names: None,
         };
