@@ -87,7 +87,7 @@ impl RegisteredGenerator {
             Type::PythonObject,
             None,
             pull,
-            |ty| scope.hidden(ty),
+            |ty, cursor| scope.reserve_cursor_slot(ty, cursor),
         );
         let mut body = scope
             .comprehension_loop(plan, 0, input, &mut |scope, output, _| {

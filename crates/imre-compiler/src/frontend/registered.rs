@@ -45,6 +45,7 @@ pub(crate) fn registered_type_parameters<F>(
 pub(crate) struct RegisteredOperand {
     pub(crate) value: Expr,
     pub(crate) inputs: Box<[PhysicalOperand]>,
+    pub(crate) frame_slots: FrameSlots,
     #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
     locals: Vec<Type>,
     pub(crate) local_names: HashMap<usize, LocalBinding>,
@@ -63,6 +64,7 @@ pub(crate) struct RegisteredRegion<'a> {
     #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
     pub(crate) params: &'a [usize],
     pub(crate) local_names: &'a HashMap<usize, LocalBinding>,
+    pub(crate) frame_slots: &'a FrameSlots,
     root: RegionRoot<'a>,
 }
 
@@ -100,7 +102,7 @@ impl<'a> RegisteredRegion<'a> {
             visit(node);
         });
         slots.retain(|slot| !self.local_names.contains_key(slot));
-        FrameSlots::new(slots, cursors)
+        FrameSlots::new(slots.into_iter().collect(), cursors)
     }
 }
 
@@ -110,6 +112,7 @@ impl RegisteredOperand {
         Self {
             value,
             inputs,
+            frame_slots: FrameSlots::default(),
             #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
             locals: Vec::new(),
             local_names: HashMap::new(),
@@ -156,13 +159,14 @@ impl RegisteredOperand {
     }
 
     fn from_scope(value: Expr, scope: SourceScope<'_>) -> Self {
-        let (_locals, local_names) = scope.bindings();
+        let bindings = scope.bindings();
         Self {
             value,
+            frame_slots: bindings.slots,
             #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
-            locals: _locals,
+            locals: bindings.locals,
             inputs: Box::default(),
-            local_names,
+            local_names: bindings.names,
         }
     }
 
@@ -173,6 +177,7 @@ impl RegisteredOperand {
             #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
             params: &[],
             local_names: &self.local_names,
+            frame_slots: &self.frame_slots,
             root: RegionRoot::Operand(&self.value),
         }
     }
@@ -203,16 +208,28 @@ struct PrivateSlots {
 }
 
 impl FrameSlots {
-    pub(crate) fn new(
-        slots: std::collections::BTreeSet<usize>,
+    pub(crate) fn new(slots: Box<[usize]>, cursors: HashMap<usize, ir::IterNextKind>) -> Self {
+        Self(
+            (!slots.is_empty() || !cursors.is_empty())
+                .then(|| Arc::new(PrivateSlots { slots, cursors })),
+        )
+    }
+
+    /// All unnamed locals of a prepared source scope belong to the activation that allocated them.
+    fn from_locals(
+        count: usize,
+        names: &HashMap<usize, LocalBinding>,
         cursors: HashMap<usize, ir::IterNextKind>,
     ) -> Self {
-        Self((!slots.is_empty() || !cursors.is_empty()).then(|| {
-            Arc::new(PrivateSlots {
-                slots: slots.into_iter().collect(),
-                cursors,
-            })
-        }))
+        if count == names.len() && cursors.is_empty() {
+            return Self::default();
+        }
+        Self::new(
+            (0..count)
+                .filter(|slot| !names.contains_key(slot))
+                .collect(),
+            cursors,
+        )
     }
 
     pub(crate) fn slots(&self) -> &[usize] {
@@ -261,7 +278,8 @@ impl RegisteredFunction {
         Some(scope.finish(body))
     }
 
-    pub(super) fn expression(range: TextRange, value: Expr) -> Self {
+    #[cfg(test)]
+    fn expression(range: TextRange, value: Expr) -> Self {
         let body = Self::returning(range, value);
         Self {
             inputs: FrameInputs::Checked,
@@ -294,6 +312,7 @@ impl RegisteredFunction {
             #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
             params: &self.function.params,
             local_names: &self.local_names,
+            frame_slots: &self.frame_slots,
             root: RegionRoot::Suite(&self.function.body),
         }
     }
@@ -968,7 +987,12 @@ fn scalar_reference(expr: &ast::Expr) -> Option<String> {
     }
 }
 
-pub(crate) type RegisteredBindings = (Vec<Type>, HashMap<usize, LocalBinding>);
+#[derive(Clone, Default)]
+pub(crate) struct RegisteredBindings {
+    locals: Vec<Type>,
+    names: HashMap<usize, LocalBinding>,
+    slots: FrameSlots,
+}
 
 impl DeferredAnnotation {
     fn new(
@@ -1004,7 +1028,7 @@ impl DeferredAnnotation {
     /// Build one provider in the order its checked fields become visible.
     pub(crate) fn prepare_body(
         declarations: impl IntoIterator<Item = (Self, Option<usize>)>,
-        (locals, local_names): RegisteredBindings,
+        bindings: RegisteredBindings,
     ) -> AnnotationProvider {
         let mut fields = Vec::new();
         let mut values = Vec::new();
@@ -1025,16 +1049,16 @@ impl DeferredAnnotation {
         ))];
         Ok(RegisteredFunction {
             inputs: FrameInputs::Checked,
-            frame_slots: FrameSlots::default(),
+            frame_slots: bindings.slots,
             fixed_sites: Vec::new(),
             fixed_attributes: None,
             function: ir::Function {
                 params: vec![],
                 returns: Type::PythonObject,
-                locals,
+                locals: bindings.locals,
                 body,
             },
-            local_names,
+            local_names: bindings.names,
         })
     }
 }
@@ -1473,7 +1497,7 @@ pub(super) fn cursor_input(
     element: Type,
     acquire_at: Option<TextRange>,
     pull: Option<ir::AsyncPull>,
-    hidden: impl FnMut(Type) -> usize,
+    hidden: impl FnMut(Type, Option<ir::IterNextKind>) -> usize,
 ) -> pipelines::Prepared {
     let acquire = match (acquire_at, pull) {
         (Some(range), None) => Some(ir::IteratorOp::Loop(range)),
@@ -2202,7 +2226,7 @@ impl<'a> SuitePreparation<'a> {
             Type::PythonObject,
             Some(loop_.iter.range()),
             for_pull(loop_),
-            |ty| scope.hidden(ty),
+            |ty, cursor| scope.reserve_cursor_slot(ty, cursor),
         );
         let binding = input
             .bind_loop_target(&mut scope, &loop_.target, true)
@@ -3033,6 +3057,7 @@ struct SourceScope<'a> {
     comprehension: Option<eager::Namespace>,
     generator_expression: bool,
     locals: Vec<Type>,
+    cursors: HashMap<usize, ir::IterNextKind>,
     loop_scope: LoopScope,
     suspending_operands: bool,
     refusal: Option<(TextRange, &'static str)>,
@@ -3142,6 +3167,7 @@ impl<'a> SourceScope<'a> {
             comprehension: None,
             generator_expression: false,
             locals: Vec::new(),
+            cursors: HashMap::new(),
             loop_scope: LoopScope::Outside,
             suspending_operands: false,
             refusal: None,
@@ -3164,32 +3190,38 @@ impl<'a> SourceScope<'a> {
             })
             .chain(self.namespaces)
             .collect();
-        (self.locals, names)
+        let slots = FrameSlots::from_locals(self.locals.len(), &names, self.cursors);
+        RegisteredBindings {
+            locals: self.locals,
+            names,
+            slots,
+        }
     }
 
     /// Discard bindings allocated by operands before a later operand failed to lower.
     fn truncate_locals(&mut self, len: usize) {
         if self.locals.len() != len {
             self.locals.truncate(len);
+            self.cursors.retain(|slot, _| *slot < len);
             self.names.retain(|_, slot| *slot < len);
             self.namespaces.retain(|slot, _| *slot < len);
         }
     }
 
     fn finish(self, body: Vec<Statement>) -> RegisteredFunction {
-        let (locals, local_names) = self.bindings();
+        let bindings = self.bindings();
         RegisteredFunction {
             inputs: FrameInputs::Checked,
-            frame_slots: FrameSlots::default(),
+            frame_slots: bindings.slots,
             fixed_sites: Vec::new(),
             fixed_attributes: None,
             function: ir::Function {
                 params: Vec::new(),
                 returns: Type::PythonObject,
-                locals,
+                locals: bindings.locals,
                 body,
             },
-            local_names,
+            local_names: bindings.names,
         }
     }
 }
@@ -3453,6 +3485,14 @@ impl SourceScope<'_> {
         body
     }
 
+    fn reserve_cursor_slot(&mut self, ty: Type, cursor: Option<ir::IterNextKind>) -> usize {
+        let slot = self.hidden(ty);
+        if let Some(kind) = cursor {
+            self.cursors.insert(slot, kind);
+        }
+        slot
+    }
+
     fn hidden(&mut self, ty: Type) -> usize {
         let slot = self.locals.len();
         self.locals.push(ty);
@@ -3537,7 +3577,7 @@ impl SourceScope<'_> {
             Type::PythonObject,
             Some(iterable.range()),
             pull,
-            |ty| self.hidden(ty),
+            |ty, cursor| self.reserve_cursor_slot(ty, cursor),
         ))
     }
 

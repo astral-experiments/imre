@@ -69,25 +69,29 @@ pub(super) struct EagerList {
 }
 
 impl Prepared {
-    pub(super) fn cursor(cursor: Expr, element: Type, hidden: impl FnMut(Type) -> usize) -> Self {
+    pub(super) fn cursor(
+        cursor: Expr,
+        element: Type,
+        mut hidden: impl FnMut(Type) -> usize,
+    ) -> Self {
         let kind = match cursor.kind {
             ExprKind::Builtin(Builtin::SplitByteIter(_) | Builtin::SortedSplitByteIter(_), _) => {
                 crate::ir::IterNextKind::SplitField
             }
             _ => crate::ir::IterNextKind::Generic,
         };
-        Self::pull_cursor(cursor, element, kind, hidden)
+        Self::pull_cursor(cursor, element, kind, |ty, _| hidden(ty))
     }
 
     pub(super) fn pull_cursor(
         cursor: Expr,
         element: Type,
         kind: ir::IterNextKind,
-        mut hidden: impl FnMut(Type) -> usize,
+        mut hidden: impl FnMut(Type, Option<ir::IterNextKind>) -> usize,
     ) -> Self {
-        let iterator = hidden(cursor.ty);
-        let value = hidden(element);
-        let ready = hidden(Type::Bool);
+        let iterator = hidden(cursor.ty, Some(kind));
+        let value = hidden(element, None);
+        let ready = hidden(Type::Bool, None);
         Prepared {
             evaluate: vec![Statement::Assign(iterator, cursor)],
             acquire: Vec::new(),

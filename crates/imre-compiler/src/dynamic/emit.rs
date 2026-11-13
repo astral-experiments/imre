@@ -4869,6 +4869,11 @@ mod tests {
             ],
             clear: vec![0],
         });
+        assert_eq!(
+            crate::verify::registered(checked.region()).unwrap_err(),
+            "registered frame storage disagrees with its scoped operations"
+        );
+        checked.frame_slots = crate::frontend::FrameSlots::new(vec![0].into(), HashMap::new());
         crate::verify::registered(checked.region()).unwrap();
         let scoped = prepared.standalone().unwrap();
         let load = "load i64, ptr %ir_slot0";

@@ -361,10 +361,7 @@ impl<'p> RegisteredBody<'p> {
             Self::Function(checked) | Self::Prepared(checked) => (checked, None, &[][..]),
             Self::Suite(suite) => (&suite.checked, Some(suite), suite.operands.as_slice()),
         };
-        let Some(enclosing) = code.enter_checked_slots(
-            checked.region(),
-            Some((checked.function.locals.len(), &checked.frame_slots)),
-        ) else {
+        let Some(enclosing) = code.enter_checked_slots(checked.region()) else {
             return;
         };
         let next = Cell::new(0);
@@ -390,7 +387,7 @@ impl<'a, 'p> Frame<'_, 'a, 'p> {
     ) -> String {
         code.place_operand(value);
         let enclosing = if let Some(operand) = operand {
-            let Some(enclosing) = code.enter_checked_slots(operand.region(), None) else {
+            let Some(enclosing) = code.enter_checked_slots(operand.region()) else {
                 return "0".into();
             };
             Some(enclosing)
@@ -1497,7 +1494,6 @@ impl RegisteredFrame<'_, '_> {
     pub(crate) fn enter_checked_slots(
         &mut self,
         checked: RegisteredRegion<'_>,
-        function: Option<(usize, &FrameSlots)>,
     ) -> Option<EnclosingSlots> {
         #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
         if let Err(error) = crate::verify::registered(checked) {
@@ -1510,14 +1506,7 @@ impl RegisteredFrame<'_, '_> {
         let live_roots = self.live_slots.len();
         let first = self.private_slot_count;
         // Iterator cursors and other private storage occupy unnamed local slots.
-        self.iteration.storage = match function {
-            Some((count, layout))
-                if count == checked.local_names.len() || !layout.slots().is_empty() =>
-            {
-                layout.clone()
-            }
-            _ => checked.frame_layout(|_| {}),
-        };
+        self.iteration.storage = checked.frame_slots.clone();
         self.iteration.first_slot = first;
         let end = first + self.iteration.storage.slots().len();
         self.private_slot_count = end;

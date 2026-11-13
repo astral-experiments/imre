@@ -5083,7 +5083,7 @@ impl<'a> Checker<'a> {
                 Type::PythonObject,
                 Some(expression.range()),
                 None,
-                |ty| self.hidden(ty),
+                |ty, _| self.hidden(ty),
             );
             // The private item owns the Python handle returned by next(). Its
             // checked element type belongs to the subsequent target binding.
@@ -5135,7 +5135,7 @@ impl<'a> Checker<'a> {
                 Type::PythonObject,
                 Some(node.range()),
                 None,
-                |ty| self.hidden(ty),
+                |ty, _| self.hidden(ty),
             )));
         }
         if let Some(prepared) = self.record_iteration(&iterable, node)? {

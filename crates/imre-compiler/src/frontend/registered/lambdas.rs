@@ -19,9 +19,7 @@ impl RegisteredLambda {
         let sites = StatementSites::default();
         let mut scope = SourceScope::new(RegisteredScope::Lambda, source, &operations, &sites);
         let value = scope.operand(expr)?;
-        let mut function = RegisteredFunction::expression(expr.range(), value);
-        (function.function.locals, function.local_names) = scope.bindings();
-        Some(function)
+        Some(scope.finish(RegisteredFunction::returning(expr.range(), value)))
     }
 
     pub(super) fn prepare(
