@@ -1,6 +1,7 @@
 //! Source-ordered comparison links, with an early exit for each false middle result.
 use super::super::{Compare, Expr, Type, Value, read_only_field_operand};
 use super::{CheckedBody, CheckedValue, Entry, ValueJoin};
+use crate::llvm::registered::permanent;
 use ruff_python_ast::CmpOp;
 
 impl CheckedValue {
@@ -47,7 +48,7 @@ impl<'f, 'a, 'p, 'm> CheckedBody<'f, 'a, 'p, 'm> {
                     self.python()
                         .literal_tuple_membership(id, expr, *op == CmpOp::NotIn)
             {
-                return self.comparison_result(result, None, truth);
+                return self.comparison_result(CheckedValue::handle(result), truth);
             }
             let value = if immediate {
                 CheckedValue::native(self.fixed().immediate_receiver(expr))
@@ -61,18 +62,15 @@ impl<'f, 'a, 'p, 'm> CheckedBody<'f, 'a, 'p, 'm> {
         unreachable!("checked comparisons end with a result")
     }
 
-    fn comparison_result(
-        &mut self,
-        value: String,
-        predicate: Option<String>,
-        truth: bool,
-    ) -> CheckedValue {
-        if truth {
-            CheckedValue::condition(
-                predicate.unwrap_or_else(|| self.python().comparison_truth(&value, None)),
-            )
-        } else {
-            CheckedValue::handle(value)
+    fn comparison_result(&mut self, value: CheckedValue, truth: bool) -> CheckedValue {
+        match (&value, truth) {
+            (CheckedValue::Native(_, None), false) => {
+                self.python().boolean_result(&value.into_condition(), false)
+            }
+            (CheckedValue::Handle { id, .. }, true) => {
+                CheckedValue::condition(self.python().comparison_truth(id, None))
+            }
+            _ => value,
         }
     }
 
@@ -81,15 +79,22 @@ impl<'f, 'a, 'p, 'm> CheckedBody<'f, 'a, 'p, 'm> {
         op: CmpOp,
         left: &CheckedValue,
         right: &CheckedValue,
-    ) -> (String, Option<String>) {
+    ) -> CheckedValue {
         match (left, right) {
             (CheckedValue::Native(a, None), CheckedValue::Native(b, None)) => {
                 let op = Compare::from_operator(op).expect("checked native comparison");
-                let predicate = self.fixed().compare(op, &a.value, &b.value).operand;
-                (predicate.clone(), Some(predicate))
+                CheckedValue::owned(self.fixed().compare(op, &a.value, &b.value))
             }
             (CheckedValue::Handle { id: a, .. }, CheckedValue::Handle { id: b, .. }) => {
-                self.python().rich_comparison(op, a, b)
+                if matches!(op, CmpOp::Is | CmpOp::IsNot) {
+                    let relation = if op == CmpOp::Is { "eq" } else { "ne" };
+                    CheckedValue::condition(
+                        self.body()
+                            .instruction(format!("icmp {relation} i64 {a}, {b}")),
+                    )
+                } else {
+                    CheckedValue::handle(self.python().op(op.as_str(), &[a, b]))
+                }
             }
             _ => unreachable!("comparison operands follow the selected representation"),
         }
@@ -152,7 +157,11 @@ impl<'a> ComparisonChain<'a> {
         let done = &self.done;
         let join = &mut self.join;
         let right_scope = self.right_scope.take();
-        let (value, predicate) = code.compare_pair(op, &left, &right);
+        let value = code.compare_pair(op, &left, &right);
+        let handle = match &value {
+            CheckedValue::Handle { id, .. } => Some(id.as_str()),
+            _ => None,
+        };
         code.release_comparison(&left);
         let right_mark = right_scope.map(|(mark, edge)| {
             code.python().close_compare_scope(edge, &mark);
@@ -162,16 +171,16 @@ impl<'a> ComparisonChain<'a> {
             if let Some((mark, _)) = root {
                 // Release right before left; a rich comparison result may alias either.
                 for boundary in [right_mark.as_ref().unwrap(), mark] {
-                    if predicate.is_some() {
-                        code.python().discard_truth(boundary);
+                    if let Some(id) = handle {
+                        code.python().keep_operands(boundary, id, "0");
                     } else {
-                        code.python().keep_operands(boundary, &value, "0");
+                        code.python().discard_truth(boundary);
                     }
                 }
             } else {
                 code.release_comparison(&right);
             }
-            let value = code.comparison_result(value, predicate, truth);
+            let value = code.comparison_result(value, truth);
             let result = if self.branched {
                 join.jump(code.body(), done, value);
                 code.body().start(done);
@@ -186,18 +195,16 @@ impl<'a> ComparisonChain<'a> {
             }
             return Some(result);
         }
-        let rich = predicate.is_none();
         let middle = if let (Some((mark, _)), CheckedValue::Handle { id, .. }) = (root, &right) {
-            Some(
-                code.python()
-                    .keep_operands(mark, id, if rich { &value } else { "0" }),
-            )
+            Some(code.python().keep_operands(mark, id, handle.unwrap_or("0")))
         } else {
             None
         };
-        let bit =
-            predicate.unwrap_or_else(|| code.python().comparison_truth(&value, middle.as_deref()));
-        if truth && rich {
+        let bit = match handle {
+            Some(id) => code.python().comparison_truth(id, middle.as_deref()),
+            None => value.fixed_value().operand.clone(),
+        };
+        if truth && handle.is_some() {
             code.python().discard_truth(middle.as_ref().unwrap());
         }
         let next = code.body().name("compare_next");
@@ -210,8 +217,8 @@ impl<'a> ComparisonChain<'a> {
             Some(saved)
         } else {
             let mark = &root.as_ref().expect("rooted chain").0;
-            if rich && !truth {
-                code.python().keep_operands(mark, &value, "0");
+            if let Some(id) = handle.filter(|_| !truth) {
+                code.python().keep_operands(mark, id, "0");
             } else {
                 code.python().discard_truth(mark);
             }
@@ -223,14 +230,16 @@ impl<'a> ComparisonChain<'a> {
             if truth {
                 CheckedValue::condition("false".into())
             } else {
-                CheckedValue::handle(value)
+                CheckedValue::handle(
+                    handle.map_or_else(|| permanent::FALSE.to_string(), str::to_owned),
+                )
             },
         );
         code.body().start(&next);
         if let Some(saved) = temporaries {
             code.fixed().temporaries = saved;
         }
-        if rich && !truth {
+        if handle.is_some() && !truth {
             code.python().discard_truth(middle.as_ref().unwrap());
         }
         self.branched = true;

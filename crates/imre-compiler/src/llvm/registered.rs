@@ -17,7 +17,6 @@ use crate::llvm::LoopTarget;
 use crate::llvm::body::FunctionBody;
 pub(crate) use abi::{ABI, CallArguments, Output, permanent};
 pub(crate) use frame::{AnnotationScope, RegisteredFrame, SourcePositions};
-use ruff_python_ast::CmpOp;
 use ruff_python_ast::UnaryOp;
 use sites::CheckedSites;
 
@@ -644,28 +643,6 @@ impl<'f> Frame<'f, '_, '_> {
         let (array, count) = self.handle_array(&items);
         let negate = u32::from(negate);
         Some(self.checked(&format!("call i64 @imre_dyn_contains_literal_tuple(ptr %ctx, i64 {needle}, ptr {array}, i64 {count}, i32 {negate})")))
-    }
-
-    pub(crate) fn rich_comparison(
-        &mut self,
-        op: CmpOp,
-        left: &str,
-        right: &str,
-    ) -> (String, Option<String>) {
-        if matches!(op, CmpOp::Is | CmpOp::IsNot) {
-            let relation = if op == CmpOp::Is { "eq" } else { "ne" };
-            let bit = self
-                .code
-                .value(&format!("icmp {relation} i64 {left}, {right}"));
-            let value = self.value(&format!(
-                "select i1 {bit}, i64 {}, i64 {}",
-                permanent::TRUE,
-                permanent::FALSE
-            ));
-            (value, Some(bit))
-        } else {
-            (self.code.op(op.as_str(), &[left, right]), None)
-        }
     }
 
     pub(super) fn iteration_mark(&mut self) -> Option<String> {
