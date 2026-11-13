@@ -851,8 +851,12 @@ impl<'f> Frame<'f, '_, '_> {
     }
     pub(crate) fn enter_loop(&mut self, edges: &LoopEdges) {
         let cleanup_depth = self.code.regions.len();
-        // A resumed for statement keeps its header even inside an operand's cleanup scope.
-        let line = (self.code.native_suspension && self.code.iteration.expression_mark.is_none())
+        // A statement loop restores its header before each pull, including after a body call.
+        let line = self
+            .code
+            .iteration
+            .expression_mark
+            .is_none()
             .then(|| self.code.positions.line(self.code.current_range.start()));
         self.code.loops.push((
             LoopTarget {

@@ -830,9 +830,10 @@ pub(super) fn push_checkpoint(body: &mut Vec<Statement>, stmt: &ast::Stmt) {
 }
 
 fn checkpoint(stmt: &ast::Stmt) -> Statement {
-    // Truth conversion can call Python after the condition's last operand returns.
+    // Truth conversion and iterator advancement can call Python after evaluating the operand.
     let range = match stmt {
         ast::Stmt::If(branch) => branch.test.range(),
+        ast::Stmt::For(loop_) if !loop_.is_async => loop_.iter.range(),
         _ => stmt.range(),
     };
     Statement::Position(range, imre_ast::unhighlighted_call(stmt))
@@ -1974,7 +1975,9 @@ impl<'a> SuitePreparation<'a> {
             ast::Stmt::While(loop_) => {
                 Ok(self.prepare_while(loop_, kind, child_selection, suspended))
             }
-            ast::Stmt::For(loop_) => self.prepare_for(loop_, kind, child_selection, suspended),
+            ast::Stmt::For(loop_) => {
+                self.prepare_for(loop_, checkpoint(stmt), kind, child_selection, suspended)
+            }
             ast::Stmt::Try(protected) => Ok(self.prepare_try(
                 protected,
                 checkpoint(stmt),
@@ -2368,6 +2371,7 @@ impl<'a> SuitePreparation<'a> {
     fn prepare_for(
         &mut self,
         loop_: &ast::StmtFor,
+        checkpoint: Statement,
         kind: RegisteredScope,
         selection: SuiteSelection,
         suspended: bool,
@@ -2406,7 +2410,7 @@ impl<'a> SuitePreparation<'a> {
         } else {
             region.child(self.physical_suite(&loop_.orelse, kind, selection, suspended))
         };
-        let mut statements = vec![Statement::Position(loop_.range(), None)];
+        let mut statements = vec![checkpoint];
         statements.extend(input.for_suite(body, otherwise, Vec::new()));
         region.checked.function.body = statements;
         Ok(region)

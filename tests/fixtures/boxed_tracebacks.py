@@ -402,3 +402,16 @@ last_frame, = format_tb(saved, limit=-1)
 assert "in total" in last_frame
 assert "return data['values']" in last_frame
 assert format_tb(saved, limit=0) == []
+
+
+def report_pull(items):
+    try:
+        for item in (
+            items
+        ):
+            print("pulled", item)
+    except Exception as error:
+        print(type(error).__name__, error.__traceback__.tb_lineno)
+
+
+report_pull(map(int, ("7", "bad")))
