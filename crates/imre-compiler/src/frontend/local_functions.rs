@@ -837,8 +837,10 @@ impl Checker<'_> {
                 &format!("asynchronous capture '{name}' may be rebound before the coroutine runs"),
             ));
         }
-        // Inference uses the signature and captures, then drops its helper slots.
-        let mut body = self.inference.is_none().then(Vec::new);
+        // A caller that already needs the Python frame cannot use a lifted body.
+        // Its signature, captures and diagnostics still come from the same check.
+        let mut body =
+            (self.inference.is_none() && self.unrepresented.borrow().is_none()).then(Vec::new);
         let falls = helper.function_body(&definition.body, body.as_mut())?;
         if let Some(mut returns) = helper.inferred_returns.take() {
             if falls || returns.is_empty() {
