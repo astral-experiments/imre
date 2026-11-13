@@ -310,7 +310,7 @@ impl FunctionScope {
     fn function(
         def: &ast::StmtFunctionDef,
         string_annotations: bool,
-        enclosing_class: Option<&classes::ClassScope>,
+        may_capture_class: bool,
     ) -> Self {
         let mut names = ClosureNames {
             include_nested_reads: true,
@@ -319,10 +319,7 @@ impl FunctionScope {
         };
         names.visit_body(&def.body);
         let parameters = Some(def.parameters.as_ref());
-        // The enclosing class already checked each method for a free __class__.
-        // Generic methods may capture a type parameter in their own scope.
-        let captures_class = (def.type_params.is_some()
-            || enclosing_class.is_none_or(|class| class.needs_class_cell))
+        let captures_class = may_capture_class
             && imre_ast::class_cell::function_needed(&def.body, parameters, string_annotations);
         Self::new(names, parameters, captures_class)
     }
@@ -481,11 +478,14 @@ where
                     (true, false) => COROUTINE,
                     (true, true) => ASYNC_GENERATOR,
                 };
-                let enclosing_class = match self.scope {
-                    Scope::Class(site) => Some(&self.scopes.classes[&site]),
-                    _ => None,
-                };
-                let lexical = FunctionScope::function(def, strings, enclosing_class);
+                // A module supplies globals. A generic function has its own type-parameter scope.
+                let may_capture_class = def.type_params.is_some()
+                    || match self.scope {
+                        Scope::Module => false,
+                        Scope::Class(site) => self.scopes.classes[&site].needs_class_cell,
+                        Scope::Function { .. } | Scope::Lambda => true,
+                    };
+                let lexical = FunctionScope::function(def, strings, may_capture_class);
                 let header = NamedFunction::prepare(def, self.names, lexical, suspension_flags);
                 self.scopes.functions.insert(start, header);
                 return;
