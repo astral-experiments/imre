@@ -3736,7 +3736,11 @@ macro_rules! statement_children {
                     ($expression)(value);
                 }
             }
-            Statement::SetField(a, _, b) | Statement::AugmentField(a, _, _, b) => {
+            Statement::SetField(receiver, _, rhs) => {
+                ($expression)(rhs);
+                ($expression)(receiver);
+            }
+            Statement::AugmentField(a, _, _, b) => {
                 ($expression)(a);
                 ($expression)(b);
             }

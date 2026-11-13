@@ -88,6 +88,7 @@ pub(crate) enum FixedNode {
         message: bool,
     },
     Store(usize),
+    StoreField(usize),
     Branch(usize, usize),
     /// The operation keeps its checked slot or operand count, and its native type.
     Indexed(std::mem::Discriminant<ExprKind>, usize, Type),
@@ -116,6 +117,7 @@ impl FixedNode {
                 cause: raised.cause.is_some(),
             },
             ir::Node::Statement(Statement::Assign(slot, _)) => Self::Store(*slot),
+            ir::Node::Statement(Statement::SetField(_, field, _)) => Self::StoreField(*field),
             ir::Node::Expression(expr) => match expr.kind {
                 ExprKind::None if expr.ty == Type::None => Self::Constant(ir::Constant::None),
                 ExprKind::Str(_) | ExprKind::Bool(_) => {
@@ -293,14 +295,24 @@ impl SourceSites {
     }
 
     pub(super) fn field(&mut self, field: &ast::ExprAttribute, native: FixedNode) {
+        if let Some(site) = self.site_at(field.range()) {
+            self.attribute(site, ir::AttributeAction::Load, field, native);
+        }
+    }
+
+    fn attribute(
+        &mut self,
+        site: PendingSite,
+        action: ir::AttributeAction,
+        field: &ast::ExprAttribute,
+        native: FixedNode,
+    ) {
         // Private names require the registered class's lexical mangling.
-        if !ruff_python_stdlib::identifiers::is_mangled_private(field.attr.as_str())
-            && let Some(site) = self.site_at(field.range())
-        {
+        if !ruff_python_stdlib::identifiers::is_mangled_private(field.attr.as_str()) {
             self.python_operation(
                 site,
                 field.attr.start(),
-                registered::values::attribute_load(field),
+                registered::attribute_opcode(action, field),
                 native,
             );
         }
@@ -346,12 +358,34 @@ impl SourceSites {
     }
 
     pub(super) fn statement(&mut self, operand: TextRange, node: FixedNode) {
-        if let Some(site) = self.current
-            && let Some((range, _)) = self.sites.get(site.index + 1)
-            && *range == operand
-        {
+        if let Some(site) = self.statement_site(operand) {
             self.commit(site, node);
         }
+    }
+
+    /// A physical method stores through the actual receiver at the original attribute range.
+    pub(super) fn store_field(
+        &mut self,
+        field: &ast::ExprAttribute,
+        rhs: TextRange,
+        offset: usize,
+    ) {
+        if self.wrapper_fields
+            && let Some(site) = self.statement_site(rhs)
+        {
+            self.attribute(
+                site,
+                ir::AttributeAction::Store,
+                field,
+                FixedNode::StoreField(offset),
+            );
+        }
+    }
+
+    fn statement_site(&self, operand: TextRange) -> Option<PendingSite> {
+        let site = self.current?;
+        let (range, _) = self.sites.get(site.index + 1)?;
+        (*range == operand).then_some(site)
     }
 
     pub(super) fn finish(
