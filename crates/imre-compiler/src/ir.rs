@@ -2317,8 +2317,8 @@ pub(crate) enum Builtin {
     RegisteredComplex(f64, f64),
     /// Little-endian Python code points preserve non-scalar values and linked literal identity.
     RegisteredString(Vec<u8>),
-    /// The immutable strings tuple has one more segment than there are interpolation operands.
-    RegisteredTemplate(Vec<Vec<u8>>),
+    /// Construct a template from its literal strings tuple and its evaluated interpolations tuple.
+    RegisteredTemplate,
     /// Capture the evaluated value and format spec without formatting the value.
     RegisteredInterpolation {
         expression: String,

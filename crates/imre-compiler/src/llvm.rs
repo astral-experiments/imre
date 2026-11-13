@@ -4514,7 +4514,7 @@ impl Emitter<'_, '_> {
             | Builtin::RegisteredComplex(..)
             | Builtin::FormatConversion(_)
             | Builtin::RegisteredString(_)
-            | Builtin::RegisteredTemplate(_)
+            | Builtin::RegisteredTemplate
             | Builtin::RegisteredInterpolation { .. }
             | Builtin::RegisteredAttribute { .. }
             | Builtin::RegisteredLocation(..) => {

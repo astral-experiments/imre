@@ -741,7 +741,7 @@ impl Builtin {
             | Self::FormatConversion(_)
             | Self::FormatField(_)
             | Self::RegisteredString(_)
-            | Self::RegisteredTemplate(_)
+            | Self::RegisteredTemplate
             | Self::RegisteredInterpolation { .. }
             | Self::RegisteredNamespace(_)
             | Self::RegisteredUnpack { .. }
