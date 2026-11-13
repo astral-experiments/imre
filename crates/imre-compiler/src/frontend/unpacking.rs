@@ -84,8 +84,8 @@ pub(super) trait PatternBinder {
 pub(super) struct PatternSnapshot {
     root: usize,
     body: Vec<Statement>,
+    // Captured target slots follow the temporaries used to evaluate and check the input.
     clear: Vec<usize>,
-    items: Vec<usize>,
 }
 
 impl PatternSnapshot {
@@ -93,7 +93,6 @@ impl PatternSnapshot {
         let slot = binder.pattern_hidden(item.ty);
         self.body.push(Statement::Assign(slot, item));
         self.clear.push(slot);
-        self.items.push(slot);
     }
 }
 
@@ -120,7 +119,6 @@ fn protocol_snapshot(
         root,
         body: vec![Statement::Assign(root, consume_row(sequence, row))],
         clear: vec![root],
-        items: Vec::with_capacity(count),
     };
     for index in 0..count {
         // Python packs the starred remainder into a list even when its items are opaque.
@@ -225,12 +223,12 @@ pub(super) fn bind_input<B: PatternBinder>(
         root,
         mut body,
         clear,
-        items,
     } = binder.pattern_snapshot(target, targets, star, value, row)?;
+    let items = &clear[clear.len() - targets.len()..];
     body.push(Statement::Clear(root));
     let pair = if let Some((iterator, ready)) = pair_pull
         && star.is_none()
-        && let &[first, second] = items.as_slice()
+        && let &[first, second] = items
     {
         let ordinary = binder.pattern_hidden(Type::Bool);
         // The loop owns the cursor predicate across iterations.
@@ -257,7 +255,7 @@ pub(super) fn bind_input<B: PatternBinder>(
     } else {
         None
     };
-    for (target, item) in targets.iter().zip(items) {
+    for (target, &item) in targets.iter().zip(items) {
         let target = if let ast::Expr::Starred(starred) = target {
             &starred.value
         } else {
@@ -280,15 +278,13 @@ impl Checker<'_> {
     ) -> Statement {
         let sequence = self.types.list(Type::PythonObject);
         let PatternSnapshot {
-            mut body,
-            clear,
-            items,
-            ..
+            mut body, clear, ..
         } = protocol_snapshot(self, site, 2, None, item, sequence, None);
+        let &[key, value] = clear.last_chunk().expect("captured both pair items");
         body.push(Statement::assign_item(
             self.local(target),
-            self.local(items[0]),
-            self.local(items[1]),
+            self.local(key),
+            self.local(value),
         ));
         Statement::Scope { body, clear }
     }
@@ -1304,7 +1300,6 @@ impl PatternBinder for Checker<'_> {
             root: captured,
             body,
             clear,
-            items: Vec::with_capacity(targets.len()),
         };
         for (index, target) in targets.iter().enumerate() {
             let item = if let ast::Expr::Starred(starred) = target {
