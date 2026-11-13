@@ -1729,7 +1729,7 @@ mod tests {
     mod declaration_sites;
     use super::super::prepare::{self, ModuleSource};
     use super::*;
-    use crate::frontend::NamedBody;
+    use crate::frontend::{FrameArguments, NamedBody};
     use crate::llvm::registered::permanent;
 
     #[test]
@@ -2477,7 +2477,7 @@ mod tests {
         });
         assert_eq!(generators, ["word.title() for word in words"]);
         (checked.inputs, checked.frame_slots) =
-            crate::llvm::registered::frame_inputs(&checked, true).unwrap();
+            crate::llvm::registered::frame_inputs(&checked, FrameArguments::Python).unwrap();
         let bodies = HashMap::from([(site, checked)]);
         for (source, retained) in [
             (source, true),
@@ -2511,7 +2511,7 @@ mod tests {
             PreparedBody::module("example", path, source, 0, ModuleOrigin::Program(None)).unwrap();
         let mut checked = original.source.take_prepared_function(site);
         (checked.inputs, checked.frame_slots) =
-            crate::llvm::registered::frame_inputs(&checked, true).unwrap();
+            crate::llvm::registered::frame_inputs(&checked, FrameArguments::Python).unwrap();
         let bodies = HashMap::from([(site, checked)]);
         for (text, retained) in [(source, true), (refused, false)] {
             let module = PreparedBody::module(

@@ -356,7 +356,7 @@ impl Checker<'_> {
         if call.arguments.is_empty()
             && matches!(&value.kind, ExprKind::Builtin(Builtin::Text(_), args) if args.len() == 1)
         {
-            self.live_protocol_parameters = true;
+            self.frame_arguments = FrameArguments::Python;
             if let Some(sites) = &mut self.fixed_sites {
                 sites.method(call, field, &value);
             }

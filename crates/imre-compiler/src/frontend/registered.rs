@@ -199,9 +199,21 @@ pub(crate) enum FrameSite {
     Generator(TextRange),
 }
 
+/// How a body will receive its arguments. A pending source check needs both contracts.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FrameArguments {
+    Checked,
+    Pending,
+    Python,
+}
+
 /// Argument binding and lexical dependencies of a retained Python frame.
 pub(crate) enum FrameInputs {
     Checked,
+    /// A solved body keeps its checked binder until its source contract settles.
+    Deferred {
+        live_sites: Option<Box<[FrameSite]>>,
+    },
     /// Scalar parameters reach Python call operands without native coercion.
     Protocol {
         sites: Box<[FrameSite]>,
@@ -259,7 +271,7 @@ pub(crate) struct RegisteredFunction {
     pub(crate) inputs: FrameInputs,
     pub(crate) frame_slots: FrameSlots,
     /// Physical positions for the unchanged fixed operations, in checked node order.
-    pub(crate) fixed_sites: Vec<TextRange>,
+    pub(crate) fixed_sites: Box<[TextRange]>,
     /// Descriptor names and token positions for placed fixed-layout field reads.
     #[expect(
         clippy::box_collection,
@@ -274,18 +286,18 @@ impl RegisteredFunction {
     pub(super) fn from_checked_body(
         function: ir::Function,
         local_names: HashMap<usize, LocalBinding>,
-        live_protocol_parameters: bool,
+        arguments: FrameArguments,
     ) -> Option<Self> {
         let mut checked = Self {
             inputs: FrameInputs::Checked,
             frame_slots: FrameSlots::default(),
-            fixed_sites: Vec::new(),
+            fixed_sites: Box::default(),
             fixed_attributes: None,
             function,
             local_names,
         };
         (checked.inputs, checked.frame_slots) =
-            crate::llvm::registered::frame_inputs(&checked, live_protocol_parameters)?;
+            crate::llvm::registered::frame_inputs(&checked, arguments)?;
         Some(checked)
     }
 
@@ -308,7 +320,7 @@ impl RegisteredFunction {
         Self {
             inputs: FrameInputs::Checked,
             frame_slots: FrameSlots::default(),
-            fixed_sites: Vec::new(),
+            fixed_sites: Box::default(),
             fixed_attributes: None,
             function: ir::Function {
                 params: vec![],
@@ -460,7 +472,7 @@ pub(super) fn lower_definition(
         )
         .classify(Kind::ScopedObject));
     }
-    RegisteredFunction::from_checked_body(body.function, local_names, body.live_protocol_parameters)
+    RegisteredFunction::from_checked_body(body.function, local_names, body.frame_arguments)
         .ok_or_else(|| {
             error(
                 source,
@@ -660,6 +672,11 @@ pub(super) fn capture(
         if contract == Some(false) {
             continue;
         }
+        let checks = &inference.source_checks;
+        let deferred = checks
+            .solved
+            .as_ref()
+            .filter(|_| contract.is_none() && matches!(source, Capture::Solved(None)));
         let helpers = Helpers::new(inference.len());
         // A solved definition reads names from the Python namespace. Its trial
         // must not establish a native caller or consume a missing binding.
@@ -694,17 +711,23 @@ pub(super) fn capture(
         };
         let body = placed.or_else(|| {
             let mut signature = signature.clone();
-            if matches!(source, Capture::Declared) {
-                for parameter in &mut signature.params {
-                    parameter.ty = Type::PythonObject;
-                }
-            }
             signature.returns = Type::PythonObject;
             let mut checker = checker();
             checker.registered_local_start = Some(signature.params.len());
             checker.settled_attributes = (!attributes.is_empty()).then_some(&mut attributes);
             checker.checked_callback_effects = checked;
-            checker.live_protocol_parameters = matches!(source, Capture::Declared);
+            checker.frame_arguments = match source {
+                Capture::Declared => {
+                    for parameter in &mut signature.params {
+                        parameter.ty = Type::PythonObject;
+                    }
+                    FrameArguments::Python
+                }
+                Capture::Solved(_) if deferred.is_some() && method.is_none() => {
+                    FrameArguments::Pending
+                }
+                Capture::Solved(_) => FrameArguments::Checked,
+            };
             let mut body = graph
                 .try_registered_body(id, || lower_definition(checker, function, &signature).ok())?;
             if let Some(method) = method {
@@ -719,12 +742,9 @@ pub(super) fn capture(
         });
         if let Some(body) = body
             && contract.unwrap_or_else(|| {
-                let checks = &inference.source_checks;
                 // No unresolved caller can depend on a solved frame's ABI. The fixed sibling
                 // placement only checks occupancy for the same physical source range.
-                if matches!(source, Capture::Solved(None))
-                    && let Some(solved) = &checks.solved
-                {
+                if let Some(solved) = deferred {
                     solved.borrow_mut().push((id, function.range()));
                     true
                 } else {
@@ -1067,7 +1087,7 @@ impl DeferredAnnotation {
         Ok(RegisteredFunction {
             inputs: FrameInputs::Checked,
             frame_slots: bindings.slots,
-            fixed_sites: Vec::new(),
+            fixed_sites: Box::default(),
             fixed_attributes: None,
             function: ir::Function {
                 params: vec![],
@@ -1807,7 +1827,7 @@ impl<'a> SuitePreparation<'a> {
         header.annotations = site.annotations;
         // A checked frame can reference lexical activations prepared at this definition.
         let checked = checked.filter(|body| match &body.inputs {
-            FrameInputs::Checked => true,
+            FrameInputs::Checked | FrameInputs::Deferred { .. } => true,
             FrameInputs::Protocol { sites } => sites.iter().all(|site| match site {
                 FrameSite::Method(declaration) => declaration.as_ref() == def,
                 FrameSite::Lambda(start) => self
@@ -1849,7 +1869,7 @@ impl<'a> SuitePreparation<'a> {
         // argument. Other functions bind through their live annotation references.
         let fixed_parameters = match body.as_ref() {
             RegisteredBody::Function(frame)
-                if site.module_scope && matches!(frame.inputs, FrameInputs::Checked) =>
+                if site.module_scope && !matches!(frame.inputs, FrameInputs::Protocol { .. }) =>
             {
                 Some(frame)
             }
@@ -3271,7 +3291,7 @@ impl<'a> SourceScope<'a> {
         RegisteredFunction {
             inputs: FrameInputs::Checked,
             frame_slots: bindings.slots,
-            fixed_sites: Vec::new(),
+            fixed_sites: Box::default(),
             fixed_attributes: None,
             function: ir::Function {
                 params: Vec::new(),

@@ -1107,7 +1107,7 @@ impl Checker<'_> {
             };
             if let Some(sites) = &mut self.fixed_sites {
                 sites.checked_expression(field.range(), &formatted);
-                self.live_protocol_parameters = true;
+                self.frame_arguments = FrameArguments::Python;
             }
             return Ok(Formatted(formatted));
         }

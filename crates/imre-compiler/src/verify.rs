@@ -899,7 +899,7 @@ mod tests {
         let mut frame = crate::frontend::RegisteredFunction {
             inputs: crate::frontend::FrameInputs::Checked,
             frame_slots: Default::default(),
-            fixed_sites: Vec::new(),
+            fixed_sites: Box::default(),
             fixed_attributes: None,
             function: empty().entry,
             local_names: Default::default(),
@@ -929,7 +929,7 @@ mod tests {
         let mut frame = crate::frontend::RegisteredFunction {
             inputs: crate::frontend::FrameInputs::Checked,
             frame_slots: Default::default(),
-            fixed_sites: Vec::new(),
+            fixed_sites: Box::default(),
             fixed_attributes: None,
             function: empty().entry,
             local_names: Default::default(),

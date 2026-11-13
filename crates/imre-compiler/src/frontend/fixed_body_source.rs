@@ -722,8 +722,7 @@ mod tests {
                 }
                 let placed = &registered[&graph.entry][&start];
                 assert_eq!(placed.function.body.as_ptr(), operations);
-                assert_eq!(placed.fixed_sites, positions);
-                assert_eq!(placed.fixed_sites.capacity(), positions.len());
+                assert_eq!(&*placed.fixed_sites, positions.as_slice());
                 assert!(matches!(&placed.inputs, FrameInputs::Protocol { sites }
                     if matches!(sites.as_ref(), [FrameSite::Method(method)] if Arc::as_ptr(method) == declaration)));
             }
