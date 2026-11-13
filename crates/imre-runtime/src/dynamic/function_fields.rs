@@ -187,7 +187,9 @@ impl Context {
             let Value::Function { code, .. } = *self.heap.get(fun) else {
                 unreachable!()
             };
-            if value != code && !(new.module_definition && self.code_object(code).module_definition)
+            if value != code
+                && !(new.definition.module_definition
+                    && self.code_object(code).definition.module_definition)
             {
                 return Err(Error::new(
                     "NotImplementedError",

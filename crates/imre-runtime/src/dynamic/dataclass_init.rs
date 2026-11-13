@@ -39,7 +39,8 @@ fn bound(ctx: &mut Context, scope: Id, key: Id) -> Result<Id> {
 fn captured(ctx: &mut Context, scope: Id, index: Id) -> Result<Id> {
     let cell = ctx
         .code_object(ctx.heap.current_code())
-        .freevars
+        .definition
+        .freevars()
         .first()
         .cloned()
         .ok_or_else(invalid)?;
@@ -234,6 +235,6 @@ pub(super) fn bind_initializer(ctx: &mut Context, args: &[Id]) -> Result<Id> {
     };
     metadata.varnames = varnames;
     metadata.cellvars = super::value::EMPTY_TUPLE;
-    metadata.module_definition = false;
+    metadata.definition.module_definition = false;
     ctx.define_function(code, scope, name, defaults, qualname, NONE, NONE, false)
 }

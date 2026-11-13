@@ -2,7 +2,7 @@
 //! Only the compiler can certify that the function needs no surrounding heap.
 
 use super::thread_worker::Operation;
-use super::value::{Body, Code, CodeObject, WorkerStack};
+use super::value::{Body, Code, CodeDefinition, CodeObject, WorkerStack};
 use super::{Context, Error, Id, NONE, Result, Value, copy_label, ffi};
 use crate::objects::locks::PrimitiveLock;
 use crate::objects::logging::HandlerLock;
@@ -18,6 +18,7 @@ enum Argument {
 pub(super) struct Callback {
     frames: WorkerStack,
     entry: Code,
+    definition: CodeDefinition,
     module: String,
     name: String,
     qualname: String,
@@ -25,7 +26,7 @@ pub(super) struct Callback {
     first_line: u32,
     signature: String,
     values: Vec<Argument>,
-    receiver: Option<(String, Argument)>,
+    receiver: Option<Argument>,
     config: Arc<serde_json::Value>,
     gc_settings: Arc<super::gc_schedule::GcSettings>,
     interpreter: super::InterpreterState,
@@ -95,7 +96,7 @@ impl Callback {
         // Heap-local code operands do not cross the isolated worker interpreter.
         if matches!(code.body, Body::Native(_, operands) if operands != NONE)
             || code.is_coroutine()
-            || !code.closure_supported
+            || !code.definition.closure_supported
         {
             return Ok(None);
         }
@@ -108,7 +109,7 @@ impl Callback {
             if !matches!(code.body, Body::Native(_, NONE)) {
                 return Ok(None);
             }
-            if !code.freevars.is_empty()
+            if !code.definition.freevars().is_empty()
                 || !pos.is_empty()
                 || kwargs.is_some_and(
                     |id| !matches!(ctx.heap.get(id), Value::Dict(items) if items.is_empty()),
@@ -148,11 +149,11 @@ impl Callback {
                 roots,
             )));
         }
-        if receiver.is_some() && !code.freevars.is_empty() {
+        if receiver.is_some() && !code.definition.freevars().is_empty() {
             return Ok(None);
         }
         let bindings = &ctx.scope_data(scope).closure;
-        if let [name] = code.freevars.as_slice()
+        if let [name] = code.definition.freevars()
             && pos.is_empty()
             && kwargs.is_none_or(
                 |id| matches!(ctx.heap.get(id), Value::Dict(entries) if entries.is_empty()),
@@ -174,16 +175,16 @@ impl Callback {
             };
             let roots = super::concat_ids(roots, &[id])?;
             let mut callback = Self::from_code(ctx, code, scope, entry, Vec::new())?;
-            callback.receiver = Some((copy_label(name)?, receiver));
+            callback.receiver = Some(receiver);
             return Ok(Some((Operation::Python(Box::new(callback)), roots)));
         }
-        if !code.freevars.is_empty() {
+        if !code.definition.freevars().is_empty() {
             if high_level
                 && pos.is_empty()
                 && let Some(kwargs) = kwargs
                 && matches!(ctx.heap.get(kwargs), Value::Dict(entries) if entries.is_empty())
                 && let Some(names) = meta["thread_captured_locks"].as_array()
-                && bindings.cells.len() == code.freevars.len()
+                && bindings.cells.len() == code.definition.freevars().len()
                 && bindings.cells.len() == names.len()
             {
                 let operand = |name: &serde_json::Value| {
@@ -348,6 +349,7 @@ impl Callback {
         Ok(Self {
             frames: WorkerStack::reserve()?,
             entry,
+            definition: code.definition.clone(),
             module: copy_label(&ctx.scope_data(scope).module)?,
             name: copy_label(ctx.str_value(code.name)?)?,
             qualname: copy_label(ctx.str_value(code.qualname)?)?,
@@ -377,33 +379,35 @@ impl Callback {
         );
         let globals = ctx.scope(&self.module, None);
         // The worker owns this cell and its selected lock before it reports readiness.
-        let scope = if let Some((name, receiver)) = self.receiver {
+        let cell = self.receiver.map(|receiver| {
             let value = match receiver {
                 Argument::Lock(lock) => ctx.alloc(Value::PrimitiveLock(lock)),
                 Argument::RLock(lock) => ctx.alloc(Value::HandlerLock(lock)),
                 Argument::Builtin(_) => unreachable!("the terminal receiver is an exact lock"),
             };
-            let cell = ctx.alloc(Value::Cell(Some(value)));
-            ctx.closure_environment(globals, vec![name], &[cell])
-        } else {
-            globals
-        };
+            ctx.alloc(Value::Cell(Some(value)))
+        });
         let name = ctx.text(self.name);
         let qualname = ctx.text(self.qualname);
         let signature = ctx.text(self.signature);
         let filename = ctx.text_codepoints(self.filename);
         let location = (filename, self.first_line);
-        let code = ctx.prelinked_code(
+        let code = ctx.realize_code(
             Body::Native(self.entry, NONE),
-            scope,
+            self.definition,
             name,
             signature,
             (qualname, NONE),
             location,
         );
-        let defaults = ctx.dict(Vec::new());
-        let function =
-            ctx.define_function(code, scope, name, defaults, qualname, NONE, NONE, false)?;
+        let function = ctx.function_with_closure(
+            code,
+            globals,
+            super::source_code::FunctionClosure::Cells(cell.as_slice()),
+            (name, qualname),
+            NONE,
+            NONE,
+        );
         // Preserve object identity when multiple parameters alias the same lock.
         let mut aliases = HashMap::new();
         aliases

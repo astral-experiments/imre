@@ -73,7 +73,8 @@ fn frame_scope(ctx: &mut Context, frame: Id) -> Result<(Id, Id, bool)> {
         return Ok((scope, code, unoptimized_locals.is_none()));
     }
     let layout = ctx.code_object(code);
-    let mut names: std::collections::HashSet<_> = layout.freevars.iter().cloned().collect();
+    let mut names: std::collections::HashSet<_> =
+        layout.definition.freevars().iter().cloned().collect();
     if let Value::Str(parameters) = ctx.heap.get(layout.parameters) {
         #[derive(serde::Deserialize)]
         struct Layout {

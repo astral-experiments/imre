@@ -546,27 +546,19 @@ impl Context {
         flags: Option<u32>,
     ) -> Id {
         let name_id = self.text("<module>");
-        self.alloc(Value::Code(value::CodeObject {
-            compilation_constants: Default::default(),
-            parsed_parameters: Default::default(),
-            varnames: NONE,
-            cellvars: NONE,
-            freevar_names: NONE,
-            body: value::Body::Native(entry, NONE),
-            parameters: NONE,
-            nested: Vec::new(),
-            freevars: Vec::new(),
-            closure_supported: false,
-            name: name_id,
-            qualname: name_id,
-            doc: NONE,
-            filename,
-            first_line: 1,
-            module_definition: true,
-            flags: flags.unwrap_or(0),
-            flags_complete: flags.is_some(),
-            generator_lambda: false,
-        }))
+        self.realize_code(
+            value::Body::Native(entry, NONE),
+            value::CodeDefinition {
+                module_definition: true,
+                flags: flags.unwrap_or(0),
+                flags_complete: flags.is_some(),
+                ..Default::default()
+            },
+            name_id,
+            NONE,
+            (name_id, NONE),
+            (filename, 1),
+        )
     }
 
     /// Resolve bytes read from a physical origin to its compiled module code, preserving

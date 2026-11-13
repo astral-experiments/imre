@@ -3018,15 +3018,7 @@ impl Context {
         let freevars = if metadata.scope_complete != true {
             None
         } else if let Some(captures_class) = metadata.method_class_cell.as_bool() {
-            let owner = self.scope_data(scope);
-            // A transferred function already owns a closure environment. Only a method
-            // being defined in a class still needs to skip its definition namespace.
-            let enclosing = if owner.closure.environment {
-                Some(scope)
-            } else {
-                owner.parent
-            };
-            self.freevars_with_class_cell(enclosing, reads, captures_class)
+            self.freevars_with_class_cell(self.scope_data(scope).parent, reads, captures_class)
         } else if metadata.class_cell == true {
             // A nested function can read __class__ through super(), or resolve it as a global.
             self.is_enclosing_freevar(lexical, "__class__")
@@ -3050,6 +3042,33 @@ impl Context {
             .code_flags
             .as_u64()
             .and_then(|v| u32::try_from(v).ok());
+        let definition = value::CodeDefinition {
+            module_definition,
+            flags: flags.unwrap_or_default(),
+            flags_complete: flags.is_some(),
+            generator_lambda: metadata.generator_lambda,
+            freevars: (!freevars.is_empty()).then(|| freevars.into()),
+            closure_supported,
+        };
+        self.realize_code(
+            body,
+            definition,
+            name,
+            parameters,
+            (qualname, doc),
+            (filename, first_line),
+        )
+    }
+
+    pub(super) fn realize_code(
+        &mut self,
+        body: value::Body,
+        definition: value::CodeDefinition,
+        name: Id,
+        parameters: Id,
+        (qualname, doc): (Id, Id),
+        (filename, first_line): (Id, u32),
+    ) -> Id {
         self.alloc(Value::Code(value::CodeObject {
             compilation_constants: Default::default(),
             parsed_parameters: Default::default(),
@@ -3063,13 +3082,8 @@ impl Context {
             parameters,
             filename,
             first_line,
-            module_definition,
-            flags: flags.unwrap_or_default(),
-            flags_complete: flags.is_some(),
-            generator_lambda: metadata.generator_lambda,
+            definition,
             nested: Vec::new(),
-            freevars,
-            closure_supported,
         }))
     }
 
@@ -3089,8 +3103,12 @@ impl Context {
         // A borrowed method only owns its defining class if its code captures __class__.
         let code_data = self.code_object(code);
         let mut class_cell = owner.class_cell.filter(|_| {
-            !code_data.closure_supported
-                || code_data.freevars.iter().any(|name| name == "__class__")
+            !code_data.definition.closure_supported
+                || code_data
+                    .definition
+                    .freevars()
+                    .iter()
+                    .any(|name| name == "__class__")
         });
         let scope = if owner.exec_locals.is_some()
             || ((owner.class_body.is_some() || owner.class_namespace.is_some())
@@ -3102,7 +3120,7 @@ impl Context {
         };
         let fields =
             super::function_fields::FunctionFields::new(self, scope, name, qualname, doc, annotate);
-        let names = self.code_object(code).freevars.clone();
+        let names = self.code_object(code).definition.freevars().to_vec();
         let entries = if defaults == NONE {
             Vec::new()
         } else {
@@ -3180,7 +3198,7 @@ impl Context {
             }
             cells.push(cell);
         }
-        let scope = if self.code_object(code).closure_supported {
+        let scope = if self.code_object(code).definition.closure_supported {
             let mut globals = scope;
             while let Some(parent) = self.scope_data(globals).parent {
                 globals = parent;

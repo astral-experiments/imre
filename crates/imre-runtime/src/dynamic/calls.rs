@@ -4280,13 +4280,13 @@ impl Context {
                     return self.code_local_field(obj, name);
                 }
                 "co_flags" => {
-                    if !code.flags_complete {
+                    if !code.definition.flags_complete {
                         return Err(Error::new(
                             "NotImplementedError",
                             "co_flags unavailable for this code object",
                         ));
                     }
-                    return Ok(self.int(i64::from(code.flags)));
+                    return Ok(self.int(i64::from(code.definition.flags)));
                 }
                 "co_name" => return Ok(code.name),
                 "co_qualname" => return Ok(code.qualname),
@@ -4400,7 +4400,7 @@ impl Context {
             } => {
                 if name == "__closure__" {
                     let code = self.code_object(code);
-                    if !code.closure_supported && !code.module_definition {
+                    if !code.definition.closure_supported && !code.definition.module_definition {
                         return Err(Error::new(
                             "NotImplementedError",
                             "code lacks closure metadata",
@@ -9587,7 +9587,7 @@ impl Context {
             return Ok(ScalarAnnotation::Unresolved);
         };
         let provider = self.code_object(code);
-        if !provider.closure_supported || provider.parameters == NONE {
+        if !provider.definition.closure_supported || provider.parameters == NONE {
             return Ok(ScalarAnnotation::Unresolved);
         }
         let sig = self.parsed_parameters(code)?;
@@ -9598,7 +9598,7 @@ impl Context {
         else {
             return Ok(ScalarAnnotation::Unresolved);
         };
-        let postponed = provider.flags & imre_ast::code_flags::FUTURE_ANNOTATIONS != 0;
+        let postponed = provider.definition.flags & imre_ast::code_flags::FUTURE_ANNOTATIONS != 0;
         if published.is_some_and(|text| !postponed || text != name) {
             return Ok(ScalarAnnotation::Unresolved);
         }

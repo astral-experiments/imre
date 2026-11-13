@@ -25,6 +25,13 @@ struct ParsedModule {
     flags: u32,
 }
 
+/// An explicit Python closure tuple keeps its identity. A compiled binding can
+/// expose the same cells lazily through the ordinary function attribute.
+pub(super) enum FunctionClosure<'a> {
+    Tuple(Id),
+    Cells(&'a [Id]),
+}
+
 struct Program {
     // Stop symbol collection at the first invalid binding or misplaced future import.
     syntax_limit: Option<ruff_text_size::TextRange>,
@@ -2391,7 +2398,8 @@ impl Context {
     pub(super) fn inherited_compile_flags(&self) -> u32 {
         match self.heap.get(self.heap.current_code()) {
             Value::Code(caller) => {
-                caller.flags & (code_flags::FUTURE_ANNOTATIONS | code_flags::FUTURE_BARRY_AS_BDFL)
+                caller.definition.flags
+                    & (code_flags::FUTURE_ANNOTATIONS | code_flags::FUTURE_BARRY_AS_BDFL)
             }
             _ => 0,
         }
@@ -2704,31 +2712,21 @@ impl Context {
 
     fn box_source_code(&mut self, module: ParsedModule, filename: Id) -> Id {
         let name = self.heap.code_name("<module>");
-        self.alloc(Value::Code(value::CodeObject {
-            compilation_constants: Default::default(),
-            parsed_parameters: Default::default(),
-            varnames: NONE,
-            cellvars: NONE,
-            freevar_names: NONE,
-            name,
-            qualname: name,
-            // compile() returns the module code object. Its docstring is a rooted constant.
-            doc: NONE,
-            filename,
-            first_line: 1,
-            module_definition: true,
-            flags: module.flags,
-            // Parsed module metadata records only the future flags.
-            flags_complete: false,
-            generator_lambda: false,
-            body: Body::Parsed {
+        self.realize_code(
+            Body::Parsed {
                 constants: module.constants,
             },
-            parameters: NONE,
-            nested: Vec::new(),
-            closure_supported: false,
-            freevars: Vec::new(),
-        }))
+            value::CodeDefinition {
+                module_definition: true,
+                // Parsed module metadata records only the future flags.
+                flags: module.flags,
+                ..Default::default()
+            },
+            name,
+            NONE,
+            (name, NONE),
+            (filename, 1),
+        )
     }
 
     /// Define a function whose parameters and executable belong to the generated code object.
@@ -2816,12 +2814,12 @@ impl Context {
                 ),
             ));
         }
-        if !data.module_definition && !data.closure_supported {
+        if !data.definition.module_definition && !data.definition.closure_supported {
             return Err(unsupported(
                 "function construction without closure metadata",
             ));
         }
-        let required = data.freevars.len();
+        let required = data.definition.freevars().len();
         let code_name = data.name;
         let qualname = data.qualname;
         let name = name.filter(|&v| v != NONE).unwrap_or(code_name);
@@ -2886,35 +2884,38 @@ impl Context {
             None => self.caller_builtins()?,
         };
         let scope = self.function_environment("", globals, builtins);
-        Ok(
-            self.function_with_closure(
-                code,
-                scope,
-                closure,
-                (name, qualname),
-                defaults,
-                kwdefaults,
-            ),
-        )
+        Ok(self.function_with_closure(
+            code,
+            scope,
+            FunctionClosure::Tuple(closure),
+            (name, qualname),
+            defaults,
+            kwdefaults,
+        ))
     }
 
     /// Bind a validated closure to its code object's free variables in order.
-    fn function_with_closure(
+    pub(super) fn function_with_closure(
         &mut self,
         code: Id,
         scope: Id,
-        closure: Id,
+        closure: FunctionClosure<'_>,
         (name, qualname): (Id, Id),
         defaults: Id,
         kwdefaults: Id,
     ) -> Id {
         let data = self.code_object(code);
-        let freevars = data.freevars.clone();
+        let freevars = data.definition.freevars().to_vec();
         let code_doc = data.doc;
-        let cells = match self.heap.get(closure) {
-            Value::Tuple(cells) => cells.to_vec(),
-            _ if closure == NONE => Vec::new(),
-            _ => unreachable!("validated function closure"),
+        let (closure, cells) = match closure {
+            FunctionClosure::Cells(cells) => (NONE, Cow::Borrowed(cells)),
+            FunctionClosure::Tuple(NONE) => (NONE, Cow::Borrowed(&[][..])),
+            FunctionClosure::Tuple(tuple) => {
+                let Value::Tuple(cells) = self.heap.get(tuple) else {
+                    unreachable!("validated function closure")
+                };
+                (tuple, Cow::Owned(cells.to_vec()))
+            }
         };
         let class_cell = freevars
             .iter()
@@ -3144,11 +3145,11 @@ impl Context {
             local = parent;
         }
         if let Value::Code(code) = self.heap.get(code) {
-            names.extend(code.freevars.iter().cloned());
+            names.extend(code.definition.freevars().iter().cloned());
             // Some compiled functions retain their lexical environment because their entire
             // closure cannot yet be cloned. Their statically resolved reads are still locals.
             let frame = self.scope_data(local);
-            if !code.closure_supported
+            if !code.definition.closure_supported
                 && frame.comprehension.is_none()
                 && let Some(parent) = frame.parent
                 && let Value::Str(signature) = self.heap.get(code.parameters)
@@ -3243,14 +3244,14 @@ impl Context {
         }
         let builtins = self.namespace_builtins(globals, function)?;
         let code_id = match self.heap.get(self.scalar_value(source)) {
-            Value::Code(code) if mode == "eval" && !code.freevars.is_empty() => {
+            Value::Code(code) if mode == "eval" && !code.definition.freevars().is_empty() => {
                 return Err(Error::new(
                     "TypeError",
                     "code object passed to eval() may not contain free variables",
                 ));
             }
-            Value::Code(code) if !code.freevars.is_empty() => {
-                let required = code.freevars.len();
+            Value::Code(code) if !code.definition.freevars().is_empty() => {
+                let required = code.definition.freevars().len();
                 if let Some(Value::Tuple(cells)) = closure.map(|id| self.heap.get(id))
                     && cells.len() == required
                     && cells
@@ -3322,12 +3323,19 @@ impl Context {
         let code = self.code_object(code_id);
         if code.parameters != NONE {
             // A complete layout can bind even a nested body without its defining frame.
-            let function = if code.closure_supported || closure.is_some() {
+            let function = if code.definition.closure_supported || closure.is_some() {
                 let cells = closure.unwrap_or(NONE);
                 let name = code.name;
-                self.function_with_closure(code_id, scope, cells, (name, name), NONE, NONE)
+                self.function_with_closure(
+                    code_id,
+                    scope,
+                    FunctionClosure::Tuple(cells),
+                    (name, name),
+                    NONE,
+                    NONE,
+                )
             } else {
-                if !code.module_definition {
+                if !code.definition.module_definition {
                     return Err(unsupported(
                         "exec of a prelinked function with an enclosing scope",
                     ));

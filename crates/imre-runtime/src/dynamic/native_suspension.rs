@@ -304,7 +304,7 @@ impl Context {
         *offset = Some(1);
         let code = *code;
         // An async generator's public wrapper owns its first-iteration and finalization hooks.
-        if self.code_object(code).flags & imre_ast::code_flags::ASYNC_GENERATOR == 0 {
+        if self.code_object(code).definition.flags & imre_ast::code_flags::ASYNC_GENERATOR == 0 {
             self.heap.register_finalizer(owner);
         }
         result.map(Some)
