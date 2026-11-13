@@ -1453,24 +1453,21 @@ impl Checker<'_> {
             && let Some(Binding::Definition(id)) = self.resolve(&call.func)
         {
             let refused = || self.scoped_builtin_error("declared Python call", call);
-            let signature = self
-                .functions
-                .get(&id)
-                .filter(|s| {
-                    call.func.is_name_expr()
-                        && fixed_positional_arguments(call)
-                        && call.arguments.len() == s.params.len()
-                        && s.params.iter().all(|p| {
-                            matches!(
-                                p.kind,
-                                ParameterKind::PositionalOnly | ParameterKind::PositionalOrKeyword
-                            )
-                        })
-                })
+            let signature = self.functions.get(&id).ok_or_else(refused)?;
+            let (written, omitted) = signature
+                .params
+                .split_at_checked(call.arguments.len())
                 .ok_or_else(refused)?;
+            if !call.func.is_name_expr()
+                || !fixed_positional_arguments(call)
+                || written.iter().any(|p| !p.kind.accepts_positional())
+                || omitted.iter().any(|p| p.default.is_none())
+            {
+                return Err(refused());
+            }
             let target = self.expr(&call.func)?;
             let mut args = Vec::with_capacity(call.arguments.len());
-            for (arg, parameter) in call.arguments.args.iter().zip(&signature.params) {
+            for (arg, parameter) in call.arguments.args.iter().zip(written) {
                 let value = self.expr(arg)?;
                 if value.ty != parameter.ty {
                     return Err(self.scoped_builtin_error("declared Python argument", arg));

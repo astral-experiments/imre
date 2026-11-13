@@ -1435,15 +1435,20 @@ fn lower_graph(
             && unavailable.is_none()
             && signature.physical_frame
             && signature.method.is_none()
-            && signature.returns == Type::None
-            && definition.returns.is_some()
-            && !signature.params.is_empty()
-            && signature.params.iter().all(|p| {
-                (p.ty.is_format_scalar() || p.ty == Type::Path)
-                    && p.default.is_none()
-                    && !p.sign_only
-            })
-            && signature.parameter_declarations.iter().all(Option::is_some)
+            && signature
+                .params
+                .iter()
+                .all(|p| p.default.is_none() && !p.sign_only)
+            && ((signature.returns == Type::None
+                && definition.returns.is_some()
+                && !signature.params.is_empty()
+                && signature
+                    .params
+                    .iter()
+                    .all(|p| p.ty.is_format_scalar() || p.ty == Type::Path)
+                && signature.parameter_declarations.iter().all(Option::is_some))
+                || (definition.returns.is_none()
+                    && inference.has_inferred_sequence_argument(signature, &types)))
         {
             registered::place_checked_definition(&checker, definition, signature, &inference)
                 .map(|body| (body, Default::default()))
@@ -1951,6 +1956,10 @@ fn lower_function(
     checker.interactive_names = module.is_doctest_case() && definition.name.as_str() == "_run_case";
     let mut params = Vec::new();
     checker.bind_function_signature(definition, signature, |slot| params.push(slot))?;
+    if checker.checked_call_contracts && definition.returns.is_none() {
+        // The Python frame returns the caller's live result. Inference keeps the fixed result type.
+        checker.returns = Type::PythonObject;
+    }
     // A live Python frame calls the original string methods and iterates the original list.
     if checker.registered_local_start.is_none() {
         checker.joined_lines = joined_lines::find(&definition.body);
@@ -2037,7 +2046,7 @@ fn lower_function(
         }));
     }
     if falls_through {
-        match signature.returns {
+        match checker.returns {
             Type::None => {}
             // A registered frame returns the None handle on fallthrough.
             Type::PythonObject if checker.registered.is_some() => {}
@@ -2085,7 +2094,7 @@ fn lower_function(
             source,
             function: ir::Function {
                 params,
-                returns: signature.returns,
+                returns: checker.returns,
                 locals: checker.locals,
                 body,
             },
