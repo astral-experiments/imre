@@ -15,42 +15,39 @@ enum Lines {
 }
 
 impl Lines {
-    fn next(&mut self) -> Result<Option<StrOwner>> {
-        match self {
+    /// The checked row parser consumes the borrowed text before the source can advance again.
+    fn read_line(&mut self, parse: impl FnOnce(&str) -> Result<bool>) -> Result<Option<bool>> {
+        let parsed = match self {
             Self::List(lines, index) => {
-                // SAFETY: the concrete list and its string stay rooted during this nonreentrant read.
-                let value = unsafe {
-                    lines.0.with(|s| {
-                        Ok(s.sequence()?
-                            .values
-                            .get(*index)
-                            .map(|&word| crate::StrOwner::acquire_word(word)))
+                // SAFETY: the list owns each exact str, and parsing cannot reenter the list.
+                unsafe {
+                    lines.0.with(|s| -> Result<_> {
+                        Ok(s.sequence()?.values.get(*index).map(|&word| {
+                            *index += 1;
+                            parse(&*(word as *const Str))
+                        }))
                     })
-                }?;
-                if value.is_some() {
-                    *index += 1;
-                } else {
-                    *self = Self::End;
-                }
-                Ok(value)
+                }?
             }
             Self::File(file) => {
                 // SAFETY: this rooted file is distinct from its CSV reader; reading cannot reenter.
                 let line = unsafe { file.0.with_mut(|s| s.file_mut().readline()) }?;
-                Ok((!line.is_empty()).then(|| StrOwner::new(line)))
+                return (!line.is_empty()).then(|| parse(&line)).transpose();
             }
             Self::Text(text, byte) => {
-                let Some(ch) = text[*byte..].chars().next() else {
-                    *self = Self::End;
-                    return Ok(None);
-                };
-                let end = *byte + ch.len_utf8();
-                let line = StrOwner::new(Str::new(&text[*byte..end]));
-                *byte = end;
-                Ok(Some(line))
+                let rest = &text[*byte..];
+                let width = rest.ceil_char_boundary(1);
+                (width != 0).then(|| {
+                    *byte += width;
+                    parse(&rest[..width])
+                })
             }
-            Self::End => Ok(None),
+            Self::End => return Ok(None),
+        };
+        if parsed.is_none() {
+            *self = Self::End;
         }
+        parsed.transpose()
     }
 }
 
@@ -341,14 +338,17 @@ impl Reader {
             Ok(())
         });
         loop {
-            let Some(line) = self.lines.next()? else {
+            let Some(complete) = self.lines.read_line(|line| {
+                self.line_num += 1;
+                row.line(&self.dialect, line.chars().map(u32::from), 131_072)
+            })?
+            else {
                 if !row.eof(&self.dialect)? {
                     return Ok(None);
                 }
                 break;
             };
-            self.line_num += 1;
-            if row.line(&self.dialect, line.chars().map(u32::from), 131_072)? {
+            if complete {
                 break;
             }
         }
