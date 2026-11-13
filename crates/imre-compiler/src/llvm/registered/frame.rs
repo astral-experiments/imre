@@ -1852,11 +1852,17 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
         let operands = match &call.arguments {
             RegisteredArguments::Positional => {
                 let receiver_slot = receiver.is_some();
-                let values: Vec<_> = receiver
-                    .into_iter()
-                    .chain(args.map(|a| self.evaluate_handle(a)))
-                    .collect();
-                let (array, count) = self.fixed_call_arguments(&callable, values, exec);
+                let (array, count) =
+                    if receiver_slot && args.as_slice().is_empty() && exec.is_none() {
+                        // Method lookup initialized slot zero and no argument can reuse it.
+                        self.write_handles_at(1, &[] as &[&str])
+                    } else {
+                        let values = receiver
+                            .into_iter()
+                            .chain(args.map(|a| self.evaluate_handle(a)))
+                            .collect();
+                        self.fixed_call_arguments(&callable, values, exec)
+                    };
                 if let Some((index, range)) = call.partition_field {
                     let span = self.expression_range_span(range, call.range.end(), b'[');
                     let get_position =
