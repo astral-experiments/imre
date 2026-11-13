@@ -89,49 +89,36 @@ impl RegisteredFrame<'_, '_> {
         (exit, value, above_exit)
     }
 
-    fn exit_async(&mut self, context: &ContextRegion, exception: Option<&str>) -> String {
-        let args = [
-            context.callable.as_str(),
-            exception.unwrap_or("0"),
-            context.caught.as_str(),
-        ];
-
-        // A pending return, outer managers and the body exception survive this await.
-        // The exceptional exit also retains its callable through the truth test.
-        let outer_roots = self.live.len() + self.live_slots.len();
-        self.caught
-            .push(exception.unwrap_or(&context.caught).into());
-        self.current_range = context.site.range;
-        if let Some(exception) = exception {
-            self.checkpoint_with_roots(context.site.range, &[exception, &context.callable]);
+    fn exit_async(&mut self, context: &ContextRegion, error: &str, outer_roots: usize) -> String {
+        let range = context.site.range;
+        let failed = self.value(&format!("icmp ne i64 {error}, 0"));
+        let active = if context.caught == "0" {
+            error.to_owned()
         } else {
-            self.checkpoint_with_roots(context.site.range, &[&context.callable]);
-        }
+            self.value(&format!(
+                "select i1 {failed}, i64 {error}, i64 {}",
+                context.caught
+            ))
+        };
+        self.caught.push(active);
+        self.current_range = range;
+        self.checkpoint_with_roots(range, &[error, &context.callable]);
         self.caught.pop();
-        self.call_position(context.site.range);
-        let awaitable = self.op("async_exit_context", &args);
-        let mark = if exception.is_some() {
+        self.call_position(range);
+        let awaitable = self.op(
+            "async_exit_context",
+            &[&context.callable, error, &context.caught],
+        );
+        // Only exceptional exits retain the exception and callable across the await and truth test.
+        let mark = self.value(&format!(
+            "select i1 {failed}, i64 {}, i64 {outer_roots}",
             outer_roots + 2
-        } else {
-            outer_roots
-        }
-        .to_string();
+        ));
         self.keep_operands(&mark, &awaitable, "0");
-        let result = self.await_at(&awaitable, "2", context.site.range, &mark);
-        if let Some(exc) = exception {
-            self.call_position(context.site.range);
-            let suppress = self.op("truth", &[&result]);
-            self.keep_operands(&outer_roots.to_string(), exc, &suppress);
-            self.op("restore_caught", &[&context.caught]);
-            suppress
-        } else {
-            self.discard_truth(&mark);
-            "0".into()
-        }
+        self.await_at(&awaitable, "2", range, &mark)
     }
 
     fn propagate_unless_suppressed(&mut self, exception: &str, result: &str, done: &str) {
-        // Sync exit and resumed async exit have already tested the result under the body exception.
         let suppress = self.value(&format!("icmp eq i64 {result}, {}", super::permanent::TRUE));
         let propagate = self.name("b");
         self.branch(&suppress, done, &propagate);
@@ -270,30 +257,39 @@ impl Frame<'_, '_, '_> {
         self.live.pop();
 
         let raised = self.take_context_error(&failed, &context.callable);
-        if site.is_async {
-            let result = self.exit_async(&context, Some(&raised));
-            self.propagate_unless_suppressed(&raised, &result, &done);
-            self.finish_exits(
-                region,
-                |frame, _| frame.exit_async(&context, None),
-                |_, _| unreachable!("exceptional async exit already resumed"),
-            );
-        } else {
-            region.enter(
-                &mut self.body,
-                Completion::Error,
-                Some((raised, context.caught.clone())),
-            );
-            self.finish_exits(
-                region,
-                |frame, region| {
-                    let error = region.pending_error(frame);
-                    let result = frame.exit_sync(&context, &error);
-                    (error, result)
-                },
-                |frame, (error, result)| frame.propagate_unless_suppressed(error, result, &done),
-            );
-        }
+        region.enter(
+            &mut self.body,
+            Completion::Error,
+            Some((raised, context.caught.clone())),
+        );
+        self.finish_exits(
+            region,
+            |frame, region| {
+                let error = region.pending_error(frame);
+                let outer_roots = frame.live.len() + frame.live_slots.len();
+                let result = if site.is_async {
+                    frame.exit_async(&context, &error, outer_roots)
+                } else {
+                    frame.exit_sync(&context, &error)
+                };
+                (error, result, outer_roots)
+            },
+            |frame, target, (error, result, outer_roots)| {
+                if matches!(target, Completion::Error) {
+                    if site.is_async {
+                        frame.call_position(site.range);
+                        let suppress = frame.op("truth", &[result]);
+                        frame.keep_operands(&outer_roots.to_string(), error, &suppress);
+                        frame.op("restore_caught", &[&context.caught]);
+                        frame.propagate_unless_suppressed(error, &suppress, &done);
+                    } else {
+                        frame.propagate_unless_suppressed(error, result, &done);
+                    }
+                } else if site.is_async {
+                    frame.discard_truth(&outer_roots.to_string());
+                }
+            },
+        );
         self.label(&done);
     }
 }
