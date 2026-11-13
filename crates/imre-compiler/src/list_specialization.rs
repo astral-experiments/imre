@@ -345,7 +345,10 @@ impl Plan<'_> {
                     }
                 }
                 Statement::Match(..) => return false,
-                Statement::Break | Statement::Continue | Statement::Exhaust => {}
+                Statement::Position(..)
+                | Statement::Break
+                | Statement::Continue
+                | Statement::Exhaust => {}
                 // An exact string cursor cannot call Python or resize a list.
                 Statement::IterNext {
                     kind: crate::ir::IterNextKind::CodePoint,

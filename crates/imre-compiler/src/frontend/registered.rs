@@ -310,12 +310,7 @@ impl RegisteredFunction {
     }
 
     fn returning(range: TextRange, value: Expr) -> Vec<Statement> {
-        let checkpoint = operation(
-            Builtin::RegisteredStatement(range, None),
-            Type::None,
-            vec![],
-        );
-        vec![Statement::Expr(checkpoint), Statement::Return(value)]
+        vec![Statement::Position(range, None), Statement::Return(value)]
     }
 
     pub(crate) fn region(&self) -> RegisteredRegion<'_> {
@@ -729,11 +724,7 @@ pub(super) fn checkpoint(stmt: &ast::Stmt) -> Statement {
         ast::Stmt::If(branch) => branch.test.range(),
         _ => stmt.range(),
     };
-    Statement::Expr(operation(
-        Builtin::RegisteredStatement(range, imre_ast::unhighlighted_call(stmt)),
-        Type::None,
-        vec![],
-    ))
+    Statement::Position(range, imre_ast::unhighlighted_call(stmt))
 }
 
 pub(super) fn assertion_statements(
@@ -750,11 +741,7 @@ pub(super) fn assertion_statements(
         message.into_iter().collect(),
     );
     [
-        Statement::Expr(operation(
-            Builtin::RegisteredStatement(stmt.test.range(), None),
-            Type::None,
-            vec![],
-        )),
+        Statement::Position(stmt.test.range(), None),
         Statement::If(test, Vec::new(), vec![Statement::Expr(failure)]),
     ]
 }
@@ -2097,11 +2084,11 @@ impl<'a> SuitePreparation<'a> {
                 break;
             }
         }
-        region.checked.function.body.push(Statement::Expr(operation(
-            Builtin::RegisteredStatement(branch.range(), None),
-            Type::None,
-            vec![],
-        )));
+        region
+            .checked
+            .function
+            .body
+            .push(Statement::Position(branch.range(), None));
         region.falls_through = otherwise.is_none() || arm_continues;
         region
             .checked
@@ -2190,11 +2177,7 @@ impl<'a> SuitePreparation<'a> {
             self.sites.omit_assertions,
         );
         let mut operands = Vec::new();
-        let mut statements = vec![Statement::Expr(operation(
-            Builtin::RegisteredStatement(stmt.range(), None),
-            Type::None,
-            vec![],
-        ))];
+        let mut statements = vec![Statement::Position(stmt.range(), None)];
         let mut protected = &mut statements;
         let mut refused_binding = None;
         for item in &stmt.items {
@@ -2315,11 +2298,7 @@ impl<'a> SuitePreparation<'a> {
         } else {
             region.child(self.physical_suite(&loop_.orelse, kind, selection, suspended))
         };
-        let mut statements = vec![Statement::Expr(operation(
-            Builtin::RegisteredStatement(loop_.range(), None),
-            Type::None,
-            Vec::new(),
-        ))];
+        let mut statements = vec![Statement::Position(loop_.range(), None)];
         statements.extend(input.for_suite(body, otherwise, Vec::new()));
         region.checked.function.body = statements;
         Ok(region)
@@ -4236,12 +4215,10 @@ mod tests {
         assert_eq!(plan.checked.local_names.len(), 1);
         assert_eq!(plan.checked.local_names[&0].name, "selected");
         let assertion = body[0].as_assert_stmt().unwrap();
-        let Some(Statement::Expr(checkpoint)) = plan.checked.function.body.first() else {
+        let Some(Statement::Position(range, None)) = plan.checked.function.body.first() else {
             panic!("expected a checkpoint before the physical assertion");
         };
-        assert!(matches!(&checkpoint.kind,
-            ExprKind::Builtin(Builtin::RegisteredStatement(range, None), _) if *range == assertion.test.range()
-        ));
+        assert_eq!(*range, assertion.test.range());
         let [
             PhysicalOperand::Checked(test),
             PhysicalOperand::Residual(message),
@@ -4604,7 +4581,7 @@ else:
             panic!("expected the conditional to bind its child suite")
         };
         assert!(matches!(region.checked.function.body.as_slice(),
-            [Statement::Expr(mark), Statement::If(..)] if matches!(mark.kind, ExprKind::Builtin(Builtin::RegisteredStatement(range, None), _) if range == stmts[1].range())
+            [Statement::Position(range, None), Statement::If(..)] if *range == stmts[1].range()
         ));
         assert!(matches!(
             region.operands.as_slice(),
@@ -5194,7 +5171,7 @@ else:
                     }
                 )])
             );
-            let [Statement::Expr(_), store] = suite.function.body.as_slice() else {
+            let [Statement::Position(..), store] = suite.function.body.as_slice() else {
                 panic!("expected one checkpoint followed by one store")
             };
             let operand = match (module, store) {
@@ -5328,16 +5305,14 @@ print(render('ok'), raw('ok'))
         let functions = graph.registered_functions();
         let body = &functions[&graph.entry][&current.start()].function.body;
         let [
-            Statement::Expr(mark),
+            Statement::Position(range, None),
             Statement::If(_, pass, fail),
             Statement::Return(_),
         ] = &body[..]
         else {
             panic!("expected the checked assertion and implicit return")
         };
-        assert!(
-            matches!(mark.kind, ExprKind::Builtin(Builtin::RegisteredStatement(range, None), _) if range == assertion.test.range())
-        );
+        assert_eq!(*range, assertion.test.range());
         assert!(pass.is_empty());
         let [Statement::Expr(failure)] = &fail[..] else {
             panic!("expected the failure on the false branch");
@@ -5984,12 +5959,18 @@ publish(5, callback)
         let mut checkpoints = Vec::new();
         let mut checked_adds = 0;
         let mut invokes = 0;
-        ir::walk_expressions(&body.body, &mut |expr| match expr.kind {
-            ExprKind::Builtin(Builtin::RegisteredStatement(range, _), _) => {
-                checkpoints.push(&graph.modules[graph.entry].source[range]);
+        ir::walk_nodes(&body.body, &mut |node, _| match node {
+            ir::Node::Statement(Statement::Position(range, _)) => {
+                checkpoints.push(&graph.modules[graph.entry].source[*range]);
             }
-            ExprKind::Binary(Binary::Add, ..) => checked_adds += 1,
-            ExprKind::Invoke { ref args, .. } => {
+            ir::Node::Expression(Expr {
+                kind: ExprKind::Binary(Binary::Add, ..),
+                ..
+            }) => checked_adds += 1,
+            ir::Node::Expression(Expr {
+                kind: ExprKind::Invoke { args, .. },
+                ty,
+            }) => {
                 let site = args.site.python().unwrap();
                 let source = &graph.modules[graph.entry].source;
                 assert_eq!(&source[site.range], "sink(answer)");
@@ -5997,7 +5978,7 @@ publish(5, callback)
                 assert_eq!(&source[name], "sink");
                 assert_eq!(name.end(), site.callee_end);
                 assert!(args.order.is_empty());
-                assert_eq!(expr.ty, Type::PythonObject);
+                assert_eq!(*ty, Type::PythonObject);
                 invokes += 1;
             }
             _ => {}

@@ -62,6 +62,7 @@ pub(crate) struct FixedAttribute {
 
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) enum FixedNode {
+    Position(TextRange),
     Return,
     Effect,
     Raise {
@@ -90,6 +91,7 @@ impl FixedNode {
 
     pub(crate) fn checked(node: &ir::Node<'_>) -> Option<Self> {
         Some(match node {
+            ir::Node::Statement(Statement::Position(range, None)) => Self::Position(*range),
             ir::Node::Statement(Statement::If(_, yes, no)) => Self::Branch(yes.len(), no.len()),
             ir::Node::Statement(Statement::Return(_)) => Self::Return,
             ir::Node::Statement(Statement::Expr(_)) => Self::Effect,
@@ -191,7 +193,7 @@ impl SourceSites {
         self.current.filter(|site| site.range == range)
     }
 
-    pub(super) fn expression(&mut self, range: TextRange, node: FixedNode) {
+    pub(super) fn record(&mut self, range: TextRange, node: FixedNode) {
         if let Some(site) = self.site_at(range) {
             self.commit(site, node);
         }
@@ -199,7 +201,7 @@ impl SourceSites {
 
     pub(super) fn checked_expression(&mut self, range: TextRange, value: &Expr) {
         if let Some(node) = FixedNode::checked(&ir::Node::Expression(value)) {
-            self.expression(range, node);
+            self.record(range, node);
         }
     }
 

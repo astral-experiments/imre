@@ -724,7 +724,6 @@ impl Builtin {
             | Self::RegisteredTypeAlias(_)
             | Self::RegisteredSuite(_)
             | Self::RegisteredInput(_)
-            | Self::RegisteredStatement(..)
             | Self::RegisteredDiscard
             | Self::RegisteredDisplayHook
             | Self::RegisteredName(_)

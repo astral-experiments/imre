@@ -109,7 +109,9 @@ fn updates(emit: &Emitter<'_, '_>, st: &Statement, targets: &mut BTreeSet<usize>
         Statement::While(test, a, b) | Statement::If(test, a, b) => {
             scalar(test) && a.iter().chain(b).all(|s| updates(emit, s, targets))
         }
-        Statement::Break | Statement::Continue | Statement::Exhaust => true,
+        Statement::Position(..) | Statement::Break | Statement::Continue | Statement::Exhaust => {
+            true
+        }
         _ => false,
     }
 }
@@ -134,7 +136,10 @@ impl Emitter<'_, '_> {
                     scalar(test) && yes.iter().chain(no).all(|s| fixed_region(s, types))
                 }
                 Statement::Return(value) => scalar(value) || matches!(value.kind, ExprKind::None),
-                Statement::Break | Statement::Continue | Statement::Exhaust => true,
+                Statement::Position(..)
+                | Statement::Break
+                | Statement::Continue
+                | Statement::Exhaust => true,
                 _ => false,
             }
         }

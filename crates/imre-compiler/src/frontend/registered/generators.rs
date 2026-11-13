@@ -146,11 +146,7 @@ fn loop_clause(
     nested: bool,
     emit: impl FnOnce(pipelines::Prepared, &Statement) -> Vec<Statement>,
 ) -> Vec<Statement> {
-    let boundary = Statement::Expr(operation(
-        Builtin::RegisteredStatement(site, None),
-        Type::None,
-        vec![],
-    ));
+    let boundary = Statement::Position(site, None);
     if !nested {
         return emit(input, &boundary);
     }

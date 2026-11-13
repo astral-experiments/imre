@@ -1076,12 +1076,15 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
     }
 
     pub(crate) fn emit_statement(&mut self, stmt: &Statement) {
-        if let Entry::Registered(frame) = &mut self.0
-            && let Some(range) = frame.next_fixed_site()
-        {
-            frame.statement_site(range, None);
+        if let Entry::Registered(frame) = &mut self.0 {
+            match (stmt, frame.next_fixed_site()) {
+                (Statement::Position(range, simple), _) => frame.statement_site(*range, *simple),
+                (_, Some(range)) => frame.statement_site(range, None),
+                (_, None) => {}
+            }
         }
         match stmt {
+            Statement::Position(..) => {}
             Statement::Assign(slot, expr) => {
                 let previous_small = match &mut self.0 {
                     Entry::Native(emitter) => {

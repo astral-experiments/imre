@@ -233,7 +233,10 @@ impl Analysis<'_> {
                         state[slot] = None;
                     }
                 }
-                Statement::Break | Statement::Continue | Statement::Exhaust => {}
+                Statement::Position(..)
+                | Statement::Break
+                | Statement::Continue
+                | Statement::Exhaust => {}
             }
         }
     }
@@ -543,6 +546,7 @@ pub(crate) fn block_readonly(body: &[Statement]) -> bool {
         }),
         Statement::Move(..)
         | Statement::Clear(_)
+        | Statement::Position(..)
         | Statement::Break
         | Statement::Continue
         | Statement::Exhaust => true,

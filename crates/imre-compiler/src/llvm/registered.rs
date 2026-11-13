@@ -82,7 +82,8 @@ pub(crate) fn frame_inputs(
                         uses_python_protocol = true;
                         value.as_ref().is_none_or(|raised| raised.origin.is_none())
                     }
-                    Statement::Return(_)
+                    Statement::Position(..)
+                    | Statement::Return(_)
                     | Statement::Expr(_)
                     | Statement::Scope { .. }
                     | Statement::While(..)
@@ -259,9 +260,7 @@ pub(crate) fn frame_inputs(
                 uses_python_protocol = true;
                 args.len() == 1
             }
-            ExprKind::Builtin(Builtin::RegisteredStatement(..) | Builtin::RegisteredDiscard, _) => {
-                true
-            }
+            ExprKind::Builtin(Builtin::RegisteredDiscard, _) => true,
             ExprKind::Builtin(Builtin::RegisteredLocation(..), operands) => operands.len() == 1,
             ExprKind::Builtin(Builtin::RegisteredAttribute { action, .. }, operands) => {
                 use ir::AttributeAction;
@@ -939,10 +938,6 @@ impl<'f> Frame<'f, '_, '_> {
                 unreachable!("ordered child suite outside its control region")
             };
             RegisteredBody::Suite(&region.suites[*index]).emit(self.code);
-            true
-        } else if let ExprKind::Builtin(Builtin::RegisteredStatement(range, simple), _) = &expr.kind
-        {
-            self.statement_site(*range, *simple);
             true
         } else if matches!(
             expr.kind,

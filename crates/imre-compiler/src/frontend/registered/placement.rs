@@ -87,6 +87,29 @@ mod tests {
     }
 
     #[test]
+    fn fallthrough_keeps_each_executable_source_position() {
+        let text = "def nothing():\n    pass\n    pass\nprint(nothing())\n";
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.py");
+        std::fs::write(&path, text).unwrap();
+        let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
+        graph.registered_startup = true;
+        crate::checked_lower(&mut graph).unwrap();
+        let functions = graph.registered_functions();
+        let body = &functions[&graph.entry][&TextSize::default()];
+        let [
+            Statement::Position(first, None),
+            Statement::Position(last, None),
+        ] = body.function.body.as_slice()
+        else {
+            panic!("expected both checkpoints and an implicit None return");
+        };
+        assert_eq!(body.fixed_sites, [*first, *last]);
+        assert_eq!((&text[*first], &text[*last]), ("pass", "pass"));
+        assert!(first.end() < last.start());
+    }
+
+    #[test]
     fn named_entry_places_the_checked_arithmetic_body() {
         let text = "def scale(n: int) -> int:\n    return n * 31415927 + 17\n\nprint(scale(3))\n";
         let dir = tempfile::tempdir().unwrap();

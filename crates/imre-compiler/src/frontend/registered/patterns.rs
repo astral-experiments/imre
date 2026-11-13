@@ -45,11 +45,7 @@ impl SuitePreparation<'_> {
             case.captures = scope.match_slots(&case.pattern);
         }
         region.checked = scope.finish(vec![
-            Statement::Expr(operation(
-                Builtin::RegisteredStatement(branch.range(), None),
-                Type::None,
-                vec![],
-            )),
+            Statement::Position(branch.range(), None),
             Statement::Match(subject, cases),
         ]);
         Ok(region)

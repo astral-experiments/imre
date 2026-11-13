@@ -4494,7 +4494,6 @@ impl Emitter<'_, '_> {
             | Builtin::RegisteredTypeAlias(_)
             | Builtin::RegisteredSuite(_)
             | Builtin::RegisteredInput(_)
-            | Builtin::RegisteredStatement(..)
             | Builtin::RegisteredDiscard
             | Builtin::RegisteredDisplayHook
             | Builtin::RegisteredNamespace(_)
