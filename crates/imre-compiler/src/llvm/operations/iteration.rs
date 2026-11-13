@@ -362,6 +362,7 @@ impl CheckedBody<'_, '_, '_, '_> {
         let value = self.operand(expr);
         match &mut self.0 {
             Entry::Native(_) => value,
+            Entry::Registered(_) if matches!(value, CheckedValue::Handle { .. }) => value,
             Entry::Registered(frame) => CheckedValue::handle(frame.materialize(&value)),
         }
     }

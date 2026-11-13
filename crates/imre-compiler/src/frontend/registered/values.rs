@@ -905,6 +905,16 @@ fn display_operands<E>(
         .collect()
 }
 
+fn refine_operand(types: crate::analysis::OperandTypes<'_>, node: &ast::Expr, value: &mut Expr) {
+    if value.ty == Type::PythonObject
+        && let ExprKind::Builtin(Builtin::RegisteredLocation(range, _, hint), _) = &mut value.kind
+        && *range == node.range()
+        && hint.is_none()
+    {
+        *hint = types.scalar_type(node);
+    }
+}
+
 /// Retain the source layout on the Python operand that the arithmetic guard will inspect.
 pub(in crate::frontend) fn binary(
     source: &ast::ExprBinOp,
@@ -924,19 +934,9 @@ pub(in crate::frontend) fn binary(
                 | Binary::RightShift
         )
     }) {
-        let refine = |node: &ast::Expr, value: &mut Expr| {
-            if value.ty == Type::PythonObject
-                && let ExprKind::Builtin(Builtin::RegisteredLocation(range, _, hint), _) =
-                    &mut value.kind
-                && *range == node.range()
-                && hint.is_none()
-            {
-                *hint = types.scalar_type(node);
-            }
-        };
-        refine(&source.left, &mut left);
+        refine_operand(types, &source.left, &mut left);
         if left.checked_operand_type() == Type::Int {
-            refine(&source.right, &mut right);
+            refine_operand(types, &source.right, &mut right);
         }
     }
     Expr {
@@ -1012,11 +1012,22 @@ pub(super) fn operation<E>(
             return generator_binding(generator, child).map(Some);
         }
         ast::Expr::Compare(cmp) => {
-            let values = cmp
+            let mut values = cmp
                 .operands
                 .iter()
                 .map(&mut child)
                 .collect::<StdResult<Vec<_>, _>>()?;
+            if let [op] = cmp.ops.as_ref()
+                && ir::Compare::from_operator(*op).is_some()
+                && let Some(types) = source.operand_types
+                && let [left, right] = values.as_mut_slice()
+            {
+                if right.checked_operand_type() == Type::Int {
+                    refine_operand(types, &cmp.operands[0], left);
+                } else if left.checked_operand_type() == Type::Int {
+                    refine_operand(types, &cmp.operands[1], right);
+                }
+            }
             // A chain can return any comparison that ends it. Identity and
             // membership always return a boolean, including on user-defined objects.
             let ty = if cmp.ops.iter().all(|op| {

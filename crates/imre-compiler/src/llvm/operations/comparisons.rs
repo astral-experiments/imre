@@ -40,6 +40,8 @@ impl<'f, 'a, 'p, 'm> CheckedBody<'f, 'a, 'p, 'm> {
             }
             Entry::Registered(_) => false,
         };
+        let integer_pair = matches!(values, [a, b]
+            if a.checked_operand_type() == Type::Int && b.checked_operand_type() == Type::Int);
         let mut chain = ComparisonChain::new(self, ops, truth);
         for expr in values {
             if let [op @ (CmpOp::In | CmpOp::NotIn)] = ops
@@ -61,7 +63,7 @@ impl<'f, 'a, 'p, 'm> CheckedBody<'f, 'a, 'p, 'm> {
             } else {
                 self.store_operand(expr)
             };
-            if let Some(result) = chain.push(self, value, right_scope) {
+            if let Some(result) = chain.push(self, value, right_scope, integer_pair) {
                 return result;
             }
         }
@@ -85,6 +87,7 @@ impl<'f, 'a, 'p, 'm> CheckedBody<'f, 'a, 'p, 'm> {
         op: CmpOp,
         left: &CheckedValue,
         right: &CheckedValue,
+        integer_pair: bool,
     ) -> CheckedValue {
         match (left, right) {
             (CheckedValue::Native(a, None), CheckedValue::Native(b, None)) => {
@@ -98,6 +101,26 @@ impl<'f, 'a, 'p, 'm> CheckedBody<'f, 'a, 'p, 'm> {
                         self.body()
                             .instruction(format!("icmp {relation} i64 {a}, {b}")),
                     )
+                } else if integer_pair && let Some(order) = Compare::from_operator(op) {
+                    let (x, _) = self.integer_operand(left);
+                    let (y, _) = self.integer_operand(right);
+                    // Only two tagged integers have their Python ordering directly in the words.
+                    let tags = self.body().instruction(format!("and i64 {x}, {y}"));
+                    let small = self.body().instruction(format!("trunc i64 {tags} to i1"));
+                    ValueJoin::select(
+                        self,
+                        Self::body,
+                        |code, yes, no| code.body().branch(&small, yes, no),
+                        |code| {
+                            let predicate = order.signed_predicate();
+                            let bit = code
+                                .body()
+                                .instruction(format!("icmp {predicate} i64 {x}, {y}"));
+                            code.python().boolean_result(&bit, false)
+                        },
+                        |code| CheckedValue::handle(code.python().op(op.as_str(), &[a, b])),
+                    )
+                    .expect("a comparison has a normal edge")
                 } else {
                     CheckedValue::handle(self.python().op(op.as_str(), &[a, b]))
                 }
@@ -151,6 +174,7 @@ impl<'a> ComparisonChain<'a> {
         code: &mut CheckedBody<'_, '_, '_, '_>,
         right: CheckedValue,
         right_scope: Option<(String, (String, String))>,
+        integer_pair: bool,
     ) -> Option<CheckedValue> {
         let Some(left) = self.left.take() else {
             self.left = Some(right);
@@ -163,7 +187,7 @@ impl<'a> ComparisonChain<'a> {
         let root = &self.root;
         let done = &self.done;
         let join = &mut self.join;
-        let value = code.compare_pair(op, &left, &right);
+        let value = code.compare_pair(op, &left, &right, integer_pair);
         let handle = match &value {
             CheckedValue::Handle { id, .. } => Some(id.as_str()),
             _ => None,

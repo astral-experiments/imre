@@ -3774,14 +3774,7 @@ impl Emitter<'_, '_> {
     }
 
     fn compare(&mut self, op: Compare, left: &Value, right: &Value) -> Value {
-        let predicate = match op {
-            Compare::Equal => "eq",
-            Compare::NotEqual => "ne",
-            Compare::Less => "slt",
-            Compare::LessEqual => "sle",
-            Compare::Greater => "sgt",
-            Compare::GreaterEqual => "sge",
-        };
+        let predicate = op.signed_predicate();
         if matches!(
             (left.ty, right.ty),
             (Type::Int, Type::Float) | (Type::Float, Type::Int)
@@ -10221,6 +10214,19 @@ fn record_layouts(
             "{{ i64 {count}, ptr @kinds_{name}, ptr {semantics} }}"
         )
         .unwrap();
+    }
+}
+
+impl Compare {
+    fn signed_predicate(self) -> &'static str {
+        match self {
+            Self::Equal => "eq",
+            Self::NotEqual => "ne",
+            Self::Less => "slt",
+            Self::LessEqual => "sle",
+            Self::Greater => "sgt",
+            Self::GreaterEqual => "sge",
+        }
     }
 }
 
