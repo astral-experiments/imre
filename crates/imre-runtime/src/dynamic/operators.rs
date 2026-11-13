@@ -5943,8 +5943,9 @@ impl Context {
             });
         // Once both string equality slots decline, distinct objects compare unequal
         // even when their underlying spellings are identical.
-        let text_equality =
-            op == "==" && self.string_storage(a).is_some() && self.string_storage(b).is_some();
+        let text_equality = matches!(op, "==" | "!=")
+            && self.string_storage(a).is_some()
+            && self.string_storage(b).is_some();
         if real_pair
             || native_comparison
             || text_equality
