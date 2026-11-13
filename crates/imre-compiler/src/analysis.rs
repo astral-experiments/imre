@@ -232,6 +232,12 @@ impl OperandTypes<'_> {
         self.session.parsed(self.session.files[self.module])
     }
 
+    /// A forwarded operand can retain a source index while naming a different value.
+    pub(crate) fn is_original_operand(self, operand: &Expr) -> bool {
+        self.original_operand(&self.parsed(), operand.into())
+            .is_some()
+    }
+
     pub(crate) fn scalar_type(self, operand: &Expr) -> Option<crate::ir::Type> {
         self.checked_scalar(operand.into(), ScalarMatch::Assignable)
     }

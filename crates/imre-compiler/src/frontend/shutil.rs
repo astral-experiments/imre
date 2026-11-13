@@ -482,7 +482,13 @@ impl Checker<'_> {
                     .operands(self.source, self.graph.python_optimization());
                 // The ordinary binder loads an imported callable before either path.
                 // A direct method would need its separate receiver.
-                if source.direct_method(call).is_some() {
+                if source.direct_method(call).is_some()
+                    || !self
+                        .graph
+                        .session
+                        .operand_types(self.module)
+                        .is_original_operand(&call.func)
+                {
                     return None;
                 }
                 registered::values::registered_value(&call.func, source)
