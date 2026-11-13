@@ -50,7 +50,6 @@ pub(crate) struct NamedFunction<'p> {
     pub(crate) metadata: CallableMetadata,
     pub(crate) globals: std::collections::BTreeSet<String>,
     pub(crate) annotations: Option<Box<crate::frontend::ParameterAnnotations>>,
-    pub(crate) generic: bool,
     pub(crate) type_params:
         Vec<crate::ir::RegisteredTypeParameter<crate::frontend::ParameterEvaluator>>,
 }
@@ -82,7 +81,6 @@ impl NamedFunction<'_> {
             metadata: CallableMetadata::new(Some(&def.parameters), lexical, suspension_flags),
             globals: std::mem::take(&mut lexical.names.globals),
             annotations: None,
-            generic: def.type_params.is_some(),
             type_params: Vec::new(),
         }
     }

@@ -2984,7 +2984,7 @@ impl Context {
                     return false;
                 }
                 let captured = match name {
-                    "__class__" => annotation_class,
+                    "__class__" => annotation_class && class.in_class_body,
                     "__classdict__" => class_reads,
                     CONDITIONAL => class_reads && class.conditional_annotation_cell().is_some(),
                     _ => false,
@@ -3189,6 +3189,7 @@ impl Context {
                 continue;
             }
             if name == "__class__"
+                && in_class
                 && (signature["method_class_cell"] == true || signature["annotation_class"] == true)
             {
                 cells.push(class_cell.expect("class scope"));

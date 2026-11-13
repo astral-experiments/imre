@@ -153,8 +153,7 @@ pub(crate) fn function_parameter_header<'a>(
     Some(params)
 }
 
-/// Class layout and registered definition binding share the lexical scope decision.
-/// Ordinary named functions may inherit a method's finite type-parameter scope.
+/// Determine whether a generic function can select object lowering during class layout or boxing.
 pub(crate) fn type_parameter_scope(
     function: &ast::StmtFunctionDef,
     string_annotations: bool,
