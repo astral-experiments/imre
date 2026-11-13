@@ -3572,6 +3572,17 @@ impl<'a> Checker<'a> {
         }
         let slot = self.hidden(ty);
         self.names.insert(name.to_owned(), slot);
+        if let Some(namespace) = self.namespace
+            && self.comprehension_targets.contains(name)
+        {
+            self.namespace_bindings.insert(
+                slot,
+                registered::LocalBinding {
+                    name: name.to_owned(),
+                    namespace: Some(namespace),
+                },
+            );
+        }
         Ok(slot)
     }
 
