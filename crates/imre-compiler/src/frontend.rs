@@ -7432,15 +7432,26 @@ impl<'a> Checker<'a> {
                 .transpose()?;
             let before_handler = name.and_then(|_| self.take_breaks());
             let capture_depth = self.caught_exceptions.len();
-            if let (Some(slot), Some(target)) = (name, &handler.name)
-                && let ir::ExceptionMatcher::Categories(kinds) = &matcher
-                && !narrowing::assigned_names(&handler.body).contains(target.as_str())
-            {
-                self.caught_exceptions.push(CaughtException {
-                    slot,
-                    builtin_class: Self::directly_raised_builtin(&body, kinds),
-                    fields: processes::process_error_view(raises, &body, self.types, kinds),
-                });
+            let caught = name.zip(handler.name.as_ref()).and_then(|(slot, target)| {
+                let ir::ExceptionMatcher::Categories(kinds) = &matcher else {
+                    return None;
+                };
+                Some((slot, target, kinds))
+            });
+            if caught.is_some() || !try_.finalbody.is_empty() {
+                let writes = narrowing::assigned_names(&handler.body);
+                if let Some((slot, target, kinds)) = caught
+                    && !writes.contains(target.as_str())
+                {
+                    self.caught_exceptions.push(CaughtException {
+                        slot,
+                        builtin_class: Self::directly_raised_builtin(&body, kinds),
+                        fields: processes::process_error_view(raises, &body, self.types, kinds),
+                    });
+                }
+                if !try_.finalbody.is_empty() {
+                    assigned.extend(writes);
+                }
             }
             let (handler_body, falls) = self.block(&handler.body)?;
             self.caught_exceptions.truncate(capture_depth);
@@ -7492,7 +7503,6 @@ impl<'a> Checker<'a> {
         deleted.extend(narrowing::deleted_names(&try_.orelse));
         for handler in &try_.handlers {
             let ast::ExceptHandler::ExceptHandler(handler) = handler;
-            assigned.extend(narrowing::assigned_names(&handler.body));
             deleted.extend(narrowing::deleted_names(&handler.body));
             if let Some(name) = &handler.name
                 && let Some(slot) = self.names.get(name.as_str())
