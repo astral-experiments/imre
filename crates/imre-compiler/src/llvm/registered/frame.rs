@@ -1621,43 +1621,6 @@ pub(crate) trait FrameEmitter<'a, 'p>:
         self.op("put", &[receiver, index, value])
     }
 
-    fn object_operation<'e, T: 'e>(
-        &mut self,
-        op: &Builtin,
-        target: &'e T,
-        mut args: impl Iterator<Item = &'e T>,
-        exec: Option<super::sites::CompiledExec>,
-        mut evaluate: impl FnMut(&mut Self, &T) -> String,
-    ) -> String {
-        match op {
-            Builtin::RegisteredDeleteItem => {
-                let mark = self.temporary_mark();
-                let targets = self.begin_operand_scope();
-                let receiver = evaluate(self, target);
-                let key_mark = self.keep_operands(&mark, &receiver, "0");
-                let key = evaluate(self, args.next().expect("indexed deletion key"));
-                self.keep_operands(&key_mark, &key, "0");
-                let result = self.delete_item(&receiver, &key);
-                self.finish_unwind(targets, |frame| frame.release_owned_operands(&mark));
-                self.release_owned_operands(&mark);
-                result
-            }
-            Builtin::RegisteredCall(call) => self.call_value(call, target, args, exec, evaluate),
-            Builtin::RegisteredAttribute {
-                action,
-                name,
-                range,
-            } => self.attribute_operation(
-                *action,
-                name,
-                *range,
-                std::iter::once(target).chain(args),
-                evaluate,
-            ),
-            _ => unreachable!("selected Python object operation"),
-        }
-    }
-
     fn begin_unary(&mut self) -> (String, (String, String)) {
         (self.temporary_mark(), self.begin_operand_scope())
     }
@@ -1678,162 +1641,6 @@ pub(crate) trait FrameEmitter<'a, 'p>:
         }
         self.finish_operand_scope(&mark, edge);
         result
-    }
-
-    /// Evaluate the callable before its arguments. A lone *iterable is converted
-    /// at invocation, after the keywords; a mixed positional list expands each * in place.
-    fn call_value<'e, T: 'e>(
-        &mut self,
-        call: &ir::RegisteredCall,
-        target: &T,
-        mut args: impl Iterator<Item = &'e T>,
-        exec: Option<super::sites::CompiledExec>,
-        mut evaluate: impl FnMut(&mut Self, &T) -> String,
-    ) -> String {
-        use ir::{RegisteredArguments, RegisteredCallTarget};
-
-        let mark = self.temporary_mark();
-        if self.native_suspension
-            && let RegisteredCallTarget::Callable {
-                suspended_name: Some(name),
-                ..
-            } = &call.target
-        {
-            self.call_position(*name);
-        }
-        let (scope, target) = if call.explicit_scope {
-            let scope = evaluate(self, target);
-            (scope, args.next().expect("scoped call has a target"))
-        } else {
-            (self.scope.clone(), target)
-        };
-        let (callable, receiver, callee_end) = match &call.target {
-            RegisteredCallTarget::Callable { end, .. } => (evaluate(self, target), None, *end),
-            RegisteredCallTarget::Method {
-                name, attribute, ..
-            } => self.unwind_operands(&mark, |f| {
-                let receiver = evaluate(f, target);
-                let direct = matches!(call.arguments, RegisteredArguments::Positional);
-                let (callee, bound) = if let SourcePosition::Expression(active) = f.position {
-                    let lookup =
-                        TextRange::new(active.start().max(attribute.start()), attribute.end());
-                    f.with_source_range(lookup, |f| {
-                        f.method_target(&receiver, name, lookup, direct)
-                    })
-                } else {
-                    f.method_target(&receiver, name, *attribute, direct)
-                };
-                f.keep_operands(&mark, &callee, bound.as_deref().unwrap_or("0"));
-                (callee, bound, attribute.end())
-            }),
-        };
-        let operands = match &call.arguments {
-            RegisteredArguments::Positional => {
-                let receiver_slot = receiver.is_some();
-                let values: Vec<_> = receiver
-                    .into_iter()
-                    .chain(args.map(|a| evaluate(self, a)))
-                    .collect();
-                let (array, count) = self.fixed_call_arguments(&callable, values, exec);
-                if let Some((index, range)) = call.partition_field {
-                    let span = self.expression_range_span(range, call.range.end(), b'[');
-                    let get_position =
-                        span.map_or_else(|| "null".into(), |span| self.output.position(span));
-                    debug_assert!(receiver_slot && count == 2);
-                    CallArguments::PartitionField {
-                        array,
-                        index,
-                        get_position,
-                    }
-                } else {
-                    CallArguments::Positional {
-                        array,
-                        count,
-                        receiver_slot,
-                    }
-                }
-            }
-            RegisteredArguments::Keywords { positional, names } => {
-                let values: Vec<_> = args.map(|a| evaluate(self, a)).collect();
-                let (array, _) = self.fixed_call_arguments(&callable, values, exec);
-                CallArguments::FixedKeywords {
-                    array,
-                    positional: *positional,
-                    keywords: names.len(),
-                    names: self.output.data(names.join("\0").as_bytes()),
-                }
-            }
-            RegisteredArguments::Packed(pack) => self.unwind_operands(&mark, |f| {
-                let mut values = ArgumentPack::new(f, pack, Some(&callable));
-                for (index, arg) in args.enumerate() {
-                    let slot = values.prepare(f, index);
-                    let value = evaluate(f, arg);
-                    values.insert(f, slot, &value);
-                }
-                let (args, kwargs) = values.finish(f);
-                CallArguments::Packed { args, kwargs }
-            }),
-        };
-        self.positioned_call(&callable, operands, &mark, call.range, callee_end, &scope)
-    }
-
-    /// Execute a descriptor operation at the original target, using the same live receiver
-    /// for both halves of augmented assignment. A mutation releases its operand window on
-    /// success and unwinds it before transferring an exception to the handler.
-    fn attribute_operation<'e, T: 'e>(
-        &mut self,
-        action: ir::AttributeAction,
-        name: &str,
-        range: ruff_text_size::TextRange,
-        mut operands: impl Iterator<Item = &'e T>,
-        mut evaluate: impl FnMut(&mut Self, &T) -> String,
-    ) -> String {
-        use ir::AttributeAction;
-        let first = operands.next().expect("attribute operand");
-        let mark = self.temporary_mark();
-        if action == AttributeAction::Load {
-            return self.unwind_operands(&mark, |code| {
-                let receiver = evaluate(code, first);
-                let value = code.attribute_value(&receiver, name, range);
-                code.keep_operands(&mark, &value, "0");
-                value
-            });
-        }
-        self.unwind_operands(&mark, |code| {
-            match action {
-                AttributeAction::Store => {
-                    let value = evaluate(code, first);
-                    code.store_attribute(name, range, &value, |code| {
-                        evaluate(code, operands.next().expect("attribute receiver"))
-                    });
-                }
-                AttributeAction::Delete => {
-                    let receiver = evaluate(code, first);
-                    code.write_attribute(&receiver, name, range, None);
-                }
-                AttributeAction::InPlace(op) => {
-                    let receiver = evaluate(code, first);
-                    let right_mark = code.temporary_mark();
-                    let value = code.unwind_operands(&right_mark, |code| {
-                        let left = code.attribute_value(&receiver, name, range);
-                        let right = evaluate(code, operands.next().expect("in-place RHS"));
-                        let value = code.inplace(op, &left, &right);
-                        // The binary operation consumed both operands before STORE_ATTR.
-                        code.keep_operands(&right_mark, &value, "0");
-                        value
-                    });
-                    // STORE_ATTR consumes its receiver before the value being stored.
-                    let receiver_mark = code.keep_operands(&mark, &value, &receiver);
-                    code.unwind_operands(&receiver_mark, |code| {
-                        code.write_attribute(&receiver, name, range, Some(&value));
-                        code.discard_truth(&receiver_mark);
-                    });
-                }
-                AttributeAction::Load => unreachable!(),
-            }
-            code.discard_truth(&mark);
-        });
-        permanent::NONE.to_string()
     }
 
     fn store_attribute(
@@ -1994,6 +1801,188 @@ pub(crate) trait FrameEmitter<'a, 'p>:
 impl<'a, 'p, T> FrameEmitter<'a, 'p> for T where
     T: std::ops::DerefMut<Target = RegisteredFrame<'a, 'p>>
 {
+}
+
+impl super::Frame<'_, '_, '_> {
+    pub(crate) fn object_operation(&mut self, op: &Builtin, operands: &[Expr]) -> CheckedValue {
+        let (target, args) = operands
+            .split_first()
+            .expect("checked object operation has a target");
+        let handle = match op {
+            Builtin::RegisteredDeleteItem => {
+                let mark = self.temporary_mark();
+                let targets = self.begin_operand_scope();
+                let receiver = self.evaluate_handle(target);
+                let key_mark = self.keep_operands(&mark, &receiver, "0");
+                let key = self.evaluate_handle(args.first().expect("indexed deletion key"));
+                self.keep_operands(&key_mark, &key, "0");
+                let result = self.delete_item(&receiver, &key);
+                self.finish_unwind(targets, |frame| frame.release_owned_operands(&mark));
+                self.release_owned_operands(&mark);
+                result
+            }
+            Builtin::RegisteredCall(call) => self.call_value(call, target, args),
+            Builtin::RegisteredAttribute {
+                action,
+                name,
+                range,
+            } => self.attribute_operation(*action, name, *range, operands.iter()),
+            _ => unreachable!("selected Python object operation"),
+        };
+        CheckedValue::handle(handle)
+    }
+
+    /// Evaluate the callable before its arguments. A lone *iterable is converted
+    /// at invocation, after the keywords; a mixed positional list expands each * in place.
+    fn call_value(&mut self, call: &ir::RegisteredCall, target: &Expr, args: &[Expr]) -> String {
+        use ir::{RegisteredArguments, RegisteredCallTarget};
+        let exec = self.exec_literal_at(call.range);
+        let mut args = args.iter();
+
+        let mark = self.temporary_mark();
+        if self.native_suspension
+            && let RegisteredCallTarget::Callable {
+                suspended_name: Some(name),
+                ..
+            } = &call.target
+        {
+            self.call_position(*name);
+        }
+        let (scope, target) = if call.explicit_scope {
+            let scope = self.evaluate_handle(target);
+            (scope, args.next().expect("scoped call has a target"))
+        } else {
+            (self.scope.clone(), target)
+        };
+        let (callable, receiver, callee_end) = match &call.target {
+            RegisteredCallTarget::Callable { end, .. } => {
+                (self.evaluate_handle(target), None, *end)
+            }
+            RegisteredCallTarget::Method {
+                name, attribute, ..
+            } => self.unwind_operands(&mark, |f| {
+                let receiver = f.evaluate_handle(target);
+                let direct = matches!(call.arguments, RegisteredArguments::Positional);
+                let (callee, bound) = if let SourcePosition::Expression(active) = f.position {
+                    let lookup =
+                        TextRange::new(active.start().max(attribute.start()), attribute.end());
+                    f.with_source_range(lookup, |f| {
+                        f.method_target(&receiver, name, lookup, direct)
+                    })
+                } else {
+                    f.method_target(&receiver, name, *attribute, direct)
+                };
+                f.keep_operands(&mark, &callee, bound.as_deref().unwrap_or("0"));
+                (callee, bound, attribute.end())
+            }),
+        };
+        let operands = match &call.arguments {
+            RegisteredArguments::Positional => {
+                let receiver_slot = receiver.is_some();
+                let values: Vec<_> = receiver
+                    .into_iter()
+                    .chain(args.map(|a| self.evaluate_handle(a)))
+                    .collect();
+                let (array, count) = self.fixed_call_arguments(&callable, values, exec);
+                if let Some((index, range)) = call.partition_field {
+                    let span = self.expression_range_span(range, call.range.end(), b'[');
+                    let get_position =
+                        span.map_or_else(|| "null".into(), |span| self.output.position(span));
+                    debug_assert!(receiver_slot && count == 2);
+                    CallArguments::PartitionField {
+                        array,
+                        index,
+                        get_position,
+                    }
+                } else {
+                    CallArguments::Positional {
+                        array,
+                        count,
+                        receiver_slot,
+                    }
+                }
+            }
+            RegisteredArguments::Keywords { positional, names } => {
+                let values: Vec<_> = args.map(|a| self.evaluate_handle(a)).collect();
+                let (array, _) = self.fixed_call_arguments(&callable, values, exec);
+                CallArguments::FixedKeywords {
+                    array,
+                    positional: *positional,
+                    keywords: names.len(),
+                    names: self.output.data(names.join("\0").as_bytes()),
+                }
+            }
+            RegisteredArguments::Packed(pack) => self.unwind_operands(&mark, |f| {
+                let mut values = ArgumentPack::new(f, pack, Some(&callable));
+                for (index, arg) in args.enumerate() {
+                    let slot = values.prepare(f, index);
+                    let value = f.evaluate_handle(arg);
+                    values.insert(f, slot, &value);
+                }
+                let (args, kwargs) = values.finish(f);
+                CallArguments::Packed { args, kwargs }
+            }),
+        };
+        self.positioned_call(&callable, operands, &mark, call.range, callee_end, &scope)
+    }
+
+    /// Execute a descriptor operation at the original target, using the same live receiver
+    /// for both halves of augmented assignment. A mutation releases its operand window on
+    /// success and unwinds it before transferring an exception to the handler.
+    fn attribute_operation<'e>(
+        &mut self,
+        action: ir::AttributeAction,
+        name: &str,
+        range: ruff_text_size::TextRange,
+        mut operands: impl Iterator<Item = &'e Expr>,
+    ) -> String {
+        use ir::AttributeAction;
+        let first = operands.next().expect("attribute operand");
+        let mark = self.temporary_mark();
+        if action == AttributeAction::Load {
+            return self.unwind_operands(&mark, |code| {
+                let receiver = code.evaluate_handle(first);
+                let value = code.attribute_value(&receiver, name, range);
+                code.keep_operands(&mark, &value, "0");
+                value
+            });
+        }
+        self.unwind_operands(&mark, |code| {
+            match action {
+                AttributeAction::Store => {
+                    let value = code.evaluate_handle(first);
+                    code.store_attribute(name, range, &value, |code| {
+                        code.evaluate_handle(operands.next().expect("attribute receiver"))
+                    });
+                }
+                AttributeAction::Delete => {
+                    let receiver = code.evaluate_handle(first);
+                    code.write_attribute(&receiver, name, range, None);
+                }
+                AttributeAction::InPlace(op) => {
+                    let receiver = code.evaluate_handle(first);
+                    let right_mark = code.temporary_mark();
+                    let value = code.unwind_operands(&right_mark, |code| {
+                        let left = code.attribute_value(&receiver, name, range);
+                        let right = code.evaluate_handle(operands.next().expect("in-place RHS"));
+                        let value = code.inplace(op, &left, &right);
+                        // The binary operation consumed both operands before STORE_ATTR.
+                        code.keep_operands(&right_mark, &value, "0");
+                        value
+                    });
+                    // STORE_ATTR consumes its receiver before the value being stored.
+                    let receiver_mark = code.keep_operands(&mark, &value, &receiver);
+                    code.unwind_operands(&receiver_mark, |code| {
+                        code.write_attribute(&receiver, name, range, Some(&value));
+                        code.discard_truth(&receiver_mark);
+                    });
+                }
+                AttributeAction::Load => unreachable!(),
+            }
+            code.discard_truth(&mark);
+        });
+        permanent::NONE.to_string()
+    }
 }
 
 impl RegisteredFrame<'_, '_> {

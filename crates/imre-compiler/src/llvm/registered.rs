@@ -1304,25 +1304,6 @@ impl<'f> Frame<'f, '_, '_> {
             .cloned()
     }
 
-    pub(crate) fn object_operation(&mut self, op: &Builtin, operands: &[Expr]) -> CheckedValue {
-        let (target, args) = operands
-            .split_first()
-            .expect("checked object operation has a target");
-        let exec = match op {
-            Builtin::RegisteredCall(call) => self.exec_literal_at(call.range),
-            _ => None,
-        };
-        let handle = FrameEmitter::object_operation(
-            self,
-            op,
-            target,
-            args.iter(),
-            exec,
-            Self::evaluate_handle,
-        );
-        CheckedValue::handle(handle)
-    }
-
     pub(crate) fn own_word(&mut self, word: &str) -> usize {
         let slot = self.code.integer_owners;
         self.code.integer_owners += 1;
