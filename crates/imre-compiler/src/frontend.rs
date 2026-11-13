@@ -1948,12 +1948,12 @@ fn lower_function(
         .as_deref()
         .filter(|p| p.annotation().is_some())
         .map(|p| p.name.to_string());
-    checker.joined_lines = joined_lines::find(&definition.body);
     checker.interactive_names = module.is_doctest_case() && definition.name.as_str() == "_run_case";
     let mut params = Vec::new();
     checker.bind_function_signature(definition, signature, |slot| params.push(slot))?;
-    // A live Python frame obtains its iterator from the original object.
+    // A live Python frame calls the original string methods and iterates the original list.
     if checker.registered_local_start.is_none() {
+        checker.joined_lines = joined_lines::find(&definition.body);
         checker.consuming_lists = consuming_lists::find(&definition.body, |func| {
             checker.unshadowed_builtin(func, "sorted")
         });
