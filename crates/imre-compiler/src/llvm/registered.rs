@@ -179,11 +179,13 @@ pub(crate) fn frame_inputs(
                 args.len() == 1
             }
             ExprKind::Builtin(Builtin::FormatField(_), args) => {
-                protocol_reads += args.first().map_or(0, &protocol_parameter);
-                uses_python_protocol |= args
-                    .first()
-                    .is_some_and(|value| value.ty == Type::PythonObject);
-                matches!(args.len(), 1 | 2)
+                let Some((value, spec)) = args.split_first() else {
+                    return false;
+                };
+                let reads = protocol_parameter(value);
+                uses_python_protocol |= reads != 0 || value.ty == Type::PythonObject;
+                protocol_reads += reads;
+                spec.len() <= 1
             }
             ExprKind::Builtin(Builtin::FormatJoin, parts) => parts.len() >= 2,
             ExprKind::Binary(..) => true,
