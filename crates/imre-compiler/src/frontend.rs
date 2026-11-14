@@ -11557,12 +11557,11 @@ impl<'a> Checker<'a> {
             return self.call_live_target(call, callee);
         }
         if self.module_scope
+            && self.globals.registered_initializers
             && call.arguments.is_empty()
             && self.unshadowed_builtin(&call.func, "globals")
         {
-            if !self.globals.registered_initializers {
-                self.require_registered_operation(call)?;
-            }
+            // A registered initializer already owns the namespace returned by globals().
             self.namespace_calls.insert(call.range());
             return Ok(registered::values::name_call(call, "globals", vec![]));
         }
