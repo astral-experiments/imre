@@ -92,7 +92,7 @@ pub(crate) struct RegisteredFrame<'a, 'p> {
     pub(crate) body: FunctionBody,
     id: u32,
     pending_check: Option<String>,
-    pub(crate) scope: String,
+    pub(crate) scope: Cow<'static, str>,
     // Handles held in native registers across statement boundaries must stay reachable.
     pub(crate) live: Vec<String>,
     /// Addressable IR temporaries whose contents survive Python statement boundaries.
