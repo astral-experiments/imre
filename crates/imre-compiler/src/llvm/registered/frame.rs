@@ -1654,17 +1654,14 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
     }
 
     pub(in crate::llvm) fn sequence(&mut self, values: &[Expr], display: DisplayKind) -> String {
+        match (display, values) {
+            (DisplayKind::List, []) => return self.op("list", &[]),
+            (DisplayKind::Tuple, []) => return permanent::EMPTY_TUPLE.to_string(),
+            (DisplayKind::Set, []) => return self.op("set", &[]),
+            (DisplayKind::Set, _) => return self.sequence_display(values, display, None),
+            (DisplayKind::List | DisplayKind::Tuple, _) => {}
+        }
         let tuple = display == DisplayKind::Tuple;
-        if display == DisplayKind::Set {
-            return self.sequence_display(values, display, None);
-        }
-        if values.is_empty() {
-            return if tuple {
-                permanent::EMPTY_TUPLE.to_string()
-            } else {
-                self.op("list", &[])
-            };
-        }
         let slot = tuple
             .then(|| {
                 values
