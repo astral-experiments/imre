@@ -3819,27 +3819,20 @@ impl SourceScope<'_> {
     }
 
     fn match_statement(&mut self, branch: &ast::StmtMatch) -> StdResult<statements::Block, ()> {
-        let mut cases = Vec::with_capacity(branch.cases.len());
+        let mut cases = patterns::prepare_cases(branch, self.source).map_err(|_| ())?;
         let mut exhaustive = false;
-        let patterns = patterns::prepare_patterns(branch, self.source).map_err(|_| ())?;
-        for (case, pattern) in branch.cases.iter().zip(patterns) {
+        for (case, written) in cases.iter_mut().zip(&branch.cases) {
             if exhaustive {
                 return Err(());
             }
-            let captures = self.match_slots(&pattern);
-            let guard = case
+            case.captures = self.match_slots(&case.pattern);
+            case.guard = written
                 .guard
                 .as_deref()
                 .map(|value| self.condition_operand(value).map(truth).ok_or(()))
                 .transpose()?;
-            exhaustive = guard.is_none() && case.pattern.is_irrefutable();
-            let body = self.suite(&case.body)?;
-            cases.push(ir::MatchCase {
-                pattern,
-                captures,
-                guard,
-                body,
-            });
+            exhaustive = case.guard.is_none() && written.pattern.is_irrefutable();
+            case.body = self.suite(&written.body)?;
         }
         // Only a complete match owns its subject in this suite's slot layout.
         let subject = self.frame_value(&branch.subject).ok_or(())?;

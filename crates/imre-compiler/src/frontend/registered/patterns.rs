@@ -11,33 +11,25 @@ impl SuitePreparation<'_> {
         kind: RegisteredScope,
         suspended: bool,
     ) -> PatternResult<RegisteredSuite> {
-        let patterns = prepare_patterns(branch, self.source)?;
+        let mut cases = prepare_cases(branch, self.source)?;
         let operand = |prepare: &mut Self, expr: &ast::Expr| {
             prepare.owned_operand(expr, kind, suspended, |scope| scope.frame_value(expr))
         };
         let mut region = self.region(kind);
         let subject = region.operand(operand(self, &branch.subject), Type::PythonObject);
-        let mut cases = patterns
-            .into_iter()
-            .zip(&branch.cases)
-            .map(|(pattern, case)| ir::MatchCase {
-                pattern,
-                captures: Vec::new(),
-                guard: case
-                    .guard
-                    .as_deref()
-                    .map(|guard| region.operand(operand(self, guard), Type::Bool)),
-                body: region.child(self.physical_suite(
-                    &case.body,
-                    kind,
-                    SuiteSelection::All,
-                    suspended,
-                )),
-            })
-            .collect::<Vec<_>>();
         let mut scope = self.source_scope(kind);
-        for case in &mut cases {
+        for (case, written) in cases.iter_mut().zip(&branch.cases) {
             case.captures = scope.match_slots(&case.pattern);
+            case.guard = written
+                .guard
+                .as_deref()
+                .map(|guard| region.operand(operand(self, guard), Type::Bool));
+            case.body = region.child(self.physical_suite(
+                &written.body,
+                kind,
+                SuiteSelection::All,
+                suspended,
+            ));
         }
         region.checked = scope.finish(vec![
             Statement::Position(branch.range(), None),
@@ -47,15 +39,22 @@ impl SuitePreparation<'_> {
     }
 }
 
-pub(super) fn prepare_patterns(
+/// Check every pattern before preparing its guard or body. The case keeps its
+/// pattern in the same vector when a caller binds the remaining operands.
+pub(super) fn prepare_cases(
     branch: &ast::StmtMatch,
     source: values::RegisteredSource<'_>,
-) -> PatternResult<Vec<ir::MatchPattern>> {
-    branch
-        .cases
-        .iter()
-        .map(|case| prepare_pattern(&case.pattern, source))
-        .collect()
+) -> PatternResult<Vec<ir::MatchCase>> {
+    let mut cases = Vec::with_capacity(branch.cases.len());
+    for case in &branch.cases {
+        cases.push(ir::MatchCase {
+            pattern: prepare_pattern(&case.pattern, source)?,
+            captures: Vec::new(),
+            guard: None,
+            body: Vec::new(),
+        });
+    }
+    Ok(cases)
 }
 
 fn prepare_pattern(
