@@ -431,6 +431,7 @@ impl<'p> ScopeFacts<'p> {
             names,
             scope: Scope::Module,
             suite_scope: None,
+            attribute_class: None,
             yields: false,
             body_yields: false,
             alias_site: &mut alias_site,
@@ -474,6 +475,8 @@ struct Collector<'s, 'p, 'a> {
     names: &'s imre_ast::Names,
     scope: Scope,
     suite_scope: Option<Scope>,
+    // The enclosing class whose nested code records self attribute stores.
+    attribute_class: Option<TextSize>,
     yields: bool,
     body_yields: bool,
     alias_site: &'s mut dyn FnMut(&'a ast::StmtTypeAlias, Option<TextSize>),
@@ -560,8 +563,22 @@ impl<'a> Visitor<'a> for Collector<'_, '_, 'a> {
                     .module_globals
                     .extend(global.names.iter().map(ToString::to_string));
             }
-            ast::Stmt::AnnAssign(_) if self.scope == Scope::Module => {
-                self.scopes.module_annotations = true;
+            ast::Stmt::AugAssign(update)
+                if let ast::Expr::Attribute(target) = update.target.as_ref() =>
+            {
+                // Augmented attribute stores do not contribute to __static_attributes__.
+                self.visit_expr(&update.value);
+                self.visit_expr(&target.value);
+                return;
+            }
+            ast::Stmt::AnnAssign(update) => {
+                self.scopes.module_annotations |= self.scope == Scope::Module;
+                if update.value.is_none() {
+                    let owner = self.attribute_class.take();
+                    visitor::walk_stmt(self, stmt);
+                    self.attribute_class = owner;
+                    return;
+                }
             }
             _ => {}
         }
@@ -583,14 +600,33 @@ impl<'a> Visitor<'a> for Collector<'_, '_, 'a> {
             return;
         };
         let parent = std::mem::replace(&mut self.scope, scope);
+        let outer_class = self.attribute_class;
+        if let Scope::Class(site) = parent {
+            self.attribute_class = Some(site);
+        }
         let parent_yields = std::mem::take(&mut self.yields);
         visitor::walk_body(self, body);
         self.body_yields = std::mem::replace(&mut self.yields, parent_yields);
         self.scope = parent;
+        self.attribute_class = outer_class;
     }
 
     fn visit_expr(&mut self, expr: &'a ast::Expr) {
         stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || match expr {
+            ast::Expr::Attribute(attr)
+                if attr.ctx == ast::ExprContext::Store
+                    && self.suite_scope.is_none()
+                    && let Some(site) = self.attribute_class
+                    && matches!(&*attr.value, ast::Expr::Name(n) if n.id == "self") =>
+            {
+                self.scopes
+                    .classes
+                    .get_mut(&site)
+                    .unwrap()
+                    .static_attributes
+                    .insert(self.names.definition(&attr.attr).to_owned());
+                self.visit_expr(&attr.value);
+            }
             ast::Expr::Lambda(lambda) => {
                 if let Some(parameters) = &lambda.parameters {
                     self.visit_parameters(parameters);
