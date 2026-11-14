@@ -1153,41 +1153,17 @@ impl<'p> RegisteredFrame<'_, 'p> {
         }
     }
 
-    /// Advance a synchronous cursor once. An exact forward list cursor supplies
-    /// the rooted item directly. All other cursors keep the ordinary lookahead protocol.
+    /// Advance the acquired cursor and load the rooted item on the successful edge.
     fn sync_item(&mut self, cursor: &str, has_else: bool, exhausted: &str) -> String {
-        let ordinary = self.name("b");
-        let ordinary_item = self.name("b");
-        let list_item = self.name("b");
-        let joined = self.name("b");
+        let item = self.name("b");
         self.max_live = self.max_live.max(1);
         let status = self.checked(&format!(
-            "call i32 @imre_dyn_list_cursor_pull(ptr %ctx, i64 {cursor}, ptr %live, i1 {has_else})"
+            "call i32 @imre_dyn_pull_item(ptr %ctx, i64 {cursor}, ptr %live, i1 {has_else})"
         ));
-        self.end(&format!(
-            "switch i32 {status}, label %{ordinary} [ i32 0, label %{exhausted} i32 1, label %{list_item} ]"
-        ));
-        self.label(&list_item);
-        let direct = self.value("load i64, ptr %live");
-        self.jump(&joined);
-
-        self.label(&ordinary);
-        let more = self.op(if has_else { "more_else" } else { "more" }, &[cursor]);
-        self.branch_on_item(&more, &ordinary_item, exhausted);
-        self.label(&ordinary_item);
-        let protocol = self.op("next", &[cursor]);
-        let previous = self.current_block().to_owned();
-        self.jump(&joined);
-
-        self.label(&joined);
-        self.value(&format!(
-            "phi i64 [ {direct}, %{list_item} ], [ {protocol}, %{previous} ]"
-        ))
-    }
-
-    fn branch_on_item(&mut self, more: &str, item: &str, exhausted: &str) {
-        let ready = self.value(&format!("icmp eq i64 {more}, {}", permanent::TRUE));
-        self.branch(&ready, item, exhausted);
+        let ready = self.value(&format!("icmp ne i32 {status}, 0"));
+        self.branch(&ready, &item, exhausted);
+        self.label(&item);
+        self.value("load i64, ptr %live")
     }
 
     /// Only the implicit __anext__ call and its await can exhaust an async for.

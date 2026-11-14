@@ -34,10 +34,7 @@ fn cached_operand_rechecks_the_frame_and_its_current_edge() {
     let class = ctx.builtin("object");
     let owner = ctx.instance(class, None);
     let other = ctx.instance(class, None);
-    let iterator = ctx.alloc(Value::LoopIterator {
-        source: owner,
-        peeked: None,
-    });
+    let iterator = ctx.alloc(Value::LoopIterator { source: owner });
     let scope = ctx.scope("sample", None);
     let heap = &mut ctx.heap;
     heap.release_temporaries_since(0);
@@ -162,17 +159,14 @@ fn finalizer_paths_recheck_scope_owners_and_their_weak_references() {
 }
 
 #[test]
-fn published_loop_sources_and_peeked_items_keep_finalizers_alive() {
+fn published_loop_sources_and_pulled_items_keep_finalizers_alive() {
     let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
     let class = ctx.builtin("object");
     let scope = ctx.scope("sample", None);
     ctx.heap.enter(scope, NONE, FrameOwner::Module(NONE));
     let source = ctx.instance(class, None);
     let item = ctx.instance(class, None);
-    let cursor = ctx.alloc(Value::LoopIterator {
-        source,
-        peeked: Some(item),
-    });
+    let cursor = ctx.alloc(Value::LoopIterator { source });
     let globals = ctx.finalizer_path_roots();
     let streams = stdlib::io::rooted_standard_streams(&ctx);
     let heap = &mut ctx.heap;
@@ -180,7 +174,10 @@ fn published_loop_sources_and_peeked_items_keep_finalizers_alive() {
     heap.register_finalizer(item);
     heap.release_temporaries_since(0);
     heap.keep(cursor);
-    assert!(heap.cached_finalizers_kept(globals, streams.as_ref(), Some(1)));
+    let cursor_mark = heap.temporary_mark();
+    heap.keep(item);
+    assert!(heap.cached_finalizers_kept(globals, streams.as_ref(), Some(2)));
+    assert!(!heap.cached_finalizers_kept(globals, streams.as_ref(), Some(1)));
     assert!(heap.cached_finalizers_kept(globals, streams.as_ref(), None));
     assert!(!heap.cached_finalizers_kept(globals, streams.as_ref(), Some(0)));
 
@@ -188,11 +185,11 @@ fn published_loop_sources_and_peeked_items_keep_finalizers_alive() {
         heap.enter(scope, NONE, FrameOwner::Module(NONE));
     }
     assert!(heap.cached_finalizers_kept(globals, streams.as_ref(), Some(0)));
-    let Value::LoopIterator { peeked, .. } = heap.get_mut(cursor) else {
-        unreachable!();
-    };
-    *peeked = None;
-    assert!(!heap.cached_finalizers_kept(globals, streams.as_ref(), Some(0)));
+    for _ in 0..32 {
+        heap.leave(NONE, false);
+    }
+    heap.release_temporaries_since(cursor_mark);
+    assert!(!heap.cached_finalizers_kept(globals, streams.as_ref(), None));
 }
 
 #[test]
@@ -536,12 +533,9 @@ fn iterator_paths_recheck_the_suspended_operands() {
     let heap = &mut ctx.heap;
     let target = heap.alloc(generator_value(NONE));
     let generator = heap.alloc(generator_value(scope));
-    let cursor = heap.alloc(Value::LoopIterator {
-        source: NONE,
-        peeked: Some(target),
-    });
-    let source = ctx.dict(vec![(NONE, cursor)]);
-    ctx.bind(scope, ".0", source);
+    let cursor = heap.alloc(Value::LoopIterator { source: target });
+    let bindings = ctx.dict(vec![(NONE, cursor)]);
+    ctx.bind(scope, ".0", bindings);
     let heap = &mut ctx.heap;
     let coroutine = heap.alloc(Value::Coroutine {
         frame: generator,
@@ -564,15 +558,15 @@ fn iterator_paths_recheck_the_suspended_operands() {
     assert!(paths.valid(heap, globals));
     assert_traced_edges(heap, &paths);
 
-    let Value::LoopIterator { peeked, .. } = heap.get_mut(cursor) else {
+    let Value::LoopIterator { source } = heap.get_mut(cursor) else {
         unreachable!()
     };
-    *peeked = None;
+    *source = NONE;
     assert!(!paths.valid(heap, globals));
-    let Value::LoopIterator { peeked, .. } = heap.get_mut(cursor) else {
+    let Value::LoopIterator { source } = heap.get_mut(cursor) else {
         unreachable!()
     };
-    *peeked = Some(target);
+    *source = target;
     assert!(paths.valid(heap, globals));
 
     let Value::Generator { scope: current, .. } = heap.get_mut(generator) else {
@@ -587,7 +581,7 @@ fn iterator_paths_recheck_the_suspended_operands() {
     assert!(paths.valid(heap, globals));
 
     assert!(heap.short_path_keeps_owner(generator, target));
-    ctx.delete_item(source, NONE).unwrap();
+    ctx.delete_item(bindings, NONE).unwrap();
     assert!(!paths.valid(&ctx.heap, globals));
     assert!(!ctx.heap.short_path_keeps_owner(generator, target));
 }

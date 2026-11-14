@@ -2665,10 +2665,7 @@ mod tests {
             );
             if projects_pair {
                 assert!(llvm.find(pull).unwrap() < llvm.find(unpack).unwrap());
-                assert!(
-                    !llvm.contains("call i32 @imre_dyn_list_cursor_pull("),
-                    "{source}"
-                );
+                assert!(!llvm.contains("call i32 @imre_dyn_pull_item("), "{source}");
             }
         }
     }

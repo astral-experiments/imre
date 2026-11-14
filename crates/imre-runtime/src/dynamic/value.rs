@@ -1751,7 +1751,6 @@ pub(super) enum Value {
     // Private to a compiled loop. Python-visible iterators keep their original identity.
     LoopIterator {
         source: Id,
-        peeked: Option<Id>,
     },
     Iterator {
         kind: &'static str,
@@ -2326,10 +2325,7 @@ impl Value {
             Self::Zip { inputs, .. } => visit.extend(inputs.iter()),
             Self::Filter { predicate, input } => visit.extend([*predicate, *input]),
             Self::CallableIterator(state) => visit.extend(state.iter().flatten()),
-            Self::LoopIterator { source, peeked } => {
-                visit.push(*source);
-                visit.extend(peeked);
-            }
+            Self::LoopIterator { source } => visit.push(*source),
             Self::NamedTuple { values, extras, .. } => {
                 visit.extend(values);
                 visit.extend(extras.iter().map(|&(_, id)| id));
@@ -5975,9 +5971,7 @@ impl Heap {
             }
             match heap.get(root) {
                 Value::Method { receiver, .. } => keeps(heap, *receiver, owner, budget),
-                Value::LoopIterator { source, peeked } => {
-                    *peeked == Some(owner) || keeps(heap, *source, owner, budget)
-                }
+                Value::LoopIterator { source } => keeps(heap, *source, owner, budget),
                 Value::Map { inputs, .. } | Value::Zip { inputs, .. } => inputs
                     .iter()
                     .take(*budget)
@@ -6096,15 +6090,12 @@ impl Heap {
             return None;
         }
         let iterator = self.last_generator_iterator?;
-        let Value::LoopIterator { source, peeked } =
-            self.slots.get(iterator as usize)?.value.as_ref()?
+        let Value::LoopIterator { source } = self.slots.get(iterator as usize)?.value.as_ref()?
         else {
             return None;
         };
-        (self.is_pending_finalizer(*source)
-            && matches!(self.get(*source), Value::Generator { .. })
-            && *peeked != Some(iterator))
-        .then_some((*source, iterator))
+        (self.is_pending_finalizer(*source) && matches!(self.get(*source), Value::Generator { .. }))
+            .then_some((*source, iterator))
     }
 
     /// Prove that only the loop iterator can hold the generator and nothing holds the iterator.
@@ -7642,10 +7633,7 @@ mod tests {
                 running: false,
             });
             heap.record_generator_birth(generator);
-            let iterator = heap.alloc(Value::LoopIterator {
-                source: generator,
-                peeked: None,
-            });
+            let iterator = heap.alloc(Value::LoopIterator { source: generator });
             (generator, iterator)
         };
         let (first, first_iterator) = new_loop(&mut heap);

@@ -1468,16 +1468,13 @@ impl Context {
         self.alloc(Value::DictIterator(iter))
     }
 
-    /// Compiled loops test for an item before consuming it. User code must advance only once.
     fn loop_iterator(&mut self, iterable: Id) -> Result<Id> {
         let source = self.iterator(iterable)?;
         Ok(self.loop_cursor(source))
     }
 
-    /// Keep lookahead separate from acquiring the Python iterator.
     fn loop_cursor(&mut self, source: Id) -> Id {
         match self.heap.get(source) {
-            // These cursors can test for exhaustion without consuming an item.
             Value::Iterator { .. }
             | Value::RangeIterator(_)
             | Value::FormatIterator { .. }
@@ -1485,10 +1482,7 @@ impl Context {
             | Value::Repeat(_)
             | Value::AstWalk { .. }
             | Value::LoopIterator { .. } => source,
-            _ => self.alloc(Value::LoopIterator {
-                source,
-                peeked: None,
-            }),
+            _ => self.alloc(Value::LoopIterator { source }),
         }
     }
 
@@ -1527,41 +1521,6 @@ impl Context {
             }
             _ => unreachable!("iterator sequence"),
         })
-    }
-
-    /// Reads the current position and permanently detaches the source on exhaustion.
-    fn iterator_has_item(&mut self, id: Id) -> Result<bool> {
-        if let Value::FormatIterator { input, offset, .. } = *self.heap.get(id) {
-            return Ok(offset < self.str_value(input)?.len());
-        }
-        if matches!(self.heap.get(id), Value::Count { .. }) {
-            return Ok(true);
-        }
-        if let Value::RangeIterator(iter) = self.heap.get(id) {
-            return Ok(iter.remaining.as_small() != Some(0));
-        }
-        if let Value::Repeat(repeat) = self.heap.get(id) {
-            return Ok(repeat.remaining != Some(0));
-        }
-        if let Value::LoopIterator { source, peeked } = *self.heap.get(id) {
-            if peeked.is_some() {
-                return Ok(true);
-            }
-            let item = self.next_item(source)?;
-            *self.heap.get_mut(id) = Value::LoopIterator {
-                source,
-                peeked: item,
-            };
-            return Ok(item.is_some());
-        }
-        if matches!(self.heap.get(id), Value::AstWalk { .. }) {
-            return stdlib::ast::has_item(self, id);
-        }
-        let more = !self.iterator_remaining(id)?.is_empty();
-        if !more && let Value::Iterator { sequence, .. } = self.heap.get_mut(id) {
-            *sequence = None;
-        }
-        Ok(more)
     }
 
     /// Discard StopIteration's payload only for consumers that treat it as exhaustion.
@@ -1913,7 +1872,10 @@ impl Context {
                     self.resume_native(id, id, generator_protocol::GeneratorInput::Send(NONE))
                 });
             }
-            Value::LoopIterator { peeked, .. } => return Ok(peeked.take()),
+            Value::LoopIterator { source } => {
+                let source = *source;
+                return self.next_result(source);
+            }
             Value::BufferedRandom(..) | Value::File(_) => {
                 let readline = self.lookup_attr(id, "readline")?;
                 let line = self.call(readline, Vec::new(), Vec::new())?;
