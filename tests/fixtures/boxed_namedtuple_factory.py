@@ -31,6 +31,7 @@ def layout_read_allocation():
 
 
 def current():
+    import collections
     from annotationlib import Format
     from typing import NamedTuple
 
@@ -50,6 +51,35 @@ def current():
     assert Declared.__replace__ is Declared._replace
     updated = Declared("kept")._replace(label="new")
     assert type(updated) is Declared and updated.label == "new"
+
+    alternate = namedtuple("Alternate", ["kept"])
+    calls = []
+
+    def replacement(name, fields, **kwargs):
+        calls.append((name, fields, list(kwargs.items())))
+        if name == "Stopped":
+            raise LookupError("from factory")
+        return alternate
+
+    collections.namedtuple = replacement
+    try:
+        class Written(NamedTuple):
+            value: int = 2
+
+        assert Written is alternate and Written._fields == ("kept",)
+        assert Written.__annotations__ == {"value": int}
+        try:
+            NamedTuple("Stopped", [("tag", str)])
+        except LookupError as error:
+            assert str(error) == "from factory"
+        else:
+            raise AssertionError("factory exception suppressed")
+    finally:
+        collections.namedtuple = namedtuple
+    assert calls == [
+        ("Written", ["value"], [("defaults", [2]), ("module", __name__)]),
+        ("Stopped", ["tag"], [("defaults", ()), ("module", __name__)]),
+    ]
 
     Point = namedtuple('Point', 'self y')
     class Pixel(Point):

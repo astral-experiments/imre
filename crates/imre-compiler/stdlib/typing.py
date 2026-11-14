@@ -2,6 +2,7 @@
 
 import _typing as _typing_runtime
 import builtins as _builtins
+import collections
 import copyreg
 import functools
 import sys as _sys
@@ -696,8 +697,6 @@ def NamedTuple(typename, fields=_sentinel, /, **kwargs):
 
         Employee = NamedTuple('Employee', [('name', str), ('id', int)])
     """
-    from collections import namedtuple
-
     if fields is _sentinel:
         if kwargs:
             deprecated_thing = "Creating NamedTuple classes using keyword arguments"
@@ -741,22 +740,66 @@ def NamedTuple(typename, fields=_sentinel, /, **kwargs):
     field_names = [n for n, _ in fields]
 
     annotate = _make_eager_annotate(types)
-    nt = namedtuple(typename, field_names, defaults=(), module=_caller())
-    nt.__annotate__ = nt.__new__.__annotate__ = annotate
+    nt = _make_nmtuple(typename, field_names, annotate, _caller())
     nt.__orig_bases__ = (NamedTuple,)
     return nt
 
 
+def _make_nmtuple(typename, fields, annotate, module, defaults=()):
+    cls = collections.namedtuple(typename, fields, defaults=defaults, module=module)
+    cls.__annotate__ = cls.__new__.__annotate__ = annotate
+    return cls
+
+
+class NamedTupleMeta(type):
+    def __new__(mcls, typename, bases, namespace):
+        if "__classcell__" in namespace:
+            raise TypeError("uses of super() and __class__ are unsupported in methods of NamedTuple subclasses")
+        if any(base is not _NamedTuple and base is not Generic for base in bases):
+            raise TypeError("can only inherit from a NamedTuple type and Generic")
+        if "__annotations__" in namespace:
+            types = namespace["__annotations__"]
+            fields = list(types)
+            annotate = _make_eager_annotate(types)
+        else:
+            from annotationlib import get_annotate_from_class_namespace
+            original = get_annotate_from_class_namespace(namespace)
+            if original is None:
+                fields = []
+                annotate = _make_eager_annotate()
+            else:
+                annotate = _namedtuple_annotate(original)
+                fields = list(annotate(3))
+        default_names = []
+        for field in fields:
+            if field in namespace:
+                default_names.append(field)
+            elif default_names:
+                raise TypeError(f"Non-default namedtuple field {field} cannot follow default field"
+                                f"{'s' if len(default_names) > 1 else ''} {', '.join(default_names)}")
+        cls = _make_nmtuple(typename, fields, annotate, namespace["__module__"],
+                            defaults=[namespace[n] for n in default_names])
+        cls.__bases__ = tuple(tuple if b is _NamedTuple else b for b in bases)
+        if Generic in bases:
+            cls.__class_getitem__ = classmethod(_namedtuple_generic_getitem)
+        _namedtuple_set_names(typename, cls, namespace)
+        if Generic in bases:
+            cls.__init_subclass__()
+        return cls
+
+
+_NamedTuple = type.__new__(NamedTupleMeta, "NamedTuple", (), {})
+
+
 def _namedtuple_mro_entries(bases):
     assert NamedTuple in bases
-    return (_typing._NamedTuple,)
+    return (_NamedTuple,)
 
 
 NamedTuple.__mro_entries__ = _namedtuple_mro_entries
 
 
-def _namedtuple_set_names(cls, namespace):
-    typename = cls.__name__
+def _namedtuple_set_names(typename, cls, namespace):
     for name, value in namespace.items():
         if name in ('__new__', '__init__', '__slots__', '__getnewargs__',
                     '_fields', '_field_defaults', '_make', '_replace', '_asdict', '_source'):

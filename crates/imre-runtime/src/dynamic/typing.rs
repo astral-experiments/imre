@@ -3023,151 +3023,6 @@ impl Context {
             .map(super::builtins::boolean)
     }
 
-    /// Identify the marker substituted by typing.NamedTuple.__mro_entries__.
-    pub(super) fn namedtuple_base(&self, bases: &[Id]) -> Option<Id> {
-        self.builtins
-            .get("typing.NamedTuple")
-            .copied()
-            .filter(|marker| bases.contains(marker))
-    }
-
-    /// Freeze the fields of a new declaration and replace its marker with the actual tuple base.
-    fn namedtuple_layout(
-        &mut self,
-        name: &str,
-        bases: &mut [Id],
-        scope: Id,
-        namespace: Option<Id>,
-    ) -> Result<Option<Arc<[String]>>> {
-        if let Some(marker) = self.namedtuple_base(bases) {
-            let generic = self.classes.get("typing.Generic").copied();
-            if bases
-                .iter()
-                .any(|&base| base != marker && Some(base) != generic)
-            {
-                return Err(Error::new(
-                    "TypeError",
-                    "can only inherit from a NamedTuple type and Generic",
-                ));
-            }
-            let tuple = self.builtin("tuple");
-            for base in bases.iter_mut() {
-                if *base == marker {
-                    *base = tuple;
-                }
-            }
-            let explicit = self.scope_name(scope, "__annotations__");
-            let (fields, provider) = if explicit.is_none()
-                && let Some(original) = self.scope_name(scope, "__annotate_func__")
-            {
-                let annotate = self.call_typing_helper("_namedtuple_annotate", vec![original])?;
-                self.heap.keep(annotate);
-                let forwardref = self.int(3);
-                let fields = self.call(annotate, vec![forwardref], Vec::new())?;
-                (Some(fields), Some(annotate))
-            } else {
-                (explicit, None)
-            };
-            let mut named_fields = Vec::new();
-            if let Some(fields) = fields {
-                self.heap.keep(fields);
-                let keys = self.items(fields)?;
-                for &key in &keys {
-                    self.heap.keep(key);
-                }
-                for key in keys {
-                    named_fields.push(super::namedtuple::string(self, key)?);
-                }
-            }
-            let annotate = if let Some(provider) = provider {
-                provider
-            } else {
-                let annotate = self
-                    .call_typing_helper("_make_eager_annotate", explicit.into_iter().collect())?;
-                self.heap.keep(annotate);
-                if explicit.is_some() {
-                    let key = self.heap.code_name("__annotations__");
-                    self.remove_binding(scope, "__annotations__", key)?;
-                }
-                self.enable_class_annotation_provider(scope);
-                annotate
-            };
-            let mut defaults = Vec::new();
-            for field in &named_fields {
-                if let Some(value) = self.scope_name(scope, field) {
-                    defaults.push(value);
-                } else if !defaults.is_empty() {
-                    return Err(Error::new(
-                        "TypeError",
-                        format!("non-default field {field} cannot follow default fields"),
-                    ));
-                }
-            }
-            super::namedtuple::validate_fields(name, &named_fields, false)?;
-            if let Some(namespace) = namespace {
-                // The factory installs user members one at a time after creating its tuple type.
-                let entries = self
-                    .dict_entries(namespace)
-                    .expect("NamedTuple declaration")
-                    .to_vec();
-                for (key, _) in entries {
-                    if let Ok(attr) = self.str_value(key)
-                        && !matches!(
-                            attr,
-                            "__module__"
-                                | "__name__"
-                                | "__annotations__"
-                                | "__annotate__"
-                                | "__annotate_func__"
-                                | "__annotations_cache__"
-                        )
-                    {
-                        let attr = attr.to_owned();
-                        self.remove_binding(scope, &attr, key)?;
-                    }
-                }
-            }
-            if generic.is_some_and(|g| bases.contains(&g))
-                && self.scope_name(scope, "__class_getitem__").is_none()
-            {
-                let getitem = self
-                    .module_value("typing", "_namedtuple_generic_getitem")
-                    .ok_or_else(|| {
-                        Error::new("RuntimeError", "missing NamedTuple subscription hook")
-                    })?;
-                self.bind_local(scope, "__class_getitem__", getitem);
-            }
-            let (fields, signature) = super::namedtuple::bind_field_metadata(
-                self,
-                scope,
-                name,
-                &named_fields,
-                &defaults,
-            )?;
-            let defaults = self.alloc(Value::Tuple(defaults));
-            let new = super::namedtuple::bind_new(
-                self,
-                scope,
-                name,
-                &named_fields,
-                fields,
-                Some(defaults),
-                signature,
-            )?;
-            self.bind_local(scope, "__annotate_func__", annotate);
-            self.set_attr(new, "__annotate__", annotate)?;
-            let name = self.text(name);
-            if self.scope_name(scope, "__repr__").is_none() {
-                super::namedtuple::bind_repr(self, scope, name, fields)?;
-            }
-            super::namedtuple::bind_replace(self, scope, name, fields)?;
-            super::namedtuple::bind_make(self, scope, name, fields)?;
-            super::namedtuple::bind_fields(self, scope, &named_fields);
-            return Ok(Some(named_fields.into()));
-        }
-        Ok(None)
-    }
-
     pub(super) fn declared_slot_names(
         &mut self,
         slots: Option<Id>,
@@ -3192,7 +3047,7 @@ impl Context {
 
     /// Preserve the actual direct bases as well as the immutable C3 tuple exposed by type.
     pub(super) fn allocate_class(&mut self, name: String, scope: Id, bases: Vec<Id>) -> Result<Id> {
-        self.allocate_class_with_slots(name, scope, bases, ClassLayout::Specialized, None)
+        self.allocate_class_with_slots(name, scope, bases, ClassLayout::Specialized)
             .map(|(class, _)| class)
     }
 
@@ -3200,26 +3055,14 @@ impl Context {
         &mut self,
         name: String,
         scope: Id,
-        mut bases: Vec<Id>,
+        bases: Vec<Id>,
         layout: ClassLayout,
-        namedtuple_namespace: Option<Id>,
     ) -> Result<(Id, Id)> {
-        let declared_fields =
-            self.namedtuple_layout(&name, &mut bases, scope, namedtuple_namespace)?;
         let bases = self.validate_class_bases(bases, layout)?;
         let ancestors = self.linearized_bases(&bases, false)?;
         let layout_base = self.member_layout_base(&bases)?;
         let slots = self.declared_slot_names(self.scope_name(scope, "__slots__"), layout_base)?;
         let class = self.allocate_prepared_class(name, scope, bases, ancestors, layout, slots)?;
-        if let Some(fields) = declared_fields {
-            let Value::Class {
-                namedtuple_fields, ..
-            } = self.heap.get_mut(class)
-            else {
-                unreachable!()
-            };
-            *namedtuple_fields = Some(fields);
-        }
         Ok((class, layout_base))
     }
 

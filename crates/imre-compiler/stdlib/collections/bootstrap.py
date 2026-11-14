@@ -65,14 +65,12 @@ def _namedtuple_replace(typename, field_names):
     return _replace
 
 
-def _namedtuple_getnewargs(typename, with_asdict=False):
+def _namedtuple_getnewargs(typename):
     def __getnewargs__(self):
         'Return self as a plain tuple. Used by copy and pickle.'
         return tuple(self)
 
     __getnewargs__.__qualname__ = f'{typename}.__getnewargs__'
-    if not with_asdict:
-        return __getnewargs__
 
     _dict, _zip = dict, zip
 
@@ -81,4 +79,4 @@ def _namedtuple_getnewargs(typename, with_asdict=False):
         return _dict(_zip(self._fields, self))
 
     _asdict.__qualname__ = f'{typename}._asdict'
-    return __getnewargs__, _asdict
+    return _asdict, __getnewargs__

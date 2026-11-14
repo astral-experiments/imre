@@ -9,28 +9,44 @@ struct ProposedMro {
 
 impl Context {
     /// Check the published layouts before replacing any bases or descendant MROs.
-    fn supports_rebase(&self, class: Id) -> bool {
+    fn supports_rebase(&self, class: Id, tuple_layout: bool) -> bool {
         self.find_in_mro(class, |owner| {
             let supported = match self.heap.get(owner) {
                 Value::Native(name) => {
                     matches!(name.as_str(), "object" | "dict")
+                        || (tuple_layout && name == "tuple")
                         || super::builtins::is_exception(name)
                 }
                 Value::Class {
                     scope,
                     metaclass,
-                    namedtuple_fields: None,
+                    namedtuple_fields,
                     io_kind: None,
                     heap_type: None,
                     ..
-                } if metaclass.is_none() || *metaclass == self.builtins.get("type").copied() => {
+                } => {
                     let frame = self.scope_data(*scope);
-                    frame.class_cell.is_some()
-                        && frame.class_namespace.as_ref().is_some_and(|ns| {
-                            !ns.immutable_type
-                                && ns.slot_names.is_none()
-                                && ns.itertools_layout.is_none()
-                        })
+                    let default_meta =
+                        metaclass.is_none() || *metaclass == self.builtins.get("type").copied();
+                    frame.class_namespace.as_ref().is_some_and(|ns| {
+                        if ns.immutable_type || ns.itertools_layout.is_some() {
+                            return false;
+                        }
+                        if default_meta
+                            && frame.class_cell.is_some()
+                            && namedtuple_fields.is_none()
+                            && ns.slot_names.is_none()
+                        {
+                            return true;
+                        }
+                        tuple_layout
+                            && ns.slot_names.as_deref().is_none_or(<[_]>::is_empty)
+                            && (namedtuple_fields.is_some() || !self.owns_allocation(owner))
+                            && metaclass.is_none_or(|meta| {
+                                self.class_attr(meta, "mro")
+                                    .is_none_or(|mro| Some(&mro) == self.builtins.get("type.mro"))
+                            })
+                    })
                 }
                 _ => false,
             };
@@ -115,7 +131,19 @@ impl Context {
                 ),
             ));
         }
-        if !new_bases.iter().all(|&base| self.supports_rebase(base)) {
+        // A tuple class may add or remove mixins that contribute no instance storage.
+        let object = self.builtins.get("object").copied();
+        let contributes_layout = |&&base: &&Id| layout(base) != (true, object, false, false, false);
+        let tuple_layout = old_base == new_base
+            && self.builtins.get("tuple") == Some(&old_base)
+            && old_bases
+                .iter()
+                .filter(contributes_layout)
+                .eq(new_bases.iter().filter(contributes_layout));
+        if !new_bases
+            .iter()
+            .all(|&base| self.supports_rebase(base, tuple_layout))
+        {
             return Err(unsupported());
         }
 
@@ -123,7 +151,7 @@ impl Context {
         let affected = self.heap.class_hierarchy(class);
         let mut proposed: HashMap<Id, ProposedMro> = HashMap::new();
         for &owner in &affected {
-            if !self.supports_rebase(owner) {
+            if !self.supports_rebase(owner, tuple_layout) {
                 return Err(unsupported());
             }
             let bases = if owner == class {
@@ -139,9 +167,8 @@ impl Context {
             })?;
             // Changing a mixin must not silently replace the native storage of any descendant.
             if let Some(old) = self.allocation_base(owner)
-                && ancestors
-                    .iter()
-                    .copied()
+                && std::iter::once(owner)
+                    .chain(ancestors.iter().copied())
                     .find(|&base| self.owns_allocation(base))
                     != Some(old)
             {
