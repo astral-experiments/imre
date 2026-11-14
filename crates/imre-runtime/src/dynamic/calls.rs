@@ -145,7 +145,13 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         "resource" if matches!(function, "getrlimit" | "setrlimit") => Some((module, function)),
         "gc" if matches!(
             function,
-            "enable" | "disable" | "isenabled" | "get_threshold" | "set_threshold" | "is_tracked"
+            "enable"
+                | "disable"
+                | "isenabled"
+                | "get_threshold"
+                | "set_threshold"
+                | "is_tracked"
+                | "is_finalized"
         ) =>
         {
             Some((module, function))
@@ -4216,7 +4222,9 @@ impl Context {
                     {
                         return Ok(self.text("($module, /)"));
                     }
-                    "__text_signature__" if symbol == "gc.is_tracked" => {
+                    "__text_signature__"
+                        if matches!(symbol.as_str(), "gc.is_tracked" | "gc.is_finalized") =>
+                    {
                         return Ok(self.text("($module, obj, /)"));
                     }
                     "__text_signature__" if symbol == "gc.set_threshold" => return Ok(NONE),
@@ -4228,6 +4236,9 @@ impl Context {
                                 "Returns true if automatic garbage collection is enabled."
                             }
                             "get_threshold" => "Return the current collection thresholds.",
+                            "is_finalized" => {
+                                "Returns true if the object has been already finalized by the GC."
+                            }
                             "is_tracked" => {
                                 "Returns true if the object is tracked by the garbage collector.\n\nSimple atomic objects will return false."
                             }

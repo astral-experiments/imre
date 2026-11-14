@@ -3120,7 +3120,8 @@ const BYTE_BUFFER_FLOOR: usize = 8 * 1024 * 1024;
 enum Finalization {
     None,
     Pending,
-    Done,
+    Dispatched,
+    Finalized,
 }
 
 /// Compact slot state used by marking and sweeping. Mutable borrows invalidate scalar leaves.
@@ -5942,7 +5943,21 @@ impl Heap {
     }
 
     pub(super) fn finalizer_ran(&self, id: Id) -> bool {
-        self.slots[id as usize].finalization == Finalization::Done
+        matches!(
+            self.slots[id as usize].finalization,
+            Finalization::Dispatched | Finalization::Finalized
+        )
+    }
+
+    pub(super) fn is_gc_finalized(&self, id: Id) -> bool {
+        self.slots[id as usize].finalization == Finalization::Finalized
+    }
+
+    pub(super) fn mark_gc_finalized(&mut self, id: Id) {
+        let slot = &mut self.slots[id as usize];
+        if slot.has_gc_header {
+            slot.finalization = Finalization::Finalized;
+        }
     }
 
     pub(super) fn take_finalizer(&mut self, id: Id, found: bool) {
@@ -5953,7 +5968,7 @@ impl Heap {
             .unwrap();
         self.ordinary_finalizers.swap_remove(index);
         self.slots[id as usize].finalization = if found {
-            Finalization::Done
+            Finalization::Dispatched
         } else {
             Finalization::None
         };

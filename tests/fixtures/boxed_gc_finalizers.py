@@ -6,6 +6,7 @@ from weakref import ref
 
 class Parent:
     def __del__(self):
+        self.finalized_on_entry = gc.is_finalized(self)
         events.append("finalize")
         saved.append(self)
 
@@ -26,6 +27,7 @@ def weak_callback(w):
 def exercise(cyclic, unrelated):
     gc.collect(2)
     owner = Owner()
+    assert not gc.is_finalized(owner)
     owner.payload = []
     if cyclic:
         owner.loop = owner
@@ -48,6 +50,8 @@ def exercise(cyclic, unrelated):
     else:
         assert early() is saved[0] and events == ["finalize"]
 
+    assert saved[0].finalized_on_entry is cyclic
+    assert gc.is_finalized(saved[0])
     late = ref(saved[0], weak_callback)
     saved.clear()
     if cyclic:
