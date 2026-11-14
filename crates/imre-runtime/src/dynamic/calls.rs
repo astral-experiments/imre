@@ -270,7 +270,8 @@ pub(super) enum RegisteredCall {
 
 impl RegisteredCall {
     /// # Safety
-    /// A prepared frame belongs to the exclusively executing context that pushed it.
+    /// The executing thread must own the context that prepared this call until the call
+    /// and any nested Python callbacks return. Any pushed frame must remain rooted.
     #[inline]
     pub(super) unsafe fn run(self, context: *mut Context) -> Result<Id> {
         match self {
@@ -288,6 +289,8 @@ impl RegisteredCall {
             }
             // SAFETY: the interrupted caller remains rooted in this exclusively executing context.
             Self::Join(join) => unsafe { join.run(context) },
+            // SAFETY: the registered caller keeps its context live on this thread through
+            // the interruptible joins and any Python signal handlers they dispatch.
             Self::ShutdownWorkers => unsafe { thread_worker::shutdown_workers(context) },
             // SAFETY: the native worker takes no reference into its creator's heap.
             Self::Start(start) => unsafe { start.run(context) },

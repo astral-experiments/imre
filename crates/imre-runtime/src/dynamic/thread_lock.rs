@@ -45,11 +45,9 @@ pub(super) fn construct(
 
 fn acquire_args(
     ctx: &mut Context,
-    args: &[Id],
-    kwargs: &[(String, Id)],
+    blocking: Option<Id>,
+    timeout: Option<Id>,
 ) -> Result<(bool, Option<std::time::Duration>)> {
-    let [blocking, timeout] =
-        bind_method_arguments("acquire", args, kwargs, ["blocking", "timeout"], 2)?;
     let blocking = ctx.optional_truth(blocking, true)?;
     let timeout = match timeout {
         None => None,
@@ -95,7 +93,7 @@ fn receiver_args<'a, 'b>(
     Ok((id, lock, args))
 }
 
-/// The registered caller roots the physical receiver through the wait.
+/// The physical receiver selected by the registered call, together with its wait options.
 pub(super) struct Acquire {
     receiver: Id,
     blocking: bool,
@@ -121,46 +119,66 @@ impl NativeWait<'_> {
     }
 
     /// # Safety
-    /// The caller owns the interrupted context and roots the receiver until this returns.
+    /// The caller must resume in its own context. An acquire receiver must be live at entry.
     pub(super) unsafe fn run(mut self, _context: *mut Context) -> Result<bool> {
         #[cfg(unix)]
         if crate::signals::is_main() {
-            let deadline = match &self {
-                Self::Acquire(timeout, ..) => timeout.map(Deadline::after),
-                Self::Join(deadline, _) => *deadline,
+            let (deadline, root) = match self {
+                Self::Acquire(timeout, receiver, _) => {
+                    // SAFETY: the caller owns the active frame at entry. Only the root's
+                    // index and value cross the native wait.
+                    let ctx = unsafe { &mut *_context };
+                    ctx.heap.reserve_temporaries(1)?;
+                    let mark = ctx.heap.temporary_mark();
+                    ctx.heap.keep(receiver);
+                    (timeout.map(Deadline::after), Some((mark, receiver)))
+                }
+                Self::Join(deadline, _) => (deadline, None),
             };
             let interval = Duration::from_millis(50);
             let mut phase = WaitPhase::Initial;
-            loop {
+            let result = loop {
                 let remaining = deadline.map(Deadline::remaining);
                 let slice = remaining.map_or(interval, |left| left.min(interval));
                 if self.wait(Some(slice), phase) {
-                    return Ok(true);
+                    break Ok(true);
                 }
                 // An expired join returns immediately. A lock wait interrupted during
                 // a positive slice dispatches first, then probes the lock once more.
                 if matches!(self, Self::Join(..))
                     && deadline.is_some_and(|end| end.remaining().is_zero())
                 {
-                    return Ok(false);
+                    break Ok(false);
                 }
                 if !slice.is_zero()
                     && crate::signals::TRIPPED.load(std::sync::atomic::Ordering::Acquire)
                 {
-                    // SAFETY: the wait released its native locks before returning to this frame.
-                    unsafe { Context::dispatch_pending_calls(_context)? };
+                    // SAFETY: the native wait released its mutex and returned to the
+                    // interrupted thread. Python reenters its active context here.
+                    if let Err(error) = unsafe { Context::dispatch_pending_calls(_context) } {
+                        break Err(error);
+                    }
                     if let Self::Acquire(_, receiver, lock) = &mut self {
                         // A returning signal handler may have reset the lock in a forked child.
+                        // SAFETY: dispatch returned to the rooted receiver's frame. Clone
+                        // its current backing before the next native wait.
                         **lock = Lock::backing(unsafe { &*_context }, *receiver);
                     }
                     phase = WaitPhase::Interrupted;
                     continue;
                 }
                 if matches!(self, Self::Acquire(..)) && remaining == Some(slice) {
-                    return Ok(false);
+                    break Ok(false);
                 }
                 phase = WaitPhase::Parked;
+            };
+            if let Some((mark, receiver)) = root {
+                // SAFETY: every exit resumes the same frame after any handler returned.
+                unsafe { &mut *_context }
+                    .heap
+                    .release_weak_target(mark, receiver);
             }
+            return result;
         }
         Ok(self.wait(
             match &self {
@@ -209,7 +227,10 @@ impl Acquire {
         let (blocking, timeout) = if args.is_empty() && kwargs.is_empty() {
             (true, None)
         } else {
-            acquire_args(ctx, args, kwargs)?
+            let [blocking, timeout] =
+                bind_method_arguments("acquire", args, kwargs, ["blocking", "timeout"], 2)?;
+            // Both conversions can run Python and remove the binding we just selected.
+            ctx.with_weak_target(receiver, |ctx| acquire_args(ctx, blocking, timeout))?
         };
         Ok(Self {
             receiver,
@@ -219,7 +240,8 @@ impl Acquire {
     }
 
     /// # Safety
-    /// The interrupted caller roots the selected receiver through the call.
+    /// Run in the preparing thread and context before any intervening Python call or
+    /// collection, while the selected receiver is still live.
     pub(super) unsafe fn run_registered(self, context: *mut Context) -> Result<Id> {
         // SAFETY: conversion has finished. Only the native backing crosses a blocking wait.
         let mut lock = Lock::backing(unsafe { &*context }, self.receiver);
@@ -230,7 +252,8 @@ impl Acquire {
                 WaitPhase::Initial,
             )));
         }
-        // SAFETY: the registered caller roots the receiver across possible signal delivery.
+        // SAFETY: the receiver is live at entry. The interruptible wait keeps it rooted
+        // through signal handlers that can replace its backing.
         unsafe { NativeWait::Acquire(self.timeout, self.receiver, &mut lock).run(context) }
             .map(boolean)
     }

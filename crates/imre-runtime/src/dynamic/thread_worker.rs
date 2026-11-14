@@ -569,18 +569,25 @@ pub(super) fn prepare_shutdown(ctx: &mut Context) -> Result<super::calls::Regist
 /// # Safety
 /// The caller owns this context through signal dispatch and resumption.
 pub(super) unsafe fn shutdown_workers(context: *mut Context) -> Result<Id> {
-    // SAFETY: each registry borrow ends before the retained handle can block.
+    // SAFETY: preparation returned the context to the registered caller on this thread.
     unsafe { &mut *context }.reap_thread_operands();
     loop {
+        // SAFETY: only this thread accesses its registry. Clone the handle so the
+        // borrow ends here, before a signal handler can change the registry.
         let handle = unsafe { &*context }
             .workers
             .shutdown_handles()
             .find(|handle| handle.awaiting_exit())
             .cloned();
         let Some(handle) = handle else { break };
+        // SAFETY: the registered caller owns the context through signal dispatch.
+        // Only the owned native handle crosses the wait.
         if let Err(error) = unsafe { NativeWait::Join(None, &handle).run(context) } {
+            // SAFETY: the wait and raising handler have returned to the caller. The
+            // unraisable hook can now run with exclusive access to the same context.
+            let ctx = unsafe { &mut *context };
             super::unraisable::report(
-                unsafe { &mut *context },
+                ctx,
                 error,
                 false,
                 None,
@@ -594,17 +601,17 @@ pub(super) unsafe fn shutdown_workers(context: *mut Context) -> Result<Id> {
     }
     // Other workers may have published completion during an interruptible wait.
     // Finish their native joins, which can still block in native thread teardown.
-    // No Python is dispatched during this final sweep.
-    let caller = thread_ident();
-    let count = unsafe { &*context }.workers.entries.len();
-    for index in 0..count {
-        let handle = unsafe { &*context }.workers.entries[index]
-            .shutdown_handle(caller)
-            .cloned();
-        if let Some(handle) = handle {
-            drop(handle.joined());
-        }
+    // SAFETY: the registered caller is back in its context. Snapshot the native
+    // handles so the registry borrow ends before the first join.
+    let handles: Vec<_> = unsafe { &*context }
+        .workers
+        .shutdown_handles()
+        .cloned()
+        .collect();
+    for handle in handles {
+        drop(handle.joined());
     }
+    // SAFETY: the native joins returned to the registered caller on this thread.
     unsafe { &mut *context }.reap_thread_operands();
     Ok(NONE)
 }
