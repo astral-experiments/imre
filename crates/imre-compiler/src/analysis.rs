@@ -245,6 +245,50 @@ impl OperandTypes<'_> {
         self.checked_scalar(operand.into(), ScalarMatch::Assignable)
     }
 
+    /// Check the source contract of an argument that stays boxed for a live call.
+    pub(crate) fn accepts_argument(
+        self,
+        operand: &Expr,
+        callee: crate::modules::DefinitionId,
+        index: usize,
+        annotation: TextRange,
+    ) -> bool {
+        let session = self.session;
+        let parsed = self.parsed();
+        let Some((original, _)) = self.original_operand(&parsed, operand.into()) else {
+            return false;
+        };
+        let file = session.files[callee.module];
+        let target = session.parsed(file);
+        let Some(parameter) = target
+            .suite()
+            .get(callee.statement)
+            .and_then(|stmt| stmt.as_function_def_stmt())
+            .and_then(|def| def.parameters.iter_non_variadic_params().nth(index))
+            .filter(|p| {
+                p.annotation()
+                    .is_some_and(|node| node.range() == annotation)
+            })
+        else {
+            return false;
+        };
+        let model = SemanticModel::new(&session.db, session.db.program_file(file));
+        session
+            .inferred_operand_type(self.module, original)
+            .zip(parameter.inferred_type(&model))
+            .is_some_and(|(value, expected)| {
+                let env = model.program_environment();
+                !value.is_unknown()
+                    && value.is_assignable_to(&session.db, &env, expected)
+                    && session
+                        .scalar_layout(&env, expected, ScalarMatch::Assignable)
+                        .is_none_or(|layout| {
+                            session.scalar_layout(&env, value, ScalarMatch::Assignable)
+                                == Some(layout)
+                        })
+            })
+    }
+
     /// The untaken continuation needs the exact result of the original call.
     pub(crate) fn stopped_call_result(self, call: &ExprCall) -> Option<crate::ir::Type> {
         self.checked_scalar(call.into(), ScalarMatch::Exact)
@@ -2340,6 +2384,14 @@ impl Session {
         ) {
             return None;
         }
+        self.inferred_operand_type(module, value)
+    }
+
+    fn inferred_operand_type(
+        &self,
+        module: usize,
+        value: &Expr,
+    ) -> Option<ty_python_semantic::types::Type<'_>> {
         self.hint_reads.set(self.hint_reads.get() + 1);
         let file = self.db.program_file(self.files[module]);
         // Inferring one expression visits its scope. An unrelated loop can grow a
