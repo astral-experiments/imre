@@ -724,8 +724,9 @@ impl<'f> Frame<'f, '_, '_> {
     }
 
     /// Project both evaluated operands before the result can allocate or call Python.
-    pub(super) fn float_product(
+    pub(super) fn float_arithmetic(
         &mut self,
+        op: ir::Binary,
         left: &CheckedValue,
         right: &CheckedValue,
         span: Option<[usize; 4]>,
@@ -744,15 +745,15 @@ impl<'f> Frame<'f, '_, '_> {
                 let a = frame.value("load double, ptr %live");
                 let rhs = frame.value("getelementptr double, ptr %live, i64 1");
                 let b = frame.value(&format!("load double, ptr {rhs}"));
-                let product = frame.body().float_arithmetic(ir::Binary::Multiply, &a, &b);
+                let result = frame.body().float_arithmetic(op, &a, &b);
                 let position = frame.output.position(span);
                 CheckedValue::handle(frame.checked(&format!(
-                    "call i64 @imre_dyn_own_float(ptr %ctx, double {product}, ptr {position})"
+                    "call i64 @imre_dyn_own_float(ptr %ctx, double {result}, ptr {position})"
                 )))
             },
-            |frame| CheckedValue::handle(frame.op_at("*", &[&left, &right], span)),
+            |frame| CheckedValue::handle(frame.op_at(op.protocol(), &[&left, &right], span)),
         )
-        .expect("both product edges produce Python objects")
+        .expect("both arithmetic edges produce Python objects")
     }
 
     pub(crate) fn block_name(&mut self) -> String {

@@ -843,11 +843,12 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         }
         let types = (left.checked_operand_type(), right.checked_operand_type());
         let checked_ints = types == (Type::Int, Type::Int);
-        let float_product = matches!(self.0, Entry::Registered(_))
-            && op == Binary::Multiply
+        let plain_arithmetic = matches!(op, Binary::Add | Binary::Subtract | Binary::Multiply);
+        let float_arithmetic = plain_arithmetic
+            && matches!(self.0, Entry::Registered(_))
             && types == (Type::Float, Type::Float);
         // Refining a Python operand for arithmetic must preserve its original error site.
-        let positioned = matches!(op, Binary::Add | Binary::Subtract | Binary::Multiply)
+        let positioned = plain_arithmetic
             || op == Binary::Modulo
                 && [left, right].into_iter().all(|operand| {
                     operand.ty == Type::Int
@@ -865,7 +866,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                     || expr.ty == Type::PythonObject
                     || checked_ints);
         let (left_use, right_use) = if arithmetic
-            && !float_product
+            && !float_arithmetic
             && (op == Binary::Multiply || checked_ints || usage.needs_integer())
         {
             // The left operand must be ready before the right can call Python.
@@ -907,8 +908,8 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 emitter.bounded_binary(op, expr, (left, a.fixed_value()), (right, b.fixed_value()))
         {
             CheckedValue::owned(value)
-        } else if float_product {
-            self.python().float_product(&a, &b, span)
+        } else if float_arithmetic {
+            self.python().float_arithmetic(op, &a, &b, span)
         } else if let Some(divisor) = divisor
             && let Some(value) = self.cached_remainder(&a, &b, span, divisor)
         {

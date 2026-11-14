@@ -449,6 +449,8 @@ fn placed_arithmetic_keeps_the_python_operator_and_integer_guards() {
     use crate::ir::{Binary, ExprKind, Statement};
 
     for (op, signature, result, call) in [
+        (Binary::Add, "a: float, b: float", "float", "2.5, 3.0"),
+        (Binary::Subtract, "a: float, b: float", "float", "2.5, 3.0"),
         (Binary::Multiply, "a: float, b: float", "float", "2.5, 3.0"),
         (Binary::Multiply, "a: str, b: int", "str", "'a', 3"),
         (Binary::Add, "a: str, b: str", "str", "'a', 'b'"),
@@ -460,8 +462,8 @@ fn placed_arithmetic_keeps_the_python_operator_and_integer_guards() {
         ),
         (Binary::Add, "a: str | None, b: str", "str", "'a', 'b'"),
     ] {
-        let float_product = op == Binary::Multiply && result == "float";
-        let integer_product = op == Binary::Multiply && !float_product;
+        let floats = result == "float";
+        let integer_product = op == Binary::Multiply && !floats;
         let operator = op.protocol();
         let source = format!(
             "class Receiver:\n    def read(self, value: int) -> int:\n        return value\n\
@@ -502,15 +504,15 @@ fn placed_arithmetic_keeps_the_python_operator_and_integer_guards() {
             body.matches("call i64 @int_mul(").count(),
             usize::from(integer_product)
         );
-        assert_eq!(body.contains("fmul double"), float_product);
-        assert_eq!(
-            body.contains("call i1 @imre_dyn_exact_float_pair("),
-            float_product
-        );
-        assert_eq!(
-            body.contains("call i64 @imre_dyn_own_float("),
-            float_product
-        );
+        for (instruction, operation) in [
+            ("fadd double", Binary::Add),
+            ("fsub double", Binary::Subtract),
+            ("fmul double", Binary::Multiply),
+        ] {
+            assert_eq!(body.contains(instruction), floats && op == operation);
+        }
+        assert_eq!(body.contains("call i1 @imre_dyn_exact_float_pair("), floats);
+        assert_eq!(body.contains("call i64 @imre_dyn_own_float("), floats);
         assert_eq!(
             body.matches(&format!(
                 "call i64 @imre_dyn_op_at(ptr %ctx, ptr {operator},"
