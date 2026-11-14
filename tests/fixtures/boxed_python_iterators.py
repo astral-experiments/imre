@@ -167,13 +167,14 @@ def current():
             alias.append(9)
             raise ValueError("stop")
 
-    events = []
-    try:
-        target.extend(Hint())
-    except ValueError as error:
-        print(str(error), events, alias)
-    else:
-        raise AssertionError("ignored length hint")
+    for consume in (target.extend, list):
+        events = []
+        try:
+            consume(Hint())
+        except ValueError as error:
+            print(str(error), events, alias)
+        else:
+            raise AssertionError("ignored length hint")
     growing = [4, 5]
     for index, item in enumerate(growing, start=1 << 70):
         print(index, item)
