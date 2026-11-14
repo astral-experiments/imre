@@ -1072,12 +1072,11 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
         (&mut self.frame, &self.sites)
     }
 
-    fn place_declaration(&mut self, site: TextSize) -> usize {
-        if let Some(index) = self.sites.declarations.get_index_of(&site) {
-            return index;
+    fn place_declaration(&mut self, site: TextSize) {
+        if let Err(index) = self.sites.position(site) {
+            let declaration = self.compile_declaration(site);
+            self.sites.declarations.insert(index, (site, declaration));
         }
-        let declaration = self.compile_declaration(site);
-        self.sites.declarations.insert_full(site, declaration).0
     }
 
     fn class_namespace(&mut self, site: TextSize) -> CompiledClassNamespace {

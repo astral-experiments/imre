@@ -1,5 +1,4 @@
 //! Compiled code identities and operands for declarations in a registered frame.
-use indexmap::IndexMap;
 use ruff_text_size::{TextRange, TextSize};
 
 use super::RegisteredFrame;
@@ -178,12 +177,28 @@ pub(crate) struct CompiledExec {
 
 #[derive(Default)]
 pub(crate) struct CheckedSites<'p> {
-    pub(crate) declarations: IndexMap<TextSize, Result<Declaration<'p>, String>>,
+    pub(crate) declarations: Vec<(TextSize, Result<Declaration<'p>, String>)>,
 }
 
 impl CheckedSites<'_> {
-    pub(crate) fn declaration(&self, index: usize) -> &Declaration<'_> {
-        self.declarations[index]
+    /// Most declarations follow the last written site. An exception handler or a
+    /// replayed suite can revisit an earlier position in the same frame.
+    pub(crate) fn position(&self, site: TextSize) -> Result<usize, usize> {
+        match self.declarations.last() {
+            Some((last, _)) if *last == site => Ok(self.declarations.len() - 1),
+            Some((last, _)) if *last > site => self
+                .declarations
+                .binary_search_by_key(&site, |(site, _)| *site),
+            _ => Err(self.declarations.len()),
+        }
+    }
+
+    fn placed(&self, site: TextSize) -> &Result<Declaration<'_>, String> {
+        &self.declarations[self.position(site).expect("a placed declaration")].1
+    }
+
+    pub(crate) fn declaration(&self, site: TextSize) -> &Declaration<'_> {
+        self.placed(site)
             .as_ref()
             .expect("a function or class declaration")
     }
@@ -191,9 +206,9 @@ impl CheckedSites<'_> {
     pub(crate) fn bind_type_alias(
         &self,
         frame: &mut RegisteredFrame<'_, '_>,
-        index: usize,
+        site: TextSize,
     ) -> String {
-        let alias = match &self.declarations[index] {
+        let alias = match self.placed(site) {
             Ok(alias) => alias,
             Err(error) => {
                 frame.output.diagnostic.get_or_insert_with(|| error.clone());
@@ -219,7 +234,7 @@ impl CheckedSites<'_> {
     pub(crate) fn definition(
         &self,
         frame: &mut RegisteredFrame<'_, '_>,
-        index: usize,
+        site: TextSize,
         decorators: &[(String, String)],
         defaults: &[String],
         class_arguments: Option<(String, String)>,
@@ -228,7 +243,7 @@ impl CheckedSites<'_> {
             definition,
             decorator_offsets,
             type_params,
-        } = self.declaration(index);
+        } = self.declaration(site);
         let scope = frame.scope.clone();
         let mut value = if let Some(arguments) = class_arguments {
             definition.instantiate_class(frame, arguments, None)

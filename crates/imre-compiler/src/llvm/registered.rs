@@ -415,7 +415,7 @@ pub(crate) trait PreparedSuiteEmitter<'a, 'p>:
     std::ops::DerefMut<Target = RegisteredFrame<'a, 'p>>
 {
     fn frame_and_sites(&mut self) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites<'p>);
-    fn place_declaration(&mut self, site: TextSize) -> usize;
+    fn place_declaration(&mut self, site: TextSize);
     fn class_namespace(&mut self, site: TextSize) -> CompiledClassNamespace;
     fn callable_at(&mut self, site: CallableSite, scoped: bool) -> CompiledDefinition;
     fn annotation_string(&mut self, site: TextSize, spelling: &str) -> String;
@@ -1239,8 +1239,10 @@ impl<'f> Frame<'f, '_, '_> {
                 let early = matches!(
                     RequiredSite::definition(site, header),
                     RequiredSite::Definition(_)
-                )
-                .then(|| self.code.place_declaration(site.start()));
+                );
+                if early {
+                    self.code.place_declaration(site.start());
+                }
                 let (decorators, defaults, arguments) = match site {
                     ir::DefinitionSite::Class {
                         arguments: Some(layout),
@@ -1254,8 +1256,7 @@ impl<'f> Frame<'f, '_, '_> {
                         arguments: None, ..
                     } => (header, &[][..], None),
                     ir::DefinitionSite::Function(_) => {
-                        let index = early.expect("a function precedes its defaults");
-                        let definition = self.code.frame_and_sites().1.declaration(index);
+                        let definition = self.code.frame_and_sites().1.declaration(site.start());
                         let (decorators, defaults) =
                             header.split_at(definition.decorator_offsets.len());
                         (decorators, defaults, None)
@@ -1268,17 +1269,19 @@ impl<'f> Frame<'f, '_, '_> {
                     .collect::<Vec<_>>();
                 let class_arguments =
                     arguments.map(|(layout, operands)| self.pack_arguments(layout, operands, None));
-                let index = early.unwrap_or_else(|| self.code.place_declaration(site.start()));
+                if !early {
+                    self.code.place_declaration(site.start());
+                }
                 let (code, sites) = self.code.frame_and_sites();
-                sites.definition(code, index, &decorators, &defaults, class_arguments)
+                sites.definition(code, site.start(), &decorators, &defaults, class_arguments)
             }
             (Builtin::RegisteredClassNamespace(site, layout), operands) => {
                 self.generic_class(*site, layout, operands)
             }
             (Builtin::RegisteredTypeAlias(site), []) => {
-                let index = self.code.place_declaration(*site);
+                self.code.place_declaration(*site);
                 let (frame, sites) = self.code.frame_and_sites();
-                sites.bind_type_alias(frame, index)
+                sites.bind_type_alias(frame, *site)
             }
             (Builtin::RegisteredImport(import), []) => {
                 self.code.namespace_import(import);
