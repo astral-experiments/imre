@@ -147,10 +147,12 @@ fn owned_registered_entry_roots_bound_slots_and_restores_its_frame() {
             ctx.heap.release_temporaries_since(mark);
             let call = if forwarded {
                 let method = ctx.bind_python_method(target, value);
+                let wrapper =
+                    crate::dynamic::method_decorator::static_method(&mut ctx, method).unwrap();
                 ctx.prepare_call_in_scope(
                     scope,
                     operator,
-                    vec![method],
+                    vec![wrapper],
                     vec![("alias".into(), value)],
                 )
                 .unwrap()

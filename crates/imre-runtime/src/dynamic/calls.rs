@@ -8414,6 +8414,9 @@ impl Context {
                     args = method_arguments(receiver, args)?;
                     callable = target;
                 }
+                Value::StaticMethod {
+                    callable: target, ..
+                } => callable = target,
                 Value::HeapTypeMethod { owner, name, .. }
                     if self.heap.get(owner).heap_type() == Some(stdlib::socket::CLASS) =>
                 {
@@ -8961,7 +8964,6 @@ impl Context {
             }
             Value::Native(name) => stdlib::call(self, &name, &args, &kwargs)
                 .map_err(|error| stdlib::io::qualify_error(self, error, None)),
-            Value::StaticMethod { callable, .. } => self.call(callable, args, kwargs),
             Value::KeyWrapper { comparator, .. } => {
                 let object = stdlib::functools::key_argument("K", "obj", &args, &kwargs)?;
                 Ok(self.alloc(Value::KeyWrapper {
