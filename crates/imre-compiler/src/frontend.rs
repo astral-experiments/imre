@@ -196,6 +196,7 @@ use module_values::{Initialization, ModuleValues};
 struct Signature {
     id: usize,
     physical_frame: bool,
+    may_have_display: bool,
     asynchronous: bool,
     parameter_declarations: Arc<[Option<TypeDeclaration>]>,
     params: Vec<Parameter>,
@@ -607,6 +608,12 @@ const RESERVED: &[&str] = &[
     "__doc__",
     "__file__",
 ];
+
+/// Recognize a builtin name when no declaration in the module binds it.
+fn module_builtin_name(module: &crate::modules::SourceModule, name: &str) -> bool {
+    !module.bindings.contains_key(name)
+        && (reserved_builtin_function(name) || imre_ast::providers::BUILTIN_TYPES.contains(&name))
+}
 
 pub(crate) fn reserved_builtin_function(name: &str) -> bool {
     RESERVED.contains(&name) && imre_ast::providers::BUILTIN_FUNCTIONS.contains(&name)
@@ -1145,7 +1152,8 @@ fn lower_graph(
     }
     for (module, function, signature) in &mut definitions {
         let renamed = assignments::alias_builtin_parameters(function, graph, *module);
-        let (dispatch, packed) = closed_calls::prepare(function, graph, *module);
+        let (dispatch, packed, may_have_display) = closed_calls::prepare(function, graph, *module);
+        signature.may_have_display = may_have_display;
         if renamed || dispatch || packed {
             signature.physical_frame = false;
         }
@@ -1503,11 +1511,23 @@ fn lower_graph(
                 .params
                 .iter()
                 .all(|p| p.default.is_none() && !p.sign_only)
-            && ((signature.returns == Type::None
-                && definition.returns.is_some()
-                && !signature.params.is_empty()
-                && signature.parameter_declarations.len() == signature.params.len()
-                && signature.parameter_declarations.iter().all(Option::is_some))
+            && ((named_scalar
+                && unavailable.is_none()
+                && signature.may_have_display
+                // Eager displays cannot supply a fixed source operand to this frame.
+                // Keep first-party calls and method bindings on their fixed contract.
+                && graph.session.function_reads_only(
+                    *module_id,
+                    definition,
+                    crate::analysis::EagerDisplays::Required,
+                    |_| true,
+                    |name| module_builtin_name(module, name),
+                ))
+                || (signature.returns == Type::None
+                    && definition.returns.is_some()
+                    && !signature.params.is_empty()
+                    && signature.parameter_declarations.len() == signature.params.len()
+                    && signature.parameter_declarations.iter().all(Option::is_some))
                 || (named
                     && definition.returns.is_none()
                     && (callable_inputs.is_some()
@@ -2664,6 +2684,7 @@ fn signature(
     Ok(Signature {
         id,
         physical_frame: false,
+        may_have_display: false,
         asynchronous: function.is_async,
         parameter_declarations: parameter_declarations.into(),
         params,

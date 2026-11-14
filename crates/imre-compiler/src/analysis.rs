@@ -68,6 +68,14 @@ struct Database {
     analysis: Arc<AnalysisSettings>,
 }
 
+/// Which comprehension scopes can supply expressions to this function.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EagerDisplays {
+    Excluded,
+    Allowed,
+    Required,
+}
+
 /// The eager body check reads the lowering filesystem with independent diagnostic rules.
 pub(crate) struct RegisteredBodyChecks(Database);
 
@@ -709,7 +717,12 @@ impl Session {
         eager_displays: bool,
         fixed_global: impl Fn(&str) -> bool,
     ) -> bool {
-        self.function_reads_only(module, function, eager_displays, |_| true, fixed_global)
+        let displays = if eager_displays {
+            EagerDisplays::Allowed
+        } else {
+            EagerDisplays::Excluded
+        };
+        self.function_reads_only(module, function, displays, |_| true, fixed_global)
     }
 
     /// Check a fixed body with separate rules for reads of local and global names.
@@ -717,7 +730,7 @@ impl Session {
         &self,
         module: usize,
         function: &ruff_python_ast::StmtFunctionDef,
-        eager_displays: bool,
+        displays: EagerDisplays,
         allowed_local_read: impl Fn(&str) -> bool,
         fixed_global: impl Fn(&str) -> bool,
     ) -> bool {
@@ -743,11 +756,13 @@ impl Session {
                     .definitions_with_usage()
                     .any(|(_, definition, _)| definition.kind(&self.db).is_import())
         };
+        let mut children = index.child_scopes(scope).peekable();
         !function.is_async
             && !scope.is_generator_function(index)
+            && (displays != EagerDisplays::Required || children.peek().is_some())
             && fixed(scope)
-            && index.child_scopes(scope).all(|(id, child)| {
-                eager_displays
+            && children.all(|(id, child)| {
+                displays != EagerDisplays::Excluded
                     && matches!(
                         child.node(),
                         NodeWithScopeKind::ListComprehension(_)

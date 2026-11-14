@@ -487,7 +487,7 @@ impl Checker<'_> {
                 if !self.graph.session.function_reads_only(
                     origin.module,
                     declaration,
-                    false,
+                    crate::analysis::EagerDisplays::Excluded,
                     |name| name != receiver_name.as_str(),
                     |_| false,
                 ) {
