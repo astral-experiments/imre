@@ -660,14 +660,17 @@ pub(crate) fn lower_with_caller_cache(
     let mut key_reprs = HashSet::new();
     loop {
         let before = key_reprs.len();
-        graph.missing_repr.set(None);
         let (lowered, checks) = lower_current(
             graph,
             cache.take(),
             &mut key_reprs,
             !matches!(source_checks, Some(SourceCheckSession::SharedGraph)),
         );
-        key_reprs.extend(graph.missing_repr.take());
+        if let Err(reason) = &lowered
+            && let Kind::MissingFormatter(owner) = reason.kind
+        {
+            key_reprs.insert(owner);
+        }
         if key_reprs.len() == before {
             let session = match source_checks {
                 Some(SourceCheckSession::SharedGraph) => {

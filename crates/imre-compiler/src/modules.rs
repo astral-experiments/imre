@@ -3225,7 +3225,6 @@ pub(crate) struct SourceGraph {
     pub(crate) closed_initializer: Option<crate::analysis::InitializerCheck>,
     pub(crate) layout_hint: std::cell::Cell<LayoutHint>,
     pub(crate) float_components: std::cell::Cell<FloatComponents>,
-    pub(crate) missing_repr: std::cell::Cell<Option<DefinitionId>>,
     pub(crate) command_startup: Option<(crate::CommandFlags, String)>,
     pub(crate) virtual_command: bool,
     pub(crate) handled_tracebacks: bool,
@@ -3286,7 +3285,6 @@ impl SourceGraph {
         self.session.explicit_check = baseline.explicit_check;
         self.layout_hint.set(LayoutHint::Disabled);
         self.float_components.set(FloatComponents::Native);
-        self.missing_repr.set(None);
         *self.class_layout_error.get_mut() = None;
         self.has_object_constructor_fallback.set(false);
         self.check_fallback_calls.set(FallbackCalls::None);
@@ -3316,7 +3314,6 @@ impl SourceGraph {
         let constructor = self.has_object_constructor_fallback.replace(false);
         let floats = self.float_components.get();
         let set = self.layout_hint.get();
-        let repr = self.missing_repr.get();
         let result = lower();
         let deferred_here = self.deferred_object_error.replace(deferred).is_some();
         let needed_here = self.needs_object_runtime.replace(needs_object);
@@ -3325,7 +3322,6 @@ impl SourceGraph {
         self.check_fallback_calls.set(calls);
         self.float_components.set(floats);
         self.layout_hint.set(set);
-        self.missing_repr.set(repr);
         self.checked_diagnostics.borrow_mut()[module].truncate(diagnostics);
         result
     }
@@ -5102,7 +5098,6 @@ impl<'a> Loader<'a> {
             checked_builtin_imports: self.checked_builtin_imports,
             checked_diagnostics: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
             float_components: Default::default(),
-            missing_repr: Default::default(),
             // An import that cannot be initialized here must not turn an unused
             // object-capable namespace into a reason to box the caller.
             needs_object_runtime: std::cell::Cell::new(

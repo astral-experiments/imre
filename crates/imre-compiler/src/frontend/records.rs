@@ -939,12 +939,12 @@ impl Checker<'_> {
             && !method.is_async
             && !self.graph.includes_method(owner.module, method)
         {
-            self.graph.missing_repr.set(Some(owner));
             return Err(error(
                 self.source,
                 at,
                 "this representation requires a reachable __repr__ implementation",
-            ));
+            )
+            .classify(Kind::MissingFormatter(owner)));
         }
         Ok(())
     }
