@@ -843,9 +843,8 @@ enum Body<'a> {
 
 struct SourceMap<'a> {
     info: &'a SourceInfo<'a>,
-    /// A duplicated cleanup still uses the same code. Lambdas have source offsets and
-    /// generators have nonempty source ranges.
-    callable_code: std::cell::RefCell<HashMap<TextRange, String>>,
+    /// Repeated emission of a source expression reuses its original code object.
+    callable_code: std::cell::RefCell<HashMap<RequiredSite, String>>,
     exec_code: std::cell::RefCell<HashMap<TextRange, sites::CompiledExec>>,
     unit: usize,
     positions: &'a SourcePositions<'a>,
@@ -886,8 +885,7 @@ impl<'a> RegisteredBody<'a> {
 #[derive(Default)]
 struct SourceInfo<'a> {
     exec_literals: LiteralSites,
-    annotation_children:
-        HashMap<TextSize, crate::frontend::AnnotationBody<Box<SourceInfo<'static>>>>,
+    annotation_children: HashMap<String, crate::frontend::AnnotationBody<Box<SourceInfo<'static>>>>,
     scopes: crate::frontend::function_scope::ScopeFacts<'a>,
     lambdas: HashMap<ruff_text_size::TextSize, RegisteredLambda>,
     generators: HashMap<TextRange, RegisteredGenerator>,
@@ -1154,6 +1152,34 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
         definitions.compile_callable(range, callable)
     }
 
+    fn annotation_string(&mut self, site: TextSize, spelling: &str) -> String {
+        let mut entries = self.source.callable_code.borrow_mut();
+        let code = entries
+            .entry(RequiredSite::AnnotationString(site))
+            .or_insert_with(|| {
+                let body = &self.source.annotation_children[spelling];
+                let text = body.scope.text.as_ref();
+                let file = self.frame.output.data(b"<string>");
+                let location = SourceMap {
+                    info: &body.scope,
+                    callable_code: Default::default(),
+                    exec_code: Default::default(),
+                    unit: self.source.unit,
+                    positions: &SourcePositions::new(&body.scope.path, text, &file),
+                };
+                location.code(
+                    self.frame.output,
+                    "",
+                    Body::Operand(body.code.range, &body.code.operand, None),
+                    false,
+                    None,
+                )
+            });
+        let text = self.frame.source_text(spelling, None);
+        self.frame.bind_annotation_expression(&text, code);
+        text
+    }
+
     fn exec_literal_at(&mut self, site: TextRange) -> Option<sites::CompiledExec> {
         let child = self.source.exec_literals.body(site)?;
         let output = &mut self.frame.output;
@@ -1269,26 +1295,6 @@ impl sites::SiteDefinitions for LexicalDefinitions<'_, '_> {
             None => Ok(compiled.expect("prepared alias evaluator")),
         }
     }
-
-    fn annotation_string(&mut self, site: TextSize) -> String {
-        let body = &self.source.annotation_children[&site];
-        let text = body.scope.text.as_ref();
-        let file = self.output.data(b"<string>");
-        let location = SourceMap {
-            info: &body.scope,
-            callable_code: Default::default(),
-            exec_code: Default::default(),
-            unit: self.source.unit,
-            positions: &SourcePositions::new(&body.scope.path, text, &file),
-        };
-        location.code(
-            self.output,
-            "",
-            Body::Operand(body.code.range, &body.code.operand, None),
-            false,
-            None,
-        )
-    }
 }
 
 impl LexicalDefinitions<'_, '_> {
@@ -1330,8 +1336,12 @@ impl LexicalDefinitions<'_, '_> {
         let generic = header.is_some_and(|h| !h.type_params.is_empty());
         let suspension = metadata.suspension_flags();
         // Several expression regions can place the same lexical function.
-        let cache = (!matches!(callable, Callable::Named(_))).then_some(&source.callable_code);
-        let existing = cache.and_then(|cache| cache.borrow().get(&site).cloned());
+        let key = match callable {
+            Callable::Lambda(..) => Some(RequiredSite::Lambda(site.start())),
+            Callable::Generator(_) => Some(RequiredSite::Generator(site)),
+            Callable::Named(_) => None,
+        };
+        let existing = key.and_then(|key| source.callable_code.borrow().get(&key).cloned());
         let code = existing.unwrap_or_else(|| {
             let prefix = if matches!(callable, Callable::Generator(_)) {
                 format!("{qualname}.")
@@ -1345,8 +1355,8 @@ impl LexicalDefinitions<'_, '_> {
                 true,
                 Some((site.start(), suspension)),
             );
-            if let Some(cache) = cache {
-                cache.borrow_mut().insert(site, code.clone());
+            if let Some(key) = key {
+                source.callable_code.borrow_mut().insert(key, code.clone());
             }
             code
         });

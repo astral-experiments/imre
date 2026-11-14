@@ -410,6 +410,7 @@ pub(crate) trait PreparedSuiteEmitter<'a, 'p>:
     fn frame_and_sites(&mut self) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites);
     fn place_site(&mut self, site: RequiredSite);
     fn callable_at(&mut self, site: CallableSite, scoped: bool) -> CompiledDefinition;
+    fn annotation_string(&mut self, site: TextSize, spelling: &str) -> String;
     fn exec_literal_at(&mut self, site: TextRange) -> Option<sites::CompiledExec>;
 }
 
@@ -1289,9 +1290,7 @@ impl<'f> Frame<'f, '_, '_> {
                 self.code.take_annotation_result()
             }
             (Builtin::BindAnnotationExpression { site, spelling }, []) => {
-                self.code.place_site(RequiredSite::AnnotationString(*site));
-                let (code, sites) = self.code.frame_and_sites();
-                sites.annotation_string(code, *site, spelling)
+                self.code.annotation_string(*site, spelling)
             }
             (
                 Builtin::RegisteredNamespaceAnnotation(ir::NamespaceAnnotation::Module { index }),

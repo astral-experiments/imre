@@ -1303,7 +1303,7 @@ pub(crate) fn registered_sites<'a, R>(
         &str,
         &ruff_python_parser::Parsed<ast::ModExpression>,
     ) -> Option<AnnotationBody<R>>,
-) -> (RegisteredSites<'a>, HashMap<TextSize, AnnotationBody<R>>) {
+) -> (RegisteredSites<'a>, HashMap<String, AnnotationBody<R>>) {
     let mut children = HashMap::new();
     let sites = collect_sites(body, names, source, |expr, module| {
         super::annotation_operands::annotation_operand(

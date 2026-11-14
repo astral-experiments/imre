@@ -63,9 +63,9 @@ fn checked_module_places_class_generator_and_following_lambda() {
     assert_eq!(sites.definitions[class].definition.qualname, "C");
     assert_eq!(sites.definitions[read].definition.name, "read");
     for site in [
-        TextRange::empty(*first),
-        *generator,
-        TextRange::empty(*last),
+        RequiredSite::Lambda(*first),
+        RequiredSite::Generator(*generator),
+        RequiredSite::Lambda(*last),
     ] {
         let symbols = location.callable_code.borrow();
         let entry = &symbols[&site];
@@ -134,7 +134,7 @@ fn checked_module_places_both_plain_and_generic_aliases_before_their_following_l
             sites.aliases[alias].as_ref().unwrap().definition.code,
             symbol(1)
         );
-        let last = TextRange::empty(*last);
+        let last = RequiredSite::Lambda(*last);
         assert_eq!(location.callable_code.borrow()[&last], symbol(2));
         let count = function.frame.output.count;
         RegisteredBody::Suite(module.initializer()).emit(&mut function);
@@ -287,34 +287,44 @@ invalid: 'Child['
         ModuleOrigin::Provider,
     )
     .unwrap();
-    let child = |quoted: &str| {
-        let site = u32::try_from(source.find(quoted).unwrap()).unwrap().into();
-        let Some(child) = body.source.annotation_children.get(&site) else {
-            panic!("missing prepared annotation {quoted}")
-        };
-        child
-    };
+    let child = |spelling: &str| &body.source.annotation_children[spelling];
     assert!(
-        !child("'[x for")
+        !child("[x for x in Child]")
             .code
             .operand
             .region()
             .private_slots()
             .is_empty()
     );
-    assert!(child("'(lambda").scope.lambdas[&1.into()].body.is_some());
-    for quoted in ["'(x for", "'list(x for", "'lambda:"] {
+    assert!(
+        child("(lambda: Child)()").scope.lambdas[&1.into()]
+            .body
+            .is_some()
+    );
+    for quoted in [
+        "(x for x in Child)",
+        "list(x for x in Child)",
+        "lambda: (x for x in Child)",
+    ] {
         assert_eq!(child(quoted).scope.generators.len(), 1, "{quoted}");
     }
-    assert!(child("'lambda:").scope.lambdas[&0.into()].body.is_some());
-    for quoted in ["'lambda: [box", "'lambda: (v", "'lambda vals="] {
+    assert!(
+        child("lambda: (x for x in Child)").scope.lambdas[&0.into()]
+            .body
+            .is_some()
+    );
+    for quoted in [
+        "lambda: [box.make(x).value for x in Child]",
+        "lambda: (v := box.make(9)).value",
+        "lambda vals=[box.make(x).value for x in Child]: vals",
+    ] {
         assert!(
             child(quoted).scope.lambdas[&0.into()].body.is_some(),
             "{quoted}"
         );
     }
     assert!(
-        !child("\"t'")
+        !child("t'{client.lookup(*args)}{[v for v in values]}'")
             .code
             .operand
             .region()
@@ -322,7 +332,7 @@ invalid: 'Child['
             .is_empty()
     );
     assert!(
-        !child("'resolve(")
+        !child("resolve([Child for _ in (0,)])")
             .code
             .operand
             .region()
@@ -330,7 +340,10 @@ invalid: 'Child['
             .is_empty()
     );
     assert_eq!(
-        child("\"t'{client.lookup(*args)}{(").scope.generators.len(),
+        child("t'{client.lookup(*args)}{(v for v in values)}'")
+            .scope
+            .generators
+            .len(),
         1
     );
     let mut output = Output::default();
