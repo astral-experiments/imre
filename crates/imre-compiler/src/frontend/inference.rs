@@ -1026,7 +1026,21 @@ impl Inference {
                 let mut implicit_none = false;
                 let mut superseded_returns = false;
                 let mut checked_call_cannot_return = false;
+                // A binding in the semantic index already selects this coroutine's Python
+                // iterator protocol. Keep its checked placement across diagnostic discovery.
+                let mut placement = (physical
+                    && function.is_async
+                    && signature.method.is_none()
+                    && graph.modules[*module].is_program_source()
+                    && graph
+                        .session
+                        .coroutine_uses_async_iteration(*module, function))
+                .then(|| registered::place_checked_definition(&checker, function, signature, self));
+                let mut retained = matches!(placement, Some(Ok(Some(_))));
                 let result = (|| {
+                    if retained {
+                        return Ok(());
+                    }
                     checker.bind_function_signature(function, signature, |slot| {
                         if let Some((params, _)) = &mut return_body {
                             params.push(slot);
@@ -1094,7 +1108,8 @@ impl Inference {
                     checked_bodies.clear();
                     checked_revision = revision;
                 }
-                if let Err(mut diagnostic) = checker.finish_region(result) {
+                let mut result = checker.finish_region(result);
+                if let Err(diagnostic) = &mut result {
                     // A completed return check can still require Python operations. Only the
                     // registered frame may own that body, after its ordinary source check.
                     if checked_return
@@ -1106,7 +1121,7 @@ impl Inference {
                     // An invalid operand does not give a procedure a different return type.
                     // Let the ordinary binder report the same body as an explicit -> None.
                     if infer_return
-                        && matches!(&diagnostic, Failure::Diagnostic(report) if report.exact_operand().is_some())
+                        && matches!(diagnostic, Failure::Diagnostic(report) if report.exact_operand().is_some())
                         && !function.is_async
                         && !imre_ast::code_flags::is_generator(&function.body)
                     {
@@ -1120,7 +1135,7 @@ impl Inference {
                             self.revision.set(self.revision.get() + 1);
                         }
                     }
-                    let retained = if matches!(&diagnostic, Failure::Diagnostic(report)
+                    retained = if matches!(diagnostic, Failure::Diagnostic(report)
                         if report.kind == Kind::FrameSuspension && signature.method.is_none())
                     {
                         if let Some(retained) = registered::retain_generator(
@@ -1133,12 +1148,14 @@ impl Inference {
                             && function.is_async
                             && graph.modules[*module].is_program_source()
                         {
-                            match registered::place_checked_definition(
-                                &checker, function, signature, self,
-                            ) {
+                            match placement.take().unwrap_or_else(|| {
+                                registered::place_checked_definition(
+                                    &checker, function, signature, self,
+                                )
+                            }) {
                                 Ok(body) => body.is_some(),
                                 Err(reason) => {
-                                    diagnostic = reason;
+                                    *diagnostic = reason;
                                     false
                                 }
                             }
@@ -1148,16 +1165,17 @@ impl Inference {
                     } else {
                         false
                     };
-                    if retained {
-                        suspended_bodies.insert(signature.id);
-                        checked_bodies.insert(signature.id);
-                        if infer_return {
-                            self.pending.borrow_mut()[signature.id].returns =
-                                Some(Type::PythonObject);
-                            self.revision.set(self.revision.get() + 1);
-                        }
-                        continue;
+                }
+                if retained {
+                    suspended_bodies.insert(signature.id);
+                    checked_bodies.insert(signature.id);
+                    if infer_return {
+                        self.pending.borrow_mut()[signature.id].returns = Some(Type::PythonObject);
+                        self.revision.set(self.revision.get() + 1);
                     }
+                    continue;
+                }
+                if let Err(diagnostic) = result {
                     if self.pending.borrow()[signature.id].returns.is_none()
                         && diagnostic.is_representation()
                         && graph.modules[*module].is_program_source()
