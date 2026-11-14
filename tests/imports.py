@@ -2067,6 +2067,12 @@ ACCEPTED = {
         "pkg/parent.py": "def increment(n: int) -> int:\n    return n + 1\nfrom . import child\nobserved = child.result\n",
         "pkg/child.py": "from .parent import increment\nresult = increment(41)\n",
     },
+    "published_function_in_cycle": {
+        "main.py": "from pkg import use\nprint(use(15))\n",
+        "pkg/__init__.py": "from .origin import deliver as selected\nfrom .child import use\n",
+        "pkg/child.py": "from . import selected as held\ndef use(n: int) -> int: return held(n)\n",
+        "pkg/origin.py": "def deliver(n: int) -> int: return n + 2\n",
+    },
     "published_class_in_cycle": {
         "main.py": "import pkg\n",
         "pkg/__init__.py": "from .api import Item as Published\nfrom .api import Item as Published, child\n",
