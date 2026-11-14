@@ -3,7 +3,6 @@
 use std::ops::ControlFlow;
 
 use super::*;
-use ruff_python_ast::UnaryOp;
 
 /// Evaluate the supplied call operands in order, then raise the checked TypeError.
 pub(super) fn type_error(ty: Type, values: Vec<Expr>, message: String) -> Expr {
@@ -271,6 +270,9 @@ pub(crate) fn scalar_literal(
     expression: &ast::Expr,
     source: &str,
 ) -> std::result::Result<Expr, String> {
+    if let Some(literal) = literals::signed_number(expression, |ty| ty != Type::PythonObject) {
+        return Ok(literal);
+    }
     let (ty, kind) = match expression {
         ast::Expr::NumberLiteral(ast::ExprNumberLiteral {
             value: ast::Number::Int(value),
@@ -280,25 +282,6 @@ pub(crate) fn scalar_literal(
             value: ast::Number::Float(value),
             ..
         }) => (Type::Float, ExprKind::Float(*value)),
-        ast::Expr::UnaryOp(unary)
-            if matches!(unary.op, ast::UnaryOp::UAdd | ast::UnaryOp::USub)
-                && matches!(&*unary.operand, ast::Expr::NumberLiteral(value) if matches!(&value.value, ast::Number::Int(_) | ast::Number::Float(_))) =>
-        {
-            let ast::Expr::NumberLiteral(value) = &*unary.operand else {
-                unreachable!()
-            };
-            let (ty, kind) = match &value.value {
-                ast::Number::Int(value) => (Type::Int, ExprKind::Int(value.to_string())),
-                ast::Number::Float(value) => (Type::Float, ExprKind::Float(*value)),
-                _ => unreachable!(),
-            };
-            let kind = if unary.op == ast::UnaryOp::USub {
-                ExprKind::Unary(UnaryOp::USub, Box::new(Expr { ty, kind }))
-            } else {
-                kind
-            };
-            (ty, kind)
-        }
         ast::Expr::BooleanLiteral(value) => (Type::Bool, ExprKind::Bool(value.value)),
         ast::Expr::StringLiteral(value) => {
             check_string(value, source)?;
