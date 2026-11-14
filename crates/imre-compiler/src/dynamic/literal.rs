@@ -123,6 +123,7 @@ impl ParsedLiteral {
             },
             python_optimization,
             ModuleOrigin::ExecLiteral {
+                checked: &self.parsed,
                 inherited_flags: self.inherited_flags,
                 python_annotations,
             },
