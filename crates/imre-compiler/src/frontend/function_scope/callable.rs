@@ -94,7 +94,6 @@ impl NamedFunction<'_> {
         &mut self,
         def: &ast::StmtFunctionDef,
         thread_entry: Option<imre_ast::ThreadEntry>,
-        python_annotations: bool,
         checked: Option<&crate::frontend::RegisteredFunction>,
     ) {
         let suspended = self.metadata.suspension_flags() != 0;
@@ -111,7 +110,11 @@ impl NamedFunction<'_> {
             }
             None => {}
         }
-        let Some(annotations) = self.annotations.as_ref().filter(|_| !python_annotations) else {
+        let Some(annotations) = self
+            .annotations
+            .as_ref()
+            .filter(|a| !a.references.is_empty())
+        else {
             return;
         };
         let scalar = |name: &str| {

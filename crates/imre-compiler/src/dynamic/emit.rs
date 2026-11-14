@@ -565,6 +565,7 @@ impl<'a> PreparedBody<'a> {
             &private_names,
             values,
             bundled,
+            !origin.python_annotations(name),
             |text, parsed| Self::prepare_annotation(text, parsed, python_optimization),
         );
         let operations = sites.operations;
@@ -602,7 +603,6 @@ impl<'a> PreparedBody<'a> {
         // Preparing inner declarations first lets their binding sites consume
         // the selected body's decision in the enclosing suite.
         use crate::frontend::DeclarationSite;
-        let python_annotations = origin.python_annotations(name);
         for declaration in sites.declarations.into_iter().rev() {
             let site = match declaration {
                 DeclarationSite::Function(site) => site,
@@ -617,7 +617,6 @@ impl<'a> PreparedBody<'a> {
                 header,
                 site,
                 program_bodies.and_then(|bodies| bodies.get(&start)),
-                python_annotations,
             );
         }
         let initializer = if interactive {
@@ -650,7 +649,6 @@ impl<'a> PreparedBody<'a> {
             module_annotations: sites.module_annotations.into_body(),
             bundled,
             path,
-            python_annotations,
             module_start,
             docs,
             #[cfg(test)]
@@ -878,7 +876,6 @@ struct SourceInfo<'a> {
     module_annotations: Option<crate::frontend::AnnotationProvider>,
     bundled: bool,
     path: Cow<'a, Path>,
-    python_annotations: bool,
     module_start: ruff_text_size::TextSize,
     docs: Option<crate::modules::doctest::SealedDocs>,
     #[cfg(test)]
@@ -1463,7 +1460,7 @@ impl<'p> Function<'_, 'p, '_> {
             "annotation_class": class.is_some(),
         });
         annotations.scope.write_signature(&mut metadata);
-        if !source.python_annotations && header.type_params.is_empty() {
+        if header.type_params.is_empty() {
             for (slot, reference) in &annotations.references {
                 let root = reference.split('.').next().unwrap();
                 if !class.is_some_and(|class| class.globals.contains(root)) {
@@ -1853,6 +1850,7 @@ mod tests {
             &prepared.source.private_names,
             source,
             prepared.source.bundled,
+            true,
             |text, parsed| {
                 PreparedBody::prepare_annotation(text, parsed, prepared.source.python_optimization)
             },
@@ -5787,6 +5785,22 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             }
         });
         assert_eq!(names, ["list", "str"]);
+    }
+
+    #[test]
+    fn provider_annotations_keep_the_evaluator_without_checked_references() {
+        let text = "def read(x: api.Value) -> int: return x.value\n";
+        for (origin, references) in [
+            (ModuleOrigin::Provider, 0),
+            (ModuleOrigin::Program(None), 2),
+        ] {
+            let module =
+                PreparedBody::module("reader", Path::new("reader.py"), text, 0, origin).unwrap();
+            let header = &module.source.scopes.functions[&TextSize::default()];
+            let annotations = header.annotations.as_ref().unwrap();
+            assert!(annotations.body.is_ok());
+            assert_eq!(annotations.references.len(), references);
+        }
     }
 
     #[test]
