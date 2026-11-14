@@ -200,10 +200,7 @@ def iter_modules(path=None, prefix=''):
     for directory in sys.path if path is None else path:
         finder = get_importer(directory)
         if isinstance(finder, _PathFileFinder):
-            for filename in _filenames(finder.path):
-                info = _module_info(finder, filename, prefix, seen)
-                if info is not None:
-                    yield info
+            yield from _iter_file_modules(finder, prefix, seen)
             continue
         if isinstance(finder, _ZipImporter):
             entries = _iter_zip_modules(finder, prefix)

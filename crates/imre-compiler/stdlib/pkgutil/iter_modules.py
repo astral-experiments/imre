@@ -1,3 +1,6 @@
+from typing import Iterator as _Iterator
+
+
 class FileFinder:
     path: str
 
@@ -34,3 +37,11 @@ def _module_info(finder: FileFinder, filename: str, prefix: str, seen: set[str])
         return None
     seen.add(name)
     return ModuleInfo(finder, name, ispkg)
+
+
+def _iter_file_modules(finder, prefix, seen) -> _Iterator[ModuleInfo]:
+    for filename in _filenames(finder.path):
+        info = _module_info(finder, filename, prefix, seen)
+        if info is None:
+            continue
+        yield info
