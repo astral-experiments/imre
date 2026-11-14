@@ -455,7 +455,7 @@ struct ProgramOutput {
     whole: Option<String>,
 }
 
-/// Uses the boxed backend when the checked graph requires Python object operations.
+/// Check the entry graph and select how its modules initialize and call compiled functions.
 fn object_fallback(
     mut output: Option<&mut ProgramOutput>,
     entry: ProgramEntry<'_>,

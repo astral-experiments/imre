@@ -1,4 +1,4 @@
-//! Emit native functions and control flow for closed modules using boxed Python values.
+//! Prepare checked Python bodies and place their compiled functions in LLVM modules.
 
 use std::borrow::Cow;
 use std::collections::{BTreeSet, HashMap, HashSet};
