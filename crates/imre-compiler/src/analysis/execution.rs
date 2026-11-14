@@ -260,7 +260,7 @@ impl<'ast, 'db> Escape<'ast, 'db> {
         let binding = self
             .session
             .file_binding(self.model.file(), callee)
-            .or_else(|| super::sole_global_name(&self.model, name))?;
+            .or_else(|| super::sole_global_name(self.model, name))?;
         if binding.file(db) != self.model.file() {
             return None;
         }

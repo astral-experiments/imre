@@ -6475,8 +6475,8 @@ publish(5, callback)
         let checked = &functions[&graph.entry][&TextSize::default()];
         assert!(crate::llvm::registered::supports(checked));
         let mut calls = Vec::new();
-        ir::walk_expressions(&checked.function.body, &mut |expr| match &expr.kind {
-            ExprKind::Invoke { callable, args } => {
+        ir::walk_expressions(&checked.function.body, &mut |expr| {
+            if let ExprKind::Invoke { callable, args } = &expr.kind {
                 let site = args.site.python().unwrap();
                 if matches!(site.call.target, ir::RegisteredCallTarget::Method { .. }) {
                     assert_eq!(site.call.arguments, ir::RegisteredArguments::Positional);
@@ -6504,7 +6504,6 @@ publish(5, callback)
                 };
                 calls.push((&source[site.call.range], kind));
             }
-            _ => {}
         });
         assert_eq!(
             calls,

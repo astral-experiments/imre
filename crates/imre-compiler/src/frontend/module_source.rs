@@ -165,6 +165,8 @@ pub(crate) fn validate_file(
         .map_err(|error| format!("{}:{error}", path.display()))
 }
 
+type LiteralReplacements = HashMap<TextRange, Vec<u32>>;
+
 /// Check syntax, recover literal escapes and determine whether this parse contains templates.
 pub(crate) fn validate<'a>(
     path: &Path,
@@ -173,7 +175,7 @@ pub(crate) fn validate<'a>(
     checked: Option<&'a crate::modules::SourceModule>,
     checked_literal: Option<&Parsed<ast::ModModule>>,
     keep_docstrings: bool,
-) -> Result<(Cow<'a, HashMap<TextRange, Vec<u32>>>, bool), String> {
+) -> Result<(Cow<'a, LiteralReplacements>, bool), String> {
     let checked_scope = checked_literal.or_else(|| checked.map(|module| &*module.parsed));
     validate_syntax(path, source, parsed, checked_scope)?;
     let (replacements, has_templates) = if let Some(module) = checked
