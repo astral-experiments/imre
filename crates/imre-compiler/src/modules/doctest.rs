@@ -445,7 +445,7 @@ fn has_option_directive(source: &str) -> bool {
 /// to choose how to compile an expression.
 fn case_program(
     name: &str,
-    sources: &[String],
+    sources: &mut [String],
     target: Binding,
     modules: &[SourceModule],
 ) -> Result<String, String> {
@@ -458,7 +458,7 @@ fn case_program(
     let mut names = HashSet::new();
     let mut imports = Vec::new();
     let mut import_bindings = HashMap::new();
-    for (i, source) in sources.iter().enumerate() {
+    for (i, source) in sources.iter_mut().enumerate() {
         let parsed = ruff_python_parser::parse_module(source)
             .map_err(|err| format!("doctest {name}, example {}: {err}", i + 1))?;
         let has_directive = has_option_directive(source);
@@ -515,18 +515,17 @@ fn case_program(
         }
         names.extend(interp.names);
         imports.extend(interp.imports);
-        let mut code = source.clone();
-        for (start, end, replacement) in interp.edits.into_iter().rev() {
-            code.replace_range(start..end, &replacement);
-        }
         writeln!(
             body,
             "    _imre_ex = _checked_example(_imre_test, {i}, {})",
             serde_json::to_string(source).unwrap()
         )
         .unwrap();
+        for (start, end, replacement) in interp.edits.into_iter().rev() {
+            source.replace_range(start..end, &replacement);
+        }
         body.push_str("    _imre_quiet = (_imre_flags & _imre_FIRST) != 0 if _imre_failures else False\n    _imre_flags = _optionflags(_imre_ex, _imre_optionflags)\n    if not _imre_flags & _imre_SKIP:\n        _imre_attempted += 1\n        _imre_error = \"\"\n        _imre_begin()\n        try:\n");
-        for line in code.lines() {
+        for line in source.lines() {
             writeln!(body, "            {line}").unwrap();
         }
         body.push_str("        except Exception as _imre_exc:\n            _imre_error = _exception_line(_imre_exc)\n        finally:\n            _imre_got = _imre_take()\n        _imre_check(_imre_test, _imre_ex, _imre_got, _imre_error, _imre_failures, _imre_debug, _imre_checker, _imre_flags, _imre_quiet)\n        if _imre_failures and _imre_flags & _imre_FAIL_FAST:\n            raise AssertionError(\"\\n\".join(_imre_failures))\n");
@@ -645,6 +644,10 @@ impl Loader<'_> {
                 uses.visit_stmt(stmt);
             }
         }
+        let optimization = self
+            .options
+            .and_then(crate::CompileOptions::python_startup)
+            .map_or(0, |(flags, _)| flags.optimize);
         let mut cases = std::collections::BTreeMap::new();
         let mut recorded = HashSet::new();
         let mut dependencies = Dependencies::default();
@@ -695,11 +698,7 @@ impl Loader<'_> {
                                 text: Cow::Owned(source.clone()),
                                 parsed: Cow::Owned(parsed),
                             };
-                            prepared.extend(Prompt::from_parsed(
-                                path,
-                                module,
-                                self.python_optimization,
-                            ));
+                            prepared.extend(Prompt::from_parsed(path, module, optimization));
                         }
                     }
                     imports.dependencies
@@ -707,8 +706,7 @@ impl Loader<'_> {
                 for (name, doc, _) in docs.iter() {
                     let sources = prompts(doc);
                     if !sources.is_empty() {
-                        let emit =
-                            self.python_optimization < 2 && recorded.insert((module, name.clone()));
+                        let emit = optimization < 2 && recorded.insert((module, name.clone()));
                         let imports = record(name, &sources, emit);
                         cases.insert(name.clone(), (sources, target, imports));
                     }
@@ -749,15 +747,23 @@ impl Loader<'_> {
             self.needs_object_imports = true;
             return Ok(targets);
         }
+        // Module startup executes the enrolled prompts in test.globs. Checked files
+        // still need the fixed calls to diagnose typed arguments in a prompt.
+        if self
+            .options
+            .is_some_and(crate::CompileOptions::registered_initializer)
+        {
+            return Ok(Vec::new());
+        }
         let mut source = String::from(
             "from doctest import DocTest, OutputChecker, SKIP, _optionflags\nfrom unittest import SkipTest\n",
         );
         let mut body = String::from(
             "\ndef _execute(test: DocTest, debug: bool, optionflags: int = 0, checker: OutputChecker | None = None) -> None:\n    if checker is None:\n        checker = OutputChecker()\n    if not test.examples:\n        attempted = 0\n",
         );
-        for (i, (name, (prompts, context, _))) in cases.into_iter().enumerate() {
+        for (i, (name, (mut prompts, context, _))) in cases.into_iter().enumerate() {
             let module = format!("{CASE_PREFIX}{i}");
-            let program = case_program(&name, &prompts, context, &self.modules)?;
+            let program = case_program(&name, &mut prompts, context, &self.modules)?;
             self.add_doctest_module(module.clone(), &program)
                 .map_err(|err| format!("doctest {name}: {err}"))?;
             writeln!(source, "from {module} import _run_case as _case_{i}").unwrap();

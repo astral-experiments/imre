@@ -157,6 +157,12 @@ impl CompileOptions {
             })
     }
 
+    fn registered_initializer(&self) -> bool {
+        self.module_entry.is_some()
+            && self.python_startup().is_some()
+            && self.entry_profile.is_none()
+    }
+
     fn installed_dirs(&self) -> impl Iterator<Item = &PathBuf> {
         let sites = if self
             .python_startup()
@@ -479,8 +485,7 @@ fn object_fallback(
     let checked_file = options.python_startup().is_none();
     // A Python module launch enters through the runtime registration. Other callers
     // can return a native diagnostic before registration, including profiled entries.
-    let registered_initializer =
-        options.module_entry.is_some() && !checked_file && options.entry_profile.is_none();
+    let registered_initializer = options.registered_initializer();
     let boxed_startup = options.module_entry.is_some()
         || options.sitecustomize
         || options

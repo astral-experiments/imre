@@ -4900,7 +4900,7 @@ impl ModuleText<'_> {
 
 struct Loader<'a> {
     local_declarations: BTreeSet<String>,
-    python_optimization: i32,
+    options: Option<&'a crate::CompileOptions>,
     module_operand: Option<String>,
     fs: FileSystem<'a>,
     /// ty only searches typeshed for builtins; record sealed imports missing from its inventory.
@@ -4942,7 +4942,7 @@ impl<'a> Loader<'a> {
         root: PathBuf,
         extension_paths: &[PathBuf],
         python_archive_indices: &[usize],
-        python: Option<(&crate::CompileOptions, &'a mut SiteProbes)>,
+        python: Option<(&'a crate::CompileOptions, &'a mut SiteProbes)>,
         mut fs: FileSystem<'a>,
     ) -> Result<Self, String> {
         let mut search_roots = Vec::new();
@@ -4977,12 +4977,8 @@ impl<'a> Loader<'a> {
         }
         let archive_roots = search_roots.len();
         let mut site_roots = HashSet::new();
-        let mut site_probes = None;
-        let python_optimization = python
-            .as_ref()
-            .and_then(|(options, _)| options.python_startup())
-            .map_or(0, |(flags, _)| flags.optimize);
-        if let Some((options, probes)) = python {
+        let (options, probes) = python.unzip();
+        if let Some(options) = options {
             for dir in options.installed_dirs() {
                 let canonical = fs.canonicalize(dir).map_err(|e| e.to_string())?;
                 inputs.directories.push((dir.to_owned(), canonical.clone()));
@@ -4993,15 +4989,14 @@ impl<'a> Loader<'a> {
                     search_roots.push(canonical);
                 }
             }
-            site_probes = Some((site_roots, probes));
         }
         Ok(Self {
-            python_optimization,
+            options,
             module_operand: None,
             fs,
             local_declarations: BTreeSet::new(),
             archive_roots,
-            site_probes,
+            site_probes: probes.map(|probes| (site_roots, probes)),
             session: Session::new(&root, &search_roots)?,
             search_roots,
             inputs,
