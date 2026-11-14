@@ -20,7 +20,7 @@ use crate::llvm::body::FunctionBody;
 pub(crate) use abi::{ABI, CallArguments, Output, permanent};
 pub(crate) use frame::{AnnotationScope, RegisteredFrame, SourcePositions};
 use ruff_python_ast::UnaryOp;
-use sites::CheckedSites;
+use sites::{CallableSite, CheckedSites, CompiledDefinition};
 
 use crate::llvm::operations::{CheckedBody, CheckedValue, LoopEdges, ValueUse};
 use context::Region;
@@ -409,7 +409,7 @@ pub(crate) trait PreparedSuiteEmitter<'a, 'p>:
 {
     fn frame_and_sites(&mut self) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites);
     fn place_site(&mut self, site: RequiredSite);
-    fn lambda_at(&mut self, site: TextSize, comprehension: bool) -> sites::CompiledDefinition;
+    fn callable_at(&mut self, site: CallableSite, scoped: bool) -> CompiledDefinition;
     fn exec_literal_at(&mut self, site: TextRange) -> Option<sites::CompiledExec>;
 }
 
@@ -1158,7 +1158,7 @@ impl<'f> Frame<'f, '_, '_> {
                     .interpolation(&value, expression, *conversion, &spec)
             }),
             (Builtin::RegisteredLambda(site, scoped), operands) => {
-                let lambda = self.code.lambda_at(*site, *scoped);
+                let lambda = self.code.callable_at(CallableSite::Lambda(*site), *scoped);
                 let mut operands = operands.iter();
                 let scope = if *scoped {
                     self.evaluate_handle(operands.next().expect("explicit lambda scope"))
@@ -1171,7 +1171,9 @@ impl<'f> Frame<'f, '_, '_> {
                 lambda.bind_defaults(self.code, &scope, &defaults)
             }
             (Builtin::RegisteredGenerator(site, scoped, acquire), operands) => {
-                self.code.place_site(RequiredSite::Generator(*site));
+                let generator = self
+                    .code
+                    .callable_at(CallableSite::Generator(*site), *scoped);
                 let (scope, iterable) =
                     ir::generator_operands(*scoped, operands).expect("checked generator operands");
                 let scope = scope
@@ -1182,8 +1184,8 @@ impl<'f> Frame<'f, '_, '_> {
                     let iterable = frame.evaluate_handle(iterable);
                     let cursor = frame.acquire_iterator(*acquire, &iterable);
                     frame.keep_operands(&mark, &cursor, "0");
-                    let (code, sites) = frame.code.frame_and_sites();
-                    let result = sites.bind_generator(code, *site, &scope, &cursor);
+                    let function = generator.bind_defaults(frame.code, &scope, &[]);
+                    let result = frame.op("generator", &[&function, &cursor]);
                     frame.keep_operands(&mark, &result, "0");
                     result
                 })
