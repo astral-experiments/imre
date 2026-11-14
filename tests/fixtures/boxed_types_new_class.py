@@ -162,7 +162,11 @@ def prepared_class_statements():
         def owner(self):
             return __class__
 
+        def record(self):
+            self.value: [0 for self.never in ()] = 1
+
     assert type(Product) is Meta and Product().owner() is Product and Product.value == 9
+    assert Product.__static_attributes__ == ("value",)
 
     prepared = {"__name__": "local", "x": "prepared"}
     x = "outer"

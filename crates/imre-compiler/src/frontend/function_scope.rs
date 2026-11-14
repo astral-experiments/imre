@@ -570,22 +570,33 @@ impl<'a> Visitor<'a> for Collector<'_, '_, 'a> {
                     .module_globals
                     .extend(global.names.iter().map(ToString::to_string));
             }
-            ast::Stmt::AugAssign(update)
-                if let ast::Expr::Attribute(target) = update.target.as_ref() =>
-            {
+            ast::Stmt::AugAssign(update) => {
                 // Augmented attribute stores do not contribute to __static_attributes__.
                 self.visit_expr(&update.value);
-                self.visit_expr(&target.value);
+                visitor::walk_expr(self, &update.target);
                 return;
             }
             ast::Stmt::AnnAssign(update) => {
                 self.scopes.module_annotations |= self.scope == Scope::Module;
-                if update.value.is_none() {
-                    let owner = self.attribute_class.take();
-                    visitor::walk_stmt(self, stmt);
-                    self.attribute_class = owner;
-                    return;
+                if let Some(value) = &update.value {
+                    self.visit_expr(value);
                 }
+                // Only a simple, deferred class annotation emits code owned by the class.
+                let owner = self.attribute_class;
+                self.attribute_class = match self.scope {
+                    Scope::Class(site) if update.simple && !strings => Some(site),
+                    _ => None,
+                };
+                self.visit_annotation(&update.annotation);
+                self.attribute_class = owner;
+
+                if update.value.is_some() {
+                    self.visit_expr(&update.target);
+                } else {
+                    // A bare target evaluates its operands without storing to the target.
+                    visitor::walk_expr(self, &update.target);
+                }
+                return;
             }
             _ => {}
         }
