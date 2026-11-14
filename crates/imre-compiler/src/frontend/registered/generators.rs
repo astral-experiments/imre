@@ -24,11 +24,7 @@ impl LexicalOperands {
         source: values::RegisteredSource<'_>,
         strings: bool,
     ) {
-        let source = values::RegisteredSource {
-            generators: Some(&self.generators),
-            lambdas: Some(&self.lambdas),
-            ..source
-        };
+        let source = source.with_children(&self.lambdas, &self.generators);
         match site {
             LexicalSite::Generator(range, plan, is_async, scope) => {
                 let child = stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {

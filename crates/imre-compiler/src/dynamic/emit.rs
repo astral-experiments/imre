@@ -253,6 +253,7 @@ pub(super) struct PreparedBody<'a> {
     syntax: Option<Cow<'static, ast::Suite>>,
     docstring: Option<String>,
     source: SourceInfo<'a>,
+    initializer: crate::frontend::RegisteredSuite,
 }
 
 impl<'a> PreparedUnit<'a> {
@@ -343,19 +344,14 @@ impl<'a> PreparedBody<'a> {
         origin: ModuleOrigin<'a>,
         use_module: impl FnOnce(PreparedBody<'a>) -> Result<R, String>,
     ) -> Result<R, String> {
-        let (module, _) = Self::prepare(
+        let module = Self::prepare(
             name,
-            Cow::Borrowed(path),
-            Cow::Borrowed(source),
+            path.into(),
+            ParsedModule::parse(path, source.into())?.into(),
             python_optimization,
             origin,
-            None,
-            Input::Module(
-                ParsedModule::parse(path, source.into())?.parsed,
-                LiteralSites::default(),
-                None,
-                None,
-            ),
+            LiteralSites::default(),
+            (None, None),
         )?;
         use_module(module)
     }
@@ -394,26 +390,16 @@ impl<'a> PreparedBody<'a> {
             Option<&'a crate::modules::SourceModule>,
         ),
     ) -> Result<Self, String> {
-        let (module, normalized) = module.into();
-        // Layouts can parse the same physical bytes in another session.
-        let checked_source = checked_source.filter(|source| {
-            source.is_program_source() && std::ptr::eq(source.source.as_str(), module.text.as_ref())
-        });
-        let (body, _) = Self::prepare(
+        let body = Self::prepare(
             name,
             path.into(),
-            module.text,
+            module.into(),
             python_optimization,
             origin,
-            checked_source,
-            Input::Module(
-                module.parsed,
-                literal_sites,
-                operand_types,
-                normalized.map(Box::new),
-            ),
+            literal_sites,
+            (operand_types, checked_source),
         )?;
-        if let Some(refusal) = body.initializer().refusal {
+        if let Some(refusal) = body.initializer.refusal {
             use crate::frontend::PreparedRefusal;
             return Err(match refusal {
                 PreparedRefusal::Operand((range, reason)) => module_source::operand_diagnostic(
@@ -439,17 +425,22 @@ impl<'a> PreparedBody<'a> {
     fn prepare(
         name: &'a str,
         path: Cow<'a, Path>,
-        text: Cow<'a, str>,
+        (module, normalized): ParsedInput<'a, '_>,
         python_optimization: i32,
         origin: ModuleOrigin<'a>,
-        checked_source: Option<&'a crate::modules::SourceModule>,
-        input: Input<'_>,
-    ) -> Result<(Self, Option<crate::frontend::AnnotationCode>), String> {
+        exec_literals: LiteralSites,
+        (operand_types, checked_source): (
+            Option<crate::analysis::OperandTypes<'_>>,
+            Option<&'a crate::modules::SourceModule>,
+        ),
+    ) -> Result<Self, String> {
+        let ParsedModule { text, parsed } = module;
         #[cfg(test)]
-        crate::single_emission_tests::record_preparation(
-            &path,
-            matches!(&input, Input::Module(Cow::Borrowed(_), ..)),
-        );
+        crate::single_emission_tests::record_preparation(&path, matches!(parsed, Cow::Borrowed(_)));
+        // Layouts can parse the same physical bytes in another session.
+        let checked_source = checked_source.filter(|source| {
+            source.is_program_source() && std::ptr::eq(source.source.as_str(), text.as_ref())
+        });
         let interactive = matches!(origin, ModuleOrigin::Interactive(_));
         let keep_docstrings = python_optimization < 2;
         let source = text.as_ref();
@@ -461,35 +452,20 @@ impl<'a> PreparedBody<'a> {
             | ModuleOrigin::Interactive(inherited_flags) => inherited_flags,
             _ => 0,
         };
-        let expression = matches!(&input, Input::Expression(..));
         let program_bodies = match origin {
             ModuleOrigin::Program(bodies) => bodies,
             _ => None,
         };
-        let (syntax, tokens, replacements) = match &input {
-            Input::Module(parsed, ..) => (
-                parsed.syntax(),
-                parsed.tokens(),
-                module_source::validate(
-                    &path,
-                    source,
-                    parsed,
-                    checked_source,
-                    keep_docstrings
-                        && !(interactive
-                            && parsed
-                                .syntax()
-                                .body
-                                .first()
-                                .is_some_and(ast::Stmt::is_expr_stmt)),
-                )?,
-            ),
-            Input::Expression(syntax, tokens) => (
-                syntax,
-                *tokens,
-                Cow::Owned(crate::frontend::literal_replacements(source, tokens)),
-            ),
-        };
+        let syntax = parsed.syntax();
+        let tokens = parsed.tokens();
+        let replacements = module_source::validate(
+            &path,
+            source,
+            &parsed,
+            checked_source,
+            keep_docstrings
+                && !(interactive && syntax.body.first().is_some_and(ast::Stmt::is_expr_stmt)),
+        )?;
         let docs = if keep_docstrings && name == "collections" && bundled {
             crate::modules::doctest::sealed(crate::modules::IntrinsicModule::Collections)
         } else {
@@ -542,22 +518,15 @@ impl<'a> PreparedBody<'a> {
             |values| Cow::Borrowed(&values.method_imports),
         );
         let future_flags = inherited_flags | imre_ast::future_flags(&syntax.body);
-        let lower = |mut body: ast::Suite| {
+        let (body, private_names) = normalized.unwrap_or_else(|| {
+            let mut body = module_source::into_body(parsed);
             let names = imre_ast::lower_in(
                 &mut body,
                 "",
                 future_flags & imre_ast::code_flags::FUTURE_ANNOTATIONS != 0,
             );
             (body, names)
-        };
-        let ((body, private_names), exec_literals, operand_types) = match input {
-            Input::Module(parsed, sites, types, normalized) => (
-                normalized.map_or_else(|| lower(module_source::into_body(parsed)), |root| *root),
-                sites,
-                types,
-            ),
-            Input::Expression(syntax, ..) => (lower(syntax.body), LiteralSites::default(), None),
-        };
+        });
         module_source::validate_names(&path, source, &body, &private_names)?;
         let values = crate::frontend::RegisteredSource {
             python_optimization,
@@ -571,9 +540,8 @@ impl<'a> PreparedBody<'a> {
             lambdas: None,
         };
         let mut aliases = Vec::new();
-        // A decoded annotation owns its operand directly and has no statement suite.
         let mut lexical = crate::frontend::LexicalOperands {
-            expressions: (!expression).then(Default::default),
+            expressions: Some(Default::default()),
             ..Default::default()
         };
         let (mut scopes, children) = crate::frontend::function_scope::ScopeFacts::prepare(
@@ -587,11 +555,7 @@ impl<'a> PreparedBody<'a> {
             lambdas,
             expressions,
         } = lexical;
-        let values = crate::frontend::RegisteredSource {
-            generators: Some(&generators),
-            lambdas: Some(&lambdas),
-            ..values
-        };
+        let values = values.with_children(&lambdas, &generators);
         // Annotation providers use the completed lambda sites for this source unit.
         let (sites, annotation_children) = crate::frontend::registered_sites(
             (&body, children),
@@ -656,30 +620,17 @@ impl<'a> PreparedBody<'a> {
             );
         }
         let initializer = if interactive {
-            Some(
-                prepare
-                    .interactive(&body)
-                    .ok_or("unsupported interactive statement")?,
-            )
+            prepare
+                .interactive(&body)
+                .ok_or("unsupported interactive statement")?
         } else {
-            (!expression).then(|| {
-                // begin_module binds the leading docstring at its own statement checkpoint.
-                let statements = if keep_docstrings {
-                    ast::helpers::body_without_leading_docstring(&body)
-                } else {
-                    &body
-                };
-                prepare.suite(statements, crate::frontend::RegisteredScope::Module)
-            })
-        };
-        // Decode the annotation while its original lexical inputs are still in scope.
-        let annotation = if expression {
-            let [ast::Stmt::Expr(statement)] = body.as_slice() else {
-                unreachable!("single decoded expression");
+            // begin_module binds the leading docstring at its own statement checkpoint.
+            let statements = if keep_docstrings {
+                ast::helpers::body_without_leading_docstring(&body)
+            } else {
+                &body
             };
-            crate::frontend::AnnotationCode::prepare(&statement.value, values)
-        } else {
-            None
+            prepare.suite(statements, crate::frontend::RegisteredScope::Module)
         };
         #[cfg(test)]
         let statement_sites = prepare.sites;
@@ -697,7 +648,6 @@ impl<'a> PreparedBody<'a> {
             type_aliases,
             module_annotations: sites.module_annotations.into_body(),
             class_bodies,
-            initializer,
             bundled,
             path,
             python_annotations,
@@ -713,22 +663,20 @@ impl<'a> PreparedBody<'a> {
             private_names,
             text,
         };
-        let docstring = (!expression && !interactive && keep_docstrings)
+        let docstring = (!interactive && keep_docstrings)
             .then(|| crate::frontend::docstring(&body).or_else(|| source.bundled_docstring("")))
             .flatten();
         drop(body);
-        Ok((
-            PreparedBody {
-                prompts: &[],
-                has_body_statements,
-                name,
-                #[cfg(test)]
-                syntax: None,
-                docstring,
-                source,
-            },
-            annotation,
-        ))
+        Ok(PreparedBody {
+            prompts: &[],
+            has_body_statements,
+            name,
+            #[cfg(test)]
+            syntax: None,
+            docstring,
+            source,
+            initializer,
+        })
     }
 
     /// Prepare the decoded expression and its lexical definitions in their own source unit.
@@ -737,38 +685,53 @@ impl<'a> PreparedBody<'a> {
         parsed: &ruff_python_parser::Parsed<ast::ModExpression>,
         python_optimization: i32,
     ) -> Option<crate::frontend::AnnotationBody<Box<SourceInfo<'static>>>> {
-        let expression = parsed.syntax();
-        let stmt = ast::Stmt::Expr(ast::StmtExpr {
-            node_index: Default::default(),
-            range: expression.body.range(),
-            value: expression.body.clone(),
-        });
-        let syntax = ast::ModModule {
-            node_index: Default::default(),
-            range: expression.range(),
-            body: std::iter::once(stmt).collect(),
+        let expr = &parsed.syntax().body;
+        let literals = crate::frontend::RegisteredModuleSource::from_tokens(
+            text,
+            parsed.tokens(),
+            Default::default(),
+        );
+        let fields = literals
+            .has_templates
+            .then(|| imre_ast::strings::template_fields(text, parsed.tokens(), parsed.syntax()));
+        let names = imre_ast::Names::default();
+        let values = crate::frontend::RegisteredSource {
+            template_fields: fields.as_ref(),
+            private_names: Some(&names),
+            ..literals.operands(text, python_optimization)
         };
-        let (prepared, code) = PreparedBody::prepare(
-            "",
-            Cow::Borrowed(Path::new("<string>")),
-            Cow::Owned(text.to_owned()),
-            python_optimization,
-            ModuleOrigin::Program(None),
-            None,
-            Input::Expression(syntax, parsed.tokens()),
-        )
-        .ok()?;
+        let mut lexical = crate::frontend::LexicalOperands::default();
+        crate::frontend::function_scope::ScopeFacts::collect(
+            |visitor| visitor.visit_expr(expr),
+            &names,
+            |_, _| {},
+            |site| lexical.prepare(site, values, false),
+        );
+        let code = crate::frontend::AnnotationCode::prepare(
+            expr,
+            values.with_children(&lexical.lambdas, &lexical.generators),
+        )?;
         Some(crate::frontend::AnnotationBody {
-            code: code?,
-            scope: Box::new(prepared.source),
+            code,
+            scope: Box::new(SourceInfo {
+                path: Cow::Borrowed(Path::new("<string>")),
+                text: Cow::Owned(text.to_owned()),
+                module_start: expr.start(),
+                python_optimization,
+                lambdas: lexical.lambdas,
+                generators: lexical.generators,
+                #[cfg(test)]
+                replacements: literals.replacements,
+                #[cfg(test)]
+                template_fields: fields.unwrap_or_default(),
+                ..Default::default()
+            }),
         })
     }
 
+    #[cfg(test)]
     fn initializer(&self) -> &crate::frontend::RegisteredSuite {
-        self.source
-            .initializer
-            .as_ref()
-            .expect("module initializer")
+        &self.initializer
     }
 
     fn emit(&self, output: &mut Output, unit: usize, file: &str) -> Result<String, String> {
@@ -846,16 +809,6 @@ impl<'a> PreparedBody<'a> {
     }
 }
 
-enum Input<'a> {
-    Module(
-        Cow<'a, ruff_python_parser::Parsed<ast::ModModule>>,
-        LiteralSites,
-        Option<crate::analysis::OperandTypes<'a>>,
-        Option<Box<super::LoweredRoot>>,
-    ),
-    Expression(ast::ModModule, &'a ast::token::Tokens),
-}
-
 enum DefinitionName<'a> {
     Binding(&'a ast::Identifier),
     Evaluator {
@@ -923,6 +876,7 @@ impl<'a> RegisteredBody<'a> {
     }
 }
 
+#[derive(Default)]
 struct SourceInfo<'a> {
     exec_literals: LiteralSites,
     annotation_children:
@@ -938,7 +892,6 @@ struct SourceInfo<'a> {
     namespace_operations: HashMap<ruff_text_size::TextRange, crate::ir::Expr>,
     module_annotations: Option<crate::frontend::AnnotationProvider>,
     class_bodies: HashMap<ruff_text_size::TextSize, crate::frontend::RegisteredClass>,
-    initializer: Option<crate::frontend::RegisteredSuite>,
     bundled: bool,
     path: Cow<'a, Path>,
     python_annotations: bool,
@@ -1060,7 +1013,7 @@ impl SourceMap<'_> {
                     frame.op("bind_doctest_module", &[&frame.scope.clone(), &name]);
                 }
                 frame.declare_globals(declared_globals);
-                RegisteredBody::Suite(module.initializer()).emit(&mut function);
+                RegisteredBody::Suite(&module.initializer).emit(&mut function);
                 return function.frame.finish_module();
             }
             Body::Registered(body, _) => {
@@ -1990,7 +1943,7 @@ mod tests {
             &prepared.source.scopes,
         );
         let sites = suites.sites;
-        prepared.source.initializer = Some(initializer);
+        prepared.initializer = initializer;
         prepared.source.class_bodies = class_bodies;
         prepared.source.statement_sites = sites;
     }
@@ -2119,7 +2072,7 @@ mod tests {
     }
 
     fn replace_residual_input(prepared: &mut PreparedBody<'_>, index: usize) {
-        residual_selection(prepared.source.initializer.as_mut().unwrap())
+        residual_selection(&mut prepared.initializer)
             .replace_residual_input(index, crate::ir::Expr::none());
     }
 
@@ -2789,7 +2742,7 @@ mod tests {
         )
         .unwrap();
         inject_residual_child_module(&mut module);
-        let initializer = module.source.initializer.as_mut().unwrap();
+        let initializer = &mut module.initializer;
         assert!(!initializer.fully_checked());
         let before = module.standalone().unwrap();
         module.syntax = None;
@@ -3333,7 +3286,7 @@ mod tests {
         assert!(module.syntax.take().is_some());
         assert_eq!(module.standalone().unwrap(), before);
 
-        let suite = module.source.initializer.as_mut().unwrap();
+        let suite = &mut module.initializer;
         assert!(suite.refusal.is_none());
         let statements: Vec<_> = input_statements(suite).collect();
         let [(_, statement)] = statements.as_slice() else {
@@ -3385,8 +3338,7 @@ mod tests {
         let body = residual_occurrence(&mut class.body);
         body.selected = std::rc::Rc::new(ExpressionSelection::Refused(body.range, "body refused"));
         assert!(module.standalone().unwrap_err().contains("body refused"));
-        module.source.initializer.as_mut().unwrap().operands[1] =
-            PhysicalOperand::Residual(refused_base);
+        module.initializer.operands[1] = PhysicalOperand::Residual(refused_base);
         assert!(module.standalone().unwrap_err().contains("header refused"));
     }
 
@@ -3428,7 +3380,7 @@ mod tests {
                     ["SupportsAbs", "SupportsRound"]
                 );
                 let mut bindings = Vec::new();
-                let initializer = typing.source.initializer.as_ref().unwrap();
+                let initializer = &typing.initializer;
                 crate::ir::walk_expressions(&initializer.checked.function.body, &mut |expr| {
                     if let ExprKind::Builtin(
                         Builtin::RegisteredDefinition(crate::ir::DefinitionSite::Class {
@@ -3501,14 +3453,7 @@ mod tests {
             ModuleOrigin::Bundled,
         )
         .unwrap();
-        let body = &typing
-            .source
-            .initializer
-            .as_ref()
-            .unwrap()
-            .checked
-            .function
-            .body;
+        let body = &typing.initializer.checked.function.body;
         for name in ["SupportsAbs", "SupportsRound"] {
             let class = syntax
                 .body
@@ -4154,7 +4099,7 @@ mod tests {
         .unwrap();
         let before = module.standalone().unwrap();
         assert!(module.syntax.is_none());
-        let suite = module.source.initializer.as_mut().unwrap();
+        let suite = &mut module.initializer;
         assert!(suite.fully_checked());
         let mut stored = 0;
         crate::ir::rewrite_statements(&mut suite.checked.function.body, &mut |statement| {
@@ -4362,7 +4307,7 @@ mod tests {
 
         let original = prepared.standalone().unwrap();
         assert!(input_statements(prepared.initializer()).next().unwrap().0 > 0);
-        let root = residual_selection(prepared.source.initializer.as_mut().unwrap());
+        let root = residual_selection(&mut prepared.initializer);
         let outer_inputs = root.physical().unwrap().operands().collect::<Vec<_>>();
         let [
             Checked(_),
@@ -4414,7 +4359,7 @@ mod tests {
         inject_residual_child_module(&mut prepared);
         let original = prepared.standalone().unwrap();
         assert!(input_statements(prepared.initializer()).next().unwrap().0 > 0);
-        let root = residual_occurrence(prepared.source.initializer.as_mut().unwrap());
+        let root = residual_occurrence(&mut prepared.initializer);
         assert_eq!(
             &text[root.range],
             "first() < (lambda v: v)(middle()) <= last()"
@@ -4469,7 +4414,7 @@ mod tests {
 
         let original = prepared.standalone().unwrap();
         assert!(input_statements(prepared.initializer()).next().unwrap().0 > 0);
-        let inputs = residual_selection(prepared.source.initializer.as_mut().unwrap())
+        let inputs = residual_selection(&mut prepared.initializer)
             .physical()
             .unwrap();
         let crate::ir::ExprKind::Binary(crate::ir::Binary::Add, left, right) =
@@ -4512,7 +4457,7 @@ mod tests {
             .keywords[0]
             .value
             .range();
-        let inputs = residual_selection(prepared.source.initializer.as_mut().unwrap())
+        let inputs = residual_selection(&mut prepared.initializer)
             .physical()
             .unwrap();
         use crate::ir::{ExprKind, RegisteredArguments, RegisteredCallTarget};
@@ -4664,19 +4609,9 @@ mod tests {
             panic!("expected assignment expression")
         };
         let mut owns_choice = false;
-        crate::ir::walk_expressions(
-            &prepared
-                .source
-                .initializer
-                .as_ref()
-                .unwrap()
-                .checked
-                .function
-                .body,
-            &mut |value| {
-                owns_choice |= matches!(value.kind, crate::ir::ExprKind::Conditional(..));
-            },
-        );
+        crate::ir::walk_expressions(&prepared.initializer.checked.function.body, &mut |value| {
+            owns_choice |= matches!(value.kind, crate::ir::ExprKind::Conditional(..));
+        });
         assert!(owns_choice);
         let ast::Expr::If(choice) = named.value.as_mut() else {
             panic!("expected choice")
@@ -4704,8 +4639,7 @@ mod tests {
         inject_residual_child_module(&mut prepared);
 
         let original = prepared.standalone().unwrap();
-        let ExpressionSelection::Operand(inputs) =
-            residual_selection(prepared.source.initializer.as_mut().unwrap())
+        let ExpressionSelection::Operand(inputs) = residual_selection(&mut prepared.initializer)
         else {
             panic!("expected a mixed conditional");
         };
@@ -4741,8 +4675,7 @@ mod tests {
         inject_residual_child_module(&mut prepared);
         let original = prepared.standalone().unwrap();
         use crate::frontend::{ExpressionInput, ExpressionSelection, SourceOperand};
-        let ExpressionSelection::Operand(inputs) =
-            residual_selection(prepared.source.initializer.as_mut().unwrap())
+        let ExpressionSelection::Operand(inputs) = residual_selection(&mut prepared.initializer)
         else {
             panic!("expected a mixed choice");
         };
@@ -4829,7 +4762,7 @@ mod tests {
         use crate::ir::Statement;
 
         fn region<'a>(prepared: &'a mut PreparedBody<'_>) -> &'a mut RegisteredSuite {
-            &mut prepared.source.initializer.as_mut().unwrap().suites[0]
+            &mut prepared.initializer.suites[0]
         }
 
         let source = concat!(
@@ -5123,7 +5056,7 @@ mod tests {
         let ast::Stmt::Match(branch) = &mut prepared.syntax.as_mut().unwrap().to_mut()[0] else {
             panic!("expected match")
         };
-        let suite = prepared.source.initializer.as_ref().unwrap();
+        let suite = &prepared.initializer;
         let [region] = suite.suites.as_slice() else {
             panic!("expected a mixed match")
         };
@@ -6410,7 +6343,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         use crate::ir::Statement;
 
         fn region<'a>(module: &'a mut PreparedBody) -> &'a mut RegisteredSuite {
-            let suite = module.source.initializer.as_mut().unwrap();
+            let suite = &mut module.initializer;
             assert!(suite.refusal.is_none());
             let [region] = suite.suites.as_mut_slice() else {
                 panic!("expected the prepared while");
@@ -7000,7 +6933,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             .value
             .as_call_expr()
             .unwrap();
-        let inputs = residual_selection(prepared.source.initializer.as_mut().unwrap())
+        let inputs = residual_selection(&mut prepared.initializer)
             .physical()
             .unwrap();
         let (callee, arguments) = named_call(&inputs.value);
@@ -7373,7 +7306,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             .as_try_stmt_mut()
             .unwrap();
         let branch = protected.finalbody[0].as_match_stmt_mut().unwrap();
-        let suite = prepared.source.initializer.as_ref().unwrap();
+        let suite = &prepared.initializer;
         let [region] = suite.suites.as_slice() else {
             panic!("expected a registered try with prepared children")
         };
@@ -7533,7 +7466,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             .value
             .as_call_expr()
             .unwrap();
-        let inputs = residual_selection(prepared.source.initializer.as_mut().unwrap())
+        let inputs = residual_selection(&mut prepared.initializer)
             .physical()
             .unwrap();
         let (callee, arguments) = named_call(&inputs.value);
