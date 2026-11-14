@@ -2500,6 +2500,13 @@ impl Session {
                 if definition.focus_range(&self.db) == Some(self.class_declaration(class)))
     }
 
+    /// A constructor binding can also denote a factory. An instance test needs the class object.
+    pub(crate) fn is_class_object(&self, module: usize, expr: &Expr) -> bool {
+        self.hint_reads.set(self.hint_reads.get() + 1);
+        let model = SemanticModel::new(&self.db, self.db.program_file(self.files[module]));
+        expr.inferred_type(&model).is_some_and(|ty| ty.is_class_literal())
+    }
+
     /// Check the class definition at the use site, including aliases and local shadowing.
     pub(crate) fn is_stdlib_class(
         &self,

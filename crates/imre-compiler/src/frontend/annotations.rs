@@ -51,6 +51,22 @@ pub(super) fn class_value(name: &str) -> Expr {
     }
 }
 
+/// Fixed class bindings whose annotation and runtime instance test use the same type.
+pub(super) fn fixed_instance_type(binding: Option<Binding>) -> Option<Type> {
+    let Binding::Intrinsic(intrinsic) = binding? else {
+        return None;
+    };
+    Some(match intrinsic {
+        Intrinsic::BytesIo => Type::BytesIO,
+        Intrinsic::StringIo => Type::StringIO,
+        Intrinsic::Context => Type::Context,
+        Intrinsic::ClockTime => Type::ClockTime,
+        Intrinsic::Path => Type::Path,
+        Intrinsic::LogRecord => Type::LogRecord,
+        _ => return None,
+    })
+}
+
 /// Both annotations describe the same item interface; their class values differ.
 pub(super) fn sequence_annotation(binding: Option<Binding>) -> bool {
     matches!(
