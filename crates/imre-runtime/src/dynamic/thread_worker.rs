@@ -561,29 +561,16 @@ enum Registration {
 }
 
 /// Match the interpreter's lookup of an already imported threading module at exit.
-pub(super) fn shutdown(ctx: &mut Context) {
+pub(super) fn prepare_shutdown(ctx: &mut Context) -> Result<super::calls::RegisteredCall> {
     // An exception in the Python handler can deliberately prevent a non-daemon join.
     // Do not repeat that join in Drop or include workers started later by ordinary atexit.
     ctx.workers.joined_at_shutdown = true;
-    let mark = ctx.heap.temporary_mark();
-    let result = (|| -> Result<()> {
-        let key = ctx.text("threading");
-        if let Some(module) = ctx.initialized_registry_entry(key)? {
-            let shutdown = ctx.lookup_attr(module, "_shutdown")?;
-            ctx.call(shutdown, Vec::new(), Vec::new())?;
-        }
-        Ok(())
-    })();
-    if let Err(error) = result {
-        super::unraisable::report(
-            ctx,
-            error,
-            false,
-            None,
-            "Exception ignored on threading shutdown",
-        );
-    }
-    ctx.heap.release_temporaries_since(mark);
+    let key = ctx.text("threading");
+    let Some(module) = ctx.initialized_registry_entry(key)? else {
+        return Ok(super::calls::RegisteredCall::Returned(NONE));
+    };
+    let shutdown = ctx.lookup_attr(module, "_shutdown")?;
+    ctx.prepare_call(shutdown, Vec::new(), Vec::new())
 }
 
 /// Reject new work before binding or moving its Python callback operands.

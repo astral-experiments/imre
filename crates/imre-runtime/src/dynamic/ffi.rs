@@ -1451,7 +1451,19 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
             1
         }
     };
-    super::thread_worker::shutdown(&mut ctx);
+    let shutdown_mark = ctx.heap.temporary_mark();
+    let shutdown = super::thread_worker::prepare_shutdown(&mut ctx);
+    // SAFETY: finish owns the context and the shutdown frame until the call returns.
+    if let Err(error) = shutdown.and_then(|call| unsafe { call.run(&raw mut *ctx) }) {
+        super::unraisable::report(
+            &mut ctx,
+            error,
+            false,
+            None,
+            "Exception ignored on threading shutdown",
+        );
+    }
+    ctx.heap.release_temporaries_since(shutdown_mark);
     atexit::run(&mut ctx);
     #[cfg(unix)]
     if crate::signals::is_main() {
