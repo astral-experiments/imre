@@ -335,6 +335,7 @@ pub unsafe extern "C" fn imre_poll_wait(
 pub(crate) struct SelectFds {
     sets: [libc::fd_set; 3],
     max: i32,
+    interests: u8,
 }
 
 impl SelectFds {
@@ -344,6 +345,7 @@ impl SelectFds {
             // SAFETY: all-zero fd sets are valid and contain no descriptors.
             sets: unsafe { std::mem::zeroed() },
             max: -1,
+            interests: 0,
         }
     }
 
@@ -363,6 +365,7 @@ impl SelectFds {
         }
         // SAFETY: fd is nonnegative and strictly below FD_SETSIZE.
         unsafe { libc::FD_SET(fd, &mut self.sets[group]) };
+        self.interests |= 1 << group;
         self.max = self.max.max(fd);
         Ok(())
     }
@@ -376,7 +379,14 @@ impl SelectFds {
         let mut ready = self.sets;
         let count = wait(timeout, check_signals, |remaining| {
             ready = self.sets;
-            let [r, w, x] = &mut ready;
+            // POSIX skips copying a descriptor set when the caller passes null.
+            let [r, w, x] = std::array::from_fn(|group| {
+                if self.interests & (1 << group) == 0 {
+                    ptr::null_mut()
+                } else {
+                    ptr::from_mut(&mut ready[group])
+                }
+            });
             let mut tv = remaining.map(|d| {
                 let us = d.as_nanos().div_ceil(1_000);
                 libc::timeval {
