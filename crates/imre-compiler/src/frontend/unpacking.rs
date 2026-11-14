@@ -1458,16 +1458,17 @@ impl Checker<'_> {
             items: false,
             start: None,
         };
-        let (iteration, _) = self.lower_iteration(&item_target, input, &[], |checker, body| {
-            let item = checker.local(checker.names[&name]);
-            let item = checker.coerce(item, expected, target)?;
-            body.push(Statement::Expr(builtin(
-                Type::None,
-                Builtin::Append,
-                vec![checker.local(result), item],
-            )));
-            Ok(())
-        })?;
+        let (iteration, _) =
+            self.lower_iteration_after(&item_target, input, &[], Vec::new(), |checker, body| {
+                let item = checker.local(checker.names[&name]);
+                let item = checker.coerce(item, expected, target)?;
+                body.push(Statement::Expr(builtin(
+                    Type::None,
+                    Builtin::Append,
+                    vec![checker.local(result), item],
+                )));
+                Ok(true)
+            })?;
         let item = self.names.remove(&name).unwrap();
         let mut body = vec![Statement::Assign(
             result,
