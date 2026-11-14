@@ -26,18 +26,23 @@ pub(crate) struct ModuleEntryRoot<'a> {
 
 impl<'a> ModuleEntryRoot<'a> {
     pub(crate) fn select(
-        root: &Path,
-        entry: &Path,
-        path_zero: bool,
+        selected_entry: Option<(&Path, &Path)>,
+        path_zero: Option<&Path>,
         records: &'a mut WheelRecords,
         options: &crate::CompileOptions,
         inputs: &mut SourceInputs,
         fs: &mut FileSystem<'_>,
     ) -> Option<Self> {
+        // A bundled launcher has no source directory of its own. Its application
+        // imports still use the launch directory and that directory's wheel records.
+        let (root, pythonpath_entry) = match selected_entry {
+            Some((root, path)) => (root, (Some(root) != path_zero).then_some(path)),
+            None => (path_zero?, None),
+        };
         if !fs.is_dir(root) {
             return None;
         }
-        if !path_zero {
+        if pythonpath_entry.is_some() {
             if options.pythonpath.is_empty() {
                 return None;
             }
@@ -52,7 +57,7 @@ impl<'a> ModuleEntryRoot<'a> {
         let wheels = records.discover(root, inputs, fs);
         let installed = records.membership(wheels);
         Some(Self {
-            application: path_zero || !installed.contains(entry),
+            application: pythonpath_entry.is_none_or(|entry| !installed.contains(entry)),
             root: root.to_owned(),
             installed,
         })

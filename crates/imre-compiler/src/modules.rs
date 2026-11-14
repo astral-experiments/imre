@@ -4194,9 +4194,8 @@ impl SourceGraph {
         if let SearchRoots::Single(index) = graph.modules[entry].search_roots {
             let root = &graph.filesystem_roots[index - skipped];
             if let Some(owner) = crate::installed_wheels::ModuleEntryRoot::select(
-                root,
-                &graph.modules[entry].path,
-                index == 0,
+                Some((root, &graph.modules[entry].path)),
+                (index == 0).then_some(root),
                 &mut site_probes.wheel_records,
                 options,
                 &mut graph.inputs,
