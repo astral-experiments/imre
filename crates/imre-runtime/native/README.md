@@ -4,6 +4,9 @@ Modules/errnomodule.c). The original license is in PSF-LICENSE. The entries
 contain symbolic names only. build.rs compiles a table against the target's
 actual errno headers so an absent platform constant is absent in the module.
 
+The builtins module documentation comes from Python/bltinmodule.c in the same
+CPython release.
+
 The raw Unicode decomposition mappings use Unicode 16.0.0, the database in
 CPython 3.14. Regenerate them with
 `python3 scripts/generate_unicode_decomposition.py UnicodeData.txt` and the

@@ -2957,6 +2957,10 @@ impl Context {
     /// Populate the public module with the same native objects used by compiled calls.
     pub(super) fn install_builtins(&mut self, scope: Id) -> Result<()> {
         for (name, value) in [
+            (
+                "__doc__",
+                self.text(include_str!("../../native/builtins-doc.txt")),
+            ),
             ("None", NONE),
             ("False", value::FALSE),
             ("True", value::TRUE),
