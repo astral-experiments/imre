@@ -1776,14 +1776,13 @@ impl<'a> SuitePreparation<'a> {
     pub(crate) fn class_suites(
         &mut self,
         classes: Vec<ClassSite<'_>>,
-        class_keywords: &[TextSize],
         names: &imre_ast::Names,
         scopes: &super::function_scope::ScopeFacts<'_>,
     ) -> HashMap<TextSize, RegisteredClass> {
         classes
             .into_iter()
             .rev()
-            .map(|class| self.class_suite(class, class_keywords, names, scopes))
+            .map(|class| self.class_suite(class, names, scopes))
             .collect()
     }
 
@@ -1793,7 +1792,6 @@ impl<'a> SuitePreparation<'a> {
             def: class,
             mut annotations,
         }: ClassSite<'_>,
-        class_keywords: &[TextSize],
         names: &imre_ast::Names,
         scopes: &super::function_scope::ScopeFacts<'_>,
     ) -> (TextSize, RegisteredClass) {
@@ -1836,8 +1834,17 @@ impl<'a> SuitePreparation<'a> {
             });
             ClassHeader { parameters, body }
         });
-        let keyword = class_keywords.partition_point(|&p| p < class.name.start()) - 1;
-        let range = TextRange::new(class_keywords[keyword], class.end());
+        let keyword = if class.decorator_list.is_empty() {
+            start
+        } else {
+            // The class keyword is the last non-trivia token before its name.
+            ruff_python_trivia::BackwardsTokenizer::up_to(class.name.start(), self.source.text, &[])
+                .skip_trivia()
+                .next()
+                .expect("parsed class keyword")
+                .start()
+        };
+        let range = TextRange::new(keyword, class.end());
         let body = self.suite(&class.body, RegisteredScope::Class);
         if let Some(refusal) = header
             .as_ref()
