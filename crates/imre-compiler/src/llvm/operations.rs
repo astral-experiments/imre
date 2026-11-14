@@ -855,7 +855,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                     operand.ty == Type::Int
                         || matches!(operand.without_location().kind, ExprKind::Int(_))
                 });
-        let arithmetic = matches!(
+        let integer_arithmetic = (matches!(
             op,
             Binary::FloorDivide | Binary::Modulo | Binary::RightShift
         ) && checked_ints
@@ -865,9 +865,15 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             || positioned
                 && (matches!(site, OperationSite::Placed(..))
                     || expr.ty == Type::PythonObject
-                    || checked_ints);
-        let (left_use, right_use) = if arithmetic
+                    || checked_ints))
             && !float_arithmetic
+            && [left, right].into_iter().all(|operand| {
+                matches!(
+                    operand.without_location().kind.scalar_literal_type(),
+                    None | Some(Type::Int)
+                )
+            });
+        let (left_use, right_use) = if integer_arithmetic
             && (op == Binary::Multiply || checked_ints || usage.needs_integer())
         {
             // The left operand must be ready before the right can call Python.
@@ -915,7 +921,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             && let Some(value) = self.cached_remainder(&a, &b, span, divisor)
         {
             value
-        } else if arithmetic
+        } else if integer_arithmetic
             && (op == Binary::Multiply
                 || checked_ints
                 || a.can_use_integer_arithmetic(left.ty, &b, right.ty, usage))

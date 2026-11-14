@@ -198,6 +198,14 @@ fn a_checked_local_uses_python_membership_alongside_native_multiplication() {
 }
 
 #[test]
+fn literal_multiplication_uses_the_python_protocol_on_either_side() {
+    let body = emit_captured_body("def emit(value, send):\n    send('-' * value, value * '-')\n")
+        .functions;
+    assert!(!body.contains("@int_mul("));
+    assert_eq!(body.matches("call i64 @imre_dyn_op_at(").count(), 2);
+}
+
+#[test]
 fn checked_subtraction_selects_integer_arithmetic_in_both_calling_conventions() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("difference.py");

@@ -1671,18 +1671,15 @@ impl Checker<'_> {
             self.frame_arguments = FrameArguments::Python;
         }
         // Checked locals and exact literals keep their known types in the registered frame.
-        value.ty = match &value.kind {
-            ExprKind::Int(_) => Type::Int,
-            ExprKind::Float(_) => Type::Float,
-            ExprKind::Str(_) | ExprKind::Builtin(Builtin::RegisteredString(_), _) => Type::Str,
-            ExprKind::Bytes(_) => Type::Bytes,
-            ExprKind::Bool(_) => Type::Bool,
-            ExprKind::None => Type::None,
-            ExprKind::Conditional(_, yes, no) if yes.ty == no.ty => yes.ty,
-            _ => self
-                .registered_display_type(&value.kind)
-                .unwrap_or(value.ty),
-        };
+        value.ty = value
+            .kind
+            .scalar_literal_type()
+            .unwrap_or_else(|| match &value.kind {
+                ExprKind::Conditional(_, yes, no) if yes.ty == no.ty => yes.ty,
+                _ => self
+                    .registered_display_type(&value.kind)
+                    .unwrap_or(value.ty),
+            });
         if let ExprKind::Set { element, .. } = &mut value.kind
             && let Some(known) = self.types.set_element(value.ty)
         {
