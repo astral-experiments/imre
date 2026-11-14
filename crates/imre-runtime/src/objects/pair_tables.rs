@@ -156,16 +156,35 @@ pub unsafe extern "C" fn imre_pair_table_try_add_rows(table: *const Object, stop
 /// The table is rooted, as is the arbitrary-precision Python index.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_pair_table_index(table: *const Object, at: usize) -> usize {
-    // SAFETY: borrow the immutable integer and the current table length only.
-    let result = unsafe {
-        object(table).0.with(|s| {
-            index(
-                list_subscript_index(&Int::borrow(at))?,
-                s.pair_table().rows.len(),
-            )
-            .map(|i| Int::from_usize(i).into_raw())
-        })
+    // SAFETY: the table is rooted and its row count cannot change during this call.
+    let len = unsafe {
+        object(table)
+            .0
+            .with(|storage| storage.pair_table().rows.len())
     };
+    if at & 1 != 0 {
+        let limit = len << 1;
+        if at < limit {
+            return at;
+        }
+        // A carry means that this negative small integer lies within one table length.
+        let (normalized, in_range) = at.overflowing_add(limit);
+        if in_range {
+            return normalized;
+        }
+    }
+    // SAFETY: the caller also roots the index through normalization.
+    unsafe { normalize_pair_table_index(at, len) }
+}
+
+/// Normalize heap integers and report out-of-range list subscripts.
+#[inline(never)]
+unsafe fn normalize_pair_table_index(at: usize, len: usize) -> usize {
+    // SAFETY: the caller holds the Python integer alive.
+    let value = unsafe { Int::borrow(at) };
+    let result = list_subscript_index(&value)
+        .and_then(|at| index(at, len))
+        .map(|row| Int::from_usize(row).into_raw());
     finish(result, 0)
 }
 
