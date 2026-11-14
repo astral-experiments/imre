@@ -6624,6 +6624,7 @@ impl<'a> Loader<'a> {
             }
             return Ok(id);
         }
+        let mut path_first = false;
         let mut checked_declaration = None;
         let mut registered_namespace = false;
         let bundled = match name {
@@ -6640,6 +6641,11 @@ impl<'a> Loader<'a> {
                 && self.has_project_source(name) =>
             {
                 None
+            }
+            // Interpreter startup supplies cmd from its installed ZIP at its real path position.
+            "cmd" if self.allow_imports && self.site_probes.is_none() => {
+                path_first = true;
+                bundled_source!("cmd.py")
             }
             "stat" => stat_mode_source().map(|source| ("stat.py", source)),
             // Keep these checked definitions behind the complete public typeshed interfaces.
@@ -6744,13 +6750,32 @@ impl<'a> Loader<'a> {
                     .checked_shipped_prefix(name, "BaseHTTPRequestHandler")?,
             )),
             _ => {
+                path_first = name == "ssl" && self.allow_imports;
                 // Both modules populate their public namespace using a native provider.
                 registered_namespace = source_exports || matches!(name, "bisect" | "ssl");
                 bundled_runtime_source(name)
             }
         };
+        if bundled.is_none() || path_first {
+            if !self.allow_imports {
+                return Err("imports require a source file and a first-party module root".into());
+            }
+            // Both scanning an import and resolving a dotted package parent can
+            // re-enter the loader. Count active calls, including unresolved parents.
+            if self.import_depth >= 96 {
+                return Err("first-party import nesting exceeds 96 levels".into());
+            }
+            self.import_depth += 1;
+            let result = self.load_new_module(name, path_first);
+            self.import_depth -= 1;
+            if let Some(id) = result? {
+                return Ok(id);
+            }
+        }
         if let Some((filename, source)) = bundled {
-            self.reject_stdlib_shadow(name)?;
+            if !path_first {
+                self.reject_stdlib_shadow(name)?;
+            }
             // token initializes its tables and quopri selects a codec from live module globals.
             self.needs_object_imports |= matches!(
                 name,
@@ -6816,18 +6841,15 @@ impl<'a> Loader<'a> {
             self.bind_child(name, id, parent)?;
             return Ok(id);
         }
-        if !self.allow_imports {
-            return Err("imports require a source file and a first-party module root".into());
-        }
-        // Both scanning an import and resolving a dotted package parent can
-        // re-enter the loader. Count active calls, including unresolved parents.
-        if self.import_depth >= 96 {
-            return Err("first-party import nesting exceeds 96 levels".into());
-        }
-        self.import_depth += 1;
-        let result = self.load_new_module(name);
-        self.import_depth -= 1;
-        result
+        let hint = if !name.contains('.') {
+            "\n  help: for an installed dependency, pass --extension-path DIRECTORY where DIRECTORY contains the package or module"
+        } else {
+            ""
+        };
+        Err(format!(
+            "cannot resolve first-party module {name:?} under {}{hint}",
+            self.root.display()
+        ))
     }
 
     /// Resolve the containing package, including one that is importing this child itself.
@@ -7059,11 +7081,17 @@ impl<'a> Loader<'a> {
         Ok(Some((path, identity, is_package, root_index, archive)))
     }
 
-    fn load_new_module(&mut self, name: &str) -> Result<ModuleId, String> {
+    /// A missing path provider lets the caller select its shipped source. A selected
+    /// source, namespace, or importer owns its result, including its errors.
+    fn load_new_module(
+        &mut self,
+        name: &str,
+        path_fallback: bool,
+    ) -> Result<Option<ModuleId>, String> {
         let first = name.split('.').next().unwrap_or("");
         let directory_main = name == "__main__" && self.module_operand.as_deref() == Some(name);
-        let declaration = if directory_main {
-            // runpy removes the startup __main__ from sys.modules for a path operand.
+        let declaration = if directory_main || path_fallback {
+            // A path entry or an available source fallback supplies its own declaration.
             None
         } else {
             self.checked_import_declaration(first)?
@@ -7074,7 +7102,7 @@ impl<'a> Loader<'a> {
             if self.loading.contains(&id) {
                 return Err(format!("cyclic import through {name:?}"));
             }
-            return Ok(id);
+            return Ok(Some(id));
         }
         // A regular package owns its subtree. A namespace searches its portions in path order.
         let relative = name.replace('.', "/");
@@ -7145,7 +7173,7 @@ impl<'a> Loader<'a> {
         }
         let Some((path, identity, is_package, root_index, archive)) = resolved else {
             let has_namespace = zip_namespace || portions.peek().is_some();
-            if !zip_member && !has_namespace {
+            if !zip_member && !has_namespace && !path_fallback {
                 self.import_failure = Some(EntryImportFailure::MissingModule);
             }
             #[cfg(target_os = "linux")]
@@ -7161,7 +7189,7 @@ impl<'a> Loader<'a> {
                         for suffix in [&tagged, &abi3, &shared] {
                             let path = stem.with_added_extension(&suffix[1..]);
                             if !self.fs.is_file(&path) {
-                                if has_namespace {
+                                if has_namespace || path_fallback {
                                     self.inputs.file_checks.insert(path, false);
                                 }
                                 continue;
@@ -7193,20 +7221,15 @@ impl<'a> Loader<'a> {
                 }
             }
             if zip_import {
+                if path_fallback {
+                    self.checked_import_declaration(first)?;
+                }
                 self.import_failure = Some(EntryImportFailure::ZipImport);
                 return Err(format!("module {name:?} requires the ZIP importer"));
             }
             let indices: Vec<_> = portions.collect();
             let Some(&first) = indices.first() else {
-                let hint = if name == first {
-                    "\n  help: for an installed dependency, pass --extension-path DIRECTORY where DIRECTORY contains the package or module"
-                } else {
-                    ""
-                };
-                return Err(format!(
-                    "cannot resolve first-party module {name:?} under {}{hint}",
-                    self.root.display()
-                ));
+                return Ok(None);
             };
             let path = Self::root_at(&self.root, &self.search_roots, first).join(&relative);
             for &index in &indices {
@@ -7226,7 +7249,7 @@ impl<'a> Loader<'a> {
             self.modules[id].search_roots = SearchRoots::Namespace(indices);
             self.scan(id)?;
             self.bind_child(name, id, parent)?;
-            return Ok(id);
+            return Ok(Some(id));
         };
         if archive.is_some() {
             let leaf = name.rsplit('.').next().unwrap();
@@ -7266,7 +7289,7 @@ impl<'a> Loader<'a> {
         self.modules[id].archive = archive;
         self.scan(id)?;
         self.bind_child(name, id, parent)?;
-        Ok(id)
+        Ok(Some(id))
     }
 
     fn bind_child(
@@ -7669,6 +7692,24 @@ mod native_tests {
         .unwrap();
         let child = loader.load_module("email.encoders").unwrap();
         assert!(!loader.modules[child].registered_namespace);
+    }
+
+    #[test]
+    fn checked_source_fallback_keeps_the_selected_module() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        let entry = root.join("main.py");
+        fs::write(&entry, "import cmd\nimport ssl\n").unwrap();
+        for physical in [false, true] {
+            if physical {
+                fs::write(root.join("ssl.py"), "marker = 37\n").unwrap();
+            }
+            let graph = SourceGraph::load(&entry, Some(root), &[]).unwrap();
+            let ssl = graph.modules.iter().find(|m| m.name == "ssl").unwrap();
+            assert_eq!(ssl.bundled, !physical);
+            assert_eq!(ssl.registered_namespace, !physical);
+            assert!(graph.modules.iter().any(|m| m.name == "cmd" && m.bundled));
+        }
     }
 
     #[test]
