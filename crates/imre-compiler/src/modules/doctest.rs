@@ -161,6 +161,7 @@ pub(crate) fn sealed(name: IntrinsicModule) -> Option<SealedDocs> {
 }
 
 struct Uses<'a> {
+    session: &'a Session,
     modules: &'a [SourceModule],
     origin: ModuleId,
     suite: DefinitionId,
@@ -173,6 +174,20 @@ struct Uses<'a> {
 }
 
 impl Uses<'_> {
+    fn is_suite(&self, callee: &ast::Expr) -> bool {
+        let suite = Some(Binding::Definition(self.suite));
+        if let Some(binding) = resolve_binding(self.modules, self.origin, callee) {
+            return Some(binding) == suite;
+        }
+        // A function-local import is not a module slot. Resolve its receiver at this use.
+        let owner = &self.modules[self.suite.module];
+        callee.as_attribute_expr().is_some_and(|attr| {
+            owner.export(attr.attr.as_str()) == suite
+                && self.session.module_name_at(self.origin, &attr.value)
+                    == Some(owner.name.as_str())
+        })
+    }
+
     fn remember(&mut self, target: &ast::Expr, values: &[ast::Expr]) {
         let Some(name) = target.as_name_expr() else {
             return;
@@ -214,8 +229,7 @@ impl<'a> Visitor<'a> for Uses<'_> {
             self.executes = true;
         }
         if let ast::Expr::Call(call) = expr
-            && resolve_binding(self.modules, self.origin, &call.func)
-                == Some(Binding::Definition(self.suite))
+            && self.is_suite(&call.func)
         {
             let arg = call.arguments.args.first().or_else(|| {
                 call.arguments
@@ -601,6 +615,7 @@ impl Loader<'_> {
             unreachable!()
         };
         let mut uses = Uses {
+            session: &self.session,
             modules: &self.modules,
             origin: 0,
             suite,

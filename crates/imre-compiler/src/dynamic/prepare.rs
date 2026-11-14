@@ -214,6 +214,7 @@ pub(super) fn units<'a>(
                 )?;
                 if python_optimization < 2 {
                     body.prompts = bundled_prompts
+                        .or_else(|| checked_source.map(|source| &source.doctest_prompts))
                         .or_else(|| module_id.map(|id| &registrations.modules[id].doctest_prompts))
                         .map_or(&[], Vec::as_slice);
                 }
