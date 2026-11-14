@@ -1372,10 +1372,11 @@ impl Checker<'_> {
         }
         if self.checked_call_contracts
             && let Some(call) = node.as_call_expr()
-            && let Some(method) = source.direct_method(call)
+            && let Some(method) = call.func.as_attribute_expr()
             && let Some(receiver) = method.value.as_name_expr()
             && let Some(&slot) = self.names.get(receiver.id.as_str())
             && self.types.element(self.locals[slot]).is_some()
+            && source.direct_method(call).is_some()
         {
             // Let the list method check its written operands before binding the live method.
             let receiver = self.expr(&method.value)?;
