@@ -1502,6 +1502,19 @@ pub(crate) struct DictEntry {
 }
 
 impl ExprKind {
+    /// The exact scalar type constructed by a literal, independent of lexical type hints.
+    pub(crate) fn scalar_literal_type(&self) -> Option<Type> {
+        Some(match self {
+            Self::Int(_) => Type::Int,
+            Self::Float(_) => Type::Float,
+            Self::Str(_) | Self::Builtin(Builtin::RegisteredString(_), _) => Type::Str,
+            Self::Bytes(_) => Type::Bytes,
+            Self::Bool(_) => Type::Bool,
+            Self::None => Type::None,
+            _ => return None,
+        })
+    }
+
     pub(crate) fn dict_pairs(entries: Vec<(Expr, Expr)>) -> Self {
         Self::Dict(
             entries
