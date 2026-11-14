@@ -327,7 +327,8 @@ impl BuiltinDescriptor {
                 method: !name.starts_with("__")
                     || (name == "__length_hint__"
                         && (matches!(owner, "set_iterator" | value::STRUCT_UNPACK_ITERATOR)
-                            || deque::iterator_class(owner).is_some()))
+                            || deque::iterator_class(owner).is_some()
+                            || DictIterator::class(owner).is_some()))
                     || (owner == "type" && name == "__subclasses__")
                     || (owner == "list" && name == "__getitem__")
                     || (matches!(owner, "set" | "frozenset") && name == "__contains__")
@@ -517,9 +518,6 @@ impl BuiltinDescriptor {
             }
             owner if stdlib::datetime::members(owner).is_some() => {
                 ctx.instance_of(receiver, ctx.builtins[owner])
-            }
-            owner if DictIterator::class(owner).is_some() => {
-                matches!(ctx.heap.get(receiver), Value::DictIterator(iter) if iter.class_name() == owner)
             }
             "list_iterator"
             | "tuple_iterator"
@@ -746,11 +744,14 @@ impl BuiltinDescriptor {
             "__doc__" if self.owner == "module" && self.name == "__dir__" => ctx.text("__dir__() -> list\nspecialized dir() implementation"),
             "__doc__" if self.name == "__getattribute__" => ctx.text("Return getattr(self, name)."),
             "__text_signature__" if self.name == "__getattribute__" => ctx.text("($self, name, /)"),
-            "__doc__" if self.owner == "itertools.repeat" && self.name == "__length_hint__" => {
-                ctx.text("Private method returning an estimate of len(list(it)).")
-            }
-            "__text_signature__" if self.owner == "itertools.repeat" && self.name == "__length_hint__" => {
-                ctx.text("($self, /)")
+            "__doc__" | "__text_signature__" if self.name == "__length_hint__"
+                && (self.owner == "itertools.repeat" || DictIterator::class(self.owner).is_some()) =>
+            {
+                ctx.text(if name == "__doc__" {
+                    "Private method returning an estimate of len(list(it))."
+                } else {
+                    "($self, /)"
+                })
             }
             "__doc__" if self.owner == "dict" && self.name == "__reversed__" => {
                 ctx.text("Return a reverse iterator over the dict keys.")

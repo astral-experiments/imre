@@ -8645,6 +8645,14 @@ impl Context {
                     && DictIterator::methods(owner).contains(&slot)
                     && DictIterator::class(owner).is_some() =>
             {
+                if slot == "__length_hint__" {
+                    let receiver =
+                        builtins::noargs_method_receiver(self, owner, slot, &args, &kwargs)?;
+                    let Value::DictIterator(iter) = self.heap.get(receiver) else {
+                        unreachable!("validated dictionary iterator");
+                    };
+                    return Ok(self.int(iter.length_hint(self, 0)));
+                }
                 self.iterator_method(owner, slot, &args, &kwargs)
             }
             Value::Native(name) if name == "type.__new__" => self.type_new(&args, &kwargs),
