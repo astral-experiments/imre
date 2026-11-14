@@ -21,7 +21,10 @@ fn module_qualified_class_value_uses_its_python_binding() {
 
     fs::write(&main, "import scores\nprint(scores.Item().missing)\n").unwrap();
     let error = crate::check_file(&main, None).unwrap_err();
-    assert!(error.contains("main.py:2:7: Imre: unknown field"), "{error}");
+    assert!(
+        error.contains("main.py:2:7: Imre: unknown field"),
+        "{error}"
+    );
 }
 
 #[test]

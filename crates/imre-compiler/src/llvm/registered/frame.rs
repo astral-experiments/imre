@@ -1019,9 +1019,7 @@ impl<'p> RegisteredFrame<'_, 'p> {
         {
             "lookup_class_local"
         } else if self.scope == ENTRY_SCOPE
-            && self
-                .callable
-                .is_some_and(|meta| meta.locals.contains(name))
+            && self.callable.is_some_and(|meta| meta.locals.contains(name))
         {
             "lookup_local"
         } else {
