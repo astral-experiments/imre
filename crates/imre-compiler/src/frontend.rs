@@ -4784,7 +4784,7 @@ impl<'a> Checker<'a> {
                 self.dict_constructor(call, self.types.mapping(concrete))?
             }
             ast::Expr::Call(call)
-                if self.types.set_element(concrete).is_some()
+                if let Some(element) = self.types.set_element(concrete)
                     && matches!(&*call.func, ast::Expr::Name(name) if name.id == "set")
                     && call.arguments.args.is_empty()
                     && call.arguments.keywords.is_empty() =>
@@ -4792,7 +4792,7 @@ impl<'a> Checker<'a> {
                 Expr {
                     ty: concrete,
                     kind: ExprKind::Set {
-                        element: self.types.set_element(concrete).unwrap(),
+                        element,
                         values: Vec::new(),
                     },
                 }
