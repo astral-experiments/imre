@@ -113,6 +113,7 @@ impl CheckedBody<'_, '_, '_, '_> {
                     &subject,
                     &next,
                     &mut bindings,
+                    Some(&case.captures),
                     (!again).then_some(mark.as_str()),
                 );
                 // Captures are stacked in reverse binding order. A failed alternative
@@ -178,7 +179,26 @@ impl Frame<'_, '_, '_> {
         children: impl Iterator<Item = &'t MatchTest> + Clone,
         failed: &str,
         captures: &mut PatternCaptures,
+        targets: Option<&[usize]>,
     ) {
+        // Once the outer shape succeeds, a bare fast-local store can be seen from
+        // the next discarded field's destructor. Cells, globals and any group with
+        // a remaining test keep the ordinary pending captures.
+        let fast_targets = targets.filter(|targets| {
+            !targets.is_empty()
+                && children.clone().all(|child| match child {
+                    MatchTest::Always => true,
+                    MatchTest::Capture(inner, _) => matches!(inner.as_ref(), MatchTest::Always),
+                    _ => false,
+                })
+                && targets.iter().all(|slot| {
+                    self.names
+                        .and_then(|names| names.get(slot))
+                        .is_some_and(|binding| {
+                            binding.namespace.is_none() && self.is_fast_local(&binding.name)
+                        })
+                })
+        });
         let mut operands = Vec::with_capacity(children.size_hint().0);
         for (i, _) in children.clone().enumerate() {
             let index = crate::llvm::small(i as i64);
@@ -195,9 +215,18 @@ impl Frame<'_, '_, '_> {
             } else {
                 self.value(&format!("add i64 {mark}, {remaining}"))
             };
+            if let Some(targets) = fast_targets {
+                if let MatchTest::Capture(_, name) = child {
+                    let enclosing = self.replace_expression_mark(Some(boundary.clone()));
+                    self.assign(targets[*name], CheckedValue::handle(item.clone()));
+                    self.replace_expression_mark(enclosing);
+                }
+                self.release_owned_operands(&boundary);
+                continue;
+            }
             let mismatch = self.name("b");
             let release = self.name("b");
-            self.test_pattern(child, item, &mismatch, captures, None);
+            self.test_pattern(child, item, &mismatch, captures, None, None);
             let accepted = self.current_block().to_owned();
             self.jump(&release);
             self.label(&mismatch);
@@ -227,12 +256,13 @@ impl Frame<'_, '_, '_> {
         value: &str,
         failed: &str,
         captures: &mut PatternCaptures,
+        targets: Option<&[usize]>,
         last_use: Option<&str>,
     ) {
         match test {
             MatchTest::Always => {}
             MatchTest::Capture(inner, index) => {
-                self.test_pattern(inner, value, failed, captures, None);
+                self.test_pattern(inner, value, failed, captures, None, None);
                 captures.bind(self.code, *index, value);
             }
             MatchTest::Equal(expr) => self.pattern_equal(value, expr, failed, last_use),
@@ -258,7 +288,7 @@ impl Frame<'_, '_, '_> {
                     } else {
                         self.name("b")
                     };
-                    self.test_pattern(child, value, &next, captures, None);
+                    self.test_pattern(child, value, &next, captures, None, None);
                     let f = &mut *self.code;
                     if i == 0 {
                         matched_names.extend_from_slice(&captures.names[first..]);
@@ -278,7 +308,7 @@ impl Frame<'_, '_, '_> {
                 self.label(&done);
             }
             MatchTest::Sequence(plan, items) => {
-                self.sequence_test(plan, items, value, failed, captures)
+                self.sequence_test(plan, items, value, failed, captures, targets)
             }
             MatchTest::Mapping(items, rest) => {
                 let f = &mut *self.code;
@@ -309,6 +339,7 @@ impl Frame<'_, '_, '_> {
                     items.iter().map(|(_, child)| child),
                     failed,
                     captures,
+                    targets.filter(|_| rest.is_none()),
                 );
                 if let Some(index) = rest {
                     let f = &mut *self.code;
@@ -346,7 +377,7 @@ impl Frame<'_, '_, '_> {
                 let children = positional
                     .iter()
                     .chain(keywords.iter().map(|(_, child)| child));
-                self.test_collected_items(&mark, &fields, children, failed, captures);
+                self.test_collected_items(&mark, &fields, children, failed, captures, targets);
             }
         }
     }
@@ -358,6 +389,7 @@ impl Frame<'_, '_, '_> {
         value: &str,
         failed: &str,
         captures: &mut PatternCaptures,
+        targets: Option<&[usize]>,
     ) {
         let f = &mut *self.code;
         let sequence = f.op("match_sequence", &[value]);
@@ -387,7 +419,7 @@ impl Frame<'_, '_, '_> {
                         f.op("-", &[&size, &offset])
                     };
                     let item = f.op("get", &[value, &index]);
-                    self.test_pattern(child, &item, failed, captures, None);
+                    self.test_pattern(child, &item, failed, captures, None, None);
                 }
             }
             SequencePatternItems::Unpack(star) => {
@@ -395,7 +427,7 @@ impl Frame<'_, '_, '_> {
                 let star = star.map_or_else(|| "0".into(), |i| f.integer(i));
                 let mark = f.temporary_mark();
                 let values = f.op("unpack", &[value, &count, &star]);
-                self.test_collected_items(&mark, &values, items.iter(), failed, captures);
+                self.test_collected_items(&mark, &values, items.iter(), failed, captures, targets);
             }
         }
     }

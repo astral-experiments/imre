@@ -3,7 +3,7 @@
 use super::sequences::permanent_handle;
 use super::suspension::Suspension;
 use super::{CallArguments, Output, permanent, suspension};
-use crate::frontend::function_scope::ClassBindings;
+use crate::frontend::function_scope::{CallableMetadata, ClassBindings};
 use crate::frontend::module_source::SourceFile;
 use crate::frontend::push_codepoints;
 use crate::ir;
@@ -81,8 +81,8 @@ pub(crate) struct RegisteredFrame<'a, 'p> {
     pub(crate) current_range: TextRange,
     pub(super) regions: Vec<super::context::Region>,
     pub(crate) async_generator: bool,
-    /// Borrow the callable signature's local names while emitting its body.
-    pub(crate) function_locals: Option<&'p indexmap::IndexSet<String>>,
+    /// Use the defining callable's local and closure bindings while emitting its body.
+    pub(crate) callable: Option<&'p CallableMetadata>,
     pub(crate) class_locals: Option<&'p ClassBindings>,
     pub(crate) annotation_values: Option<String>,
     pub(crate) annotation_scope: AnnotationScope<'p>,
@@ -134,7 +134,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
             current_range: TextRange::empty(start),
             regions: Vec::new(),
             async_generator: false,
-            function_locals: None,
+            callable: None,
             class_locals: None,
             annotation_values: None,
             annotation_scope: AnnotationScope::Plain,
@@ -987,6 +987,10 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
 }
 
 impl<'p> RegisteredFrame<'_, 'p> {
+    pub(super) fn is_fast_local(&self, name: &str) -> bool {
+        self.scope == ENTRY_SCOPE && self.callable.is_some_and(|meta| meta.is_fast_local(name))
+    }
+
     pub(crate) fn text(&mut self, value: &str) -> String {
         if !value.is_empty() && interned_spelling(value) {
             self.output.intern_identifier(value);
@@ -1016,8 +1020,8 @@ impl<'p> RegisteredFrame<'_, 'p> {
             "lookup_class_local"
         } else if self.scope == ENTRY_SCOPE
             && self
-                .function_locals
-                .is_some_and(|locals| locals.contains(name))
+                .callable
+                .is_some_and(|meta| meta.locals.contains(name))
         {
             "lookup_local"
         } else {

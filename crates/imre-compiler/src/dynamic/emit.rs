@@ -999,7 +999,7 @@ impl SourceMap<'_> {
             Body::Registered(callable) => {
                 let body = match callable {
                     Callable::Named(header) => {
-                        function.frame.function_locals = Some(&header.metadata.locals);
+                        function.frame.callable = Some(&header.metadata);
                         function.declared_globals = &header.globals;
                         function.frame.declare_globals(function.declared_globals);
                         header.body()
@@ -1008,7 +1008,7 @@ impl SourceMap<'_> {
                         RegisteredBody::Function(lambda.body.as_ref().expect("checked lambda body"))
                     }
                     Callable::Generator(generator) => {
-                        function.frame.function_locals = Some(&generator.metadata.locals);
+                        function.frame.callable = Some(&generator.metadata);
                         RegisteredBody::Function(&generator.body)
                     }
                 };
