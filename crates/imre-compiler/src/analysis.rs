@@ -2942,6 +2942,7 @@ impl Session {
             "invalid-argument-type",
             "invalid-return-type",
             "invalid-assignment",
+            "unresolved-import",
         ]
         .into_iter()
         .chain(
@@ -3681,6 +3682,12 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<CheckedEr
                     }
                     None
                 }
+                Some(_)
+                    if diagnostic.id().is_lint_named("unresolved-import")
+                        && signature_uses_guarded_import(db, file, range?, skipped) =>
+                {
+                    None
+                }
                 Some(_) => return None,
                 None => None,
             };
@@ -3697,6 +3704,77 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<CheckedEr
             })
         })
         .collect()
+}
+
+/// Retain ty's failed import at the original binding when a written signature uses it.
+/// Missing members point to an individual alias. Missing providers point to the module.
+fn signature_uses_guarded_import(
+    db: &dyn Db,
+    file: File,
+    range: TextRange,
+    skipped: &[TextRange],
+) -> bool {
+    use ruff_python_ast::{AnyNodeRef, find_node::covering_node};
+    use ty_python_semantic::types::ide_support::{ImportAliasResolution, definitions_for_name};
+
+    let source = db.program_file(file);
+    let parsed = ruff_db::parsed::parsed_module(db, source.python_file(db)).load(db);
+    let nodes = covering_node(parsed.syntax().into(), range);
+    let Some(from) = nodes.ancestors().find_map(AnyNodeRef::stmt_import_from) else {
+        return false;
+    };
+    let index = ty_python_core::semantic_index(db, source);
+    let model = SemanticModel::new(db, source);
+    from.names.iter().any(|alias| {
+        if range != alias.range()
+            && range != from.module.as_ref().map_or(from.range(), Ranged::range)
+        {
+            return false;
+        }
+        let Some(import) = index.try_definition(alias) else {
+            return false;
+        };
+        let scope = import.file_scope(db);
+        if !index.is_in_type_checking_block(scope, alias.range()) {
+            return false;
+        }
+        let local = alias.asname.as_ref().unwrap_or(&alias.name);
+        let mut uses = |model: &SemanticModel<'_>, operand: &Expr| {
+            let Some(name) = operand.as_name_expr().filter(|n| n.id == local.id) else {
+                return false;
+            };
+            if let Some(def) = shipped_exports::binding_at_use(db, file, operand) {
+                return def == import;
+            }
+            // Postponed names may have no use ID. Navigation includes earlier
+            // assignments too, so require a binding still live at scope exit.
+            index
+                .use_def_map(scope)
+                .end_of_scope_bindings(import.place(db))
+                .any(|b| b.binding.definition() == Some(import))
+                && definitions_for_name(
+                    model,
+                    name.id.as_str(),
+                    name.into(),
+                    ImportAliasResolution::PreserveAliases,
+                )
+                .iter()
+                .any(|def| def.definition() == Some(import))
+        };
+        index.scope_ids().any(|scope| {
+            let Some(owner) = scope.node(db).as_function() else {
+                return false;
+            };
+            let f = owner.node(&parsed);
+            !skipped.iter().any(|r| r.contains_range(f.range()))
+                && !index.is_in_type_checking_block(scope.file_scope_id(db), f.range())
+                && f.parameters
+                    .iter()
+                    .filter_map(|p| p.annotation())
+                    .chain(f.returns.as_deref())
+                    .any(|annotation| any_annotation_operand(&model, annotation, &mut uses))
+        })
+    })
 }
 
 /// Literal initializers of scalar names are independent of the operation that required boxing.
@@ -3830,6 +3908,23 @@ fn source_class_annotation(
     )
 }
 
+fn any_annotation_operand<'db>(
+    model: &SemanticModel<'db>,
+    annotation: &Expr,
+    visit: &mut dyn FnMut(&SemanticModel<'db>, &Expr) -> bool,
+) -> bool {
+    ruff_python_ast::helpers::any_over_expr(annotation, |operand| {
+        if let Expr::StringLiteral(text) = operand {
+            return model
+                .enter_string_annotation(text)
+                .is_some_and(|(parsed, inner)| {
+                    any_annotation_operand(&inner, &parsed.syntax().body, visit)
+                });
+        }
+        visit(model, operand)
+    })
+}
+
 fn contains_source_class<'db>(
     db: &'db dyn Db,
     model: &SemanticModel<'db>,
@@ -3837,7 +3932,6 @@ fn contains_source_class<'db>(
     class_files: &[File],
     aliases: &mut std::collections::HashSet<ty_python_core::definition::Definition<'db>>,
 ) -> bool {
-    use ruff_python_ast::helpers::any_over_expr;
     use ty_python_semantic::types::{Type, TypeDefinition};
 
     let env = model.program_environment();
@@ -3845,14 +3939,7 @@ fn contains_source_class<'db>(
         matches!(ty.definition(db, &env), Some(TypeDefinition::StaticClass(class))
             if class_files.binary_search(&class.file(db)).is_ok())
     };
-    any_over_expr(annotation, |operand| {
-        if let Expr::StringLiteral(text) = operand {
-            return model
-                .enter_string_annotation(text)
-                .is_some_and(|(parsed, inner)| {
-                    contains_source_class(db, &inner, &parsed.syntax().body, class_files, aliases)
-                });
-        }
+    any_annotation_operand(model, annotation, &mut |model, operand| {
         if !matches!(operand, Expr::Name(_) | Expr::Attribute(_)) {
             return false;
         }

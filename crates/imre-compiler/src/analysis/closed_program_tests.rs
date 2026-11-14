@@ -1445,6 +1445,57 @@ fn a_guarded_builtin_alias_uses_the_selected_stub() {
 }
 
 #[test]
+fn a_written_guarded_alias_requires_an_exported_member() {
+    let project = tempdir().unwrap();
+    let root = project.path();
+    let app = root.join("app.py");
+    let stub = root.join("labels.pyi");
+    fs::write(root.join("model.py"), "class Packet(str): pass\n").unwrap();
+    fs::write(
+        root.join("labels.py"),
+        "raise AssertionError('guarded provider ran')\n",
+    )
+    .unwrap();
+    fs::write(&stub, "from model import Packet as Result\n").unwrap();
+    fs::write(
+        &app,
+        r#"from model import Packet
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from labels import Result as int
+def sample(value: int) -> int:
+    return value
+print(sample(Packet("chosen")))
+"#,
+    )
+    .unwrap();
+    let named = crate::CompileOptions {
+        module_entry: Some("app".into()),
+        script_startup: Some((Default::default(), "imre".into())),
+        extension_paths: vec![root.to_owned()],
+        ..Default::default()
+    };
+    for error in [
+        crate::check_file(&app, Some(root)).unwrap_err(),
+        crate::compile_file_with_boxed_units(&app, Some(root), &named)
+            .err()
+            .unwrap(),
+    ] {
+        assert!(
+            error.contains("app.py:4:24")
+                && error.contains("Module `labels` has no member `Result`"),
+            "{error}"
+        );
+    }
+    fs::write(
+        &stub,
+        "from model import Packet as Result\n__all__ = ['Result']\n",
+    )
+    .unwrap();
+    crate::check_file(&app, Some(root)).unwrap();
+}
+
+#[test]
 fn a_guarded_reexport_resolves_to_its_linked_class_without_running_the_module() {
     let project = tempdir().unwrap();
     let root = project.path();
