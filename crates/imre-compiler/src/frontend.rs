@@ -3299,19 +3299,22 @@ pub(crate) fn check_string(value: &ast::ExprStringLiteral, source: &str) -> StdR
 
 /// Checks each adjacent literal with its own raw prefix and content range.
 fn check_string_literal(value: &ast::StringLiteral, source: &str) -> StdResult<(), String> {
-    if matches!(
-        value.flags.prefix(),
-        ast::str_prefix::StringLiteralPrefix::Raw { .. }
-    ) {
+    if value.flags.prefix().is_raw() {
         Ok(())
     } else {
-        check_string_escapes(value.content_range(), source)
+        check_string_escapes(value, value.content_range(), source)
     }
 }
 
-/// Scans only literal bytes; f-string field expressions have independent prefixes.
-fn check_string_escapes(range: TextRange, source: &str) -> StdResult<(), String> {
-    if imre_ast::strings::replacements(&source[range]).any(|point| point != 0xfffd) {
+/// Ruff decodes a lone surrogate to U+FFFD. Only that decoded character needs its spelling.
+fn has_surrogate_escape(decoded: &str, range: TextRange, source: &str) -> bool {
+    decoded.contains(char::REPLACEMENT_CHARACTER)
+        && imre_ast::strings::replacements(&source[range])
+            .any(|point| point != u32::from(char::REPLACEMENT_CHARACTER))
+}
+
+fn check_string_escapes(decoded: &str, range: TextRange, source: &str) -> StdResult<(), String> {
+    if has_surrogate_escape(decoded, range, source) {
         return Err(diagnostic_message(
             source,
             &range,
