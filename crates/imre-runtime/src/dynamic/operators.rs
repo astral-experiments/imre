@@ -3510,7 +3510,14 @@ impl Context {
     }
     pub(super) fn contains(&mut self, item: Id, container: Id) -> Result<bool> {
         let container = self.mapping_proxy_target(container);
-        if let Some(hook) = self.bound_slot(container, "__contains__")? {
+        let hook = match self.bound_slot(container, "__contains__") {
+            Ok(hook) => hook,
+            Err(error) if self.is_attribute_error(&error) => {
+                return self.iter_contains(item, container);
+            }
+            Err(error) => return Err(error),
+        };
+        if let Some(hook) = hook {
             if hook == NONE {
                 return Err(Error::new(
                     "TypeError",
@@ -3591,6 +3598,10 @@ impl Context {
         ) {
             return Ok(self.find_dictionary_key(container, item, None)?.1.is_some());
         }
+        self.iter_contains(item, container)
+    }
+
+    fn iter_contains(&mut self, item: Id, container: Id) -> Result<bool> {
         let iterator = self.iterator(container).map_err(|error| {
             let ty = self.builtin("TypeError");
             if self.raised_error_matches(&error, ty) {
