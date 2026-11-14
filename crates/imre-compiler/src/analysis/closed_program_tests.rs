@@ -315,6 +315,25 @@ print(getattr(Hooks, sys.argv[1])(7))
 }
 
 #[test]
+fn a_selected_handler_must_accept_all_keywords_together() {
+    let project = tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    let check = |call: &str| {
+        let handlers = r#"def first(x: int, y: str) -> int:
+    return x
+def second(y: int, x: str) -> int:
+    return y
+handlers = {"first": first, "second": second}
+"#;
+        fs::write(&entry, format!("{handlers}{call}\n")).unwrap();
+        crate::check_file(&entry, None)
+    };
+    check("print(handlers[input()](x=1, y='ok'))").unwrap();
+    let error = check("print(handlers[input()](x=1, y=2))").unwrap_err();
+    assert!(error.contains("invalid-argument-type"), "{error}");
+}
+
+#[test]
 fn computed_factory_preserves_dormant_declared_calls() {
     let tmp = tempdir().unwrap();
     let source = tmp.path().join("main.py");

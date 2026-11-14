@@ -311,19 +311,82 @@ impl OperandTypes<'_> {
         session
             .inferred_operand_type(self.module, original)
             .zip(parameter.inferred_type(&model))
-            .is_some_and(|(value, expected)| {
-                let env = model.program_environment();
-                !value.is_unknown()
-                    && value.is_assignable_to(&session.db, &env, expected)
-                    && Session::scalar_layout(&session.db, &env, expected, ScalarMatch::Assignable)
-                        .is_none_or(|layout| {
-                            Session::scalar_layout(
-                                &session.db,
-                                &env,
-                                value,
-                                ScalarMatch::Assignable,
-                            ) == Some(layout)
+            .is_some_and(|(value, expected)| Self::accepts_type(&model, value, expected))
+    }
+
+    fn accepts_type<'db>(
+        model: &SemanticModel<'db>,
+        value: ty_python_semantic::types::Type<'db>,
+        expected: ty_python_semantic::types::Type<'db>,
+    ) -> bool {
+        let db = model.db();
+        let env = model.program_environment();
+        let layout = |ty| Session::scalar_layout(db, &env, ty, ScalarMatch::Assignable);
+        !value.is_unknown()
+            && value.is_assignable_to(db, &env, expected)
+            && layout(expected).is_none_or(|expected| layout(value) == Some(expected))
+    }
+
+    /// A dictionary lookup selects one function. Its complete binding must be
+    /// possible for the written operands, even if another member rejects them.
+    pub(crate) fn accepts_selected_call(self, call: &ExprCall) -> bool {
+        use ty_python_core::scope::NodeWithScopeKind;
+        use ty_python_semantic::types::Type;
+        use ty_python_semantic::types::ide_support::{
+            ResolvedDefinition, definitions_for_keyword_argument,
+        };
+
+        let parsed = self.parsed();
+        let Some((Expr::Call(call), _)) = self.original_operand(&parsed, call.into()) else {
+            return false;
+        };
+        let db = &self.session.db;
+        let model = SemanticModel::new(db, db.program_file(self.session.files[self.module]));
+        let Some(Type::Union(union)) = call.func.inferred_type(&model) else {
+            return false;
+        };
+        if !union
+            .elements(db)
+            .iter()
+            .all(|ty| matches!(ty, Type::Callable(_) | Type::FunctionLiteral(_)))
+        {
+            return false;
+        }
+        let Some(keyword) = call.arguments.keywords.first() else {
+            return false;
+        };
+        // A matching fixed declaration must bind this keyword. Its parameter
+        // retains the defining scope even when the dictionary widens a function literal to Callable.
+        definitions_for_keyword_argument(&model, keyword, call)
+            .into_iter()
+            .any(|binding| {
+                let ResolvedDefinition::Definition(parameter) = binding else {
+                    return false;
+                };
+                let owner = parameter.file(db);
+                let NodeWithScopeKind::Function(function) = parameter.scope(db).node(db) else {
+                    return false;
+                };
+                if !self.session.files.contains(&owner) {
+                    return false;
+                }
+                let ast = self.session.parsed(owner);
+                let function = function.node(&ast);
+                if !function.decorator_list.is_empty() || function.type_params.is_some() {
+                    return false;
+                }
+                let owner = SemanticModel::new(db, db.program_file(owner));
+                crate::frontend::fixed_call_arguments(call, &function.parameters).is_some_and(
+                    |bound| {
+                        bound.into_iter().all(|(param, arg)| {
+                            arg.inferred_type(&model)
+                                .zip(param.inferred_type(&owner))
+                                .is_some_and(|(value, expected)| {
+                                    Self::accepts_type(&owner, value, expected)
+                                })
                         })
+                    },
+                )
             })
     }
 

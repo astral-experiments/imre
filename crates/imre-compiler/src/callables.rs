@@ -82,6 +82,17 @@ impl TargetCollector {
         }
     }
 
+    pub(crate) fn plain_sources(&self, ty: Type, source: impl Fn(usize) -> bool) -> bool {
+        !self.open.contains(&ty)
+            && !self.wrapped.iter().any(|(signature, _)| *signature == ty)
+            && self.constructed.get(&ty).is_some_and(|targets| {
+                !targets.is_empty()
+                    && targets
+                        .iter()
+                        .all(|target| !target.bound && source(target.function))
+            })
+    }
+
     pub(crate) fn deduplicate(&mut self) {
         for targets in self.constructed.values_mut() {
             targets.sort_unstable();
