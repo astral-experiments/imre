@@ -322,7 +322,7 @@ impl Checker<'_> {
         let method_site = signature
             .method
             .filter(|_| class_method || (receiver.is_some() && !signature.asynchronous));
-        let mut signature = signature.clone();
+        let mut signature = Cow::Borrowed(signature);
         // A saved method with defaults can infer missing formals at its later source-bound call.
         if let Some(inference) = self.inference
             && (expected.is_some()
@@ -332,7 +332,7 @@ impl Checker<'_> {
         {
             let asynchronous = signature.asynchronous;
             inference.callable_signature(
-                &mut signature,
+                signature.to_mut(),
                 skip,
                 expected
                     .and_then(|ty| self.types.signature(ty))
