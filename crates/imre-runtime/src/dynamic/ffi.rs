@@ -3298,11 +3298,14 @@ pub(super) unsafe extern "C" fn imre_dyn_format_parts(
 ) -> Id {
     // SAFETY: the caller owns the context and roots the parts through the join.
     let (ctx, values) = unsafe { (&mut *ctx, live_handles(values, count)) };
+    // Successful joins add only exact text roots. Release those with the last source
+    // operand, keeping the joined result live before a source destructor can run.
+    let parts_end = ctx.heap.temporary_mark();
     let joined = ctx.join_formatted(values);
     let result = finish(ctx, joined);
     if ctx.heap.execution.pending.is_none() {
         if ctx.heap.observes_released_roots() {
-            for slot in (mark + 1..ctx.heap.temporary_mark()).rev() {
+            for slot in (mark + 1..parts_end).rev() {
                 ctx.discard_temporaries(slot, [result]);
             }
         }
