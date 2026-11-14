@@ -153,30 +153,6 @@ impl CompiledDefinition {
     }
 }
 
-pub(crate) struct CompiledAlias {
-    pub(crate) definition: CompiledDefinition,
-    pub(crate) parameters: Option<CompiledTypeParameters>,
-}
-
-impl CompiledAlias {
-    pub(crate) fn instantiate(&self, frame: &mut RegisteredFrame<'_, '_>) -> String {
-        let outer = frame.scope.clone();
-        let (scope, parameters) = if let Some(params) = &self.parameters {
-            let Some(scope) = frame.bind_type_parameters(&outer, params, false) else {
-                return "0".into();
-            };
-            let key = frame.code_name(".type_params");
-            let parameters = frame.op("lookup", &[&scope, &key]);
-            (scope, parameters)
-        } else {
-            (outer, "0".into())
-        };
-        let evaluator = self.definition.bind_defaults(frame, &scope, &[]);
-        let name = frame.code_name(&self.definition.name);
-        frame.op("type_alias", &[&name, &evaluator, &parameters])
-    }
-}
-
 pub(crate) type CompiledTypeParameters =
     Result<Vec<RegisteredTypeParameter<CompiledDefinition>>, String>;
 
@@ -202,11 +178,44 @@ pub(crate) struct CompiledExec {
 
 #[derive(Default)]
 pub(crate) struct CheckedSites<'p> {
-    pub(crate) definitions: IndexMap<TextSize, Declaration<'p>>,
-    pub(crate) aliases: IndexMap<TextSize, Result<CompiledAlias, String>>,
+    pub(crate) declarations: IndexMap<TextSize, Result<Declaration<'p>, String>>,
 }
 
 impl CheckedSites<'_> {
+    pub(crate) fn declaration(&self, index: usize) -> &Declaration<'_> {
+        self.declarations[index]
+            .as_ref()
+            .expect("a function or class declaration")
+    }
+
+    pub(crate) fn bind_type_alias(
+        &self,
+        frame: &mut RegisteredFrame<'_, '_>,
+        index: usize,
+    ) -> String {
+        let alias = match &self.declarations[index] {
+            Ok(alias) => alias,
+            Err(error) => {
+                frame.output.diagnostic.get_or_insert_with(|| error.clone());
+                return "0".into();
+            }
+        };
+        let outer = frame.scope.clone();
+        let (scope, parameters) = if let Some(params) = &alias.type_params {
+            let Some(scope) = frame.bind_type_parameters(&outer, params, false) else {
+                return "0".into();
+            };
+            let key = frame.code_name(".type_params");
+            let parameters = frame.op("lookup", &[&scope, &key]);
+            (scope, parameters)
+        } else {
+            (outer, "0".into())
+        };
+        let evaluator = alias.definition.bind_defaults(frame, &scope, &[]);
+        let name = frame.code_name(&alias.definition.name);
+        frame.op("type_alias", &[&name, &evaluator, &parameters])
+    }
+
     pub(crate) fn definition(
         &self,
         frame: &mut RegisteredFrame<'_, '_>,
@@ -219,7 +228,7 @@ impl CheckedSites<'_> {
             definition,
             decorator_offsets,
             type_params,
-        } = &self.definitions[index];
+        } = self.declaration(index);
         let scope = frame.scope.clone();
         let mut value = if let Some(arguments) = class_arguments {
             definition.instantiate_class(frame, arguments, None)

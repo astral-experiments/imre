@@ -28,14 +28,11 @@ impl<'a, 'p> PreparedSuiteEmitter<'a, 'p> for TestFrame<'_, 'a, 'p> {
     fn frame_and_sites(&mut self) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites<'p>) {
         (self.0, &self.1)
     }
-    fn place_definition(&mut self, site: TextSize) -> usize {
-        self.1.definitions.get_index_of(&site).unwrap()
+    fn place_declaration(&mut self, site: TextSize) -> usize {
+        self.1.declarations.get_index_of(&site).unwrap()
     }
     fn class_namespace(&mut self, _: TextSize) -> CompiledClassNamespace {
         unreachable!("isolated writer tests have no generic class headers")
-    }
-    fn place_type_alias(&mut self, site: TextSize) -> usize {
-        self.1.aliases.get_index_of(&site).unwrap()
     }
     fn callable_at(&mut self, _: CallableSite, _: bool) -> CompiledDefinition {
         unreachable!("isolated writer tests have no lexical callable definitions")
