@@ -1814,6 +1814,7 @@ pub(super) enum Value {
     Context(std::rc::Rc<HashMap<Id, Id>>),
     ContextVar {
         name: Id,
+        name_hash: i64,
         default: Option<Id>,
         repr_active: std::cell::Cell<bool>,
     },
@@ -8590,6 +8591,7 @@ mod tests {
         let name = heap.alloc(Value::Str("key".into()));
         let key = heap.alloc(Value::ContextVar {
             name,
+            name_hash: crate::python_hash::text("key"),
             default: None,
             repr_active: std::cell::Cell::new(false),
         });

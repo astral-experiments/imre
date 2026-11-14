@@ -784,6 +784,7 @@ impl Context {
             match self.heap.get(key) {
                 Value::Int(n) => integer_hash(n),
                 Value::Bool(b) => i64::from(*b),
+                Value::ContextVar { name_hash, .. } => Self::identity_hash(key) ^ name_hash,
                 Value::Float(f) => float_hash(*f, key),
                 Value::Complex(z) => normalized(float_hash(z.real, key))
                     .wrapping_add(IMAG.wrapping_mul(normalized(float_hash(z.imag, key)))),

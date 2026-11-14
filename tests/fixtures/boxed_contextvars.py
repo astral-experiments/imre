@@ -21,6 +21,18 @@ def current():
     assert _contextvars.Token is Token
     assert _contextvars.copy_context is copy_context
 
+    hashes = []
+
+    class Name(str):
+        def __hash__(self):
+            hashes.append(self)
+            return 37
+
+    name = Name("request")
+    named = ContextVar(name)
+    assert named.name is name and hashes == [name]
+    assert hash(named) == hash(named) and hashes == [name]
+
     for cls in (ContextVar, Token):
         alias = cls[Request]
         raw = vars(cls)["__class_getitem__"]

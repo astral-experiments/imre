@@ -134,14 +134,16 @@ pub(super) fn call(
                     ));
                 }
             };
-            if !matches!(ctx.heap.get(var_name), Value::Str(_)) {
+            if ctx.string_storage(var_name).is_none() {
                 return Err(Error::new(
                     "TypeError",
                     "context variable name must be a str",
                 ));
             }
+            let name_hash = ctx.dictionary_hash(var_name)?;
             Ok(ctx.alloc(Value::ContextVar {
                 name: var_name,
+                name_hash,
                 default,
                 repr_active: Default::default(),
             }))
