@@ -20,7 +20,7 @@ impl FunctionFields {
     pub fn new(
         ctx: &mut Context,
         scope: Id,
-        root: Id,
+        module: Id,
         name: Id,
         qualname: Id,
         doc: Id,
@@ -31,7 +31,7 @@ impl FunctionFields {
             qualname,
             doc,
             annotate,
-            module: ctx.root_module_name(root),
+            module,
             annotations: None,
             type_params: ctx.alloc(Value::Tuple(Vec::new())),
             dict: if ctx.scope_data(scope).parent.is_none()

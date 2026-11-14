@@ -4942,6 +4942,7 @@ for name in ("md4", "ripemd160"):
             "boxed_nested_callable_scope.py",
             "boxed_function_annotation_closure.py",
             "boxed_functiontype.py",
+            "boxed_function_defining_globals.py",
             "boxed_module_function_builtins.py",
             "boxed_function_call.py",
             "boxed_any_generator.py",
