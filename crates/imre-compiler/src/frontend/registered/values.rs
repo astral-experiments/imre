@@ -267,17 +267,15 @@ pub(in crate::frontend) fn name_binding(id: impl Into<ast::name::Name>) -> Expr 
 
 /// Fixed calls use bounded entry-block scratch. Expanded or larger calls retain
 /// their positional and keyword layout for incremental packing.
-pub(in crate::frontend) fn registered_argument_layout(
-    args: &ast::Arguments,
-) -> ir::RegisteredArguments {
-    let positional = args.args.len();
-    if positional + args.keywords.len() <= 64
-        && !args.args.iter().any(ast::Expr::is_starred_expr)
-        && args.keywords.iter().all(|key| key.arg.is_some())
-    {
-        fixed_argument_layout(args)
+fn fixed_arguments(call: &ast::ExprCall) -> bool {
+    call.arguments.len() <= 64 && !calls::has_unpacking(call)
+}
+
+fn registered_argument_layout(call: &ast::ExprCall) -> ir::RegisteredArguments {
+    if fixed_arguments(call) {
+        fixed_argument_layout(&call.arguments)
     } else {
-        ir::RegisteredArguments::Packed(packed_arguments(args))
+        ir::RegisteredArguments::Packed(packed_arguments(&call.arguments))
     }
 }
 
@@ -446,10 +444,7 @@ pub(crate) fn exec_literal_text<'a>(
 }
 
 pub(in crate::frontend) fn fixed_positional_arguments(call: &ast::ExprCall) -> bool {
-    matches!(
-        registered_argument_layout(&call.arguments),
-        ir::RegisteredArguments::Positional
-    )
+    call.arguments.keywords.is_empty() && fixed_arguments(call)
 }
 
 pub(in crate::frontend) fn call_arguments<E>(
@@ -472,7 +467,7 @@ pub(in crate::frontend) fn bound_call(
     // methods also arrive with at most one bound positional argument.
     let layout = match selection {
         ir::RegisteredCallTarget::Method { .. } => fixed_argument_layout(&call.arguments),
-        ir::RegisteredCallTarget::Callable { .. } => registered_argument_layout(&call.arguments),
+        ir::RegisteredCallTarget::Callable { .. } => registered_argument_layout(call),
     };
     invoke_value(
         ir::RegisteredCall::new(call.range(), selection, layout),
@@ -1498,10 +1493,9 @@ impl Checker<'_> {
             && let Some(FixedAttribute::Call(Some(target), mut site)) = sites.remove(&call.range())
             && site.target == callable_target(call)
             && operands.is_original_operand(&call.func)
-            && source.direct_method(call).is_none()
         {
             // Forwarding can preserve the imported target and replace its arguments.
-            site.arguments = registered_argument_layout(&call.arguments);
+            site.arguments = registered_argument_layout(call);
             let args = call_arguments(call, |arg| self.expr(arg))?;
             return Ok(Some(
                 source.located_operation(node, invoke_value(site, target, args)),

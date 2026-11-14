@@ -480,9 +480,8 @@ impl Checker<'_> {
                 let source = self.graph.modules[self.module]
                     .registered_values()
                     .operands(self.source, self.graph.python_optimization());
-                // The ordinary binder loads an imported callable before either path.
-                // A direct method would need its separate receiver.
-                if source.direct_method(call).is_some()
+                // An imported module member keeps callable lookup even when arguments change.
+                if !source.method_imports.contains(module.id.as_str())
                     || !self
                         .graph
                         .session

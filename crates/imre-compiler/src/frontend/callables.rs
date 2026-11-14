@@ -767,12 +767,16 @@ impl Checker<'_> {
             return Ok(None);
         };
         let ty = self.locals[slot];
-        if !self.assigned.contains(&slot) || !registered::values::fixed_positional_arguments(call) {
+        if !self.assigned.contains(&slot) {
             return Ok(None);
         }
         let Some((params, returns)) = self
             .types
-            .with_callback_signature(ty, |params, returns| (params.to_vec(), returns))
+            .with_callback_signature(ty, |params, returns| {
+                registered::values::fixed_positional_arguments(call)
+                    .then(|| (params.to_vec(), returns))
+            })
+            .flatten()
         else {
             return Ok(None);
         };
