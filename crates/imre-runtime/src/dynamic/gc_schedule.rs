@@ -3,10 +3,15 @@
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 
+pub(super) const DEBUG_SAVEALL: i32 = 32;
+// CPython also counts the collectable and uncollectable reporting bits in DEBUG_LEAK.
+pub(super) const DEBUG_LEAK: i32 = 2 | 4 | DEBUG_SAVEALL;
+
 const DEFAULT_THRESHOLDS: [i32; 3] = [2000, 10, 10];
 
 pub(super) struct GcSettings {
     pub(super) enabled: AtomicBool,
+    pub(super) debug: AtomicI32,
     thresholds: Mutex<[i32; 3]>,
     // Most allocations only need to compare the young count.
     young: AtomicI32,
@@ -16,6 +21,7 @@ impl Default for GcSettings {
     fn default() -> Self {
         Self {
             enabled: AtomicBool::new(true),
+            debug: AtomicI32::new(0),
             thresholds: Mutex::new(DEFAULT_THRESHOLDS),
             young: AtomicI32::new(DEFAULT_THRESHOLDS[0]),
         }

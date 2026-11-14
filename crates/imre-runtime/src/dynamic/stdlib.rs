@@ -579,7 +579,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         (
             "gc",
             "enable" | "disable" | "isenabled" | "get_threshold" | "set_threshold" | "is_tracked"
-            | "is_finalized",
+            | "is_finalized" | "get_debug" | "set_debug",
         ) => ctx.builtin(&format!("gc.{name}")),
         ("unicodedata", "unidata_version") => ctx.text(imre_ast::UNICODE_DATA_VERSION),
         (
@@ -2995,7 +2995,7 @@ pub(super) fn call(
     }
     if matches!(
         name,
-        "gc.enable" | "gc.disable" | "gc.isenabled" | "gc.get_threshold"
+        "gc.enable" | "gc.disable" | "gc.isenabled" | "gc.get_threshold" | "gc.get_debug"
     ) {
         if !kwargs.is_empty() {
             return Err(Error::new(
@@ -3009,6 +3009,14 @@ pub(super) fn call(
                 format!("{name}() takes no arguments ({} given)", args.len()),
             ));
         }
+        if name == "gc.get_debug" {
+            let flags = ctx
+                .heap
+                .gc_settings
+                .debug
+                .load(std::sync::atomic::Ordering::Relaxed);
+            return Ok(ctx.int(i64::from(flags)));
+        }
         if name == "gc.get_threshold" {
             let values = ctx.heap.gc_thresholds().map(|n| ctx.int(i64::from(n)));
             return Ok(ctx.alloc(Value::Tuple(values.into())));
@@ -3020,6 +3028,21 @@ pub(super) fn call(
             ));
         }
         enabled.store(name == "gc.enable", std::sync::atomic::Ordering::Relaxed);
+        return Ok(NONE);
+    }
+    if name == "gc.set_debug" {
+        let arg = builtins::one_positional_arg(name, args, kwargs)?;
+        let flags = index_c_int(ctx, arg)?;
+        if flags & (1 | 2 | 4) != 0 {
+            return Err(Error::new(
+                "NotImplementedError",
+                "GC diagnostic output is unavailable",
+            ));
+        }
+        ctx.heap
+            .gc_settings
+            .debug
+            .store(flags, std::sync::atomic::Ordering::Relaxed);
         return Ok(NONE);
     }
     if name == "gc.set_threshold" {

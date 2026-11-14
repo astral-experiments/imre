@@ -3695,6 +3695,8 @@ struct CycleSet {
     incoming: Vec<usize>,
     work: Vec<usize>,
     cyclic_callbacks: usize,
+    // Existing weakrefs were cleared before this isolate's finalizers ran.
+    new_weakref_to_member: bool,
 }
 
 impl CycleSet {
@@ -3769,6 +3771,8 @@ pub(super) struct Heap {
     next_collection: usize,
     byte_buffer_allowance: usize,
     pub(super) gc_settings: Arc<GcSettings>,
+    // This root survives replacement of the gc module attribute.
+    pub(super) gc_garbage: Id,
     pub(super) gc_schedule: GcSchedule,
     weak: HashMap<Id, Vec<Id>>,
     weak_roots: weak_roots::RootPaths,
@@ -4074,6 +4078,7 @@ impl Heap {
             next_collection: FIRST_DYNAMIC_SLOT + 4096,
             byte_buffer_allowance: BYTE_BUFFER_FLOOR,
             gc_settings,
+            gc_garbage: NONE,
             gc_schedule: GcSchedule::default(),
             weak: HashMap::new(),
             weak_roots: Default::default(),
@@ -4103,6 +4108,7 @@ impl Heap {
         for id in 0..FIRST_SMALL_INT as usize {
             heap.gc_order.push(id, &heap.slots);
         }
+        heap.gc_garbage = heap.alloc_slot_with_trace(Value::List(Vec::new()), false);
         heap
     }
 
@@ -4265,6 +4271,14 @@ impl Heap {
             .entry(target)
             .or_insert(new_references)
             .insert(index, id);
+        if let Some(cycles) = &mut self.full_collection
+            && cycles
+                .incoming
+                .get(target as usize)
+                .is_some_and(|&n| n != 0)
+        {
+            cycles.new_weakref_to_member = true;
+        }
         self.has_weak_values = true;
         // The caller may hold either the target or the new wrapper only as a temporary.
         self.collect_next_statement = true;
@@ -5699,6 +5713,7 @@ impl Heap {
 
     fn mark_roots(&self, globals: impl Iterator<Item = Id>, pending: &mut impl VisitReferences) {
         globals.for_each(pending.visitor());
+        pending.push(self.gc_garbage);
         pending.extend(self.full_collection_members());
         pending.extend(self.linked_constants.values().copied());
         pending.extend(self.short_bytes.values().copied());
@@ -7171,7 +7186,7 @@ impl Heap {
         // finalizer can ask for __subclasses__ before the isolated objects are swept.
         self.classes.retain(|&id| cycles.incoming[id as usize] == 0);
         self.schedule_unawaited_coroutines(Some(&cycles));
-        let mut callbacks = self.clear_weak_targets(Some(&cycles.incoming), None);
+        let mut callbacks = self.clear_weak_targets(Some(&cycles.incoming), None, true);
         cycles.cyclic_callbacks = callbacks.len();
         self.mark(cycles.members());
         if let Some(acyclic) = self.sweep(&[]) {
@@ -7218,7 +7233,7 @@ impl Heap {
                 // Weakrefs in the owner's dictionary are still live during its deallocation.
                 self.mark(std::iter::once(owner));
             }
-            self.clear_weak_targets(None, Some(owner))
+            self.clear_weak_targets(None, Some(owner), true)
         } else {
             Vec::new()
         };
@@ -7230,6 +7245,7 @@ impl Heap {
         &mut self,
         cyclic: Option<&[usize]>,
         dealloc: Option<Id>,
+        notify: bool,
     ) -> WeakCallbacks {
         // Clear non-owning handles before any dead target slot can be reused. Dead wrappers
         // never receive callbacks, and every live wrapper is cleared before any callback runs.
@@ -7240,11 +7256,11 @@ impl Heap {
                 return true;
             }
             if let Some(cyclic) = cyclic {
-                if cyclic[target as usize] == 0 {
+                if cyclic.get(target as usize).copied().unwrap_or(0) == 0 {
                     // A weakref in the isolate must lose even a live referent. A
                     // later finalizer can resurrect the wrapper and observe it.
                     refs.retain(|&id| {
-                        if cyclic[id as usize] == 0 {
+                        if cyclic.get(id as usize).copied().unwrap_or(0) == 0 {
                             return true;
                         }
                         let weak = self.slots[id as usize]
@@ -7277,9 +7293,10 @@ impl Heap {
                         != NONE
                 })
                 .count();
-            let dispatch = callbacks.try_reserve(count).is_ok()
+            let dispatch = notify
+                && callbacks.try_reserve(count).is_ok()
                 && live.try_reserve(count.saturating_mul(2)).is_ok();
-            if !dispatch {
+            if notify && !dispatch {
                 eprintln!("Exception ignored while clearing object weakrefs: MemoryError");
             }
             for &id in refs.iter() {
@@ -7332,30 +7349,101 @@ impl Heap {
     pub(super) fn finish_full_collection(
         &mut self,
         globals: impl Iterator<Item = Id>,
+        ran_python: bool,
     ) -> (usize, Option<WeakCallbacks>) {
         let mut cycles = self
             .full_collection
             .take()
             .expect("finishing active collection");
-        // A callback can release other roots or allocate a new cycle. Those objects are
-        // outside this collection, but their strong edges can keep original candidates alive.
-        let outside = self.slots.iter().enumerate().filter_map(|(id, slot)| {
-            (slot.value.is_some() && cycles.incoming.get(id).copied().unwrap_or(0) == 0)
-                .then_some(id as Id)
-        });
-        self.mark(globals.chain(outside));
-        cycles.incoming.fill(0);
-        self.identify_cycles(&mut cycles);
-        let count = cycles
-            .members()
-            .filter(|&id| self.slots[id as usize].gc_tracked(self))
-            .count();
+        let save_all = self
+            .gc_settings
+            .debug
+            .load(std::sync::atomic::Ordering::Relaxed)
+            & super::gc_schedule::DEBUG_SAVEALL
+            != 0;
+        let mut survivors = std::mem::take(&mut self.prompt_cycles);
+        if ran_python
+            && (save_all || cycles.new_weakref_to_member)
+            && survivors.prepare(self.slots.len()).is_ok()
+        {
+            // A finalizer's dead call frame may still hold self. Only outside owners
+            // that survive refcounting can keep members of the original isolate alive.
+            self.mark_reference_roots(globals, None);
+            self.identify_cycles(&mut survivors);
+            self.mark(
+                survivors
+                    .members()
+                    .filter(|&id| cycles.incoming.get(id as usize).copied().unwrap_or(0) == 0),
+            );
+            for (id, member) in cycles.incoming.iter_mut().enumerate() {
+                if self.traces[id].get() != UNMARKED || survivors.incoming[id] == 0 {
+                    *member = 0;
+                }
+            }
+            survivors.incoming.fill(0);
+        } else {
+            // Preserve the ordinary collection’s outside owners. A callback can release
+            // other roots or allocate a new cycle outside this collection.
+            let outside = self.slots.iter().enumerate().filter_map(|(id, slot)| {
+                (slot.value.is_some() && cycles.incoming.get(id).copied().unwrap_or(0) == 0)
+                    .then_some(id as Id)
+            });
+            self.mark(globals.chain(outside));
+            cycles.incoming.fill(0);
+            self.identify_cycles(&mut cycles);
+        }
+        self.prompt_cycles = survivors;
+        if cycles.new_weakref_to_member {
+            // Finalizers can publish new weakrefs before the last resurrection check.
+            self.clear_weak_targets(Some(&cycles.incoming), None, false);
+        }
+        let count = if save_all {
+            self.save_unreachable(&mut cycles)
+        } else {
+            cycles
+                .members()
+                .filter(|&id| self.is_gc_tracked(id))
+                .count()
+        };
         let callbacks = self.sweep(&[]);
         // Slots can now be reused. Keep the collection guard until any callbacks
         // from the final sweep return, without retaining stale candidate IDs.
         cycles.incoming.clear();
         self.full_collection = Some(cycles);
         (count, callbacks)
+    }
+
+    /// Publish precisely the tracked members of the final isolate, in collector order.
+    /// Mark the newly installed edges before the existing sweep can reuse their slots.
+    fn save_unreachable(&mut self, cycles: &mut CycleSet) -> usize {
+        // The peel queue is empty after cycle identification. Reuse it to
+        // preserve collector order without borrowing the public list mid-scan.
+        debug_assert!(cycles.work.is_empty());
+        let mut id = self.gc_order.head;
+        while id != END {
+            if cycles.incoming.get(id).copied().unwrap_or(0) != 0 && self.slots[id].gc_tracked(self)
+            {
+                cycles.work.push(id);
+            }
+            id = self.slots[id].gc_next.get();
+        }
+        if !cycles.work.is_empty() {
+            let Value::List(items) = self.get_mut(self.gc_garbage) else {
+                unreachable!("collector-owned list")
+            };
+            let mut saved = 0;
+            for &id in &cycles.work {
+                if items.try_reserve(1).is_err() {
+                    break;
+                }
+                items.push(id as Id);
+                saved += 1;
+            }
+            // Only the new owning edges need marking. This replaces the
+            // scalar-descendant scan used to retain the pre-finalization isolate.
+            self.mark(cycles.work[..saved].iter().map(|&id| id as Id));
+        }
+        cycles.work.len()
     }
 
     /// The initial sweep has already released acyclic garbage. If no callbacks ran
@@ -7474,7 +7562,7 @@ impl Heap {
         });
         self.interned
             .retain(|_, entry| self.traces[entry.id as usize].get() != UNMARKED);
-        let callbacks = self.clear_weak_targets(None, None);
+        let callbacks = self.clear_weak_targets(None, None, true);
         self.linked_sources
             .retain(|&owner, _| self.traces[owner as usize].get() != UNMARKED);
         self.abc_registrations.retain(|&[owner, member]| {
@@ -8067,7 +8155,7 @@ mod tests {
         // Prompt collections retain the unbound cycle until cyclic GC runs.
         assert!(heap.slots[original as usize].value.is_some());
         heap.begin_collection(std::iter::empty(), 2).unwrap();
-        heap.finish_full_collection(std::iter::empty());
+        heap.finish_full_collection(std::iter::empty(), false);
         assert!(heap.slots[original as usize].value.is_none());
         assert!(heap.slots[child as usize].value.is_none());
 
@@ -8640,7 +8728,7 @@ mod reachability_tests {
         let mark = heap.temporary_mark();
         let original = heap.alloc(Value::List(Vec::new()));
         heap.begin_collection(std::iter::empty(), 2).unwrap();
-        heap.finish_full_collection(std::iter::empty());
+        heap.finish_full_collection(std::iter::empty(), false);
         heap.end_full_collection();
         assert_eq!(heap.slots[original as usize].generation, 2);
 
@@ -8684,14 +8772,17 @@ mod reachability_tests {
         heap.collect(std::iter::empty());
 
         // The callback publishes one original cycle and creates a different one.
-        assert_eq!(heap.finish_full_collection([survivor].into_iter()).0, 1);
+        assert_eq!(
+            heap.finish_full_collection([survivor].into_iter(), true).0,
+            1
+        );
         heap.end_full_collection();
         assert!(heap.slots[doomed as usize].value.is_none());
         for owner in [survivor, child, new_cycle] {
             assert!(heap.slots[owner as usize].value.is_some());
         }
         heap.begin_collection(std::iter::empty(), 2).unwrap();
-        assert_eq!(heap.finish_full_collection(std::iter::empty()).0, 3);
+        assert_eq!(heap.finish_full_collection(std::iter::empty(), false).0, 3);
     }
 
     #[test]

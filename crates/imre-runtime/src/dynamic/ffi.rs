@@ -4081,11 +4081,13 @@ impl Context {
                 self.run_weak_callbacks(deferred);
             }
         }
+        let mut ran_python = !callbacks.is_empty();
         while let Some(owner) = self.heap.pending_full_finalizer() {
+            ran_python = true;
             self.dispatch_finalizer(owner);
         }
         let (heap, roots) = self.heap_and_roots();
-        let (count, callbacks) = heap.finish_full_collection(roots);
+        let (count, callbacks) = heap.finish_full_collection(roots, ran_python);
         if let Some(callbacks) = callbacks {
             self.run_weak_callbacks(callbacks);
         }

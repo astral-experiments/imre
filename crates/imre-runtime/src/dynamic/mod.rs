@@ -4536,6 +4536,13 @@ impl Context {
             }
         }
         match name {
+            "gc" if source.is_none() => {
+                self.bind(scope, "garbage", self.heap.gc_garbage);
+                let saveall = self.int(i64::from(gc_schedule::DEBUG_SAVEALL));
+                self.bind(scope, "DEBUG_SAVEALL", saveall);
+                let leak = self.int(i64::from(gc_schedule::DEBUG_LEAK));
+                self.bind(scope, "DEBUG_LEAK", leak);
+            }
             "_frozen_importlib_external" | "importlib._bootstrap_external" => {
                 let finder = if self.finder_external == NONE {
                     module

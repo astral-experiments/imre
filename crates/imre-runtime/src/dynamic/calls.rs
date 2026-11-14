@@ -150,6 +150,8 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
                 | "isenabled"
                 | "get_threshold"
                 | "set_threshold"
+                | "get_debug"
+                | "set_debug"
                 | "is_tracked"
                 | "is_finalized"
         ) =>
@@ -4227,6 +4229,9 @@ impl Context {
                     {
                         return Ok(self.text("($module, obj, /)"));
                     }
+                    "__text_signature__" if symbol == "gc.set_debug" => {
+                        return Ok(self.text("($module, flags, /)"));
+                    }
                     "__text_signature__" if symbol == "gc.set_threshold" => return Ok(NONE),
                     "__doc__" if module == "gc" => {
                         let doc = match function {
@@ -4235,6 +4240,8 @@ impl Context {
                             "isenabled" => {
                                 "Returns true if automatic garbage collection is enabled."
                             }
+                            "get_debug" => "Get the garbage collection debugging flags.",
+                            "set_debug" => "Set the garbage collection debugging flags.",
                             "get_threshold" => "Return the current collection thresholds.",
                             "is_finalized" => {
                                 "Returns true if the object has been already finalized by the GC."
@@ -4331,6 +4338,7 @@ impl Context {
                                 | "gc.disable"
                                 | "gc.isenabled"
                                 | "gc.get_threshold"
+                                | "gc.get_debug"
                                 | "_signal.pause"
                                 | "_signal.sigpending"
                                 | "_signal.valid_signals"
