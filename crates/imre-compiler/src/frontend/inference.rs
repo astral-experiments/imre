@@ -1317,7 +1317,9 @@ impl Inference {
                     if infer_return
                         && signature.params.is_empty()
                         && !signature.registered_frame()
-                        && self.pending.borrow()[signature.id].returns == Some(Type::None)
+                        && self.pending.borrow()[signature.id]
+                            .returns
+                            .is_some_and(|ty| ty == Type::None || ty.builtin_scalar_name().is_some())
                         && checker.calls.is_empty()
                         && checker.class_reads.borrow().is_empty()
                         && graph.session.function_uses_fixed_names(
