@@ -8633,7 +8633,10 @@ impl Context {
         match target {
             Value::Weak(wr) => match wr.kind {
                 weakref::Kind::Reference => wr.call(&args, &kwargs),
-                weakref::Kind::CallableProxy => self.call(wr.upgrade()?, args, kwargs),
+                weakref::Kind::CallableProxy => {
+                    let target = wr.upgrade()?;
+                    self.with_weak_target(target, |ctx| ctx.call(target, args, kwargs))
+                }
                 weakref::Kind::Proxy => Err(non_callable_error("weakref.ProxyType")),
             },
             Value::GenericAlias(alias) => {
