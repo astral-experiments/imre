@@ -253,6 +253,19 @@ def class_reassignment():
     slotted = ClassSlot()
     slotted.__class__ = 42
     assert type(slotted) is ClassSlot and slotted.__class__ == 42
+    assert object.__getattribute__(slotted, "__class__") == 42
+
+    class CollidingKey:
+        def __hash__(self):
+            return hash("__class__")
+
+        def __eq__(self, other):
+            raise AssertionError("looked in the instance dictionary for object.__class__")
+
+    ordinary = Owner()
+    ordinary.__dict__[CollidingKey()] = 42
+    assert ordinary.__class__ is Owner
+    assert object.__getattribute__(ordinary, "__class__") is Owner
 
     finalized = []
 
