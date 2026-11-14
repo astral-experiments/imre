@@ -178,7 +178,7 @@ impl CheckedBody<'_, '_, '_, '_> {
             Entry::Registered(frame) => frame.operand_range(expr),
             Entry::Native(_) => None,
         };
-        if let ExprKind::Bool(value) = expr.kind {
+        if let ExprKind::Bool(value) = expr.without_location().kind {
             if let Entry::Registered(frame) = &self.0 {
                 frame.next_fixed_site(crate::ir::Node::Expression(expr));
             }
