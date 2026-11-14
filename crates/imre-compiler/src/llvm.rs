@@ -12772,6 +12772,7 @@ def handler(a: defaultdict[str, list[int]], b: defaultdict[str, list[int]]) -> l
             ("int | None", Some("@retain_int(")),
             ("float | None", Some("@imre_float_box_retain(")),
             ("list[int]", Some("@imre_list_retain(")),
+            ("list[int] | None", Some("@list_retain_if_present(")),
             ("tuple[int]", Some("@imre_record_retain(")),
             ("bool | None", None),
             ("float", None),
