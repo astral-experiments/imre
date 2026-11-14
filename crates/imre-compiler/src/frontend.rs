@@ -11948,8 +11948,8 @@ impl<'a> Checker<'a> {
             return self.counter_most_common(call, None);
         }
         if let ast::Expr::Attribute(method) = &*call.func
-            && self.resolve(&method.value) == Some(Binding::Intrinsic(Intrinsic::Counter))
             && matches!(method.attr.as_str(), "subtract" | "update")
+            && self.resolve(&method.value) == Some(Binding::Intrinsic(Intrinsic::Counter))
             && !calls::starred(call)
         {
             let op = if method.attr.as_str() == "subtract" {
