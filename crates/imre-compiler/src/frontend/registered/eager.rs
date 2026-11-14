@@ -90,7 +90,7 @@ impl ClauseLowering for SourceScope<'_> {
         output: Output<'_>,
         body: impl FnOnce(&mut Self) -> StdResult<(Vec<Expr>, Vec<Statement>), ()>,
     ) -> StdResult<Vec<Statement>, ()> {
-        input.bind_loop_target(self, target, false)?;
+        input.bind_loop_target(self, target)?;
         let (conditions, body) = self.in_loop(LoopScope::WithCursor, body)?;
         let body = filter_suite(conditions, body);
         Ok(match output {

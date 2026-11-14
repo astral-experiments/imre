@@ -4388,7 +4388,6 @@ impl Emitter<'_, '_> {
             | Builtin::RegisteredNamespace(_)
             | Builtin::RegisteredUnpack { .. }
             | Builtin::RegisteredIter(_)
-            | Builtin::RegisteredPairNeedsRow
             | Builtin::RegisteredName(_)
             | Builtin::Unrepresented
             | Builtin::UnrepresentedCall
@@ -9042,7 +9041,9 @@ impl Emitter<'_, '_> {
         }
         let iterator = self.borrow_slot(iterator);
         let (available, direct_key) = match kind {
-            ir::IterNextKind::Async(_) => unreachable!("async pull requires a suspended frame"),
+            ir::IterNextKind::Async(_) | ir::IterNextKind::Pair(_) => {
+                unreachable!("Python pull requires a registered frame")
+            }
             ir::IterNextKind::SplitField => {
                 let field = self.instruction(format!(
                     "call i64 @imre_split_field_next(ptr {})",

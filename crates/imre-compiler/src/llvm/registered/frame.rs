@@ -1186,27 +1186,6 @@ impl<'p> RegisteredFrame<'_, 'p> {
         ))
     }
 
-    pub(crate) fn plain_items_cursor(&mut self, cursor: &str) -> String {
-        self.value(&format!(
-            "call i1 @imre_dyn_plain_items_cursor(ptr %ctx, i64 {cursor})"
-        ))
-    }
-
-    /// Branch after pulling both projections into the caller's rooted temporary slots.
-    pub(crate) fn next_item_pair(
-        &mut self,
-        cursor: &str,
-        has_else: bool,
-        available: &str,
-        exhausted: &str,
-    ) {
-        self.max_live = self.max_live.max(2);
-        let more = self.checked(&format!(
-            "call i64 @imre_dyn_next_pair(ptr %ctx, i64 {cursor}, ptr %live, i1 {has_else})"
-        ));
-        self.branch_on_item(&more, available, exhausted);
-    }
-
     fn branch_on_item(&mut self, more: &str, item: &str, exhausted: &str) {
         let ready = self.value(&format!("icmp eq i64 {more}, {}", permanent::TRUE));
         self.branch(&ready, item, exhausted);

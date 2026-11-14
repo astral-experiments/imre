@@ -67,7 +67,7 @@ pub(super) trait PatternBinder {
         elements: &[ast::Expr],
         star: Option<usize>,
         value: Expr,
-        row: Option<Row<'_>>,
+        row: Option<Row>,
     ) -> StdResult<PatternSnapshot, Self::Error> {
         Ok(protocol_snapshot(
             self,
@@ -135,7 +135,7 @@ fn protocol_snapshot(
     star: Option<usize>,
     mut value: Expr,
     sequence_type: Type,
-    row: Option<Row<'_>>,
+    mut row: Option<Row>,
 ) -> PatternSnapshot {
     if row.is_none()
         && star.is_none()
@@ -143,6 +143,40 @@ fn protocol_snapshot(
         && let Some(items) = tuple_operands(&mut value, item_types.len())
     {
         return PatternSnapshot::from_items(binder, items);
+    }
+    // Project directly into the two output slots of the prepared pull. Keep its
+    // cursor and its original exhaustion edge, including after generator startup.
+    if item_types.len() == 2
+        && star.is_none()
+        && let Some(Row::Pulled(scope)) = &mut row
+        && let [
+            Statement::Clear(clear),
+            Statement::IterNext {
+                kind,
+                iterator,
+                key,
+                value: second_slot @ None,
+                ready,
+            },
+            exhausted,
+        ] = scope.body.as_mut_slice()
+        && *kind == ir::IterNextKind::Generic
+        && *key == *clear
+        && scope.clear.as_slice() == [*clear]
+        && exhausted.branches_for_flag(*ready).is_some()
+        && binder.pattern_local(*iterator).ty == Type::PythonObject
+    {
+        let mut slots = item_types.map(|ty| binder.pattern_hidden(ty));
+        let first = slots.next().unwrap();
+        let second = slots.next().unwrap();
+        *kind = ir::IterNextKind::Pair(target);
+        *key = first;
+        *second_slot = Some(second);
+        scope.body.remove(0);
+        return PatternSnapshot {
+            body: std::mem::take(&mut scope.body),
+            clear: vec![first, second],
+        };
     }
     let sequence = builtin(
         sequence_type,
@@ -216,18 +250,15 @@ pub(super) fn bind_assignment<B: PatternBinder>(
 }
 
 /// A projected fixed tuple or a checked Python pull that owns the source row.
-pub(super) enum Row<'a> {
+pub(super) enum Row {
     Projected(usize),
-    Pulled {
-        scope: &'a mut calls::ArgumentScope,
-        pair: Option<(usize, usize)>,
-    },
+    Pulled(calls::ArgumentScope),
 }
 
 /// Only the expression consuming the pull can release its source temporaries.
-fn consume_row(value: Expr, row: Option<Row<'_>>) -> Expr {
+fn consume_row(value: Expr, row: Option<Row>) -> Expr {
     match row {
-        Some(Row::Pulled { scope, .. }) => std::mem::take(scope).finish(value),
+        Some(Row::Pulled(scope)) => scope.finish(value),
         _ => value,
     }
 }
@@ -237,12 +268,12 @@ pub(super) fn bind_input<B: PatternBinder>(
     binder: &mut B,
     target: &ast::Expr,
     value: Expr,
-    row: Option<Row<'_>>,
+    row: Option<Row>,
     output: &mut Vec<Statement>,
-) -> StdResult<Option<usize>, B::Error> {
+) -> StdResult<(), B::Error> {
     let Some(targets) = pattern_elements(target) else {
         binder.pattern_store(target, consume_row(value, row), output)?;
-        return Ok(None);
+        return Ok(());
     };
     let mut stars = targets
         .iter()
@@ -252,47 +283,12 @@ pub(super) fn bind_input<B: PatternBinder>(
     if stars.next().is_some() {
         return Err(binder.multiple_stars(target));
     }
-    // A private tuple slot supplies fixed fields. A qualified Python cursor can
-    // supply a pair directly. Other inputs snapshot the ordinary row.
-    let pair_pull = match &row {
-        Some(Row::Pulled { pair, .. }) => *pair,
-        _ => None,
-    };
     let PatternSnapshot { mut body, clear } =
         binder.pattern_snapshot(target, targets, star, value, row)?;
     let (temporaries, items) = clear.split_at(clear.len() - targets.len());
     if let Some(&root) = temporaries.first() {
         body.push(Statement::Clear(root));
     }
-    let pair = if let Some((iterator, ready)) = pair_pull
-        && star.is_none()
-        && let &[first, second] = items
-    {
-        let ordinary = binder.pattern_hidden(Type::Bool);
-        // The loop owns the cursor predicate across iterations.
-        // A direct pull initializes both projected items before the common target stores.
-        let from_row = Expr {
-            ty: Type::Bool,
-            kind: ExprKind::Compare(
-                vec![binder.pattern_local(ordinary), Expr::boolean(true)],
-                vec![ast::CmpOp::Is],
-            ),
-        };
-        let direct = vec![
-            Statement::IterNext {
-                kind: ir::IterNextKind::Generic,
-                iterator,
-                key: first,
-                value: Some(second),
-                ready,
-            },
-            pipelines::Prepared::exhaust_if_empty(Expr::local(ready, Type::Bool)),
-        ];
-        body = vec![Statement::If(from_row, body, direct)];
-        Some(ordinary)
-    } else {
-        None
-    };
     for (target, &item) in targets.iter().zip(items) {
         let target = if let ast::Expr::Starred(starred) = target {
             &starred.value
@@ -303,7 +299,7 @@ pub(super) fn bind_input<B: PatternBinder>(
         bind_input(binder, target, value, None, &mut body)?;
     }
     output.push(Statement::Scope { body, clear });
-    Ok(pair)
+    Ok(())
 }
 
 impl Checker<'_> {
@@ -1231,7 +1227,7 @@ impl PatternBinder for Checker<'_> {
         targets: &[ast::Expr],
         star: Option<usize>,
         value: Expr,
-        row: Option<Row<'_>>,
+        row: Option<Row>,
     ) -> StdResult<PatternSnapshot, Self::Error> {
         if value.ty == Type::PythonObject
             && (self.registered.is_some() || self.graph.modules[self.module].is_program_source())

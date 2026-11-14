@@ -1704,16 +1704,6 @@ pub(super) unsafe extern "C" fn imre_dyn_list_cursor_pull(
     }
 }
 
-/// Query the acquired cursor without advancing it or invoking Python.
-///
-/// # Safety
-/// Generated code supplies the active context and a live loop cursor.
-#[unsafe(no_mangle)]
-pub(super) unsafe extern "C" fn imre_dyn_plain_items_cursor(ctx: *const Context, iter: Id) -> bool {
-    // SAFETY: the generated caller keeps the context and cursor live for this query.
-    plain_items_cursor(unsafe { &*ctx }, iter).is_some()
-}
-
 fn plain_items_cursor(ctx: &Context, iter: Id) -> Option<(Id, DictIterator)> {
     let Value::LoopIterator {
         source,
@@ -1728,56 +1718,58 @@ fn plain_items_cursor(ctx: &Context, iter: Id) -> Option<(Id, DictIterator)> {
     cursor.is_plain_items().then_some((source, cursor))
 }
 
-/// Advance a compiled loop whose target unpacks exactly two items.
+/// Return 2 for two projected handles, 1 for an owned row and 0 for exhaustion or error.
+/// The caller unpacks an ordinary row at the target's source position.
 ///
 /// # Safety
-/// Generated code supplies a live context and space for two handles.
+/// The caller owns the active context, cursor and two writable handle slots.
 #[unsafe(no_mangle)]
-pub(super) unsafe extern "C" fn imre_dyn_next_pair(
+pub(super) unsafe extern "C" fn imre_dyn_pull_pair(
     ctx: *mut Context,
     iter: Id,
     items: *mut [Id; 2],
     has_else: bool,
-) -> Id {
+) -> i32 {
     // SAFETY: generated code owns these scratch slots in the active frame.
     let (ctx, items) = unsafe { (&mut *ctx, &mut *items) };
     if ctx.heap.execution.pending.is_some() {
-        return NONE;
+        return 0;
     }
-    let result = next_loop_pair(ctx, iter, items, has_else);
-    finish(ctx, result)
+    match pull_pair(ctx, iter, items) {
+        Ok(0) if has_else => {
+            ctx.heap.release_unbound_finalizers();
+            0
+        }
+        Ok(status) => status,
+        Err(error) => {
+            finish(ctx, Err(error));
+            0
+        }
+    }
 }
 
-/// Read dictionary entries directly, keeping both values alive across target assignment.
-fn next_loop_pair(ctx: &mut Context, iter: Id, items: &mut [Id; 2], has_else: bool) -> Result<Id> {
-    let more = if let Some((source, cursor)) = plain_items_cursor(ctx, iter) {
-        if let Some(pair) = cursor.next_entry_pair(ctx, source)? {
-            ctx.heap.reserve_temporaries(2)?;
-            for value in pair {
-                ctx.heap.keep(value);
-            }
-            *items = pair;
-            true
-        } else {
-            false
+fn pull_pair(ctx: &mut Context, iter: Id, items: &mut [Id; 2]) -> Result<i32> {
+    if let Some((source, cursor)) = plain_items_cursor(ctx, iter) {
+        let Some(pair) = cursor.next_entry_pair(ctx, source)? else {
+            return Ok(0);
+        };
+        ctx.heap.reserve_temporaries(2)?;
+        for value in pair {
+            ctx.heap.keep(value);
         }
+        *items = pair;
+        Ok(2)
     } else if ctx.iterator_has_item(iter)? {
-        let value = ctx
+        let row = ctx
             .next_item(iter)?
             .ok_or_else(|| Error::new("StopIteration", ""))?;
         ctx.heap.reserve_temporaries(1)?;
-        ctx.heap.keep(value);
-        let owner = snapshot_pair(ctx, value, items)?;
-        ctx.heap.reserve_temporaries(1)?;
-        ctx.heap.keep(owner);
-        true
+        ctx.heap.keep(row);
+        items[0] = row;
+        Ok(1)
     } else {
-        false
-    };
-    if !more && has_else {
-        ctx.heap.release_unbound_finalizers();
+        Ok(0)
     }
-    Ok(flag(more))
 }
 
 /// Construct a fresh sequence using the permanent handles in a linked literal.

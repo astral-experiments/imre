@@ -100,15 +100,14 @@ pub(crate) fn registered(frame: crate::frontend::RegisteredRegion<'_>) -> Result
                 "context binding needs a private entered-value slot",
             ),
             ir::Node::Statement(Statement::IterNext {
-                kind: kind @ (ir::IterNextKind::Generic | ir::IterNextKind::Async(_)),
+                kind: kind @ (ir::IterNextKind::Generic | ir::IterNextKind::Pair(_) | ir::IterNextKind::Async(_)),
                 iterator,
                 key,
                 ready,
                 value,
             }) => require(
-                value.is_none_or(|slot| {
-                    *kind == ir::IterNextKind::Generic
-                        && slot != *iterator
+                (matches!(kind, ir::IterNextKind::Pair(_)) == value.is_some()) && value.is_none_or(|slot| {
+                    slot != *iterator
                         && slot != *key
                         && slot != *ready
                         && private.index(&slot).is_some()
@@ -434,8 +433,8 @@ impl Verifier<'_> {
                     crate::ir::IterNextKind::CodePoint | crate::ir::IterNextKind::Utf8Byte => {
                         Some(Type::Int)
                     }
-                    crate::ir::IterNextKind::Async(_) => {
-                        return Err("async cursor requires a registered frame".into());
+                    crate::ir::IterNextKind::Async(_) | crate::ir::IterNextKind::Pair(_) => {
+                        return Err("Python cursor requires a registered frame".into());
                     }
                     crate::ir::IterNextKind::Generic => None,
                 };

@@ -99,7 +99,12 @@ impl<'a> RegisteredRegion<'a> {
                     slots.extend(clear);
                 }
                 ir::Node::Statement(Statement::IterNext { iterator, kind, .. }) => {
-                    cursors.insert(*iterator, *kind);
+                    // Unpacking a row changes its consumer, not the acquired cursor.
+                    let storage = match kind {
+                        ir::IterNextKind::Pair(_) => ir::IterNextKind::Generic,
+                        kind => *kind,
+                    };
+                    cursors.insert(*iterator, storage);
                 }
                 _ => {}
             }
@@ -2478,7 +2483,7 @@ impl<'a> SuitePreparation<'a> {
             |ty, cursor| scope.reserve_cursor_slot(ty, cursor),
         );
         let binding = input
-            .bind_loop_target(&mut scope, &loop_.target, true)
+            .bind_loop_target(&mut scope, &loop_.target)
             .map_err(|()| {
                 scope.refusal.unwrap_or((
                     loop_.target.range(),
@@ -3111,7 +3116,7 @@ impl statements::StatementLowering for SourceScope<'_> {
         let mut input = self
             .creating_iterable(|scope| scope.iteration_input(&loop_.iter, for_pull(loop_)))
             .ok_or(())?;
-        input.bind_loop_target(self, &loop_.target, true)?;
+        input.bind_loop_target(self, &loop_.target)?;
         self.in_loop(LoopScope::WithCursor, |scope| {
             scope.block_into(&loop_.body, &mut input.next)
         })?;
@@ -7425,27 +7430,19 @@ publish(5, callback)
             let _ = super::super::lower(&graph);
             let registered = graph.registered_functions();
             let function = &registered[&graph.entry][&TextSize::default()].function;
-            let mut unpacks = 0;
-            let mut stores = 0;
-            ir::walk_expressions(&function.body, &mut |expr| {
-                if matches!(
-                    expr.kind,
-                    ExprKind::Builtin(
-                        Builtin::RegisteredUnpack {
-                            count: 2,
-                            star: None,
-                            ..
-                        },
-                        _
-                    )
-                ) {
-                    unpacks += 1;
-                }
+            let mut operations = Vec::new();
+            ir::walk_nodes(&function.body, &mut |node, _| match node {
+                ir::Node::Expression(Expr {
+                    kind: ExprKind::Builtin(Builtin::RegisteredUnpack { count: 2, star: None, .. }, _),
+                    ..
+                })
+                | ir::Node::Statement(Statement::IterNext {
+                    kind: ir::IterNextKind::Pair(_), ..
+                }) => operations.push("unpack"),
+                ir::Node::Statement(Statement::SetItem(..)) => operations.push("store"),
+                _ => {}
             });
-            ir::walk_statements(&function.body, &mut |stmt| {
-                stores += usize::from(matches!(stmt, Statement::SetItem(..)));
-            });
-            assert_eq!((unpacks, stores), (1, 2), "{source}");
+            assert_eq!(operations, ["unpack", "store", "store"], "{source}");
         }
     }
 
@@ -7550,7 +7547,7 @@ publish(5, callback)
     }
 
     #[test]
-    fn retained_pair_target_uses_the_same_acquired_cursor_for_both_pulls() {
+    fn retained_pair_target_uses_one_pull_at_its_written_target() {
         let text = concat!(
             "def consume() -> None:\n",
             "    for key, value in available_rows:\n",
@@ -7578,14 +7575,20 @@ publish(5, callback)
                 acquired.push(*slot);
             }
             Statement::IterNext {
-                iterator, value, ..
-            } => pulls.push((*iterator, value.is_some())),
+                iterator, kind, value, ..
+            } => {
+                let ir::IterNextKind::Pair(range) = *kind else {
+                    panic!("expected a single pair pull")
+                };
+                assert_eq!(&text[range], "key, value");
+                pulls.push((*iterator, value.is_some()));
+            }
             _ => {}
         });
         let [cursor] = acquired[..] else {
             panic!("expected one acquired cursor")
         };
-        assert_eq!(pulls, [(cursor, false), (cursor, true)]);
+        assert_eq!(pulls, [(cursor, true)]);
     }
 
     #[test]

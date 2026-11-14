@@ -1548,7 +1548,6 @@ impl IteratorOp {
 /// Borrow the operands consumed by registered iteration without changing their evaluation order.
 pub(crate) enum IterationOperands<'a> {
     Iter(&'a Expr, IteratorOp),
-    PairNeedsRow(&'a Expr),
     Truth(&'a Expr),
     Insert(&'a [Expr; 2]),
     Unpack(
@@ -1576,7 +1575,6 @@ impl Builtin {
         };
         Some(match self {
             Self::RegisteredIter(op) => one().map(|value| Iter(value, *op)),
-            Self::RegisteredPairNeedsRow => one().map(PairNeedsRow),
             Self::Bool => one().map(Truth),
             Self::Append | Self::SetAdd => two().map(Insert),
             Self::RegisteredUnpack {
@@ -2420,8 +2418,6 @@ pub(crate) enum Builtin {
     },
     /// Acquire or adapt an iterator through its corresponding Python protocol.
     RegisteredIter(IteratorOp),
-    /// Whether two-target binding needs an ordinary row from this acquired cursor.
-    RegisteredPairNeedsRow,
     /// Snapshot a sequence for ordered target stores, including the optional starred remainder.
     RegisteredUnpack {
         count: usize,
@@ -3575,6 +3571,8 @@ pub(crate) struct AsyncPull {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum IterNextKind {
     Generic,
+    /// A Python row is unpacked at the written target after its cursor advances.
+    Pair(ruff_text_size::TextRange),
     Async(AsyncPull),
     /// An owned field from a private single-byte split cursor.
     SplitField,
