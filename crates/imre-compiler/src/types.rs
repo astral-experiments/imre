@@ -1514,6 +1514,11 @@ impl Types {
         }
     }
 
+    /// A source method can flow into its positional `Callable` type without changing its receiver.
+    pub(crate) fn source_callable_types(&self, ty: Type) -> impl Iterator<Item = Type> {
+        std::iter::once(ty).chain(self.method_signature(ty))
+    }
+
     /// Different bound declarations may still share a positional call ABI.
     pub(crate) fn common_method_signature(&self, left: Type, right: Type) -> Option<Type> {
         let left_abi = self.method_signature(left);

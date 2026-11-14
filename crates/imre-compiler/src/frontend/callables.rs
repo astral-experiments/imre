@@ -100,9 +100,8 @@ pub(super) fn record_target(
     targets: &mut HashMap<Type, HashSet<usize>>,
 ) {
     if let ExprKind::Callable { function, .. } = &value.kind {
-        targets.entry(value.ty).or_default().insert(*function);
-        if let Some(signature) = types.method_signature(value.ty) {
-            targets.entry(signature).or_default().insert(*function);
+        for ty in types.source_callable_types(value.ty) {
+            targets.entry(ty).or_default().insert(*function);
         }
     }
 }

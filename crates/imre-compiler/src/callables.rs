@@ -44,7 +44,9 @@ impl TargetCollector {
                 function: *function,
                 bound: receiver.is_some(),
             };
-            self.targets.0.entry(value.ty).or_default().push(target);
+            for ty in types.source_callable_types(value.ty) {
+                self.targets.0.entry(ty).or_default().push(target);
+            }
             if let Some(raw) = types.original_cache_body(*function) {
                 let signature = types.wrapped_signature(value.ty).unwrap_or(value.ty);
                 self.targets.0.entry(signature).or_default().push(Target {
@@ -87,6 +89,51 @@ impl Targets {
     pub(crate) fn get(&self, ty: Type) -> &[Target] {
         self.0.get(&ty).map_or(&[], Vec::as_slice)
     }
+}
+
+/// Keep operands whose origin cannot be established from local writes and every closed call site.
+pub(crate) fn retain_unproven_operands(
+    functions: &[ir::Function],
+    entry: &ir::Function,
+    types: &crate::types::Types,
+    operands: &mut BTreeMap<usize, Vec<&ir::Expr>>,
+    proven: impl Fn(&ir::Expr) -> bool,
+    may_enter_uncalled: impl Fn(usize) -> bool,
+) {
+    let mut direct_inputs: HashMap<_, Vec<_>> = operands
+        .keys()
+        .filter_map(|&id| {
+            let function = functions.get(id)?;
+            (!function.params.is_empty()).then(|| (id, Vec::new()))
+        })
+        .collect();
+    if !direct_inputs.is_empty() {
+        for function in functions.iter().chain([entry]) {
+            ir::walk_expressions(&function.body, &mut |expr| match &expr.kind {
+                ExprKind::Call(id, args) => {
+                    if let Some(inputs) = direct_inputs.get_mut(id) {
+                        inputs.push(args);
+                    }
+                }
+                ExprKind::Callable { function, .. } => {
+                    direct_inputs.remove(function);
+                    if let Some(raw) = types.original_cache_body(*function) {
+                        direct_inputs.remove(&raw);
+                    }
+                }
+                ExprKind::Construct { initializer, .. } => {
+                    direct_inputs.remove(initializer);
+                }
+                _ => {}
+            });
+        }
+    }
+    operands.retain(|&id, owners| {
+        let function = functions.get(id).unwrap_or(entry);
+        let inputs = direct_inputs.get(&id);
+        ir::retain_unproven_operands(function, owners, inputs.map_or(&[], Vec::as_slice), &proven);
+        !owners.is_empty() && (!inputs.is_some_and(Vec::is_empty) || may_enter_uncalled(id))
+    });
 }
 
 /// Callable representation selected from the original checked operations.
@@ -145,47 +192,20 @@ pub(crate) fn layouts(module: &ir::Module) -> Result<Layouts, LoweringDiagnostic
         !owners.is_empty()
     });
 
-    // Direct arguments can establish ownership only for a closed function whose
-    // signature also admits a bound method. Other callables need no caller scan.
-    let mut direct_inputs: HashMap<_, Vec<_>> = link_owners
-        .keys()
-        .filter_map(|&id| {
-            let function = module.functions.get(id)?;
-            (!function.params.is_empty()).then(|| (id, Vec::new()))
-        })
-        .collect();
-    if !direct_inputs.is_empty() {
-        for function in module.functions.iter().chain([&module.entry]) {
-            ir::walk_expressions(&function.body, &mut |expr| match &expr.kind {
-                ExprKind::Call(id, args) => {
-                    if let Some(inputs) = direct_inputs.get_mut(id) {
-                        inputs.push(args);
-                    }
-                }
-                ExprKind::Callable { function, .. } => {
-                    direct_inputs.remove(function);
-                    if let Some(raw) = module.types.original_cache_body(*function) {
-                        direct_inputs.remove(&raw);
-                    }
-                }
-                ExprKind::Construct { initializer, .. } => {
-                    direct_inputs.remove(initializer);
-                }
-                _ => {}
-            });
-        }
-    }
-    link_owners.retain(|&id, owners| {
-        let function = module.functions.get(id).unwrap_or(&module.entry);
-        let inputs = direct_inputs.get(&id).map_or(&[][..], Vec::as_slice);
-        ir::retain_unknown_link_owners(function, owners, inputs, |operand| {
-            matches!(operand.kind, ExprKind::Callable { function, receiver: None }
+    retain_unproven_operands(
+        &module.functions,
+        &module.entry,
+        &module.types,
+        &mut link_owners,
+        |value| {
+            matches!(&value.kind, ExprKind::Builtin(ir::Builtin::StaticFunction(_), args)
+            if matches!(args[0].kind, ExprKind::Callable { function, receiver: None }
                 if !cached(function)
-                    && module.types.constructor_base(operand.ty).is_none()
-                    && linked_functions.contains(&function))
-        });
-        !owners.is_empty()
-    });
+                    && module.types.constructor_base(args[0].ty).is_none()
+                    && linked_functions.contains(&function)))
+        },
+        |_| true,
+    );
     // Only the owner needs link storage. A plain function can wrap a bound
     // builtin, even when the two callables have the same signature.
     if link_owners.values().flatten().any(|owner| {
