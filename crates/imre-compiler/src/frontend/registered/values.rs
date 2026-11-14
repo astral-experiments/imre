@@ -1352,9 +1352,20 @@ impl Checker<'_> {
                 } else {
                     parameter.ty
                 };
-                self.expect(expected, value.checked_operand_type(), arg).map_err(|error| {
-                    error.expected_from(signature.parameter_declaration(index), arg.range())
-                })?;
+                let actual = value.checked_operand_type();
+                if let Err(error) = self.expect(expected, actual, arg) {
+                    let declaration = signature.parameter_declaration(index);
+                    let operands = self.graph.session.operand_types(self.module);
+                    let checked = actual == Type::PythonObject
+                        && expected == parameter.ty
+                        && declaration.is_some_and(|decl| {
+                            decl.module == id.module
+                                && operands.accepts_argument(arg, id, index, decl.annotation)
+                        });
+                    if !checked {
+                        return Err(error.expected_from(declaration, arg.range()));
+                    }
+                }
                 args.push(value);
             }
             let value = self.call_with_values(call, target, args);
