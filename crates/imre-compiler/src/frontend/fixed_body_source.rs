@@ -528,7 +528,7 @@ mod tests {
             .find(|(id, ..)| *id == 0)
             .unwrap();
         let function = fixed.ir.0.functions.into_iter().next().unwrap();
-        let placed = source.place(function).ok().unwrap();
+        let mut placed = source.clone().place(function).ok().unwrap();
         let [Statement::Return(value)] = placed.function.body.as_slice() else {
             panic!("expected a float return");
         };
@@ -536,6 +536,27 @@ mod tests {
             matches!(value.without_location().kind, ExprKind::Float(value) if value.to_bits() == (-0.0_f64).to_bits())
         );
         assert_eq!(&text[*placed.fixed_sites.last().unwrap()], "-0.0");
+        // A native caller may subsequently wrap this value for an optional destination.
+        let [Statement::Return(operand)] = placed.function.body.as_mut_slice() else {
+            unreachable!();
+        };
+        let payload = std::mem::replace(operand, Expr::none());
+        operand.ty = fixed.ir.0.types.optional(payload.ty);
+        operand.kind = ExprKind::Present(Box::new(payload));
+        placed.function.returns = operand.ty;
+        let mut optional = source.clone().place(placed.function).ok().unwrap();
+        assert_eq!(optional.fixed_sites, placed.fixed_sites);
+        let [
+            Statement::Return(Expr {
+                kind: ExprKind::Present(value),
+                ..
+            }),
+        ] = optional.function.body.as_mut_slice()
+        else {
+            unreachable!();
+        };
+        value.kind = ExprKind::Float(0.0);
+        assert!(source.place(optional.function).is_err());
     }
 
     #[test]

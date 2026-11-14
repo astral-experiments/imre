@@ -3945,10 +3945,17 @@ pub(crate) enum Node<'a> {
 }
 
 impl Node<'_> {
-    /// A native optional wraps its None-valued operand in an absence tag. The
-    /// Python frame evaluates that operand at its original source position.
+    /// A Python handle already represents both a present value and None. A native
+    /// optional tag around the written operand has no source position of its own.
     pub(crate) fn has_fixed_site(&self) -> bool {
-        !matches!(self, Self::Expression(Expr { kind: ExprKind::Absent(value), .. }) if value.ty == Type::None)
+        match self {
+            Self::Expression(expr) => match &expr.kind {
+                ExprKind::Present(_) => false,
+                ExprKind::Absent(value) => value.ty != Type::None,
+                _ => true,
+            },
+            Self::Statement(_) => true,
+        }
     }
 }
 
