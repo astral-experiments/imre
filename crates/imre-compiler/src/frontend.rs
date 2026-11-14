@@ -3530,6 +3530,7 @@ struct Checker<'a> {
     block_depth: usize,
     finally_scope: FinallyScope,
     reachable: bool,
+    suite_imports: bool,
     module_scope: bool,
     class: Option<usize>,
     class_receiver: Option<String>,
@@ -3650,6 +3651,7 @@ impl<'a> Checker<'a> {
             block_depth: 0,
             finally_scope: FinallyScope::Outside,
             reachable: true,
+            suite_imports: true,
             module_scope: false,
             class: None,
             class_receiver: None,
@@ -7085,6 +7087,7 @@ impl<'a> Checker<'a> {
             {
                 return Err(self.object_runtime_export("a conditional or local import", statement));
             }
+            ast::Stmt::Import(_) | ast::Stmt::ImportFrom(_) if !self.suite_imports => None,
             ast::Stmt::TypeAlias(_) => {
                 return Err(self.scoped_builtin_error("type alias declaration", statement));
             }
@@ -7962,6 +7965,18 @@ impl<'a> Checker<'a> {
         Ok(finish((finalbody, final_falls)))
     }
 
+    fn lower_if_suite(
+        &mut self,
+        suite: &[ast::Stmt],
+        output: Option<&mut Vec<Statement>>,
+        imports: bool,
+    ) -> Result<bool, String> {
+        let outer = std::mem::replace(&mut self.suite_imports, imports);
+        let result = self.lower_block(suite, output);
+        self.suite_imports = outer;
+        result
+    }
+
     fn if_chain(
         &mut self,
         branch: &ast::StmtIf,
@@ -7970,12 +7985,18 @@ impl<'a> Checker<'a> {
         let clauses = &branch.elif_else_clauses;
         let conditions =
             statements::if_clauses(branch).map_while(|(test, body)| Some((test?, body)));
+        let mut remaining_imports = self.suite_imports;
         let mut else_field = None;
         let mut joined = None;
         let mut falls_at_cutoff = None;
         let mut exit_fixed = false;
         let mut last_test = branch.test.as_ref();
         for (index, (test, body)) in conditions.enumerate() {
+            // A literal true takes the remaining suites' import paths.
+            let imports = match test.as_boolean_literal_expr() {
+                Some(literal) => literal.value && std::mem::take(&mut remaining_imports),
+                None => remaining_imports,
+            };
             last_test = test;
             self.branch_layouts(body, &clauses[index..])?;
             let condition = self.condition(test)?;
@@ -8032,7 +8053,7 @@ impl<'a> Checker<'a> {
             {
                 Ok(false)
             } else {
-                self.lower_block(body, yes)
+                self.lower_if_suite(body, yes, imports)
             };
             self.present_fields.truncate(field_depth);
             self.regex_guards.truncate(guard_depth);
@@ -8054,7 +8075,7 @@ impl<'a> Checker<'a> {
             let guards = self.present_fields.len();
             self.enter_namespace_guards(last_test, false, &tail.body);
             self.guard_return_field(&tail.body, else_field);
-            let result = self.lower_block(&tail.body, arm);
+            let result = self.lower_if_suite(&tail.body, arm, remaining_imports);
             self.present_fields.truncate(guards);
             result?
         } else {
