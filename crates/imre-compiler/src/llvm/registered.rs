@@ -409,6 +409,7 @@ pub(crate) trait PreparedSuiteEmitter<'a, 'p>:
 {
     fn frame_and_sites(&mut self) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites);
     fn place_site(&mut self, site: RequiredSite);
+    fn lambda_at(&mut self, site: TextSize, comprehension: bool) -> sites::CompiledDefinition;
     fn exec_literal_at(&mut self, site: TextRange) -> Option<sites::CompiledExec>;
 }
 
@@ -1157,7 +1158,7 @@ impl<'f> Frame<'f, '_, '_> {
                     .interpolation(&value, expression, *conversion, &spec)
             }),
             (Builtin::RegisteredLambda(site, scoped), operands) => {
-                self.code.place_site(RequiredSite::Lambda(*site, *scoped));
+                let lambda = self.code.lambda_at(*site, *scoped);
                 let mut operands = operands.iter();
                 let scope = if *scoped {
                     self.evaluate_handle(operands.next().expect("explicit lambda scope"))
@@ -1167,8 +1168,7 @@ impl<'f> Frame<'f, '_, '_> {
                 let defaults = operands
                     .map(|value| self.evaluate_eager_handle(value))
                     .collect::<Vec<_>>();
-                let (code, sites) = self.code.frame_and_sites();
-                sites.bind_lambda(code, *site, &scope, &defaults)
+                lambda.bind_defaults(self.code, &scope, &defaults)
             }
             (Builtin::RegisteredGenerator(site, scoped, acquire), operands) => {
                 self.code.place_site(RequiredSite::Generator(*site));

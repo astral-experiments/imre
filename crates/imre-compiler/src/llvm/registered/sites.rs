@@ -190,7 +190,6 @@ pub(crate) struct CompiledExec {
 
 /// Compile a declaration in its lexical scope when the enclosing frame first needs its site.
 pub(crate) trait SiteDefinitions {
-    fn lambda(&mut self, site: TextSize, comprehension: bool) -> CompiledDefinition;
     fn declaration(&mut self, site: TextSize) -> Declaration;
     fn class_namespace(
         &mut self,
@@ -207,7 +206,6 @@ pub(crate) struct CheckedSites {
     pub(crate) definitions: HashMap<TextSize, Declaration>,
     pub(crate) class_namespaces:
         HashMap<TextSize, (CompiledDefinition, CompiledTypeParameters, TextRange)>,
-    pub(crate) lambdas: HashMap<TextSize, CompiledDefinition>,
     pub(crate) generators: HashMap<TextRange, CompiledDefinition>,
     pub(crate) aliases: HashMap<TextSize, Result<CompiledAlias, String>>,
 }
@@ -215,17 +213,14 @@ pub(crate) struct CheckedSites {
 impl CheckedSites {
     pub(crate) fn place(&mut self, site: RequiredSite, definitions: &mut impl SiteDefinitions) {
         match site {
-            RequiredSite::Lambda(site, comprehension) => {
-                self.lambdas
-                    .entry(site)
-                    .or_insert_with(|| definitions.lambda(site, comprehension));
-            }
             RequiredSite::Definition(site) => {
                 self.definitions
                     .entry(site)
                     .or_insert_with(|| definitions.declaration(site));
             }
-            RequiredSite::DefinitionAfterInputs(_) | RequiredSite::ExecLiteral(_) => {}
+            RequiredSite::DefinitionAfterInputs(_)
+            | RequiredSite::ExecLiteral(_)
+            | RequiredSite::Lambda(..) => {}
             RequiredSite::ClassNamespace(site) => {
                 self.class_namespaces
                     .entry(site)
@@ -269,16 +264,6 @@ impl CheckedSites {
     ) -> String {
         let function = self.generators[&site].bind_defaults(frame, scope, &[]);
         frame.op("generator", &[&function, cursor])
-    }
-
-    pub(crate) fn bind_lambda(
-        &self,
-        frame: &mut RegisteredFrame<'_, '_>,
-        site: TextSize,
-        scope: &str,
-        defaults: &[String],
-    ) -> String {
-        self.lambdas[&site].bind_defaults(frame, scope, defaults)
     }
 
     pub(crate) fn definition(

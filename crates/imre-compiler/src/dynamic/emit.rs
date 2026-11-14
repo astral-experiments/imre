@@ -1138,6 +1138,12 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
         sites.place(site, &mut definitions);
     }
 
+    fn lambda_at(&mut self, site: TextSize, comprehension: bool) -> CompiledDefinition {
+        let lambda = &self.source.lambdas[&site];
+        let (_, mut definitions) = self.definitions();
+        definitions.compile_callable(site, Callable::Lambda(lambda, comprehension))
+    }
+
     fn exec_literal_at(&mut self, site: TextRange) -> Option<sites::CompiledExec> {
         let child = self.source.exec_literals.body(site)?;
         let output = &mut self.frame.output;
@@ -1182,11 +1188,6 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
 }
 
 impl sites::SiteDefinitions for LexicalDefinitions<'_, '_> {
-    fn lambda(&mut self, site: TextSize, comprehension: bool) -> CompiledDefinition {
-        let lambda = &self.source.lambdas[&site];
-        self.compile_callable(site, Callable::Lambda(lambda, comprehension))
-    }
-
     fn declaration(&mut self, site: TextSize) -> Declaration {
         let source = self.source;
         let (definition, decorator_offsets, type_params) =

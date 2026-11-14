@@ -2065,7 +2065,7 @@ impl<'a> SuitePreparation<'a> {
                     self.declaration_refusals.get(&start).copied()
                 }
                 // Each activation was prepared from its lexical children before its binding.
-                RequiredSite::Lambda(start, _) if self.literal_refusals.is_some() => {
+                RequiredSite::Lambda(start) if self.literal_refusals.is_some() => {
                     let body = self.source.lambdas?.get(&start)?.body.as_ref()?;
                     self.checked_declaration_refusal(&body.function.body)
                 }
