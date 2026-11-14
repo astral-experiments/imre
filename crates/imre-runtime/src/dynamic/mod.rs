@@ -2944,9 +2944,26 @@ impl Context {
         Ok(index.map(|index| self.stored_entries(dict)[index].1))
     }
 
+    /// Class bodies and explicit globals use Python subscription on dict subclasses.
+    fn lookup_mapping_name(&mut self, mapping: Id, name: &str) -> Result<Option<Id>> {
+        if matches!(self.heap.get(mapping), Value::Dict(_)) {
+            return self.lookup_dict_name(mapping, name);
+        }
+        match self.load_exec_name(mapping, name) {
+            Ok(value) => Ok(Some(value)),
+            Err(error) if self.is_builtin_error(&error, "KeyError") => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
     fn lookup_scope_name(&mut self, scope: Id, name: &str) -> Result<Option<Id>> {
-        if let Some(dict) = self.scope_data(scope).binding_namespace(name) {
-            return self.lookup_dict_name(dict, name);
+        let frame = self.scope_data(scope);
+        if let Some(dict) = frame.binding_namespace(name) {
+            return if frame.in_class_body {
+                self.lookup_mapping_name(dict, name)
+            } else {
+                self.lookup_dict_name(dict, name)
+            };
         }
         Ok(self.scope_name(scope, name))
     }
@@ -2989,11 +3006,7 @@ impl Context {
             if let Some(globals) = s.exec_globals {
                 return self.source_global(globals, name);
             }
-            let binding = match s.binding_namespace(name) {
-                Some(dict) => self.lookup_dict_name(dict, name)?,
-                None => self.frame_binding(s, name),
-            };
-            if let Some(id) = binding {
+            if let Some(id) = self.lookup_scope_name(scope, name)? {
                 return Ok(id);
             }
             let s = self.scope_data(scope);
