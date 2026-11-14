@@ -617,6 +617,9 @@ impl Context {
             ("list", Value::List(_)) | ("tuple", Value::Tuple(_) | Value::NamedTuple { .. }) => {
                 true
             }
+            (_, cursor @ (Value::Iterator { .. } | Value::StructUnpackIterator { .. })) => {
+                cursor.intrinsic_type_name() == Some(owner)
+            }
             (_, Value::DictView { .. }) => {
                 Self::dict_view_owner(self.type_name(object)) == Some(owner)
             }
@@ -3454,6 +3457,7 @@ impl Context {
                 "index",
             ],
             "set" | "frozenset" => builtins::set_methods(name),
+            "list_iterator" => builtins::ITERATOR_METHODS_WITH_HINT,
             "set_iterator" => builtins::SET_ITERATOR_METHODS,
             class if DictIterator::builtin_classes().any(|owner| owner == class) => {
                 DictIterator::methods(class)

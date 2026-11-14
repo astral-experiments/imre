@@ -5903,7 +5903,10 @@ impl Context {
                 }
             }
             Value::Native(ref class)
-                if (class == "set_iterator" && builtins::SET_ITERATOR_METHODS.contains(&name))
+                if (class == "list_iterator"
+                    && builtins::ITERATOR_METHODS_WITH_HINT.contains(&name))
+                    || (class == "set_iterator"
+                        && builtins::SET_ITERATOR_METHODS.contains(&name))
                     || (DictIterator::methods(class).contains(&name)
                         && DictIterator::class(class).is_some()) =>
             {
@@ -5946,11 +5949,7 @@ impl Context {
             Value::Native(ref class)
                 if matches!(
                     class.as_str(),
-                    "list_iterator"
-                        | "tuple_iterator"
-                        | "str_ascii_iterator"
-                        | "str_iterator"
-                        | "enumerate"
+                    "tuple_iterator" | "str_ascii_iterator" | "str_iterator" | "enumerate"
                 ) && matches!(name, "__iter__" | "__next__") =>
             {
                 return Ok(self.builtin(&format!("{class}.{name}")));
@@ -8852,7 +8851,7 @@ impl Context {
             }
             Value::Native(ref name)
                 if let Some((value::STRUCT_UNPACK_ITERATOR, method)) = name.rsplit_once('.')
-                    && builtins::UNPACK_ITERATOR_METHODS.contains(&method) =>
+                    && builtins::ITERATOR_METHODS_WITH_HINT.contains(&method) =>
             {
                 self.iterator_method(value::STRUCT_UNPACK_ITERATOR, method, &args, &kwargs)
             }
