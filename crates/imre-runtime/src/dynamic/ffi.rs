@@ -3768,7 +3768,7 @@ impl Context {
                 .gc_schedule
                 .generation_if_due(&self.heap.gc_settings)
             {
-                let _ = self.collect_generation(generation);
+                let _ = self.collect_with_callbacks(generation);
             }
             return;
         }
@@ -4050,6 +4050,54 @@ impl Context {
         let streams = super::stdlib::io::rooted_standard_streams(self);
         self.heap
             .learn_descriptor_paths([modules, reference], streams.as_ref());
+    }
+
+    /// Notify observers around both scheduled and explicit collections, including empty passes.
+    pub(super) fn collect_with_callbacks(&mut self, generation: u8) -> Result<usize> {
+        if self.heap.gc_schedule.collecting || self.heap.full_collection_active() {
+            return Ok(0);
+        }
+        self.heap.gc_schedule.collecting = true;
+        self.invoke_gc_callbacks("start", generation, 0);
+        let result = self.collect_generation(generation);
+        if let Ok(collected) = result {
+            self.invoke_gc_callbacks("stop", generation, collected);
+        }
+        self.heap.gc_schedule.collecting = false;
+        result
+    }
+
+    fn invoke_gc_callbacks(&mut self, phase: &str, generation: u8, collected: usize) {
+        if self.heap.gc_callback(0).is_none() {
+            return;
+        }
+        let mark = self.heap.temporary_mark();
+        let phase = self.text(phase);
+        let fields = [
+            ("generation", i64::from(generation)),
+            ("collected", collected as i64),
+            ("uncollectable", 0),
+        ]
+        .map(|(key, value)| (self.heap.code_name(key), self.int(value)));
+        let info = self.dict(fields.into());
+        let mut index = 0;
+        // Python can mutate the shared info dictionary and the live list at each call.
+        while let Some(callback) = self.heap.gc_callback(index) {
+            let step = self.heap.temporary_mark();
+            self.heap.keep(callback);
+            if let Err(error) = self.call(callback, vec![phase, info], Vec::new()) {
+                super::unraisable::report(
+                    self,
+                    error,
+                    true,
+                    Some(callback),
+                    "Exception ignored while calling GC callback",
+                );
+            }
+            self.heap.release_temporaries_since(step);
+            index += 1;
+        }
+        self.heap.release_temporaries_since(mark);
     }
 
     /// Resolve weakrefs before callbacks, then recheck the original cyclic isolate.

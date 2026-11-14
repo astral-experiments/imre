@@ -151,6 +151,37 @@ def check_garbage():
         garbage.clear()
 
 
+def check_callbacks():
+    callbacks = gc.callbacks
+    events = []
+    nested = []
+
+    def observer(phase, info):
+        events.append((phase, info.copy()))
+        nested.append(gc.collect())
+        if phase == "start":
+            info["shared"] = True
+            callbacks.append(late)
+
+    def late(phase, info):
+        events.append((phase, info.get("shared", False)))
+
+    callbacks.append(observer)
+    try:
+        gc.callbacks = []
+        collected = gc.collect(2)
+        assert [phase for phase, _ in events] == ["start", "start", "stop", "stop"]
+        assert events[0][1] == {"generation": 2, "collected": 0, "uncollectable": 0}
+        assert events[1][1] is True and events[3][1] is False
+        assert events[2][1] == {"generation": 2, "collected": collected, "uncollectable": 0}
+        assert nested == [0, 0]
+    finally:
+        callbacks.remove(observer)
+        if late in callbacks:
+            callbacks.remove(late)
+        gc.callbacks = callbacks
+
+
 def current():
     check_thresholds()
     check_header_pressure()
@@ -161,6 +192,7 @@ def current():
         assert gc.isenabled() is False
         check_tracking()
         check_garbage()
+        check_callbacks()
         delayed = cycle(events)
         node = Node()
         immediate = ref(node, events.append)

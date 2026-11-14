@@ -3090,7 +3090,7 @@ pub(super) fn call(
             }
             generation as u8
         };
-        let reclaimed = ctx.collect_generation(generation)?;
+        let reclaimed = ctx.collect_with_callbacks(generation)?;
         return Ok(ctx.int(reclaimed as i64));
     }
     if name == "marshal.dumps" {

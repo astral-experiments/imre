@@ -4538,6 +4538,7 @@ impl Context {
         match name {
             "gc" if source.is_none() => {
                 self.bind(scope, "garbage", self.heap.gc_garbage);
+                self.bind(scope, "callbacks", self.heap.gc_callbacks);
                 let saveall = self.int(i64::from(gc_schedule::DEBUG_SAVEALL));
                 self.bind(scope, "DEBUG_SAVEALL", saveall);
                 let leak = self.int(i64::from(gc_schedule::DEBUG_LEAK));
