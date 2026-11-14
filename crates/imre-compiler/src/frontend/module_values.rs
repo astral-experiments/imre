@@ -16,7 +16,7 @@ pub(super) struct ModuleValues {
     /// A concrete source read supplies the registered function's ordinary Python binding.
     pub(super) missing_bindings: RefCell<std::collections::BTreeMap<usize, Diagnostic>>,
     pub(super) class_data: RefCell<class_data::Storage>,
-    definitions: RefCell<HashMap<(DefinitionId, usize), (usize, Type)>>,
+    definitions: RefCell<HashMap<(DefinitionId, usize), usize>>,
     list_origins: RefCell<HashMap<usize, DefinitionId>>,
     class_slots: RefCell<HashMap<(DefinitionId, usize), usize>>,
     pub(super) unittest_skips: RefCell<HashMap<(DefinitionId, usize), (usize, usize)>>,
@@ -164,23 +164,20 @@ impl ModuleValues {
     }
 
     /// Resolves storage only after the defining initializer has been checked.
-    fn read(
-        &self,
-        definition: DefinitionId,
-        member: usize,
-    ) -> Result<Option<(usize, Type)>, String> {
+    fn read(&self, definition: DefinitionId, member: usize) -> Result<Option<Expr>, String> {
         if let Some(wait) = self.waiting.borrow().get(&definition) {
             return Err(wait.clone());
         }
         Ok(self
-            .definitions
-            .borrow()
-            .get(&(definition, member))
-            .copied())
+            .slot(definition, member)
+            .map(|slot| self.slot_value(slot)))
     }
 
-    pub fn get(&self, definition: DefinitionId) -> Option<(usize, Type)> {
-        self.definitions.borrow().get(&(definition, 0)).copied()
+    pub(super) fn slot(&self, definition: DefinitionId, member: usize) -> Option<usize> {
+        self.definitions
+            .borrow()
+            .get(&(definition, member))
+            .copied()
     }
 
     fn insert(&self, definition: DefinitionId, ty: Type) -> usize {
@@ -194,7 +191,7 @@ impl ModuleValues {
         assert!(
             self.definitions
                 .borrow_mut()
-                .insert((definition, member), (slot, ty))
+                .insert((definition, member), slot)
                 .is_none()
         );
         slot
@@ -258,7 +255,7 @@ impl Checker<'_> {
         member: Option<usize>,
         at: &impl Ranged,
     ) -> Result<Expr, String> {
-        let (slot, ty) = self
+        let storage = self
             .globals
             .read(definition, member.unwrap_or(0))?
             .ok_or_else(|| {
@@ -268,15 +265,14 @@ impl Checker<'_> {
                     "module value is not initialized on this path",
                 )
             })?;
-        let storage = self.globals.slot_value(slot);
         if member.is_none()
-            && !matches!(ty, Type::Callable(_))
+            && !matches!(storage.ty, Type::Callable(_))
             && self.graph.modules[definition.module]
                 .rebound_values
                 .contains(&definition.statement)
         {
             return Ok(Expr {
-                ty: self.types.element(ty).expect("module cell"),
+                ty: self.types.element(storage.ty).expect("module cell"),
                 kind: ExprKind::Builtin(Builtin::ListGet(None), vec![storage, Expr::integer(0)]),
             });
         }
@@ -437,14 +433,15 @@ impl Checker<'_> {
         first: DefinitionId,
         statement: &ast::Stmt,
     ) -> Result<Statement, String> {
-        let (slot, storage) = self.globals.get(first).ok_or_else(|| {
+        let slot = self.globals.slot(first, 0).ok_or_else(|| {
             error(
                 self.source,
                 statement,
                 "module value is not initialized on this path",
             )
         })?;
-        let ty = self.types.element(storage).expect("module cell");
+        let storage = self.globals.slot_value(slot);
+        let ty = self.types.element(storage.ty).expect("module cell");
         let value = match statement {
             ast::Stmt::Assign(assign) => self.expr_expected(&assign.value, ty)?,
             _ => {
@@ -452,11 +449,7 @@ impl Checker<'_> {
                 self.coerce(value, ty, statement)?
             }
         };
-        Ok(Statement::assign_item(
-            self.globals.slot_value(slot),
-            Expr::integer(0),
-            value,
-        ))
+        Ok(Statement::assign_item(storage, Expr::integer(0), value))
     }
 
     fn module_assignment(&mut self, statement: &ast::Stmt) -> Result<Expr, String> {
@@ -771,14 +764,14 @@ impl Initialization {
                         let slot = if first == definition {
                             checker.globals.insert(first, value.ty)
                         } else {
-                            let (slot, ty) = checker.globals.get(first).ok_or_else(|| {
+                            let slot = checker.globals.slot(first, 0).ok_or_else(|| {
                                 error(
                                     checker.source,
                                     statement,
                                     "the preceding declaration is unavailable",
                                 )
                             })?;
-                            if ty != value.ty {
+                            if checker.globals.types.borrow()[slot] != value.ty {
                                 return Err(error(
                                     checker.source,
                                     statement,
@@ -881,7 +874,7 @@ impl Initialization {
                     // The binding exists even when its initializer needs Python storage.
                     // Preserve a real use-before-initialization error for unreached stores.
                     Err(error) if checker.missing_operation(&error) => {
-                        if checker.globals.get(definition).is_none() {
+                        if checker.globals.slot(definition, 0).is_none() {
                             let ty = if module.rebound_values.contains(&index) {
                                 checker.types.list(Type::PythonObject)
                             } else {
