@@ -2796,7 +2796,19 @@ impl Context {
             Value::Super { .. } => return self.super_getattribute(obj, name),
             _ => return self.default_object_attribute(obj, attr, ObjectAttribute::Get),
         };
-        let attribute = if let Some(hook) = self.class_attr(class, "__getattribute__") {
+        // Select both hooks before descriptor binding or Python key comparisons can rebind them.
+        let (mut primary, mut fallback) = (None, None);
+        let _ = self.find_in_mro(class, |base| {
+            primary = primary.or_else(|| self.own_class_attr(base, "__getattribute__"));
+            fallback = fallback.or_else(|| self.own_class_attr(base, "__getattr__"));
+            primary.zip(fallback)
+        });
+        let fallback = fallback.map(|hook| {
+            let mark = self.heap.temporary_mark();
+            self.heap.keep(hook);
+            (hook, mark)
+        });
+        let attribute = if let Some(hook) = primary {
             self.attribute_hook(hook, obj, class, attr, original)
         } else if name == "__class__"
             && attr.nonexact_key(self).is_none()
@@ -2810,15 +2822,16 @@ impl Context {
         } else {
             self.default_object_attribute(obj, attr, ObjectAttribute::Get)
         };
-        match attribute {
-            Err(error) if self.is_attribute_error(&error) => {
-                let Some(hook) = self.class_attr(class, "__getattr__") else {
-                    return Err(error);
-                };
-                self.attribute_hook(hook, obj, class, attr, original)
-            }
+        let Some((hook, mark)) = fallback else {
+            return attribute;
+        };
+        let result = match attribute {
+            Err(error) if self.is_attribute_error(&error) => self
+                .exact_type(obj)
+                .and_then(|owner| self.attribute_hook(hook, obj, owner, attr, original)),
             result => result,
-        }
+        };
+        self.release_with_result(mark, result)
     }
 
     /// Bind a context manager's special method on its type before entering the suite.
