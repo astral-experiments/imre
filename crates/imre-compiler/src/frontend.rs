@@ -8154,7 +8154,8 @@ impl<'a> Checker<'a> {
                 "local assignment requires a name",
             ));
         };
-        let value = if let Some(&slot) = self.names.get(name.id.as_str()) {
+        let existing = self.names.get(name.id.as_str()).copied();
+        let value = if let Some(slot) = existing {
             // A pulled object replaces the value in the same unannotated Python
             // binding. An empty loop leaves its previous value there.
             if value.ty == Type::PythonObject
@@ -8184,9 +8185,8 @@ impl<'a> Checker<'a> {
         } else {
             Self::inferred_stream(value)
         };
-        let fresh = !self.names.contains_key(name.id.as_str());
-        let slot = self.declare(name.id.as_str(), value.ty, target)?;
-        if fresh {
+        let slot = self.declare_binding(name.id.as_str(), value.ty, target, existing.is_some())?;
+        if existing.is_none() {
             self.remember_inferred_container(slot);
         }
         self.assigned_value(slot, &value);
