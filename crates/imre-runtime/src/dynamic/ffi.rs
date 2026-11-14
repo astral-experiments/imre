@@ -3848,7 +3848,7 @@ impl Context {
     /// elements to the stack, keeping earlier siblings alive across Python callbacks.
     pub(super) fn unwind_operands(&mut self, mark: usize) {
         if !self.heap.observes_released_roots() || self.can_skip_finalizer_sweep(mark) {
-            self.discard_truth(mark);
+            self.heap.release_temporaries_since(mark);
             return;
         }
         while self.heap.temporary_mark() > mark {
