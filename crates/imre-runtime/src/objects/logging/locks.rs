@@ -2,7 +2,7 @@
 //! Python code runs with an owner recorded, never with the Rust guard borrowed.
 
 use super::{Error, Int, Kind, Object, Result, Storage, StorageCell, finish, object};
-use crate::objects::locks::{timeout_float, timeout_int};
+use crate::objects::locks::{WaitPhase, timeout_float, timeout_int};
 use std::sync::{Arc, Condvar, Mutex};
 #[cfg(test)]
 use std::thread;
@@ -39,20 +39,33 @@ fn owner_ident() -> usize {
 impl HandlerLock {
     /// An owner may acquire recursively; other callers wait for the final release.
     pub(crate) fn acquire(&self, blocking: bool, timeout: Option<Duration>) -> Result<bool> {
+        Ok(self.acquire_slice(blocking, timeout, WaitPhase::Initial))
+    }
+
+    pub(crate) fn acquire_slice(
+        &self,
+        blocking: bool,
+        timeout: Option<Duration>,
+        phase: WaitPhase,
+    ) -> bool {
         let id = owner_ident();
         let mut state = self.state.lock().unwrap();
-        if let Some((thread, depth)) = state.owner.as_mut()
+        if phase == WaitPhase::Initial
+            && let Some((thread, depth)) = state.owner.as_mut()
             && *thread == id
         {
             // CPython's unsigned recursion counter also wraps after a forged saved count.
             *depth = depth.wrapping_add(1);
-            return Ok(true);
+            return true;
         }
-        if state.owner.is_some() {
+        if state.owner.is_some() || (phase == WaitPhase::Parked && !state.parked) {
             if !blocking || timeout == Some(Duration::ZERO) {
-                return Ok(false);
+                return false;
             }
-            state.parked = true;
+            // A polling timeout does not re-enroll a waiter after _at_fork_reinit.
+            if phase != WaitPhase::Parked {
+                state.parked = true;
+            }
             let must_wait = |s: &mut State| s.owner.is_some() || !s.parked;
             state = if let Some(timeout) = timeout {
                 let (state, timed) = self
@@ -60,7 +73,7 @@ impl HandlerLock {
                     .wait_timeout_while(state, timeout, must_wait)
                     .unwrap();
                 if timed.timed_out() {
-                    return Ok(false);
+                    return false;
                 }
                 state
             } else {
@@ -68,7 +81,7 @@ impl HandlerLock {
             };
         }
         state.owner = Some((id, 1));
-        Ok(true)
+        true
     }
 
     /// Wake a waiting thread only after the matching outer release.
@@ -379,6 +392,23 @@ mod tests {
             assert!(lock.release().is_ok());
             assert_eq!(waiter.join().unwrap(), Some(false));
         });
+    }
+
+    #[test]
+    fn polling_preserves_waiter_enrollment_and_interrupts_do_not_recurse() {
+        let mut lock = Arc::new(HandlerLock::default());
+        lock.acquire_restore(1, !owner_ident());
+        let slice = Some(Duration::from_millis(1));
+        assert!(!lock.acquire_slice(true, slice, WaitPhase::Initial));
+        HandlerLock::at_fork_reinit(&mut lock);
+        assert!(!lock.acquire_slice(true, slice, WaitPhase::Parked));
+
+        // A returning signal handler restarts the underlying mutex acquisition.
+        assert!(lock.acquire_slice(true, slice, WaitPhase::Interrupted));
+        assert!(!lock.acquire_slice(true, slice, WaitPhase::Interrupted));
+        assert_eq!(lock.depth(), 1);
+        assert!(lock.release().is_ok());
+        assert!(lock.acquire_slice(true, Some(Duration::ZERO), WaitPhase::Parked));
     }
 
     #[test]

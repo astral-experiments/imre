@@ -1,7 +1,8 @@
 //! Boxed access to the primitive shared by threading.Lock and _thread.LockType.
 use super::builtins::{bind_method_arguments, boolean};
 use super::{Context, Error, Id, NONE, Result, Value};
-use crate::objects::locks::{PrimitiveLock, timeout_float, timeout_int};
+use crate::objects::locks::{PrimitiveLock, WaitPhase, timeout_float, timeout_int};
+use crate::objects::logging::HandlerLock;
 use crate::objects::time::Deadline;
 use std::sync::Arc;
 use std::time::Duration;
@@ -42,7 +43,7 @@ pub(super) fn construct(
     Ok(ctx.alloc(Value::PrimitiveLock(Default::default())))
 }
 
-pub(super) fn acquire_args(
+fn acquire_args(
     ctx: &mut Context,
     args: &[Id],
     kwargs: &[(String, Id)],
@@ -94,11 +95,16 @@ fn receiver_args<'a, 'b>(
     Ok((id, lock, args))
 }
 
-/// The native wait owns its receiver after Python argument conversion has finished.
+/// The registered caller roots the physical receiver through the wait.
 pub(super) struct Acquire {
-    lock: Arc<PrimitiveLock>,
+    receiver: Id,
     blocking: bool,
     timeout: Option<Duration>,
+}
+
+enum Lock {
+    Primitive(Arc<PrimitiveLock>),
+    Reentrant(Arc<HandlerLock>),
 }
 
 pub(super) enum NativeWait {
@@ -113,7 +119,7 @@ impl NativeWait {
     pub(super) unsafe fn run(
         self,
         _context: *mut Context,
-        wait: impl Fn(Option<Duration>) -> bool,
+        mut wait: impl FnMut(Option<Duration>, WaitPhase) -> bool,
     ) -> Result<bool> {
         #[cfg(unix)]
         if crate::signals::is_main() {
@@ -122,10 +128,11 @@ impl NativeWait {
                 Self::Join(deadline) => deadline,
             };
             let interval = Duration::from_millis(50);
+            let mut phase = WaitPhase::Initial;
             loop {
                 let remaining = deadline.map(Deadline::remaining);
                 let slice = remaining.map_or(interval, |left| left.min(interval));
-                if wait(Some(slice)) {
+                if wait(Some(slice), phase) {
                     return Ok(true);
                 }
                 // An expired join returns immediately. A lock wait interrupted during
@@ -140,65 +147,93 @@ impl NativeWait {
                 {
                     // SAFETY: the wait released its native locks before returning to this frame.
                     unsafe { Context::dispatch_pending_calls(_context)? };
+                    phase = WaitPhase::Interrupted;
                     continue;
                 }
                 if matches!(self, Self::Acquire(_)) && remaining == Some(slice) {
                     return Ok(false);
                 }
+                phase = WaitPhase::Parked;
             }
         }
-        Ok(wait(match self {
-            Self::Acquire(timeout) => timeout,
-            Self::Join(deadline) => deadline.map(Deadline::remaining),
-        }))
+        Ok(wait(
+            match self {
+                Self::Acquire(timeout) => timeout,
+                Self::Join(deadline) => deadline.map(Deadline::remaining),
+            },
+            WaitPhase::Initial,
+        ))
+    }
+}
+
+impl Lock {
+    fn backing(ctx: &Context, receiver: Id) -> Self {
+        match ctx.heap.get(receiver) {
+            Value::PrimitiveLock(lock) => Self::Primitive(Arc::clone(lock)),
+            Value::HandlerLock(lock) => Self::Reentrant(Arc::clone(lock)),
+            _ => unreachable!("lock receiver checked before conversion"),
+        }
+    }
+
+    fn acquire(&self, blocking: bool, timeout: Option<Duration>, phase: WaitPhase) -> bool {
+        match self {
+            Self::Primitive(lock) => lock.acquire(blocking, timeout),
+            Self::Reentrant(lock) => lock.acquire_slice(blocking, timeout, phase),
+        }
     }
 }
 
 impl Acquire {
-    /// An already selected lock.acquire() with no Python arguments.
-    pub(super) fn blocking(lock: &Arc<PrimitiveLock>) -> Self {
-        Self {
-            lock: Arc::clone(lock),
-            blocking: true,
-            timeout: None,
-        }
-    }
-
     pub(super) fn prepare(
         ctx: &mut Context,
         name: &str,
         args: &[Id],
         kwargs: &[(String, Id)],
     ) -> Result<Self> {
-        let (id, lock, args) = receiver_args(ctx, name, args)?;
-        if args.is_empty() && kwargs.is_empty() {
-            return Ok(Self::blocking(lock));
-        }
-        let (blocking, timeout) = acquire_args(ctx, args, kwargs)?;
-        // Conversion may replace this lock's native backing in a forked child.
-        let Value::PrimitiveLock(lock) = ctx.heap.get(id) else {
-            unreachable!("lock receiver checked above");
+        let (receiver, _, args) = receiver_args(ctx, name, args)?;
+        Self::with_receiver(ctx, receiver, args, kwargs)
+    }
+
+    pub(super) fn with_receiver(
+        ctx: &mut Context,
+        receiver: Id,
+        args: &[Id],
+        kwargs: &[(String, Id)],
+    ) -> Result<Self> {
+        let (blocking, timeout) = if args.is_empty() && kwargs.is_empty() {
+            (true, None)
+        } else {
+            acquire_args(ctx, args, kwargs)?
         };
         Ok(Self {
-            lock: Arc::clone(lock),
+            receiver,
             blocking,
             timeout,
         })
     }
 
-    pub(super) fn run(self) -> Id {
-        boolean(self.lock.acquire(self.blocking, self.timeout))
-    }
-
     /// # Safety
-    /// The interrupted caller and its Python frame belong to this thread throughout the wait.
-    pub(super) unsafe fn run_registered(self, _context: *mut Context) -> Result<Id> {
+    /// The interrupted caller roots the selected receiver through the call.
+    pub(super) unsafe fn run_registered(self, context: *mut Context) -> Result<Id> {
+        // SAFETY: conversion has finished. Only the native backing crosses a blocking wait.
+        let backing = || Lock::backing(unsafe { &*context }, self.receiver);
+        let mut lock = backing();
         if !self.blocking {
-            return Ok(self.run());
+            return Ok(boolean(lock.acquire(
+                self.blocking,
+                self.timeout,
+                WaitPhase::Initial,
+            )));
         }
-        // SAFETY: the caller owns its frame and the lock releases its mutex after each wait.
+        // SAFETY: a Python handler returns to the same caller frame before the next probe.
         unsafe {
-            NativeWait::Acquire(self.timeout).run(_context, |limit| self.lock.acquire(true, limit))
+            NativeWait::Acquire(self.timeout).run(context, |limit, phase| {
+                if phase == WaitPhase::Interrupted {
+                    // A returning handler can resume in a forked child with a reset backing.
+                    lock = backing();
+                }
+                lock.acquire(true, limit, phase)
+            })
         }
         .map(boolean)
     }

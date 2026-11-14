@@ -156,6 +156,16 @@ impl Restore {
     }
 }
 
+pub(super) fn prepare_acquire(
+    ctx: &mut Context,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<super::thread_lock::Acquire> {
+    let (receiver, args) = receiver_args(ctx, name, args)?;
+    super::thread_lock::Acquire::with_receiver(ctx, receiver, args, kwargs)
+}
+
 pub(super) fn method(
     ctx: &mut Context,
     name: &str,
@@ -165,11 +175,12 @@ pub(super) fn method(
     if name == "_acquire_restore" {
         return Ok(Restore::prepare(ctx, args, kwargs)?.run());
     }
-    let (receiver, args) = receiver_args(ctx, name, args)?;
     if matches!(name, "acquire" | "__enter__") {
-        let (blocking, timeout) = super::thread_lock::acquire_args(ctx, args, kwargs)?;
-        return Ok(boolean(backing(ctx, receiver).acquire(blocking, timeout)?));
+        let wait = prepare_acquire(ctx, name, args, kwargs)?;
+        // SAFETY: conversion returned to the owner of the interrupted frame.
+        return unsafe { wait.run_registered(ctx) };
     }
+    let (receiver, args) = receiver_args(ctx, name, args)?;
     if !kwargs.is_empty() {
         let label = if name == "__exit__" {
             name.to_owned()

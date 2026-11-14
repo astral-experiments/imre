@@ -232,7 +232,7 @@ fn native_start_and_join_publish_the_worker_lifetime() {
         let (ident, native_id) = launch(
             &mut ctx,
             Operation::Acquire {
-                wait: Acquire::blocking(lock),
+                wait: Arc::clone(lock),
                 release: None,
             },
             registered(&handle, false, owner),
@@ -284,7 +284,7 @@ fn worker_waits_for_the_creator_to_publish_its_receiver() {
         let request = super::Start::new(
             &ctx,
             Operation::Acquire {
-                wait: Acquire::blocking(&body),
+                wait: Arc::clone(&body),
                 release: Some(prefix.clone()),
             },
             registered(&handle, false, owner),
@@ -333,7 +333,7 @@ fn failed_startup_release_skips_the_blocking_acquire() {
     let error = launch(
         &mut ctx,
         Operation::Acquire {
-            wait: Acquire::blocking(&body),
+            wait: Arc::clone(&body),
             release: Some(Arc::default()),
         },
         registered(&handle, false, owner),
@@ -416,7 +416,7 @@ fn joined_and_detached_operands_are_released_at_their_own_checkpoints() {
         let start = prepare_detached(
             &mut ctx,
             Operation::Acquire {
-                wait: Acquire::blocking(gate),
+                wait: Arc::clone(gate),
                 release: None,
             },
             NONE,
@@ -548,7 +548,7 @@ fn shutdown_joins_non_daemon_workers_and_leaves_daemon_workers_running() {
         launch(
             &mut ctx,
             Operation::Acquire {
-                wait: Acquire::blocking(lock),
+                wait: Arc::clone(lock),
                 release: None,
             },
             registered(&daemon, true, daemon_owner),
@@ -583,7 +583,7 @@ fn detached_handle_keeps_the_non_daemon_worker_registered_until_exit() {
         let (ident, _) = launch(
             &mut ctx,
             Operation::Acquire {
-                wait: Acquire::blocking(gate),
+                wait: Arc::clone(gate),
                 release: None,
             },
             registered(&handle, false, owner),
