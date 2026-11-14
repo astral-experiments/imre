@@ -510,10 +510,7 @@ where
                 return;
             }
             ast::Stmt::ClassDef(class) => {
-                let start = class
-                    .decorator_list
-                    .first()
-                    .map_or(class.start(), Ranged::start);
+                let start = classes::site(class);
                 let enclosing_class = match self.scope {
                     Scope::Class(site) => Some(site),
                     _ => None,
@@ -557,12 +554,13 @@ where
             _ => {}
         }
         visitor::walk_stmt(self, stmt);
-        if let ast::Stmt::ClassDef(class) = stmt
-            && self.yields
-            && !parent_yields
-        {
-            self.yields = imre_ast::class_definition_expressions(class)
-                .any(imre_ast::code_flags::yields_in_expression);
+        if let ast::Stmt::ClassDef(class) = stmt {
+            // Methods and aliases need the bindings on entry. Nested class reads are ready on exit.
+            class_metadata::capture(class, strings, &mut self.scopes.classes);
+            if self.yields && !parent_yields {
+                self.yields = imre_ast::class_definition_expressions(class)
+                    .any(imre_ast::code_flags::yields_in_expression);
+            }
         }
     }
 

@@ -2,9 +2,10 @@
 use std::collections::BTreeSet;
 
 use ruff_python_ast as ast;
+use ruff_text_size::{Ranged, TextSize};
 use serde_json::{Value, json};
 
-use super::{ClassBindings, ClosureNames, FunctionScope, class_metadata};
+use super::{ClassBindings, ClosureNames, FunctionScope};
 
 pub(crate) struct ClassScope {
     pub(crate) enclosing_class: Option<ruff_text_size::TextSize>,
@@ -15,6 +16,13 @@ pub(crate) struct ClassScope {
     pub(crate) needs_dict_cell: bool,
     pub(crate) needs_conditional_cell: bool,
     pub(crate) static_attributes: BTreeSet<String>,
+}
+
+pub(super) fn site(class: &ast::StmtClassDef) -> TextSize {
+    class
+        .decorator_list
+        .first()
+        .map_or(class.start(), Ranged::start)
 }
 
 impl ClassScope {
@@ -36,9 +44,7 @@ impl ClassScope {
     ) -> Self {
         let body = &class.body;
         let string_annotations = names.string_annotations;
-        let mut declarations = ClosureNames::class_declarations(body);
-        let (frame_reads, method_reads) =
-            class_metadata::capture(&mut declarations, class, string_annotations);
+        let declarations = ClosureNames::class_declarations(body);
         let (needs_class_cell, needs_dict_cell, needs_conditional_cell) =
             imre_ast::class_cell::required_with_conditional(body, string_annotations);
         Self {
@@ -47,17 +53,14 @@ impl ClassScope {
                 locals: declarations.locals,
                 globals: declarations.globals,
             },
-            namespace: FunctionScope::new(
-                ClosureNames {
+            namespace: FunctionScope {
+                names: ClosureNames {
                     nonlocals: declarations.nonlocals,
-                    incomplete: method_reads.is_none(),
-                    reads: method_reads.unwrap_or_default(),
                     ..ClosureNames::default()
                 },
-                None,
-                false,
-            ),
-            frame_reads,
+                captures_class: false,
+            },
+            frame_reads: BTreeSet::new(),
             needs_class_cell,
             needs_dict_cell,
             needs_conditional_cell,

@@ -1,42 +1,57 @@
 //! Class bodies can store their implicit metadata in a cell from an enclosing function.
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use ruff_python_ast as ast;
 use ruff_python_ast::visitor::{self, Visitor};
+use ruff_text_size::TextSize;
 
-use super::{ClassBindings, ClosureNames, FunctionScope};
+use super::{ClassBindings, ClosureNames, FunctionScope, classes};
 
 const GENERATED: [&str; 3] = ["__module__", "__qualname__", "__doc__"];
 
 /// Collect class frame reads and the implicit metadata stores resolved as nonlocals.
 pub(super) fn capture(
-    bindings: &mut ClosureNames,
     class: &ast::StmtClassDef,
     string_annotations: bool,
-) -> (BTreeSet<String>, Option<BTreeSet<String>>) {
+    classes: &mut HashMap<TextSize, classes::ClassScope>,
+) {
     let mut uses = Uses::new(string_annotations);
-    uses.visit_body(&class.body);
-    let method_reads = (class.type_params.is_none()
+    BodyUses {
+        uses: &mut uses,
+        classes,
+    }
+    .visit_body(&class.body);
+    let scope = classes
+        .get_mut(&classes::site(class))
+        .expect("class bindings on entry");
+    let names = &mut scope.namespace.names;
+    if class.type_params.is_none()
         && class
             .body
             .iter()
-            .all(|stmt| matches!(stmt, ast::Stmt::Pass(_) | ast::Stmt::FunctionDef(_))))
-    .then(|| uses.direct.union(&uses.nested).cloned().collect());
+            .all(|stmt| matches!(stmt, ast::Stmt::Pass(_) | ast::Stmt::FunctionDef(_)))
+    {
+        names.reads = uses.direct.union(&uses.nested).cloned().collect();
+    } else {
+        names.incomplete = true;
+    }
     for name in GENERATED {
         if (uses.direct.contains(name) || uses.nested.contains(name))
-            && !bindings.locals.contains(name)
-            && !bindings.globals.contains(name)
+            && !scope.bindings.locals.contains(name)
+            && !scope.bindings.globals.contains(name)
         {
-            bindings.nonlocals.insert(name.to_owned());
+            names.nonlocals.insert(name.to_owned());
         }
     }
     // Class bindings shadow direct reads; functions defined in the body skip its namespace.
-    uses.direct
-        .retain(|name| !bindings.locals.contains(name) && !bindings.globals.contains(name));
+    uses.direct.retain(|name| {
+        !scope.bindings.locals.contains(name) && !scope.bindings.globals.contains(name)
+    });
     uses.direct.append(&mut uses.nested);
-    uses.direct.extend(bindings.nonlocals.iter().cloned());
-    (uses.direct, method_reads)
+    uses.direct.extend(names.nonlocals.iter().cloned());
+    scope.frame_reads = uses.direct;
+    names.finish_scope();
 }
 
 /// Reads in a nested lambda or comprehension bypass the enclosing class's namespace.
@@ -153,19 +168,14 @@ impl Uses {
         }
     }
 
-    /// A function hides its own bindings; a class namespace does not enclose the next method.
+    /// A function hides its own bindings from its enclosing scope.
     fn child(
         &mut self,
         mut child: Self,
         params: Option<&ast::Parameters>,
-        class: bool,
         is_bound: impl Fn(&str) -> bool,
     ) {
-        if class {
-            self.nested.append(&mut child.nested);
-        } else {
-            child.direct.append(&mut child.nested);
-        }
+        child.direct.append(&mut child.nested);
         for name in child.direct {
             if !is_bound(&name)
                 && !params
@@ -174,17 +184,6 @@ impl Uses {
                 self.nested.insert(name);
             }
         }
-    }
-
-    fn suite(&mut self, body: &[ast::Stmt], params: Option<&ast::Parameters>, class: bool) {
-        let mut bounds = ClosureNames::default();
-        bounds.visit_body(body);
-        let mut child = self.child_scope();
-        child.visit_body(body);
-        self.child(child, params, class, |name| {
-            bounds.globals.contains(name) || bounds.locals.contains(name)
-        });
-        self.nested.extend(bounds.nonlocals);
     }
 
     fn comprehension(&mut self, plan: imre_ast::comprehension::Plan<'_>) {
@@ -212,11 +211,24 @@ impl Uses {
             self.nested.extend(child.walrus.iter().cloned());
         }
         self.walrus.append(&mut child.walrus);
-        self.child(child, None, false, |name| targets.contains(name));
+        self.child(child, None, |name| targets.contains(name));
     }
 }
 
-impl<'a> Visitor<'a> for Uses {
+struct BodyUses<'s> {
+    uses: &'s mut Uses,
+    classes: &'s HashMap<TextSize, classes::ClassScope>,
+}
+
+impl<'a> Visitor<'a> for BodyUses<'_> {
+    fn visit_expr(&mut self, expr: &'a ast::Expr) {
+        self.uses.visit_expr(expr);
+    }
+
+    fn visit_annotation(&mut self, expr: &'a ast::Expr) {
+        self.uses.visit_annotation(expr);
+    }
+
     fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
         match stmt {
             ast::Stmt::FunctionDef(f) => {
@@ -230,7 +242,18 @@ impl<'a> Visitor<'a> for Uses {
                 if let Some(result) = &f.returns {
                     self.visit_annotation(result);
                 }
-                self.suite(&f.body, Some(&f.parameters), false);
+                let mut bounds = ClosureNames::default();
+                bounds.visit_body(&f.body);
+                let mut child = self.uses.child_scope();
+                BodyUses {
+                    uses: &mut child,
+                    classes: self.classes,
+                }
+                .visit_body(&f.body);
+                self.uses.child(child, Some(&f.parameters), |name| {
+                    bounds.globals.contains(name) || bounds.locals.contains(name)
+                });
+                self.uses.nested.extend(bounds.nonlocals);
             }
             ast::Stmt::ClassDef(c) => {
                 for decorator in &c.decorator_list {
@@ -242,12 +265,16 @@ impl<'a> Visitor<'a> for Uses {
                 if let Some(args) = &c.arguments {
                     self.visit_arguments(args);
                 }
-                self.suite(&c.body, None, true);
+                self.uses
+                    .nested
+                    .extend(self.classes[&classes::site(c)].frame_reads.iter().cloned());
             }
             _ => visitor::walk_stmt(self, stmt),
         }
     }
+}
 
+impl<'a> Visitor<'a> for Uses {
     fn visit_expr(&mut self, expr: &'a ast::Expr) {
         match expr {
             ast::Expr::Name(n) if n.ctx == ast::ExprContext::Load => {
@@ -270,9 +297,7 @@ impl<'a> Visitor<'a> for Uses {
                 let mut child = self.child_scope();
                 child.visit_expr(&f.body);
                 let locals = std::mem::take(&mut child.walrus);
-                self.child(child, f.parameters.as_deref(), false, |name| {
-                    locals.contains(name)
-                });
+                self.child(child, f.parameters.as_deref(), |name| locals.contains(name));
             }
             expr if let Some(plan) = imre_ast::comprehension::Plan::from_expr(expr) => {
                 self.comprehension(plan);
