@@ -71,3 +71,30 @@ def current():
         )
 
     print("restored", enclosing())
+
+    class Method:
+        @property
+        def K(self):
+            caller = sys._getframe(1)
+            positions = inspect.getframeinfo(caller, context=0).positions
+            print("lookup", caller.f_lineno, tuple(positions))
+            return position
+
+        # Each three-byte Roman numeral normalizes to four letters.
+        ⅷⅷⅷⅷⅷⅷⅷⅷⅷⅷⅷⅷⅷⅷⅷⅷ = K
+
+    def continued(receiver):
+        return lambda where=(
+            receiver
+            .K()
+        ): where
+
+    def expanded(receiver):
+        return (
+            receiver
+            .ⅷⅷⅷⅷⅷⅷⅷⅷⅷⅷⅷⅷⅷⅷⅷⅷ(
+            )
+        )
+
+    print("method", continued(Method())())
+    print("no call columns", expanded(Method()))

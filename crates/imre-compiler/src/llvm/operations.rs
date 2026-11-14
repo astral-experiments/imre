@@ -345,20 +345,27 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         } else {
             frame.evaluate_handle(target)
         };
-        let (callable, receiver, end) = match &call.target {
-            RegisteredCallTarget::Callable { end, .. } => (target, None, *end),
+        let (callable, receiver, range, end) = match &call.target {
+            RegisteredCallTarget::Callable { end, .. } => (target, None, Some(call.range), *end),
             RegisteredCallTarget::Method {
-                name, attribute, ..
+                name,
+                attribute,
+                name_start,
             } => {
                 let direct = matches!(call.arguments, RegisteredArguments::Positional);
-                let (callable, bound) = frame.call_method_target(&target, name, *attribute, direct);
+                let (lookup, range) = frame
+                    .positions
+                    .method_ranges(*attribute, *name_start, name, call.range)
+                    .unzip();
+                let (callable, bound) =
+                    frame.call_method_target(&target, name, lookup, attribute.end(), direct);
                 next = frame.keep_operands(&next, &callable, bound.as_deref().unwrap_or("0"));
                 if bound.is_some() && !args.is_empty() {
                     // keep_operands returns the boundary above the callable. A direct
                     // lookup may have placed its receiver above that boundary as well.
                     next = frame.temporary_mark();
                 }
-                (callable, bound, attribute.end())
+                (callable, bound, range, attribute.end())
             }
         };
         let operands = match &call.arguments {
@@ -396,14 +403,8 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             }
         };
         let invoke = |frame: &mut CheckedFrame<'_, '_, '_>| {
-            frame.positioned_call(
-                &callable,
-                operands,
-                &mark,
-                call.range,
-                end,
-                scope.as_deref(),
-            )
+            let span = frame.position_for_call(range, end, call.range.end());
+            frame.call_at(&callable, operands, &mark, span, scope.as_deref())
         };
         let result = if packed {
             frame.finish_unwind(edge, |frame| frame.release_owned_operands(&mark));

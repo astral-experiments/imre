@@ -2426,7 +2426,7 @@ pub(super) unsafe extern "C" fn imre_dyn_op_at(
         finish_operand_position(
             ctx,
             &mut result,
-            uniform_operand.then_some(value::TracebackAnchor::Uniform),
+            (uniform_operand || op == "method").then_some(value::TracebackAnchor::Uniform),
         );
     }
     if reraise && let Err(error) = result {
@@ -2627,7 +2627,7 @@ fn method_target(
         *bound_receiver = receiver;
         callable
     });
-    finish_operand_position(ctx, &mut result, None);
+    finish_operand_position(ctx, &mut result, Some(value::TracebackAnchor::Uniform));
     finish(ctx, result)
 }
 

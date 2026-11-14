@@ -752,7 +752,8 @@ impl<'a> PreparedBody<'a> {
             }
             _ => file.to_owned(),
         };
-        let positions = SourcePositions::new(&self.source.path, &self.source.text, &code_file);
+        let positions = SourcePositions::new(&self.source.path, &self.source.text, &code_file)
+            .with_names(&self.source.private_names);
         let location = SourceMap {
             info: &self.source,
             callable_code: Default::default(),
@@ -1129,7 +1130,8 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
                     callable_code: Default::default(),
                     exec_code: Default::default(),
                     unit: self.source.unit,
-                    positions: &SourcePositions::new(&body.scope.path, text, &file),
+                    positions: &SourcePositions::new(&body.scope.path, text, &file)
+                        .with_names(&body.scope.private_names),
                 };
                 location.code(
                     self.frame.output,

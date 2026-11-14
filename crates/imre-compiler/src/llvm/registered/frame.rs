@@ -21,6 +21,7 @@ use std::path::Path;
 /// Python's emitted filename may differ from the source path used in build diagnostics.
 pub(crate) struct SourcePositions<'a> {
     source: SourceFile<'a>,
+    names: Option<&'a imre_ast::Names>,
     pub(crate) file: &'a str,
 }
 
@@ -28,8 +29,42 @@ impl<'a> SourcePositions<'a> {
     pub(crate) fn new(path: &'a Path, text: &'a str, file: &'a str) -> Self {
         Self {
             source: SourceFile::new(path, text),
+            names: None,
             file,
         }
+    }
+
+    pub(crate) fn with_names(mut self, names: &'a imre_ast::Names) -> Self {
+        self.names = Some(names);
+        self
+    }
+
+    /// CPython counts back from the end of a continued method name by the number
+    /// of Unicode characters in its normalized, unmangled spelling. It omits
+    /// the columns when this width would cross the start of the line.
+    pub(in crate::llvm) fn method_ranges(
+        &self,
+        attribute: TextRange,
+        name_start: TextSize,
+        binding: &str,
+        call: TextRange,
+    ) -> Option<(TextRange, TextRange)> {
+        let (_, column) = self.line_and_column(attribute.end());
+        if usize::from(attribute.len()) <= column {
+            return Some((attribute, call));
+        }
+        let name = self
+            .names
+            .map_or(binding, |names| names.source_name(name_start, binding));
+        let width = name.chars().count();
+        if width > column {
+            return None;
+        }
+        let start = attribute.end() - TextSize::new(width as u32);
+        Some((
+            TextRange::new(start, attribute.end()),
+            TextRange::new(start, call.end()),
+        ))
     }
 }
 
@@ -891,29 +926,41 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
 
     /// A live caller retains the full range even when traceback highlighting is suppressed.
     pub(crate) fn call_position(&mut self, range: TextRange) {
-        let span = self.call_position_span(range);
+        self.write_call_position(self.call_position_span(range));
+    }
+
+    /// An unrepresentable normalized column still has two source lines. CPython
+    /// represents each absent column with -1 in its instruction positions.
+    fn call_position_without_columns(&mut self, start: TextSize, end: TextSize) {
+        let start_line = self.positions.line(start);
+        let end_line = self.positions.line(end);
+        self.write_call_position([start_line, end_line, u32::MAX as usize, u32::MAX as usize]);
+    }
+
+    fn write_call_position(&mut self, span: [usize; 4]) {
         let position = self.output.position(Some(span));
         self.line(&format!(
             "call void @imre_dyn_call_position(ptr %ctx, ptr {position})"
         ));
     }
 
-    pub(crate) fn positioned_call(
+    pub(crate) fn position_for_call(
         &mut self,
-        callable: &str,
-        operands: CallArguments,
-        mark: &str,
-        range: TextRange,
+        range: Option<TextRange>,
         callee_end: TextSize,
-        scope: Option<&str>,
-    ) -> String {
-        let span = self.expression_range_span(range, callee_end, b'(');
-        self.call_position(range);
-        self.call_at(callable, operands, mark, span, scope)
+        call_end: TextSize,
+    ) -> Option<[usize; 4]> {
+        if let Some(range) = range {
+            self.call_position(range);
+            self.expression_range_span(range, callee_end, b'(')
+        } else {
+            self.call_position_without_columns(callee_end, call_end);
+            None
+        }
     }
 
     /// Pass the caller's temporary root boundary and optional traceback position.
-    fn call_at(
+    pub(crate) fn call_at(
         &mut self,
         callable: &str,
         operands: CallArguments,
@@ -1795,17 +1842,20 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
         &mut self,
         receiver: &str,
         name: &str,
-        attribute: TextRange,
+        attribute: Option<TextRange>,
+        name_end: TextSize,
         direct: bool,
     ) -> (String, Option<String>) {
-        if let SourcePosition::Expression(active) = self.position {
-            let lookup = TextRange::new(active.start().max(attribute.start()), attribute.end());
-            self.with_source_range(lookup, |frame| {
-                frame.method_target(receiver, name, lookup, direct)
-            })
+        if let Some(range) = attribute {
+            let start = match self.position {
+                SourcePosition::Expression(active) => active.start().max(range.start()),
+                _ => range.start(),
+            };
+            self.call_position(TextRange::new(start, range.end()));
         } else {
-            self.method_target(receiver, name, attribute, direct)
+            self.call_position_without_columns(name_end, name_end);
         }
+        self.method_target(receiver, name, direct)
     }
 
     /// Mutate a descriptor at the original target, using the same live receiver
@@ -2025,10 +2075,8 @@ impl RegisteredFrame<'_, '_> {
         &mut self,
         receiver: &str,
         name: &str,
-        range: ruff_text_size::TextRange,
         direct: bool,
     ) -> (String, Option<String>) {
-        self.attribute_position(range);
         let lookup = if direct && name == "get" {
             Some(format!(
                 "call i64 @imre_dyn_dict_get_target(ptr %ctx, i64 {receiver}, ptr %live)"
