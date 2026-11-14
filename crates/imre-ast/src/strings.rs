@@ -307,22 +307,7 @@ pub fn dedent(text: &str) -> CompactString {
 /// CPython expands tabs at eight-character stops, then removes the common
 /// margin after the first line. Blank lines and the final newline survive.
 pub fn clean_doc(doc: &str) -> String {
-    let mut expanded = String::with_capacity(doc.len());
-    let mut column = 0;
-    for c in doc.chars() {
-        if c == '\t' {
-            let width = 8 - column % 8;
-            expanded.extend(std::iter::repeat_n(' ', width));
-            column += width;
-        } else {
-            expanded.push(c);
-            column = if matches!(c, '\r' | '\n') {
-                0
-            } else {
-                column + 1
-            };
-        }
-    }
+    let expanded = ruff_python_trivia::expand_tabs(doc);
     let mut lines = expanded.split('\n');
     let first = lines.next().unwrap_or_default().trim_start_matches(' ');
     let margin = lines
