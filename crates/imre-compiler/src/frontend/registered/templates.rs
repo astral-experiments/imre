@@ -4,9 +4,9 @@ use imre_ast::strings::interpolation_conversion;
 
 impl RegisteredSource<'_> {
     pub(crate) fn formatted_literal(self, literal: &ast::InterpolatedStringLiteralElement) -> Expr {
-        if let Some(replacements) = self.format_replacements(literal) {
+        if let Some(replacements) = self.replacements.get(&literal.range()) {
             let mut bytes = Vec::new();
-            values::push_codepoints(&mut bytes, &literal.value, Some(&replacements));
+            values::push_codepoints(&mut bytes, &literal.value, Some(replacements));
             object(Builtin::RegisteredString(bytes), vec![])
         } else {
             text(literal.value.to_string())
@@ -30,8 +30,8 @@ fn literal_points(
     literal: &ast::InterpolatedStringLiteralElement,
     buffer: &mut Vec<u8>,
 ) {
-    let replacements = source.format_replacements(literal);
-    values::push_codepoints(buffer, &literal.value, replacements.as_deref());
+    let replacements = source.replacements.get(&literal.range()).map(Vec::as_slice);
+    values::push_codepoints(buffer, &literal.value, replacements);
 }
 
 impl RegisteredSource<'_> {
