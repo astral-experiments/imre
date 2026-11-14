@@ -1081,10 +1081,9 @@ impl<'p> RegisteredFrame<'_, 'p> {
     }
 
     pub(crate) fn begin_annotations(&mut self) {
-        // The format argument belongs to this callback, even if the class also defines it.
-        let format = self.lookup("format");
+        let format = self.lookup(imre_ast::annotations::FORMAT_PARAMETER);
         self.op("annotation_format", &[&format]);
-        let (local, result) = match self.annotation_scope {
+        match self.annotation_scope {
             AnnotationScope::Class {
                 bindings,
                 conditional,
@@ -1092,28 +1091,18 @@ impl<'p> RegisteredFrame<'_, 'p> {
                 if conditional {
                     self.annotation_active = Some(self.lookup("__conditional_annotations__"));
                 }
-                let dict = self.lookup("__classdict__");
-                let local = self.op("class_annotation_locals", &[&self.scope.clone(), &dict]);
                 self.use_class_annotation_names(bindings);
-                let result = self.op("dict", &[]);
-                (local, result)
             }
-            scope => {
-                let class = match scope {
-                    AnnotationScope::Method(class) => Some(class),
-                    _ => None,
-                };
-                let result = self.op("dict", &[]);
-                let local = self.op("annotation_scope", &[&self.scope.clone()]);
-                if let Some(class) = class {
-                    self.class_locals = Some(class);
-                    self.annotation_names = Some((class, local.clone()));
-                }
-                (local, result)
+            AnnotationScope::Method(class) => {
+                self.class_locals = Some(class);
+                self.use_class_annotation_names(class);
             }
-        };
-        self.live.extend([local.clone(), result.clone()]);
-        self.scope = local;
+            AnnotationScope::Plain => {}
+        }
+        // Direct class names can consult __classdict__. Children close over the
+        // provider's call frame, including any cells owned by this invocation.
+        let result = self.op("dict", &[]);
+        self.live.push(result.clone());
         self.annotation_values = Some(result);
     }
 

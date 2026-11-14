@@ -180,10 +180,11 @@ mod tests {
             values: HashMap::new(),
             children: HashMap::new(),
         };
-        let (_, children) =
+        let (mut scopes, children) =
             super::super::function_scope::ScopeFacts::prepare(stmts, &names, |_, _| {}, |_| {});
         super::super::registered::collect_sites(
             (stmts, children),
+            &mut scopes,
             &names,
             source,
             |expr, module| {

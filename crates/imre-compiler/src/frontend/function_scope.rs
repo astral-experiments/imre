@@ -66,24 +66,29 @@ impl ClosureNames {
     }
 
     /// Propagate a completed child's free names, including its lazy annotation scope.
-    fn read_child_function(&mut self, f: &ast::StmtFunctionDef, child: ClosureNames) {
+    fn read_child_function(
+        &mut self,
+        f: &ast::StmtFunctionDef,
+        child: ClosureNames,
+        annotations: Option<&ParameterReads>,
+    ) {
         self.incomplete |= child.incomplete;
         let mut reads = child.reads;
-        let mut annotations = if self.string_annotations {
-            Vec::new()
-        } else {
-            crate::frontend::parameter_annotations(&f.parameters, f.returns.as_deref())
-        };
-        if let Some(params) = &f.type_params {
-            annotations.extend(
-                params
-                    .iter()
-                    .flat_map(imre_ast::TypeParameterField::expressions)
-                    .map(|(_, expr)| ("", expr)),
+        if let Some(annotations) = annotations {
+            reads.extend(
+                annotations
+                    .direct_reads()
+                    .chain(annotations.nested_reads())
+                    .cloned(),
             );
         }
-        reads.extend(class_metadata::annotation_reads(&annotations, None, false));
         if let Some(params) = &f.type_params {
+            let fields: Vec<_> = params
+                .iter()
+                .flat_map(imre_ast::TypeParameterField::expressions)
+                .map(|(_, expr)| ("", expr))
+                .collect();
+            reads.extend(class_metadata::annotation_reads(&fields, None, false));
             for param in params.iter() {
                 reads.remove(param.name().as_str());
             }
@@ -398,6 +403,70 @@ impl<'p> ScopeFacts<'p> {
             .map_or(def.start(), Ranged::start)]
     }
 
+    pub(in crate::frontend) fn annotation_scope(
+        &mut self,
+        def: &ast::StmtFunctionDef,
+        owners: &[&ast::Stmt],
+    ) -> FunctionScope {
+        let start = def
+            .decorator_list
+            .first()
+            .map_or(def.start(), Ranged::start);
+        let reads = self
+            .functions
+            .get_mut(&start)
+            .unwrap()
+            .annotation_reads
+            .take()
+            .unwrap_or_default();
+        let class = match owners.last() {
+            Some(ast::Stmt::ClassDef(class)) => Some(&self.classes[&classes::site(class)].bindings),
+            _ => None,
+        };
+        let parameter = |params: Option<&ast::TypeParams>, name: &str| {
+            params.is_some_and(|params| params.iter().any(|p| p.name().as_str() == name))
+        };
+        reads.provider(class, |name| {
+            if parameter(def.type_params.as_deref(), name) {
+                return true;
+            }
+            for owner in owners.iter().rev() {
+                let params = match owner {
+                    ast::Stmt::FunctionDef(f) => {
+                        let f_scope = self.function(f);
+                        if f_scope.globals.contains(name) {
+                            return false;
+                        }
+                        if f_scope
+                            .metadata
+                            .local_names()
+                            .iter()
+                            .any(|local| local.as_str() == Some(name))
+                        {
+                            return true;
+                        }
+                        f.type_params.as_deref()
+                    }
+                    ast::Stmt::ClassDef(c) => {
+                        if self.classes[&classes::site(c)]
+                            .cells
+                            .supplied_only()
+                            .any(|n| n == name)
+                        {
+                            return true;
+                        }
+                        c.type_params.as_deref()
+                    }
+                    _ => unreachable!("declaration owner"),
+                };
+                if parameter(params, name) {
+                    return true;
+                }
+            }
+            false
+        })
+    }
+
     pub(crate) fn type_alias_scope(
         &self,
         value: &ast::Expr,
@@ -547,10 +616,23 @@ impl<'a> Visitor<'a> for Collector<'_, '_, 'a> {
                     };
                 let names = std::mem::replace(&mut self.function_names, parent_names);
                 let mut lexical = FunctionScope::function(def, names, may_capture_class);
+                let annotations =
+                    crate::frontend::parameter_annotations(&def.parameters, def.returns.as_deref());
+                let reads = (!strings && !annotations.is_empty()).then(|| {
+                    Box::new(class_metadata::declaration_reads(
+                        &annotations,
+                        false,
+                        !matches!(self.scope, Scope::Class(_)),
+                    ))
+                });
                 let header =
-                    NamedFunction::prepare(def, self.names, &mut lexical, suspension_flags);
+                    NamedFunction::prepare(def, self.names, &mut lexical, suspension_flags, reads);
                 if matches!(self.scope, Scope::Function { .. }) {
-                    self.function_names.read_child_function(def, lexical.names);
+                    self.function_names.read_child_function(
+                        def,
+                        lexical.names,
+                        header.annotation_reads.as_deref(),
+                    );
                 }
                 self.scopes.functions.insert(start, header);
                 return;

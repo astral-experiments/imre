@@ -1109,30 +1109,23 @@ pub(crate) type AnnotationProvider = CheckedProvider;
 
 pub(crate) struct ParameterAnnotations {
     pub(crate) start: TextSize,
-    reads: super::function_scope::ParameterReads,
+    pub(crate) scope: super::function_scope::FunctionScope,
     pub(crate) body: AnnotationProvider,
     pub(crate) references: HashMap<String, String>,
 }
 
 impl ParameterAnnotations {
-    pub(crate) fn reads(
-        &self,
-        class: Option<&super::function_scope::ClassBindings>,
-    ) -> std::collections::BTreeSet<String> {
-        self.reads.clone().resolve(class)
-    }
-
     fn prepare(
         def: &ast::StmtFunctionDef,
         source: values::RegisteredSource<'_>,
         operand: &mut dyn FnMut(&ast::Expr, bool) -> Option<Expr>,
-        string_annotations: bool,
+        lexical: impl FnOnce() -> super::function_scope::FunctionScope,
     ) -> Option<Box<Self>> {
         let annotations = parameter_annotations(&def.parameters, def.returns.as_deref());
         if annotations.is_empty() {
             return None;
         }
-        let reads = super::function_scope::parameter_reads(&annotations, string_annotations);
+
         let mut entries = Vec::with_capacity(annotations.len());
         let mut references = HashMap::new();
         // Each annotation is evaluated in the same provider activation.
@@ -1155,7 +1148,7 @@ impl ParameterAnnotations {
         let body = DeferredAnnotation::prepare_body(entries, scope.bindings());
         Some(Box::new(Self {
             start: def.parameters.start(),
-            reads,
+            scope: lexical(),
             body,
             references,
         }))
@@ -1337,6 +1330,7 @@ pub(crate) struct RegisteredSites<'a> {
 
 pub(crate) fn registered_sites<'a, R>(
     body: (&'a [ast::Stmt], super::function_scope::FunctionChildren<'a>),
+    scopes: &mut super::function_scope::ScopeFacts<'_>,
     names: &imre_ast::Names,
     source: values::RegisteredSource<'_>,
     bundled: bool,
@@ -1346,7 +1340,7 @@ pub(crate) fn registered_sites<'a, R>(
     ) -> Option<AnnotationBody<R>>,
 ) -> (RegisteredSites<'a>, HashMap<String, AnnotationBody<R>>) {
     let mut children = HashMap::new();
-    let sites = collect_sites(body, names, source, |expr, module| {
+    let sites = collect_sites(body, scopes, names, source, |expr, module| {
         super::annotation_operands::annotation_operand(
             expr,
             module,
@@ -1362,6 +1356,7 @@ pub(crate) fn registered_sites<'a, R>(
 
 pub(super) fn collect_sites<'a>(
     (body, children): (&'a [ast::Stmt], super::function_scope::FunctionChildren<'a>),
+    scopes: &mut super::function_scope::ScopeFacts<'_>,
     names: &imre_ast::Names,
     source: values::RegisteredSource<'_>,
     mut operand: impl FnMut(&ast::Expr, bool) -> Option<Expr>,
@@ -1373,7 +1368,9 @@ pub(super) fn collect_sites<'a>(
         fields: Vec<(DeferredAnnotation, Option<usize>)>,
         conditional: bool,
     }
-    struct Collector<'s, 'a> {
+    struct Collector<'s, 'a, 'p> {
+        scopes: &'s mut super::function_scope::ScopeFacts<'p>,
+        owners: Vec<&'a ast::Stmt>,
         children: &'s [&'a ast::Stmt],
         names: &'s imre_ast::Names,
         source: values::RegisteredSource<'s>,
@@ -1383,7 +1380,7 @@ pub(super) fn collect_sites<'a>(
         scope: RegisteredScope,
         output: RegisteredSites<'a>,
     }
-    impl<'a> StatementVisitor<'a> for Collector<'_, 'a> {
+    impl<'a> StatementVisitor<'a> for Collector<'_, 'a, '_> {
         fn visit_body(&mut self, body: &'a [ast::Stmt]) {
             let outer = std::mem::replace(&mut self.class.conditional, true);
             walk_body(self, body);
@@ -1409,7 +1406,9 @@ pub(super) fn collect_sites<'a>(
                     );
                     let outer_annotations = std::mem::replace(&mut self.annotations, child);
                     let outer_fields = std::mem::take(&mut self.class);
+                    self.owners.push(stmt);
                     walk_body(self, &class.body);
+                    self.owners.pop();
                     let ClassFields {
                         mut plan, fields, ..
                     } = std::mem::replace(&mut self.class, outer_fields);
@@ -1431,7 +1430,7 @@ pub(super) fn collect_sites<'a>(
                         def,
                         self.source,
                         self.operand,
-                        self.names.string_annotations,
+                        || self.scopes.annotation_scope(def, &self.owners),
                     );
                     let parameters = def.type_params.as_deref().map_or_else(Vec::new, |params| {
                         registered_type_parameters(params, self.names, self.source)
@@ -1461,6 +1460,7 @@ pub(super) fn collect_sites<'a>(
                     let after = self
                         .children
                         .partition_point(|child| child.start() <= def.start());
+                    self.owners.push(stmt);
                     let mut children = &self.children[after..];
                     while let Some((&child, rest)) = children.split_first() {
                         if child.start() >= def.end() {
@@ -1470,6 +1470,7 @@ pub(super) fn collect_sites<'a>(
                         // The child just visited owns all declarations within its range.
                         children = &rest[rest.partition_point(|next| next.start() < child.end())..];
                     }
+                    self.owners.pop();
                     self.scope = outer;
                 }
                 ast::Stmt::AnnAssign(ann)
@@ -1543,6 +1544,8 @@ pub(super) fn collect_sites<'a>(
         }
     }
     let mut sites = Collector {
+        scopes,
+        owners: Vec::new(),
         children: &children,
         names,
         source,
@@ -4149,10 +4152,11 @@ mod tests {
     ) -> RegisteredSites<'a> {
         let default_names = imre_ast::Names::default();
         let names = source.private_names.unwrap_or(&default_names);
-        let (_, children) =
+        let (mut scopes, children) =
             super::super::function_scope::ScopeFacts::prepare(stmts, names, |_, _| {}, |_| {});
         registered_sites(
             (stmts, children),
+            &mut scopes,
             names,
             source,
             bundled,
@@ -4382,10 +4386,11 @@ mod tests {
         let mut body = module.parsed.syntax().body.clone();
         let names = imre_ast::lower(&mut body);
         let literals = values::ModuleSource::new(module);
-        let (_, children) =
+        let (mut scopes, children) =
             super::super::function_scope::ScopeFacts::prepare(&body, &names, |_, _| {}, |_| {});
         let sites = registered_sites(
             (&body, children),
+            &mut scopes,
             &names,
             literals.context(source),
             false,
@@ -4654,12 +4659,23 @@ mod tests {
         };
         let provider = site.annotations.as_ref().unwrap();
         assert_eq!(provider.start, def.parameters.start());
-        let class = crate::frontend::function_scope::ClassBindings {
-            locals: ["mod".to_owned()].into_iter().collect(),
-            globals: Default::default(),
+        let mut signature = serde_json::json!({});
+        provider.scope.write_signature(&mut signature);
+        assert!(signature["scope_reads"].as_array().unwrap().iter().any(|name| name == "mod"));
+        let class_text = "class C:\n mod = 1\n def f(a: mod.T): pass\n";
+        let class_graph = SourceGraph::single(class_text).unwrap();
+        let class_module = &class_graph.modules[class_graph.entry];
+        let class_sites = prepared_sites(
+            &class_module.parsed.syntax().body,
+            values::ModuleSource::new(class_module).context(class_text),
+            false,
+        );
+        let DeclarationSite::Function(method) = &class_sites.declarations[1] else {
+            panic!("expected a method");
         };
-        assert!(!provider.reads(Some(&class)).contains("mod"));
-        assert!(provider.reads(None).contains("mod"));
+        let mut signature = serde_json::json!({});
+        method.annotations.as_ref().unwrap().scope.write_signature(&mut signature);
+        assert!(!signature["scope_reads"].as_array().into_iter().flatten().any(|name| name == "mod"));
         let body = &provider.body.as_ref().unwrap().function.body;
         let [
             Statement::Return(Expr {

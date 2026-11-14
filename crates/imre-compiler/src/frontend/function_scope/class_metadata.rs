@@ -5,7 +5,7 @@ use std::collections::{BTreeSet, HashSet};
 use ruff_python_ast as ast;
 use ruff_python_ast::visitor::{self, Visitor};
 
-use super::annotations::{ParameterReads, Symbol};
+use super::annotations::ParameterReads;
 use super::{ClassBindings, ClosureNames, FunctionScope, ScopeFacts, classes};
 
 const GENERATED: [&str; 3] = ["__module__", "__qualname__", "__doc__"];
@@ -61,7 +61,18 @@ pub(in crate::frontend) fn parameter_reads(
     entries: &[(&str, &ast::Expr)],
     string_annotations: bool,
 ) -> ParameterReads {
+    declaration_reads(entries, string_annotations, false)
+}
+
+pub(super) fn declaration_reads(
+    entries: &[(&str, &ast::Expr)],
+    string_annotations: bool,
+    inline: bool,
+) -> ParameterReads {
     let mut uses = Uses::new(string_annotations);
+    if inline {
+        uses.scope = ExpressionScope::Provider;
+    }
     for (_, expression) in entries {
         uses.visit_annotation(expression);
     }
@@ -143,6 +154,7 @@ enum ExpressionScope {
     // The annotation itself ignores names. Its children still resolve symbols.
     Unevaluated,
     AnnotationChild,
+    Provider,
 }
 
 #[derive(Default)]
@@ -179,12 +191,14 @@ impl Uses {
         parent.reads.extend(reads);
     }
 
-    fn child_scope(&self) -> Self {
+    fn child_scope(&self, inline: bool) -> Self {
         Self {
             implicit_class: self.implicit_class,
-            scope: match self.scope {
-                ExpressionScope::Unevaluated => ExpressionScope::AnnotationChild,
-                scope => scope,
+            scope: match (self.scope, inline) {
+                (ExpressionScope::Unevaluated, _) => ExpressionScope::AnnotationChild,
+                // Separately compiled code closes over its physical incoming reads.
+                (ExpressionScope::Provider, false) => ExpressionScope::Separate,
+                (scope, _) => scope,
             },
             ..Self::new(self.string_annotations)
         }
@@ -195,7 +209,7 @@ impl Uses {
         let Some(params) = params else {
             return read(self);
         };
-        let mut child = self.child_scope();
+        let mut child = self.child_scope(false);
         child.visit_type_params(params);
         read(&mut child);
         // The generic header binds its parameter tuple as well as each parameter.
@@ -212,29 +226,43 @@ impl Uses {
                 .reads
                 .symbols
                 .into_iter()
-                .filter(|(_, symbol)| *symbol == Symbol::Read),
+                .filter(|(_, symbol)| !symbol.local),
         );
         self.reads.nested.append(&mut child.reads.nested);
     }
 
     fn child(&mut self, mut child: ParameterReads, locals: BTreeSet<String>, inline: bool) {
-        child
-            .symbols
-            .extend(locals.into_iter().map(|name| (name, Symbol::Local)));
-        child.remove_locals();
+        for name in locals {
+            let captured = child.nested.remove(&name);
+            let symbol = child.symbols.entry(name).or_default();
+            symbol.local = true;
+            symbol.display_cell |= captured && self.scope == ExpressionScope::Provider;
+        }
+        if self.scope != ExpressionScope::Provider || !inline {
+            child.remove_locals();
+        }
         for name in &child.nested {
-            child.symbols.entry(name.clone()).or_insert(Symbol::Read);
+            child.symbols.entry(name.clone()).or_default();
         }
         for (name, symbol) in child.symbols {
             match (inline, self.scope) {
-                (true, ExpressionScope::Unevaluated | ExpressionScope::AnnotationChild) => {
+                (
+                    true,
+                    ExpressionScope::Unevaluated
+                    | ExpressionScope::AnnotationChild
+                    | ExpressionScope::Provider,
+                ) => {
                     // CPython copies only the first symbol supplied by an inlined display.
-                    self.reads.symbols.entry(name).or_insert(symbol);
+                    self.reads
+                        .symbols
+                        .entry(name)
+                        .or_insert(symbol)
+                        .display_cell |= symbol.display_cell;
                 }
-                (true, ExpressionScope::Function) if symbol == Symbol::Read => {
+                (true, ExpressionScope::Function) if !symbol.local => {
                     self.reads.symbols.insert(name, symbol);
                 }
-                _ if symbol == Symbol::Read => {
+                _ if !symbol.local => {
                     self.reads.nested.insert(name);
                 }
                 _ => {}
@@ -245,9 +273,9 @@ impl Uses {
 
     fn comprehension(&mut self, plan: imre_ast::comprehension::Plan<'_>) {
         self.visit_expr(plan.outer);
-        let mut child = self.child_scope();
-        let targets = plan.scope_bindings(|expr| child.visit_expr(expr));
         let inline = !matches!(plan.output, imre_ast::comprehension::Output::Generator(_));
+        let mut child = self.child_scope(inline);
+        let targets = plan.scope_bindings(|expr| child.visit_expr(expr));
         if !inline && self.scope == ExpressionScope::Function {
             self.reads.nested.extend(child.walrus.iter().cloned());
         }
@@ -280,7 +308,7 @@ impl<'a> Visitor<'a> for BodyUses<'_, '_> {
                 let mut extra = BTreeSet::new();
                 if !method.metadata.reads_complete() {
                     // A nested class may pass on reads its enclosing function can't resolve.
-                    let mut child = self.uses.child_scope();
+                    let mut child = self.uses.child_scope(false);
                     BodyUses {
                         uses: &mut child,
                         scopes: self.scopes,
@@ -299,13 +327,14 @@ impl<'a> Visitor<'a> for BodyUses<'_, '_> {
                     .reads()
                     .chain(extra.iter().map(String::as_str));
                 self.uses.declaration(f.type_params.as_deref(), |scope| {
-                    if !scope.string_annotations {
-                        for (_, expr) in crate::frontend::parameter_annotations(
-                            &f.parameters,
-                            f.returns.as_deref(),
-                        ) {
-                            scope.visit_expr(expr);
+                    if let Some(annotations) = &method.annotation_reads {
+                        for name in annotations.direct_reads() {
+                            scope.reads.read(name);
                         }
+                        scope
+                            .reads
+                            .nested
+                            .extend(annotations.nested_reads().cloned());
                     }
                     scope.reads.nested.extend(reads.map(str::to_owned));
                 });
@@ -338,11 +367,9 @@ impl<'a> Visitor<'a> for Uses {
                     && self.scope != ExpressionScope::Unevaluated =>
             {
                 let name = n.id.as_str();
-                self.reads.symbols.insert(name.to_owned(), Symbol::Read);
+                self.reads.read(name);
                 if self.implicit_class && name == "super" {
-                    self.reads
-                        .symbols
-                        .insert("__class__".to_owned(), Symbol::Read);
+                    self.reads.read("__class__");
                 }
             }
             ast::Expr::Dict(dict) => {
@@ -360,7 +387,7 @@ impl<'a> Visitor<'a> for Uses {
                 if let Some(params) = &f.parameters {
                     self.visit_parameters(params);
                 }
-                let mut child = self.child_scope();
+                let mut child = self.child_scope(false);
                 child.visit_expr(&f.body);
                 let mut locals = std::mem::take(&mut child.walrus);
                 if let Some(params) = &f.parameters {

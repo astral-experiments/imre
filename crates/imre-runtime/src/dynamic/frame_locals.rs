@@ -190,12 +190,17 @@ fn access(ctx: &mut Context, frame: Id, key: Id, op: Access) -> Result<Option<Id
     let (original, code, optimized) = frame_scope(ctx, frame)?;
     let mut names = indexmap::IndexSet::new();
     if optimized {
-        names = ctx.frame_binding_names(original, code)?;
-        names.extend(ctx.scope_data(original).closure.declared.iter().cloned());
+        names = ctx.frame_binding_names(original, code, true)?;
     }
     let slots = names
         .iter()
-        .map(|name| (ctx.heap.code_name(name), NONE))
+        .map(|name| {
+            (
+                ctx.heap
+                    .code_name(super::code_locals::visible_slot_name(name)),
+                NONE,
+            )
+        })
         .collect();
     let slots = ctx.dict(slots);
     ctx.heap.keep(slots);
