@@ -10111,10 +10111,7 @@ impl Context {
                 .get_or_insert_with(Default::default)
                 .dictionary = Some(mapping);
         }
-        let mut globals = parent;
-        while let Some(outer) = self.scope_data(globals).parent {
-            globals = outer;
-        }
+        let globals = self.root_scope(parent);
         let module_name = if self.binding_scope(scope, "__name__") != scope {
             self.lookup(scope, "__name__")?
         } else if let Some(name) = self.lookup_scope_name(scope, "__name__")? {
@@ -10253,6 +10250,8 @@ impl Context {
             if let Some(namespace) = &mut frame.class_namespace {
                 namespace.annotation_scratch = None;
             }
+            // The type keeps the namespace after the body returns. Its readers own their cells.
+            frame.parent = Some(globals);
             frame.globals.clear();
             frame.closure.nonlocals.clear();
         }
