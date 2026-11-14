@@ -559,7 +559,7 @@ pub(crate) fn check_registered_project<'a>(
         {
             let winners = sources.map(|winner| (winner.checked_module.unwrap(), winner));
             graph.session.check_registered_execution(
-                contract.original(graph).clone(),
+                || contract.original(graph).clone(),
                 winners.clone(),
                 has_file_body,
                 entry_operand,
@@ -666,10 +666,9 @@ pub(crate) fn check_registered_project<'a>(
     } else {
         session.set_closed_program_rules();
     }
-    let contracts = session.closed_program_errors(&paths, None, &[], refusal);
     let winners = (first_winner..).zip(sources);
     session.check_registered_execution(
-        contracts,
+        || session.closed_program_errors(&paths, None, &[], refusal),
         winners.clone(),
         has_file_body,
         entry_operand,
@@ -982,7 +981,7 @@ impl Session {
     /// Check both execution boundaries against the winners of the same registered program.
     fn check_registered_execution<'a>(
         &self,
-        contracts: Result<(), String>,
+        contracts: impl FnOnce() -> Result<(), String>,
         sources: impl Iterator<Item = (usize, crate::dynamic::RegisteredSource<'a>)> + Clone,
         has_file_body: Option<&dyn Fn(&str) -> bool>,
         entry_operand: Option<(usize, &str, &crate::frontend::phase::Diagnostic)>,
@@ -990,7 +989,8 @@ impl Session {
         original: Option<&crate::modules::SourceGraph>,
     ) -> Result<(), String> {
         let mut captures = execution::CapturedImports::default();
-        if let Some((entry, start)) = sources.clone().find(|(_, source)| {
+        let checked;
+        let report = if let Some((entry, start)) = sources.clone().find(|(_, source)| {
             source.declares_signatures
                 && match source.initial {
                     None => false,
@@ -1021,7 +1021,6 @@ impl Session {
                     && start.source == module.original_source())
                 .then_some(closed)
             });
-            let checked;
             let initializer = if let Some(closed) = closed {
                 // No import was queried on this prefix, so no imported function was captured.
                 closed
@@ -1048,15 +1047,14 @@ impl Session {
                 &checked
             };
             if let Some(error) = &initializer.error {
-                if !matches!(
+                if matches!(
                     error.kind,
                     crate::frontend::phase::Kind::ExecutionOperand(_)
                 ) {
-                    contracts?;
+                    return Err(error.to_string());
                 }
-                return Err(error.to_string());
-            }
-            if let Some((id, function)) = initializer.entered_function
+                Some(error)
+            } else if let Some((id, function)) = initializer.entered_function
                 && let Some((_, _, _, report)) =
                     called_bodies.iter().find(|&&(path, source, range, _)| {
                         function == range
@@ -1068,19 +1066,23 @@ impl Session {
                             })
                     })
             {
-                contracts?;
-                return Err(report.to_string());
-            }
-            if let Some((owner, original, error)) = entry_operand
+                Some(*report)
+            } else if let Some((owner, original, error)) = entry_operand
                 && start.main_body
                 && start.checked_module == Some(owner)
                 && start.source == original
             {
-                contracts?;
-                return Err(error.to_string());
+                Some(error)
+            } else {
+                None
             }
+        } else {
+            None
+        };
+        contracts()?;
+        if let Some(report) = report {
+            return Err(report.to_string());
         }
-        contracts?;
         let ordinary = self.check_execution_with_imports(
             sources
                 .clone()
@@ -2506,7 +2508,8 @@ impl Session {
     pub(crate) fn is_class_object(&self, module: usize, expr: &Expr) -> bool {
         self.hint_reads.set(self.hint_reads.get() + 1);
         let model = SemanticModel::new(&self.db, self.db.program_file(self.files[module]));
-        expr.inferred_type(&model).is_some_and(|ty| ty.is_class_literal())
+        expr.inferred_type(&model)
+            .is_some_and(|ty| ty.is_class_literal())
     }
 
     /// Check the class definition at the use site, including aliases and local shadowing.
