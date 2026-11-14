@@ -870,6 +870,14 @@ impl Inference {
                 && (reserved_builtin_function(name)
                     || imre_ast::providers::BUILTIN_TYPES.contains(&name))
         };
+        // Without input or layout inference, resolved return slots stay resolved.
+        let mut first_open_return = (!self.widened.get()
+            && self
+                .pending
+                .borrow()
+                .iter()
+                .all(|p| !p.inferred_params.contains(&true)))
+            .then_some(0);
         let mut before = self.revision.get();
         let fixed_dependencies = loop {
             let widened = self.widened.replace(false);
@@ -881,6 +889,7 @@ impl Inference {
             let previous_checks = std::mem::take(&mut checked_before_registration);
             checked_bodies.clear();
             if widened {
+                first_open_return = None;
                 self.revisit_checked_returns();
             }
             let mut skipped = false;
@@ -940,6 +949,22 @@ impl Inference {
                 }
                 let (ready, infer_return, retrying, document_return) = {
                     let signatures = self.pending.borrow();
+                    if let Some(slot) = &mut first_open_return
+                        && !self.widened.get()
+                    {
+                        while *slot < signatures.len() && signatures[*slot].returns.is_some() {
+                            *slot += 1;
+                        }
+                        // Methods and generators can still supply a prepared frame.
+                        // Leave ordinary physical functions to their consuming body check.
+                        if *slot == signatures.len()
+                            && signature.physical_frame
+                            && signature.method.is_none()
+                            && !graph.session.is_generator_definition(*module, function)
+                        {
+                            continue;
+                        }
+                    }
                     let pending = &signatures[signature.id];
                     let skip = match pending.discovery {
                         ReturnDiscovery::Independent => continue,
@@ -2040,6 +2065,24 @@ mod tests {
         let error = crate::check_file(&file, None).unwrap_err();
         assert!(
             error.contains("main.py:5:12: Imre: expected int, got str"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn settling_a_return_preserves_the_following_generator_frame() {
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("main.py");
+        let source = concat!(
+            "def leaf(): return 42\n",
+            "def sequence(x: int) -> object:\n",
+            "    yield x\n",
+            "print(next(sequence(leaf())))\n",
+        );
+        std::fs::write(&file, source).unwrap();
+        let error = crate::check_file(&file, None).unwrap_err();
+        assert!(
+            error.contains("main.py:4:7: Imre: next requires a supported iterator"),
             "{error}"
         );
     }
