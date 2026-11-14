@@ -303,7 +303,8 @@ mod tests {
 
     #[test]
     fn named_list_method_uses_the_checked_receiver_and_argument() {
-        let fixture = include_str!("../../../../../tests/fixtures/truthiness/conditional_contexts.py");
+        let fixture =
+            include_str!("../../../../../tests/fixtures/truthiness/conditional_contexts.py");
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("app.py");
         std::fs::write(&path, fixture).unwrap();
