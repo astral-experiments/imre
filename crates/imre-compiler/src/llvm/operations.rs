@@ -832,6 +832,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             op,
             Binary::FloorDivide | Binary::Modulo | Binary::RightShift
         ) && checked_ints
+            || op == Binary::FloorDivide && usage.needs_integer() && !matches!(site, OperationSite::Unlocated)
             || positioned
                 && (matches!(site, OperationSite::Placed(..))
                     || expr.ty == Type::PythonObject
@@ -881,19 +882,16 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             && let Some(value) = self.cached_remainder(&a, &b, span, divisor)
         {
             value
-        } else if arithmetic {
-            if op == Binary::Multiply
+        } else if arithmetic
+            && (op == Binary::Multiply
                 || checked_ints
-                || a.can_use_integer_arithmetic(left.ty, &b, right.ty, usage)
-            {
-                // Python's exact remainder is in 0..divisor, including for a heap dividend.
-                let permanent = divisor.is_some_and(|d| {
-                    (1..=super::registered::permanent::SMALL_INT_MAX + 1).contains(&d)
-                });
-                self.integer_arithmetic(op, &a, &b, span, usage, permanent)
-            } else {
-                self.python_binary(op, &a, &b, span)
-            }
+                || a.can_use_integer_arithmetic(left.ty, &b, right.ty, usage))
+        {
+            // Python's exact remainder is in 0..divisor, including for a heap dividend.
+            let permanent = divisor.is_some_and(|d| {
+                (1..=super::registered::permanent::SMALL_INT_MAX + 1).contains(&d)
+            });
+            self.integer_arithmetic(op, &a, &b, span, usage, permanent)
         } else if let (CheckedValue::Native(x, None), CheckedValue::Native(y, None)) = (&a, &b) {
             CheckedValue::owned(self.fixed().binary(op, &x.value, &y.value))
         } else {
