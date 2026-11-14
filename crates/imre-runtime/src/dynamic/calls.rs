@@ -788,10 +788,14 @@ impl Context {
         let Some(dictionary) = dictionary else {
             return Ok(None);
         };
-        let storage = self.dict_storage(dictionary).expect("instance dictionary");
         let key = self.text(name);
+        self.dictionary_field_with_key(dictionary, key)
+    }
+
+    fn dictionary_field_with_key(&mut self, dictionary: Id, key: Id) -> Result<Option<Id>> {
+        let storage = self.dict_storage(dictionary).expect("instance dictionary");
         let (_, index) = self.find_dictionary_key(storage, key, None)?;
-        Ok(index.map(|i| self.dict_entries(storage).expect("instance dictionary")[i].1))
+        Ok(index.map(|i| self.stored_entries(storage)[i].1))
     }
 
     fn update_exception_field(&mut self, obj: Id, name: &str, value: Option<Id>) -> Result<()> {
@@ -848,29 +852,33 @@ impl Context {
         }
         let key = original.expect("original Python name");
         if let Some(descriptor) = member {
+            if matches!(op, ObjectAttribute::Get) && self.data_descriptor(descriptor) {
+                return self.read_data_descriptor(descriptor, obj, class, |ctx| {
+                    match ctx.instance_namespace_for_name(obj, class, false) {
+                        Some(dict) => ctx.dictionary_field_with_key(dict, key),
+                        None => Ok(None),
+                    }
+                });
+            }
             self.heap.keep(descriptor);
-            match op {
-                ObjectAttribute::Get if self.readable_data_descriptor(descriptor) => {
-                    return self.bind_attribute(descriptor, obj, class);
-                }
-                ObjectAttribute::Edit(value) if self.data_descriptor(descriptor) => {
-                    self.edit_data_descriptor(descriptor, obj, value)?;
-                    return Ok(NONE);
-                }
-                _ => {}
+            if let ObjectAttribute::Edit(value) = op
+                && self.data_descriptor(descriptor)
+            {
+                self.edit_data_descriptor(descriptor, obj, value)?;
+                return Ok(NONE);
             }
         }
         let dictionary =
             self.instance_namespace_for_name(obj, class, matches!(op, ObjectAttribute::Edit(_)));
         if let Some(dictionary) = dictionary {
-            let storage = self.dict_storage(dictionary).expect("instance dictionary");
             match op {
                 ObjectAttribute::Get => {
-                    if let (_, Some(index)) = self.find_dictionary_key(storage, key, None)? {
-                        return Ok(self.stored_entries(storage)[index].1);
+                    if let Some(field) = self.dictionary_field_with_key(dictionary, key)? {
+                        return Ok(field);
                     }
                 }
                 ObjectAttribute::Edit(value) => {
+                    let storage = self.dict_storage(dictionary).expect("instance dictionary");
                     let result = if let Some(value) = value {
                         self.put_item(storage, key, value)
                     } else {
@@ -1360,6 +1368,26 @@ impl Context {
     fn readable_data_descriptor(&self, member: Id) -> bool {
         self.native_data_descriptor(member)
             || (self.slot(member, "__get__").is_some() && self.data_descriptor(member))
+    }
+
+    /// A descriptor with only a setter or deleter yields to an instance field. Keep the
+    /// selected descriptor on a miss even if comparing dictionary keys replaces its class entry.
+    fn read_data_descriptor(
+        &mut self,
+        descriptor: Id,
+        object: Id,
+        class: Id,
+        field: impl FnOnce(&mut Self) -> Result<Option<Id>>,
+    ) -> Result<Id> {
+        let mark = self.heap.temporary_mark();
+        self.heap.reserve_temporaries(1)?;
+        self.heap.keep(descriptor);
+        let result = if self.readable_data_descriptor(descriptor) {
+            self.bind_attribute(descriptor, object, class)
+        } else {
+            field(self).map(|value| value.unwrap_or(descriptor))
+        };
+        self.release_with_result(mark, result)
     }
 
     /// Bind a Python method to the receiver selected by descriptor lookup.
@@ -3275,19 +3303,20 @@ impl Context {
             {
                 return Ok(self.instance_dictionary(obj, class));
             }
-            if let Some(member) = member
-                && self.native_data_descriptor(member)
-            {
-                return self.bind_attribute(member, obj, class);
-            }
             let inline = inline.filter(|_| !layout.declared_slot);
-            let field = if inline.is_some()
-                || namespace.is_none()
-                || member.is_some_and(|member| self.data_descriptor(member))
+            let field = if inline.is_none()
+                && let Some(dictionary) = namespace
             {
-                inline
+                if let Some(member) = member
+                    && self.data_descriptor(member)
+                {
+                    return self.read_data_descriptor(member, obj, class, |ctx| {
+                        ctx.dictionary_field(Some(dictionary), name)
+                    });
+                }
+                self.dictionary_field(Some(dictionary), name)?
             } else {
-                self.dictionary_field(namespace, name)?
+                inline
             };
             if field.is_none()
                 && let Some(member) = member
