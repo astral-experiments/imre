@@ -995,9 +995,18 @@ impl Inference {
                 {
                     continue;
                 }
+                let mut callable_inputs = HashMap::new();
                 let mut checker = Checker::new(
                     graph, *module, signatures, classes, types, &helpers, &globals,
                 );
+                if graph.registered_startup
+                    && signature.method.is_none()
+                    && signature.params.is_empty()
+                    && function.returns.is_none()
+                    && signature.physical_frame
+                {
+                    checker.settled_attributes = Some(&mut callable_inputs);
+                }
                 checker.nonreturning_functions = &completed_calls;
                 if signature.registered_frame() {
                     checker.registered = Some(graph.modules[*module].registered_values());
@@ -1035,7 +1044,7 @@ impl Inference {
                     && graph
                         .session
                         .coroutine_uses_async_iteration(*module, function))
-                .then(|| registered::place_checked_definition(&checker, function, signature, self));
+                .then(|| registered::place_checked_definition(&checker, function, signature, self, None));
                 let mut retained = matches!(placement, Some(Ok(Some(_))));
                 let result = (|| {
                     if retained {
@@ -1150,7 +1159,7 @@ impl Inference {
                         {
                             match placement.take().unwrap_or_else(|| {
                                 registered::place_checked_definition(
-                                    &checker, function, signature, self,
+                                    &checker, function, signature, self, None,
                                 )
                             }) {
                                 Ok(body) => body.is_some(),
@@ -1209,6 +1218,12 @@ impl Inference {
                                 && !checker.calls.contains(&signature.id))
                     {
                         checked_bodies.insert(signature.id);
+                        if implicit_none
+                            && let Some(sites) = checker.settled_attributes.take()
+                            && !sites.is_empty()
+                        {
+                            method_returns.insert(signature.id, Err(std::mem::take(sites)));
+                        }
                         if let Some(dependencies) = &mut fixed_dependencies
                             && (!signature.physical_frame
                                 || signature.method.is_some()

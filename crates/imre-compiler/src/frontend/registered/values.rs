@@ -1345,6 +1345,7 @@ impl Checker<'_> {
         if self.checked_call_contracts
             && let ast::Expr::Call(call) = node
             && let Some(Binding::Definition(id)) = self.resolve(&call.func)
+            && !self.classes.declarations.ids.contains_key(&id)
         {
             let refused = || self.scoped_builtin_error("declared Python call", call);
             let signature = self.functions.get(&id).ok_or_else(refused)?;
@@ -1360,6 +1361,9 @@ impl Checker<'_> {
                 return Err(refused());
             }
             let target = self.expr(&call.func)?;
+            // A live Python argument can satisfy an inferred layout only at dispatch.
+            // Forward it unchanged and leave the result untyped on that edge.
+            let mut fixed_result = true;
             let mut args = Vec::with_capacity(call.arguments.len());
             for (index, (arg, parameter)) in call.arguments.args.iter().zip(written).enumerate() {
                 let value = self.expr(arg)?;
@@ -1371,24 +1375,33 @@ impl Checker<'_> {
                 let actual = value.checked_operand_type();
                 if let Err(error) = self.expect(expected, actual, arg) {
                     let declaration = signature.parameter_declaration(index);
-                    let operands = self.graph.session.operand_types(self.module);
-                    let checked = actual == Type::PythonObject
-                        && expected == parameter.ty
-                        && declaration.is_some_and(|decl| {
-                            decl.module == id.module
-                                && operands.accepts_argument(arg, id, index, decl.annotation)
-                        });
-                    if !checked {
-                        return Err(error.expected_from(declaration, arg.range()));
+                    if actual == Type::PythonObject
+                        && self.inference.is_none()
+                        && declaration.is_none()
+                    {
+                        fixed_result = false;
+                    } else {
+                        let operands = self.graph.session.operand_types(self.module);
+                        let checked = actual == Type::PythonObject
+                            && expected == parameter.ty
+                            && declaration.is_some_and(|decl| {
+                                decl.module == id.module
+                                    && operands.accepts_argument(arg, id, index, decl.annotation)
+                            });
+                        if !checked {
+                            return Err(error.expected_from(declaration, arg.range()));
+                        }
                     }
                 }
                 args.push(value);
             }
             let value = self.call_with_values(call, target, args);
             let mut located = source.located_operation(node, value);
-            if !signature.asynchronous
+            if fixed_result
+                && !signature.asynchronous
                 && !self.classes.generators.contains(&signature.id)
-                && let ExprKind::Builtin(Builtin::RegisteredLocation(_, _, hint), _) = &mut located.kind
+                && let ExprKind::Builtin(Builtin::RegisteredLocation(_, _, hint), _) =
+                    &mut located.kind
             {
                 *hint = Some(self.enter_source_call(call, signature)?);
             } else {
@@ -1448,13 +1461,12 @@ impl Checker<'_> {
         if let Some(sites) = &mut self.settled_attributes
             && let Some(call) = node.as_call_expr()
             && self.namespace.is_none()
-            && let Some(field) = call.func.as_attribute_expr()
-            && let Some(module) = field.value.as_name_expr()
-            && !self.names.contains_key(module.id.as_str())
+            && let Some(name) = call.func.as_name_expr().or_else(|| {
+                call.func.as_attribute_expr()?.value.as_name_expr()
+            })
+            && !self.names.contains_key(name.id.as_str())
             && let Some(FixedAttribute::Call(Some(target), mut site)) = sites.remove(&call.range())
-            && matches!(&site.target, ir::RegisteredCallTarget::Callable {
-                end, suspended_name: None,
-            } if *end == call.func.end())
+            && site.target == callable_target(call)
             && operands.is_original_operand(&call.func)
             && source.direct_method(call).is_none()
         {
