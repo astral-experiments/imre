@@ -371,17 +371,13 @@ enum Completion<T = Value> {
     Error,
 }
 
-/// The native representation cannot implement this checked operation.
-#[derive(Debug)]
-pub(crate) struct Unsupported(pub(crate) &'static str, pub(crate) crate::LoweringKind);
-
 #[cfg(test)]
 pub(crate) fn emit(
     module: &Module,
     ranges: &RangeFacts<'_>,
     sanitize: bool,
-) -> Result<String, Unsupported> {
-    let program = analyze_program(module)?;
+) -> Result<String, crate::LoweringDiagnostic> {
+    let program = crate::callables::layouts(module)?;
     let mut unit = crate::CodegenUnit::new("__main__", String::new());
     Output::new([], std::slice::from_mut(&mut unit), 0, false)
         .emit(module, ranges, sanitize, program);
@@ -390,128 +386,12 @@ pub(crate) fn emit(
 
 const BRANCH_WEIGHTS: &str = "\n!0 = !{!\"branch_weights\", i32 1, i32 2000}\n!1 = !{!\"branch_weights\", i32 2000, i32 1}\n";
 
-/// Callable representation selected from the original checked operations.
-pub(crate) struct NativeProgram {
-    callable_targets: crate::callables::Targets,
-    linked_functions: HashSet<usize>,
-}
-
-pub(crate) fn analyze_program(module: &Module) -> Result<NativeProgram, Unsupported> {
-    let mut function_link_types = HashSet::new();
-    let mut link_owners = BTreeMap::<usize, Vec<&Expr>>::new();
-    let mut targets = crate::callables::TargetCollector::default();
-    for (id, function) in module.functions.iter().chain([&module.entry]).enumerate() {
-        ir::walk_expressions(&function.body, &mut |expr| {
-            targets.inspect(&module.types, expr);
-            let ExprKind::Builtin(builtin, args) = &expr.kind else {
-                return;
-            };
-            match builtin {
-                Builtin::FunctionWrappedSet | Builtin::FunctionWrappedGet(_) => {
-                    let owner = &args[0];
-                    function_link_types.insert(owner.ty);
-                    link_owners.entry(id).or_default().push(owner);
-                }
-                _ => {}
-            }
-        });
-    }
-    let callable_targets = targets.finish();
-    let cached = |id| module.types.cache_adapter(id).is_some();
-    const SIGNATURE: &str = "Imre: wrapper links require a callable signature with known native functions or source methods";
-    if function_link_types
-        .iter()
-        .any(|&ty| module.types.dispatcher(ty).is_some() || callable_targets.get(ty).is_empty())
-    {
-        return Err(Unsupported(SIGNATURE, crate::LoweringKind::Object));
-    }
-    let linked_functions = function_link_types
-        .iter()
-        .flat_map(|&ty| callable_targets.get(ty))
-        .filter(|target| !target.bound)
-        .map(|target| target.function)
-        .collect::<HashSet<_>>();
-    link_owners.retain(|_, owners| {
-        owners.retain(|owner| {
-            callable_targets
-                .get(owner.ty)
-                .iter()
-                .any(|target| target.bound && !cached(target.function))
-        });
-        !owners.is_empty()
-    });
-
-    // Direct arguments can establish ownership only for a closed function whose
-    // signature also admits a bound method. Other callables need no caller scan.
-    let mut direct_inputs: HashMap<_, Vec<_>> = link_owners
-        .keys()
-        .filter_map(|&id| {
-            let function = module.functions.get(id)?;
-            (!function.params.is_empty()).then(|| (id, Vec::new()))
-        })
-        .collect();
-    if !direct_inputs.is_empty() {
-        for function in module.functions.iter().chain([&module.entry]) {
-            ir::walk_expressions(&function.body, &mut |expr| match &expr.kind {
-                ExprKind::Call(id, args) => {
-                    if let Some(inputs) = direct_inputs.get_mut(id) {
-                        inputs.push(args);
-                    }
-                }
-                ExprKind::Callable { function, .. } => {
-                    direct_inputs.remove(function);
-                    if let Some(raw) = module.types.original_cache_body(*function) {
-                        direct_inputs.remove(&raw);
-                    }
-                }
-                ExprKind::Construct { initializer, .. } => {
-                    direct_inputs.remove(initializer);
-                }
-                _ => {}
-            });
-        }
-    }
-    link_owners.retain(|&id, owners| {
-        let function = module.functions.get(id).unwrap_or(&module.entry);
-        let inputs = direct_inputs.get(&id).map_or(&[][..], Vec::as_slice);
-        ir::retain_unknown_link_owners(function, owners, inputs, |operand| {
-            matches!(operand.kind, ExprKind::Callable { function, receiver: None }
-                if !cached(function)
-                    && module.types.constructor_base(operand.ty).is_none()
-                    && linked_functions.contains(&function))
-        });
-        !owners.is_empty()
-    });
-    // Only the owner needs link storage. A plain function can wrap a bound
-    // builtin, even when the two callables have the same signature.
-    if link_owners.values().flatten().any(|owner| {
-        callable_targets.get(owner.ty).iter().any(|target| {
-            let function = &module.functions[target.function];
-            target.bound
-                && !cached(target.function)
-                && !matches!(function.locals[function.params[0]], Type::Class(_))
-        })
-    }) {
-        return Err(Unsupported(SIGNATURE, crate::LoweringKind::Object));
-    }
-    if !link_owners.is_empty() {
-        return Err(Unsupported(
-            "Imre: native wrapper links require a plain function as their owner",
-            crate::LoweringKind::ScopedObject,
-        ));
-    }
-    Ok(NativeProgram {
-        callable_targets,
-        linked_functions,
-    })
-}
-
 fn emit_program(
     module: &Module,
     ranges: &RangeFacts<'_>,
     sanitize: bool,
     output: &mut Output<'_>,
-    program: NativeProgram,
+    program: crate::callables::Layouts,
 ) {
     let mut literal_globals = vec![None; module.globals.len()];
     let mut extension_modules = BTreeSet::new();
@@ -572,7 +452,7 @@ fn emit_program(
     resource_types.retain(|&ty| {
         if matches!(ty, Type::Callable(_)) {
             // A plain function has no captured receiver to finalize.
-            return program.callable_targets.get(ty).iter().any(|target| {
+            return program.targets.get(ty).iter().any(|target| {
                 let f = &module.functions[target.function];
                 target.bound
                     && module
@@ -582,8 +462,8 @@ fn emit_program(
         }
         module.types.may_own_file(ty, &module.class_fields, true)
     });
-    let borrows = borrows::analyze(module, &program.callable_targets);
-    let effects = effects::analyze(module, &program.callable_targets);
+    let borrows = borrows::analyze(module, &program.targets);
+    let effects = effects::analyze(module, &program.targets);
     let inline_dispatch = string_enums::inline_dispatch(module, &effects);
     let mut emitter = Emitter {
         module,
@@ -645,7 +525,7 @@ fn emit_program(
         ranges,
         effects,
         inline_dispatch,
-        callable_targets: program.callable_targets,
+        callable_targets: program.targets,
         integer_regions: integer_regions::analyze(module),
         uses_sys_argv: uses_sys_argv || uses_orig_argv,
         uses_orig_argv,
