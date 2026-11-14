@@ -305,7 +305,7 @@ impl Prepared {
     }
 
     pub(super) fn exhaust_if_empty(ready: Expr) -> Statement {
-        Statement::If(not(ready), vec![Statement::Exhaust], Vec::new())
+        Statement::If(ready, Vec::new(), vec![Statement::Exhaust])
     }
 }
 

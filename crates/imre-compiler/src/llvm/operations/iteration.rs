@@ -337,7 +337,7 @@ impl CheckedBody<'_, '_, '_, '_> {
             e.iter_next(iterator, key, value, ready, kind);
             return;
         }
-        self.python().pull(iterator, key, value, ready, kind, false);
+        self.python().pull(iterator, key, value, ready, kind, None);
     }
 
     pub(in crate::llvm) fn loop_transfer(&mut self, statement: &Statement) {

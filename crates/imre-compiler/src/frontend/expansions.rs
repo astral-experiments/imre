@@ -1,7 +1,6 @@
 //! Eager display expansion keeps every copy before the following source entry.
 
 use super::*;
-use ruff_python_ast::UnaryOp;
 
 enum ExpansionSource {
     Value(Expr),
@@ -1081,14 +1080,7 @@ impl Checker<'_> {
                 value: Some(value),
                 ready,
             },
-            Statement::If(
-                Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Unary(UnaryOp::Not, Box::new(self.local(ready))),
-                },
-                vec![Statement::Exhaust],
-                Vec::new(),
-            ),
+            pipelines::Prepared::exhaust_if_empty(self.local(ready)),
             Statement::assign_item(self.local(result), self.local(key), value_expr),
             Statement::Clear(key),
             Statement::Clear(value),
