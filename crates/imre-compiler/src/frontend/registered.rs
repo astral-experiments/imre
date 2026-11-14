@@ -4219,39 +4219,38 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_statement_operation_retains_its_build_diagnostic_range() {
+    fn a_type_alias_binds_at_its_written_position_without_a_prepared_operation() {
         let text = "before = 1\ntype Alias = int\nafter = 2\n";
         let graph = SourceGraph::single(text).unwrap();
         let module = &graph.modules[graph.entry];
         let body = &module.parsed.syntax().body;
-        let literals = values::ModuleSource::new(module);
-        // Leave out the alias operation that its lexical scope normally prepares.
+        let source = values::ModuleSource::new(module);
         let operations = HashMap::new();
-        let mut prepare = SuitePreparation::new(&operations, literals.context(text), true);
+        let mut prepare = SuitePreparation::new(&operations, source.context(text), true);
         let suite = prepare.suite(body, RegisteredScope::Module);
-        let Some(PreparedRefusal::Operand((range, reason))) = suite.refusal else {
-            panic!("the omitted alias must report a ranged operand diagnostic");
-        };
-        assert_eq!(&text[range], "type Alias = int");
-        assert_eq!(reason, "cannot compile this statement ahead of time");
-        let [operand] = suite.operands.as_slice() else {
-            panic!("expected the omitted alias operand")
-        };
-        assert_eq!(prepare.operand_refusal(operand), suite.refusal);
-        let body = &suite.checked.function.body;
-        let at = body
-            .iter()
-            .position(|stmt| {
-                matches!(
-                    stmt,
-                    Statement::Expr(Expr {
-                        kind: ExprKind::Builtin(Builtin::RegisteredInput(0), _),
-                        ..
-                    })
-                )
-            })
-            .expect("the omitted alias is evaluated between the two assignments");
-        assert!(at > 0 && at + 1 < body.len());
+        assert!(suite.fully_checked());
+        let frame = &suite.checked;
+        let mut stores = Vec::new();
+        for statement in &frame.function.body {
+            if let Statement::Expr(Expr {
+                kind: ExprKind::Builtin(Builtin::GlobalSet(slot), args),
+                ..
+            }) = statement
+            {
+                let [value] = args.as_slice() else {
+                    panic!("one value per binding");
+                };
+                let site = match &value.kind {
+                    ExprKind::Builtin(Builtin::RegisteredTypeAlias(site), _) => Some(*site),
+                    _ => None,
+                };
+                stores.push((frame.local_names[slot].name.as_str(), site));
+            }
+        }
+        assert_eq!(
+            stores,
+            [("before", None), ("Alias", Some(body[1].start())), ("after", None)]
+        );
     }
 
     #[test]
