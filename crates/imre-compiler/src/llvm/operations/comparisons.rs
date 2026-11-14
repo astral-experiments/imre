@@ -45,7 +45,7 @@ impl<'f, 'a, 'p, 'm> CheckedBody<'f, 'a, 'p, 'm> {
         let root = if matches!(self.0, Entry::Registered(_))
             && (ops.len() > 1
                 || matches!(ops, [CmpOp::Is | CmpOp::IsNot])
-                || matches!(ops, [op] if truth && Compare::from_operator(*op).is_some()))
+                || matches!(ops, [op] if Compare::from_operator(*op).is_some()))
         {
             Some(self.python().compare_scope())
         } else {
