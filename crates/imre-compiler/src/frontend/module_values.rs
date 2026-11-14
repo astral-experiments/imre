@@ -337,20 +337,30 @@ impl Checker<'_> {
             return self.inherit_class_data(class_id, body);
         }
         let mut locals = Vec::new();
+        let initial_doc = (self.graph.python_optimization() < 2)
+            .then(|| docstring(&class.node.body))
+            .flatten()
+            .map(ClassValue::String);
         for (ordinal, stmt) in class.node.body.iter().enumerate() {
-            let ast::Stmt::Assign(assign) = stmt else {
-                continue;
+            let (name, binding) = match stmt {
+                ast::Stmt::Expr(_) if ordinal == 0 => ("__doc__", initial_doc.as_ref()),
+                ast::Stmt::Assign(assign)
+                    if let [ast::Expr::Name(target)] = assign.targets.as_slice() =>
+                {
+                    (
+                        target.id.as_str(),
+                        class.static_bindings.get(target.id.as_str()),
+                    )
+                }
+                _ => continue,
             };
-            let [ast::Expr::Name(target)] = &*assign.targets else {
-                continue;
-            };
-            let name = target.id.as_str();
             let start = body.as_deref().map_or(0, Vec::len);
             let initialized = self.globals.types.borrow().len();
-            let binding = class.static_bindings.get(name);
             let value = match binding {
                 Some(ClassValue::Runtime { owner, ordinal: at })
-                    if *owner == definition && *at == ordinal =>
+                    if *owner == definition
+                        && *at == ordinal
+                        && let ast::Stmt::Assign(assign) = stmt =>
                 {
                     if class_scoped_child(&assign.value)
                         && !(matches!(&*assign.value, ast::Expr::DictComp(_))
@@ -389,7 +399,7 @@ impl Checker<'_> {
             }
             if matches!(binding, Some(ClassValue::Runtime { .. })) {
                 let value =
-                    self.class_storage_value(class_id, name, self.local(temporary), assign)?;
+                    self.class_storage_value(class_id, name, self.local(temporary), stmt)?;
                 let slot = self.globals.reserve(value.ty);
                 self.globals
                     .class_slots
@@ -454,6 +464,18 @@ impl Checker<'_> {
 
     fn module_assignment(&mut self, statement: &ast::Stmt) -> Result<Expr, String> {
         match statement {
+            ast::Stmt::Expr(doc) if let ast::Expr::StringLiteral(text) = &*doc.value => {
+                check_string(text, self.source)?;
+                Ok(if self.graph.python_optimization() < 2 {
+                    let doc = imre_ast::strings::clean_doc(text.value.to_str());
+                    Expr {
+                        ty: self.types.string_literal(vec![doc.clone()]),
+                        kind: ExprKind::Str(doc),
+                    }
+                } else {
+                    Expr::none()
+                })
+            }
             ast::Stmt::Assign(assignment) => self.expr(&assignment.value),
             ast::Stmt::AnnAssign(assignment) => {
                 let value = assignment.value.as_deref().ok_or_else(|| {
@@ -512,7 +534,12 @@ impl Checker<'_> {
             }
             return Ok(());
         }
-        let rebound = self.graph.modules[self.module].rebound_target(self.module, statement);
+        let module = &self.graph.modules[self.module];
+        let rebound = if module.rebound_values.contains(&definition.statement) {
+            Some(definition)
+        } else {
+            module.rebound_target(self.module, statement)
+        };
         if let Some(first) = rebound
             && first != definition
         {
@@ -560,7 +587,8 @@ impl Checker<'_> {
             .classify(Kind::UnsupportedRepresentation));
         }
         let value = if rebound.is_some() {
-            if !class_data_type(value.ty, self.types)
+            if !statement.is_expr_stmt()
+                && !class_data_type(value.ty, self.types)
                 && !matches!(
                     self.types.payload(value.ty).unwrap_or(value.ty),
                     Type::Class(_)
@@ -573,6 +601,11 @@ impl Checker<'_> {
                 )
                 .classify(Kind::UnsupportedRepresentation));
             }
+            let value = if statement.is_expr_stmt() {
+                self.coerce(value, Type::ObjectValue, statement)?
+            } else {
+                value
+            };
             Expr {
                 ty: self.types.list(value.ty),
                 kind: ExprKind::List(vec![value]),
@@ -873,9 +906,7 @@ impl Initialization {
             }
             let initialized = checker.globals.types.borrow().len();
             let start = body.len();
-            if module.snapshots.contains_key(&index)
-                || crate::modules::value_name(statement).is_some()
-            {
+            if module.snapshots.contains_key(&index) || module.value_name_at(index).is_some() {
                 let captured = match module.snapshots.get(&index) {
                     Some(crate::modules::ImportSnapshot::Values(sources)) => Some(sources),
                     _ => None,
