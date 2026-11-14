@@ -1003,6 +1003,40 @@ pub(in crate::frontend) fn binary(
     }
 }
 
+/// Compare the original Python operands, keeping any scalar type checked at that use.
+pub(in crate::frontend) fn comparison(
+    cmp: &ast::ExprCompare,
+    mut values: Vec<Expr>,
+    types: Option<crate::analysis::OperandTypes<'_>>,
+) -> Expr {
+    if let [op] = cmp.ops.as_ref()
+        && ir::Compare::from_operator(*op).is_some()
+        && let Some(types) = types
+        && let [left, right] = values.as_mut_slice()
+    {
+        if right.checked_operand_type() == Type::Int {
+            refine_operand(types, &cmp.operands[0], left);
+        } else if left.checked_operand_type() == Type::Int {
+            refine_operand(types, &cmp.operands[1], right);
+        }
+    }
+    // A chain can return any comparison that ends it. Identity and
+    // membership always return a boolean, including on user-defined objects.
+    let ty = if cmp
+        .ops
+        .iter()
+        .all(|op| ir::Compare::from_operator(*op).is_none())
+    {
+        Type::Bool
+    } else {
+        Type::PythonObject
+    };
+    Expr {
+        ty,
+        kind: ExprKind::Compare(values, cmp.ops.to_vec()),
+    }
+}
+
 /// Select one registered-frame operation before requesting its operands in source order.
 pub(super) fn operation<E>(
     node: &ast::Expr,
@@ -1060,38 +1094,12 @@ pub(super) fn operation<E>(
             return generator_binding(generator, child).map(Some);
         }
         ast::Expr::Compare(cmp) => {
-            let mut values = cmp
+            let values = cmp
                 .operands
                 .iter()
                 .map(&mut child)
                 .collect::<StdResult<Vec<_>, _>>()?;
-            if let [op] = cmp.ops.as_ref()
-                && ir::Compare::from_operator(*op).is_some()
-                && let Some(types) = source.operand_types
-                && let [left, right] = values.as_mut_slice()
-            {
-                if right.checked_operand_type() == Type::Int {
-                    refine_operand(types, &cmp.operands[0], left);
-                } else if left.checked_operand_type() == Type::Int {
-                    refine_operand(types, &cmp.operands[1], right);
-                }
-            }
-            // A chain can return any comparison that ends it. Identity and
-            // membership always return a boolean, including on user-defined objects.
-            let ty = if cmp.ops.iter().all(|op| {
-                matches!(
-                    op,
-                    ast::CmpOp::Is | ast::CmpOp::IsNot | ast::CmpOp::In | ast::CmpOp::NotIn
-                )
-            }) {
-                Type::Bool
-            } else {
-                Type::PythonObject
-            };
-            return Ok(Some(Expr {
-                kind: ExprKind::Compare(values, cmp.ops.to_vec()),
-                ty,
-            }));
+            return Ok(Some(comparison(cmp, values, source.operand_types)));
         }
         ast::Expr::If(branch) => {
             return Ok(Some(select(
