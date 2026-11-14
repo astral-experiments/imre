@@ -1785,15 +1785,31 @@ impl Checker<'_> {
         let source_arguments = materialized.is_none() && normalization.is_none();
         let args = if let Some((field, wrapper, template)) = normalization {
             let params = &signature.params[1..];
-            self.arguments_with(call, params, None, |checker, index, value| {
+            let mut normalized = None;
+            let args = self.arguments_with(call, params, None, |checker, index, value| {
                 if params[index].name == field && matches!(value, ast::Expr::Dict(_)) {
                     let mut conversion = template.clone();
                     conversion.arguments.keywords[0].value = value.clone();
+                    normalized = Some(value.range());
                     checker.construct(&conversion, wrapper)
                 } else {
                     checker.direct_argument(value, params[index].ty, params[index].sign_only)
                 }
-            })?
+            })?;
+            if let Some(range) = normalized {
+                // A keyword diagnostic covers its original spelling, including ** unpacking.
+                let module = &self.graph.modules[self.module];
+                let nodes = ast::find_node::covering_node(module.parsed.syntax().into(), range);
+                let operand = nodes.ancestors()
+                    .take_while(|node| call.range().contains_range(node.range()))
+                    .find_map(|node| match node {
+                        ast::AnyNodeRef::Keyword(kw) => Some(kw.range()),
+                        _ => None,
+                    })
+                    .unwrap_or(range);
+                self.graph.checked_argument_type(self.module, operand);
+            }
+            args
         } else if self.inference.is_some() {
             self.bind_source(call, &signature, None, 1, None)?.1
         } else {

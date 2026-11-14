@@ -73,7 +73,7 @@ impl Session {
         Ok(file)
     }
 
-    fn checked_shipped_file(
+    pub(crate) fn checked_shipped_file(
         &mut self,
         owner: &str,
         private_path: Option<&Path>,
@@ -114,7 +114,7 @@ impl Session {
     }
 
     /// Register the immutable module under the original top-level statement index.
-    pub(crate) fn add_shipped_function(
+    pub(crate) fn add_shipped_declaration(
         &mut self,
         site: FileRange,
         path: &Path,
@@ -125,10 +125,10 @@ impl Session {
                 self.checked_parse(site.file(), path, source, input, crate::SourceKind::File)?;
             let suite = parsed.suite();
             let index = suite.partition_point(|stmt| stmt.end() <= site.range().start());
-            let function = suite.get(index).and_then(Stmt::as_function_def_stmt);
-            if function.is_none_or(|f| f.name.range() != site.range()) {
+            let name = suite.get(index).and_then(crate::modules::declaration_name);
+            if name.is_none_or(|name| name.range() != site.range()) {
                 return Err(format!(
-                    "{path}: checked binding is not a module-level function"
+                    "{path}: checked binding is not a module-level declaration"
                 ));
             }
             self.files.push(site.file());

@@ -3101,6 +3101,12 @@ impl SourceModule {
 
     /// A type-only import in a native stub does not add a member to the C module.
     fn export(&self, name: &str) -> Option<Binding> {
+        if self.is_bundled("dataclasses") && name == "MISSING" {
+            // The module initializer constructs the object captured by field defaults.
+            return Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
+                "dataclasses.MISSING",
+            )));
+        }
         if self.is_bundled("uuid") {
             let export = match name {
                 "uuid1" => Some("uuid.uuid1"),
@@ -4836,7 +4842,7 @@ impl SiteProbes {
 type ModuleFile = (PathBuf, PathBuf, bool, usize, Option<NativeArchive>);
 
 enum ModuleText<'a> {
-    ShippedFunction(&'a str, ruff_db::files::FileRange),
+    ShippedDeclaration(&'a str, ruff_db::files::FileRange),
     Text(std::borrow::Cow<'a, str>, crate::SourceKind),
     Disk(crate::DiskSource, String),
 }
@@ -5009,7 +5015,7 @@ impl<'a> Loader<'a> {
     ) -> Result<ModuleId, String> {
         let (text, kind, disk_hash, raw_digest, site) = match input {
             ModuleText::Text(text, kind) => (text, kind, None, None, None),
-            ModuleText::ShippedFunction(text, site) => {
+            ModuleText::ShippedDeclaration(text, site) => {
                 (text.into(), crate::SourceKind::File, None, None, Some(site))
             }
             ModuleText::Disk(source, hash) => (
@@ -5033,7 +5039,7 @@ impl<'a> Loader<'a> {
             }
         };
         let (parsed, checked_declaration) = if let Some(site) = site {
-            let (parsed, index) = self.session.add_shipped_function(site, &path, &source)?;
+            let (parsed, index) = self.session.add_shipped_declaration(site, &path, &source)?;
             (parsed, Some(index))
         } else {
             (self.session.add(&path, &source, kind)?, None)
@@ -5834,6 +5840,12 @@ impl<'a> Loader<'a> {
                 for alias in &import.names {
                     let name = alias.name.as_str();
                     if let Some(module) = self.intrinsic_module(name, None)? {
+                        if module == IntrinsicModule::Dataclasses {
+                            self.modules[id]
+                                .registered_imports
+                                .entry(index)
+                                .or_insert(alias.range());
+                        }
                         if let Some(child) = importlib_child_name(module) {
                             self.modules[id]
                                 .importlib_children
@@ -6007,6 +6019,11 @@ impl<'a> Loader<'a> {
                                     self.import_namespace(id, statement.range(), provider);
                                     self.modules[provider].export(member)
                                 }
+                                // Isolated sources have only the selected checked interface.
+                                Err(StdlibMiss::Unclaimed)
+                                    if module == IntrinsicModule::Dataclasses
+                                        && !self.allow_imports
+                                        && self.by_name.contains_key(&name) => None,
                                 Err(StdlibMiss::Unclaimed) => {
                                     self.session.demanded_shipped_declaration(&name, member)?
                                 }
@@ -6033,7 +6050,9 @@ impl<'a> Loader<'a> {
                                 self.session.prepare_shipped_source(&child_name)?;
                             }
                         }
-                        if matches!(binding, Binding::RegisteredValue(_)) {
+                        if matches!(binding, Binding::RegisteredValue(_))
+                            || checked_stdlib_owner(module, alias.name.as_str()) == Some("dataclasses")
+                        {
                             self.modules[id]
                                 .registered_imports
                                 .entry(index)
@@ -6605,7 +6624,7 @@ impl<'a> Loader<'a> {
             }
             return Ok(id);
         }
-        let mut checked_function = None;
+        let mut checked_declaration = None;
         let mut registered_namespace = false;
         let bundled = match name {
             _ if self.project_shadows_native_package(name) => None,
@@ -6629,13 +6648,24 @@ impl<'a> Loader<'a> {
                 let path = self.private_implementation_path(INSPECT_FUNCTIONS)?;
                 let export = "cleandoc";
                 let (source, site) = self.session.checked_shipped_function(name, export, &path)?;
-                checked_function = Some((export, site));
+                checked_declaration = Some((export, site));
                 Some(("__imre_inspect_functions__.py", source))
             }
-            "dataclasses" => Some((
-                "<imre stdlib>/dataclasses.py",
-                self.session.checked_shipped_prefix(name, "MISSING")?,
-            )),
+            "dataclasses" => {
+                let filename = "<imre stdlib>/dataclasses.py";
+                let fallback = self.root.join("<imre checked>/dataclasses.py");
+                let (source, file) = self.session.checked_shipped_file(name, Some(&fallback))?;
+                let export = "_MISSING_TYPE";
+                if let Some(Binding::RegisteredClass(site)) =
+                    self.session.shipped_declaration_at(file, name, export)
+                    && site.file() == file
+                {
+                    checked_declaration = Some((export, site));
+                } else {
+                    registered_namespace = true;
+                }
+                Some((filename, source))
+            }
             "socketserver" => Some(("socketserver.py", include_str!("../stdlib/socketserver.py"))),
             "_imre_socketserver_reader" => Some((
                 "_imre_socketserver_reader.py",
@@ -6742,8 +6772,8 @@ impl<'a> Loader<'a> {
             // ty resolves this immutable source at its Python import path in the
             // in-memory project. It is part of the compiler, not a disk input.
             let path = self.root.join(filename);
-            let input = match checked_function {
-                Some((_, site)) => ModuleText::ShippedFunction(source, site),
+            let input = match checked_declaration {
+                Some((_, site)) => ModuleText::ShippedDeclaration(source, site),
                 None => ModuleText::Text(source.into(), crate::SourceKind::File),
             };
             let id = self.add_source(
@@ -6770,15 +6800,15 @@ impl<'a> Loader<'a> {
                 );
             } else {
                 self.scan(id)?;
-                if let Some((export, _)) = checked_function
+                if let Some((export, _)) = checked_declaration
                     && let Some(statement) = self.modules[id].checked_declaration
                 {
                     let module = &mut self.modules[id];
-                    let function = module.parsed.suite()[statement]
-                        .as_function_def_stmt()
-                        .expect("checked function declaration");
-                    if function.name.as_str() != export {
-                        let binding = module.bindings[function.name.as_str()];
+                    let declared = declaration_name(&module.parsed.suite()[statement])
+                        .expect("checked declaration")
+                        .as_str();
+                    if declared != export {
+                        let binding = module.bindings[declared];
                         module.bindings.insert(export.to_owned(), binding);
                     }
                 }
@@ -7578,6 +7608,14 @@ fn native_declaration(statement: &ast::Stmt) -> bool {
                 && matches!(f.body.as_slice(), [ast::Stmt::Expr(s)] if matches!(&*s.value, ast::Expr::EllipsisLiteral(_)))
         }
         _ => false,
+    }
+}
+
+pub(crate) fn declaration_name(statement: &ast::Stmt) -> Option<&ast::Identifier> {
+    match statement {
+        ast::Stmt::FunctionDef(f) => Some(&f.name),
+        ast::Stmt::ClassDef(c) => Some(&c.name),
+        _ => None,
     }
 }
 

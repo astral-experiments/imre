@@ -396,10 +396,39 @@ fn checked_function_preserves_a_user_file_at_the_sdk_path() {
     let (source, site) = session
         .checked_shipped_function("inspect", "cleandoc", &private_path)
         .unwrap();
-    session.add_shipped_function(site, &private_path, source).unwrap();
+    session.add_shipped_declaration(site, &private_path, source).unwrap();
     let copy = session.copy_for_diagnostics(None, None).unwrap();
     assert_eq!(session.selected_file(&sdk_path).unwrap().2.as_str(), user);
     assert_eq!(copy.selected_file(&private_path).unwrap().2.as_str(), source);
+}
+
+#[test]
+fn checked_missing_uses_the_declared_class_and_the_live_module_value() {
+    use super::{Binding, Intrinsic};
+
+    let graph = SourceGraph::single_with_mode(
+        "from dataclasses import MISSING, _MISSING_TYPE as Declared\n",
+        true,
+    )
+    .unwrap();
+    let entry = &graph.modules[graph.entry];
+    assert!(entry.registered_imports.contains_key(&0));
+    let Some(Binding::Definition(id)) = entry.export("Declared") else {
+        panic!("expected the declared sentinel class");
+    };
+    let path = Path::new(crate::dynamic::BUNDLED_SOURCE_ROOT).join("dataclasses.py");
+    let (_, parsed, _) = graph.session.selected_file(&path).unwrap();
+    let module = &graph.modules[id.module];
+    assert!(std::ptr::eq(parsed.syntax(), module.parsed.syntax()));
+    assert_eq!(module.checked_statements(), id.statement..id.statement + 1);
+    let class = parsed.suite()[id.statement].as_class_def_stmt().unwrap();
+    assert_eq!(class.name.as_str(), "_MISSING_TYPE");
+    assert_eq!(
+        entry.export("MISSING"),
+        Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
+            "dataclasses.MISSING"
+        )))
+    );
 }
 
 #[test]
