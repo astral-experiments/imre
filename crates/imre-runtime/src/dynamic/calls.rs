@@ -153,7 +153,7 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         "binascii"
             if matches!(
                 function,
-                "a2b_qp" | "b2a_qp" | "crc32" | "b2a_hex" | "hexlify"
+                "a2b_qp" | "b2a_qp" | "crc32" | "crc_hqx" | "b2a_hex" | "hexlify"
             ) =>
         {
             Some((module, function))
