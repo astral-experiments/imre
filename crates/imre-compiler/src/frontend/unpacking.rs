@@ -88,10 +88,43 @@ pub(super) struct PatternSnapshot {
 }
 
 impl PatternSnapshot {
+    fn from_items(binder: &mut (impl PatternBinder + ?Sized), items: Vec<Expr>) -> Self {
+        let mut snapshot = Self {
+            body: Vec::with_capacity(items.len()),
+            clear: Vec::with_capacity(items.len()),
+        };
+        for item in items {
+            snapshot.capture(binder, item);
+        }
+        snapshot
+    }
+
     fn capture(&mut self, binder: &mut (impl PatternBinder + ?Sized), item: Expr) {
         let slot = binder.pattern_hidden(item.ty);
         self.body.push(Statement::Assign(slot, item));
         self.clear.push(slot);
+    }
+}
+
+/// Take the original operands of a fixed tuple through its diagnostic source positions.
+fn tuple_operands(mut value: &mut Expr, count: usize) -> Option<Vec<Expr>> {
+    loop {
+        match &mut value.kind {
+            ExprKind::Builtin(Builtin::RegisteredLocation(..), args) => {
+                let [inner] = args.as_mut_slice() else {
+                    return None;
+                };
+                value = inner;
+            }
+            ExprKind::Tuple(items)
+                if items.len() == count
+                    && items.iter().all(|item| item.spread_operand().is_none())
+                    && !items.iter().all(ir::Constant::is_constant) =>
+            {
+                return Some(std::mem::take(items));
+            }
+            _ => return None,
+        }
     }
 }
 
@@ -100,10 +133,17 @@ fn protocol_snapshot(
     target: TextRange,
     item_types: impl ExactSizeIterator<Item = Type>,
     star: Option<usize>,
-    value: Expr,
+    mut value: Expr,
     sequence_type: Type,
     row: Option<Row<'_>>,
 ) -> PatternSnapshot {
+    if row.is_none()
+        && star.is_none()
+        && (1..=3).contains(&item_types.len())
+        && let Some(items) = tuple_operands(&mut value, item_types.len())
+    {
+        return PatternSnapshot::from_items(binder, items);
+    }
     let sequence = builtin(
         sequence_type,
         Builtin::RegisteredUnpack {
@@ -1258,14 +1298,7 @@ impl PatternBinder for Checker<'_> {
             && matches!(value.ty, Type::Tuple(_))
             && let ExprKind::Tuple(items) = value.kind
         {
-            let mut snapshot = PatternSnapshot {
-                body: Vec::with_capacity(items.len()),
-                clear: Vec::with_capacity(items.len()),
-            };
-            for item in items {
-                snapshot.capture(self, item);
-            }
-            return Ok(snapshot);
+            return Ok(PatternSnapshot::from_items(self, items));
         }
         let (captured, mut body) = if let Some(Row::Projected(captured)) = row {
             (captured, Vec::new())
