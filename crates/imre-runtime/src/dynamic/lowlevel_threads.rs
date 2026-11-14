@@ -159,7 +159,8 @@ pub(super) fn prepare_start(
     let pos = ctx
         .tuple_elements(*positional)
         .expect("validated thread arguments");
-    let Some((callback, roots)) = Callback::capture(ctx, *function, args, pos, keyword, false)?
+    let Some((callback, roots)) =
+        Callback::capture(ctx, ctx.heap.get(*function), args, pos, keyword, false)?
     else {
         return Err(super::thread_callback::unsupported());
     };
