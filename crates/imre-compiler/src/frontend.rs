@@ -4584,7 +4584,8 @@ impl<'a> Checker<'a> {
                 }
                 return coerce(self, value, expected, expression);
             }
-            if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::JsonLoads)) {
+            let binding = self.resolve(expression);
+            if binding == Some(Binding::Intrinsic(Intrinsic::JsonLoads)) {
                 let value = self.json_load_callable(None, Some(concrete), expression)?;
                 return coerce(self, value, expected, expression);
             }
@@ -4593,12 +4594,12 @@ impl<'a> Checker<'a> {
                 | Intrinsic::RmTree
                 | Intrinsic::Move
                 | Intrinsic::DestInSrc),
-            )) = self.resolve(expression)
+            )) = binding
             {
                 let value = self.shutil_function_value(op, Some(concrete), expression)?;
                 return coerce(self, value, expected, expression);
             }
-            if let Some(Binding::Definition(definition)) = self.resolve(expression)
+            if let Some(Binding::Definition(definition)) = binding
                 && let Some(signature) = self.functions.get(&definition).cloned()
             {
                 let value = self.callable_value(&signature, None, Some(concrete), expression)?;
