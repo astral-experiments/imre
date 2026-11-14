@@ -5491,7 +5491,10 @@ impl Heap {
 
     pub(super) fn observe_fault_workers(&self, workers: &Arc<()>) {
         self.fault_workers.replace(Some(Arc::downgrade(workers)));
-        self.publish_fault_frames(crate::fault_handler::generation());
+        let generation = crate::fault_handler::generation();
+        if self.fault_generation.get() != Some(generation) {
+            self.publish_fault_frames(generation);
+        }
     }
 
     fn filename_display(&self, id: Id) -> Result<std::borrow::Cow<'_, str>> {
