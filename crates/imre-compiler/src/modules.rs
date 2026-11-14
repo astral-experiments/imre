@@ -3177,14 +3177,6 @@ impl SourceModule {
     }
 }
 
-#[derive(Clone, Copy, Default, Eq, PartialEq)]
-pub(crate) enum FloatComponents {
-    #[default]
-    Native,
-    Used,
-    Boxed,
-}
-
 /// Whether native lowering may try an inferred layout and recover the ordinary checked path.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LayoutHint {
@@ -3224,7 +3216,6 @@ pub(crate) struct SourceGraph {
     /// The original entry's reached call check when it consulted no import bindings.
     pub(crate) closed_initializer: Option<crate::analysis::InitializerCheck>,
     pub(crate) layout_hint: std::cell::Cell<LayoutHint>,
-    pub(crate) float_components: std::cell::Cell<FloatComponents>,
     pub(crate) command_startup: Option<(crate::CommandFlags, String)>,
     pub(crate) virtual_command: bool,
     pub(crate) handled_tracebacks: bool,
@@ -3284,7 +3275,6 @@ impl SourceGraph {
         self.session.resume_layout_queries();
         self.session.explicit_check = baseline.explicit_check;
         self.layout_hint.set(LayoutHint::Disabled);
-        self.float_components.set(FloatComponents::Native);
         *self.class_layout_error.get_mut() = None;
         self.has_object_constructor_fallback.set(false);
         self.check_fallback_calls.set(FallbackCalls::None);
@@ -3312,7 +3302,6 @@ impl SourceGraph {
         let needs_object = self.needs_object_runtime.replace(false);
         let calls = self.check_fallback_calls.get();
         let constructor = self.has_object_constructor_fallback.replace(false);
-        let floats = self.float_components.get();
         let set = self.layout_hint.get();
         let result = lower();
         let deferred_here = self.deferred_object_error.replace(deferred).is_some();
@@ -3320,7 +3309,6 @@ impl SourceGraph {
         let used_constructor = self.has_object_constructor_fallback.replace(constructor);
         let result = result.filter(|_| !deferred_here && !needed_here && !used_constructor);
         self.check_fallback_calls.set(calls);
-        self.float_components.set(floats);
         self.layout_hint.set(set);
         self.checked_diagnostics.borrow_mut()[module].truncate(diagnostics);
         result
@@ -5097,7 +5085,6 @@ impl<'a> Loader<'a> {
             empty_keywords: empty_keywords::EmptyKeywords::default(),
             checked_builtin_imports: self.checked_builtin_imports,
             checked_diagnostics: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
-            float_components: Default::default(),
             // An import that cannot be initialized here must not turn an unused
             // object-capable namespace into a reason to box the caller.
             needs_object_runtime: std::cell::Cell::new(

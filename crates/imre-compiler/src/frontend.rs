@@ -700,33 +700,17 @@ fn lower_current(
     StdResult<crate::CheckedProgram, Diagnostic>,
     registered::SourceChecks,
 ) {
-    use crate::modules::FloatComponents;
-    let mut attempt = |cache, unresolved| {
-        let mut inference = inference::Inference::default();
-        inference.source_checks.solved = defer_solved.then(Default::default);
-        inference.source_checks.unresolved = unresolved;
-        let mut layout_error = None;
-        let result = lower_graph(graph, cache, key_reprs, &mut inference, &mut layout_error);
-        let result = layout_error.map_or(result, Err);
-        (result, inference.source_checks)
-    };
-    graph.float_components.set(FloatComponents::Native);
-    let result = attempt(cache, Vec::new());
-    if result.0.is_err() && graph.float_components.get() == FloatComponents::Used {
-        // Recover the original descriptor diagnostic when a later use needs object semantics.
-        graph.float_components.set(FloatComponents::Boxed);
-        let mut unresolved = result.1.unresolved;
-        unresolved.clear();
-        return attempt(None, unresolved);
-    }
-    result
+    let mut inference = inference::Inference::default();
+    inference.source_checks.solved = defer_solved.then(Default::default);
+    let mut layout_error = None;
+    let result = lower_graph(graph, cache, key_reprs, &mut inference, &mut layout_error);
+    (layout_error.map_or(result, Err), inference.source_checks)
 }
 
 /// The file driver checks this graph again before it can place a registered body.
 fn retries_failed_layout(graph: &SourceGraph) -> bool {
     graph.layout_hint.get() == crate::modules::LayoutHint::Applied
         && !graph.reachable_only()
-        && graph.float_components.get() == crate::modules::FloatComponents::Native
 }
 
 /// A body without its native representation still has checked neighbors. Keep its
@@ -743,8 +727,8 @@ fn checked_region<T>(
         Err(failure) => failure,
     };
     // A failed layout trial is discarded. Finish checking and capture any
-    // registered siblings in the ordinary pass. Reachable key formatters and
-    // native float components have their own retries inside the layout trial.
+    // registered siblings in the ordinary pass. Reachable key formatters
+    // have their own retry inside the layout trial.
     if retries_failed_layout(graph) {
         return Err(failure.terminal_in(graph, module));
     }
@@ -10629,11 +10613,7 @@ impl<'a> Checker<'a> {
                 }
                 if receiver.ty == Type::Float
                     && matches!(attribute.attr.as_str(), "real" | "imag")
-                    && self.graph.float_components.get() != crate::modules::FloatComponents::Boxed
                 {
-                    self.graph
-                        .float_components
-                        .set(crate::modules::FloatComponents::Used);
                     if attribute.attr.as_str() == "real" {
                         return Ok(receiver);
                     }
