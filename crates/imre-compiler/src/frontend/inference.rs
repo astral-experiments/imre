@@ -1133,8 +1133,12 @@ impl Inference {
                         }
                     })?;
                     checker.collect_local_definitions(&function.body)?;
-                    let falls_through = checker
-                        .lower_block(&function.body, return_body.as_mut().map(|(_, body)| body))?;
+                    let falls_through = checker.lower_block_with_placement(
+                        &function.body,
+                        return_body.as_mut().map(|(_, body)| body),
+                        None,
+                        Some(function),
+                    )?;
                     // An outstanding call cannot establish an implicit return, even
                     // when checking subsequent statements reached the end of the body.
                     if matches!(

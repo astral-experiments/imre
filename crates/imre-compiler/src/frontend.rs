@@ -2310,6 +2310,7 @@ fn lower_function(
         let result = if let Some(inference) = placement {
             let helpers = checker.helpers.len();
             checker.function_body(
+                definition,
                 statements,
                 Some(&mut body),
                 Some(&mut |cx| {
@@ -2332,7 +2333,7 @@ fn lower_function(
                 }),
             )
         } else {
-            checker.function_body(statements, Some(&mut body), None)
+            checker.function_body(definition, statements, Some(&mut body), None)
         };
         if let Some(body) = placed {
             return Ok((body, HashMap::new()));
@@ -6233,7 +6234,7 @@ impl<'a> Checker<'a> {
         statements: &[ast::Stmt],
         output: Option<&mut Vec<Statement>>,
     ) -> Result<bool, String> {
-        self.lower_block_with_placement(statements, output, None)
+        self.lower_block_with_placement(statements, output, None, None)
     }
 
     /// Let a complete Python body finish a function whose fixed positions no longer match.
@@ -6242,6 +6243,7 @@ impl<'a> Checker<'a> {
         statements: &[ast::Stmt],
         mut output: Option<&mut Vec<Statement>>,
         mut place: Option<&mut dyn FnMut(&Self) -> bool>,
+        function: Option<&ast::StmtFunctionDef>,
     ) -> Result<bool, String> {
         if let Some(reason) = statements.first().and_then(|first| {
             self.graph
@@ -6272,7 +6274,7 @@ impl<'a> Checker<'a> {
                 self.omitted_assert_free
                     .retain(|name, _| !live.contains(name));
             }
-            let (guarded, nullable) = unbound_locals::local_assignments(self, statements);
+            let (guarded, nullable) = unbound_locals::local_assignments(self, statements, function);
             self.nullable_assignments = nullable;
             let mut names: Vec<_> = guarded.into_iter().collect();
             names.sort_unstable();
