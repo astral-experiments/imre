@@ -837,7 +837,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         }
         let types = (left.checked_operand_type(), right.checked_operand_type());
         let checked_ints = types == (Type::Int, Type::Int);
-        let plain_arithmetic = matches!(op, Binary::Add | Binary::Subtract | Binary::Multiply);
+        let plain_arithmetic = op.is_plain_arithmetic();
         let float_arithmetic = plain_arithmetic
             && matches!(self.0, Entry::Registered(_))
             && types == (Type::Float, Type::Float);

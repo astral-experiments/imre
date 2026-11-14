@@ -53,16 +53,11 @@ impl FixedBodySource {
                 .params
                 .iter()
                 .any(|&slot| frame.function.locals[slot].builtin_scalar_name().is_some())
+            && !frame.bind_python_arguments()
         {
-            let Some((inputs, slots)) =
-                crate::llvm::registered::frame_inputs(&frame, self.arguments)
-            else {
-                return Err(frame
-                    .fixed_attributes
-                    .map_or_else(HashMap::new, |attrs| *attrs));
-            };
-            frame.inputs = inputs;
-            frame.frame_slots = slots;
+            return Err(frame
+                .fixed_attributes
+                .map_or_else(HashMap::new, |attrs| *attrs));
         }
         Ok(frame)
     }

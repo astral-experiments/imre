@@ -169,7 +169,7 @@ fn typing_initializer_binds_the_checked_reveal_type_definition() {
         Path::new("<imre stdlib>/typing.py"),
         source,
         0,
-        ModuleOrigin::Bundled,
+        ModuleOrigin::Bundled(None),
         |module| {
             let initializer = module.initializer();
             assert!(initializer.fully_checked());

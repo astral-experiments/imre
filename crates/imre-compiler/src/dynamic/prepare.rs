@@ -51,7 +51,7 @@ pub(super) fn check_shipped(
         path,
         input,
         python_optimization,
-        ModuleOrigin::Bundled,
+        ModuleOrigin::Bundled(None),
         Default::default(),
         Default::default(),
     )
@@ -112,11 +112,11 @@ pub(super) fn units<'a>(
                 .flatten();
             let standalone = bundled_prompts.is_none()
                 && unit != 0
-                && matches!(origin, ModuleOrigin::Bundled)
+                && matches!(origin, ModuleOrigin::Bundled(_))
                 && physical.is_none()
                 && zip.is_none()
                 && discovered.is_none()
-                && checked.is_none()
+                && checked.is_none_or(|unit| unit.source.is_none() && unit.run_path.is_none())
                 && literals.is_none()
                 && types.is_none();
             let initializer = if !builtin && let Some(error) = module_errors.get(path) {

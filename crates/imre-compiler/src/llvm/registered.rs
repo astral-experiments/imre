@@ -252,6 +252,17 @@ pub(crate) fn frame_inputs(
                 protocol_reads += protocol_parameter(left) + protocol_parameter(right);
                 true
             }
+            ExprKind::Binary(op, left, right)
+                if has_scalar
+                    && op.is_plain_arithmetic()
+                    && (left.checked_operand_type(), right.checked_operand_type())
+                        == (Type::Float, Type::Float) =>
+            {
+                // The registered float guard receives both original handles on either edge.
+                read_scalar_protocol(left);
+                read_scalar_protocol(right);
+                true
+            }
             ExprKind::Binary(..) => true,
             ExprKind::List(values) | ExprKind::Tuple(values) | ExprKind::Set { values, .. } => {
                 uses_python_protocol = true;

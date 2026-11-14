@@ -487,7 +487,10 @@ fn placed_arithmetic_keeps_the_python_operator_and_integer_guards() {
             &value.kind,
             ExprKind::Binary(actual, ..) if *actual == op
         ));
-        let placed = frame.place(function).ok().unwrap();
+        let mut placed = frame.place(function).ok().unwrap();
+        if floats {
+            assert!(placed.bind_python_arguments());
+        }
         let mut output = Output::default();
         let file = output.data(b"combine.py");
         let positions = SourcePositions::new(Path::new("combine.py"), &source, &file);

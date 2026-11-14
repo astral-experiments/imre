@@ -320,6 +320,21 @@ impl RegisteredFunction {
         Some(checked)
     }
 
+    /// Check that each use of a parameter can consume the caller's live Python value.
+    pub(crate) fn bind_python_arguments(&mut self) -> bool {
+        if matches!(self.inputs, FrameInputs::Protocol { .. }) {
+            return true;
+        }
+        let Some((inputs, slots)) =
+            crate::llvm::registered::frame_inputs(self, FrameArguments::Python)
+        else {
+            return false;
+        };
+        self.inputs = inputs;
+        self.frame_slots = slots;
+        true
+    }
+
     /// Graph admission needs a complete function. The lexical owner prepares residual operands.
     pub(crate) fn from_suite(
         stmts: &[ast::Stmt],
@@ -762,7 +777,8 @@ impl FixedFunctions {
                 .registered_functions()
                 .get(&module)
                 .is_some_and(|entries| entries.contains_key(&start))
-                && let Ok(placed) = source.place(function)
+                && let Ok(mut placed) = source.place(function)
+                && (!graph.modules[module].bundled || placed.bind_python_arguments())
                 && accepted(module, definition)
             {
                 graph.register_function(module, start, placed);
