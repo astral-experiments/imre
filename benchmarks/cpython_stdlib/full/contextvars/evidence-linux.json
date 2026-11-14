@@ -8,8 +8,8 @@
     "denominator": 56,
     "distinct_ids": 56,
     "counts": {
-      "failed": 8,
-      "fully-native": 25,
+      "failed": 7,
+      "fully-native": 26,
       "unexpected-skip": 23
     },
     "records": [
@@ -184,19 +184,20 @@
         "opt_level": 0,
         "fixture_variant": "test.test_context.ContextTest",
         "reference": "pass",
-        "outcome": "failure",
+        "outcome": "pass",
         "roles": {
           "body": "imre",
           "assertions": "imre",
           "operation": "imre",
           "fixture": "imre"
         },
-        "reason": "AssertionError: \"missing 1 required\" does not match \"invalid arguments to Context.run\"",
         "evidence": {
           "method_sha256": "9dca760176b9d4fdd0f6a7ebb16157979a0afab27e88e284769341cb2d4dde72",
-          "stderr_line": 13
+          "stderr_line": 13,
+          "operation": "ContextTest.test_context_run_1",
+          "fixture": "unmodified test_context.py in the linked FILE application"
         },
-        "classification": "failed"
+        "classification": "fully-native"
       },
       {
         "id": "test.test_context.ContextTest.test_context_run_2",
@@ -462,7 +463,7 @@
           "operation": "imre",
           "fixture": "imre"
         },
-        "reason": "AssertionError: <_contextvars.Context object at 0x9401> is not an instance of <class 'collections.abc.Mapping'>",
+        "reason": "AssertionError: <_contextvars.Context object at 0x940d> is not an instance of <class 'collections.abc.Mapping'>",
         "evidence": {
           "method_sha256": "4159594f79e0aa97419dfb1c9cfa7fca449d0ee6cdc22d0ec42bbc59aa1ad8bb",
           "stderr_line": 10
@@ -1171,8 +1172,8 @@
     "denominator": 56,
     "distinct_ids": 56,
     "counts": {
-      "failed": 8,
-      "fully-native": 25,
+      "failed": 7,
+      "fully-native": 26,
       "unexpected-skip": 23
     },
     "records": [
@@ -1347,19 +1348,20 @@
         "opt_level": 3,
         "fixture_variant": "test.test_context.ContextTest",
         "reference": "pass",
-        "outcome": "failure",
+        "outcome": "pass",
         "roles": {
           "body": "imre",
           "assertions": "imre",
           "operation": "imre",
           "fixture": "imre"
         },
-        "reason": "AssertionError: \"missing 1 required\" does not match \"invalid arguments to Context.run\"",
         "evidence": {
           "method_sha256": "9dca760176b9d4fdd0f6a7ebb16157979a0afab27e88e284769341cb2d4dde72",
-          "stderr_line": 13
+          "stderr_line": 13,
+          "operation": "ContextTest.test_context_run_1",
+          "fixture": "unmodified test_context.py in the linked FILE application"
         },
-        "classification": "failed"
+        "classification": "fully-native"
       },
       {
         "id": "test.test_context.ContextTest.test_context_run_2",
@@ -1625,7 +1627,7 @@
           "operation": "imre",
           "fixture": "imre"
         },
-        "reason": "AssertionError: <_contextvars.Context object at 0x9401> is not an instance of <class 'collections.abc.Mapping'>",
+        "reason": "AssertionError: <_contextvars.Context object at 0x940d> is not an instance of <class 'collections.abc.Mapping'>",
         "evidence": {
           "method_sha256": "4159594f79e0aa97419dfb1c9cfa7fca449d0ee6cdc22d0ec42bbc59aa1ad8bb",
           "stderr_line": 10
