@@ -592,21 +592,18 @@ pub(crate) fn check_registered_project<'a>(
     // Static SDK declarations can type an import even though there is no Python
     // body to register. An actual same-name registration supplies its own types.
     if let Some(graph) = checked {
-        // Keep the guarded import's stub beside its selected Python implementation.
-        for &file in &graph.session.declarations {
-            let path = file.path(&graph.session.db);
-            let stub = Path::new(path.as_str());
-            if stub.extension().is_some_and(|ext| ext == "pyi") {
-                let implementation = stub.with_extension("py");
-                if sources
-                    .clone()
-                    .any(|s| s.declares_signatures && s.path == implementation)
-                    && !paths.iter().any(|(path, _, _)| path == stub)
-                {
-                    let source = ruff_db::source::source_text(&graph.session.db, file);
-                    let file = session.write_file(path.as_str(), source.as_str())?;
+        for winner in sources.clone().filter(|s| s.declares_signatures) {
+            if let Some(stub) = winner.guarded_stub {
+                let path = winner
+                    .semantic_path
+                    .unwrap_or(winner.path)
+                    .with_extension("pyi");
+                if !paths.iter().any(|(registered, _, _)| *registered == path) {
+                    let source = ruff_db::source::source_text(&graph.session.db, stub);
+                    let spelling = path.to_str().ok_or("module paths must be valid UTF-8")?;
+                    let file = session.write_file(spelling, source.as_str())?;
                     session.files.push(file);
-                    paths.push((stub.to_owned(), false, None));
+                    paths.push((path, false, None));
                 }
             }
         }
@@ -631,10 +628,10 @@ pub(crate) fn check_registered_project<'a>(
             kind,
             ..
         } = winner;
-        let path = if kind == crate::SourceKind::Command {
-            root.join("<string>.py")
-        } else {
-            path.to_owned()
+        let path = match (winner.semantic_path, kind) {
+            (Some(path), _) => path.to_owned(),
+            (None, crate::SourceKind::Command) => root.join("<string>.py"),
+            _ => path.to_owned(),
         };
         let source = crate::normalize_source(source, kind)
             .map_err(|error| format!("{}: {error}", path.display()))?;
@@ -1758,6 +1755,34 @@ impl Session {
                 .as_system_path()
                 .is_some_and(|origin| origin.as_std_path() == path)
         })
+    }
+
+    /// Pair a guarded declaration with the selected implementation's adjacent stub.
+    pub(crate) fn guarded_stub(
+        &self,
+        implementation: &Path,
+        declarations: &[(PathBuf, PathBuf, String)],
+        inputs: &mut crate::SourceInputs,
+        fs: &mut crate::watch::FileSystem<'_>,
+    ) -> Option<File> {
+        let stub = implementation.with_extension("pyi");
+        if let Some(file) = self.file_at_path(&stub, &self.declarations) {
+            return Some(file);
+        }
+        let mut stubs = declarations
+            .iter()
+            .filter(|(path, _, _)| path.extension().is_some_and(|ext| ext == "pyi"))
+            .peekable();
+        if stubs.peek().is_none() {
+            return None;
+        }
+        let resolved = fs.canonicalize(&stub).ok();
+        let matched = resolved.as_ref().and_then(|identity| {
+            let (path, _, _) = stubs.find(|(_, seen, _)| seen == identity)?;
+            self.file_at_path(path, &self.declarations)
+        });
+        inputs.declared_file_resolutions.push((stub, resolved));
+        matched
     }
 
     /// Borrow the declaration's indexed syntax while its physical parser input still matches.

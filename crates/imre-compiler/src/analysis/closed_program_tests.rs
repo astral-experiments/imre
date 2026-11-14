@@ -1723,29 +1723,92 @@ fn a_guarded_reexport_resolves_to_its_linked_class_without_running_the_module() 
 
     let stub = package.join("labels.pyi");
     fs::write(&stub, "from .other import Packet as Packet\n").unwrap();
-    let named = crate::CompileOptions {
+    let named = |root: &std::path::Path| crate::CompileOptions {
         module_entry: Some("main".into()),
         script_startup: Some((Default::default(), "imre".into())),
         extension_paths: vec![root.to_owned()],
         ..Default::default()
     };
-    fs::write(&entry, source).unwrap();
-    let error = crate::compile_file_with_boxed_units(&entry, Some(root), &named)
-        .err()
-        .expect("the guarded stub requires pkg.other.Packet");
-    assert!(
-        error.contains("main.py:7:12")
-            && error.contains("expected `pkg.other.Packet`, found `pkg.model.Packet`"),
-        "{error}"
-    );
+    let check_named = |spelling: &std::path::Path| {
+        let app = spelling.join("main.py");
+        let options = named(spelling);
+        fs::write(&entry, source).unwrap();
+        let error = crate::compile_file_with_boxed_units(&app, Some(spelling), &options)
+            .err()
+            .expect("the guarded stub requires pkg.other.Packet");
+        assert!(
+            error.contains("main.py:7:12")
+                && error.contains("expected `pkg.other.Packet`, found `pkg.model.Packet`"),
+            "{error}"
+        );
+        fs::write(&entry, &returning_other).unwrap();
+        let (compiled, _) =
+            crate::compile_file_with_boxed_units(&app, Some(spelling), &options).unwrap();
+        (error, compiled.source_inputs)
+    };
+    check_named(root);
+    check_named(&package.join(".."));
+    #[cfg(unix)]
+    {
+        let shadow = tempdir().unwrap();
+        let other = shadow.path().join("pkg");
+        fs::create_dir(&other).unwrap();
+        for name in ["__init__.py", "model.py", "other.py", "labels.py"] {
+            fs::copy(package.join(name), other.join(name)).unwrap();
+        }
+        fs::write(shadow.path().join("main.py"), source).unwrap();
+        fs::write(
+            other.join("labels.pyi"),
+            "from .model import Packet as Packet\n",
+        )
+        .unwrap();
+        let link = shadow.path().join("link");
+        std::os::unix::fs::symlink(&package, &link).unwrap();
+        let (error, inputs) = check_named(&link.join(".."));
+        assert!(
+            !error.contains(shadow.path().file_name().unwrap().to_str().unwrap()),
+            "{error}"
+        );
+        assert!(inputs.declared_file_resolutions.contains(&(
+            link.join(".."),
+            Some(root.canonicalize().unwrap()),
+        )));
+        assert!(inputs.fresh());
+        fs::remove_file(&link).unwrap();
+        std::os::unix::fs::symlink(&other, &link).unwrap();
+        assert!(!inputs.fresh());
+    }
 
-    fs::write(&entry, returning_other).unwrap();
     let mut graph = crate::modules::SourceGraph::load(&entry, Some(root), &[]).unwrap();
+    let alternate = tempdir().unwrap();
+    fs::write(alternate.path().join("labels.pyi"), "class Packet: ...\n").unwrap();
+    let mut observed = crate::SourceInputs::default();
+    let mut fs = crate::watch::FileSystem::default();
+    for (implementation, matches) in [
+        (package.join("../pkg/labels.py"), true),
+        (alternate.path().join("labels.py"), false),
+    ] {
+        assert_eq!(
+            graph
+                .session
+                .guarded_stub(
+                    &implementation,
+                    &graph.inputs.declaration_files,
+                    &mut observed,
+                    &mut fs,
+                )
+                .is_some(),
+            matches,
+            "{}",
+            implementation.display()
+        );
+    }
+    assert!(observed.fresh());
     let (inputs, paths) = graph.disk_inputs(None);
     assert!(paths.contains(&stub.canonicalize().unwrap()));
     assert!(inputs.fresh());
     crate::check_file(&entry, Some(root)).unwrap();
-    crate::compile_file_with_boxed_units(&entry, Some(root), &named).unwrap();
+    crate::compile_file_with_boxed_units(&entry, Some(root), &named(root)).unwrap();
     fs::write(&stub, "from .model import Packet as Packet\n").unwrap();
     assert!(!inputs.fresh());
     let error = crate::check_file(&entry, Some(root)).unwrap_err();

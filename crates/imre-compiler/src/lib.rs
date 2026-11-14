@@ -277,7 +277,7 @@ pub struct SourceInputs {
     /// File-kind queries that affect import admission without reading a provider's contents.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub file_checks: std::collections::BTreeMap<PathBuf, bool>,
-    /// Resolution of runpy's normalized open path when it differs from the loader's origin.
+    /// Resolutions of alternate paths used by runpy and guarded declarations.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub declared_file_resolutions: Vec<(PathBuf, Option<PathBuf>)>,
     /// Import search directories and the canonical directories they resolve to.
