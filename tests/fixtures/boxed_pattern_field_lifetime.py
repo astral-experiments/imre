@@ -32,3 +32,12 @@ def current():
         case (Pair(left=Field(child=saved), right=Field(label="absent"))
               | Pair(left=Field(child=saved), right=Field(label="right"))):
             print("bound", saved.name)
+
+    class Lists:
+        @property
+        def pair(self):
+            return [Field("list first"), Field("list last")]
+
+    match Lists():
+        case Lists(pair=_):
+            print("matched the list")

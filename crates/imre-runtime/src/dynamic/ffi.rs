@@ -3480,7 +3480,8 @@ pub(super) unsafe extern "C" fn imre_dyn_replace_temporaries(
 ) {
     // SAFETY: the generated caller retains the context and the complete native root array.
     let (ctx, values) = unsafe { (&mut *ctx, live_handles(values, count)) };
-    ctx.discard_temporaries(mark, values.iter().copied());
+    ctx.heap.insert_temporaries(mark, values);
+    ctx.unwind_operands(mark + count);
 }
 
 /// Publish surviving operands before collecting, returning the boundary above the first one.
