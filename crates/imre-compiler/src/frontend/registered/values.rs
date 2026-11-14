@@ -468,7 +468,12 @@ pub(in crate::frontend) fn bound_call(
     target: Expr,
     arguments: Vec<Expr>,
 ) -> Expr {
-    let layout = registered_argument_layout(&call.arguments);
+    // Direct method lookup excludes expansion and large calls. The checked list
+    // methods also arrive with at most one bound positional argument.
+    let layout = match selection {
+        ir::RegisteredCallTarget::Method { .. } => fixed_argument_layout(&call.arguments),
+        ir::RegisteredCallTarget::Callable { .. } => registered_argument_layout(&call.arguments),
+    };
     invoke_value(
         ir::RegisteredCall::new(call.range(), selection, layout),
         Box::new(target),
