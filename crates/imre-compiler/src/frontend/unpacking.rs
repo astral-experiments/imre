@@ -687,7 +687,8 @@ impl Checker<'_> {
                         vec![value, receiver],
                     );
                 }
-                if self.resolve(target) == Some(Binding::Intrinsic(Intrinsic::PopenSelector)) {
+                let binding = self.resolve(target);
+                if binding == Some(Binding::Intrinsic(Intrinsic::PopenSelector)) {
                     let value = self.coerce(value, Type::ProcessSelectorClass, target)?;
                     break 'place Statement::Expr(Expr {
                         ty: Type::None,
@@ -697,7 +698,9 @@ impl Checker<'_> {
                         ),
                     });
                 }
-                if self.cache_config(target) == Some(true) {
+                if cache_paths::config(attribute, binding, || self.resolve(&attribute.value))
+                    == Some(true)
+                {
                     let value = self.coerce(value, self.types.optional(Type::Str), target)?;
                     break 'place Statement::Expr(cache_paths::op(
                         ir::CachePathOperation::Set(true),
@@ -705,9 +708,7 @@ impl Checker<'_> {
                         vec![value],
                     ));
                 }
-                if let Some(Binding::Intrinsic(Intrinsic::LogRecordFlag(mask))) =
-                    self.resolve(target)
-                {
+                if let Some(Binding::Intrinsic(Intrinsic::LogRecordFlag(mask))) = binding {
                     let value = self.coerce(value, Type::Bool, target)?;
                     break 'place Statement::Expr(logging_records::op(
                         ir::LogRecordOperation::SetFlag,
@@ -715,14 +716,14 @@ impl Checker<'_> {
                         vec![Expr::integer(mask), value],
                     ));
                 }
-                if self.resolve(target) == Some(Binding::Intrinsic(Intrinsic::BuiltinsLen)) {
+                if binding == Some(Binding::Intrinsic(Intrinsic::BuiltinsLen)) {
                     let value = self.coerce(value, self.builtin_len().ty, target)?;
                     break 'place Statement::Expr(Expr {
                         ty: Type::None,
                         kind: ExprKind::Builtin(Builtin::BuiltinsSetLen, vec![value]),
                     });
                 }
-                if self.resolve(target) == Some(Binding::Intrinsic(Intrinsic::Stdout)) {
+                if binding == Some(Binding::Intrinsic(Intrinsic::Stdout)) {
                     if !matches!(
                         self.types.payload(value.ty).unwrap_or(value.ty),
                         Type::TextIO | Type::StringIO | Type::None
@@ -738,7 +739,7 @@ impl Checker<'_> {
                         kind: ExprKind::Builtin(Builtin::SysStdoutSet, vec![value]),
                     });
                 }
-                if self.resolve(target) == Some(Binding::Intrinsic(Intrinsic::BuiltinsLast)) {
+                if binding == Some(Binding::Intrinsic(Intrinsic::BuiltinsLast)) {
                     if !sys::displayable(value.ty) {
                         return Err(error(
                             self.source,
