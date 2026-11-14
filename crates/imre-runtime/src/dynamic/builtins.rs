@@ -1414,101 +1414,73 @@ pub(super) fn attribute_name(ctx: &Context, value: Id) -> Result<String> {
     })
 }
 
-fn set_attribute(
+fn edit_attribute(
     ctx: &mut Context,
     name: &str,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    let owner = name.strip_suffix(".__setattr__");
+    let (owner, method) = name
+        .rsplit_once('.')
+        .map_or((None, name), |(owner, method)| (Some(owner), method));
     if let Some(owner) = owner {
         let Some(&obj) = args.first() else {
             return Err(type_error(format!(
-                "descriptor '__setattr__' of '{owner}' object needs an argument"
+                "descriptor '{method}' of '{owner}' object needs an argument"
             )));
         };
         if owner == "type" && !ctx.is_type_object(obj) {
             return Err(type_error(format!(
-                "descriptor '__setattr__' requires a 'type' object but received a '{}'",
+                "descriptor '{method}' requires a 'type' object but received a '{}'",
                 super::stdlib::diagnostic_type_name(ctx, obj)
             )));
         }
     }
     if !kwargs.is_empty() {
-        return Err(type_error(if owner.is_some() {
-            "wrapper __setattr__() takes no keyword arguments"
-        } else {
-            "setattr() takes no keyword arguments"
-        }));
-    }
-    let [obj, attr, value] = args else {
-        return Err(type_error(if owner.is_some() {
-            format!("__setattr__ expected 2 arguments, got {}", args.len() - 1)
-        } else {
-            format!("setattr expected 3 arguments, got {}", args.len())
-        }));
-    };
-    if owner == Some("object") && ctx.is_type_object(*obj) {
-        let class = ctx.exact_type(*obj)?;
+        let prefix = if owner.is_some() { "wrapper " } else { "" };
         return Err(type_error(format!(
-            "can't apply this __setattr__ to {} object",
+            "{prefix}{method}() takes no keyword arguments"
+        )));
+    }
+    let value = match (method, args) {
+        ("__setattr__" | "setattr", [_, _, value]) => Some(*value),
+        ("__delattr__" | "delattr", [_, _]) => None,
+        _ => {
+            let count = args.len();
+            let message = match method {
+                "__setattr__" => format!("__setattr__ expected 2 arguments, got {}", count - 1),
+                "__delattr__" => format!("expected 1 argument, got {}", count - 1),
+                "setattr" => format!("setattr expected 3 arguments, got {count}"),
+                _ => format!("delattr expected 2 arguments, got {count}"),
+            };
+            return Err(type_error(message));
+        }
+    };
+    let (obj, key) = (args[0], args[1]);
+    if owner == Some("object") && ctx.is_type_object(obj) {
+        let class = ctx.exact_type(obj)?;
+        return Err(type_error(format!(
+            "can't apply this {method} to {} object",
             ctx.class_name(class)
         )));
     }
     if owner == Some("type")
-        && let Some(class) = ctx.immutable_type_name(*obj)
+        && let Some(class) = ctx.immutable_type_name(obj)
     {
-        let shown = call(ctx, "repr", &[*attr], &[])?;
+        let shown = call(ctx, "repr", &[key], &[])?;
         return Err(type_error(format!(
             "cannot set {} attribute of immutable type '{class}'",
             ctx.str_value(shown)?
         )));
     }
-    let attr_name = attribute_name(ctx, *attr)?;
-    let attr = AttributeName::from_lookup(&attr_name, Some(*attr));
+    let name = attribute_name(ctx, key)?;
+    let attr = AttributeName::from_lookup(&name, Some(key));
     if owner.is_some() {
-        ctx.default_object_attribute(*obj, attr, ObjectAttribute::Edit(Some(*value)))?;
+        ctx.default_object_attribute(obj, attr, ObjectAttribute::Edit(value))?;
+    } else if let Some(value) = value {
+        ctx.set_named_attr(obj, attr, value)?;
     } else {
-        ctx.set_named_attr(*obj, attr, *value)?;
-    }
-    Ok(NONE)
-}
-
-fn delete_attribute(
-    ctx: &mut Context,
-    name: &str,
-    args: &[Id],
-    kwargs: &[(String, Id)],
-) -> Result<Id> {
-    let base = name == "object.__delattr__";
-    if base && args.is_empty() {
-        return Err(type_error(
-            "descriptor '__delattr__' of 'object' object needs an argument",
-        ));
-    }
-    if !kwargs.is_empty() {
-        return Err(type_error(if base {
-            "wrapper __delattr__() takes no keyword arguments"
-        } else {
-            "delattr() takes no keyword arguments"
-        }));
-    }
-    let [obj, attr] = args else {
-        return Err(type_error(if base {
-            format!("expected 1 argument, got {}", args.len() - 1)
-        } else {
-            format!("delattr expected 2 arguments, got {}", args.len())
-        }));
-    };
-    if base && ctx.builtin_type_name(*obj) == Some("type") {
-        return Err(type_error("can't apply this __delattr__ to type object"));
-    }
-    let name = attribute_name(ctx, *attr)?;
-    let attr = AttributeName::from_lookup(&name, Some(*attr));
-    if base {
-        ctx.default_object_attribute(*obj, attr, ObjectAttribute::Edit(None))?;
-    } else {
-        ctx.delete_named_attr(*obj, attr)?;
+        ctx.delete_named_attr(obj, attr)?;
     }
     Ok(NONE)
 }
@@ -1914,11 +1886,16 @@ pub(super) fn call(
             )
         };
     }
-    if matches!(name, "setattr" | "object.__setattr__" | "type.__setattr__") {
-        return set_attribute(ctx, name, args, kwargs);
-    }
-    if matches!(name, "delattr" | "object.__delattr__") {
-        return delete_attribute(ctx, name, args, kwargs);
+    if matches!(
+        name,
+        "setattr"
+            | "delattr"
+            | "object.__setattr__"
+            | "object.__delattr__"
+            | "type.__setattr__"
+            | "type.__delattr__"
+    ) {
+        return edit_attribute(ctx, name, args, kwargs);
     }
     if name == "types.SimpleNamespace.__new__" {
         return super::namespace_init::allocate(ctx, args);
