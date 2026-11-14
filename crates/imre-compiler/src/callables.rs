@@ -1,6 +1,8 @@
 //! Closed target sets for exact callable signatures in the final typed program.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
+
+use crate::{LoweringDiagnostic, LoweringKind};
 
 #[cfg(test)]
 use crate::ir::Module;
@@ -85,6 +87,127 @@ impl Targets {
     pub(crate) fn get(&self, ty: Type) -> &[Target] {
         self.0.get(&ty).map_or(&[], Vec::as_slice)
     }
+}
+
+/// Callable representation selected from the original checked operations.
+pub(crate) struct Layouts {
+    pub(crate) targets: Targets,
+    pub(crate) linked_functions: HashSet<usize>,
+}
+
+pub(crate) fn layouts(module: &ir::Module) -> Result<Layouts, LoweringDiagnostic> {
+    let mut function_link_types = HashSet::new();
+    let mut link_owners = BTreeMap::<usize, Vec<&ir::Expr>>::new();
+    let mut targets = TargetCollector::default();
+    for (id, function) in module.functions.iter().chain([&module.entry]).enumerate() {
+        ir::walk_expressions(&function.body, &mut |expr| {
+            targets.inspect(&module.types, expr);
+            let ExprKind::Builtin(builtin, args) = &expr.kind else {
+                return;
+            };
+            match builtin {
+                ir::Builtin::FunctionWrappedSet | ir::Builtin::FunctionWrappedGet(_) => {
+                    let owner = &args[0];
+                    function_link_types.insert(owner.ty);
+                    link_owners.entry(id).or_default().push(owner);
+                }
+                _ => {}
+            }
+        });
+    }
+    let callable_targets = targets.finish();
+    let cached = |id| module.types.cache_adapter(id).is_some();
+    let unknown_signature = || {
+        LoweringDiagnostic::plain(
+            "Imre: wrapper links require a callable signature with known native functions or source methods".to_owned(),
+        )
+        .classified(LoweringKind::Object)
+    };
+    if function_link_types
+        .iter()
+        .any(|&ty| module.types.dispatcher(ty).is_some() || callable_targets.get(ty).is_empty())
+    {
+        return Err(unknown_signature());
+    }
+    let linked_functions = function_link_types
+        .iter()
+        .flat_map(|&ty| callable_targets.get(ty))
+        .filter(|target| !target.bound)
+        .map(|target| target.function)
+        .collect::<HashSet<_>>();
+    link_owners.retain(|_, owners| {
+        owners.retain(|owner| {
+            callable_targets
+                .get(owner.ty)
+                .iter()
+                .any(|target| target.bound && !cached(target.function))
+        });
+        !owners.is_empty()
+    });
+
+    // Direct arguments can establish ownership only for a closed function whose
+    // signature also admits a bound method. Other callables need no caller scan.
+    let mut direct_inputs: HashMap<_, Vec<_>> = link_owners
+        .keys()
+        .filter_map(|&id| {
+            let function = module.functions.get(id)?;
+            (!function.params.is_empty()).then(|| (id, Vec::new()))
+        })
+        .collect();
+    if !direct_inputs.is_empty() {
+        for function in module.functions.iter().chain([&module.entry]) {
+            ir::walk_expressions(&function.body, &mut |expr| match &expr.kind {
+                ExprKind::Call(id, args) => {
+                    if let Some(inputs) = direct_inputs.get_mut(id) {
+                        inputs.push(args);
+                    }
+                }
+                ExprKind::Callable { function, .. } => {
+                    direct_inputs.remove(function);
+                    if let Some(raw) = module.types.original_cache_body(*function) {
+                        direct_inputs.remove(&raw);
+                    }
+                }
+                ExprKind::Construct { initializer, .. } => {
+                    direct_inputs.remove(initializer);
+                }
+                _ => {}
+            });
+        }
+    }
+    link_owners.retain(|&id, owners| {
+        let function = module.functions.get(id).unwrap_or(&module.entry);
+        let inputs = direct_inputs.get(&id).map_or(&[][..], Vec::as_slice);
+        ir::retain_unknown_link_owners(function, owners, inputs, |operand| {
+            matches!(operand.kind, ExprKind::Callable { function, receiver: None }
+                if !cached(function)
+                    && module.types.constructor_base(operand.ty).is_none()
+                    && linked_functions.contains(&function))
+        });
+        !owners.is_empty()
+    });
+    // Only the owner needs link storage. A plain function can wrap a bound
+    // builtin, even when the two callables have the same signature.
+    if link_owners.values().flatten().any(|owner| {
+        callable_targets.get(owner.ty).iter().any(|target| {
+            let function = &module.functions[target.function];
+            target.bound
+                && !cached(target.function)
+                && !matches!(function.locals[function.params[0]], Type::Class(_))
+        })
+    }) {
+        return Err(unknown_signature());
+    }
+    if !link_owners.is_empty() {
+        return Err(LoweringDiagnostic::plain(
+            "Imre: native wrapper links require a plain function as their owner".to_owned(),
+        )
+        .classified(LoweringKind::ScopedObject));
+    }
+    Ok(Layouts {
+        targets: callable_targets,
+        linked_functions,
+    })
 }
 
 #[cfg(test)]

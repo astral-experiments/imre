@@ -327,7 +327,7 @@ impl<'units> Output<'units> {
         module: &Module,
         ranges: &RangeFacts<'_>,
         sanitize: bool,
-        program: NativeProgram,
+        program: crate::callables::Layouts,
     ) {
         emit_program(module, ranges, sanitize, &mut self, program);
         for (integers, unit) in self.integers.into_iter().zip(self.units.iter_mut()) {
@@ -343,7 +343,7 @@ impl crate::ProgramOutput {
         graph: &crate::modules::SourceGraph,
         fixed: &mut crate::FixedProgram,
         sanitize: bool,
-        program: NativeProgram,
+        program: crate::callables::Layouts,
     ) {
         fixed.prepare_native_sources(graph);
         let (module, owners) = &fixed.ir;

@@ -318,6 +318,41 @@ fn computed_factory_preserves_dormant_declared_calls() {
 }
 
 #[test]
+fn included_module_uses_the_checked_wrapper_representation() {
+    let project = tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    fs::write(project.path().join("plugin.py"), "value = 1\n").unwrap();
+    fs::write(
+        &entry,
+        r#"from functools import update_wrapper
+from typing import Callable
+
+class Counter:
+    def plus(self, value: int) -> int:
+        return value + 1
+
+def plain(value: int) -> int:
+    return value * 2
+
+def wrapped(fn: Callable[[int], int]) -> int:
+    try:
+        update_wrapper(fn, plain, (), ())
+    except AttributeError:
+        return fn(10)
+    return fn.__wrapped__(10)
+
+print(wrapped(Counter().plus), wrapped(plain))
+"#,
+    )
+    .unwrap();
+    let options = crate::CompileOptions {
+        include_modules: ["plugin".to_owned()].into(),
+        ..Default::default()
+    };
+    crate::check_file_with_options(&entry, None, &options).unwrap();
+}
+
+#[test]
 fn declared_import_checks_lexical_syntax() {
     let project = tempdir().unwrap();
     let entry = project.path().join("main.py");

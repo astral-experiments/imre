@@ -530,12 +530,12 @@ fn object_fallback(
                     CheckedProgram::Native(mut fixed) => {
                         let (module, owners) = &mut fixed.ir;
                         verify_after(module, "lowering")?;
-                        let Some(output) = output.as_deref_mut() else {
-                            native_includes()?;
-                            return Ok(graph.inputs);
-                        };
-                        match llvm::analyze_program(module) {
+                        match callables::layouts(module) {
                             Ok(program) => {
+                                let Some(output) = output.as_deref_mut() else {
+                                    native_includes()?;
+                                    return Ok(graph.inputs);
+                                };
                                 for original in specialize(module)? {
                                     owners.push(owners[original]);
                                 }
@@ -556,7 +556,7 @@ fn object_fallback(
                             Err(reason) => {
                                 // Placement needs the original checked operations and their source sites.
                                 fixed.register_definitions(&graph);
-                                LoweringDiagnostic::plain(reason.0.to_owned()).classified(reason.1)
+                                reason
                             }
                         }
                     }
