@@ -3903,6 +3903,14 @@ fn file_errors<'db>(db: &'db dyn LiteralSourceDb, checked: CheckedFile<'db>) -> 
     db.check_file(file)
         .iter()
         .filter(|diagnostic| {
+            let rule = diagnostic.id().as_str();
+            let check_argument = match checks {
+                FileChecks::Full => {
+                    matches!(rule, "too-many-positional-arguments" | "missing-argument")
+                }
+                FileChecks::DeclaredSignatures => is_call_shape_rule(rule),
+                _ => CALL_ARGUMENT_RULES.contains(&rule),
+            };
             diagnostic.severity() >= Severity::Error
                 && fallback.as_ref().is_none_or(|parsed| {
                     diagnostic.id().as_str() != "invalid-assignment"
@@ -3918,24 +3926,13 @@ fn file_errors<'db>(db: &'db dyn LiteralSourceDb, checked: CheckedFile<'db>) -> 
                     .and_then(|span| span.range())
                     .is_some_and(|range| {
                         skipped.iter().any(|scope| scope.contains_range(range))
-                            || (!full
-                                && CALL_ARGUMENT_RULES.contains(&diagnostic.id().as_str())
-                                && runtime_argument(
-                                    db,
-                                    checked,
-                                    range,
-                                    diagnostic.id().as_str(),
-                                ))
+                            || (check_argument && runtime_argument(db, checked, range, rule))
                             // ty also reports implicit None returns at the annotation span.
                             || (checks != FileChecks::DeclaredSignatures
                                 && diagnostic.id().is_lint_named("invalid-return-type")
                                 && diagnostic.headline_message()
                                     == "Return type does not match returned value"
                                 && contextmanager_annotation(db, file, range))
-                            || (matches!(
-                                diagnostic.id().as_str(),
-                                "too-many-positional-arguments" | "missing-argument"
-                            ) && native_partial_call(db, file, range, diagnostic.id().as_str()))
                             || overloads
                                 .iter()
                                 .any(|scope| scope.covers(diagnostic.id().as_str(), range))
@@ -3981,12 +3978,7 @@ fn file_errors<'db>(db: &'db dyn LiteralSourceDb, checked: CheckedFile<'db>) -> 
                         .ok()?;
                     None
                 }
-                Some(_) if is_call_shape_rule(diagnostic.id().as_str()) => {
-                    if runtime_argument(db, checked, range?, diagnostic.id().as_str()) {
-                        return None;
-                    }
-                    None
-                }
+                Some(_) if is_call_shape_rule(diagnostic.id().as_str()) && range.is_some() => None,
                 Some(_)
                     if diagnostic.id().is_lint_named("unresolved-import")
                         && signature_uses_guarded_import(db, file, range?, skipped) =>
@@ -4598,6 +4590,15 @@ fn runtime_argument(
         return true;
     }
     let model = SemanticModel::new(db, file);
+    let callee = std::cell::LazyCell::new(|| call.func.inferred_type(&model));
+    if matches!(rule, "too-many-positional-arguments" | "missing-argument")
+        && callee.is_some_and(|callee| native_partial_call(&model, call, callee, range, rule))
+    {
+        return true;
+    }
+    if checks == FileChecks::Full {
+        return false;
+    }
     let declarations = checked.declarations(db);
     let named = if declarations.is_some() || is_call_shape_rule(rule) {
         call.func.as_name_expr().and_then(|name| {
@@ -4638,7 +4639,7 @@ fn runtime_argument(
                     .any(|&file| function_layout_writes(db, file).contains(&definition))
         });
     }
-    let Some(callee) = call.func.inferred_type(&model) else {
+    let Some(callee) = *callee else {
         return local_calls;
     };
     if matches!(callee, Type::FunctionLiteral(_))
@@ -4801,32 +4802,21 @@ fn contextmanager_annotation(db: &dyn Db, file: File, range: TextRange) -> bool 
 /// tuple fields open. Imre has already checked the exact remaining signature.
 /// The zero-argument constructor also has a native runtime TypeError. Match
 /// only the diagnosed invocation; unrelated binding errors remain diagnostics.
-fn native_partial_call(db: &dyn Db, file: File, range: TextRange, rule: &str) -> bool {
-    use ruff_python_ast::{AnyNodeRef, find_node::covering_node};
-    use ty_python_semantic::types::{KnownClass, KnownInstanceType, ProgramEnvironment, Type};
-    let file = db.program_file(file);
-    let parsed = ruff_db::parsed::parsed_module(db, file.python_file(db)).load(db);
-    let root = AnyNodeRef::from(parsed.syntax());
-    if !root.range().contains_range(range) {
+fn native_partial_call<'db>(
+    model: &SemanticModel<'db>,
+    call: &ExprCall,
+    callee: ty_python_semantic::types::Type<'db>,
+    range: TextRange,
+    rule: &str,
+) -> bool {
+    use ty_python_semantic::types::{KnownClass, KnownInstanceType, Type};
+    // An excess positional argument can itself be a call. Only its recipient binds it.
+    if rule == "too-many-positional-arguments"
+        && !call.arguments.args.iter().any(|arg| arg.range() == range)
+    {
         return false;
     }
-    let nodes = covering_node(root, range);
-    let Some(call) = nodes.ancestors().find_map(|node| match node {
-        // An excess argument may itself be a call. Find the call that takes it.
-        AnyNodeRef::ExprCall(call)
-            if rule != "too-many-positional-arguments"
-                || call.arguments.args.iter().any(|arg| arg.range() == range) =>
-        {
-            Some(call)
-        }
-        _ => None,
-    }) else {
-        return false;
-    };
-    let model = SemanticModel::new(db, file);
-    let Some(callee) = call.func.inferred_type(&model) else {
-        return false;
-    };
+    let db = model.db();
     let is_partial = |ty| {
         matches!(
             ty,
@@ -4849,11 +4839,11 @@ fn native_partial_call(db: &dyn Db, file: File, range: TextRange, rule: &str) ->
             .arguments
             .args
             .first()
-            .and_then(|target| target.inferred_type(&model))
+            .and_then(|target| target.inferred_type(model))
             .is_some_and(is_partial),
         _ => false,
     };
-    let env = ProgramEnvironment::from_file(file);
+    let env = model.program_environment();
     checked_constructor
         && callee.is_assignable_to(
             db,
