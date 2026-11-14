@@ -133,7 +133,8 @@ def current():
     assert repr(CustomBits(3)) == module + ".CUSTOM_RED|0xcustom2"
 
     import re
-    from enum import global_flag_repr
+    from enum import global_flag_repr, show_flag_values
+    assert show_flag_values(re.I | re.M) == [2, 8]
     assert re.RegexFlag.__repr__ is global_flag_repr
     assert str(re.I) == repr(re.I) == "re.IGNORECASE"
     print("enum aliases, module members, strings and flags")
