@@ -131,9 +131,38 @@ def capture(value):
     return t"\ud800{ (value)!r:\udfff}�"
 
 
+def joined_keyword_callback():
+    import weakref
+
+    events = []
+    refs = []
+
+    class Callback:
+        def __call__(self, ref):
+            events.append("callback")
+
+        def __del__(self):
+            events.append("release")
+
+    class Part(str):
+        pass
+
+    class Field:
+        def __format__(self, spec):
+            part = Part("text")
+            refs.append(weakref.ref(part, Callback()))
+            return part
+
+    def consume(*, text, observed):
+        assert text == "text!" and observed == ["callback", "release"]
+
+    consume(text=f"{Field()}!", observed=list(events))
+
+
 def current():
     method_fields()
     query_client()
+    joined_keyword_callback()
 
     value = []
     first = capture(value)
