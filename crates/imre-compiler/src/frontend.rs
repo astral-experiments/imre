@@ -4799,9 +4799,9 @@ impl<'a> Checker<'a> {
                 return coerce(self, value, expected, expression);
             }
             if let Some(Binding::Definition(definition)) = binding
-                && let Some(signature) = self.functions.get(&definition).cloned()
+                && let Some(signature) = self.functions.get(&definition)
             {
-                let value = self.callable_value(&signature, None, Some(concrete), expression)?;
+                let value = self.callable_value(signature, None, Some(concrete), expression)?;
                 let value = coerce(self, value, expected, expression)?;
                 if let Some(sites) = self
                     .fixed_sites
