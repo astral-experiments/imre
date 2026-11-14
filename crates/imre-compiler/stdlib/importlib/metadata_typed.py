@@ -71,16 +71,10 @@ def version(distribution_name: str) -> str:
     legacy_name = distribution_name.lower().replace('-', '_')
     for root in _paths():
         directory = root or '.'
-        archive: ZipFile | None = None
+        archive, entries = _read_root(directory)
         try:
-            if _is_file(directory):
-                archive = ZipFile(directory)
-                entries = _archive_children(archive.namelist())
-            else:
-                entries = _filenames(directory)
-        except Exception:
-            entries = []
-        try:
+            if entries is None:
+                continue
             for entry in _matching_entries(directory, entries, name, legacy_name):
                 text = _metadata_text(_partial(_resource_text, directory, entry, archive))
                 if text:
@@ -92,3 +86,11 @@ def version(distribution_name: str) -> str:
             if archive is not None:
                 archive.close()
     raise PackageNotFoundError(distribution_name)
+
+
+def _zip_open(directory: str) -> ZipFile:
+    return ZipFile(directory)
+
+
+def _zip_names(archive: ZipFile) -> list[str]:
+    return archive.namelist()
