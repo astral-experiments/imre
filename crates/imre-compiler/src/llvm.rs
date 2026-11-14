@@ -3171,16 +3171,7 @@ impl Emitter<'_, '_> {
             let right = self.promote_int_to_float(right);
             let operand = match op {
                 Binary::Add | Binary::Subtract | Binary::Multiply => {
-                    let instruction = match op {
-                        Binary::Add => "fadd",
-                        Binary::Subtract => "fsub",
-                        Binary::Multiply => "fmul",
-                        _ => unreachable!(),
-                    };
-                    self.instruction(format!(
-                        "{instruction} double {}, {}",
-                        left.operand, right.operand
-                    ))
+                    self.body.float_arithmetic(op, &left.operand, &right.operand)
                 }
                 Binary::Divide | Binary::FloorDivide | Binary::Modulo => {
                     let operation = match op {

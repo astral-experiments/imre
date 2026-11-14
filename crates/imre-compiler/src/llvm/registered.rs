@@ -723,6 +723,38 @@ impl<'f> Frame<'f, '_, '_> {
         &mut self.code.body
     }
 
+    /// Project both evaluated operands before the result can allocate or call Python.
+    pub(super) fn float_product(
+        &mut self,
+        left: &CheckedValue,
+        right: &CheckedValue,
+        span: Option<[usize; 4]>,
+    ) -> CheckedValue {
+        let left = self.materialize(left);
+        let right = self.materialize(right);
+        self.max_live = self.max_live.max(2);
+        let exact = self.value(&format!(
+            "call i1 @imre_dyn_exact_float_pair(ptr %ctx, i64 {left}, i64 {right}, ptr %live)"
+        ));
+        super::operations::ValueJoin::select(
+            self,
+            Self::body,
+            |frame, yes, no| frame.branch(&exact, yes, no),
+            |frame| {
+                let a = frame.value("load double, ptr %live");
+                let rhs = frame.value("getelementptr double, ptr %live, i64 1");
+                let b = frame.value(&format!("load double, ptr {rhs}"));
+                let product = frame.body().float_arithmetic(ir::Binary::Multiply, &a, &b);
+                let position = frame.output.position(span);
+                CheckedValue::handle(frame.checked(&format!(
+                    "call i64 @imre_dyn_own_float(ptr %ctx, double {product}, ptr {position})"
+                )))
+            },
+            |frame| CheckedValue::handle(frame.op_at("*", &[&left, &right], span)),
+        )
+        .expect("both product edges produce Python objects")
+    }
+
     pub(crate) fn block_name(&mut self) -> String {
         self.code.name("b")
     }

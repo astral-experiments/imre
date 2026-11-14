@@ -1914,6 +1914,43 @@ pub(super) unsafe extern "C" fn imre_dyn_unwind_display(ctx: *mut Context, mark:
     unsafe { &mut *ctx }.unwind_operands(mark);
 }
 
+/// Copy two exact builtin floats into the current frame's reusable operand slots.
+///
+/// # Safety
+/// The context and both handles are live, and `values` points to two writable doubles.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_exact_float_pair(
+    ctx: *const Context,
+    left: Id,
+    right: Id,
+    values: *mut [f64; 2],
+) -> bool {
+    // SAFETY: the frame holds both objects throughout this read.
+    let heap = &unsafe { &*ctx }.heap;
+    if let (Value::Float(a), Value::Float(b)) = (heap.get(left), heap.get(right)) {
+        // SAFETY: the frame reserved two slots before requesting the projection.
+        unsafe { values.write([*a, *b]) };
+        return true;
+    }
+    false
+}
+
+/// Own a computed double as a fresh Python float in the active frame.
+///
+/// # Safety
+/// The context is live and `span` is null or a static operator position.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_own_float(
+    ctx: *mut Context,
+    value: f64,
+    span: *const [u32; 4],
+) -> Id {
+    // SAFETY: the generated operation owns the active context and its position.
+    let (ctx, span) = unsafe { (&mut *ctx, span.as_ref()) };
+    let object = ctx.alloc(Value::Float(value));
+    finish_at(ctx, Ok(object), span)
+}
+
 /// Borrow a tagged integer from an exact Python int. Zero indicates another type.
 ///
 /// # Safety
