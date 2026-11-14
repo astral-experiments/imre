@@ -108,6 +108,20 @@ with Rust-competitive performance.
 
 ## Standard library test results
 
+### Recent whole-suite runs
+
+These Linux runs started with the unchanged CPython 3.14.5 test files. Each paired pass identifies the same original test passing on CPython and at both Imre optimization levels. [Individual results](benchmarks/cpython_stdlib/paired-recheck-8074-and-8092.tsv)
+
+| Test suite | CPython passes | Imre O0 passes | Imre O3 passes | Paired passes | Run |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `functools` | 329/329 | 316/329 | 316/329 | 316/329 | The main file passed 316, errored on six and skipped three. All four companion free-threading tests errored. [#8074](https://github.com/astral-experiments/imre/pull/8074) |
+| `json` | 215/216 | 4/216 | 4/216 | 4/216 | Four doctest cases failed. Seventeen child test modules failed to import, leaving 208 original occurrences uncollected. [#8074](https://github.com/astral-experiments/imre/pull/8074) |
+| Iterator length hints (`test_iterlen`) | 22/22 | 22/22 | 22/22 | 22/22 | The runtime change in [#8092](https://github.com/astral-experiments/imre/pull/8092) also passed all 22 after the Python inputs were removed. |
+
+The iterator protocol suite sits outside the historical 45 module families.
+
+### Historical module-family results
+
 Across the 45 standard library module families below, **13,166 of 16,225 tests (81.15%)** have recorded paired passes.
 The paired pass rate is 80.1% (10,679 of 13,327) for the original 25 families and 85.8% (2,487 of 2,898) for the 20 additional families.
 A **paired pass** means that CPython 3.14.5 passed the original test and Imre passed it at both
