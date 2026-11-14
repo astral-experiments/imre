@@ -21,3 +21,9 @@ python3.14 benchmarks/cpython_stdlib/full/binascii/run.py \
 ```
 
 Add `--reachable-only` to compare that compiler mode. The [standalone codec fixture](../../../../tests/fixtures/text/binascii_base64.py) also checks exact exception types, constructor representation, exception hierarchy, and the order of input conversion and a user-defined keyword flag's `__bool__`.
+
+## Whole suite on public #8103
+
+CPython 3.14.5 passed 76 of the 93 original methods and skipped 17. The public #8103 named compiler passed 72 at both O0 and O3. The same saved executables repeated all 93 outcomes after source and cache withdrawal. The earlier #8074 named runs passed 52. The #8103 ordinary FILE entry stopped at the Hypothesis import on line 8 before collecting a method at either tier.
+
+The four remaining failures were the `test_functions` methods for array, bytearray, bytes and memoryview inputs. They call builtin functions directly and through their `__call__` descriptors. The [descriptor change](https://github.com/astral-experiments/imre/pull/8114) on the same #8103 source passed all four, giving the stock 76 passes and 17 skips at O0 and O3, including the saved executables. The table records the public and source-matched candidate separately. [93 methods and their original source ranges](paired-public-8103-and-callable-descriptor.tsv)
