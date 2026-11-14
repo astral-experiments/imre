@@ -148,6 +148,7 @@ impl SourceContract {
                     skipped.as_deref(),
                     &overloads,
                     Some(native),
+                    Some(&graph.registered_source_errors.borrow()),
                 )
             }),
         }
@@ -668,7 +669,7 @@ pub(crate) fn check_registered_project<'a>(
     }
     let winners = (first_winner..).zip(sources);
     session.check_registered_execution(
-        || session.closed_program_errors(&paths, None, &[], refusal),
+        || session.closed_program_errors(&paths, None, &[], refusal, None),
         winners.clone(),
         has_file_body,
         entry_operand,
@@ -3136,6 +3137,7 @@ impl Session {
         skipped: Option<&[Vec<TextRange>]>,
         overloads: &[Vec<CheckedDiagnostic>],
         native: Option<&crate::frontend::phase::Diagnostic>,
+        checked_bodies: Option<&crate::modules::RegisteredSourceErrors>,
     ) -> Result<(), String> {
         use ty_python_core::definition::DefinitionKind;
 
@@ -3231,14 +3233,19 @@ impl Session {
             call_shapes,
             program_files,
         );
+        let project_files =
+            modules
+                .iter()
+                .zip(&self.files)
+                .enumerate()
+                .filter_map(|(id, (module, &file))| {
+                    let path = module.project_path()?;
+                    path.extension()
+                        .is_none_or(|ext| ext != "pyi")
+                        .then_some((id, file, path))
+                });
         let mut errors = Vec::new();
-        for (index, (module, &file)) in modules.iter().zip(&self.files).enumerate() {
-            let Some(path) = module.project_path() else {
-                continue;
-            };
-            if path.extension().is_some_and(|ext| ext == "pyi") {
-                continue;
-            }
+        for (index, file, path) in project_files.clone() {
             if !has_signatures {
                 let index = ty_python_core::semantic_index(&self.db, self.db.program_file(file));
                 if !index.scope_ids().any(|scope| {
@@ -3254,6 +3261,13 @@ impl Session {
             }
             if !declarations.parameters(&self.db).is_empty() {
                 self.dormant_call_errors(index, path, declarations, &mut errors);
+            }
+            // The default body check covers ty's declaration rules on the same bindings.
+            if checked_bodies
+                .and_then(|bodies| bodies.get(&index))
+                .is_some_and(Vec::is_empty)
+            {
+                continue;
             }
             let checked = CheckedFile::new(
                 &self.db,
@@ -3284,13 +3298,7 @@ impl Session {
         if let Some(report) = written_return {
             return Err(report.to_string());
         }
-        for (id, (module, &file)) in modules.iter().zip(&self.files).enumerate() {
-            let Some(path) = module.project_path() else {
-                continue;
-            };
-            if path.extension().is_some_and(|ext| ext == "pyi") {
-                continue;
-            }
+        for (id, file, _) in project_files {
             let results = declarations.result_scopes(&self.db);
             let results = &results[results.partition_point(|&(f, _)| f < file)..];
             let results = &results[..results.partition_point(|&(f, _)| f == file)];

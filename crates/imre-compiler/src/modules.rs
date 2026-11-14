@@ -3277,6 +3277,8 @@ struct RegisteredFunctions {
     initializers: CheckedInitializers,
 }
 
+pub(crate) type RegisteredSourceErrors = HashMap<ModuleId, Vec<Option<TextRange>>>;
+
 pub(crate) struct SourceGraph {
     /// Fixed at graph construction, in the checked resolver's search order.
     pub(crate) filesystem_roots: Box<[PathBuf]>,
@@ -3284,8 +3286,7 @@ pub(crate) struct SourceGraph {
     pub(crate) registered_startup: bool,
     registered_functions: std::cell::RefCell<RegisteredFunctions>,
     /// Default-rule error ranges for the physical sources shared by every layout attempt.
-    pub(crate) registered_source_errors:
-        std::cell::RefCell<HashMap<ModuleId, Vec<Option<TextRange>>>>,
+    pub(crate) registered_source_errors: std::cell::RefCell<RegisteredSourceErrors>,
     /// Contract of the original graph, valid only while its declarations still win.
     pub(crate) source_contract: Option<crate::analysis::SourceContract>,
     /// The original entry's reached call check when it consulted no import bindings.

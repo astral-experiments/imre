@@ -225,7 +225,7 @@ fn closed_program_keeps_first_party_contracts_across_cached_edits() {
             graph
                 .session
                 .closed_program_session(cache, &graph.inputs)?
-                .closed_program_errors(&graph.modules, skipped.as_deref(), &proofs, native)
+                .closed_program_errors(&graph.modules, skipped.as_deref(), &proofs, native, None)
         };
         let result = check(Some(&mut cache));
         let fresh = check(None);
