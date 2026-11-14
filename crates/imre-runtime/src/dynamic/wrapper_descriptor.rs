@@ -265,9 +265,11 @@ impl BuiltinDescriptor {
                 };
                 Some(("mappingproxy", attr, members))
             }
-            Some(("type", attr)) => {
-                Some(("type", attr, &["mro", "__subclasses__", "__setattr__"][..]))
-            }
+            Some(("type", attr)) => Some((
+                "type",
+                attr,
+                &["mro", "__subclasses__", "__setattr__", "__delattr__"][..],
+            )),
             Some(("int", attr)) => Some(("int", attr, builtins::real_methods("int"))),
             Some(("float", "as_integer_ratio")) => {
                 Some(("float", "as_integer_ratio", &["as_integer_ratio"][..]))
@@ -750,7 +752,8 @@ impl BuiltinDescriptor {
             }
             "__doc__" if self.owner == "module" && self.name == "__dir__" => ctx.text("__dir__() -> list\nspecialized dir() implementation"),
             "__doc__" if self.name == "__getattribute__" => ctx.text("Return getattr(self, name)."),
-            "__text_signature__" if self.name == "__getattribute__" => ctx.text("($self, name, /)"),
+            "__doc__" if self.name == "__delattr__" => ctx.text("Implement delattr(self, name)."),
+            "__text_signature__" if matches!(self.name, "__getattribute__" | "__delattr__") => ctx.text("($self, name, /)"),
             "__doc__" | "__text_signature__" if self.name == "__length_hint__"
                 && (matches!(self.owner, "itertools.repeat" | "list_iterator") || DictIterator::class(self.owner).is_some()) =>
             {

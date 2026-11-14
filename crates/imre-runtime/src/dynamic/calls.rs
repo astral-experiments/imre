@@ -5876,7 +5876,7 @@ impl Context {
                 ) || (class == "function" && name == "__call__")
                     || builtins::is_enum_base(class)
                     || builtins::is_exception(class)
-                    || (class == "type" && name == "__setattr__")
+                    || (class == "type" && matches!(name, "__setattr__" | "__delattr__"))
                     || (class == "memoryview" && builtins::MEMORYVIEW_METHODS.contains(&name))
                     || (class == "bytes" && builtins::BYTES_METHODS.contains(&name))
                     || (class == "complex" && super::complex::METHODS.contains(&name))
@@ -8905,6 +8905,7 @@ impl Context {
                             | "method-wrapper.__reduce__"
                             | "type.__init__"
                             | "type.__setattr__"
+                            | "type.__delattr__"
                             | "BaseException.add_note"
                             | "float.__format__"
                             | "float.__getformat__"

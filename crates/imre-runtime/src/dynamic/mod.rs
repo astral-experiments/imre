@@ -3431,6 +3431,7 @@ impl Context {
                 "__subclasses__",
                 "__prepare__",
                 "__setattr__",
+                "__delattr__",
                 "__mro__",
                 "__dict__",
                 "__text_signature__",

@@ -62,6 +62,22 @@ def current():
     del Subject.constant
     print(hasattr(Subject, 'constant'))
 
+    class Meta(type):
+        def __delattr__(cls, name):
+            obj.events.append(name)
+            super().__delattr__(name)
+
+    class Model(metaclass=Meta):
+        first = second = 1
+
+    obj.events.clear()
+    del Model.first
+    raw = type.__dict__["__delattr__"]
+    assert raw is type.__delattr__ and raw.__objclass__ is type
+    assert raw.__text_signature__ == "($self, name, /)"
+    raw(Model, "second")
+    assert obj.events == ["first"] and not hasattr(Model, "first") and not hasattr(Model, "second")
+
     module = __import__(__name__)
     module.temporary = 1
     namespace = module.__dict__
