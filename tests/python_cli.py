@@ -2946,9 +2946,10 @@ with zipfile.ZipFile('zip-writer-capability.zip', 'w', zipfile.ZIP_DEFLATED) as 
         tuple_dir = root / "tuple_dir.py"
         for source in (
             "print(dir((1, 2)))",
-            "from collections import namedtuple\nT = namedtuple('T', 'x')\nprint('x' in dir(T(1)))",
+            "from collections import namedtuple\nT = namedtuple('T', 'x')\nprint('x' in dir(T(1)), tuple(vars(T)))",
             "from typing import NamedTuple\n"
             "class Row(NamedTuple):\n    value: int | None\n"
+            "print(tuple(vars(Row)))\n"
             "assert Row.__annotations__ == {'value': int | None}\n"
             "print(Row.__slots__, Row.__doc__, hasattr(Row(1), '__dict__'))",
         ):

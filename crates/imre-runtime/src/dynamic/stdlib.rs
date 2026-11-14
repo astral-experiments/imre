@@ -711,7 +711,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("_typing", "_idfunc") => ctx.builtin("_typing._idfunc"),
         ("typing", "NoDefault") => super::typing::no_default(ctx),
         ("typing", "TYPE_CHECKING") => FALSE,
-        ("typing", "_NamedTuple") => ctx.builtin("typing.NamedTuple"),
         ("typing", "Union") | ("types", "UnionType") => super::union::class(ctx),
         ("typing", "Generic" | "Protocol") => super::typing::named_class(ctx, "typing", name),
         ("_collections_abc", "Callable") => super::mapping_abc::callable(ctx)?,

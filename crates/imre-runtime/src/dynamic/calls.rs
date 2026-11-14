@@ -9844,12 +9844,7 @@ impl Context {
     }
 
     /// Initialize descriptor names in class body insertion order, before subclass hooks run.
-    pub(super) fn initialize_class_members(
-        &mut self,
-        class: Id,
-        scope: Id,
-        namedtuple_namespace: Option<Id>,
-    ) -> Result<()> {
+    pub(super) fn initialize_class_members(&mut self, class: Id, scope: Id) -> Result<()> {
         let Value::Scope(class_scope) = self.heap.get_mut(scope) else {
             unreachable!()
         };
@@ -9870,10 +9865,7 @@ impl Context {
             class_scope.namespace = Some(dictionary);
             class_scope.names.retain(|name, _| name == "__qualname__");
         }
-        if let Some(namespace) = namedtuple_namespace {
-            self.call_typing_helper("_namedtuple_set_names", vec![class, namespace])
-                .map(|_| ())
-        } else if let Some(dict) = dictionary {
+        if let Some(dict) = dictionary {
             let members = self.dict_entries(dict).expect("class dictionary").to_vec();
             for &(key, _) in &members {
                 self.heap.keep(key);
@@ -9972,14 +9964,8 @@ impl Context {
         typed_dict_meta: Option<Id>,
         enum_base: bool,
     ) -> Result<Option<Id>> {
-        // NamedTuple's marker is replaced with tuple before allocating the class.
-        let namedtuple = self.namedtuple_base(bases);
-        let metaclass_bases = bases
-            .iter()
-            .copied()
-            .filter(|base| Some(*base) != namedtuple);
         if explicit.is_none()
-            && !metaclass_bases.clone().any(|base| {
+            && !bases.iter().any(|&base| {
                 !self.is_type_object(base)
                     || self.is_bundled_abc(base)
                     || matches!(self.heap.get(base), Value::Class { metaclass: Some(meta), .. }
@@ -10002,7 +9988,7 @@ impl Context {
                 "metaclass conflict: the metaclass of a derived class must be a (non-strict) subclass of the metaclasses of all its bases",
             )
         };
-        for base in metaclass_bases {
+        for &base in bases {
             let meta =
                 if self.heap.get(base).instance_class().is_none() && self.is_bundled_abc(base) {
                     self.abc_meta()
@@ -10019,7 +10005,7 @@ impl Context {
         if winner == type_class {
             return Ok(None);
         }
-        if enum_base || namedtuple.is_some() {
+        if enum_base {
             return Err(conflict());
         }
         let is_abc = self.builtins.get("abc.ABCMeta") == Some(&winner);
@@ -10289,14 +10275,6 @@ impl Context {
                 .annotation_scratch = Some((annotations, conditional_cell));
         }
         self.execute(code, scope, FrameOwner::Function(body))?;
-        if (bindings.needs_class_cell || self.scope_name(scope, "__classcell__").is_some())
-            && self.namedtuple_base(&bases).is_some()
-        {
-            return Err(Error::new(
-                "TypeError",
-                "uses of super() and __class__ are unsupported in methods of NamedTuple subclasses",
-            ));
-        }
         if let Some(names) = bindings.static_attributes {
             let names = names.iter().map(|name| self.heap.code_name(name)).collect();
             let attrs = self.alloc(Value::Tuple(names));
@@ -10353,23 +10331,6 @@ impl Context {
             self.bind_enum_boundary(scope, &bases, boundary)?;
         }
         let exposed_body = self.finish_class_namespace(scope)?;
-        // NamedTupleMeta visits the original values, including defaults replaced by tuple getters.
-        let namedtuple_namespace = if self.namedtuple_base(&bases).is_some() {
-            let namespace = if let Some(body) = &exposed_body {
-                body.mapping
-            } else {
-                let bindings = self.scope_data(scope).names.clone();
-                let entries = bindings
-                    .into_iter()
-                    .map(|(name, value)| (self.text(name), value))
-                    .collect();
-                self.dict(entries)
-            };
-            self.heap.keep(namespace);
-            Some(namespace)
-        } else {
-            None
-        };
         if let Value::Scope(frame) = self.heap.get_mut(scope) {
             if let Some(namespace) = &mut frame.class_namespace {
                 namespace.annotation_scratch = None;
@@ -10475,13 +10436,8 @@ impl Context {
         } else {
             super::typing::ClassLayout::Specialized
         };
-        let (class, layout_base) = self.allocate_class_with_slots(
-            name.clone(),
-            scope,
-            bases,
-            layout,
-            namedtuple_namespace,
-        )?;
+        let (class, layout_base) =
+            self.allocate_class_with_slots(name.clone(), scope, bases, layout)?;
         let Value::Class { metaclass, .. } = self.heap.get_mut(class) else {
             unreachable!()
         };
@@ -10512,14 +10468,10 @@ impl Context {
                 .copied()
                 .filter(|&(key, _)| self.string_storage(key).is_none())
                 .collect::<Vec<_>>();
-            // NamedTuple's annotation provider closes over the declaration namespace,
-            // which remains distinct from the generated type's dictionary.
-            if namedtuple_namespace.is_none()
-                && let Some(cell) = body.annotation_cell
-            {
+            if let Some(cell) = body.annotation_cell {
                 self.heap.replace_cell(cell, Some(dict));
             }
-            if namedtuple_namespace.is_none() && !extras.is_empty() {
+            if !extras.is_empty() {
                 for (key, value) in extras {
                     self.put_item(dict, key, value)?;
                 }
@@ -10530,7 +10482,7 @@ impl Context {
                 )?;
             }
         }
-        self.initialize_class_members(class, scope, namedtuple_namespace)?;
+        self.initialize_class_members(class, scope)?;
         if let Some(kind) = enum_kind {
             let scalar = if let Some((member_type, first_enum)) = float_enum {
                 self.bind(scope, "_member_type_", member_type);

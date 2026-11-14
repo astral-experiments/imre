@@ -105,7 +105,7 @@ impl Context {
         self.heap.keep(class);
         self.install_instance_dictionary_descriptor(class, scope, base);
         self.install_weakref_descriptor(class, scope);
-        self.initialize_class_members(class, scope, None)?;
+        self.initialize_class_members(class, scope)?;
         Ok(class)
     }
 }

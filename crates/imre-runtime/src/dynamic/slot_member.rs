@@ -251,7 +251,6 @@ impl Context {
             scope,
             bases,
             super::typing::ClassLayout::Specialized,
-            None,
         )?;
         // The initial qualified name is type metadata, outside the __set_name__ member walk.
         let Value::Scope(frame) = self.heap.get_mut(scope) else {
@@ -580,7 +579,7 @@ impl Context {
         }
         self.install_instance_dictionary_descriptor(class, scope, layout_base);
         self.install_weakref_descriptor(class, scope);
-        self.initialize_class_members(class, scope, None)?;
+        self.initialize_class_members(class, scope)?;
         let hook = self.super_attribute(class, class, class, "__init_subclass__")?;
         self.call(hook, Vec::new(), kwargs)?;
         Ok(class)

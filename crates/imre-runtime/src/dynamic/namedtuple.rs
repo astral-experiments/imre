@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use super::{Context, Error, Id, NONE, Result, TRUE, Value, builtins};
+use super::{Context, Error, Id, NONE, Result, Value, builtins};
 use ruff_python_stdlib::{identifiers::is_identifier, keyword::is_keyword};
 
 pub(super) const GETTER: &str = "collections._tuplegetter";
@@ -185,7 +185,7 @@ pub(super) fn doc_method(
 }
 
 /// Bind read-only tuple positions in a new class namespace.
-pub(super) fn bind_fields(ctx: &mut Context, scope: Id, names: &[String]) {
+fn bind_fields(ctx: &mut Context, scope: Id, names: &[String]) {
     for (index, field) in names.iter().enumerate() {
         let doc = ctx.text(format!("Alias for field number {index}"));
         let getter = ctx.alloc(Value::TupleGetter {
@@ -309,7 +309,7 @@ fn collect(ctx: &mut Context, source: Id) -> Result<Vec<Id>> {
     Ok(items)
 }
 
-pub(super) fn string(ctx: &mut Context, object: Id) -> Result<String> {
+fn string(ctx: &mut Context, object: Id) -> Result<String> {
     let constructor = ctx.builtin("str");
     let value = ctx.call(constructor, vec![object], Vec::new())?;
     Ok(ctx.str_value(value)?.to_owned())
@@ -332,7 +332,7 @@ fn validate(name: &str) -> Result<()> {
 }
 
 /// Validate the type and field names after any requested renaming.
-pub(super) fn validate_fields(typename: &str, names: &[String], rename: bool) -> Result<()> {
+fn validate_fields(typename: &str, names: &[String], rename: bool) -> Result<()> {
     validate(typename)?;
     for name in names {
         validate(name)?;
@@ -418,14 +418,22 @@ pub(super) fn factory(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
     ctx.heap.keep(scope);
     let name = ctx.text(&typename);
     ctx.bind(scope, "__qualname__", name);
-    ctx.bind(scope, "__module__", module);
     let (fields, signature) = bind_field_metadata(ctx, scope, &typename, &names, &defaults)?;
-    bind_fields(ctx, scope, &names);
-    bind_repr(ctx, scope, name, fields)?;
-    bind_replace(ctx, scope, name, fields)?;
-    bind_make(ctx, scope, name, fields)?;
     let defaults = has_defaults.then(|| ctx.alloc(Value::Tuple(defaults)));
     bind_new(ctx, scope, &typename, &names, fields, defaults, signature)?;
+    bind_make(ctx, scope, name, fields)?;
+    bind_replace(ctx, scope, name, fields)?;
+    bind_repr(ctx, scope, name, fields)?;
+    let collections = ctx.module("collections")?;
+    let factory = ctx.lookup_attr(collections, "_namedtuple_getnewargs")?;
+    let methods = ctx.call(factory, vec![name], Vec::new())?;
+    ctx.heap.keep(methods);
+    let methods = ctx.unpack_items(methods, 2, None)?;
+    ctx.bind(scope, "_asdict", methods[0]);
+    ctx.bind(scope, "__getnewargs__", methods[1]);
+    ctx.bind(scope, "__match_args__", fields);
+    bind_fields(ctx, scope, &names);
+    ctx.bind(scope, "__module__", module);
     let tuple = ctx.builtin("tuple");
     ctx.enable_class_annotation_provider(scope);
     let class = ctx.allocate_class(typename, scope, vec![tuple])?;
@@ -440,7 +448,7 @@ pub(super) fn factory(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
 }
 
 /// Publish the metadata shared by functional and class-based named tuples.
-pub(super) fn bind_field_metadata(
+fn bind_field_metadata(
     ctx: &mut Context,
     scope: Id,
     typename: &str,
@@ -463,24 +471,20 @@ pub(super) fn bind_field_metadata(
     ctx.bind(scope, "__slots__", slots);
     let field_ids: Vec<_> = names.iter().map(|n| ctx.text(n)).collect();
     let offset = field_ids.len() - defaults.len();
-    let field_defaults = ctx.dict(
-        field_ids[offset..]
-            .iter()
-            .zip(defaults)
-            .map(|(&k, &v)| (k, v))
-            .collect(),
-    );
-    ctx.bind(scope, "_field_defaults", field_defaults);
+    let field_defaults = field_ids[offset..]
+        .iter()
+        .zip(defaults)
+        .map(|(&k, &v)| (k, v))
+        .collect();
     let fields = ctx.alloc(Value::Tuple(field_ids));
     ctx.bind(scope, "_fields", fields);
-    if ctx.scope_name(scope, "__match_args__").is_none() {
-        ctx.bind(scope, "__match_args__", fields);
-    }
+    let field_defaults = ctx.dict(field_defaults);
+    ctx.bind(scope, "_field_defaults", field_defaults);
     Ok((fields, doc))
 }
 
 /// Format the actual tuple payload against the declared field names.
-pub(super) fn bind_repr(ctx: &mut Context, scope: Id, name: Id, fields: Id) -> Result<()> {
+fn bind_repr(ctx: &mut Context, scope: Id, name: Id, fields: Id) -> Result<()> {
     let module = ctx.module("collections")?;
     let factory = ctx.lookup_attr(module, "_namedtuple_repr")?;
     let repr = ctx.call(factory, vec![name, fields], Vec::new())?;
@@ -489,17 +493,17 @@ pub(super) fn bind_repr(ctx: &mut Context, scope: Id, name: Id, fields: Id) -> R
 }
 
 /// Install both replacement names as aliases of the same generated function.
-pub(super) fn bind_replace(ctx: &mut Context, scope: Id, name: Id, fields: Id) -> Result<()> {
+fn bind_replace(ctx: &mut Context, scope: Id, name: Id, fields: Id) -> Result<()> {
     let collections = ctx.module("collections")?;
     let factory = ctx.lookup_attr(collections, "_namedtuple_replace")?;
     let replace = ctx.call(factory, vec![name, fields], Vec::new())?;
-    ctx.bind(scope, "_replace", replace);
     ctx.bind(scope, "__replace__", replace);
+    ctx.bind(scope, "_replace", replace);
     Ok(())
 }
 
 /// Install the class method that builds an instance from an iterable.
-pub(super) fn bind_make(ctx: &mut Context, scope: Id, name: Id, fields: Id) -> Result<()> {
+fn bind_make(ctx: &mut Context, scope: Id, name: Id, fields: Id) -> Result<()> {
     let collections = ctx.module("collections")?;
     let factory = ctx.lookup_attr(collections, "_namedtuple_make")?;
     let make = ctx.call(factory, vec![name, fields], Vec::new())?;
@@ -606,7 +610,7 @@ pub(super) fn construct(ctx: &mut Context, scope: Id) -> Result<Id> {
 }
 
 /// Bind the shared constructor code with this definition's signature, globals and defaults.
-pub(super) fn bind_new(
+fn bind_new(
     ctx: &mut Context,
     scope: Id,
     typename: &str,
@@ -614,7 +618,7 @@ pub(super) fn bind_new(
     field_ids: Id,
     defaults: Option<Id>,
     signature: Id,
-) -> Result<Id> {
+) -> Result<()> {
     let new = ctx.builtin("tuple.__new__");
     let allocate = ctx.text("_tuple_new");
     let module = ctx.text("__name__");
@@ -654,13 +658,5 @@ pub(super) fn bind_new(
     ctx.set_attr(new, "__doc__", doc)?;
     let descriptor = super::method_decorator::static_method(ctx, new)?;
     ctx.bind(scope, "__new__", descriptor);
-    let collections = ctx.module("collections")?;
-    let factory = ctx.lookup_attr(collections, "_namedtuple_getnewargs")?;
-    let name = ctx.text(typename);
-    let methods = ctx.call(factory, vec![name, TRUE], Vec::new())?;
-    ctx.heap.keep(methods);
-    let methods = ctx.unpack_items(methods, 2, None)?;
-    ctx.bind(scope, "__getnewargs__", methods[0]);
-    ctx.bind(scope, "_asdict", methods[1]);
-    Ok(new)
+    Ok(())
 }
