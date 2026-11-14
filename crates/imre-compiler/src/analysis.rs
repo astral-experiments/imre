@@ -3110,12 +3110,19 @@ impl Session {
             }
             Some(())
         };
-        ruff_python_ast::helpers::any_over_body(&parsed.syntax().body, |expr| {
-            if let Expr::Call(call) = expr {
-                check(call);
-            }
-            false
-        });
+        let mut body: &[Stmt] = parsed.suite();
+        for dead in ranges {
+            body = &body[body.partition_point(|stmt| stmt.end() <= dead.range.start())..];
+            let (affected, remaining) =
+                body.split_at(body.partition_point(|stmt| stmt.start() < dead.range.end()));
+            ruff_python_ast::helpers::any_over_body(affected, |expr| {
+                if let Expr::Call(call) = expr {
+                    check(call);
+                }
+                false
+            });
+            body = remaining;
+        }
     }
 
     pub(crate) fn closed_program_errors(
