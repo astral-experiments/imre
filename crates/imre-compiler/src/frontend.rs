@@ -1179,21 +1179,23 @@ fn lower_graph(
     // Fixed FILE compilations need no secondary body. A registered launch or an
     // actual representation failure can still use functions whose signatures solved.
     let pending_capture = std::cell::RefCell::new(Some(method_returns));
+    let capture_slots = |prepared: &mut HashMap<_, _>, ids: &mut dyn Iterator<Item = usize>| {
+        registered::capture(
+            graph,
+            &signatures,
+            &definitions,
+            &callable_definitions,
+            &classes,
+            &types,
+            inference,
+            registered::Capture::Solved(needs_registered_entry.then_some(&checked_bodies)),
+            ids.map(|id| (id, prepared.remove(&id))),
+        );
+    };
+    let slots = || definitions.iter().map(|(_, _, signature)| signature.id);
     let capture = || {
         if let Some(mut prepared) = pending_capture.take() {
-            registered::capture(
-                graph,
-                &signatures,
-                &definitions,
-                &callable_definitions,
-                &classes,
-                &types,
-                inference,
-                registered::Capture::Solved(needs_registered_entry.then_some(&checked_bodies)),
-                definitions
-                    .iter()
-                    .map(|(_, _, signature)| (signature.id, prepared.remove(&signature.id))),
-            );
+            capture_slots(&mut prepared, &mut slots());
         }
     };
     for (module, function, signature) in &definitions {
@@ -1241,9 +1243,25 @@ fn lower_graph(
         });
     let helpers = Helpers::new(inference.len() + graph.initializers(entry_declarations).count());
     let globals = ModuleValues::for_initializers(needs_registered_entry);
+    let named = graph.registered_startup && !needs_registered_entry;
+    let recover_completed = std::cell::Cell::new(named);
+    let defer_capture = !named && !needs_registered_entry && cache.is_none();
     let capture_on_object = |failure: &Failure| {
         if failure.is_object() || needs_registered_entry {
-            capture();
+            if defer_capture {
+                // A settled body needs no further contract check. Keep its existing
+                // recovery path while the remaining procedures finish validation.
+                if !recover_completed.replace(true)
+                    && let Some(prepared) = pending_capture.borrow_mut().as_mut()
+                {
+                    capture_slots(
+                        prepared,
+                        &mut slots().filter(|id| checked_bodies.contains(id)),
+                    );
+                }
+            } else {
+                capture();
+            }
         }
     };
     if needs_registered_entry {
@@ -1280,15 +1298,22 @@ fn lower_graph(
             module_id,
             &mut unavailable,
             capture_on_object,
-        )?;
+        )
+        .inspect_err(|_| {
+            if defer_capture && recover_completed.get() {
+                capture();
+            }
+        })?;
     }
+    // After an initializer requests recovery, a checked procedure can supply both
+    // its source contracts and its Python frame, just as it does on a named entry.
+    let place_procedures = recover_completed.get();
     if needs_registered_entry {
         capture();
     }
     if let Some(cache) = cache.as_deref_mut() {
         cache.validate_abi(&definitions, &globals);
     }
-    let named = graph.registered_startup && !needs_registered_entry;
     let mut completed = FixedFunctions::default();
     let register = |completed: FixedFunctions, owners: &[ModuleId]| {
         completed.register(graph, owners, |module, range| {
@@ -1306,7 +1331,6 @@ fn lower_graph(
             }
         });
     };
-    let recover_completed = std::cell::Cell::new(named);
     let place_completed = |completed: &mut FixedFunctions, owners: &[ModuleId]| {
         if recover_completed.get() {
             register(std::mem::take(completed), owners);
@@ -1430,8 +1454,9 @@ fn lower_graph(
         {
             checker.settled_attributes = Some(&mut attributes);
         }
-        let named_function =
-            named && cache.is_none() && signature.physical_frame && signature.method.is_none();
+        let physical_function =
+            cache.is_none() && signature.physical_frame && signature.method.is_none();
+        let named_function = named && physical_function;
         let mut callable_inputs = pending_capture.borrow_mut().as_mut().and_then(|prepared| {
             if named_function && matches!(prepared.get(&signature.id), Some(Err(_))) {
                 prepared.remove(&signature.id)?.err()
@@ -1441,7 +1466,8 @@ fn lower_graph(
         });
         let result = if let Some(body) = inferred {
             Ok(body)
-        } else if named_function
+        } else if place_procedures
+            && physical_function
             && signature
                 .params
                 .iter()
@@ -1451,7 +1477,8 @@ fn lower_graph(
                 && !signature.params.is_empty()
                 && signature.parameter_declarations.len() == signature.params.len()
                 && signature.parameter_declarations.iter().all(Option::is_some))
-                || (definition.returns.is_none()
+                || (named
+                    && definition.returns.is_none()
                     && (callable_inputs.is_some()
                         || inference.has_inferred_protocol_argument(signature, &types)
                             && (unavailable.is_none()
