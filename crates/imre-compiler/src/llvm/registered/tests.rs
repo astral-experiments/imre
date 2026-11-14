@@ -460,6 +460,8 @@ fn placed_arithmetic_keeps_the_python_operator_and_integer_guards() {
         ),
         (Binary::Add, "a: str | None, b: str", "str", "'a', 'b'"),
     ] {
+        let float_product = op == Binary::Multiply && result == "float";
+        let integer_product = op == Binary::Multiply && !float_product;
         let operator = op.protocol();
         let source = format!(
             "class Receiver:\n    def read(self, value: int) -> int:\n        return value\n\
@@ -494,11 +496,20 @@ fn placed_arithmetic_keeps_the_python_operator_and_integer_guards() {
         let body = &output.functions;
         assert_eq!(
             body.matches("call i64 @imre_dyn_exact_int_word(").count(),
-            if op == Binary::Multiply { 2 } else { 0 }
+            2 * usize::from(integer_product)
         );
         assert_eq!(
             body.matches("call i64 @int_mul(").count(),
-            usize::from(op == Binary::Multiply)
+            usize::from(integer_product)
+        );
+        assert_eq!(body.contains("fmul double"), float_product);
+        assert_eq!(
+            body.contains("call i1 @imre_dyn_exact_float_pair("),
+            float_product
+        );
+        assert_eq!(
+            body.contains("call i64 @imre_dyn_own_float("),
+            float_product
         );
         assert_eq!(
             body.matches(&format!(

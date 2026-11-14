@@ -126,6 +126,17 @@ impl FunctionBody {
         self.instruction(format!("and i64 {dividend}, {mask}"))
     }
 
+    /// Emit infallible native arithmetic on two doubles.
+    pub(super) fn float_arithmetic(&mut self, op: Binary, left: &str, right: &str) -> String {
+        let instruction = match op {
+            Binary::Add => "fadd",
+            Binary::Subtract => "fsub",
+            Binary::Multiply => "fmul",
+            _ => unreachable!("expected unchecked float arithmetic"),
+        };
+        self.instruction(format!("{instruction} double {left}, {right}"))
+    }
+
     /// Divide decoded immediate integers after the caller has excluded zero.
     pub(super) fn small_division(
         &mut self,
