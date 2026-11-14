@@ -14,6 +14,8 @@ pub(crate) struct ClassScope {
     pub(crate) bindings: ClassBindings,
     pub(crate) namespace: FunctionScope,
     pub(crate) cells: imre_ast::class_cell::ClassCells,
+    /// Free names of the class’s written annotation fields.
+    pub(crate) annotation_reads: BTreeSet<String>,
     pub(crate) static_attributes: BTreeSet<String>,
 }
 
@@ -67,6 +69,7 @@ impl ClassScope {
                 captures_class: false,
             },
             cells: imre_ast::class_cell::ClassCells::of(body, string_annotations),
+            annotation_reads: BTreeSet::new(),
             static_attributes: BTreeSet::new(),
         }
     }
