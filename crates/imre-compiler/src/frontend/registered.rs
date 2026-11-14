@@ -983,14 +983,6 @@ impl ParameterEvaluator {
     }
 }
 
-pub(crate) fn registered_type_alias(site: TextSize) -> Expr {
-    operation(
-        Builtin::RegisteredTypeAlias(site),
-        Type::PythonObject,
-        vec![],
-    )
-}
-
 /// Preserve the requested module separately from the names bound in the current namespace.
 pub(super) fn registered_import(
     stmt: &ast::Stmt,
@@ -3075,8 +3067,12 @@ impl statements::StatementLowering for SourceScope<'_> {
                 ))
             }
             ast::Stmt::TypeAlias(alias) => {
-                let value = self.operations.get(&stmt.range()).ok_or(())?.clone();
                 let name = alias.name.as_name_expr().ok_or(())?;
+                let value = operation(
+                    Builtin::RegisteredTypeAlias(alias.start()),
+                    Type::PythonObject,
+                    vec![],
+                );
                 Ok((vec![self.store(name.id.as_str(), value)], true))
             }
             ast::Stmt::Match(branch) => self.match_statement(branch),
@@ -3518,7 +3514,7 @@ impl SourceScope<'_> {
             // The physical frame owns an assignment that yields or awaits its value.
             return ir::SuspendValue::operand(&assign.value).is_none();
         }
-        self.operations.contains_key(&stmt.range())
+        stmt.is_type_alias_stmt()
             || matches!(
                 stmt,
                 ast::Stmt::Pass(_) | ast::Stmt::Global(_) | ast::Stmt::Nonlocal(_)

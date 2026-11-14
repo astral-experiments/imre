@@ -605,19 +605,20 @@ impl<'a> PreparedBody<'a> {
             bundled,
             |text, parsed| Self::prepare_annotation(text, parsed, python_optimization),
         );
-        let mut operations = sites.operations;
+        let operations = sites.operations;
         let mut type_aliases = HashMap::new();
         for (alias, class) in aliases {
             let Some(name) = alias.name.as_name_expr() else {
                 continue;
             };
-            operations.insert(
-                alias.range(),
-                crate::frontend::registered_type_alias(alias.start()),
-            );
             type_aliases.insert(
                 alias.start(),
                 TypeAliasDefinition {
+                    scope: scopes.type_alias_scope(
+                        &alias.value,
+                        class,
+                        private_names.string_annotations,
+                    ),
                     name: private_names.source_name(name.start(), &name.id).to_owned(),
                     body: crate::frontend::type_alias_body(&alias.value, values)
                         .ok_or(alias.value.range()),
@@ -925,6 +926,7 @@ impl<'a> std::ops::Deref for SourceMap<'a> {
 }
 
 struct TypeAliasDefinition {
+    scope: crate::frontend::function_scope::FunctionScope,
     name: String,
     body: Result<crate::frontend::AnnotationCode, TextRange>,
     parameters: Option<crate::frontend::TypeParameterValues>,
@@ -1290,7 +1292,7 @@ impl<'p> sites::SiteDefinitions<'p> for LexicalDefinitions<'_, 'p> {
                 definition: self.compile_evaluator(
                     site,
                     &alias.name,
-                    &self.source.scopes.aliases[&site],
+                    &alias.scope,
                     alias.parameters.is_some(),
                     code,
                     self.class_locals,
@@ -5676,13 +5678,6 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             let name = alias.name.as_name_expr().unwrap().id.as_str();
             assert_eq!(checked, shared.is_some(), "{name}");
             assert!(checked, "expected checked operands for {name}");
-            assert_eq!(
-                checked,
-                prepared
-                    .source
-                    .namespace_operations
-                    .contains_key(&alias.range())
-            );
         }
         prepared.standalone().unwrap();
     }

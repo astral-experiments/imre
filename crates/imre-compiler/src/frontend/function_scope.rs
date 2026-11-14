@@ -370,7 +370,6 @@ pub(crate) type FunctionChildren<'a> = Vec<&'a ast::Stmt>;
 pub(crate) struct ScopeFacts<'p> {
     pub(crate) module_annotations: bool,
     pub(crate) functions: HashMap<TextSize, NamedFunction<'p>>,
-    pub(crate) aliases: HashMap<TextSize, FunctionScope>,
     pub(crate) classes: HashMap<TextSize, classes::ClassScope>,
     pub(crate) module_globals: BTreeSet<String>,
 }
@@ -382,6 +381,26 @@ impl<'p> ScopeFacts<'p> {
             .decorator_list
             .first()
             .map_or(def.start(), Ranged::start)]
+    }
+
+    pub(crate) fn type_alias_scope(
+        &self,
+        value: &ast::Expr,
+        enclosing_class: Option<TextSize>,
+        string_annotations: bool,
+    ) -> FunctionScope {
+        let mut names = ClosureNames {
+            string_annotations,
+            ..Default::default()
+        };
+        if let Some(site) = enclosing_class {
+            let class = &self.classes[&site].bindings;
+            names.reads = class_metadata::annotation_reads(&[("", value)], Some(class), false);
+        } else {
+            names.visit_expr(value);
+        }
+        names.locals.insert(".format".into());
+        FunctionScope::new(names, None, false)
     }
 
     pub(crate) fn prepare<'a>(
@@ -527,21 +546,6 @@ where
                     _ => None,
                 };
                 (self.alias_site)(alias, enclosing_class);
-                let mut names = ClosureNames {
-                    string_annotations: strings,
-                    ..Default::default()
-                };
-                if let Some(site) = enclosing_class {
-                    let class = &self.scopes.classes[&site].bindings;
-                    names.reads =
-                        class_metadata::annotation_reads(&[("", &alias.value)], Some(class), false);
-                } else {
-                    names.visit_expr(&alias.value);
-                }
-                names.locals.insert(".format".into());
-                self.scopes
-                    .aliases
-                    .insert(alias.start(), FunctionScope::new(names, None, false));
             }
             ast::Stmt::Global(global) if self.scope == Scope::Module => {
                 self.scopes

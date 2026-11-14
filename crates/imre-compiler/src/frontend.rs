@@ -143,7 +143,7 @@ pub(crate) use registered::{
     FrameInputs, FrameSite, FrameSlots, LexicalOperands, NamedBody, ParameterAnnotations,
     ParameterEvaluator, PhysicalOperand, PreparedRefusal, RegisteredBody, RegisteredFunction,
     RegisteredGenerator, RegisteredLambda, RegisteredScope, RegisteredSuite, SuitePreparation,
-    TypeParameterValues, annotation_expression, registered_sites, registered_type_alias,
+    TypeParameterValues, annotation_expression, registered_sites,
 };
 pub(crate) use registered::{LocalBinding, RegisteredClass, RegisteredOperand, RegisteredRegion};
 #[cfg(test)]
