@@ -164,6 +164,43 @@ impl Session {
             .ok_or_else(|| format!("invalid checked definition range for {owner}.{last}"))
     }
 
+    /// Resolve the unannotated positional inputs of a shipped implementation in its public stub.
+    pub(crate) fn positional_contract(
+        &self,
+        interface: &str,
+        function: &ruff_python_ast::StmtFunctionDef,
+    ) -> Option<Vec<crate::ir::Type>> {
+        let db = &self.db;
+        let file = ruff_db::files::vendored_path_to_file(db, interface).ok()?;
+        let definition = self.final_module_binding(file, function.name.as_str())?;
+        let DefinitionKind::Function(declaration) = definition.kind(db) else {
+            return None;
+        };
+        let parsed = self.parsed(file);
+        let stub = &declaration.node(&parsed).parameters;
+        let source = &function.parameters;
+        if source.posonlyargs.len() != stub.posonlyargs.len()
+            || source.args.len() != stub.args.len()
+        {
+            return None;
+        }
+        let model = SemanticModel::new(db, db.program_file(file));
+        let env = model.program_environment();
+        source
+            .posonlyargs
+            .iter()
+            .chain(&source.args)
+            .zip(stub.posonlyargs.iter().chain(&stub.args))
+            .map(|(parameter, declared)| {
+                if parameter.name().as_str() != declared.name().as_str() {
+                    return None;
+                }
+                let ty = annotation_type(db, &model, declared.annotation()?)?;
+                Self::scalar_layout(db, &env, ty, ScalarMatch::Exact)
+            })
+            .collect()
+    }
+
     pub(super) fn final_module_binding(&self, file: File, name: &str) -> Option<Definition<'_>> {
         let mut defs = bindings(&self.db, file, name);
         let def = defs.next()?.definition()?;

@@ -297,3 +297,44 @@ class TextWrapper:
 
     def fill(self, text: str) -> str:
         return "\n".join(self.wrap(text))
+
+
+def wrap(text, width=70, **kwargs):
+    """Wrap a single paragraph of text, returning a list of wrapped lines.
+
+    Reformat the single paragraph in 'text' so it fits in lines of no
+    more than 'width' columns, and return a list of wrapped lines.  By
+    default, tabs in 'text' are expanded with string.expandtabs(), and
+    all other whitespace characters (including newline) are converted to
+    space.  See TextWrapper class for available keyword args to customize
+    wrapping behaviour.
+    """
+    w = TextWrapper(width=width, **kwargs)
+    return w.wrap(text)
+
+def fill(text, width=70, **kwargs):
+    """Fill a single paragraph of text, returning a new string.
+
+    Reformat the single paragraph in 'text' to fit in lines of no more
+    than 'width' columns, and return a new string containing the entire
+    wrapped paragraph.  As with wrap(), tabs are expanded and other
+    whitespace characters converted to space.  See TextWrapper class for
+    available keyword args to customize wrapping behaviour.
+    """
+    w = TextWrapper(width=width, **kwargs)
+    return w.fill(text)
+
+def shorten(text, width, **kwargs):
+    """Collapse and truncate the given text to fit in the given width.
+
+    The text first has its whitespace collapsed.  If it then fits in
+    the *width*, it is returned as is.  Otherwise, as many words
+    as possible are joined and then the placeholder is appended::
+
+        >>> textwrap.shorten("Hello  world!", width=12)
+        'Hello world!'
+        >>> textwrap.shorten("Hello  world!", width=11)
+        'Hello [...]'
+    """
+    w = TextWrapper(width=width, max_lines=1, **kwargs)
+    return w.fill(' '.join(text.strip().split()))

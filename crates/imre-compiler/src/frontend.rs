@@ -902,7 +902,12 @@ fn lower_graph(
                         // A wrapper can distinguish omitted keywords from explicitly supplied defaults.
                         keyword_forwarding::Defaults::local(module_id)
                     } else {
-                        keyword_forwarding::prepare(graph, module_id, &mut function)
+                        keyword_forwarding::prepare(
+                            graph,
+                            module_id,
+                            &mut function,
+                            classes.declarations,
+                        )
                     };
                     let mut signature = match signature(
                         &function,
@@ -2473,6 +2478,10 @@ fn signature(
             });
         }
     };
+    let positional_contract = graph.modules[module]
+        .forwarder_stub()
+        .filter(|_| method.is_none() && defaults.forwarded.is_some())
+        .and_then(|stub| graph.session.positional_contract(stub, function));
     let mut none_defaults = Vec::new();
     let mut document_parameters = Vec::new();
     for (index, parameter) in function.parameters.iter_non_variadic_params().enumerate() {
@@ -2578,6 +2587,7 @@ fn signature(
                         annotation_in_class(value, graph, module, classes, types, owner)
                     }
                 })
+                .or_else(|| positional_contract.as_ref()?.get(index).copied().map(Ok))
                 .or_else(|| parameter
                     .default
                     .as_deref()

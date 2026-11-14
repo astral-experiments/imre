@@ -3087,6 +3087,12 @@ impl SourceModule {
         Some((name, slot))
     }
 
+    /// The public stub for this private fixed implementation, after import selection.
+    pub(crate) fn forwarder_stub(&self) -> Option<&'static str> {
+        self.is_bundled(TEXTWRAP_WRAPPER)
+            .then_some("stdlib/textwrap.pyi")
+    }
+
     pub(crate) fn is_bundled(&self, name: &str) -> bool {
         self.bundled && self.name == name
     }
@@ -6485,11 +6491,7 @@ impl<'a> Loader<'a> {
             )),
             needs_textwrap(TEXTWRAP_WRAPPER).then_some((
                 TEXTWRAP_WRAPPER,
-                concat!(
-                    include_str!("../stdlib/textwrap/wrapper.py"),
-                    "\n\n",
-                    include_str!("../stdlib/textwrap/functions_typed.py"),
-                ),
+                include_str!("../stdlib/textwrap/wrapper.py"),
             )),
         ];
         for (implementation, source) in bundles.into_iter().flatten() {

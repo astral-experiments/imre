@@ -475,7 +475,8 @@ mod tests {
                 .unwrap(),
         );
         assert_eq!(forward.name.as_str(), "forward");
-        let defaults = keyword_forwarding::prepare(&graph, graph.entry, &mut forward);
+        let classes = crate::classes::Classes::collect(&graph).unwrap();
+        let defaults = keyword_forwarding::prepare(&graph, graph.entry, &mut forward, &classes);
         assert!(defaults.forwarded.is_some());
         let assignment = forward.body[1].as_assign_stmt().unwrap();
         let call = assignment.value.as_call_expr().unwrap();
