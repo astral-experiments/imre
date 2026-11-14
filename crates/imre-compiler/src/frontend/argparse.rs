@@ -1709,7 +1709,7 @@ impl Checker<'_> {
                     attribute,
                     receiver,
                     Type::PythonObject,
-                    bound.values,
+                    Some(bound.values),
                 )
                 .map(Some);
         }
