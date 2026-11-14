@@ -2907,7 +2907,14 @@ impl Session {
             "invalid-argument-type",
             "invalid-return-type",
             "invalid-assignment",
-        ] {
+        ]
+        .into_iter()
+        .chain(
+            CALL_ARGUMENT_RULES
+                .iter()
+                .copied()
+                .filter(|rule| is_call_shape_rule(rule)),
+        ) {
             rules.enable(
                 default_lint_registry()
                     .get(name)
@@ -2930,9 +2937,7 @@ impl Session {
         declarations: DeclaredSignatures<'_>,
         errors: &mut Vec<String>,
     ) {
-        use ty_python_semantic::types::ide_support::{
-            ImportAliasResolution, ResolvedDefinition, definitions_for_name, unreachable_ranges,
-        };
+        use ty_python_semantic::types::ide_support::unreachable_ranges;
         let db = &self.db;
         let file = self.files[module];
         let source = db.program_file(file);
@@ -2949,15 +2954,7 @@ impl Session {
             {
                 return None;
             }
-            let bindings = definitions_for_name(
-                &model,
-                name.id.as_str(),
-                name.into(),
-                ImportAliasResolution::ResolveAliases,
-            );
-            let [ResolvedDefinition::Definition(definition)] = bindings.as_slice() else {
-                return None;
-            };
+            let definition = resolved_name_definition(&model, name)?;
             let ty_python_core::definition::DefinitionKind::Function(function) =
                 definition.kind(db)
             else {
@@ -3014,6 +3011,7 @@ impl Session {
             return Ok(());
         }
         let mut written_return = None;
+        let mut call_shapes = Vec::new();
         let mut parameters = Vec::new();
         let mut result_scopes = Vec::new();
         let mut class_files = Vec::new();
@@ -3021,6 +3019,9 @@ impl Session {
             if !module.supplies_declarations() {
                 continue;
             }
+            let program_source = module
+                .project_path()
+                .is_some_and(|path| path.extension().is_none_or(|ext| ext != "pyi"));
             let source = self.db.program_file(file);
             let index = ty_python_core::semantic_index(&self.db, source);
             let parsed = ruff_db::parsed::parsed_module(&self.db, source.python_file(&self.db))
@@ -3061,6 +3062,7 @@ impl Session {
                             written_return = Some(report);
                         }
                     }
+                    let parameter_start = parameters.len();
                     parameters.extend(
                         function
                             .parameters
@@ -3068,15 +3070,29 @@ impl Session {
                             .filter(|p| p.annotation().is_some())
                             .map(|p| (file, p.range())),
                     );
+                    if program_source
+                        && function.decorator_list.is_empty()
+                        && function.type_params.is_none()
+                        && (function.returns.is_some() || parameters.len() != parameter_start)
+                        && let Some(definition) = index.try_definition(function)
+                    {
+                        call_shapes.push(definition);
+                    }
                 }
             }
         }
         let has_signatures =
             !parameters.is_empty() || !result_scopes.is_empty() || !class_files.is_empty();
         result_scopes.sort_unstable();
+        call_shapes.sort_unstable();
         class_files.sort_unstable();
-        let declarations =
-            DeclaredSignatures::new(&self.db, parameters, result_scopes, class_files);
+        let declarations = DeclaredSignatures::new(
+            &self.db,
+            parameters,
+            result_scopes,
+            class_files,
+            call_shapes,
+        );
         let mut errors = Vec::new();
         for (index, (module, &file)) in modules.iter().zip(&self.files).enumerate() {
             let Some(path) = module.project_path() else {
@@ -3215,6 +3231,8 @@ struct DeclaredSignatures<'db> {
     parameters: Vec<(File, TextRange)>,
     result_scopes: Vec<(File, FileScopeId)>,
     class_files: Vec<File>,
+    /// Undecorated first-party declarations with a parameter or result annotation.
+    call_shapes: Vec<ty_python_core::definition::Definition<'db>>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -3240,6 +3258,31 @@ pub(crate) enum FallbackCalls {
     All,
     /// A factory must return a callable to decorate the method.
     DecoratorFactories,
+}
+
+/// Follow an imported name only when it has one source definition.
+fn resolved_name_definition<'db>(
+    model: &SemanticModel<'db>,
+    name: &ruff_python_ast::ExprName,
+) -> Option<ty_python_core::definition::Definition<'db>> {
+    use ty_python_semantic::types::ide_support::{
+        ImportAliasResolution, ResolvedDefinition, definitions_for_name,
+    };
+    let bindings = definitions_for_name(
+        model,
+        name.id.as_str(),
+        name.into(),
+        ImportAliasResolution::ResolveAliases,
+    );
+    let [ResolvedDefinition::Definition(definition)] = bindings.as_slice() else {
+        return None;
+    };
+    Some(*definition)
+}
+
+fn is_call_shape_rule(rule: &str) -> bool {
+    !matches!(rule, "invalid-argument-type" | "no-matching-overload")
+        && CALL_ARGUMENT_RULES.contains(&rule)
 }
 
 const CALL_ARGUMENT_RULES: &[&str] = &[
@@ -3595,6 +3638,12 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<CheckedEr
                         .result_scopes(db)
                         .binary_search(&(file, scope))
                         .ok()?;
+                    None
+                }
+                Some(_) if is_call_shape_rule(diagnostic.id().as_str()) => {
+                    if runtime_argument(db, checked, range?, diagnostic.id().as_str()) {
+                        return None;
+                    }
                     None
                 }
                 Some(_) => return None,
@@ -4063,6 +4112,7 @@ fn runtime_argument(db: &dyn Db, checked: CheckedFile<'_>, range: TextRange, rul
         FileChecks::FallbackReturns
             | FileChecks::FunctionBodyCalls
             | FileChecks::NamedFunctionCalls
+            | FileChecks::DeclaredSignatures
     );
     if !root.range().contains_range(range) {
         return local_calls;
@@ -4095,6 +4145,26 @@ fn runtime_argument(db: &dyn Db, checked: CheckedFile<'_>, range: TextRange, rul
         return true;
     }
     let model = SemanticModel::new(db, file);
+    if let Some(declarations) = checked.declarations(db) {
+        let Some(name) = call.func.as_name_expr() else {
+            return true;
+        };
+        if call.arguments.args.iter().any(Expr::is_starred_expr)
+            || call
+                .arguments
+                .keywords
+                .iter()
+                .any(|keyword| keyword.arg.is_none())
+        {
+            return true;
+        }
+        return resolved_name_definition(&model, name).is_none_or(|definition| {
+            declarations
+                .call_shapes(db)
+                .binary_search(&definition)
+                .is_err()
+        });
+    }
     let Some(callee) = call.func.inferred_type(&model) else {
         return local_calls;
     };
