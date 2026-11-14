@@ -137,20 +137,20 @@ impl<'a> Visitor<'a> for ClosureNames {
                 if self.include_nested_reads
                     && let Some(params) = &c.type_params
                 {
-                    // Delayed bound and default expressions see the sibling type parameters.
-                    let mut reads = self.child_reads(None, |child| child.visit_type_params(params));
+                    let mut reads = self.child_reads(None, |child| {
+                        child.visit_type_params(params);
+                        if let Some(args) = &c.arguments {
+                            child.visit_arguments(args);
+                        }
+                    });
                     for param in params.iter() {
                         reads.remove(param.name().as_str());
                     }
                     self.cell_reads.extend(reads.iter().cloned());
                     self.reads.extend(reads);
                 }
-                // Only class header expressions can introduce names in this enclosing function.
-                for decorator in &c.decorator_list {
-                    self.visit_decorator(decorator);
-                }
-                if let Some(args) = &c.arguments {
-                    self.visit_arguments(args);
+                for expr in imre_ast::class_definition_expressions(c) {
+                    self.visit_expr(expr);
                 }
             }
             ast::Stmt::Global(g) => {
