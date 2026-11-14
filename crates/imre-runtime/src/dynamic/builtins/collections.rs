@@ -682,15 +682,10 @@ pub(super) fn construct(
     }
     if name == "list"
         && let [source] = args
-        && let Some(list) = ctx.list_from_int_character_map(*source)
     {
-        return list;
-    }
-    // list() consults the cursor's signed length hint before pulling an item.
-    if name == "list"
-        && let [source] = args
-        && matches!(ctx.heap.get(*source), Value::SetIterator(_))
-    {
+        if let Some(list) = ctx.list_from_int_character_map(*source) {
+            return list;
+        }
         let list = ctx.alloc(Value::List(Vec::new()));
         list_extend(ctx, list, *source)?;
         return Ok(list);
