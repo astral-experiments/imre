@@ -1934,7 +1934,6 @@ impl<'a> SuitePreparation<'a> {
         entry: Option<(&crate::modules::SourceModule, Box<RegisteredFunction>)>,
     ) -> RegisteredSuite {
         if let Some((module, entry)) = entry
-            && entry.function.locals.is_empty()
             && let Some((_, tail)) = module.executable_suffix()
             && let Some(prefix) = stmts.strip_suffix(tail)
             && crate::llvm::registered::frame_inputs(&entry, FrameArguments::Python).is_some()
@@ -2503,9 +2502,13 @@ impl<'a> SuitePreparation<'a> {
         select: SuiteSelection,
         child_selection: SuiteSelection,
         suspended: bool,
-        placed: Option<Box<RegisteredFunction>>,
+        mut placed: Option<Box<RegisteredFunction>>,
     ) -> RegisteredSuite {
         let mut scope = self.source_scope(kind);
+        if let Some(entry) = &mut placed {
+            // Prefix declarations allocate after the slots used by the checked tail.
+            scope.locals = std::mem::take(&mut entry.function.locals);
+        }
         let mut body = SuiteBody {
             statements: Vec::new(),
             check_from: Some(0),
@@ -2823,6 +2826,7 @@ impl<'a> SuitePreparation<'a> {
                 body.refusal = self.checked_declaration_refusal(&entry.function.body);
             }
             entry.function.body.splice(..0, body.statements);
+            scope.namespaces.extend(entry.local_names);
             let mut checked = scope.finish(entry.function.body);
             checked.fixed_sites = entry.fixed_sites;
             checked.fixed_attributes = entry.fixed_attributes;

@@ -927,41 +927,6 @@ impl Expr {
         }
     }
 
-    /// Construct a sequence length, counting regex runs directly when the list cannot escape.
-    pub(crate) fn sequence_len(mut values: Vec<Self>) -> Self {
-        let kind = match values.as_mut_slice() {
-            [
-                Self {
-                    kind:
-                        ExprKind::Builtin(
-                            Builtin::RegexCollect {
-                                program: imre_regex::Collection::Runs(members),
-                                split,
-                            },
-                            input,
-                        ),
-                    ..
-                },
-            ] if members.len() >= 256
-                && members.len().is_multiple_of(4)
-                && matches!(input.as_slice(), [text] if text.ty == Type::Str) =>
-            {
-                ExprKind::Builtin(
-                    Builtin::RegexRunCount {
-                        members: std::mem::take(members),
-                        split: *split,
-                    },
-                    std::mem::take(input),
-                )
-            }
-            _ => ExprKind::Builtin(Builtin::Len, values),
-        };
-        Self {
-            ty: Type::Int,
-            kind,
-        }
-    }
-
     /// Construct an absent optional from a literal None.
     pub(crate) fn absent(ty: Type) -> Self {
         Self {
@@ -2578,10 +2543,6 @@ pub(crate) enum Builtin {
     RegexSub(Vec<u8>),
     RegexCollect {
         program: imre_regex::Collection,
-        split: bool,
-    },
-    RegexRunCount {
-        members: Vec<u8>,
         split: bool,
     },
     RegexGroupDict,

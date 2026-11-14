@@ -135,12 +135,18 @@ pub fn evaluated_arguments(args: &ast::Arguments) -> impl Iterator<Item = ast::A
         .chain(args.keywords.iter().map(ast::ArgOrKeyword::Keyword))
 }
 
+/// The value to evaluate and whether Python expands it into positional or keyword arguments.
+pub fn call_operands(args: &ast::Arguments) -> impl Iterator<Item = (&ast::Expr, bool)> {
+    evaluated_arguments(args).map(|arg| match arg {
+        ast::ArgOrKeyword::Arg(ast::Expr::Starred(star)) => (star.value.as_ref(), true),
+        ast::ArgOrKeyword::Keyword(keyword) => (&keyword.value, keyword.arg.is_none()),
+        _ => (arg.value(), false),
+    })
+}
+
 /// Values supplied to the call, including the operands of argument expansion.
 pub fn argument_values(args: &ast::Arguments) -> impl Iterator<Item = &ast::Expr> {
-    evaluated_arguments(args).map(|arg| match arg {
-        ast::ArgOrKeyword::Arg(ast::Expr::Starred(star)) => star.value.as_ref(),
-        _ => arg.value(),
-    })
+    call_operands(args).map(|(value, _)| value)
 }
 
 /// Generic class arguments run in the type-parameter scope. Decorators always run outside it.

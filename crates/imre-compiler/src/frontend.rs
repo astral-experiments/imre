@@ -15233,7 +15233,7 @@ impl<'a> Checker<'a> {
                             | Type::VarTuple(_)
                     ) =>
             {
-                return Ok(Expr::sequence_len(args));
+                (Builtin::Len, Type::Int)
             }
             "print"
                 if !args.is_empty()

@@ -4128,9 +4128,77 @@ impl Emitter<'_, '_> {
         })
     }
 
+    /// A native length can count regex runs without allocating the intermediate list.
+    fn regex_run_count(&mut self, sequence: &Expr) -> Option<Value> {
+        let ExprKind::Builtin(
+            Builtin::RegexCollect {
+                program: imre_regex::Collection::Runs(members),
+                split,
+            },
+            inputs,
+        ) = &sequence.kind
+        else {
+            return None;
+        };
+        let [text] = inputs.as_slice() else {
+            return None;
+        };
+        if text.ty != Type::Str || members.len() < 256 || !members.len().is_multiple_of(4) {
+            return None;
+        }
+        let text = self.operand(text);
+        let subject = &text.value.operand;
+        let table = self.byte_array(members.clone());
+        self.output.local_helper(
+            "regex_run_count_word",
+            include_str!("llvm/regex_run_count_word.ll"),
+        );
+        let call = if let Ok(members) = <&[u8; 256]>::try_from(members.as_slice()) {
+            let mut matching = members.iter().enumerate().filter(|(_, flag)| **flag != 0);
+            let singleton = match (matching.next(), matching.next()) {
+                (Some((byte, _)), None) => byte as i32,
+                _ => -1,
+            };
+            // A range fits in two bytes. A negative descriptor selects the lookup loop.
+            let ranges = imre_regex::small_ranges(members).map_or(-1, |ranges| {
+                ranges.into_iter().rev().fold(0i64, |bits, (lo, width)| {
+                    (bits << 16) | (i64::from(width) << 8) | i64::from(lo)
+                })
+            });
+            self.output.local_helper(
+                "count_ascii_regex_runs",
+                include_str!("llvm/count_ascii_regex_runs.ll"),
+            );
+            format!(
+                "call i64 @count_ascii_regex_runs(ptr {subject}, ptr @{table}, i32 {singleton}, i1 {split}, i64 {ranges})"
+            )
+        } else {
+            self.output.local_helper(
+                "count_unicode_regex_runs",
+                include_str!("llvm/count_unicode_regex_runs.ll"),
+            );
+            let bounds = (members.len() - 256) / 4;
+            format!(
+                "call i64 @count_unicode_regex_runs(ptr {subject}, ptr @{table}, i64 {bounds}, i1 {split})"
+            )
+        };
+        let operand = self.checked_instruction(call);
+        self.release_operand(&text);
+        Some(Value {
+            ty: Type::Int,
+            operand,
+            small_integer: false,
+        })
+    }
+
     fn builtin(&mut self, builtin: &Builtin, expressions: &[Expr], returns: Type) -> Value {
         if let Some(v) = self.at_builtin_origin(builtin, |e| e.line_builtin(builtin, expressions)) {
             return v;
+        }
+        if let (Builtin::Len, [sequence]) = (builtin, expressions)
+            && let Some(count) = self.regex_run_count(sequence)
+        {
+            return count;
         }
         if let Builtin::Logging(ir::LogOperation::HandlerRegister(shutdown)) = builtin {
             let handler = self.expr(&expressions[0]);
@@ -4868,49 +4936,6 @@ impl Emitter<'_, '_> {
                     none()
                 } else {
                     self.call(name, returns, &values)
-                }
-            }
-            Builtin::RegexRunCount { members, split } => {
-                let table = self.byte_array(members.clone());
-                let subject = &args[0].value.operand;
-                self.output.local_helper(
-                    "regex_run_count_word",
-                    include_str!("llvm/regex_run_count_word.ll"),
-                );
-                let call = if let Ok(members) = <&[u8; 256]>::try_from(members.as_slice()) {
-                    let mut matching = members.iter().enumerate().filter(|(_, flag)| **flag != 0);
-                    let singleton = match (matching.next(), matching.next()) {
-                        (Some((byte, _)), None) => byte as i32,
-                        _ => -1,
-                    };
-                    // A range fits in two bytes. A negative descriptor selects the lookup loop.
-                    let ranges = imre_regex::small_ranges(members).map_or(-1, |ranges| {
-                        ranges.into_iter().rev().fold(0i64, |bits, (lo, width)| {
-                            (bits << 16) | (i64::from(width) << 8) | i64::from(lo)
-                        })
-                    });
-                    self.output.local_helper(
-                        "count_ascii_regex_runs",
-                        include_str!("llvm/count_ascii_regex_runs.ll"),
-                    );
-                    format!(
-                        "call i64 @count_ascii_regex_runs(ptr {subject}, ptr @{table}, i32 {singleton}, i1 {split}, i64 {ranges})"
-                    )
-                } else {
-                    self.output.local_helper(
-                        "count_unicode_regex_runs",
-                        include_str!("llvm/count_unicode_regex_runs.ll"),
-                    );
-                    let bounds = (members.len() - 256) / 4;
-                    format!(
-                        "call i64 @count_unicode_regex_runs(ptr {subject}, ptr @{table}, i64 {bounds}, i1 {split})"
-                    )
-                };
-                let operand = self.checked_instruction(call);
-                Value {
-                    ty: returns,
-                    operand,
-                    small_integer: false,
                 }
             }
             Builtin::RegexCollect { program, split } => {
