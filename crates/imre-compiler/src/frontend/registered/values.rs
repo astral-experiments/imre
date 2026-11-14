@@ -541,9 +541,7 @@ impl Checker<'_> {
                 failure.is_object() && self.registered.is_none() && self.fixed_sites.is_none()
             }
         }) {
-            for argument in imre_ast::argument_values(&call.arguments) {
-                self.check_discarded_operand(argument)?;
-            }
+            self.check_discarded_arguments(call)?;
             return Ok(super::operation(
                 Builtin::UnrepresentedCall,
                 Type::PythonObject,
@@ -551,6 +549,11 @@ impl Checker<'_> {
             ));
         }
         self.call_with_target(call, loaded_attribute(field, receiver))
+    }
+
+    fn check_discarded_arguments(&mut self, call: &ast::ExprCall) -> Result<(), String> {
+        imre_ast::argument_values(&call.arguments)
+            .try_for_each(|arg| self.check_discarded_operand(arg))
     }
 
     fn check_discarded_operand(&mut self, operand: &ast::Expr) -> Result<(), String> {
@@ -614,8 +617,7 @@ impl Checker<'_> {
         receiver: Expr,
         fixed_result: Type,
     ) -> Result<Expr, String> {
-        let arguments = call_arguments(call, |arg| self.expr(arg))?;
-        self.registered_method_call_with_values(call, method, receiver, fixed_result, arguments)
+        self.registered_method_call_with_values(call, method, receiver, fixed_result, None)
     }
 
     pub(in crate::frontend) fn registered_method_call_with_values(
@@ -624,8 +626,17 @@ impl Checker<'_> {
         method: &ast::ExprAttribute,
         receiver: Expr,
         fixed_result: Type,
-        arguments: Vec<Expr>,
+        checked: Option<Vec<Expr>>,
     ) -> Result<Expr, String> {
+        let check_only = self.module_scope && self.inference.is_none() && self.registered.is_none();
+        let arguments = match checked {
+            Some(arguments) => arguments,
+            None if check_only => {
+                self.check_discarded_arguments(call)?;
+                Vec::new()
+            }
+            None => call_arguments(call, |arg| self.expr(arg))?,
+        };
         let result = if self.registered.is_none() {
             let failure =
                 self.scoped_builtin_error(&format!("{}.{}", receiver.ty, method.attr), call);
@@ -634,7 +645,7 @@ impl Checker<'_> {
             }
             // The module's Python frame will bind and invoke the method. Only the
             // checked result type and possible call effects survive in this region.
-            if self.module_scope && self.inference.is_none() {
+            if check_only {
                 return Ok(super::operation(
                     Builtin::UnrepresentedCall,
                     fixed_result,
