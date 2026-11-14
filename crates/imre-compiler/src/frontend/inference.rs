@@ -384,6 +384,8 @@ impl Pending {
 #[derive(Default)]
 pub(super) struct Inference {
     pending: RefCell<Vec<Pending>>,
+    /// Declared list layout and the concrete layouts already observed at direct calls.
+    sequence_parameters: RefCell<HashMap<(usize, usize), (Type, Option<Type>)>>,
     document_fields: RefCell<HashSet<(usize, usize)>>,
     /// Source contract checks shared by discovery, recovery and final body lowering.
     pub(super) source_checks: registered::SourceChecks,
@@ -429,6 +431,95 @@ impl Inference {
             },
         });
         id
+    }
+
+    pub(super) fn sequence_parameters(&self, id: usize, parameters: Vec<(usize, Type)>) {
+        if !parameters.is_empty() {
+            self.sequence_parameters.borrow_mut().extend(
+                parameters
+                    .into_iter()
+                    .map(|(index, list)| ((id, index), (list, None))),
+            );
+            self.widened.set(true);
+        }
+    }
+
+    /// An empty list display still needs the declaration's item type after an earlier tuple.
+    pub(super) fn sequence_context(
+        &self,
+        id: usize,
+        index: usize,
+        expected: Type,
+        site: &ast::Expr,
+    ) -> Type {
+        if site.is_list_expr()
+            && let Some((list, _)) = self.sequence_parameters.borrow().get(&(id, index))
+        {
+            *list
+        } else {
+            expected
+        }
+    }
+
+    pub(super) fn sequence_member(
+        &self,
+        id: usize,
+        index: usize,
+        actual: Type,
+        types: &Types,
+    ) -> Option<Type> {
+        let (list, _) = *self.sequence_parameters.borrow().get(&(id, index))?;
+        let item = types.element(list)?;
+        if actual == list || types.sequence_union_element(actual) == Some(item) {
+            Some(actual)
+        } else if types.is_plain_tuple(actual) || types.var_tuple_element(actual).is_some() {
+            Some(types.var_tuple(item))
+        } else {
+            None
+        }
+    }
+
+    /// Bind the concrete container after its element layout has been checked. A second
+    /// different container widens the slot once, without changing either caller's storage.
+    pub(super) fn bind_sequence(
+        &self,
+        id: usize,
+        index: usize,
+        member: Type,
+        checker: &Checker<'_>,
+        value: Expr,
+        site: &ast::Expr,
+    ) -> Result<Expr, String> {
+        let value = checker.coerce(value, member, site)?;
+        let mut sequences = self.sequence_parameters.borrow_mut();
+        let (list, observed) = sequences.get_mut(&(id, index)).unwrap();
+        let layout = if observed.is_none_or(|seen| seen == member) {
+            member
+        } else {
+            checker.types.sequence_union(*list)
+        };
+        *observed = Some(layout);
+        if self.parameter(id, index) != Some(layout) {
+            self.widen_parameter(id, index, layout);
+        }
+        checker.coerce(value, layout, site)
+    }
+
+    /// A first-class callable exposed with a list ABI still takes that exact pointer.
+    fn keep_sequence_list(&self, id: usize, index: usize, actual: Type) {
+        let slot = (id, index);
+        if self
+            .sequence_parameters
+            .borrow()
+            .get(&slot)
+            .map(|(list, _)| *list)
+            == Some(actual)
+        {
+            self.sequence_parameters.borrow_mut().remove(&slot);
+            if self.parameter(id, index) != Some(actual) {
+                self.widen_parameter(id, index, actual);
+            }
+        }
     }
 
     pub(super) fn document_annotations(
@@ -716,7 +807,9 @@ impl Inference {
                 .into());
             }
             for (index, ty) in params.into_iter().enumerate() {
-                self.learn_parameter(signature.id, index + skip, ty);
+                let index = index + skip;
+                self.keep_sequence_list(signature.id, index, ty);
+                self.learn_parameter(signature.id, index, ty);
             }
             let mut pending = self.pending.borrow_mut();
             if pending[signature.id].returns.is_none() {
@@ -1908,12 +2001,29 @@ impl Checker<'_> {
                         };
                         checker.coerce(value, expected, node)?
                     } else {
+                        let ty =
+                            inference.sequence_context(signature.id, index, ty, argument.site());
                         argument.check_with(
                             checker,
                             ty,
                             parameter.sign_only,
                             declaration,
                             |checker, value, expected, site| {
+                                if let Some(member) = inference.sequence_member(
+                                    signature.id,
+                                    index,
+                                    value.ty,
+                                    checker.types,
+                                ) {
+                                    return inference.bind_sequence(
+                                        signature.id,
+                                        index,
+                                        member,
+                                        checker,
+                                        value,
+                                        site,
+                                    );
+                                }
                                 let expected = inference.document_parameter(
                                     signature,
                                     checker.classes,

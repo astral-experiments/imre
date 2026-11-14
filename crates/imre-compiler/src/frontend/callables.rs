@@ -884,6 +884,20 @@ impl Checker<'_> {
             ExprKind::Local(slot) => self.saved_call_target(*slot),
             _ => None,
         };
+        // A stored function supplies layout evidence even when this invocation must
+        // still load the callable. Keep the stronger saved-target proof for direct dispatch.
+        let sequence_callee = self.inference.and_then(|inference| {
+            if let Some(ValueSource::Function(id)) = self.value_source(&callable)
+                && !call
+                    .func
+                    .as_name_expr()
+                    .is_some_and(|name| self.live_module_name(&name.id))
+            {
+                Some((inference, id))
+            } else {
+                None
+            }
+        });
         let local_callable = matches!(callable.kind, ExprKind::Local(slot)
             if local == Some(&slot) && self.locals[slot] == callable.ty && matches!(callable.ty, Type::Callable(_)));
         let index_callable = self.types.index_callable_signature(callable.ty).is_some();
@@ -913,14 +927,23 @@ impl Checker<'_> {
                     );
                 }
             } else {
+                let context = sequence_callee.map_or(ty, |(inference, id)| {
+                    inference.sequence_context(id, slot, ty, argument)
+                });
                 calls::Supplied::Source(argument).check_with(
                     self,
-                    ty,
+                    context,
                     false,
                     None,
                     |checker, value, expected, site| {
                         if checker.terminating_operand(&value) && checked_tail() {
                             return Ok(value);
+                        }
+                        if let Some((inference, id)) = sequence_callee
+                            && let Some(member) =
+                                inference.sequence_member(id, slot, value.ty, checker.types)
+                        {
+                            return inference.bind_sequence(id, slot, member, checker, value, site);
                         }
                         checker.coerce(value, expected, site).map_err(|error| {
                             error.at_callable_argument(site.range(), || {

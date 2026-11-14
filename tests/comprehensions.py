@@ -19,7 +19,8 @@ BOOTSTRAP = (
 REJECTED = {
     "readonly_sequence_method": "from collections.abc import Sequence\ndef mutate(xs: Sequence[int]) -> None:\n    xs.append(2)  # ty: ignore[unresolved-attribute]\n",
     "readonly_sequence_alias": "from typing import Sequence\ndef leak(xs: Sequence[int]) -> None:\n    alias = xs\n    alias[0] = 1\n",
-    "sequence_requires_list": "from typing import Sequence\ndef count(xs: Sequence[int]) -> int:\n    return len(xs)\nprint(count((1, 2)))\n",
+    "wrong_tuple_sequence_element": "from typing import Sequence\ndef read(xs: Sequence[int]) -> int:\n    return xs[0]\nprint(read(('s',)))\n",
+    "tuple_only_shadowed_len": "from typing import Callable, Sequence\ndef read(xs: Sequence[int], len: Callable[[tuple[int, ...]], int]) -> int:\n    return len(xs)\ndef first(xs: tuple[int, ...]) -> int:\n    return xs[0]\nprint(read((1, 2), first))\n",
     "empty_sequence_default_slice": "from typing import Sequence\ndef observe(xs: Sequence[int] = ()) -> str:\n    return repr(xs[:])\n",
     "empty_sequence_default_index": "from typing import Sequence\ndef observe(xs: Sequence[int] = ()) -> int:\n    return xs[0]\n",
     "sequence_element_contract": "from typing import Sequence\ndef count(xs: Sequence[int]) -> int:\n    return len(xs)\nprint(count(['s']))\n",

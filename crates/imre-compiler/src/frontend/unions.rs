@@ -72,33 +72,66 @@ impl Checker<'_> {
         } else {
             let members = members.unwrap();
             let rest = self.types.union(&members[1..])?;
-            // A record stored in the base arm can have any of its concrete layouts.
-            let alternatives = match members[0] {
-                Type::Class(base) => self
-                    .classes
-                    .concrete_layouts(base)
-                    .into_iter()
-                    .map(|class| ir::InstanceType::Exact(Type::Class(class)))
-                    .collect(),
-                ty => vec![ir::InstanceType::Exact(ty)],
-            };
-            let project = |ty| Expr {
-                ty,
-                kind: ExprKind::Builtin(Builtin::UnionProject, vec![self.local(slot)]),
-            };
-            (
-                Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Builtin(
-                        Builtin::IsInstance(alternatives),
-                        vec![self.local(slot)],
-                    ),
-                },
-                project(members[0]),
-                project(rest),
-            )
+            self.protocol_members(&self.local(slot), members[0], rest)
         };
         Some((slot, test, first, second))
+    }
+
+    /// Select the active layout of a rooted union without evaluating its receiver again.
+    fn protocol_members(&self, source: &Expr, first: Type, rest: Type) -> (Expr, Expr, Expr) {
+        // A record stored in the base arm can have any of its concrete layouts.
+        let alternatives = match first {
+            Type::Class(base) => self
+                .classes
+                .concrete_layouts(base)
+                .into_iter()
+                .map(|class| ir::InstanceType::Exact(Type::Class(class)))
+                .collect(),
+            ty => vec![ir::InstanceType::Exact(ty)],
+        };
+        let project = |ty| Expr {
+            ty,
+            kind: ExprKind::Builtin(Builtin::UnionProject, vec![source.clone()]),
+        };
+        (
+            Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Builtin(Builtin::IsInstance(alternatives), vec![source.clone()]),
+            },
+            project(first),
+            project(rest),
+        )
+    }
+
+    /// The source and optional index are rooted by the caller. Both arms read the
+    /// same item contract, using the selected container's own bounds and errors.
+    pub(super) fn sequence_read(
+        &self,
+        source: &Expr,
+        item: Type,
+        index: Option<(&Expr, Option<Box<ir::FixedOrigin>>)>,
+    ) -> Expr {
+        let (test, list, tuple) =
+            self.protocol_members(source, self.types.list(item), self.types.var_tuple(item));
+        let operation = |ty, builtin, args| Expr {
+            ty,
+            kind: ExprKind::Builtin(builtin, args),
+        };
+        let (yes, no) = if let Some((index, origin)) = index {
+            (
+                operation(item, Builtin::ListGet(origin), vec![list, index.clone()]),
+                operation(item, Builtin::TupleIndex, vec![tuple, index.clone()]),
+            )
+        } else {
+            (
+                operation(Type::Int, Builtin::Len, vec![list]),
+                operation(Type::Int, Builtin::Len, vec![tuple]),
+            )
+        };
+        Expr {
+            ty: yes.ty,
+            kind: ExprKind::Conditional(Box::new(test), Box::new(yes), Box::new(no)),
+        }
     }
 
     /// Reads a proved member through explicit ownership-preserving projection.

@@ -2484,6 +2484,7 @@ fn signature(
         .filter(|_| method.is_none())
         .and_then(|stub| graph.session.positional_contract(stub, function, types));
     let mut none_defaults = Vec::new();
+    let mut sequence_parameters = Vec::new();
     let mut document_parameters = Vec::new();
     for (index, parameter) in function.parameters.iter_non_variadic_params().enumerate() {
         let origin = defaults
@@ -2560,7 +2561,7 @@ fn signature(
                     if let ast::Expr::Subscript(sequence) = value
                         && annotations::sequence_annotation(graph.resolve(module, &sequence.value))
                     {
-                        sequences::check_reads(
+                        let tuple_reads = sequences::check_reads(
                             function,
                             parameter.name().as_str(),
                             empty_sequence,
@@ -2576,7 +2577,11 @@ fn signature(
                             types,
                             owner,
                         )?;
-                        Ok(types.list(element))
+                        let list = types.list(element);
+                        if tuple_reads && method.is_none() && parameter.default.is_none() {
+                            sequence_parameters.push((index, list));
+                        }
+                        Ok(list)
                     } else if let Some(layout) = documents::annotation(graph, module, value) {
                         document_parameters.push(index);
                         Ok(if layout == documents::LIST {
@@ -2789,6 +2794,7 @@ fn signature(
     } else {
         document_return
     };
+    inference.sequence_parameters(id, sequence_parameters);
     inference.document_annotations(id, document_parameters, document_return);
     if !inert && graph.modules[module].archive.is_none() {
         inference.discover_list_elements(graph, module, Some(function));
@@ -4436,6 +4442,12 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(Builtin::UnionInject, vec![value]),
             });
         }
+        if self.types.is_plain_tuple(value.ty)
+            && let Some(item) = self.types.sequence_union_element(expected)
+        {
+            let tuple = self.coerce(value, self.types.var_tuple(item), node)?;
+            return self.coerce(tuple, expected, node);
+        }
         if let Some(element) = self.types.var_tuple_element(expected)
             && self
                 .types
@@ -6014,7 +6026,11 @@ impl<'a> Checker<'a> {
         else {
             unreachable!("range iteration returned above")
         };
-        if !items && start.is_none() && matches!(iterable.ty, Type::Tuple(_)) {
+        if !items
+            && start.is_none()
+            && (matches!(iterable.ty, Type::Tuple(_))
+                || self.types.sequence_union_element(iterable.ty).is_some())
+        {
             let input = self.prepare_container(iterable, false, target, false)?;
             return self.lower_prepared_iteration(
                 target,
@@ -10759,6 +10775,17 @@ impl<'a> Checker<'a> {
                 if let Some((key, value)) = self.types.mapping(list.ty) {
                     return self.dict_subscript(list, &subscript.slice, key, value);
                 }
+                if let Some(item) = self.types.sequence_union_element(list.ty) {
+                    let index = self.expr_expected(&subscript.slice, Type::Int)?;
+                    let origin =
+                        self.fixed_origin(subscript.range(), Some((subscript.value.end(), b'[')));
+                    let mut scope = calls::ArgumentScope::default();
+                    let source = scope.hold(self, list);
+                    let index = scope.hold(self, index);
+                    let read =
+                        self.sequence_read(&source, item, Some((&index, Some(Box::new(origin)))));
+                    return Ok(scope.finish(read));
+                }
                 if matches!(list.ty, Type::VarTuple(_)) {
                     let (literal, negative) = match &*subscript.slice {
                         ast::Expr::UnaryOp(u) if u.op == ast::UnaryOp::USub => (&*u.operand, true),
@@ -15319,6 +15346,14 @@ impl<'a> Checker<'a> {
                     self.checked_builtin_call(Builtin::Float, call, &args),
                     Type::Float,
                 )
+            }
+            "len"
+                if let [arg] = args.as_slice()
+                    && let Some(item) = self.types.sequence_union_element(arg.ty) =>
+            {
+                let mut scope = calls::ArgumentScope::default();
+                let source = scope.hold(self, args.pop().unwrap());
+                return Ok(scope.finish(self.sequence_read(&source, item, None)));
             }
             "len" if args.len() == 1 && args[0].ty == Type::Context => {
                 (Builtin::ContextVar(ir::ContextOperation::Len), Type::Int)

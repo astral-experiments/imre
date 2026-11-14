@@ -895,6 +895,25 @@ impl Types {
         ]))))
     }
 
+    /// A checked read-only slot can hold either physical container without copying its items.
+    pub(crate) fn sequence_union(&self, list: Type) -> Type {
+        let item = self.element(list).expect("declared sequence list");
+        Type::Union(self.intern(Shape::Union(vec![list, self.var_tuple(item)])))
+    }
+
+    pub(crate) fn sequence_union_element(&self, ty: Type) -> Option<Type> {
+        let Type::Union(id) = ty else { return None };
+        let shapes = self.0.borrow();
+        let Shape::Union(members) = &shapes.shapes[id] else {
+            return None;
+        };
+        let &[list, tuple] = members.as_slice() else {
+            return None;
+        };
+        let item = self.var_tuple_element(tuple)?;
+        (self.element(list) == Some(item)).then_some(item)
+    }
+
     pub(crate) fn members(&self, ty: Type) -> Option<Vec<Type>> {
         let Type::Union(id) = ty else { return None };
         match &self.0.borrow().shapes[id] {
