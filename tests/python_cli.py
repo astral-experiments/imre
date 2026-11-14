@@ -4694,6 +4694,7 @@ for name in ("md4", "ripemd160"):
             "boxed_interactive.py",
             "boxed_relative_package_imports.py",
             "boxed_sys_getframe.py",
+            "boxed_sys_gettrace.py",
             "boxed_sys_getsizeof.py",
             "boxed_sys_audit.py",
             "boxed_sys_asyncgen_hooks.py",

@@ -524,6 +524,7 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             "get_asyncgen_hooks",
             "get_coroutine_origin_tracking_depth",
             "getsizeof",
+            "gettrace",
             "hash_info",
             "is_finalizing",
             "monitoring",
