@@ -1,5 +1,6 @@
 import io
 import sys
+from contextlib import redirect_stderr
 from traceback import print_exception
 
 
@@ -15,8 +16,10 @@ def missing(data):
     return data['value']
 
 
-def call():
-    return missing({})
+def call(data):
+    return data.get("handler", missing)(
+        data,
+    )
 
 
 def capture(exc, **options):
@@ -26,7 +29,9 @@ def capture(exc, **options):
 
 
 try:
-    call()
+    result = call(
+        {},
+    )
 except KeyError as original:
     tb = original.__traceback__
     print(tb.tb_frame.f_code.co_name, tb.tb_frame.f_code.co_filename == __file__)
@@ -38,6 +43,9 @@ except KeyError as original:
             raise RuntimeError('outer') from cause
         except RuntimeError as outer:
             print(outer.__context__ is original, outer.__cause__ is cause, outer.__suppress_context__)
+            if cause is original:
+                with redirect_stderr(sys.stdout):
+                    sys.__excepthook__(type(outer), outer, outer.__traceback__)
             capture(outer, limit=0)
             capture(outer, limit=0, chain=False)
 
