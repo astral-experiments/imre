@@ -269,7 +269,11 @@ impl Emitter<'_, '_> {
                 })
             }
             PathOperation::Query(query) => {
-                let follow = self.instruction(format!("zext i1 {} to i32", args[1].value.operand));
+                let follow = if let Some(follow) = args.get(1) {
+                    self.instruction(format!("zext i1 {} to i32", follow.value.operand))
+                } else {
+                    i32::from(!matches!(query, ir::PathQuery::Symlink)).to_string()
+                };
                 let byte = self.instruction(format!(
                     "call i32 @imre_path_query(ptr {}, i32 {}, i32 {follow})",
                     args[0].value.operand, query as u32
