@@ -630,9 +630,10 @@ fn fault_frame_statement(file: String, name: &str, line: u32) -> Statement {
 /// Resolves the project-wide call graph without changing source-level namespaces.
 #[cfg(test)]
 pub(crate) fn lower(graph: &SourceGraph) -> StdResult<ir::Module, String> {
-    lower_current(graph, None, &mut HashSet::new(), false)
+    lower_current(graph, None, None, false)
         .0
         .map_err(|report| report.to_string())?
+        .expect("a fixed set of methods cannot request another lowering")
         .into_native(graph)
         .map(|(module, _)| module)
 }
@@ -663,7 +664,7 @@ pub(crate) fn lower_with_caller_cache(
         let (lowered, checks) = lower_current(
             graph,
             cache.take(),
-            &mut key_reprs,
+            Some(&mut key_reprs),
             !matches!(source_checks, Some(SourceCheckSession::SharedGraph)),
         );
         if let Err(reason) = &lowered
@@ -671,7 +672,9 @@ pub(crate) fn lower_with_caller_cache(
         {
             key_reprs.insert(owner);
         }
-        if key_reprs.len() == before {
+        if let Some(lowered) = lowered.transpose()
+            && key_reprs.len() == before
+        {
             let session = match source_checks {
                 Some(SourceCheckSession::SharedGraph) => {
                     for &owner in &checks.unresolved {
@@ -694,10 +697,10 @@ pub(crate) fn lower_with_caller_cache(
 fn lower_current(
     graph: &SourceGraph,
     cache: Option<&mut CallerCache>,
-    key_reprs: &mut HashSet<DefinitionId>,
+    key_reprs: Option<&mut HashSet<DefinitionId>>,
     defer_solved: bool,
 ) -> (
-    StdResult<crate::CheckedProgram, Diagnostic>,
+    StdResult<Option<crate::CheckedProgram>, Diagnostic>,
     registered::SourceChecks,
 ) {
     let mut inference = inference::Inference::default();
@@ -749,13 +752,14 @@ pub(crate) fn fixed_frame_entry(function: &ast::StmtFunctionDef) -> bool {
         && function.parameters.kwarg.is_none()
 }
 
+/// A newly reachable key formatter changes the method table. Return no program until it is included.
 fn lower_graph(
     graph: &SourceGraph,
     mut cache: Option<&mut CallerCache>,
-    key_reprs: &mut HashSet<DefinitionId>,
+    key_reprs: Option<&mut HashSet<DefinitionId>>,
     inference: &mut inference::Inference,
     layout_error: &mut Option<Diagnostic>,
-) -> StdResult<crate::CheckedProgram, Diagnostic> {
+) -> StdResult<Option<crate::CheckedProgram>, Diagnostic> {
     graph.clear_registered_functions();
     let types = Types::default();
     typing::collect_sites(graph, &types);
@@ -1657,7 +1661,7 @@ fn lower_graph(
         return Err(reason);
     }
     if needs_registered_entry {
-        return Ok(crate::CheckedProgram::Registered(None));
+        return Ok(Some(crate::CheckedProgram::Registered(None)));
     }
     if let Some(error) = graph.deferred_object_error.take() {
         register(completed, &owners);
@@ -1801,8 +1805,14 @@ fn lower_graph(
             });
         }
     }
-    if !missing_key_types.is_empty() {
+    if !missing_key_types.is_empty()
+        && let Some(key_reprs) = key_reprs
+    {
+        let before = key_reprs.len();
         classes.missing_key_reprs(missing_key_types, graph, &types, key_reprs);
+        if key_reprs.len() != before && cache.is_none() {
+            return Ok(None);
+        }
     }
     let json_records = json::schemas(graph, &classes, &types, &decoded, &encoded)
         .inspect_err(|_| place_completed(&mut completed, &owners))?;
@@ -1828,7 +1838,7 @@ fn lower_graph(
         if recover_completed.get() {
             capture();
         }
-        return Ok(registered);
+        return Ok(Some(registered));
     }
     if !can_transfer_frames && !graph.has_object_constructor_fallback.get() {
         completed.frames = Vec::new();
@@ -1914,13 +1924,13 @@ fn lower_graph(
         },
         owners,
     );
-    Ok(crate::CheckedProgram::Native(Box::new(
+    Ok(Some(crate::CheckedProgram::Native(Box::new(
         crate::FixedProgram {
             ir: lowered,
             frame_sources: completed.frames,
             uses_builtin_module_names,
         },
-    )))
+    ))))
 }
 
 #[derive(Default)]
