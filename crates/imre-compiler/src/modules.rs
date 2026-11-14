@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
 
 use ruff_db::parsed::ParsedModuleRef;
-use ruff_python_ast as ast;
+use ruff_python_ast::{self as ast, name::Name};
 use ruff_text_size::{Ranged, TextRange, TextSize};
 
 use crate::analysis::{CheckedDiagnostic, FallbackCalls, Session};
@@ -583,7 +583,7 @@ pub(crate) enum ImportSnapshot {
 }
 
 /// Sealed namespaces expose only compiler-known symbols, never module values.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum IntrinsicModule {
     RuntimeSource(&'static str),
     ContextVars,
@@ -2844,8 +2844,8 @@ pub(crate) struct SourceModule {
     pub(crate) parsed: ParsedModuleRef,
     pub(crate) bindings: HashMap<String, Binding>,
     type_bindings: HashMap<String, Binding>,
-    /// Only an executed explicit submodule import populates the bare importlib namespace.
-    importlib_children: HashMap<&'static str, TextSize>,
+    /// First checked import site for each selected intrinsic child.
+    imported_children: HashMap<IntrinsicModule, (Name, TextSize)>,
     local_static_imports: Vec<LocalStaticImport>,
     pub(crate) aliases: Vec<TypeAlias>,
     /// Decorated declarations register their original function at module initialization.
@@ -3105,6 +3105,46 @@ impl SourceModule {
             FRACTION_CLASS if self.bundled => Some("Fraction subclasses"),
             _ => None,
         }
+    }
+
+    fn import_child(&mut self, name: &Name, module: IntrinsicModule, at: TextSize) {
+        if name.contains('.') {
+            self.imported_children
+                .entry(module)
+                .or_insert_with(|| (name.clone(), at));
+        } else if let Some(child) = importlib_child_name(module) {
+            self.imported_children
+                .entry(module)
+                .or_insert_with(|| (Name::concat(&["importlib.", child]), at));
+        }
+    }
+
+    fn imported_child(&self, child: IntrinsicModule, at: TextSize) -> Option<Binding> {
+        let (_, first) = self.imported_children.get(&child)?;
+        (*first <= at).then_some(Binding::IntrinsicModule(child))
+    }
+
+    fn source_attribute(
+        &self,
+        source: &SourceModule,
+        attr: &ast::ExprAttribute,
+    ) -> Option<Binding> {
+        let name = attr.attr.as_str();
+        source.export(name).or_else(|| {
+            if !source.bundled || !source.is_package {
+                return None;
+            }
+            let root = IntrinsicModule::named(&source.name)?;
+            let child = if root == IntrinsicModule::Importlib {
+                importlib_child(name)?
+            } else {
+                let Binding::IntrinsicModule(child) = root.symbol(name)? else {
+                    return None;
+                };
+                child
+            };
+            self.imported_child(child, attr.start())
+        })
     }
 
     /// A type-only import in a native stub does not add a member to the C module.
@@ -4536,7 +4576,9 @@ impl SourceGraph {
                 .copied()
                 .or_else(|| self.resolve(module, expression)),
             ast::Expr::Attribute(attribute) => match self.resolve_type(module, &attribute.value)? {
-                Binding::Module(target) => self.modules[target].export(attribute.attr.as_str()),
+                Binding::Module(target) => {
+                    self.modules[module].source_attribute(&self.modules[target], attribute)
+                }
                 Binding::IntrinsicModule(target) => {
                     stdlib_attribute(&self.modules, module, target, attribute).ok()
                 }
@@ -4653,13 +4695,10 @@ fn stdlib_attribute(
     attr: &ast::ExprAttribute,
 ) -> Result<Binding, StdlibMiss> {
     if target == IntrinsicModule::Importlib
-        && modules[owner]
-            .importlib_children
-            .get(attr.attr.as_str())
-            .is_some_and(|at| *at <= attr.start())
         && let Some(child) = importlib_child(attr.attr.as_str())
+        && let Some(binding) = modules[owner].imported_child(child, attr.start())
     {
-        return Ok(Binding::IntrinsicModule(child));
+        return Ok(binding);
     }
     stdlib_symbol(modules, target, attr.attr.as_str())
 }
@@ -4682,7 +4721,9 @@ fn resolve_binding_in(
         ast::Expr::Name(name) => modules[module].bindings.get(name.id.as_str()).copied(),
         ast::Expr::Attribute(attribute) => {
             match resolve_binding(modules, module, &attribute.value)? {
-                Binding::Module(module) => modules[module].export(attribute.attr.as_str()),
+                Binding::Module(target) => {
+                    modules[module].source_attribute(&modules[target], attribute)
+                }
                 Binding::IntrinsicModule(target) => {
                     match stdlib_attribute(modules, module, target, attribute) {
                         Ok(binding) => Some(binding),
@@ -5078,7 +5119,7 @@ impl<'a> Loader<'a> {
             archive: None,
             bindings: HashMap::new(),
             type_bindings: HashMap::new(),
-            importlib_children: HashMap::new(),
+            imported_children: HashMap::new(),
             local_static_imports: Vec::new(),
             aliases: Vec::new(),
             overloads: HashSet::new(),
@@ -5775,8 +5816,30 @@ impl<'a> Loader<'a> {
             self.modules[module].bindings.insert(name.into(), binding);
             return Ok(());
         }
-        if let Some(previous) = self.modules[module].bindings.get(name) {
-            if *previous != binding {
+        if let Some(&previous) = self.modules[module].bindings.get(name) {
+            // Dotted imports can reach the same package through an intrinsic or a source child.
+            if let (Binding::Module(package), Binding::IntrinsicModule(intrinsic))
+            | (Binding::IntrinsicModule(intrinsic), Binding::Module(package)) =
+                (previous, binding)
+                && self.modules[package].bundled
+                && self.modules[package].is_package
+                && IntrinsicModule::named(&self.modules[package].name) == Some(intrinsic)
+            {
+                // The concrete source package owns its children's Python import paths in ty.
+                for (child, _) in self.modules[module].imported_children.values() {
+                    if child
+                        .rsplit_once('.')
+                        .is_some_and(|(parent, _)| parent == self.modules[package].name)
+                    {
+                        self.session.project_shipped_child(&self.root, child)?;
+                    }
+                }
+                self.modules[module]
+                    .bindings
+                    .insert(name.into(), Binding::Module(package));
+                return Ok(());
+            }
+            if previous != binding {
                 return Err(self.modules[module]
                     .error(node, &format!("static binding {name:?} cannot be rebound")));
             }
@@ -5869,12 +5932,7 @@ impl<'a> Loader<'a> {
                                 .entry(index)
                                 .or_insert(alias.range());
                         }
-                        if let Some(child) = importlib_child_name(module) {
-                            self.modules[id]
-                                .importlib_children
-                                .entry(child)
-                                .or_insert(statement.end());
-                        }
+                        self.modules[id].import_child(alias.name.id(), module, statement.end());
                         if module.lacks_builtin_stub() {
                             self.checked_builtin_imports.push((id, alias.range()));
                         }
@@ -6001,11 +6059,8 @@ impl<'a> Loader<'a> {
                 if import.level == 0
                     && let Some(module) = self.intrinsic_module(&name, Some(&import.names))?
                 {
-                    if let Some(child) = importlib_child_name(module) {
-                        self.modules[id]
-                            .importlib_children
-                            .entry(child)
-                            .or_insert(statement.end());
+                    if let Some(owner) = &import.module {
+                        self.modules[id].import_child(owner.id(), module, statement.end());
                     }
                     for alias in &import.names {
                         if module == IntrinsicModule::Logging && alias.name.as_str() == "handlers" {
@@ -6015,8 +6070,9 @@ impl<'a> Loader<'a> {
                         let binding = if module == IntrinsicModule::Importlib
                             && let Some(child) = importlib_child(alias.name.as_str())
                         {
-                            self.intrinsic_module(&format!("importlib.{}", alias.name), None)?;
-                            self.modules[id].importlib_children.entry(importlib_child_name(child).unwrap()).or_insert(statement.end());
+                            let qualified = Name::concat(&["importlib.", alias.name.as_str()]);
+                            self.intrinsic_module(&qualified, None)?;
+                            self.modules[id].import_child(&qualified, child, statement.end());
                             Some(Binding::IntrinsicModule(child))
                         } else if module == IntrinsicModule::Sys && alias.name.as_str() == "pycache_prefix" {
                             return Err("from-importing mutable sys.pycache_prefix is unsupported; use qualified access".into());
@@ -7874,6 +7930,33 @@ else:
                 _ => false,
             });
         }
+    }
+
+    #[test]
+    fn mixed_dotted_imports_retain_the_checked_package_and_selected_children() {
+        let workspace = tempfile::tempdir().unwrap();
+        let entry = workspace.path().join("main.py");
+        for imports in [
+            "import email.parser\nimport email.utils\nimport email.message",
+            "import email.message\nimport email.parser\nimport email.utils",
+        ] {
+            let program = format!(
+                "{imports}\n\
+                 def count() -> int:\n    message = email.message.Message()\n    message.set_raw('Date', email.utils.formatdate(0, usegmt=True))\n    return len(message.items())\n\
+                 print(count())\n"
+            );
+            fs::write(&entry, program).unwrap();
+            let compilation = crate::compile_file(
+                &entry,
+                Some(workspace.path()),
+                &crate::CompileOptions::default(),
+            )
+            .unwrap();
+            assert!(compilation.llvm_ir.contains("define internal i64 @fn_"));
+        }
+        fs::write(&entry, "import sys as email\nimport email.message\n").unwrap();
+        let error = crate::check_file(&entry, Some(workspace.path())).unwrap_err();
+        assert!(error.contains("static binding \"email\" cannot be rebound"));
     }
 
     #[test]

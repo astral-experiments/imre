@@ -39,17 +39,35 @@ impl Session {
         let Some((filename, body)) = crate::dynamic::bundled_module_source(owner, false) else {
             return Ok(None);
         };
-        self.prepare_shipped_file(owner, filename, |session, path| session.seed(path, body))
-            .map(Some)
+        self.prepare_shipped_file(
+            Path::new(crate::dynamic::BUNDLED_SOURCE_ROOT),
+            owner,
+            filename,
+            |session, path| session.seed(path, body),
+        )
+        .map(Some)
+    }
+
+    /// Make the checked child visible beside its source package in the project.
+    pub(crate) fn project_shipped_child(&mut self, root: &Path, owner: &str) -> Result<(), String> {
+        let Some((filename, _)) = crate::modules::bundled_runtime_source(owner) else {
+            return Ok(());
+        };
+        self.prepare_shipped_file(root, owner, filename, |session, path| {
+            let (_, file) = session.checked_shipped_file(owner, None)?;
+            let input = ruff_db::source::source_text(&session.db, file);
+            session.seed_parser_input(path, &input)
+        })?;
+        Ok(())
     }
 
     fn prepare_shipped_file(
         &mut self,
+        root: &Path,
         owner: &str,
         filename: &str,
         seed: impl FnOnce(&mut Self, &Path) -> Result<(), String>,
     ) -> Result<File, String> {
-        let root = Path::new(crate::dynamic::BUNDLED_SOURCE_ROOT);
         let path = root.join(filename);
         let origin = path.to_str().expect("SDK filename");
         if let Ok(file) = system_path_to_file(&self.db, origin) {
@@ -84,9 +102,12 @@ impl Session {
             .ok_or_else(|| format!("no checked runtime provider selected for {owner:?}"))?;
         let normalized = crate::normalize_source(source, crate::SourceKind::File)?;
         let input = imre_ast::indentation::prepare(&normalized);
-        let file = self.prepare_shipped_file(owner, filename, |session, path| {
-            session.seed_parser_input(path, &input.text)
-        })?;
+        let file = self.prepare_shipped_file(
+            Path::new(crate::dynamic::BUNDLED_SOURCE_ROOT),
+            owner,
+            filename,
+            |session, path| session.seed_parser_input(path, &input.text),
+        )?;
         // A user file at the SDK spelling still owns its declarations. Select the
         // immutable provider in a separate file before using offsets in its bytes.
         let file = if self.file_matches_parser_input(file, &input.text) {
