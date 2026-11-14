@@ -2,7 +2,7 @@
 
 use ruff_python_ast as ast;
 use ruff_python_parser::Parsed;
-use ruff_text_size::{Ranged, TextRange, TextSize};
+use ruff_text_size::{Ranged, TextRange};
 use std::collections::HashMap;
 
 use super::registered::values::Region;
@@ -72,7 +72,7 @@ pub(super) fn annotation_operand<R>(
     source: RegisteredSource<'_>,
     string_annotations: bool,
     bundled: bool,
-    children: &mut HashMap<TextSize, AnnotationBody<R>>,
+    children: &mut HashMap<String, AnnotationBody<R>>,
     prepare_child: impl FnOnce(&str, &Parsed<ast::ModExpression>) -> Option<AnnotationBody<R>>,
 ) -> Option<Expr> {
     let text = if string_annotations {
@@ -94,8 +94,10 @@ pub(super) fn annotation_operand<R>(
         };
     };
     // A postponed name already has its spelling and needs no executable child.
-    let body = if bundled || (string_annotations && expr.is_name_expr()) {
-        None
+    let linked = if bundled || (string_annotations && expr.is_name_expr()) {
+        false
+    } else if children.contains_key(&text) {
+        true
     } else {
         let expanded;
         let expression = if imre_ast::forward_refs::is_starred(&text) {
@@ -104,15 +106,20 @@ pub(super) fn annotation_operand<R>(
         } else {
             &text
         };
-        crate::normalize_source(expression, crate::SourceKind::Command)
+        let child = crate::normalize_source(expression, crate::SourceKind::Command)
             .ok()
             .and_then(|source| {
                 let parsed = annotation_expression(&source)?;
                 prepare_child(&source, &parsed)
-            })
+            });
+        if let Some(child) = child {
+            children.insert(text.clone(), child);
+            true
+        } else {
+            false
+        }
     };
-    let kind = if let Some(child) = body {
-        children.insert(expr.start(), child);
+    let kind = if linked {
         ExprKind::Builtin(
             Builtin::BindAnnotationExpression {
                 site: expr.start(),
@@ -154,10 +161,11 @@ pub(super) fn test_annotation_body(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ruff_text_size::TextSize;
 
     struct ObservedOperands {
         values: HashMap<TextSize, Expr>,
-        children: HashMap<TextSize, AnnotationBody<()>>,
+        children: HashMap<String, AnnotationBody<()>>,
     }
 
     fn observe(
@@ -219,19 +227,20 @@ mod tests {
         };
         let sites = observe(&parsed.syntax().body, source, false, false);
         assert_eq!(sites.values.len(), 4);
+        assert_eq!(sites.children.len(), 2);
+        let range = sites.children["list[int]"].code.range;
+        assert_eq!((range.start().to_u32(), range.end().to_u32()), (0, 9));
         for (start, _) in text.match_indices("'list[int]'") {
-            let range = sites.children[&TextSize::try_from(start).unwrap()]
-                .code
-                .range;
-            assert_eq!(range.start().to_u32(), 0);
-            assert_eq!(range.end().to_u32(), 9);
+            let start = TextSize::try_from(start).unwrap();
+            assert!(matches!(&sites.values[&start].kind,
+                ExprKind::Builtin(Builtin::BindAnnotationExpression { site, spelling }, _) if *site == start && spelling == "list[int]"));
         }
         let site = |token| TextSize::try_from(text.find(token).unwrap()).unwrap();
-        assert!(sites.children.contains_key(&site("'(lambda")));
+        assert!(sites.children.contains_key("(lambda: 1)()"));
         assert!(
             matches!(&sites.values[&site("'Name'")].kind, ExprKind::Str(text) if text == "Name")
         );
-        assert!(!sites.children.contains_key(&site("'Name'")));
+        assert!(!sites.children.contains_key("Name"));
         assert!(!sites.values.contains_key(&site("'skip")));
     }
 
@@ -256,9 +265,8 @@ def dormant(): return f"\ud801{1}", t"{x}"
         let sites = observe(&parsed.syntax().body, source, false, false);
         let site = TextSize::try_from(text.find(r#""call""#).unwrap()).unwrap();
         assert_eq!(sites.children.len(), 2);
-        assert!(sites.children.contains_key(&site));
-        let quoted = TextSize::try_from(text.find("r\"").unwrap()).unwrap();
-        assert!(sites.children.contains_key(&quoted));
+        assert!(sites.children.contains_key("call(x)"));
+        assert!(sites.children.contains_key(r"'\ud800'"));
         assert!(matches!(
             &sites.values[&site].kind,
             ExprKind::Builtin(Builtin::BindAnnotationExpression { spelling, .. }, _) if spelling == "call(x)"

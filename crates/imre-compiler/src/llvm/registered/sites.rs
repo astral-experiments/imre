@@ -202,12 +202,10 @@ pub(crate) trait SiteDefinitions {
         site: TextSize,
     ) -> (CompiledDefinition, CompiledTypeParameters, TextRange);
     fn type_alias(&mut self, site: TextSize) -> Result<CompiledAlias, String>;
-    fn annotation_string(&mut self, site: TextSize) -> String;
 }
 
 #[derive(Default)]
 pub(crate) struct CheckedSites {
-    pub(crate) annotation_strings: HashMap<TextSize, String>,
     pub(crate) definitions: HashMap<TextSize, Declaration>,
     pub(crate) class_namespaces:
         HashMap<TextSize, (CompiledDefinition, CompiledTypeParameters, TextRange)>,
@@ -223,6 +221,7 @@ impl CheckedSites {
                     .or_insert_with(|| definitions.declaration(site));
             }
             RequiredSite::DefinitionAfterInputs(_)
+            | RequiredSite::AnnotationString(_)
             | RequiredSite::ExecLiteral(_)
             | RequiredSite::Lambda(..)
             | RequiredSite::Generator(_) => {}
@@ -236,23 +235,7 @@ impl CheckedSites {
                     .entry(site)
                     .or_insert_with(|| definitions.type_alias(site));
             }
-            RequiredSite::AnnotationString(site) => {
-                self.annotation_strings
-                    .entry(site)
-                    .or_insert_with(|| definitions.annotation_string(site));
-            }
         }
-    }
-
-    pub(crate) fn annotation_string(
-        &self,
-        frame: &mut RegisteredFrame<'_, '_>,
-        site: TextSize,
-        spelling: &str,
-    ) -> String {
-        let text = frame.source_text(spelling, None);
-        frame.bind_annotation_expression(&text, &self.annotation_strings[&site]);
-        text
     }
 
     pub(crate) fn definition(

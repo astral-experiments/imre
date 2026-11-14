@@ -4,7 +4,7 @@ use crate::ir::{self, Builtin, Expr, ExprKind, Statement};
 use ruff_text_size::{TextRange, TextSize};
 
 /// A declaration used by an operand in a registered frame.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum RequiredSite {
     Definition(TextSize),
     /// The body follows header operands supplied by the enclosing registered suite.
@@ -31,9 +31,6 @@ fn visit_expression_site(
                 Builtin::RegisteredLambda(site, _) => RequiredSite::Lambda(*site),
                 Builtin::RegisteredGenerator(site, ..) => RequiredSite::Generator(*site),
                 Builtin::RegisteredTypeAlias(site) => RequiredSite::Alias(*site),
-                Builtin::BindAnnotationExpression { site, .. } => {
-                    RequiredSite::AnnotationString(*site)
-                }
                 _ => return,
             });
             return;
