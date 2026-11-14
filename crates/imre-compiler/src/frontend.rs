@@ -2266,14 +2266,7 @@ fn lower_function(
             checker.unshadowed_builtin(func, "sorted")
         });
     }
-    // A function header owns its leading docstring. Keep a sole statement for the
-    // implicit return and keep instrumented bodies on their ordinary line path.
-    let statements =
-        if checker.fixed_sites.is_some() && definition.body.len() > 1 && !checker.fault_enabled() {
-            ast::helpers::body_without_leading_docstring(&definition.body)
-        } else {
-            &definition.body
-        };
+    let statements = checker.function_statements(definition);
     let mut cannot_return = false;
     let (mut body, falls_through) = if module.archive.is_some() {
         let args = params.iter().map(|&slot| checker.local(slot)).collect();
@@ -3887,6 +3880,16 @@ impl<'a> Checker<'a> {
                 }
                 _ => false,
             }
+    }
+
+    /// A fixed function header owns its leading docstring. Keep a sole statement
+    /// for the implicit return and keep instrumented bodies on their ordinary line path.
+    fn function_statements<'s>(&self, definition: &'s ast::StmtFunctionDef) -> &'s [ast::Stmt] {
+        if self.fixed_sites.is_some() && definition.body.len() > 1 && !self.fault_enabled() {
+            ast::helpers::body_without_leading_docstring(&definition.body)
+        } else {
+            &definition.body
+        }
     }
 
     fn fixed_body_source(
