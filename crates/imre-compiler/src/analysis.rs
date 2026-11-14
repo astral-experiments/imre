@@ -102,6 +102,7 @@ impl Database {
 }
 
 pub(crate) enum AnnotationClass {
+    Builtin(Option<crate::ir::Type>),
     Linked(usize, TextRange),
     Declaration(String),
 }
@@ -2314,29 +2315,66 @@ impl Session {
 
         // Recursively parsed string contents have no node in the indexed module.
         annotation.node_index().load().as_u32()?;
-        match annotation {
-            Expr::StringLiteral(literal)
-                if ruff_python_stdlib::identifiers::is_identifier(literal.value.to_str()) => {}
-            Expr::Name(_) | Expr::Attribute(_) if !self.declarations.is_empty() => {}
+        let spelling = match annotation {
+            Expr::StringLiteral(s)
+                if ruff_python_stdlib::identifiers::is_identifier(s.value.to_str()) =>
+            {
+                Some(s.value.to_str())
+            }
+            Expr::Name(n) if !self.declarations.is_empty() => Some(n.id.as_str()),
+            Expr::Attribute(_) if !self.declarations.is_empty() => None,
             _ => return None,
-        }
+        };
+        let spelled_layout = spelling.and_then(crate::frontend::builtin_annotation);
+        let unplaced = || spelled_layout.map(|_| AnnotationClass::Builtin(None));
         self.hint_reads.set(self.hint_reads.get() + 1);
         let model = SemanticModel::new(&self.db, self.db.program_file(self.files[module]));
-        let ty @ Type::NominalInstance(_) = annotation.inferred_type(&model)? else {
+        let ty = annotation_type(&self.db, &model, annotation)?;
+        let env = model.program_environment();
+        if ty.is_none(&self.db) {
+            return Some(AnnotationClass::Builtin(Some(crate::ir::Type::None)));
+        }
+        let class_type = if matches!(ty, Type::NominalInstance(_)) {
+            ty
+        } else if let Some(binding) = self.reaching_binding(module, annotation) {
+            // A float annotation is widened in type position. The imported class object
+            // still distinguishes the builtin from an explicit union with the same members.
+            let ty_python_core::definition::DefinitionKind::ImportFrom(import) =
+                binding.kind(&self.db)
+            else {
+                return unplaced();
+            };
+            let imported = import
+                .alias(&self.parsed(self.files[module]))
+                .inferred_type(&model)?;
+            if !imported.is_class_literal() {
+                return unplaced();
+            }
+            imported
+        } else if spelled_layout == Some(crate::ir::Type::Float)
+            && concrete_scalar(&self.db, &env, ty)
+        {
             return None;
+        } else {
+            return unplaced();
         };
-        let class @ TypeDefinition::StaticClass(_) =
-            ty.definition(&self.db, &model.program_environment())?
+        let class @ TypeDefinition::StaticClass(definition) =
+            class_type.definition(&self.db, &env)?
         else {
-            return None;
+            return unplaced();
         };
+        if self.is_vendored_module_file(&model, definition.file(&self.db), "builtins") {
+            return Some(AnnotationClass::Builtin(
+                crate::frontend::builtin_annotation(&definition.name(&self.db)?),
+            ));
+        }
         let location = class.focus_range(&self.db)?;
         let file = location.file();
         if let Some(owner) = self.files.iter().position(|f| *f == file) {
             return Some(AnnotationClass::Linked(owner, location.range()));
         }
         if !self.declarations.contains(&file) || !self.parsed(file).has_no_syntax_errors() {
-            return None;
+            return unplaced();
         }
         let path = file.path(&self.db).as_system_path()?;
         let source = ruff_db::source::source_text(&self.db, file);

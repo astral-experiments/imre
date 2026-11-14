@@ -1372,6 +1372,32 @@ fn quoted_annotations_use_a_linked_class_reexported_for_type_checking() {
 }
 
 #[test]
+fn a_guarded_builtin_alias_uses_the_selected_stub() {
+    let project = tempdir().unwrap();
+    let root = project.path();
+    let app = root.join("app.py");
+    let stub = root.join("labels.pyi");
+    fs::write(root.join("labels.py"), "Result = int\n").unwrap();
+    fs::write(
+        &app,
+        "from typing import TYPE_CHECKING\n\
+         if TYPE_CHECKING:\n    from labels import Result as int\n\
+         def sample() -> int:\n    raise KeyError(4)\n    return 41\n\
+         type Batch = list[int]\n\
+         def first(items: Batch): return items[0]\n",
+    )
+    .unwrap();
+    fs::write(&stub, "Result = int\n").unwrap();
+    crate::check_file(&app, Some(root)).unwrap();
+    fs::write(&stub, "Result = str\n").unwrap();
+    let error = crate::check_file(&app, Some(root)).unwrap_err();
+    assert!(
+        error.contains("app.py:6:12: Imre: expected str, got int"),
+        "{error}"
+    );
+}
+
+#[test]
 fn a_guarded_reexport_resolves_to_its_linked_class_without_running_the_module() {
     let project = tempdir().unwrap();
     let root = project.path();
