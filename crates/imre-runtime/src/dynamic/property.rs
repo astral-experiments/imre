@@ -45,7 +45,11 @@ impl Context {
     pub(super) fn property_is_abstract(&mut self, receiver: Id) -> Result<Id> {
         // A marker's Python lookup or truth test can replace the remaining accessors.
         let mut marked = |select: fn(&Property) -> Id| -> Result<bool> {
-            let property = self.heap.get(receiver).property().expect("validated property");
+            let property = self
+                .heap
+                .get(receiver)
+                .property()
+                .expect("validated property");
             let accessor = select(property);
             Ok(accessor != NONE && self.is_abstract_method(accessor)?)
         };
