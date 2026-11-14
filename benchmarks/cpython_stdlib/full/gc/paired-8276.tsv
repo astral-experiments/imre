@@ -1,0 +1,58 @@
+id	stock	O0	O3	line	end_line
+test.test_gc.GCCallbackTests.test_collect	ok	ok	ok	1284	1309
+test.test_gc.GCCallbackTests.test_collect_garbage	skipped 'requires _testcapi.with_tp_del'	skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	1319	1351
+test.test_gc.GCCallbackTests.test_collect_generation	ok	ok	ok	1311	1316
+test.test_gc.GCCallbackTests.test_refcount_errors	skipped 'built with -NDEBUG'	skipped 'built with -NDEBUG'	skipped 'built with -NDEBUG'	1357	1410
+test.test_gc.GCTests.test_boom	ok	ok	ok	510	532
+test.test_gc.GCTests.test_boom2	ok	ok	ok	534	559
+test.test_gc.GCTests.test_bug1055820b	ok	ok	ok	649	671
+test.test_gc.GCTests.test_bug21435	ok	ok	ok	673	703
+test.test_gc.GCTests.test_class	ok	ok	ok	118	124
+test.test_gc.GCTests.test_collect_generations	ok	skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	396	414
+test.test_gc.GCTests.test_deferred_refcount_frozen	ok	FAIL	FAIL	1179	1203
+test.test_gc.GCTests.test_del	ok	ok	ok	344	357
+test.test_gc.GCTests.test_del_newclass	ok	ok	ok	359	372
+test.test_gc.GCTests.test_dict	ok	ok	ok	101	106
+test.test_gc.GCTests.test_frame	ok	skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	313	318
+test.test_gc.GCTests.test_freeze	ok	ERROR	ERROR	859	863
+test.test_gc.GCTests.test_function	ok	ok	ok	228	237
+test.test_gc.GCTests.test_function_tp_clear_leaves_consistent_state	ok	ok	ok	239	310
+test.test_gc.GCTests.test_garbage_at_shutdown	skipped 'requires _testcapi'	skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	708	759
+test.test_gc.GCTests.test_gc_debug_stats	ok	FAIL	FAIL	794	817
+test.test_gc.GCTests.test_gc_main_module_at_shutdown	ok	FAIL	FAIL	761	772
+test.test_gc.GCTests.test_gc_ordinary_module_at_shutdown	ok	FAIL	FAIL	774	791
+test.test_gc.GCTests.test_get_count	ok	skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	382	393
+test.test_gc.GCTests.test_get_objects	ok	ERROR	ERROR	865	871
+test.test_gc.GCTests.test_get_objects_arguments	ok	ERROR	ERROR	920	928
+test.test_gc.GCTests.test_get_objects_during_gc	ok	skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	1144	1165
+test.test_gc.GCTests.test_get_objects_generations	ok	ERROR	ERROR	874	918
+test.test_gc.GCTests.test_get_referents	ok	ERROR	ERROR	561	582
+test.test_gc.GCTests.test_get_referents_on_capsule	ok	skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	1127	1141
+test.test_gc.GCTests.test_get_stats	ok	ERROR	ERROR	833	857
+test.test_gc.GCTests.test_global_del_SystemExit	ok	ok	ok	819	831
+test.test_gc.GCTests.test_heap_size	ok	skipped 'requires _testinternalcapi'	skipped 'requires _testinternalcapi'	1225	1230
+test.test_gc.GCTests.test_instance	ok	ok	ok	133	140
+test.test_gc.GCTests.test_is_finalized	ok	ok	ok	631	647
+test.test_gc.GCTests.test_is_tracked	ok	ok	ok	584	629
+test.test_gc.GCTests.test_legacy_finalizer	skipped 'requires _testcapi.with_tp_del'	skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	177	200
+test.test_gc.GCTests.test_legacy_finalizer_newclass	skipped 'requires _testcapi.with_tp_del'	skipped 'implementation detail specific to cpython'	skipped 'implementation detail specific to cpython'	203	226
+test.test_gc.GCTests.test_list	ok	ok	ok	94	99
+test.test_gc.GCTests.test_method	ok	ok	ok	166	174
+test.test_gc.GCTests.test_newinstance	ok	ok	ok	142	164
+test.test_gc.GCTests.test_newstyleclass	ok	ok	ok	126	131
+test.test_gc.GCTests.test_resurrection_does_not_block_cleanup_of_other_objects	ok	ERROR	ERROR	1000	1065
+test.test_gc.GCTests.test_resurrection_is_transitive	ok	ok	ok	966	998
+test.test_gc.GCTests.test_resurrection_only_happens_once_per_object	ok	ok	ok	930	964
+test.test_gc.GCTests.test_saveall	ok	ok	ok	320	342
+test.test_gc.GCTests.test_trash_weakref_clear	skipped 'requires ContainerNoGC extension type'	skipped 'requires ContainerNoGC extension type'	skipped 'requires ContainerNoGC extension type'	1069	1124
+test.test_gc.GCTests.test_trashcan	ok	ok	ok	416	449
+test.test_gc.GCTests.test_trashcan_threads	ok	ERROR	ERROR	452	508
+test.test_gc.GCTests.test_traverse_frozen_objects	ok	ERROR	ERROR	1167	1177
+test.test_gc.GCTests.test_tuple	ok	ok	ok	108	116
+test.test_gc.GCTests.test_tuple_untrack_counts	skipped 'requires free-threaded GC'	skipped 'requires free-threaded GC'	skipped 'requires free-threaded GC'	1208	1221
+test.test_gc.GCTogglingTests.test_bug1055820c	ok	ok	ok	1421	1494
+test.test_gc.GCTogglingTests.test_bug1055820d	ok	ok	ok	1497	1566
+test.test_gc.GCTogglingTests.test_indirect_calls_with_gc_disabled	ok	ok	ok	1569	1592
+test.test_gc.GCTogglingTests.test_threshold_zero	ok	ok	ok	1596	1606
+test.test_gc.PythonFinalizationTests.test_ast_fini	ok	FAIL	FAIL	1610	1627
+test.test_gc.PythonFinalizationTests.test_warnings_fini	ok	FAIL	FAIL	1629	1640
