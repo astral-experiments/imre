@@ -946,6 +946,18 @@ pub(crate) struct RegisteredSource<'a> {
 }
 
 impl<'a> RegisteredSource<'a> {
+    /// The SDK installs the interpreter's typing objects. Its callers get their
+    /// static definitions, including the special form Any, from typeshed.
+    pub(crate) fn uses_typeshed_typing(&self) -> bool {
+        self.name == "typing"
+            && !self.main_body
+            && !self.declares_signatures
+            && !self.check_execution
+            && self.path.strip_prefix(BUNDLED_SOURCE_ROOT) == Ok(Path::new("typing.py"))
+            && crate::modules::bundled_runtime_source("typing")
+                .is_some_and(|(_, source)| source == self.source)
+    }
+
     pub(crate) fn new(
         (name, path, source): &'a ModuleSource<'_>,
         is_program: bool,

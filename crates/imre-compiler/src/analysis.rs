@@ -476,7 +476,9 @@ pub(crate) fn check_registered_project<'a>(
     cache: Option<&mut AnalysisCache>,
 ) -> Result<Option<RegisteredLayouts>, String> {
     let sources = sources.into_iter();
-    if sources.len() == 0 {
+    let capacity = sources.len();
+    let sources = sources.filter(|source| !source.uses_typeshed_typing());
+    if sources.clone().next().is_none() {
         return Ok(None);
     }
     let (checked, providers) = checked.unzip();
@@ -573,7 +575,7 @@ pub(crate) fn check_registered_project<'a>(
 
     let mut session =
         Session::with_storage(root, extension_roots, salsa::Storage::default(), true)?;
-    let mut paths = Vec::with_capacity(sources.len());
+    let mut paths = Vec::with_capacity(capacity);
     for (path, source) in declarations {
         session.register_file(path, source, crate::SourceKind::File)?;
         paths.push((path.to_owned(), false, None));
@@ -1909,7 +1911,7 @@ impl Session {
             for winner in registrations
                 .winners
                 .iter()
-                .filter(|s| s.checked_module.is_none())
+                .filter(|s| s.checked_module.is_none() && !s.uses_typeshed_typing())
             {
                 copy.seed(winner.path, winner.source)?;
             }

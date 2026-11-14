@@ -87,6 +87,17 @@ fn registered_body_checks_its_declared_result() {
 
     fs::write(&suspect, "def dormant() -> str:\n    return 'wrong'\n").unwrap();
     crate::check_file(&entry, None).unwrap();
+
+    fs::write(
+        &suspect,
+        "from typing import Any as Open\ndef fresh() -> Open: return object()\ndef number(value: Open) -> int: return value\n",
+    )
+    .unwrap();
+    crate::check_file(&entry, None).unwrap();
+
+    fs::write(project.path().join("typing.py"), "class Any: pass\n").unwrap();
+    let error = crate::check_file(&entry, None).unwrap_err();
+    assert!(error.contains("suspect.py:2:29"), "{error}");
 }
 
 #[test]
