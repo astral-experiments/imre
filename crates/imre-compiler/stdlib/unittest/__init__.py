@@ -334,6 +334,8 @@ class TestCase(_SuiteMember):
         return message + "\nDiff is " + str(len(diff)) + " characters long. Set self.maxDiff to None to see it."
 
     def assertMultiLineEqual(self, first: str, second: str, msg: str | None = None) -> None:
+        self.assertIsInstance(first, str, "First argument is not a string")
+        self.assertIsInstance(second, str, "Second argument is not a string")
         if first == second:
             return
         sides = _short_reprs(repr(first), repr(second))
