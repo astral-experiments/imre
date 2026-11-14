@@ -4058,20 +4058,24 @@ impl Context {
         let (main, _, _, _) = self.allocate_import_module("__main__", &[], None)?;
         self.publish_module("__main__", main)?;
         let site = self.module("site")?;
-        if let Some(path) = self.config["user_site_pth"].as_str().map(str::to_owned) {
-            let add = self.lookup_attr(site, "addsitedir")?;
-            let path = self.text(path);
-            self.call(add, vec![path], Vec::new())?;
-            let later: Vec<String> =
-                serde_json::from_value(self.config["after_user_site"].clone()).unwrap_or_default();
-            for path in later {
-                let sys = self.module("sys")?;
-                let paths = self.lookup_attr(sys, "path")?;
+        // site.venv processes the prefix early. The ordinary prefix pass runs after
+        // the user site, so even an already visible directory reads its path files again.
+        for key in ["venv_site_pth", "user_site_pth", "venv_site_pth"] {
+            if let Some(path) = self.config[key].as_str().map(str::to_owned) {
+                let add = self.lookup_attr(site, "addsitedir")?;
                 let path = self.text(path);
-                if !self.contains(path, paths)? {
-                    let append = self.lookup_attr(paths, "append")?;
-                    self.call(append, vec![path], Vec::new())?;
-                }
+                self.call(add, vec![path], Vec::new())?;
+            }
+        }
+        let later: Vec<String> =
+            serde_json::from_value(self.config["after_user_site"].clone()).unwrap_or_default();
+        for path in later {
+            let sys = self.module("sys")?;
+            let paths = self.lookup_attr(sys, "path")?;
+            let path = self.text(path);
+            if !self.contains(path, paths)? {
+                let append = self.lookup_attr(paths, "append")?;
+                self.call(append, vec![path], Vec::new())?;
             }
         }
         let hook = self.lookup_attr(site, "execsitecustomize")?;

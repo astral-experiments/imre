@@ -653,6 +653,23 @@ def check_symlinked_venv(launcher, base_site, root, run):
         assert (result.returncode, result.stdout, result.stderr) == (
             0, b"True True True True\nTrue False " + str(enabled).encode() + b"\n", b"",
         ), result
+    for name, answer in [("earlier", 41), ("later", 99)]:
+        source = local_site / name
+        source.mkdir()
+        (source / "editable_console.py").write_text(f"def answer():\n    return {answer}\n")
+    (local_site / "20-later.pth").write_text("later\n")
+    (local_site / "10-earlier.pth").write_text("earlier\n", encoding="utf-8-sig")
+    mixed = local_site / "05-mixed.pth"
+    mixed.write_text("later\nimport sys; sys.mixed_pth_called = True\n")
+    code = (
+        "import editable_console, sys\n"
+        "print(editable_console.answer(), hasattr(sys, 'mixed_pth_called'))\n"
+    )
+    result = run(link, "-B", "-c", code, timeout=300)
+    assert (result.returncode, result.stdout) == (0, b"99 False\n"), result
+    assert result.stderr.count(f"Error processing line 2 of {mixed}".encode()) == 2, result
+    assert b"NotImplementedError: no compiled Python body for <module> (<string>:1)" in result.stderr, result
+
     # -S suppresses site-packages but preserves the base standard library in a venv.
     code = (
         "import sysconfig; from installed_tariff import freight; "

@@ -1,6 +1,6 @@
 use std::env;
 use std::ffi::{OsStr, OsString};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use imre_compiler::CompileOptions;
 
@@ -12,6 +12,51 @@ const DEFAULT_NATIVE_OPT_LEVEL: &str = match option_env!("IMRE_DEFAULT_NATIVE_OP
     Some(level) if matches!(level.as_bytes(), [b'0'..=b'3']) => level,
     Some(_) => panic!("IMRE_DEFAULT_NATIVE_OPT_LEVEL expects 0, 1, 2, or 3"),
 };
+
+fn site_path_files(directory: &Path) -> impl Iterator<Item = PathBuf> {
+    std::fs::read_dir(directory)
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry.file_name().to_str().is_some_and(|name| {
+                !name.starts_with('.') && name.ends_with(".pth")
+            })
+        })
+        .map(|entry| entry.path())
+}
+
+/// Collect possible compiler inputs. Only site.addpackage knows which lines will run.
+fn venv_path_inputs(directory: PathBuf) -> Option<(PathBuf, Vec<PathBuf>)> {
+    let mut files: Vec<_> = site_path_files(&directory).collect();
+    if files.is_empty() {
+        return None;
+    }
+    files.sort_unstable();
+    let mut roots = Vec::new();
+    for file in files {
+        let Ok(text) = std::fs::read_to_string(file) else {
+            continue;
+        };
+        let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
+        for line in text.split(|c: char| imre_ast::strings::is_line_boundary(u32::from(c))) {
+            if line.starts_with('#') || line.starts_with("import ") || line.starts_with("import\t") {
+                continue;
+            }
+            let path = line.trim_end_matches(imre_ast::strings::python_whitespace);
+            if path.is_empty() {
+                continue;
+            }
+            let root = ruff_db::system::SystemPath::absolute(path, directory.to_str()?)
+                .as_std_path()
+                .to_owned();
+            if root.exists() && !roots.contains(&root) {
+                roots.push(root);
+            }
+        }
+    }
+    Some((directory, roots))
+}
 
 #[derive(Default)]
 pub(super) struct BuildOptions {
@@ -150,9 +195,8 @@ impl BuildOptions {
         };
         let mut prefix_sites = layout.site_packages(!flags.no_site);
         let mut site_dirs = Vec::new();
-        if venv.is_some() {
-            site_dirs.extend(prefix_sites.next());
-        }
+        let venv_site = venv.and_then(|_| prefix_sites.next());
+        site_dirs.extend(venv_site.iter().cloned());
         site_dirs.extend(user_site.clone());
         site_dirs.extend(prefix_sites);
         site_dirs.retain(|path| path.is_dir());
@@ -168,22 +212,17 @@ impl BuildOptions {
                 .iter()
                 .chain(&site_dirs)
                 .any(has_hook);
-        // A selected hook already runs site. Let addsitedir read the live user
-        // directory before the hook, including in a subsequently deployed image.
+        let venv_site_pth = venv_site
+            .filter(|_| !flags.no_site)
+            .and_then(venv_path_inputs);
+        // Process an enabled user site between the two venv prefix visits, including
+        // when the saved program finds path files that were absent at compile time.
         options.compile.user_site_pth = user_site.filter(|dir| {
-            sitecustomize
-                || std::fs::read_dir(dir).is_ok_and(|mut entries| {
-                    entries.any(|entry| {
-                        entry.is_ok_and(|entry| {
-                            let name = entry.file_name();
-                            name.to_str().is_some_and(|name| {
-                                !name.starts_with('.') && name.ends_with(".pth")
-                            })
-                        })
-                    })
-                })
+            sitecustomize || venv_site_pth.is_some() || site_path_files(dir).next().is_some()
         });
-        options.compile.sitecustomize = sitecustomize || options.compile.user_site_pth.is_some();
+        options.compile.sitecustomize =
+            sitecustomize || options.compile.user_site_pth.is_some() || venv_site_pth.is_some();
+        options.compile.venv_site_pth = venv_site_pth;
         options.compile.stdlib_sitecustomize = stdlib_sitecustomize;
         #[cfg(unix)]
         if layout.stdlib_archive.is_file() {

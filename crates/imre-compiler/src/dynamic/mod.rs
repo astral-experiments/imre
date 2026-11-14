@@ -1292,7 +1292,17 @@ pub(crate) fn compile(
         .map(|path| cwd.join(path))
         .collect();
     roots.extend(explicit_roots.iter().cloned());
-    let implicit_dirs: Vec<_> = installed_dirs
+    let mut installed_roots = Vec::new();
+    for dir in options.installed_dirs() {
+        installed_roots.push(dir.clone());
+        if let Some((prefix, paths)) = &options.venv_site_pth
+            && dir == prefix
+        {
+            // Admit source candidates. The site provider decides which paths become visible.
+            installed_roots.extend_from_slice(paths);
+        }
+    }
+    let implicit_dirs: Vec<_> = installed_roots
         .iter()
         .filter(|p| !roots.contains(p))
         .cloned()
@@ -1320,7 +1330,12 @@ pub(crate) fn compile(
             entry.insert(archive);
         }
     }
-    for path in explicit_roots.iter().cloned() {
+    let path_files = options
+        .venv_site_pth
+        .iter()
+        .flat_map(|(_, roots)| roots)
+        .filter(|root| !root.is_dir());
+    for path in explicit_roots.iter().chain(path_files).cloned() {
         if let std::collections::hash_map::Entry::Vacant(entry) = archives.entry(path)
             && let Some(archive) =
                 crate::zip_entry::ZipSources::discover(entry.key(), &mut inputs, &mut filesystem)?
@@ -1434,13 +1449,13 @@ pub(crate) fn compile(
     let mut site_root_count = 0;
     if options.sitecustomize || options.stdlib_sitecustomize {
         site_roots.extend_from_slice(startup_paths);
-        site_roots.extend_from_slice(&installed_dirs);
+        site_roots.extend_from_slice(&installed_roots);
         site_root_count = site_roots.len();
         // These alternatives can be imported after Python installs the script path.
         site_roots.extend(
             roots
                 .iter()
-                .filter(|root| !startup_paths.contains(root) && !installed_dirs.contains(root))
+                .filter(|root| !startup_paths.contains(root) && !installed_roots.contains(root))
                 .cloned(),
         );
         let mut hook = Imports::default();
@@ -1585,7 +1600,7 @@ pub(crate) fn compile(
                 uses_import_builtin,
                 uses_exec,
                 computed_import,
-                options.user_site_pth.is_some(),
+                options.user_site_pth.is_some() || options.venv_site_pth.is_some(),
             );
             if imports.names.is_empty() {
                 // A file loader or a runtime change of finder can still select physical
@@ -2499,6 +2514,7 @@ pub(crate) fn compile(
                     }
                     && !registration.name.contains('.')
                     && options.user_site_pth.is_none()
+                    && options.venv_site_pth.is_none()
                     && module_entry.is_none_or(|name| {
                         sdk_runpy
                             && (options.path_entry && name == "__main__"
@@ -2743,13 +2759,20 @@ pub(crate) fn compile(
         .map(|(_, executable)| Path::new(executable).join(bundled_root));
     initial.extend(bundle_entry.iter().cloned());
     let mut after_user_site = Vec::new();
-    if let Some(user) = &options.user_site_pth
-        && let Some(i) = options.site_dirs.iter().position(|p| p == user)
+    let first_pth_site = options
+        .venv_site_pth
+        .as_ref()
+        .map(|(dir, _)| dir)
+        .or(options.user_site_pth.as_ref());
+    if let Some(first) = first_pth_site
+        && let Some(i) = options.site_dirs.iter().position(|p| p == first)
     {
-        // A user's .pth files run before the following prefix site is visible.
+        // Process each site's paths before publishing the following site directory.
         for site in installed_dirs {
             if options.site_dirs[i + 1..].contains(&site) {
-                after_user_site.push(site);
+                if Some(&site) != options.user_site_pth.as_ref() {
+                    after_user_site.push(site);
+                }
             } else {
                 initial.push(site);
             }
@@ -2777,6 +2800,7 @@ pub(crate) fn compile(
     let config = serde_json::json!({
         "bundled_root":bundled_root,
         "stdlib_fallback":stdlib_fallback,
+        "venv_site_pth":options.venv_site_pth.as_ref().map(|(dir, _)| dir),
         "stdlib_members":crate::zip_entry::PACKAGED_MEMBERS,
         "sitecustomize":options.sitecustomize || options.stdlib_sitecustomize,"user_site_pth":options.user_site_pth,"after_user_site":after_user_site,"path0":path0_len != 0,
         "bundle_entry":bundle_entry,

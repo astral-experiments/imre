@@ -259,6 +259,11 @@ pub fn template_format_spec(
     }
 }
 
+/// Recognize the line boundaries used by Python's str.splitlines.
+pub fn is_line_boundary(point: u32) -> bool {
+    matches!(point, 0x0a..=0x0d | 0x1c..=0x1e | 0x85 | 0x2028 | 0x2029)
+}
+
 /// Python also treats the four ASCII information separators as whitespace.
 pub fn python_whitespace(value: char) -> bool {
     value.is_whitespace() || matches!(value, '\u{001c}'..='\u{001f}')
