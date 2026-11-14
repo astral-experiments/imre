@@ -66,11 +66,13 @@ fn prepare_pattern(
         source: values::RegisteredSource<'a>,
     }
     impl Builder<'_> {
-        fn capture(&mut self, name: &ast::Identifier) -> String {
-            if !self.captures.iter().any(|other| other == name.as_str()) {
-                self.captures.push(name.to_string());
+        fn capture(&mut self, name: &ast::Identifier) -> usize {
+            if let Some(index) = self.captures.iter().position(|other| other == name.as_str()) {
+                return index;
             }
-            name.to_string()
+            let index = self.captures.len();
+            self.captures.push(name.to_string());
+            index
         }
 
         fn operand(&self, node: &ast::Expr, reason: &'static str) -> PatternResult<Expr> {
