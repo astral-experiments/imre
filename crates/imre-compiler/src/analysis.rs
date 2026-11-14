@@ -2914,6 +2914,7 @@ impl Session {
                 checked_modules.is_some_and(|modules| !modules[id].bundled),
                 self.explicit_check,
                 None,
+                &[][..],
             );
             for error in file_errors(&self.db, checked) {
                 if guards.is_none_or(|guards| {
@@ -3149,7 +3150,7 @@ impl Session {
         let mut call_shapes = Vec::new();
         let mut program_files = Vec::new();
         let mut parameters = Vec::new();
-        let mut result_scopes = Vec::new();
+        let mut result_scopes: HashMap<File, Vec<FileScopeId>> = HashMap::new();
         let mut class_files = Vec::new();
         for (id, (module, &file)) in modules.iter().zip(&self.files).enumerate() {
             let program_source = module
@@ -3184,7 +3185,7 @@ impl Session {
                         && !scope.file_scope_id(&self.db).is_generator_function(index)
                     {
                         let scope = scope.file_scope_id(&self.db);
-                        result_scopes.push((file, scope));
+                        result_scopes.entry(file).or_default().push(scope);
                         if written_return.is_none()
                             && let Some((module, path)) = module.checked_source(id)
                             && path.extension().is_none_or(|ext| ext != "pyi")
@@ -3222,13 +3223,14 @@ impl Session {
         }
         let has_signatures =
             !parameters.is_empty() || !result_scopes.is_empty() || !class_files.is_empty();
-        result_scopes.sort_unstable();
+        for scopes in result_scopes.values_mut() {
+            scopes.sort_unstable();
+        }
         call_shapes.sort_unstable();
         class_files.sort_unstable();
         let declarations = DeclaredSignatures::new(
             &self.db,
             parameters,
-            result_scopes,
             class_files,
             call_shapes,
             program_files,
@@ -3278,6 +3280,7 @@ impl Session {
                 true,
                 self.explicit_check,
                 Some(declarations),
+                result_scopes.get(&file).map_or(&[][..], Vec::as_slice),
             );
             for error in file_errors(&self.db, checked) {
                 let original =
@@ -3299,14 +3302,11 @@ impl Session {
             return Err(report.to_string());
         }
         for (id, file, _) in project_files {
-            let results = declarations.result_scopes(&self.db);
-            let results = &results[results.partition_point(|&(f, _)| f < file)..];
-            let results = &results[..results.partition_point(|&(f, _)| f == file)];
-            if !results.is_empty()
+            if let Some(scopes) = result_scopes.get(&file)
                 && let Some(error) = dormant_returns(
                     &self.db,
                     file,
-                    results.iter().map(|&(_, scope)| scope).collect(),
+                    scopes.clone(),
                     skipped.map_or_else(Vec::new, |ranges| ranges[id].clone()),
                 )
             {
@@ -3352,6 +3352,7 @@ impl Session {
                     checked_modules.is_some_and(|modules| !modules[index].bundled),
                     self.explicit_check,
                     None,
+                    &[][..],
                 );
                 file_errors(&self.db, checked).iter().map(move |error| {
                     let original = native.and_then(|report| {
@@ -3387,13 +3388,15 @@ struct CheckedFile<'db> {
     explicit_check: bool,
     #[returns(copy)]
     declarations: Option<DeclaredSignatures<'db>>,
+    /// Explicit return diagnostics depend on the declared result scopes of this file.
+    #[returns(ref)]
+    result_scopes: Vec<FileScopeId>,
 }
 
-/// Source and SDK parameters, and first-party function scopes with declared results.
+/// Signature facts used across files in the selected program.
 #[salsa::interned]
 struct DeclaredSignatures<'db> {
     parameters: Vec<(File, TextRange)>,
-    result_scopes: Vec<(File, FileScopeId)>,
     class_files: Vec<File>,
     /// Undecorated first-party declarations with a parameter or result annotation.
     call_shapes: Vec<ty_python_core::definition::Definition<'db>>,
@@ -3997,12 +4000,9 @@ fn file_errors<'db>(db: &'db dyn LiteralSourceDb, checked: CheckedFile<'db>) -> 
                     }
                     scalar.map(|annotation| (file, annotation))
                 }
-                Some(sources) if diagnostic.id().is_lint_named("invalid-return-type") => {
+                Some(_) if diagnostic.id().is_lint_named("invalid-return-type") => {
                     let scope = return_scope(db, file, range?)?;
-                    sources
-                        .result_scopes(db)
-                        .binary_search(&(file, scope))
-                        .ok()?;
+                    checked.result_scopes(db).binary_search(&scope).ok()?;
                     None
                 }
                 Some(_) if is_call_shape_rule(diagnostic.id().as_str()) && range.is_some() => None,
