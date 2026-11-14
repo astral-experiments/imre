@@ -58,18 +58,6 @@ def _spaces(line: str) -> int:
     return i
 
 
-def _expand_tabs(line: str) -> str:
-    if line.find("\t") < 0:
-        return line
-    result = ""
-    for char in line:
-        if char == "\t":
-            result += " " * (8 - len(result) % 8)
-        else:
-            result += char
-    return result
-
-
 def _prompt(line: str, indent: int, name: str, lineno: int) -> str:
     if len(line) > indent + 3 and line[indent + 3] != " ":
         raise ValueError(f"line {lineno + 1} of the docstring for {name} lacks blank after {line[indent:indent + 3]}: {line!r}")
@@ -136,7 +124,7 @@ class DocTestParser:
         return test
 
     def get_examples(self, string: str, name: str = "<string>") -> list[Example]:
-        lines = [_expand_tabs(line) for line in string.split("\n")]
+        lines = string.expandtabs().split("\n")
         examples: list[Example] = []
         i = 0
         while i < len(lines):
