@@ -18,6 +18,29 @@ from pathlib import Path
 from fixture_entry import imported_fixture
 
 
+def check_reassigned_callable_operand(imre, root, run):
+    (root / "reassigned_worker.py").write_text(
+        "def scale(x: int) -> int:\n    print('scale called', x)\n    return 9\n"
+        "def replacement(x):\n    print('replacement called', x)\n    return 41\n"
+        "def compute(v: int) -> int:\n    callee = scale\n    callee = replacement\n    return callee(True)\n"
+    )
+    scores = root / "reassigned_scores.py"
+    model = "def model() -> int:\n    items: list[int] = [3]\n    items.append(True)\n    return items[0]\n"
+    scores.write_text(model)
+    (root / "checked_replacement.py").write_text(
+        "from reassigned_worker import compute\nimport reassigned_scores\n"
+        "print(compute(1))\nprint('scores result', reassigned_scores.model())\n"
+    )
+    result = run(imre, "-m", "checked_replacement")
+    expected = f"{scores}:3:18: Imre: expected int, got bool; annotations are enforced contracts\n".encode()
+    assert (result.returncode, result.stdout, result.stderr) == (1, b"", expected), result
+    scores.write_text(model.replace("append(True)", "append(3)"))
+    result = run(imre, "-m", "checked_replacement")
+    assert (result.returncode, result.stdout, result.stderr) == (
+        0, b"replacement called True\n41\nscores result 3\n", b""
+    ), result
+
+
 def check_registered_entry_operand(imre, root, run):
     entry = root / "checked_operand.py"
     functions = (
@@ -2188,6 +2211,7 @@ def main():
 
         check_installed_package_data(imre, root, run)
         check_module_search_root(imre, root, run)
+        check_reassigned_callable_operand(imre, root, run)
         check_registered_entry_operand(imre, root, run)
         check_tracemalloc_startup(imre, run)
         check_registered_run_path(imre, root, run)
