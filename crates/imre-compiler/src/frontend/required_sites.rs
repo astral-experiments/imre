@@ -10,7 +10,7 @@ pub(crate) enum RequiredSite {
     /// The body follows header operands supplied by the enclosing registered suite.
     DefinitionAfterInputs(TextSize),
     ClassNamespace(TextSize),
-    Lambda(TextSize, bool),
+    Lambda(TextSize),
     Generator(TextRange),
     Alias(TextSize),
     AnnotationString(TextSize),
@@ -28,7 +28,7 @@ fn visit_expression_site(
             visit(match op {
                 Builtin::RegisteredDefinition(site) => RequiredSite::definition(site, operands),
                 Builtin::RegisteredClassNamespace(site, _) => RequiredSite::ClassNamespace(*site),
-                Builtin::RegisteredLambda(site, scoped) => RequiredSite::Lambda(*site, *scoped),
+                Builtin::RegisteredLambda(site, _) => RequiredSite::Lambda(*site),
                 Builtin::RegisteredGenerator(site, ..) => RequiredSite::Generator(*site),
                 Builtin::RegisteredTypeAlias(site) => RequiredSite::Alias(*site),
                 Builtin::BindAnnotationExpression { site, .. } => {

@@ -47,10 +47,10 @@ fn checked_module_places_class_generator_and_following_lambda() {
     });
     let [
         RequiredSite::Definition(read),
-        RequiredSite::Lambda(first, _),
+        RequiredSite::Lambda(first),
         RequiredSite::Definition(class),
         RequiredSite::Generator(generator),
-        RequiredSite::Lambda(last, _),
+        RequiredSite::Lambda(last),
     ] = required.as_slice()
     else {
         panic!("expected the function, lambda, class, generator and final lambda");
@@ -58,18 +58,15 @@ fn checked_module_places_class_generator_and_following_lambda() {
     RegisteredBody::Suite(module.initializer()).emit(&mut function);
     let sites = &function.sites;
     assert_eq!(sites.definitions.len(), 2);
-    assert_eq!(sites.lambdas.len(), 2);
+    assert_eq!(location.callable_code.borrow().len(), 2);
     assert!(sites.generators.contains_key(generator));
     assert_eq!(sites.definitions[class].definition.qualname, "C");
-    assert_eq!(
-        sites.lambdas[last].code,
-        location.callable_code.borrow()[last]
-    );
     assert_eq!(sites.definitions[read].definition.name, "read");
-    assert_eq!(
-        sites.lambdas[first].code,
-        location.callable_code.borrow()[first]
-    );
+    for site in [first, last] {
+        let symbols = location.callable_code.borrow();
+        let entry = &symbols[site];
+        assert!(function.frame.body.code.contains(&format!("ptr {entry},")));
+    }
     let count = function.frame.output.count;
     RegisteredBody::Suite(module.initializer()).emit(&mut function);
     assert_eq!(function.frame.output.count, count);
@@ -117,7 +114,7 @@ fn checked_module_places_both_plain_and_generic_aliases_before_their_following_l
         let [
             RequiredSite::Definition(class),
             RequiredSite::Alias(alias),
-            RequiredSite::Lambda(last, _),
+            RequiredSite::Lambda(last),
         ] = required.as_slice()
         else {
             panic!("expected the class, alias and final lambda");
@@ -132,7 +129,7 @@ fn checked_module_places_both_plain_and_generic_aliases_before_their_following_l
             sites.aliases[alias].as_ref().unwrap().definition.code,
             symbol(1)
         );
-        assert_eq!(sites.lambdas[last].code, symbol(2));
+        assert_eq!(location.callable_code.borrow()[last], symbol(2));
         let count = function.frame.output.count;
         RegisteredBody::Suite(module.initializer()).emit(&mut function);
         assert_eq!(function.frame.output.count, count);
