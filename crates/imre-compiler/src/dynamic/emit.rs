@@ -2651,23 +2651,17 @@ mod tests {
                 assert_eq!(projected, 1, "{source}");
             }
             let (_, llvm) = module.standalone().unwrap();
-            let test = "call i1 @imre_dyn_plain_items_cursor(";
-            let pull = "call i64 @imre_dyn_next_pair(";
+            let pull = "call i32 @imre_dyn_pull_pair(";
+            let unpack = "call i64 @imre_dyn_unpack_pair(";
             let projects_pair = [pair_header, yielded_rows, suspended_target].contains(&header);
-            assert_eq!(
-                llvm.matches(test).count(),
-                usize::from(projects_pair),
-                "{source}"
-            );
             assert_eq!(
                 llvm.matches(pull).count(),
                 usize::from(projects_pair),
                 "{source}"
             );
             if projects_pair {
-                assert!(llvm.find(test).unwrap() < llvm.find(pull).unwrap());
-                let ordinary = "call i32 @imre_dyn_list_cursor_pull(";
-                assert_eq!(llvm.matches(ordinary).count(), 1, "{source}");
+                assert!(llvm.find(pull).unwrap() < llvm.find(unpack).unwrap());
+                assert!(!llvm.contains("call i32 @imre_dyn_list_cursor_pull("), "{source}");
             }
         }
     }

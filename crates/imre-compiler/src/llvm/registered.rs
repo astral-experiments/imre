@@ -150,16 +150,15 @@ pub(crate) fn frame_inputs(
                         .flat_map(|case| &case.captures)
                         .all(|slot| uses_slot(slot, false)),
                     Statement::IterNext {
-                        kind: kind @ (ir::IterNextKind::Generic | ir::IterNextKind::Async(_)),
+                        kind: kind @ (ir::IterNextKind::Generic | ir::IterNextKind::Pair(_) | ir::IterNextKind::Async(_)),
                         iterator,
                         key,
                         value,
                         ready,
                     } => {
                         checked.function.locals[*iterator] == Type::PythonObject
-                            && value.is_none_or(|slot| {
-                                *kind == ir::IterNextKind::Generic && uses_slot(&slot, true)
-                            })
+                            && (matches!(kind, ir::IterNextKind::Pair(_)) == value.is_some())
+                            && value.is_none_or(|slot| uses_slot(&slot, true))
                             && [iterator, key, ready]
                                 .into_iter()
                                 .all(|slot| uses_slot(slot, true))
@@ -931,7 +930,7 @@ impl<'f> Frame<'f, '_, '_> {
         // The landing clears this private flag before its handler can read it.
         // Only normal exhaustion needs to reset it when the pull owns that edge.
         let reset_on_exhaustion = exhaust.is_some()
-            && kind == ir::IterNextKind::Generic
+            && matches!(kind, ir::IterNextKind::Generic | ir::IterNextKind::Pair(_))
             && !self.code.native_suspension
             && self
                 .code
@@ -941,7 +940,7 @@ impl<'f> Frame<'f, '_, '_> {
         if !reset_on_exhaustion {
             self.store_private(ready, &permanent::FALSE.to_string());
         }
-        if kind == ir::IterNextKind::Generic
+        if matches!(kind, ir::IterNextKind::Generic | ir::IterNextKind::Pair(_))
             && let Some(line) = self.code.loops.last().and_then(|(_, line)| *line)
         {
             self.code.set_statement_line(line);
@@ -951,12 +950,9 @@ impl<'f> Frame<'f, '_, '_> {
             .loops
             .last()
             .is_some_and(|(target, _)| target.edges.exhausted != target.edges.done);
-        let item = if let Some(second) = second {
-            let available = self.code.name("b");
-            self.code
-                .next_item_pair(&cursor, has_else, &available, empty);
-            self.code.label(&available);
-            self.code.store_item_pair([key, second]);
+        let item = if let ir::IterNextKind::Pair(target) = kind {
+            let second = second.expect("checked Python pair output");
+            self.pull_pair(&cursor, has_else, target, [key, second], empty);
             None
         } else {
             let item = self.code.pull_item(&cursor, kind, has_else, empty);
@@ -984,6 +980,43 @@ impl<'f> Frame<'f, '_, '_> {
         }
         self.code.label(&done);
     }
+
+    /// Advance at the loop site, then unpack an ordinary row at the written target.
+    fn pull_pair(
+        &mut self,
+        cursor: &str,
+        has_else: bool,
+        target: TextRange,
+        items: [usize; 2],
+        exhausted: &str,
+    ) {
+        self.max_live = self.max_live.max(2);
+        let mark = self.temporary_mark();
+        self.unwind_stack_operands(&mark, |frame| {
+            let ordinary = frame.name("b");
+            let projected = frame.name("b");
+            let status = frame.checked(&format!(
+                "call i32 @imre_dyn_pull_pair(ptr %ctx, i64 {cursor}, ptr %live, i1 {has_else})"
+            ));
+            frame.end(&format!(
+                "switch i32 {status}, label %{ordinary} [ i32 0, label %{exhausted} i32 2, label %{projected} ]"
+            ));
+            frame.label(&ordinary);
+            let row = frame.value("load i64, ptr %live");
+            frame.with_source_range(target, |frame| {
+                frame.checked(&format!("call i64 @imre_dyn_unpack_pair(ptr %ctx, i64 {row}, ptr %live)"));
+            });
+            frame.jump(&projected);
+            frame.label(&projected);
+            let key = frame.value("load i64, ptr %live");
+            let slot = frame.value("getelementptr i64, ptr %live, i64 1");
+            let value = frame.value(&format!("load i64, ptr {slot}"));
+            frame.store_private(items[0], &key);
+            frame.store_private(items[1], &value);
+            frame.keep_operands(&mark, &key, &value);
+        });
+    }
+
     pub(crate) fn string(&mut self, value: &str) -> CheckedValue {
         CheckedValue::handle(self.code.source_text(value, None))
     }
@@ -1128,11 +1161,6 @@ impl<'f> Frame<'f, '_, '_> {
                 use ir::IterationOperands::*;
                 match iteration.expect("checked iteration operands") {
                     Iter(value, op) => self.iterator_operand(op, value),
-                    PairNeedsRow(value) => {
-                        let cursor = self.evaluate_handle(value);
-                        let plain = self.code.plain_items_cursor(&cursor);
-                        return self.code.boolean_result(&plain, true);
-                    }
                     Truth(value) => {
                         let bit = CheckedBody::registered(self.reborrow()).test_operand(value);
                         return self.code.boolean_result(&bit, false);
@@ -1709,14 +1737,6 @@ impl RegisteredFrame<'_, '_> {
 
     fn store_frame_slot(&mut self, physical: usize, value: &str) {
         self.line(&format!("store i64 {value}, ptr %ir_slot{physical}"));
-    }
-
-    fn store_item_pair(&mut self, items: [usize; 2]) {
-        let key = self.value("load i64, ptr %live");
-        let slot = self.value("getelementptr i64, ptr %live, i64 1");
-        let value = self.value(&format!("load i64, ptr {slot}"));
-        self.store_private(items[0], &key);
-        self.store_private(items[1], &value);
     }
 }
 

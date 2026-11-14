@@ -186,7 +186,6 @@ impl Prepared {
         &mut self,
         binder: &mut B,
         target: &ast::Expr,
-        pair_pull: bool,
     ) -> StdResult<&[Statement], B::Error> {
         let row = binder.pattern_local(self.value);
         if row.ty != Type::PythonObject || target.is_name_expr() {
@@ -195,54 +194,8 @@ impl Prepared {
             let start = self.bind_ready_row(binder, target, row)?;
             return Ok(&self.next[start..self.next.len() - 1]);
         }
-        // The acquired Python cursor and its unadapted one-row pull must still
-        // refer to the same slots. Typed rows keep their own snapshot layout.
-        let cursor = match (self.evaluate.last(), self.next.as_slice()) {
-            (
-                Some(Statement::Assign(slot, acquisition)),
-                [
-                    Statement::Clear(clear),
-                    Statement::IterNext {
-                        kind: ir::IterNextKind::Generic,
-                        iterator,
-                        key,
-                        value: None,
-                        ready,
-                    },
-                ],
-            ) if pair_pull
-                && slot == iterator
-                && *clear == self.value
-                && *key == self.value
-                && *ready == self.ready
-                && matches!(
-                    acquisition.kind,
-                    ExprKind::Builtin(Builtin::RegisteredIter(ir::IteratorOp::Loop(_)), _)
-                ) =>
-            {
-                Some(*iterator)
-            }
-            _ => None,
-        };
-        let mut scope = self.pull_scope();
-        let source = unpacking::Row::Pulled {
-            scope: &mut scope,
-            pair: cursor.map(|cursor| (cursor, self.ready)),
-        };
-        let pair = unpacking::bind_input(binder, target, row, Some(source), &mut self.next)?;
-        if let (Some(cursor), Some(ordinary)) = (cursor, pair) {
-            self.acquire.push(Statement::Assign(
-                ordinary,
-                Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Builtin(
-                        Builtin::RegisteredPairNeedsRow,
-                        vec![Expr::local(cursor, Type::PythonObject)],
-                    ),
-                },
-            ));
-            self.clear.push(ordinary);
-        }
+        let source = unpacking::Row::Pulled(self.pull_scope());
+        unpacking::bind_input(binder, target, row, Some(source), &mut self.next)?;
         Ok(&self.next)
     }
 
@@ -2955,7 +2908,7 @@ impl Checker<'_> {
         self.forget_pull_writes(&input);
         let before = self.assigned.clone();
         let mut facts = self.narrowed.clone();
-        let binding = input.bind_loop_target(self, target, true)?;
+        let binding = input.bind_loop_target(self, target)?;
         assignments::forget_binding_writes(&mut facts, binding);
         self.loop_breaks.push(None);
         let emit = lower_body(self, &mut input.next)?;
