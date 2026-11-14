@@ -316,7 +316,7 @@ impl Checker<'_> {
         let copy = string_enum && method == ir::StrDescriptor::ZFill;
         let mapping = matches!(
             method,
-            ir::StrDescriptor::Title | ir::StrDescriptor::SwapCase
+            ir::StrDescriptor::Capitalize | ir::StrDescriptor::Title | ir::StrDescriptor::SwapCase
         );
         if !(matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
             || copy

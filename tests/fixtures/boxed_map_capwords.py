@@ -4,6 +4,9 @@ from string import capwords
 def current():
     print(capwords(" aBC\t DeF "), capwords("-hELLO--WORLD-", "-"))
     print(list(map(ord, "Az")), str.capitalize("42ABC"))
+    punctuation = "!"
+    assert str.capitalize(punctuation) is not punctuation
+    assert str.capitalize("\ud800A") == "\ud800a"
 
     source = iter(["2", "bad", "4"])
     try:

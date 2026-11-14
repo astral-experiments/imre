@@ -236,11 +236,6 @@ pub(in crate::objects) fn lowercase(source: &str) -> Result<Str, ReserveError> {
     convert(source, Case::Lower)
 }
 
-/// Titlecase the first character and lowercase the rest in their original context.
-pub(crate) fn capitalize(source: &str) -> super::Result<Str> {
-    convert(source, Case::Capitalize).map_err(|_| Error::allocation())
-}
-
 /// Lowercase an exact native string, setting a pending MemoryError on allocation failure.
 ///
 /// # Safety
@@ -282,7 +277,7 @@ pub unsafe extern "C" fn imre_str_capitalize(value: *const Str) -> *const Str {
     // SAFETY: the caller roots the string.
     let source = unsafe { &*value };
     finish(
-        capitalize(source).map(|s| StrOwner::into_raw(StrOwner::new(s))),
+        case_map(source, Case::Capitalize).map(|s| StrOwner::into_raw(StrOwner::new(s))),
         std::ptr::null(),
     )
 }

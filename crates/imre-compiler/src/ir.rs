@@ -2876,11 +2876,13 @@ pub(crate) enum StrDescriptor {
     Title,
     SwapCase,
     IsNumeric,
+    Capitalize,
 }
 impl StrDescriptor {
     pub(crate) fn named(name: &str) -> Option<Self> {
         Some(match name {
             "lower" => Self::Lower,
+            "capitalize" => Self::Capitalize,
             "title" => Self::Title,
             "swapcase" => Self::SwapCase,
             "strip" => Self::Strip,
@@ -2912,6 +2914,7 @@ impl StrDescriptor {
     pub(crate) fn name(self) -> &'static str {
         match self {
             Self::Lower => "lower",
+            Self::Capitalize => "capitalize",
             Self::Title => "title",
             Self::SwapCase => "swapcase",
             Self::Strip => "strip",

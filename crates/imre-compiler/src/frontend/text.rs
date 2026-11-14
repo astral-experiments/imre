@@ -381,8 +381,14 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         calls::reject_unpacking(call, self.source)?;
         let split = name == "splitlines";
-        let mapping = matches!(name, "title" | "swapcase");
-        let returns = if mapping {
+        let mapping = match name {
+            "capitalize" => Some(TextOperation::Capitalize),
+            "title" | "swapcase" => Some(TextOperation::CaseMap {
+                title: name == "title",
+            }),
+            _ => None,
+        };
+        let returns = if mapping.is_some() {
             Type::Str
         } else if split {
             self.types.list(Type::Str)
@@ -392,13 +398,8 @@ impl Checker<'_> {
         let args = &call.arguments;
         let count = args.args.len() + args.keywords.len();
         if count == 0 {
-            let kind = if mapping {
-                ExprKind::Builtin(
-                    Builtin::Text(TextOperation::CaseMap {
-                        title: name == "title",
-                    }),
-                    vec![receiver],
-                )
+            let kind = if let Some(operation) = mapping {
+                ExprKind::Builtin(Builtin::Text(operation), vec![receiver])
             } else if split {
                 // Preserve the existing bytes.decode().splitlines() path and
                 // direct-iteration fusion for the no-argument method.
@@ -442,7 +443,7 @@ impl Checker<'_> {
         }
         // Typeshed overloads splitlines and the case mappings. Their runtime
         // paths check these arguments after evaluating the operands.
-        if split || mapping {
+        if split || mapping.is_some() {
             self.graph.checked_overload(self.module, call.range());
         }
         if !split {
@@ -771,7 +772,6 @@ impl Checker<'_> {
         let (operation, returns, parameters) = match name {
             "lower" => (TextOperation::Lower, Type::Str, vec![]),
             "upper" => (TextOperation::Upper, Type::Str, vec![]),
-            "capitalize" => (TextOperation::Capitalize, Type::Str, vec![]),
             "split" | "rsplit" => (
                 TextOperation::Split(name == "rsplit"),
                 self.types.list(Type::Str),

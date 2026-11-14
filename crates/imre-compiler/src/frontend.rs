@@ -11211,6 +11211,7 @@ impl<'a> Checker<'a> {
                         || matches!(
                             method,
                             ir::StrDescriptor::ZFill
+                                | ir::StrDescriptor::Capitalize
                                 | ir::StrDescriptor::Title
                                 | ir::StrDescriptor::SwapCase
                         )
@@ -13963,6 +13964,7 @@ impl<'a> Checker<'a> {
             if matches!(
                 attribute.attr.as_str(),
                 "splitlines"
+                    | "capitalize"
                     | "title"
                     | "swapcase"
                     | "isalnum"
@@ -13988,7 +13990,7 @@ impl<'a> Checker<'a> {
             {
                 return self.expandtabs(Self::string_value(receiver), call);
             }
-            if matches!(attribute.attr.as_str(), "lower" | "upper" | "capitalize")
+            if matches!(attribute.attr.as_str(), "lower" | "upper")
                 && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
             {
                 let value =
@@ -14898,10 +14900,7 @@ impl<'a> Checker<'a> {
                 }
             });
         }
-        if name == "int"
-            && args.len() == 1
-            && matches!(args[0].ty, Type::Union(_))
-        {
+        if name == "int" && args.len() == 1 && matches!(args[0].ty, Type::Union(_)) {
             if self.types.is_bool_or_int(args[0].ty) {
                 return self.int_method_receiver(args[0].clone(), call);
             }
