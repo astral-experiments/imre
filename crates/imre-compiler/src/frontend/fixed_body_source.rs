@@ -115,12 +115,16 @@ impl FixedNode {
 
     /// Borrow the checked spelling when a source literal is placed on its final instruction.
     fn matches(&self, node: &ir::Node<'_>) -> bool {
-        if let ir::Node::Expression(Expr {
-            kind: ExprKind::Str(value),
-            ..
-        }) = node
-        {
-            return matches!(self, Self::String(expected) if expected.as_ref() == value);
+        if let ir::Node::Expression(expr) = node {
+            match &expr.kind {
+                ExprKind::Str(value) => {
+                    return matches!(self, Self::String(expected) if expected.as_ref() == value);
+                }
+                ExprKind::Bytes(value) => {
+                    return matches!(self, Self::Scalar(ir::Constant::Bytes(expected)) if expected == value);
+                }
+                _ => {}
+            }
         }
         Self::checked(node).as_ref() == Some(self)
     }
@@ -138,7 +142,7 @@ impl FixedNode {
             ir::Node::Statement(Statement::SetField(_, field, _)) => Self::StoreField(*field),
             ir::Node::Expression(expr) => match expr.kind {
                 ExprKind::None if expr.ty != Type::None => return None,
-                ExprKind::None | ExprKind::Bool(_) | ExprKind::Float(_) => {
+                ExprKind::None | ExprKind::Bool(_) | ExprKind::Float(_) | ExprKind::Bytes(_) => {
                     Self::Scalar(ir::Constant::from_expr(expr)?)
                 }
                 ExprKind::Str(ref value) => Self::String(value.as_str().into()),
@@ -624,6 +628,34 @@ mod tests {
             let changed = FixedNode::checked(&ir::Node::Expression(&changed)).unwrap();
             assert!(original != changed);
         }
+    }
+
+    #[test]
+    fn a_bytes_operand_keeps_its_written_range_and_value() {
+        let text = concat!(
+            "class Receiver:\n    def read(self, value: int) -> int: return value\n",
+            "def data() -> bytes: return b'\\0\\x80'\nprint(data())\n",
+        );
+        let mut graph = SourceGraph::single(text).unwrap();
+        let crate::CheckedProgram::Native(fixed) = crate::checked_lower(&mut graph).unwrap() else {
+            panic!("expected a fixed bytes return");
+        };
+        let (slot, _, source) = fixed.frame_sources.into_iter().next().unwrap();
+        let function = fixed.ir.0.functions.into_iter().nth(slot).unwrap();
+        let mut placed = source.clone().place(function).ok().unwrap();
+        assert_eq!(&text[*placed.fixed_sites.last().unwrap()], r"b'\0\x80'");
+        let [
+            Statement::Return(Expr {
+                kind: ExprKind::Bytes(value),
+                ..
+            }),
+        ] = placed.function.body.as_mut_slice()
+        else {
+            panic!("expected the original bytes");
+        };
+        assert_eq!(value.as_slice(), [0, 0x80]);
+        value[1] = 0x81;
+        assert!(source.place(placed.function).is_err());
     }
 
     #[test]
