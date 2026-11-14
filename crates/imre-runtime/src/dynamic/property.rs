@@ -148,8 +148,12 @@ fn getter_doc(ctx: &mut Context, getter: Id) -> Result<Id> {
     }
 }
 
+pub(super) fn blank(ctx: &mut Context) -> Id {
+    ctx.alloc(Value::Property(Property::default()))
+}
+
 pub(super) fn construct(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let receiver = ctx.alloc(Value::Property(Property::default()));
+    let receiver = blank(ctx);
     initialize(ctx, receiver, args, kwargs)?;
     Ok(receiver)
 }

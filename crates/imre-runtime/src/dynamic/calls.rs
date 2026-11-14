@@ -1639,7 +1639,9 @@ impl Context {
                             method != "__new__" && weakref::REFERENCE_METHODS.contains(&method)
                         })
                         || name.starts_with("collections.defaultdict.")
-                        || name.starts_with("property.")
+                        || name
+                            .strip_prefix("property.")
+                            .is_some_and(|method| super::property::METHODS.contains(&method))
                         || (name.starts_with("dict.") && name != "dict.__new__")
                         || name.starts_with("FrameLocalsProxy.")
                         || name.starts_with("abc.")
@@ -4396,12 +4398,7 @@ impl Context {
                 return Ok(self.builtin(&format!("{class}.__get__")));
             }
             Value::Native(ref class)
-                if class == "property" && super::property::METHODS.contains(&name) =>
-            {
-                return Ok(self.builtin(&format!("property.{name}")));
-            }
-            Value::Native(ref class)
-                if class == "code"
+                if matches!(class.as_str(), "property" | "code")
                     && let Some(descriptor) = self.own_class_attr(obj, name) =>
             {
                 return Ok(descriptor);
@@ -6283,6 +6280,7 @@ impl Context {
                     return Ok(self.builtin("dict.__new__"));
                 }
                 Value::List(_) => return Ok(self.builtin("list.__new__")),
+                Value::Property(_) => return Ok(self.builtin("property.__new__")),
                 Value::Int(_) => return Ok(self.builtin("int.__new__")),
                 Value::Bytes(_) => return Ok(self.builtin("bytes.__new__")),
                 Value::Function { .. } => return Ok(self.builtin("function.__new__")),
@@ -8194,8 +8192,7 @@ impl Context {
         Ok(self.instance(class, None))
     }
 
-    /// Allocate native storage while leaving constructor arguments to the initializer.
-    fn new_mutable_scalar(&mut self, kind: &str, args: &[Id], empty: Value) -> Result<Id> {
+    fn new_subtype(&mut self, kind: &str, args: &[Id]) -> Result<(Id, Id)> {
         let Some(&class) = args.first() else {
             return Err(Error::new(
                 "TypeError",
@@ -8206,6 +8203,12 @@ impl Context {
         if !self.direct_subclass(class, base) {
             return Err(self.invalid_new_subtype(kind, class));
         }
+        Ok((class, base))
+    }
+
+    /// Allocate native storage while leaving constructor arguments to the initializer.
+    fn new_mutable_scalar(&mut self, kind: &str, args: &[Id], empty: Value) -> Result<Id> {
+        let (class, base) = self.new_subtype(kind, args)?;
         let storage = self.alloc(empty);
         Ok(self.with_subclass_storage(class, base, storage))
     }
@@ -8269,16 +8272,7 @@ impl Context {
 
     /// Create empty mapping storage for the requested type without running its initializer.
     fn new_dict(&mut self, args: &[Id]) -> Result<Id> {
-        let Some(&class) = args.first() else {
-            return Err(Error::new(
-                "TypeError",
-                "dict.__new__(): not enough arguments",
-            ));
-        };
-        let dict = self.builtin("dict");
-        if !self.direct_subclass(class, dict) {
-            return Err(self.invalid_new_subtype("dict", class));
-        }
+        let (class, _) = self.new_subtype("dict", args)?;
         let storage = if self.has_base(class, "collections.defaultdict") {
             self.alloc(Value::DefaultDict {
                 factory: NONE,
@@ -8809,6 +8803,14 @@ impl Context {
             }
             Value::Native(name) if name == "object.__new__" => self.new_object(&args, &kwargs),
             Value::Native(name) if name == "dict.__new__" => self.new_dict(&args),
+            Value::Native(name) if name == "property.__new__" => {
+                let (class, base) = self.new_subtype("property", &args)?;
+                Ok(if class == base {
+                    super::property::blank(self)
+                } else {
+                    self.instance(class, None)
+                })
+            }
             Value::Native(name) if name == "list.__new__" => {
                 self.new_mutable_scalar("list", &args, Value::List(Vec::new()))
             }

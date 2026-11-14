@@ -3481,7 +3481,10 @@ impl Context {
                 additional = &["fromhex"];
                 builtins::BYTEARRAY_METHODS
             }
-            "property" => property::METHODS,
+            "property" => {
+                additional = &["__new__"];
+                property::METHODS
+            }
             "memoryview" => builtins::MEMORYVIEW_METHODS,
             "bool" => {
                 self.builtin("int");

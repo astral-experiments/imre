@@ -476,6 +476,7 @@ pub(super) fn owns_native_new(owner: &str) -> bool {
         "object"
             | "dict"
             | "list"
+            | "property"
             | "mappingproxy"
             | "module"
             | "float"

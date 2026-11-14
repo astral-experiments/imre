@@ -100,6 +100,10 @@ def current():
     class Sub(Parent):
         pass
 
+    blank = Sub.__new__(Sub, Cell.first.fget)
+    assert blank.__new__ is Sub.__new__ is property.__new__
+    assert type(blank) is Sub and blank.fget is None and not hasattr(blank, "accessor")
+
     class Owner:
         saved = 5
 
