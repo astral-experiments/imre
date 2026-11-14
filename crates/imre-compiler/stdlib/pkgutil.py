@@ -40,26 +40,11 @@ def iter_modules(path: list[str] | str | None = None, prefix: str = '') -> Itera
     if isinstance(path, str):
         raise ValueError('path must be None or list of paths to look for modules in')
     paths = list(_filesystem_roots) if path is None else path
-    if not paths:
-        return
     seen: set[str] = set()
-    root = 0
-    finder = FileFinder(paths[root])
-    names = _filenames(finder.path)
-    index = 0
-    for _ in count():
-        if index >= len(names):
-            root += 1
-            if root >= len(paths):
-                return
-            finder = FileFinder(paths[root])
-            names = _filenames(finder.path)
-            index = 0
-            continue
-        info = _module_info(finder, names[index], prefix, seen)
-        index += 1
-        if info is None:
-            continue
+    for info in (
+        item for directory in paths
+        for item in _iter_file_modules(FileFinder(directory), prefix, seen)
+    ):
         yield info
 
 
