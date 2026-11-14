@@ -751,7 +751,13 @@ impl<'a> PreparedBody<'a> {
             unit,
             positions: &positions,
         };
-        let code = location.code(output, "", Body::Module(self), false, None);
+        let code = location.code(
+            output,
+            QualnameScope::MODULE,
+            Body::Module(self),
+            false,
+            None,
+        );
         match output.diagnostic.take() {
             Some(diagnostic) => Err(diagnostic),
             None => Ok(code),
@@ -933,7 +939,7 @@ impl SourceMap<'_> {
         output: &'a mut Output,
         suspension: u32,
         declared_globals: &'scope BTreeSet<String>,
-        prefix: &'scope str,
+        prefix: &'scope QualnameScope<'scope>,
         in_function: bool,
     ) -> Function<'a, 'p, 'scope> {
         let mut frame = RegisteredFrame::new(
@@ -957,7 +963,7 @@ impl SourceMap<'_> {
     fn code(
         &self,
         output: &mut Output,
-        prefix: &str,
+        prefix: QualnameScope<'_>,
         body: Body<'_>,
         in_function: bool,
         definition: Option<(TextSize, u32)>,
@@ -965,7 +971,7 @@ impl SourceMap<'_> {
         let suspension = definition.map_or(0, |(_, flags)| flags);
         let start = definition.map(|(start, _)| start);
         let empty = BTreeSet::new();
-        let mut function = self.function(output, suspension, &empty, prefix, in_function);
+        let mut function = self.function(output, suspension, &empty, &prefix, in_function);
         match body {
             Body::Module(module) => {
                 let frame = &mut function.frame;
@@ -1009,11 +1015,10 @@ impl SourceMap<'_> {
                 let frame = &mut function.frame;
                 frame.class_locals = Some(&class.bindings);
                 if frame.output.keep_docstrings
-                    && let Some(doc) = prepared.doc.as_deref().or_else(|| {
-                        self.docs
-                            .as_ref()?
-                            .object_docstring(prefix.trim_end_matches('.'))
-                    })
+                    && let Some(doc) = prepared
+                        .doc
+                        .as_deref()
+                        .or_else(|| self.docs.as_ref()?.object_docstring(prefix.name))
                 {
                     let value = frame.text(doc);
                     frame.bind("__doc__", &value);
@@ -1119,7 +1124,7 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
                 };
                 location.code(
                     self.frame.output,
-                    "",
+                    QualnameScope::MODULE,
                     Body::Operand(body.code.range, &body.code.operand, None),
                     false,
                     None,
@@ -1213,7 +1218,7 @@ impl Function<'_, '_, '_> {
         let qualname = if header.is_some_and(|h| self.declared_globals.contains(&h.binding)) {
             name.to_owned()
         } else {
-            format!("{}{name}", self.prefix)
+            self.prefix.qualify(name)
         };
         let doc = header
             .filter(|_| self.frame.output.keep_docstrings)
@@ -1233,14 +1238,13 @@ impl Function<'_, '_, '_> {
         };
         let existing = key.and_then(|key| source.callable_code.borrow().get(&key).cloned());
         let code = existing.unwrap_or_else(|| {
-            let prefix = if matches!(callable, Callable::Generator(_)) {
-                format!("{qualname}.")
-            } else {
-                format!("{qualname}.<locals>.")
+            let prefix = QualnameScope {
+                name: &qualname,
+                function_locals: !matches!(callable, Callable::Generator(_)),
             };
             let code = source.code(
                 self.frame.output,
-                &prefix,
+                prefix,
                 Body::Registered(&callable),
                 true,
                 Some((site.start(), suspension)),
@@ -1282,7 +1286,7 @@ impl Function<'_, '_, '_> {
         let qualname = if self.declared_globals.contains(class.name.as_str()) {
             name.to_owned()
         } else {
-            format!("{}{name}", self.prefix)
+            self.prefix.qualify(name)
         };
         let mut signature = json!({
             "code_flags": self.source.future_flags,
@@ -1294,7 +1298,10 @@ impl Function<'_, '_, '_> {
         scope.write_signature(&mut signature, self.is_method_scope());
         let code = self.source.code(
             self.frame.output,
-            &format!("{qualname}."),
+            QualnameScope {
+                name: &qualname,
+                function_locals: false,
+            },
             Body::Namespace(scope),
             self.in_function,
             Some((site, 0)),
@@ -1310,11 +1317,11 @@ impl Function<'_, '_, '_> {
         header: &crate::frontend::CheckedProvider,
     ) -> CompiledDefinition {
         let name = format!("<generic parameters of {}>", class.name);
-        let qualname = format!("{}{name}", self.prefix);
+        let qualname = self.prefix.qualify(&name);
         let prefix = if self.declared_globals.contains(class.name.as_str()) {
-            ""
+            QualnameScope::MODULE
         } else {
-            self.prefix
+            *self.prefix
         };
         let signature = json!({
             "code_flags": self.source.function_flags(self.in_function, false),
@@ -1378,7 +1385,7 @@ impl Function<'_, '_, '_> {
         code: &crate::frontend::AnnotationCode,
         class: Option<&ClassBindings>,
     ) -> CompiledDefinition {
-        let qualname = format!("{}{name}", self.prefix);
+        let qualname = self.prefix.qualify(name);
         let mut signature = json!({
             "code_flags": self.source.function_flags(self.in_function || type_parameter_scope, false),
             "posonly": [".format"],
@@ -1389,7 +1396,10 @@ impl Function<'_, '_, '_> {
         }
         let code = self.source.code(
             self.frame.output,
-            &format!("{qualname}.<locals>."),
+            QualnameScope {
+                name: &qualname,
+                function_locals: true,
+            },
             Body::Operand(code.range, &code.operand, class),
             true,
             Some((site, 0)),
@@ -1471,7 +1481,7 @@ impl Function<'_, '_, '_> {
             scope,
             start,
             metadata,
-            (self.prefix, format!("{qualname}.__annotate__")),
+            (*self.prefix, format!("{qualname}.__annotate__")),
         )))
     }
 }
@@ -1480,7 +1490,7 @@ impl SourceMap<'_> {
     fn finish_class_annotations(
         &self,
         frame: &mut RegisteredFrame<'_, '_>,
-        prefix: &str,
+        prefix: QualnameScope<'_>,
         in_function: bool,
         plan: &crate::frontend::ClassAnnotations,
         bindings: &ClassBindings,
@@ -1507,7 +1517,7 @@ impl SourceMap<'_> {
             scope,
             class_start,
             signature,
-            (prefix, format!("{prefix}__annotate__")),
+            (prefix, prefix.qualify("__annotate__")),
         );
         let environment = frame.op("class_annotation_environment", &[&frame.scope.clone()]);
         let function = compiled.bind_defaults(frame, &environment, &[]);
@@ -1521,7 +1531,7 @@ impl SourceMap<'_> {
         scope: AnnotationScope<'_>,
         start: TextSize,
         signature: serde_json::Value,
-        (lexical_prefix, qualname): (&str, String),
+        (lexical_prefix, qualname): (QualnameScope<'_>, String),
     ) -> CompiledDefinition {
         // Class annotations already have an explicit class environment. A method's provider
         // instead captures the class namespace of the function it annotates.
@@ -1557,7 +1567,7 @@ impl SourceMap<'_> {
                 "posonly": [imre_ast::annotations::FORMAT_PARAMETER], "scope_complete": true, "scope_locals_complete": true,
                 "code_flags": self.function_flags(false, false),
             }),
-            ("", "__annotate__".into()),
+            (QualnameScope::MODULE, "__annotate__".into()),
         );
         let scope = frame.scope.clone();
         let provider = compiled.bind_defaults(frame, &scope, &[]);
@@ -1565,11 +1575,35 @@ impl SourceMap<'_> {
     }
 }
 
+/// The enclosing Python name and the component it adds to a nested declaration.
+#[derive(Clone, Copy)]
+struct QualnameScope<'a> {
+    name: &'a str,
+    function_locals: bool,
+}
+
+impl QualnameScope<'_> {
+    const MODULE: Self = Self {
+        name: "",
+        function_locals: false,
+    };
+
+    fn qualify(self, name: &str) -> String {
+        if self.name.is_empty() {
+            name.to_owned()
+        } else if self.function_locals {
+            format!("{}.<locals>.{name}", self.name)
+        } else {
+            format!("{}.{name}", self.name)
+        }
+    }
+}
+
 struct Function<'a, 'p, 'scope> {
     sites: CheckedSites,
     frame: RegisteredFrame<'a, 'p>,
     source: &'p SourceMap<'p>,
-    prefix: &'scope str,
+    prefix: &'scope QualnameScope<'scope>,
     declared_globals: &'scope BTreeSet<String>,
     in_function: bool,
 }

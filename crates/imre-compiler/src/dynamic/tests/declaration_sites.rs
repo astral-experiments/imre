@@ -1,4 +1,4 @@
-use crate::dynamic::emit::{ModuleOrigin, Output, PreparedBody};
+use crate::dynamic::emit::{ModuleOrigin, Output, PreparedBody, QualnameScope};
 use std::path::Path;
 
 #[test]
@@ -36,7 +36,7 @@ fn checked_module_places_class_generator_and_following_lambda() {
         &mut output,
         0,
         &module.source.scopes.module_globals,
-        "",
+        &QualnameScope::MODULE,
         false,
     );
     let body = &module.initializer().checked.function.body;
@@ -104,7 +104,7 @@ fn checked_module_places_both_plain_and_generic_aliases_before_their_following_l
             &mut output,
             0,
             &module.source.scopes.module_globals,
-            "",
+            &QualnameScope::MODULE,
             false,
         );
         let body = &module.initializer().checked.function.body;
