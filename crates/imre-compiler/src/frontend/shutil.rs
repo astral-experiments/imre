@@ -34,7 +34,7 @@ impl Checker<'_> {
                     returns: result,
                     body: vec![Statement::Return(Expr {
                         ty: result,
-                        kind: ExprKind::Builtin(Builtin::Process(op), args),
+                        kind: ExprKind::Builtin(Builtin::process(op), args),
                     })],
                 },
             },
@@ -296,7 +296,7 @@ impl Checker<'_> {
             let result = self.move_result(dst);
             (ir::ProcessOperation::Move(self.shutil_tree_issue()), result)
         };
-        Ok(self.ordered_builtin(Builtin::Process(op), result, args))
+        Ok(self.ordered_builtin(Builtin::process(op), result, args))
     }
 
     pub(super) fn shutil_copytree(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
@@ -370,7 +370,7 @@ impl Checker<'_> {
         let issue = self.shutil_tree_issue();
         let result = args.values[args.order[1]].ty;
         Ok(self.ordered_builtin(
-            Builtin::Process(ir::ProcessOperation::CopyTree(issue)),
+            Builtin::process(ir::ProcessOperation::CopyTree(issue)),
             result,
             args,
         ))
@@ -424,7 +424,7 @@ impl Checker<'_> {
             }
         })?;
         Ok(self.ordered_builtin(
-            Builtin::Process(ir::ProcessOperation::RmTree),
+            Builtin::process(ir::ProcessOperation::RmTree),
             Type::None,
             args,
         ))
@@ -465,7 +465,7 @@ impl Checker<'_> {
         let dst = args.values[args.order[1]].ty;
         let result = self.copy_result(op, dst);
         let value = self.ordered_builtin(
-            Builtin::Process(ir::ProcessOperation::Copy(op)),
+            Builtin::process(ir::ProcessOperation::Copy(op)),
             result,
             args,
         );

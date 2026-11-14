@@ -557,7 +557,7 @@ impl Checker<'_> {
                     let key = self.expr_expected(&subscript.slice, ty)?;
                     break 'place Statement::Expr(builtin(
                         Type::None,
-                        Builtin::Process(ir::ProcessOperation::EnvironSet { bytes }),
+                        Builtin::process(ir::ProcessOperation::EnvironSet { bytes }),
                         vec![value, key],
                     ));
                 }
@@ -693,7 +693,7 @@ impl Checker<'_> {
                     break 'place Statement::Expr(Expr {
                         ty: Type::None,
                         kind: ExprKind::Builtin(
-                            Builtin::Process(ir::ProcessOperation::SetSelector),
+                            Builtin::process(ir::ProcessOperation::SetSelector),
                             vec![value],
                         ),
                     });
@@ -808,7 +808,7 @@ impl Checker<'_> {
                     let value = self.coerce(value, self.types.optional(Type::Int), target)?;
                     break 'place Statement::Expr(builtin(
                         Type::None,
-                        Builtin::Process(ir::ProcessOperation::PopenSetStatus),
+                        Builtin::process(ir::ProcessOperation::PopenSetStatus),
                         vec![value, receiver],
                     ));
                 }
@@ -832,7 +832,7 @@ impl Checker<'_> {
                     }
                     break 'place Statement::Expr(builtin(
                         Type::None,
-                        Builtin::Process(ir::ProcessOperation::PopenSetPoll {
+                        Builtin::process(ir::ProcessOperation::PopenSetPoll {
                             returns_none: returns == Type::None,
                         }),
                         vec![value, receiver],

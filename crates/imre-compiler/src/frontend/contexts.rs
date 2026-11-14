@@ -78,7 +78,7 @@ pub(super) fn single_yield(method: &ast::StmtFunctionDef) -> bool {
 pub(super) fn op(op: Op, ty: Type, args: Vec<Expr>) -> Expr {
     Expr {
         ty,
-        kind: ExprKind::Builtin(Builtin::Process(op), args),
+        kind: ExprKind::Builtin(Builtin::process(op), args),
     }
 }
 

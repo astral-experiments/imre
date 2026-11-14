@@ -204,7 +204,7 @@ impl FixedNode {
                 }
                 ExprKind::Binary(op, _, _) => Self::Binary(op, expr.ty),
                 ExprKind::Builtin(
-                    Builtin::Process(ir::ProcessOperation::Copy(op)),
+                    Builtin::Process(ir::ProcessOperation::Copy(op), _),
                     ref operands,
                 ) => Self::Copy(op, operands.len(), expr.ty),
                 ExprKind::Builtin(Builtin::Path(op), ref operands) => {

@@ -25,7 +25,7 @@ impl Checker<'_> {
             }
             Ok(Expr {
                 ty: returns,
-                kind: ExprKind::Builtin(Builtin::Process(ProcessOperation::Credential(name)), args),
+                kind: ExprKind::Builtin(Builtin::process(ProcessOperation::Credential(name)), args),
             })
         })
     }
@@ -153,7 +153,7 @@ fn credential_integer(mut value: Expr, group: bool, owner: &str) -> Expr {
     Expr {
         ty: Type::Int,
         kind: ExprKind::Builtin(
-            Builtin::Process(ProcessOperation::CredentialId { group }),
+            Builtin::process(ProcessOperation::CredentialId { group }),
             vec![value],
         ),
     }

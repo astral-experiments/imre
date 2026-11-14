@@ -64,6 +64,7 @@ pub(super) fn validate_storage(
                 ir::ProcessOperation::IndirectCoroutine { .. }
                 | ir::ProcessOperation::Coroutine { .. }
                 | ir::ProcessOperation::ContextNew { .. },
+                _,
             ),
             args,
         ) = &value.kind
@@ -86,7 +87,7 @@ pub(super) fn invoked_signature(value: &Expr) -> Option<Type> {
     match &value.kind {
         ExprKind::Invoke { callable, .. } => Some(callable.ty),
         ExprKind::Builtin(
-            Builtin::Process(ir::ProcessOperation::IndirectCoroutine { signature, .. }),
+            Builtin::Process(ir::ProcessOperation::IndirectCoroutine { signature, .. }, _),
             _,
         ) => Some(*signature),
         _ => None,
@@ -1085,7 +1086,7 @@ mod tests {
                     indirect |= matches!(
                         expr.kind,
                         ExprKind::Builtin(
-                            Builtin::Process(ProcessOperation::IndirectCoroutine { .. }),
+                            Builtin::Process(ProcessOperation::IndirectCoroutine { .. }, _),
                             _
                         )
                     );

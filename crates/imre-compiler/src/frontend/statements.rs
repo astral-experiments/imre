@@ -246,7 +246,7 @@ impl StatementLowering for Checker<'_> {
             _ => &mut value,
         };
         if let ExprKind::Builtin(
-            Builtin::Process(op @ ir::ProcessOperation::Run { streams: 4, .. }),
+            Builtin::Process(op @ ir::ProcessOperation::Run { streams: 4, .. }, _),
             args,
         ) = &mut result.kind
             && args[0].ty == self.types.list(Type::Str)

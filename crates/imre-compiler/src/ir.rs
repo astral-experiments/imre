@@ -1071,6 +1071,8 @@ pub(crate) struct SplitFieldOrigins {
 #[derive(Clone)]
 pub(crate) enum CallSite {
     None,
+    /// A bound source call can defer its traceback until its operation is selected.
+    Written(ruff_text_size::TextRange, ruff_text_size::TextSize),
     Fixed(FixedOrigin),
     /// A retained local carries its loaded function identity into this invocation.
     SavedFunction(FixedOrigin, usize),
@@ -2544,7 +2546,7 @@ pub(crate) enum Builtin {
     Errno(ErrnoOperation),
     Fnmatch(FnmatchOperation),
     Patch(PatchOperation),
-    Process(ProcessOperation),
+    Process(ProcessOperation, Option<FixedOrigin>),
     /// Zero reads, one truncates/writes; the frontend accepts literal modes only.
     TextOpen(u32),
     BinaryOpen(u32),
@@ -2713,6 +2715,10 @@ pub(crate) enum Builtin {
 }
 
 impl Builtin {
+    pub(crate) fn process(operation: ProcessOperation) -> Self {
+        Self::Process(operation, None)
+    }
+
     /// Position of a read-only key that can borrow a stack tuple for the call.
     pub(crate) fn tuple_probe_index(&self) -> Option<usize> {
         match self {

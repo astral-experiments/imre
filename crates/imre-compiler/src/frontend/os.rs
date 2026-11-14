@@ -109,7 +109,7 @@ impl Checker<'_> {
                     Expr {
                         ty: Type::Int,
                         kind: ExprKind::Builtin(
-                            Builtin::Process(ProcessOperation::Fd(TransferFd)),
+                            Builtin::process(ProcessOperation::Fd(TransferFd)),
                             vec![index],
                         ),
                     },
@@ -134,7 +134,7 @@ impl Checker<'_> {
                 Ok(Expr {
                     ty: returns,
                     kind: ExprKind::Builtin(
-                        Builtin::Process(ProcessOperation::Fd(op)),
+                        Builtin::process(ProcessOperation::Fd(op)),
                         vec![fd, data],
                     ),
                 })
@@ -165,7 +165,7 @@ impl Checker<'_> {
                 }
                 Ok(Expr {
                     ty: Type::Str,
-                    kind: ExprKind::Builtin(Builtin::Process(ProcessOperation::Fd(op)), args),
+                    kind: ExprKind::Builtin(Builtin::process(ProcessOperation::Fd(op)), args),
                 })
             });
         }
@@ -182,7 +182,7 @@ impl Checker<'_> {
                 Ok(Expr {
                     ty: returns,
                     kind: ExprKind::Builtin(
-                        Builtin::Process(ProcessOperation::Fd(op)),
+                        Builtin::process(ProcessOperation::Fd(op)),
                         vec![index],
                     ),
                 })
@@ -248,7 +248,7 @@ impl Checker<'_> {
             DeviceEncoding => self.types.optional(Type::Str),
             PtsName | TcGetPgrp | TcSetPgrp => unreachable!("terminal call handled above"),
         };
-        Ok(self.ordered_builtin(Builtin::Process(ProcessOperation::Fd(op)), returns, args))
+        Ok(self.ordered_builtin(Builtin::process(ProcessOperation::Fd(op)), returns, args))
     }
 
     fn os_path_at(&mut self, call: &ast::ExprCall, op: FdOperation) -> Result<Expr, String> {
@@ -283,7 +283,7 @@ impl Checker<'_> {
             }
         })?;
         Ok(self.ordered_builtin(
-            Builtin::Process(ProcessOperation::Fd(op)),
+            Builtin::process(ProcessOperation::Fd(op)),
             if op == FdOperation::Open {
                 Type::Int
             } else {
