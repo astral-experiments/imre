@@ -2429,11 +2429,10 @@ pub(crate) fn compile(
             .find(|(id, _, _)| sources[*id].0 == name)?;
         Some((id, root, *package))
     });
-    let entry_owner = module_body.and_then(|(id, root, _)| {
+    let entry_owner = module_entry.and_then(|_| {
         crate::installed_wheels::ModuleEntryRoot::select(
-            root,
-            &sources[id].1,
-            initial[..path0_len].contains(root),
+            module_body.map(|(id, root, _)| (root.as_path(), sources[id].1.as_path())),
+            initial[..path0_len].first().map(PathBuf::as_path),
             &mut wheel_records,
             options,
             &mut inputs,
