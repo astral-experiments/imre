@@ -45,7 +45,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     archive.set_comment(concat!(
         include_str!("../../licenses/CPython.txt"),
         "\n",
-        include_str!("../../licenses/ElementTree.txt")
+        include_str!("../../licenses/ElementTree.txt"),
+        "\n",
+        include_str!("../../licenses/XMLRPC.txt")
     ))?;
     // Use the writer's own offsets for the stored payloads in the embedded ZIP.
     let mut archive = archive.finish_into_readable()?;
