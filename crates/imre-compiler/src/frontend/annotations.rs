@@ -100,13 +100,13 @@ pub(super) fn type_name(value: Expr) -> Expr {
 }
 
 fn function_entries(function: &ast::StmtFunctionDef) -> Vec<(&str, &ast::Expr)> {
-    parameter_annotations(&function.parameters, function.returns.as_deref())
+    parameter_annotations(&function.parameters, function.returns.as_deref()).collect()
 }
 
 pub(crate) fn parameter_annotations<'a>(
     p: &'a ast::Parameters,
     returns: Option<&'a ast::Expr>,
-) -> Vec<(&'a str, &'a ast::Expr)> {
+) -> impl Iterator<Item = (&'a str, &'a ast::Expr)> {
     // CPython emits ordinary arguments before the separate positional-only group.
     p.args
         .iter()
@@ -117,7 +117,6 @@ pub(crate) fn parameter_annotations<'a>(
         .chain(p.kwarg.as_deref())
         .filter_map(|p| p.annotation.as_deref().map(|a| (p.name.as_str(), a)))
         .chain(returns.map(|a| ("return", a)))
-        .collect()
 }
 
 /// Undeclared names may still be provided by the Python 3.14 builtin namespace.
