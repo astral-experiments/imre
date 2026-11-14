@@ -1699,11 +1699,20 @@ fn lower_graph(
     let mut uses_builtin_module_names = false;
     let mut generator_sites = 0;
     let mut count = false;
+    let mut missing_key_types = HashSet::new();
     let mut decoded = Vec::new();
     let mut encoded = Vec::new();
     let mut record_builtin = |value: &Expr| match value.kind {
         ExprKind::Builtin(Builtin::JsonDecode(ty) | Builtin::TomlDecode(ty), _) => decoded.push(ty),
         ExprKind::Builtin(Builtin::JsonEncode(ty), _) => encoded.push(ty),
+        ExprKind::Builtin(
+            Builtin::DictGet | Builtin::DeleteItem | Builtin::DictPop | Builtin::ChainMapGetItem,
+            ref args,
+        ) if graph.reachable_only() => {
+            if let [_, key] = args.as_slice() {
+                missing_key_types.insert(key.ty);
+            }
+        }
         ExprKind::Builtin(Builtin::SysGetFrameModuleName, _) => names = true,
         ExprKind::Builtin(Builtin::SysBuiltinModuleNames, _) => uses_builtin_module_names = true,
         ExprKind::Builtin(Builtin::SysSetRecursionLimit, _) => count = true,
@@ -1778,8 +1787,8 @@ fn lower_graph(
             });
         }
     }
-    if graph.reachable_only() {
-        classes.missing_key_reprs(functions, &entry, graph, &types, key_reprs);
+    if !missing_key_types.is_empty() {
+        classes.missing_key_reprs(missing_key_types, graph, &types, key_reprs);
     }
     let json_records = json::schemas(graph, &classes, &types, &decoded, &encoded)
         .inspect_err(|_| place_completed(&mut completed, &owners))?;
