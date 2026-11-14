@@ -1820,6 +1820,8 @@ pub(crate) enum Builtin {
     /// An indeterminate operand during source checking. Its containing body retains
     /// the original representation failure and is ineligible for emission.
     Unrepresented,
+    /// A checked Python call in a discarded region still has an opaque result and effects.
+    UnrepresentedCall,
     ByteArrayNew,
     ByteArrayAppend,
     ByteArrayExtend,

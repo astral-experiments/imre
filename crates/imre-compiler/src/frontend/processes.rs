@@ -172,6 +172,7 @@ pub(super) fn process_error_view(
             }
             ExprKind::Call(..)
             | ExprKind::Invoke { .. }
+            | ExprKind::Builtin(Builtin::UnrepresentedCall, _)
             | ExprKind::Construct { .. }
             | ExprKind::Builtin(
                 Builtin::Process(

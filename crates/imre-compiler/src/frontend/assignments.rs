@@ -652,7 +652,10 @@ impl Checker<'_> {
         let can_call_python = match checked {
             Ok(value) => matches!(
                 &value.kind,
-                ExprKind::Call(..) | ExprKind::Invoke { .. } | ExprKind::Construct { .. }
+                ExprKind::Call(..)
+                    | ExprKind::Invoke { .. }
+                    | ExprKind::Construct { .. }
+                    | ExprKind::Builtin(Builtin::UnrepresentedCall, _)
             ),
             Err(error) => error.is_object(),
         };
