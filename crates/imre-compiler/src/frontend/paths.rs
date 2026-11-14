@@ -471,7 +471,7 @@ impl Checker<'_> {
                 | "symlink_to"
                 | "hardlink_to"
         ) {
-            return self.path_call(receiver, name, call);
+            return self.path_call(receiver, attribute, call);
         }
         if matches!(name, "iterdir" | "glob" | "rglob" | "walk") {
             return self.path_iterator(receiver, call, name);
@@ -600,9 +600,10 @@ impl Checker<'_> {
     fn path_call(
         &mut self,
         receiver: Expr,
-        name: &str,
+        attribute: &ast::ExprAttribute,
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
+        let name = attribute.attr.as_str();
         let (kind, returns, params) = match name {
             "mkdir" => (
                 PathOperation::Mkdir,
@@ -644,6 +645,13 @@ impl Checker<'_> {
                 Type::None,
                 vec![parameter("target", Type::Str, None)],
             ),
+            "resolve" if call.arguments.is_empty() => {
+                let value = operation(PathOperation::Resolve, Type::Path, vec![receiver]);
+                if let Some(sites) = &mut self.fixed_sites {
+                    sites.method(call, attribute, &value);
+                }
+                return Ok(value);
+            }
             "resolve" => (
                 PathOperation::Resolve,
                 Type::Path,
