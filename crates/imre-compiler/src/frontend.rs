@@ -5612,15 +5612,22 @@ impl<'a> Checker<'a> {
             }
         }
         let is_range = matches!(&input, Iteration::Range(_));
-        self.lower_iteration(&loop_.target, input, &loop_.orelse, |checker, body| {
-            let discard_range_body = is_range
-                && checker.inference.is_some()
-                && checker.discarded_function_body()
-                && checker.registered.is_none()
-                && !checker.fault_enabled();
-            checker.lower_block(&loop_.body, (!discard_range_body).then_some(body))?;
-            Ok(())
-        })
+        self.lower_iteration_after(
+            &loop_.target,
+            input,
+            &loop_.orelse,
+            Vec::new(),
+            |checker, body| {
+                let discard_range_body = is_range
+                    && checker.inference.is_some()
+                    && checker.discarded_function_body()
+                    && checker.registered.is_none()
+                    && !checker.fault_enabled();
+                checker.lower_block(&loop_.body, (!discard_range_body).then_some(body))?;
+                // The loop body can select a Python frame while its source contracts are checked.
+                Ok(!is_range || !checker.discarded_function_body())
+            },
+        )
     }
 
     /// A guarded return can inspect each fixed tuple field at its own static type.
@@ -5696,21 +5703,6 @@ impl<'a> Checker<'a> {
             items: false,
             start: Some(Expr::integer(0)),
         }))
-    }
-
-    /// Shares iteration snapshots and cleanup between statements and eager displays.
-    /// The callback runs with the target definitely assigned for one iteration.
-    fn lower_iteration(
-        &mut self,
-        target: &ast::Expr,
-        input: Iteration,
-        orelse: &[ast::Stmt],
-        lower_body: impl FnOnce(&mut Self, &mut Vec<Statement>) -> Result<(), String>,
-    ) -> Result<(Vec<Statement>, bool), String> {
-        self.lower_iteration_after(target, input, orelse, Vec::new(), |checker, body| {
-            lower_body(checker, body)?;
-            Ok(true)
-        })
     }
 
     /// A consumer can evaluate its remaining arguments after acquiring an
