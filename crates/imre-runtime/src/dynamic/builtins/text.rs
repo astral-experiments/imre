@@ -841,9 +841,13 @@ pub(in super::super) fn format_value(ctx: &mut Context, value: Id, spec: Option<
     if let Some(spec) = spec
         && ctx.string_storage(spec).is_none()
     {
-        return Err(type_error(format!(
-            "format() argument 2 must be str, not {}",
+        let kind = if spec == NONE {
+            "None"
+        } else {
             ctx.type_name(spec)
+        };
+        return Err(type_error(format!(
+            "format() argument 2 must be str, not {kind}"
         )));
     }
     let method = match ctx.heap.get(value) {
