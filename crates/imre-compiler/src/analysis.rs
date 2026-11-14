@@ -1948,6 +1948,39 @@ impl Session {
         Ok(copy)
     }
 
+    /// Visit the ordinary single-name stores owned by this physical function. A
+    /// guarded store needs its enclosing suite, which the scope index does not retain.
+    pub(crate) fn plain_function_stores(
+        &self,
+        module: usize,
+        function: &ruff_python_ast::StmtFunctionDef,
+        mut store: impl FnMut(&str, &Expr) -> Option<()>,
+    ) -> Option<()> {
+        use ty_python_core::definition::{BindingsOwner, DefinitionKind};
+        use ty_python_core::scope::{NodeWithScopeKind, NodeWithScopeRef};
+
+        let file = self.files[module];
+        let index = ty_python_core::semantic_index(&self.db, self.db.program_file(file));
+        let scope = index.try_node_scope(NodeWithScopeRef::Function(function))?;
+        let NodeWithScopeKind::Function(owner) = index.scope(scope).node() else {
+            return None;
+        };
+        let parsed = self.parsed(file);
+        if !std::ptr::eq(owner.node(&parsed), function) {
+            return None;
+        }
+        for (_, definition, _) in index.use_def_map(scope).definitions_with_usage() {
+            match definition.kind(&self.db) {
+                DefinitionKind::Assignment(a) if a.owner() == BindingsOwner::Definition => {
+                    store(a.target(&parsed).as_name_expr()?.id.as_str(), a.value(&parsed))?;
+                }
+                DefinitionKind::AnnotatedAssignment(a) if a.has_value() => return None,
+                _ => {}
+            }
+        }
+        Some(())
+    }
+
     pub(crate) fn is_generator_definition(
         &self,
         module: usize,

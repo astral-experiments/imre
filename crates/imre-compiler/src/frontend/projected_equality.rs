@@ -181,16 +181,17 @@ impl Checker<'_> {
     /// applies. Earlier statements (including any length checks) still run first.
     pub(super) fn function_body(
         &mut self,
+        definition: &ast::StmtFunctionDef,
         stmts: &[ast::Stmt],
         mut output: Option<&mut Vec<Statement>>,
         place: Option<&mut dyn FnMut(&Self) -> bool>,
     ) -> Result<bool, String> {
         self.collect_local_definitions(stmts)?;
         if self.returns != Type::Bool {
-            return self.lower_block_with_placement(stmts, output, place);
+            return self.lower_block_with_placement(stmts, output, place, Some(definition));
         }
         let Some((at, a, b, answers)) = tail(self, stmts) else {
-            return self.lower_block_with_placement(stmts, output, place);
+            return self.lower_block_with_placement(stmts, output, place, Some(definition));
         };
         let prefix_falls = self.lower_block(&stmts[..at], output.as_deref_mut())?;
         let reachable = self.reachable;

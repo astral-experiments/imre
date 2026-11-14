@@ -3,11 +3,46 @@
 use super::*;
 use ruff_python_ast::visitor::{Visitor, walk_except_handler, walk_expr, walk_stmt};
 
+fn nullable_return(checker: &Checker<'_>, rhs: &ast::Expr) -> Option<Type> {
+    let call = rhs.as_call_expr()?;
+    let crate::modules::Binding::Definition(id) = checker.resolve(&call.func)? else {
+        return None;
+    };
+    let ty = checker.functions.get(&id)?.returns;
+    checker.types.payload(ty).map(|_| ty)
+}
+
 /// Collect guarded local stores and the optional layouts needed by earlier assignments.
 pub(super) fn local_assignments(
     checker: &Checker<'_>,
     statements: &[ast::Stmt],
+    function: Option<&ast::StmtFunctionDef>,
 ) -> (HashSet<String>, HashMap<String, Type>) {
+    if let Some(function) = function {
+        let mut nullable = HashMap::new();
+        let plain =
+            checker
+                .graph
+                .session
+                .plain_function_stores(checker.module, function, |name, rhs| {
+                    if checker.interactive_names || checker.mapping_class_import(name) {
+                        return None;
+                    }
+                    if let Some(ty) = nullable_return(checker, rhs)
+                        && nullable
+                            .insert(name.to_owned(), ty)
+                            .is_some_and(|prior| prior != ty)
+                    {
+                        // Differing layouts follow the original visitor's assignment order.
+                        return None;
+                    }
+                    Some(())
+                });
+        if plain.is_some() {
+            return (HashSet::new(), nullable);
+        }
+    }
+
     struct Scan<'a, 'b> {
         checker: &'a Checker<'b>,
         inside: bool,
@@ -21,13 +56,8 @@ pub(super) fn local_assignments(
             match stmt {
                 ast::Stmt::Assign(s) if matches!(s.targets.as_slice(), [ast::Expr::Name(_)]) => {
                     let name = &s.targets[0].as_name_expr().unwrap().id;
-                    if let ast::Expr::Call(call) = &*s.value
-                        && let Some(crate::modules::Binding::Definition(id)) =
-                            self.checker.resolve(&call.func)
-                        && let Some(signature) = self.checker.functions.get(&id)
-                        && self.checker.types.payload(signature.returns).is_some()
-                    {
-                        self.nullable.insert(name.to_string(), signature.returns);
+                    if let Some(ty) = nullable_return(self.checker, &s.value) {
+                        self.nullable.insert(name.to_string(), ty);
                     }
                     if !self.inside_match
                         && ((self.checker.interactive_names && self.inside)
