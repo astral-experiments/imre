@@ -1711,22 +1711,25 @@ pub(super) fn for_pull(loop_: &ast::StmtFor) -> Option<ir::AsyncPull> {
 /// the defining frame has already obtained the iterator passed to the generator.
 pub(super) fn cursor_input(
     value: Expr,
-    element: Type,
     acquire_at: Option<TextRange>,
     pull: Option<ir::AsyncPull>,
     hidden: impl FnMut(Type, Option<ir::IterNextKind>) -> usize,
 ) -> pipelines::Prepared {
-    let acquire = match (acquire_at, pull) {
-        (Some(range), None) => Some(ir::IteratorOp::Loop(range)),
-        (Some(range), Some(_)) => Some(ir::IteratorOp::Async(range)),
-        (None, None) => Some(ir::IteratorOp::LoopCursor),
-        (None, Some(_)) => None,
+    let (acquire, kind) = match pull {
+        Some(site) => (
+            acquire_at.map(ir::IteratorOp::Async),
+            ir::IterNextKind::Async(site),
+        ),
+        None => (
+            Some(acquire_at.map_or(ir::IteratorOp::LoopCursor, ir::IteratorOp::Loop)),
+            ir::IterNextKind::Generic,
+        ),
     };
     let cursor = match acquire {
         Some(op) => operation(Builtin::RegisteredIter(op), Type::PythonObject, vec![value]),
         None => value,
     };
-    pipelines::Prepared::pull_cursor(cursor, element, pull, hidden)
+    pipelines::Prepared::pull_cursor(cursor, Type::PythonObject, kind, hidden)
 }
 
 #[derive(Clone, Copy)]
@@ -2407,7 +2410,6 @@ impl<'a> SuitePreparation<'a> {
             self.region_operand(&loop_.iter, &mut scope, &mut operands, selection, suspended);
         let mut input = cursor_input(
             iterable,
-            Type::PythonObject,
             Some(loop_.iter.range()),
             for_pull(loop_),
             |ty, cursor| scope.reserve_cursor_slot(ty, cursor),
@@ -3799,7 +3801,6 @@ impl SourceScope<'_> {
         let value = self.ordinary_operand(iterable)?;
         Some(cursor_input(
             value,
-            Type::PythonObject,
             Some(iterable.range()),
             pull,
             |ty, cursor| self.reserve_cursor_slot(ty, cursor),

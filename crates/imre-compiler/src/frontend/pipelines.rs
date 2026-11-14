@@ -136,17 +136,9 @@ impl Prepared {
     pub(super) fn pull_cursor(
         cursor: Expr,
         element: Type,
-        pull: Option<ir::AsyncPull>,
+        kind: ir::IterNextKind,
         mut hidden: impl FnMut(Type, Option<ir::IterNextKind>) -> usize,
     ) -> Self {
-        let kind = match (pull, &cursor.kind) {
-            (Some(site), _) => ir::IterNextKind::Async(site),
-            (
-                None,
-                ExprKind::Builtin(Builtin::SplitByteIter(_) | Builtin::SortedSplitByteIter(_), _),
-            ) => ir::IterNextKind::SplitField,
-            _ => ir::IterNextKind::Generic,
-        };
         let iterator = hidden(cursor.ty, Some(kind));
         let value = hidden(element, None);
         let ready = hidden(Type::Bool, None);
@@ -1487,7 +1479,13 @@ impl Checker<'_> {
     }
 
     pub(super) fn prepare_cursor(&mut self, cursor: Expr, element: Type) -> Prepared {
-        Prepared::pull_cursor(cursor, element, None, |ty, _| self.hidden(ty))
+        let kind = match cursor.kind {
+            ExprKind::Builtin(Builtin::SplitByteIter(_) | Builtin::SortedSplitByteIter(_), _) => {
+                ir::IterNextKind::SplitField
+            }
+            _ => ir::IterNextKind::Generic,
+        };
+        Prepared::pull_cursor(cursor, element, kind, |ty, _| self.hidden(ty))
     }
 
     pub(super) fn prepare_csv_reader(&mut self, reader: Expr) -> Prepared {
