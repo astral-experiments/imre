@@ -1251,7 +1251,12 @@ fn checked_lower_with(
                     .cache
                     .check_scopes(session, &graph.inputs, skipped, &overloads)?;
             } else {
-                session.check_scopes(skipped, &overloads)?;
+                let registered = graph.registered_source_errors.borrow();
+                let remaining = (0..graph.modules.len()).filter(|id| {
+                    !graph.modules[*id].checks_source_contracts()
+                        || !registered.get(id).is_some_and(Vec::is_empty)
+                });
+                session.check_scopes_in(remaining, skipped, &overloads)?;
             }
             graph.source_contract = Some(analysis::SourceContract::Checked(Ok(())));
             Ok(ir)

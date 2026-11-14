@@ -2934,16 +2934,20 @@ impl Session {
         skipped: Option<&[Vec<TextRange>]>,
         overloads: &[Vec<CheckedDiagnostic>],
     ) -> Result<(), String> {
+        self.check_scopes_in(0..self.files.len(), skipped, overloads)
+    }
+
+    /// Apply the fixed rules to modules whose source has not already passed the default rules.
+    pub(crate) fn check_scopes_in(
+        &mut self,
+        modules: impl Iterator<Item = usize>,
+        skipped: Option<&[Vec<TextRange>]>,
+        overloads: &[Vec<CheckedDiagnostic>],
+    ) -> Result<(), String> {
         DiagnosticRules::get(&self.db)
             .set_rules(&mut self.db)
             .to(self.rules.clone());
-        self.errors(
-            0..self.files.len(),
-            skipped,
-            overloads,
-            FileChecks::Full,
-            None,
-        )
+        self.errors(modules, skipped, overloads, FileChecks::Full, None)
     }
 
     /// Check explicit source signatures before choosing a representation.
