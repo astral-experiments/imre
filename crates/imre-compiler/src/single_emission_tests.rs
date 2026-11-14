@@ -60,6 +60,41 @@ fn assert_source_refusal(entry: &Path, file: &Path, expected: &str, builds: &[Co
 }
 
 #[test]
+fn split_and_whole_outputs_share_the_doctest_writer() {
+    let project = tempfile::tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    std::fs::write(
+        &entry,
+        "import doctest, subject\ndoctest.DocTestSuite(subject).debug()\n",
+    )
+    .unwrap();
+    std::fs::write(
+        project.path().join("subject.py"),
+        "\"\"\"\n>>> value()\n42\n\"\"\"\ndef value():\n    return 42\n",
+    )
+    .unwrap();
+    let options = CompileOptions {
+        script_startup: Some((CommandFlags::default(), "imre".into())),
+        ..Default::default()
+    };
+    let ((whole, units), phases) = observe_preparation(|| {
+        compile_file_with_boxed_units(&entry, Some(project.path()), &options).unwrap()
+    });
+    assert!(units.len() > 1);
+    let prompt = Path::new("<doctest subject[0]>");
+    assert_eq!(
+        phases
+            .iter()
+            .filter(|phase| matches!(phase, Phase::Llvm(Some(path)) if path == prompt))
+            .count(),
+        1
+    );
+    let registration = "call void @imre_dyn_register_module_single(";
+    assert!(whole.llvm_ir.contains(registration));
+    assert!(units.iter().any(|unit| unit.llvm_ir.contains(registration)));
+}
+
+#[test]
 fn imported_operand_refusal_precedes_llvm_emission() {
     let project = tempfile::tempdir().unwrap();
     let main = project.path().join("main.py");

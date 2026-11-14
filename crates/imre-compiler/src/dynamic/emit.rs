@@ -185,7 +185,7 @@ impl crate::ProgramOutput {
                 let register = |launcher: &mut ModuleLauncher,
                                 symbol: Option<&str>,
                                 entry|
-                 -> Result<(), String> {
+                 -> Result<String, String> {
                     let (module, code) = if let Some(entry) = entry {
                         entry
                     } else {
@@ -201,24 +201,33 @@ impl crate::ProgramOutput {
                         (module, code)
                     };
                     module.write_call(launcher, &code);
-                    for Prompt(prompt) in prompts {
-                        let file = launcher
-                            .output
-                            .data(prompt.source.path.as_os_str().as_encoded_bytes());
-                        let code = prompt.emit(&mut launcher.output, unit, &file)?;
-                        launcher.register_single(
-                            &module.name,
-                            &file,
-                            &prompt.source.text,
-                            prompt.source.future_flags,
-                            &code,
-                        );
-                    }
-                    Ok(())
+                    Ok(module.name)
                 };
-                register(root, external.as_deref(), None)?;
-                if let Some(whole) = whole {
-                    register(whole, external.as_deref().filter(|_| archived), whole_entry)?;
+                let owner = register(root, external.as_deref(), None)?;
+                let mut other = if let Some(whole) = whole {
+                    let owner =
+                        register(whole, external.as_deref().filter(|_| archived), whole_entry)?;
+                    Some((whole, owner))
+                } else {
+                    None
+                };
+                for Prompt(prompt) in prompts {
+                    if let Some((whole, _)) = &mut other {
+                        root.output.begin_placement(&mut whole.output, unit);
+                    }
+                    let mut file = root
+                        .output
+                        .data(prompt.source.path.as_os_str().as_encoded_bytes());
+                    let mut code = prompt.emit(&mut root.output, unit, &file)?;
+                    let text = &prompt.source.text;
+                    let flags = prompt.source.future_flags;
+                    if let Some((whole, owner)) = &mut other {
+                        let whole_file = Output::whole_operand(&mut file);
+                        let whole_code = Output::whole_operand(&mut code);
+                        root.output.finish_placement(&mut whole.output);
+                        whole.register_single(owner, &whole_file, text, flags, &whole_code);
+                    }
+                    root.register_single(&owner, &file, text, flags, &code);
                 }
                 Ok((name.as_str(), placed))
             },
@@ -769,14 +778,14 @@ impl<'a> PreparedBody<'a> {
             ..Output::default()
         };
         if let Some((target, unit, _)) = &mut placement {
-            output.whole = Some(Box::new(std::mem::take(target)));
-            output.whole_unit = *unit;
+            output.begin_placement(target, *unit);
         }
         let filename = self.source.path.as_os_str().as_encoded_bytes();
         let file = output.data(filename);
         let mut entry = self.emit(&mut output, 0, &file)?;
         if let Some((target, _, whole_entry)) = placement {
-            output.finish_placement(target, &mut entry, whole_entry);
+            *whole_entry = Output::whole_operand(&mut entry);
+            output.finish_placement(target);
         }
         let body = ProviderBody::new(output, entry);
         let mut hash = blake3::Hasher::new();

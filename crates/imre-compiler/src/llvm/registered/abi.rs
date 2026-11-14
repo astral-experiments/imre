@@ -92,6 +92,7 @@ pub(crate) struct Output {
     pub(crate) count: u32,
     pub(crate) whole: Option<Box<Output>>,
     pub(crate) whole_unit: usize,
+    pub(crate) whole_start: u32,
 }
 
 impl Output {
@@ -108,7 +109,10 @@ impl Output {
     pub(crate) fn code_symbol(&self, kind: &str, id: u32) -> String {
         let local = format!("@{kind}{id}");
         match &self.whole {
-            Some(whole) => Self::operand(local, format!("@{kind}{}", whole.count + id)),
+            Some(whole) => Self::operand(
+                local,
+                format!("@{kind}{}", whole.count + (id - self.whole_start)),
+            ),
             None => local,
         }
     }
@@ -134,15 +138,22 @@ impl Output {
         }
     }
 
-    pub(crate) fn finish_placement(
-        &mut self,
-        target: &mut Output,
-        entry: &mut String,
-        whole_entry: &mut String,
-    ) {
-        place_operands(entry, 0, whole_entry);
+    /// Number new definitions from the current position in each LLVM output.
+    pub(crate) fn begin_placement(&mut self, target: &mut Output, unit: usize) {
+        self.whole_start = self.count;
+        self.whole_unit = unit;
+        self.whole = Some(Box::new(std::mem::take(target)));
+    }
+
+    pub(crate) fn whole_operand(local: &mut String) -> String {
+        let mut whole = String::new();
+        place_operands(local, 0, &mut whole);
+        whole
+    }
+
+    pub(crate) fn finish_placement(&mut self, target: &mut Output) {
         let mut whole = self.whole.take().unwrap();
-        whole.count += self.count;
+        whole.count += self.count - self.whole_start;
         whole
             .declarations
             .integers
