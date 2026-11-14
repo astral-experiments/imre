@@ -130,11 +130,13 @@ pub(super) fn units<'a>(
                 };
                 let types = types.filter(|types| types.matches_source(&text));
                 let indexed = types.map(|types| types.parsed());
+                let mut owned_parser = false;
                 let declaration;
                 let mut indexed_input = None;
                 let (syntax, normalized) = if let Some(scanned) = scanned {
                     match (scanned.parsed, syntax) {
                         (Some(super::ScannedParser::Owned(parsed)), None) => {
+                            owned_parser = indexed.is_none();
                             (Some(Cow::Owned(parsed)), Some(scanned.lowered))
                         }
                         (Some(super::ScannedParser::Declaration(parser)), None) => {
@@ -152,7 +154,7 @@ pub(super) fn units<'a>(
                     (syntax, None)
                 };
                 let normalized = normalized.filter(|root| match root {
-                    super::LoweredRoot::Unchanged(_) => standalone,
+                    super::LoweredRoot::Unchanged(_) => standalone || owned_parser,
                     // Indexed parses of one physical Python input share source-order node IDs.
                     super::LoweredRoot::Complete(..) => syntax.as_deref().is_some_and(|original| {
                         types.zip(indexed.as_ref()).is_none_or(|(types, indexed)| {
