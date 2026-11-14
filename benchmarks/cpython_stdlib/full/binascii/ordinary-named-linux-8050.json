@@ -1,0 +1,546 @@
+{
+  "commit": "9328b26c350772fd28bf0479d4966f894351adeb",
+  "stock_cpython": "3.14.5",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "test_file_sha256": "648d04ce9fc9dd72d33bbffd0dd66bdd7d3e2c40aa8fee1aff3e35a6bbf39386",
+  "test_file_bytes": 23665,
+  "compiler_sha256": "f400d727d70ab2d98bc0af9e63702d1b451c95a4a7d848f8e256a0b58ed45bcb",
+  "stdlib_sha256": "8b26d7ab3be29c1d577f411324d84aa3552a6a340a73cd0235ffc0d84d0bc74d",
+  "runtime_sha256": "6536093c5cb10f3300dc1ba2fe793b12aa33f63f809828254bb2f69e90e9370b",
+  "source_archive_sha256": "2b2115aa785f234cad09c4544209ecccb88d344c6a85aed3b6679b0244bef9c6",
+  "stock": {
+    "ok": 76,
+    "skip": 17
+  },
+  "native_O0_and_O3": {
+    "ERROR": 20,
+    "FAIL": 8,
+    "ok": 48,
+    "skip": 17
+  },
+  "routes": {
+    "stock": {
+      "argv": [
+        "/home/dev-user/.local/share/imre-campaign-toolchain/managed-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "-m",
+        "test.test_binascii",
+        "-v"
+      ],
+      "pid": 1185025,
+      "raw_wait": 0,
+      "stderr_sha256": "57eb6366f76212102597c2e87ccdad8a89b4b30e3e4bc610139da7627f61708c"
+    },
+    "O0": {
+      "argv": [
+        "/tmp/hqx8050/public/sdk/imre",
+        "-B",
+        "-m",
+        "test.test_binascii",
+        "-v"
+      ],
+      "compiler_pid": 1186135,
+      "application_pid": 1186135,
+      "raw_wait": 256,
+      "stderr_sha256": "1b82fa72a9cf1720d0c3ecd6825097675e4b9da16d048d45146098000219b17f",
+      "saved_pid": 1186888,
+      "saved_raw_wait": 256,
+      "saved_stderr_sha256": "501776a703a2c06fab9835c196c821142c365411697cfe1131b1d0e6968c0eb1"
+    },
+    "FILE-O0": {
+      "compiler_pid": 1186133,
+      "raw_wait": 256,
+      "method_count": 0,
+      "refusal": "8:1: Imre: module \"test.support.hypothesis_helper\" has no static binding \"hypothesis\""
+    },
+    "O3": {
+      "argv": [
+        "/tmp/hqx8050/public/sdk/imre",
+        "-B",
+        "-m",
+        "test.test_binascii",
+        "-v"
+      ],
+      "compiler_pid": 1186132,
+      "application_pid": 1186132,
+      "raw_wait": 256,
+      "stderr_sha256": "03512999005885e857157c0ad1c51787f8919e4d594a1d9ebf84c6eabd8e1787",
+      "saved_pid": 1187939,
+      "saved_raw_wait": 256,
+      "saved_stderr_sha256": "1fe426b9aba18ddcff87be85cb69ac7a43becbd1e6c07c9ac535c7b0b72a67f0"
+    },
+    "FILE-O3": {
+      "compiler_pid": 1186134,
+      "raw_wait": 256,
+      "method_count": 0,
+      "refusal": "8:1: Imre: module \"test.support.hypothesis_helper\" has no static binding \"hypothesis\""
+    }
+  },
+  "methods": [
+    {
+      "id": "test.test_binascii.ArrayBinASCIITest.test_b2a_base64_newline",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.ArrayBinASCIITest.test_b2a_qp_a2b_qp_round_trip",
+      "stock": "skipped 'Hypothesis required for property test with no specified examples'",
+      "native_O0_and_O3": "skipped 'Hypothesis required for property test with no specified examples'"
+    },
+    {
+      "id": "test.test_binascii.ArrayBinASCIITest.test_b2a_roundtrip",
+      "stock": "skipped 'Hypothesis required for property test with no specified examples'",
+      "native_O0_and_O3": "skipped 'Hypothesis required for property test with no specified examples'"
+    },
+    {
+      "id": "test.test_binascii.ArrayBinASCIITest.test_base64_excess_data",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.ArrayBinASCIITest.test_base64_roundtrip",
+      "stock": "skipped 'Hypothesis required for property test with no specified examples'",
+      "native_O0_and_O3": "skipped 'Hypothesis required for property test with no specified examples'"
+    },
+    {
+      "id": "test.test_binascii.ArrayBinASCIITest.test_base64_strict_mode",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.ArrayBinASCIITest.test_base64errors",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.ArrayBinASCIITest.test_base64invalid",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.ArrayBinASCIITest.test_base64valid",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.ArrayBinASCIITest.test_c_contiguity",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.ArrayBinASCIITest.test_crc32",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.ArrayBinASCIITest.test_crc_hqx",
+      "stock": "ok",
+      "native_O0_and_O3": "ERROR"
+    },
+    {
+      "id": "test.test_binascii.ArrayBinASCIITest.test_empty_string",
+      "stock": "ok",
+      "native_O0_and_O3": "ERROR"
+    },
+    {
+      "id": "test.test_binascii.ArrayBinASCIITest.test_exceptions",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.ArrayBinASCIITest.test_functions",
+      "stock": "ok",
+      "native_O0_and_O3": "FAIL"
+    },
+    {
+      "id": "test.test_binascii.ArrayBinASCIITest.test_hex",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.ArrayBinASCIITest.test_hex_roundtrip",
+      "stock": "skipped 'Hypothesis required for property test with no specified examples'",
+      "native_O0_and_O3": "skipped 'Hypothesis required for property test with no specified examples'"
+    },
+    {
+      "id": "test.test_binascii.ArrayBinASCIITest.test_hex_separator",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.ArrayBinASCIITest.test_qp",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.ArrayBinASCIITest.test_returned_value",
+      "stock": "ok",
+      "native_O0_and_O3": "ERROR"
+    },
+    {
+      "id": "test.test_binascii.ArrayBinASCIITest.test_unicode_a2b",
+      "stock": "ok",
+      "native_O0_and_O3": "ERROR"
+    },
+    {
+      "id": "test.test_binascii.ArrayBinASCIITest.test_unicode_b2a",
+      "stock": "ok",
+      "native_O0_and_O3": "FAIL"
+    },
+    {
+      "id": "test.test_binascii.ArrayBinASCIITest.test_uu",
+      "stock": "ok",
+      "native_O0_and_O3": "ERROR"
+    },
+    {
+      "id": "test.test_binascii.BinASCIITest.test_b2a_base64_newline",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.BinASCIITest.test_b2a_qp_a2b_qp_round_trip",
+      "stock": "skipped 'Hypothesis required for property test with no specified examples'",
+      "native_O0_and_O3": "skipped 'Hypothesis required for property test with no specified examples'"
+    },
+    {
+      "id": "test.test_binascii.BinASCIITest.test_b2a_roundtrip",
+      "stock": "skipped 'Hypothesis required for property test with no specified examples'",
+      "native_O0_and_O3": "skipped 'Hypothesis required for property test with no specified examples'"
+    },
+    {
+      "id": "test.test_binascii.BinASCIITest.test_base64_excess_data",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.BinASCIITest.test_base64_roundtrip",
+      "stock": "skipped 'Hypothesis required for property test with no specified examples'",
+      "native_O0_and_O3": "skipped 'Hypothesis required for property test with no specified examples'"
+    },
+    {
+      "id": "test.test_binascii.BinASCIITest.test_base64_strict_mode",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.BinASCIITest.test_base64errors",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.BinASCIITest.test_base64invalid",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.BinASCIITest.test_base64valid",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.BinASCIITest.test_c_contiguity",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.BinASCIITest.test_crc32",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.BinASCIITest.test_crc_hqx",
+      "stock": "ok",
+      "native_O0_and_O3": "ERROR"
+    },
+    {
+      "id": "test.test_binascii.BinASCIITest.test_empty_string",
+      "stock": "ok",
+      "native_O0_and_O3": "ERROR"
+    },
+    {
+      "id": "test.test_binascii.BinASCIITest.test_exceptions",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.BinASCIITest.test_functions",
+      "stock": "ok",
+      "native_O0_and_O3": "FAIL"
+    },
+    {
+      "id": "test.test_binascii.BinASCIITest.test_hex",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.BinASCIITest.test_hex_roundtrip",
+      "stock": "skipped 'Hypothesis required for property test with no specified examples'",
+      "native_O0_and_O3": "skipped 'Hypothesis required for property test with no specified examples'"
+    },
+    {
+      "id": "test.test_binascii.BinASCIITest.test_hex_separator",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.BinASCIITest.test_qp",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.BinASCIITest.test_returned_value",
+      "stock": "ok",
+      "native_O0_and_O3": "ERROR"
+    },
+    {
+      "id": "test.test_binascii.BinASCIITest.test_unicode_a2b",
+      "stock": "ok",
+      "native_O0_and_O3": "ERROR"
+    },
+    {
+      "id": "test.test_binascii.BinASCIITest.test_unicode_b2a",
+      "stock": "ok",
+      "native_O0_and_O3": "FAIL"
+    },
+    {
+      "id": "test.test_binascii.BinASCIITest.test_uu",
+      "stock": "ok",
+      "native_O0_and_O3": "ERROR"
+    },
+    {
+      "id": "test.test_binascii.BytearrayBinASCIITest.test_b2a_base64_newline",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.BytearrayBinASCIITest.test_b2a_qp_a2b_qp_round_trip",
+      "stock": "skipped 'Hypothesis required for property test with no specified examples'",
+      "native_O0_and_O3": "skipped 'Hypothesis required for property test with no specified examples'"
+    },
+    {
+      "id": "test.test_binascii.BytearrayBinASCIITest.test_b2a_roundtrip",
+      "stock": "skipped 'Hypothesis required for property test with no specified examples'",
+      "native_O0_and_O3": "skipped 'Hypothesis required for property test with no specified examples'"
+    },
+    {
+      "id": "test.test_binascii.BytearrayBinASCIITest.test_base64_excess_data",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.BytearrayBinASCIITest.test_base64_roundtrip",
+      "stock": "skipped 'Hypothesis required for property test with no specified examples'",
+      "native_O0_and_O3": "skipped 'Hypothesis required for property test with no specified examples'"
+    },
+    {
+      "id": "test.test_binascii.BytearrayBinASCIITest.test_base64_strict_mode",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.BytearrayBinASCIITest.test_base64errors",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.BytearrayBinASCIITest.test_base64invalid",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.BytearrayBinASCIITest.test_base64valid",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.BytearrayBinASCIITest.test_c_contiguity",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.BytearrayBinASCIITest.test_crc32",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.BytearrayBinASCIITest.test_crc_hqx",
+      "stock": "ok",
+      "native_O0_and_O3": "ERROR"
+    },
+    {
+      "id": "test.test_binascii.BytearrayBinASCIITest.test_empty_string",
+      "stock": "ok",
+      "native_O0_and_O3": "ERROR"
+    },
+    {
+      "id": "test.test_binascii.BytearrayBinASCIITest.test_exceptions",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.BytearrayBinASCIITest.test_functions",
+      "stock": "ok",
+      "native_O0_and_O3": "FAIL"
+    },
+    {
+      "id": "test.test_binascii.BytearrayBinASCIITest.test_hex",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.BytearrayBinASCIITest.test_hex_roundtrip",
+      "stock": "skipped 'Hypothesis required for property test with no specified examples'",
+      "native_O0_and_O3": "skipped 'Hypothesis required for property test with no specified examples'"
+    },
+    {
+      "id": "test.test_binascii.BytearrayBinASCIITest.test_hex_separator",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.BytearrayBinASCIITest.test_qp",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.BytearrayBinASCIITest.test_returned_value",
+      "stock": "ok",
+      "native_O0_and_O3": "ERROR"
+    },
+    {
+      "id": "test.test_binascii.BytearrayBinASCIITest.test_unicode_a2b",
+      "stock": "ok",
+      "native_O0_and_O3": "ERROR"
+    },
+    {
+      "id": "test.test_binascii.BytearrayBinASCIITest.test_unicode_b2a",
+      "stock": "ok",
+      "native_O0_and_O3": "FAIL"
+    },
+    {
+      "id": "test.test_binascii.BytearrayBinASCIITest.test_uu",
+      "stock": "ok",
+      "native_O0_and_O3": "ERROR"
+    },
+    {
+      "id": "test.test_binascii.ChecksumBigBufferTestCase.test_big_buffer",
+      "stock": "skipped 'not enough memory: 4.0G minimum needed'",
+      "native_O0_and_O3": "skipped 'not enough memory: 4.0G minimum needed'"
+    },
+    {
+      "id": "test.test_binascii.MemoryviewBinASCIITest.test_b2a_base64_newline",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.MemoryviewBinASCIITest.test_b2a_qp_a2b_qp_round_trip",
+      "stock": "skipped 'Hypothesis required for property test with no specified examples'",
+      "native_O0_and_O3": "skipped 'Hypothesis required for property test with no specified examples'"
+    },
+    {
+      "id": "test.test_binascii.MemoryviewBinASCIITest.test_b2a_roundtrip",
+      "stock": "skipped 'Hypothesis required for property test with no specified examples'",
+      "native_O0_and_O3": "skipped 'Hypothesis required for property test with no specified examples'"
+    },
+    {
+      "id": "test.test_binascii.MemoryviewBinASCIITest.test_base64_excess_data",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.MemoryviewBinASCIITest.test_base64_roundtrip",
+      "stock": "skipped 'Hypothesis required for property test with no specified examples'",
+      "native_O0_and_O3": "skipped 'Hypothesis required for property test with no specified examples'"
+    },
+    {
+      "id": "test.test_binascii.MemoryviewBinASCIITest.test_base64_strict_mode",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.MemoryviewBinASCIITest.test_base64errors",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.MemoryviewBinASCIITest.test_base64invalid",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.MemoryviewBinASCIITest.test_base64valid",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.MemoryviewBinASCIITest.test_c_contiguity",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.MemoryviewBinASCIITest.test_crc32",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.MemoryviewBinASCIITest.test_crc_hqx",
+      "stock": "ok",
+      "native_O0_and_O3": "ERROR"
+    },
+    {
+      "id": "test.test_binascii.MemoryviewBinASCIITest.test_empty_string",
+      "stock": "ok",
+      "native_O0_and_O3": "ERROR"
+    },
+    {
+      "id": "test.test_binascii.MemoryviewBinASCIITest.test_exceptions",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.MemoryviewBinASCIITest.test_functions",
+      "stock": "ok",
+      "native_O0_and_O3": "FAIL"
+    },
+    {
+      "id": "test.test_binascii.MemoryviewBinASCIITest.test_hex",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.MemoryviewBinASCIITest.test_hex_roundtrip",
+      "stock": "skipped 'Hypothesis required for property test with no specified examples'",
+      "native_O0_and_O3": "skipped 'Hypothesis required for property test with no specified examples'"
+    },
+    {
+      "id": "test.test_binascii.MemoryviewBinASCIITest.test_hex_separator",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.MemoryviewBinASCIITest.test_qp",
+      "stock": "ok",
+      "native_O0_and_O3": "ok"
+    },
+    {
+      "id": "test.test_binascii.MemoryviewBinASCIITest.test_returned_value",
+      "stock": "ok",
+      "native_O0_and_O3": "ERROR"
+    },
+    {
+      "id": "test.test_binascii.MemoryviewBinASCIITest.test_unicode_a2b",
+      "stock": "ok",
+      "native_O0_and_O3": "ERROR"
+    },
+    {
+      "id": "test.test_binascii.MemoryviewBinASCIITest.test_unicode_b2a",
+      "stock": "ok",
+      "native_O0_and_O3": "FAIL"
+    },
+    {
+      "id": "test.test_binascii.MemoryviewBinASCIITest.test_uu",
+      "stock": "ok",
+      "native_O0_and_O3": "ERROR"
+    }
+  ]
+}
