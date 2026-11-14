@@ -433,18 +433,6 @@ impl Callback {
         {
             return Err(unsupported());
         }
-        // The creator already selected defaults and supplied operands in parameter order.
-        let mut keywords = Vec::new();
-        keywords
-            .try_reserve_exact(parameters.keyword_only.len())
-            .map_err(|_| Error::new("MemoryError", ""))?;
-        for (name, value) in parameters
-            .keyword_only
-            .iter()
-            .zip(slots.drain(parameters.positional.len()..))
-        {
-            keywords.push((copy_label(name)?, value));
-        }
         ctx.heap.observe_fault_workers(fault_workers);
         Ok(move |published, detached_label| {
             let result = if published {
@@ -454,7 +442,12 @@ impl Callback {
                         &raw mut ctx,
                         mark,
                         function,
-                        |ctx| ctx.prepare_call(function, slots, keywords),
+                        |ctx| {
+                            ctx.prepare_function_call(
+                                function,
+                                super::calls::FunctionArguments::Bound(slots),
+                            )
+                        },
                         Context::finish_call_operands,
                     )
                 }
