@@ -2978,15 +2978,27 @@ impl Session {
     }
 
     /// Check explicit source signatures before choosing a representation.
-    pub(crate) fn check_closed_program(
-        &mut self,
-        modules: &[impl ClosedSource],
-        skipped: Option<&[Vec<TextRange>]>,
-        overloads: &[Vec<CheckedDiagnostic>],
-        native: Option<&crate::frontend::phase::Diagnostic>,
-    ) -> Result<(), String> {
-        self.set_closed_program_rules();
-        self.closed_program_errors(modules, skipped, overloads, native)
+    /// Borrow the rule-enabled owner of the current source revision.
+    pub(crate) fn closed_program_session<'a>(
+        &'a mut self,
+        cache: Option<&'a mut AnalysisCache>,
+        inputs: &crate::SourceInputs,
+    ) -> Result<&'a Self, String> {
+        let Some(cache) = cache else {
+            self.set_closed_program_rules();
+            return Ok(self);
+        };
+        if let Some(prior) = &mut cache.closed_diagnostics
+            && prior.same_files(self, inputs)
+        {
+            prior.update(self, inputs)?;
+        } else {
+            // Layouts may retain a quiet handle to the lowering database.
+            let mut session = self.diagnostic_copy()?;
+            session.set_closed_program_rules();
+            cache.closed_diagnostics = Some(CachedSession::new(session, inputs));
+        }
+        Ok(&cache.closed_diagnostics.as_ref().unwrap().session)
     }
 
     pub(crate) fn set_closed_program_rules(&mut self) {
@@ -3090,7 +3102,7 @@ impl Session {
         });
     }
 
-    fn closed_program_errors(
+    pub(crate) fn closed_program_errors(
         &self,
         modules: &[impl ClosedSource],
         skipped: Option<&[Vec<TextRange>]>,
@@ -4910,30 +4922,6 @@ impl AnalysisCache {
             // An error can stop lowering before the program reaches its first hint.
             self.hints = None;
         }
-    }
-
-    pub(crate) fn check_closed_program(
-        &mut self,
-        fresh: &mut Session,
-        inputs: &crate::SourceInputs,
-        modules: &[crate::modules::SourceModule],
-        skipped: Option<&[Vec<TextRange>]>,
-        overloads: &[Vec<CheckedDiagnostic>],
-        native: Option<&crate::frontend::phase::Diagnostic>,
-    ) -> Result<(), String> {
-        if let Some(cached) = &mut self.closed_diagnostics
-            && cached.same_files(fresh, inputs)
-        {
-            cached.update(fresh, inputs)?;
-            return cached
-                .session
-                .closed_program_errors(modules, skipped, overloads, native);
-        }
-        // The optional layout cache may retain a quiet handle to fresh's Salsa storage.
-        let mut session = fresh.diagnostic_copy()?;
-        let result = session.check_closed_program(modules, skipped, overloads, native);
-        self.closed_diagnostics = Some(CachedSession::new(session, inputs));
-        result
     }
 
     /// A registered program can select different imports from the fixed checker's graph.

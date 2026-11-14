@@ -1263,18 +1263,14 @@ fn checked_lower_with(
         })
     } else {
         let native = lowered.as_ref().err();
-        let checked = if let Some(compiler) = cache.as_deref_mut() {
-            compiler.cache.check_closed_program(
-                session,
+        let checked = session
+            .closed_program_session(
+                cache.as_deref_mut().map(|compiler| &mut compiler.cache),
                 &graph.inputs,
-                &graph.modules,
-                skipped,
-                &overloads,
-                native,
             )
-        } else {
-            session.check_closed_program(&graph.modules, skipped, &overloads, native)
-        };
+            .and_then(|owner| {
+                owner.closed_program_errors(&graph.modules, skipped, &overloads, native)
+            });
         // An inapplicable object representation cannot replace a native source or ABI
         // diagnostic. A real registration checks this result before emitting its body.
         graph.source_contract = Some(analysis::SourceContract::Checked(checked));
