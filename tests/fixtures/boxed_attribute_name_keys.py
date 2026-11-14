@@ -1,4 +1,48 @@
+def selected_method_during_comparison():
+    import gc
+    import weakref
+
+    events = []
+
+    class Owner:
+        def read(self, value):
+            assert receiver() is self and id(method()) == method_id
+            events.append("method")
+            return value
+
+    class Key:
+        def __hash__(self):
+            return hash("read")
+
+        def __eq__(self, name):
+            assert name == "read"
+            owners[0].__dict__.clear()
+            del Owner.read
+            gc.collect()
+            assert id(method()) == method_id
+            events.append("comparison")
+            return False
+
+    def argument():
+        owners.clear()
+        gc.collect()
+        assert receiver() is not None and id(method()) == method_id
+        events.append("argument")
+        return 41
+
+    owners = [Owner()]
+    receiver = weakref.ref(owners[0])
+    method = weakref.ref(Owner.read)
+    method_id = id(Owner.read)
+    owners[0].__dict__[Key()] = None
+    assert owners[0].read(argument()) == 41
+    assert events == ["comparison", "argument", "method"]
+    gc.collect()
+    assert receiver() is None and method() is None
+
+
 def current():
+    selected_method_during_comparison()
     class Key(str):
         def __hash__(self):
             return hash("payload")

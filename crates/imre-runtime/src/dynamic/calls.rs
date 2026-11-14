@@ -868,13 +868,17 @@ impl Context {
         }
         let key = original.expect("original Python name");
         if let Some(descriptor) = member {
-            if matches!(op, ObjectAttribute::Get) && self.data_descriptor(descriptor) {
-                return self.read_data_descriptor(descriptor, obj, class, |ctx| {
-                    match ctx.instance_namespace_for_name(obj, class, false) {
+            if matches!(op, ObjectAttribute::Get) {
+                return self.read_instance_member(
+                    descriptor,
+                    obj,
+                    class,
+                    &mut AttributeLookup::Value,
+                    |ctx| match ctx.instance_namespace_for_name(obj, class, false) {
                         Some(dict) => ctx.dictionary_field_with_key(dict, key),
                         None => Ok(None),
-                    }
-                });
+                    },
+                );
             }
             self.heap.keep(descriptor);
             if let ObjectAttribute::Edit(value) = op
@@ -913,11 +917,6 @@ impl Context {
                     return Ok(NONE);
                 }
             }
-        }
-        if matches!(op, ObjectAttribute::Get)
-            && let Some(member) = member
-        {
-            return self.bind_attribute(member, obj, class);
         }
         Err(self.missing_attribute(obj, &text))
     }
@@ -1386,24 +1385,85 @@ impl Context {
             || (self.slot(member, "__get__").is_some() && self.data_descriptor(member))
     }
 
-    /// A descriptor with only a setter or deleter yields to an instance field. Keep the
-    /// selected descriptor on a miss even if comparing dictionary keys replaces its class entry.
-    fn read_data_descriptor(
+    /// Keep the selected member through a dictionary comparison that can replace it.
+    fn read_instance_member(
         &mut self,
-        descriptor: Id,
+        member: Id,
         object: Id,
         class: Id,
+        lookup: &mut AttributeLookup<'_>,
         field: impl FnOnce(&mut Self) -> Result<Option<Id>>,
     ) -> Result<Id> {
         let mark = self.heap.temporary_mark();
         self.heap.reserve_temporaries(1)?;
-        self.heap.keep(descriptor);
-        let result = if self.readable_data_descriptor(descriptor) {
-            self.bind_attribute(descriptor, object, class)
+        self.heap.keep(member);
+        // A comparison can change the receiver's class or the implementation of an
+        // existing descriptor slot; it cannot give this read a previously absent slot.
+        let binds = self.heap.get(member).instance_class().is_none()
+            || self.slot(member, "__get__").is_some();
+        let result = if binds && self.data_descriptor(member) {
+            self.bind_attribute(member, object, class)
         } else {
-            field(self).map(|value| value.unwrap_or(descriptor))
+            field(self).and_then(|value| match value {
+                Some(value) => Ok(value),
+                None if !binds => Ok(member),
+                None => {
+                    let owner = self.exact_type(object)?;
+                    self.bind_instance_member(member, object, owner, lookup)
+                }
+            })
         };
+        if let AttributeLookup::Method(Some(receiver)) = lookup
+            && **receiver == object
+        {
+            // The callable already occupies the marked slot.
+            self.discard_temporaries(mark + 1, [object]);
+            return result;
+        }
         self.release_with_result(mark, result)
+    }
+
+    fn bind_instance_member(
+        &mut self,
+        member: Id,
+        obj: Id,
+        class: Id,
+        lookup: &mut AttributeLookup<'_>,
+    ) -> Result<Id> {
+        if let AttributeLookup::Method(Some(receiver)) = lookup
+            && match self.heap.get(member) {
+                Value::Function { .. } => true,
+                // Direct writelines calls use the defining descriptor in argument errors.
+                Value::IoMethod { name, .. } => *name != "writelines",
+                _ => false,
+            }
+        {
+            // The call target roots the callable. Its arguments can release the receiver.
+            self.heap.reserve_temporaries(1)?;
+            self.heap.keep(obj);
+            **receiver = obj;
+            return Ok(member);
+        }
+        if matches!(lookup, AttributeLookup::Method(_))
+            && match self.heap.get(member) {
+                Value::Native(symbol) => {
+                    !stdlib::datetime::clock_classmethod(symbol)
+                        && BuiltinDescriptor::lookup(symbol)
+                            .is_some_and(|slot| slot.class() != "classmethod_descriptor")
+                }
+                Value::IoMethod {
+                    name: "writelines", ..
+                } => true,
+                _ => false,
+            }
+        {
+            return Ok(self.alloc(Value::Method {
+                callable: member,
+                receiver: obj,
+                explicit: false,
+            }));
+        }
+        self.bind_attribute(member, obj, class)
     }
 
     /// Bind a Python method to the receiver selected by descriptor lookup.
@@ -3374,10 +3434,8 @@ impl Context {
             let field = if inline.is_none()
                 && let Some(dictionary) = namespace
             {
-                if let Some(member) = member
-                    && self.data_descriptor(member)
-                {
-                    return self.read_data_descriptor(member, obj, class, |ctx| {
+                if let Some(member) = member {
+                    return self.read_instance_member(member, obj, class, &mut lookup, |ctx| {
                         ctx.dictionary_field(Some(dictionary), name)
                     });
                 }
@@ -3387,40 +3445,8 @@ impl Context {
             };
             if field.is_none()
                 && let Some(member) = member
-                && let AttributeLookup::Method(Some(receiver)) = &mut lookup
-                && match self.heap.get(member) {
-                    Value::Function { .. } => true,
-                    // Direct writelines calls use the defining descriptor in argument errors.
-                    Value::IoMethod { name, .. } => *name != "writelines",
-                    _ => false,
-                }
             {
-                // The call target roots the callable. Its arguments can release the receiver.
-                self.heap.reserve_temporaries(1)?;
-                self.heap.keep(obj);
-                **receiver = obj;
-                return Ok(member);
-            }
-            if matches!(lookup, AttributeLookup::Method(_))
-                && field.is_none()
-                && let Some(member) = member
-                && match self.heap.get(member) {
-                    Value::Native(symbol) => {
-                        !stdlib::datetime::clock_classmethod(symbol)
-                            && BuiltinDescriptor::lookup(symbol)
-                                .is_some_and(|slot| slot.class() != "classmethod_descriptor")
-                    }
-                    Value::IoMethod {
-                        name: "writelines", ..
-                    } => true,
-                    _ => false,
-                }
-            {
-                return Ok(self.alloc(Value::Method {
-                    callable: member,
-                    receiver: obj,
-                    explicit: false,
-                }));
+                return self.bind_instance_member(member, obj, class, &mut lookup);
             }
             return self.resolved_instance_attribute(obj, class, field, name, member);
         }
