@@ -43,14 +43,14 @@ impl DefinitionOperands {
 impl CompiledDefinition {
     pub(crate) fn new(
         code: String,
-        signature: serde_json::Value,
+        signature: String,
         name: &str,
         qualname: String,
         annotation_scope: bool,
     ) -> Self {
         Self {
             code,
-            signature: signature.to_string(),
+            signature,
             name: name.to_owned(),
             qualname,
             annotation_scope,

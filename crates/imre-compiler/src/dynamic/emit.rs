@@ -1329,7 +1329,7 @@ impl Function<'_, '_, '_> {
         if doc.is_some() {
             flags |= imre_ast::code_flags::HAS_DOCSTRING;
         }
-        let signature = metadata.signature(flags, direct_method);
+        let signature = metadata.serialized_signature(flags, direct_method);
         if !matches!(callable, Callable::Generator(_)) {
             self.frame
                 .output
@@ -1439,7 +1439,7 @@ impl Function<'_, '_, '_> {
             format_evaluator: evaluator_scope.is_some(),
             ..CompiledDefinition::new(
                 code,
-                signature,
+                signature.to_string(),
                 name,
                 qualname,
                 class_header.is_some() || evaluator_scope.is_some(),
@@ -1604,7 +1604,13 @@ impl SourceMap<'_> {
             true,
             Some((start, 0)),
         );
-        CompiledDefinition::new(code, signature, "__annotate__", qualname, annotation_scope)
+        CompiledDefinition::new(
+            code,
+            signature.to_string(),
+            "__annotate__",
+            qualname,
+            annotation_scope,
+        )
     }
 
     fn define_module_annotations(
