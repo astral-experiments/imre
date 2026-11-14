@@ -102,42 +102,44 @@ pub(super) struct Acquire {
     timeout: Option<Duration>,
 }
 
-enum Lock {
+pub(super) enum Lock {
     Primitive(Arc<PrimitiveLock>),
     Reentrant(Arc<HandlerLock>),
 }
 
-pub(super) enum NativeWait {
-    Acquire(Option<Duration>),
-    Join(Option<Deadline>),
+pub(super) enum NativeWait<'a> {
+    Acquire(Option<Duration>, Id, &'a mut Lock),
+    Join(Option<Deadline>, &'a super::thread_worker::Handle),
 }
 
-impl NativeWait {
+impl NativeWait<'_> {
+    fn wait(&self, limit: Option<Duration>, phase: WaitPhase) -> bool {
+        match self {
+            Self::Acquire(_, _, lock) => lock.acquire(true, limit, phase),
+            Self::Join(_, handle) => handle.wait_for_exit(limit),
+        }
+    }
+
     /// # Safety
-    /// The caller owns the interrupted context and frame. The native wait must release
-    /// its native locks before returning and must hold no references to the Python heap.
-    pub(super) unsafe fn run(
-        self,
-        _context: *mut Context,
-        mut wait: impl FnMut(Option<Duration>, WaitPhase) -> bool,
-    ) -> Result<bool> {
+    /// The caller owns the interrupted context and roots the receiver until this returns.
+    pub(super) unsafe fn run(mut self, _context: *mut Context) -> Result<bool> {
         #[cfg(unix)]
         if crate::signals::is_main() {
-            let deadline = match self {
-                Self::Acquire(timeout) => timeout.map(Deadline::after),
-                Self::Join(deadline) => deadline,
+            let deadline = match &self {
+                Self::Acquire(timeout, ..) => timeout.map(Deadline::after),
+                Self::Join(deadline, _) => *deadline,
             };
             let interval = Duration::from_millis(50);
             let mut phase = WaitPhase::Initial;
             loop {
                 let remaining = deadline.map(Deadline::remaining);
                 let slice = remaining.map_or(interval, |left| left.min(interval));
-                if wait(Some(slice), phase) {
+                if self.wait(Some(slice), phase) {
                     return Ok(true);
                 }
                 // An expired join returns immediately. A lock wait interrupted during
                 // a positive slice dispatches first, then probes the lock once more.
-                if matches!(self, Self::Join(_))
+                if matches!(self, Self::Join(..))
                     && deadline.is_some_and(|end| end.remaining().is_zero())
                 {
                     return Ok(false);
@@ -147,19 +149,23 @@ impl NativeWait {
                 {
                     // SAFETY: the wait released its native locks before returning to this frame.
                     unsafe { Context::dispatch_pending_calls(_context)? };
+                    if let Self::Acquire(_, receiver, lock) = &mut self {
+                        // A returning signal handler may have reset the lock in a forked child.
+                        **lock = Lock::backing(unsafe { &*_context }, *receiver);
+                    }
                     phase = WaitPhase::Interrupted;
                     continue;
                 }
-                if matches!(self, Self::Acquire(_)) && remaining == Some(slice) {
+                if matches!(self, Self::Acquire(..)) && remaining == Some(slice) {
                     return Ok(false);
                 }
                 phase = WaitPhase::Parked;
             }
         }
-        Ok(wait(
-            match self {
-                Self::Acquire(timeout) => timeout,
-                Self::Join(deadline) => deadline.map(Deadline::remaining),
+        Ok(self.wait(
+            match &self {
+                Self::Acquire(timeout, ..) => *timeout,
+                Self::Join(deadline, _) => deadline.map(Deadline::remaining),
             },
             WaitPhase::Initial,
         ))
@@ -216,8 +222,7 @@ impl Acquire {
     /// The interrupted caller roots the selected receiver through the call.
     pub(super) unsafe fn run_registered(self, context: *mut Context) -> Result<Id> {
         // SAFETY: conversion has finished. Only the native backing crosses a blocking wait.
-        let backing = || Lock::backing(unsafe { &*context }, self.receiver);
-        let mut lock = backing();
+        let mut lock = Lock::backing(unsafe { &*context }, self.receiver);
         if !self.blocking {
             return Ok(boolean(lock.acquire(
                 self.blocking,
@@ -225,17 +230,9 @@ impl Acquire {
                 WaitPhase::Initial,
             )));
         }
-        // SAFETY: a Python handler returns to the same caller frame before the next probe.
-        unsafe {
-            NativeWait::Acquire(self.timeout).run(context, |limit, phase| {
-                if phase == WaitPhase::Interrupted {
-                    // A returning handler can resume in a forked child with a reset backing.
-                    lock = backing();
-                }
-                lock.acquire(true, limit, phase)
-            })
-        }
-        .map(boolean)
+        // SAFETY: the registered caller roots the receiver across possible signal delivery.
+        unsafe { NativeWait::Acquire(self.timeout, self.receiver, &mut lock).run(context) }
+            .map(boolean)
     }
 }
 
