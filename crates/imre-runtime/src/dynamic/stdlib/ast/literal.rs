@@ -310,9 +310,9 @@ fn convert(ctx: &mut Context, node: Id, depth: usize) -> Result<Id> {
     signed_number(ctx, node)
 }
 
-/// A fresh Expression and Constant may be elided only when field access and finalization are ordinary.
-pub(super) fn plain_string_fields(ctx: &Context) -> bool {
-    [("ast.Expression", "body"), ("ast.Constant", "value")].into_iter().all(|(name, field)| {
+/// Elide fresh nodes only when their field reads and finalization are ordinary.
+pub(super) fn plain_fields(ctx: &Context, sequence: Option<&str>) -> bool {
+    [("ast.Expression", "body"), ("ast.Constant", "value")].into_iter().chain(sequence.map(|name| (name, "elts"))).all(|(name, field)| {
         let class = ctx.builtins[name];
         ctx.class_attr(class, field).is_none()
             && ctx.class_attr(class, "__del__").is_none()

@@ -907,6 +907,69 @@ impl Parser<'_> {
         })
     }
 
+    /// Decode a Ruff literal using the same values for ast.parse and literal_eval.
+    fn constant_value(&mut self, value: ast::LiteralExpressionRef<'_>) -> Result<Id> {
+        use ast::LiteralExpressionRef as Literal;
+        Ok(match value {
+            Literal::StringLiteral(v) => self.string_value(v)?,
+            Literal::BytesLiteral(v) => self.ctx.alloc(Value::Bytes(v.value.bytes().collect())),
+            Literal::NoneLiteral(_) => NONE,
+            Literal::BooleanLiteral(v) => {
+                if v.value {
+                    TRUE
+                } else {
+                    FALSE
+                }
+            }
+            Literal::EllipsisLiteral(_) => ELLIPSIS,
+            Literal::NumberLiteral(v) => {
+                let number = match &v.value {
+                    ast::Number::Int(n) => {
+                        let n = crate::parse_integer_literal(&n.to_string())
+                            .ok_or_else(|| Error::new("ValueError", "invalid integer literal"))?;
+                        Value::Int(crate::Int::new(n))
+                    }
+                    ast::Number::Float(n) => Value::Float(*n),
+                    ast::Number::Complex { real, imag } => Value::Complex(Complex {
+                        real: *real,
+                        imag: *imag,
+                    }),
+                };
+                self.ctx.alloc(number)
+            }
+        })
+    }
+
+    /// Elide temporary AST instances for a constant or a flat list or tuple of constants.
+    fn direct_literal(&mut self, expr: &ast::Expr) -> Result<Option<Id>> {
+        if let Some(value) = expr.as_literal_expr() {
+            return if super::literal::plain_fields(self.ctx, None) {
+                self.constant_value(value).map(Some)
+            } else {
+                Ok(None)
+            };
+        }
+        let (class, elts) = match expr {
+            ast::Expr::List(v) => ("ast.List", &v.elts),
+            ast::Expr::Tuple(v) => ("ast.Tuple", &v.elts),
+            _ => return Ok(None),
+        };
+        if !elts.iter().all(ast::Expr::is_literal_expr)
+            || !super::literal::plain_fields(self.ctx, Some(class))
+        {
+            return Ok(None);
+        }
+        let values = elts
+            .iter()
+            .map(|elt| self.constant_value(elt.as_literal_expr().unwrap()))
+            .collect::<Result<_>>()?;
+        Ok(Some(if matches!(expr, ast::Expr::Tuple(_)) {
+            self.ctx.heap.packed_tuple(values, false)
+        } else {
+            self.list(values)
+        }))
+    }
+
     fn expr(&mut self, e: ast::Expr) -> Result<Id> {
         stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || self.expr_inner(e))
     }
@@ -957,28 +1020,8 @@ impl Parser<'_> {
             Expr::TString(mut v) if !self.literal => {
                 ("TemplateStr", vec![self.template_values(&mut v)?])
             }
-            Expr::StringLiteral(v) => ("Constant", vec![self.string_value(&v)?, NONE]),
-            Expr::BytesLiteral(v) => (
-                "Constant",
-                vec![
-                    self.ctx.alloc(Value::Bytes(v.value.bytes().collect())),
-                    NONE,
-                ],
-            ),
-            Expr::EllipsisLiteral(_) => ("Constant", vec![ELLIPSIS, NONE]),
-            Expr::NoneLiteral(_) => ("Constant", vec![NONE, NONE]),
-            Expr::BooleanLiteral(v) => ("Constant", vec![if v.value { TRUE } else { FALSE }, NONE]),
-            Expr::NumberLiteral(v) => {
-                let number = match v.value {
-                    ast::Number::Int(n) => {
-                        let n = crate::parse_integer_literal(&n.to_string())
-                            .ok_or_else(|| Error::new("ValueError", "invalid integer literal"))?;
-                        Value::Int(crate::Int::new(n))
-                    }
-                    ast::Number::Float(n) => Value::Float(n),
-                    ast::Number::Complex { real, imag } => Value::Complex(Complex { real, imag }),
-                };
-                ("Constant", vec![self.ctx.alloc(number), NONE])
+            ref expr if let Some(value) = expr.as_literal_expr() => {
+                ("Constant", vec![self.constant_value(value)?, NONE])
             }
             Expr::BoolOp(v) if !self.literal => {
                 let op = self.ctx.builtins[match v.op {
@@ -1270,11 +1313,8 @@ fn parse_source(
             })?;
             parser.prepare_strings(source, expr.tokens(), expr.syntax())?;
             let expr = *expr.into_syntax().body;
-            if literal
-                && let ast::Expr::StringLiteral(text) = &expr
-                && super::literal::plain_string_fields(parser.ctx)
-            {
-                return parser.string_value(text);
+            if literal && let Some(value) = parser.direct_literal(&expr)? {
+                return Ok(value);
             }
             let body = parser.expr(expr)?;
             let expression = parsed_instance(parser.ctx, "Expression", &[body], None);
