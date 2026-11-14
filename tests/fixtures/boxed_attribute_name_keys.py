@@ -76,6 +76,19 @@ def current():
         assert not hasattr(receiver, "saved")
         assert not receiver.__dict__
 
+    query = "".join(("dynamic_", "field"))
+
+    class StoredKey(str):
+        __hash__ = str.__hash__
+
+        def __eq__(self, other):
+            assert other is query
+            return str.__eq__(self, other)
+
+    receiver = Fields()
+    receiver.__dict__[StoredKey(query)] = 37
+    assert getattr(receiver, query) == 37
+
     class Packet(bytes):
         pass
 

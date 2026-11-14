@@ -853,18 +853,26 @@ impl Context {
         );
         // Compiled literal names use the existing inline-field and native-type fast paths.
         // A Python name must run the same descriptor operation even when its spelling was supplied.
-        if !ordinary && matches!(op, ObjectAttribute::Get) {
-            return self.default_attr(obj, name, AttributeLookup::Value);
-        }
+        let default = |ctx: &mut Self| match op {
+            ObjectAttribute::Get => ctx.default_attr(
+                obj,
+                AttributeName::from_lookup(&text, original),
+                AttributeLookup::Value,
+            ),
+            ObjectAttribute::Edit(Some(value)) => {
+                ctx.default_set_attr(obj, &text, value).map(|_| NONE)
+            }
+            ObjectAttribute::Edit(None) => ctx.default_delete_attr(obj, &text).map(|_| NONE),
+        };
         if !ordinary || original.is_none() {
-            return self.default_text_attribute(obj, &text, op);
+            return default(self);
         }
         let class = self.exact_type(obj)?;
         let member = self.class_attr_with_name(class, name);
         // Exact strings with no published member retain the existing specialized builtins
         // and the inline namespace used by ordinary source assignments.
         if name.nonexact_key(self).is_none() && (member.is_none() || text == "__qualname__") {
-            return self.default_text_attribute(obj, &text, op);
+            return default(self);
         }
         let key = original.expect("original Python name");
         if let Some(descriptor) = member {
@@ -919,16 +927,6 @@ impl Context {
             }
         }
         Err(self.missing_attribute(obj, &text))
-    }
-
-    fn default_text_attribute(&mut self, obj: Id, text: &str, op: ObjectAttribute) -> Result<Id> {
-        match op {
-            ObjectAttribute::Get => self.default_get_attr(obj, text),
-            ObjectAttribute::Edit(Some(value)) => {
-                self.default_set_attr(obj, text, value).map(|_| NONE)
-            }
-            ObjectAttribute::Edit(None) => self.default_delete_attr(obj, text).map(|_| NONE),
-        }
     }
 
     /// Assign or delete a local naming attribute without changing the generic alias's origin.
@@ -3431,12 +3429,14 @@ impl Context {
             let field = if inline.is_none()
                 && let Some(dictionary) = namespace
             {
+                let read_field = |ctx: &mut Context| {
+                    let key = attr.key(ctx);
+                    ctx.dictionary_field_with_key(dictionary, key)
+                };
                 if let Some(member) = member {
-                    return self.read_instance_member(member, obj, class, &mut lookup, |ctx| {
-                        ctx.dictionary_field(Some(dictionary), name)
-                    });
+                    return self.read_instance_member(member, obj, class, &mut lookup, read_field);
                 }
-                self.dictionary_field(Some(dictionary), name)?
+                read_field(self)?
             } else {
                 inline
             };
