@@ -1,0 +1,2328 @@
+[
+  {
+    "schema": "imre.cpython-stdlib.native-evidence/v1",
+    "suite": "test.test_context",
+    "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "platform": "linux",
+    "opt_level": 0,
+    "denominator": 56,
+    "distinct_ids": 56,
+    "counts": {
+      "failed": 8,
+      "fully-native": 25,
+      "unexpected-skip": 23
+    },
+    "records": [
+      {
+        "id": "test.test_context.ContextTest.test_context_var_new_1",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "failure",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "reason": "AssertionError: \"takes exactly 1\" does not match \"invalid arguments to ContextVar\"",
+        "evidence": {
+          "method_sha256": "256f8bb0fd31f95701725d22d556da6528d4f2b0b420600d7468c628ed0a747a",
+          "stderr_line": 24
+        },
+        "classification": "failed"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_var_repr_1",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "2c68152a7bcc1daff3d97123dd1c11d23cebe589becaeae6a67534f29874995f",
+          "stderr_line": 25,
+          "operation": "ContextTest.test_context_var_repr_1",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_token_repr_1",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "eb39c1daaf0c6fdd4f4827587383029e8937ab0f10964ddb1d9e1b2e89047701",
+          "stderr_line": 33,
+          "operation": "ContextTest.test_token_repr_1",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_subclassing_1",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "03b17db9999d09c5d1ec0e292878bf80a803dd583ebc9e98ff41bcea6d127481",
+          "stderr_line": 20,
+          "operation": "ContextTest.test_context_subclassing_1",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_new_1",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "failure",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "reason": "AssertionError: \"any arguments\" does not match \"invalid arguments to Context\"",
+        "evidence": {
+          "method_sha256": "44599f147eb9153c01aacac8e2bcdf013c1142c0ca166de8719225cc2afb58ae",
+          "stderr_line": 11
+        },
+        "classification": "failed"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_new_unhashable_str_subclass",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "failure",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "reason": "AssertionError: \"unhashable type\" does not match \"context variable name must be a str\"",
+        "evidence": {
+          "method_sha256": "6ecbd423f4e6955caa26a4c0cc1b26c29312ba90a798a6fd10842a46a5b932b8",
+          "stderr_line": 12
+        },
+        "classification": "failed"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_typerrors_1",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "bbdad0c8c7fe0cb2c3fdac6daa88a56b7377a2e3043d8e42833f747acecfc537",
+          "stderr_line": 23,
+          "operation": "ContextTest.test_context_typerrors_1",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_get_context_1",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "cd9c8b4c86d94a2e60e1214cf1454d450eb873cf7a8a6a9d84bf3f5cb9f3a8ce",
+          "stderr_line": 4,
+          "operation": "ContextTest.test_context_get_context_1",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_run_1",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "failure",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "reason": "AssertionError: \"missing 1 required\" does not match \"invalid arguments to Context.run\"",
+        "evidence": {
+          "method_sha256": "9dca760176b9d4fdd0f6a7ebb16157979a0afab27e88e284769341cb2d4dde72",
+          "stderr_line": 13
+        },
+        "classification": "failed"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_run_2",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "294eafbe4c318cc6c3cf8659db9c32aa56bdd4bf93e0c95208b8780e99f47f3f",
+          "stderr_line": 14,
+          "operation": "ContextTest.test_context_run_2",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_run_3",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "0176c7cfb0d4f5609777eabfb661a870d7ccc2f6cd83092cedb8750c2eb655a6",
+          "stderr_line": 15,
+          "operation": "ContextTest.test_context_run_3",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_run_4",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "6ead03af8f9569f6098498fb7334da3ee6b7957d11922f124fc4ac7b908cf8b8",
+          "stderr_line": 16,
+          "operation": "ContextTest.test_context_run_4",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_run_5",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "0e265414e60e93df005d834df2112fa18b730da8e083b2ae5f9ad772b57d1d27",
+          "stderr_line": 17,
+          "operation": "ContextTest.test_context_run_5",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_run_6",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "73d7eda9b4fce3866137dcf679fe92ac17a2aa8ca61aaf5b70b99b73c8bff9fb",
+          "stderr_line": 18,
+          "operation": "ContextTest.test_context_run_6",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_run_7",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "8c62ee615931d3c40e06728ed0df5bde315ea12542f90fc9a5baca53c0cb1505",
+          "stderr_line": 19,
+          "operation": "ContextTest.test_context_run_7",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_getset_1",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "error",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "reason": "AttributeError: '_contextvars.Token' object has no attribute 'MISSING'",
+        "evidence": {
+          "method_sha256": "a86f25ea883f37d8522e0fe997face1cd71689c0af34e4d7e4fdad950c8c23fe",
+          "stderr_line": 5
+        },
+        "classification": "failed"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_getset_2",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "6fdd0b948c5ba046061390ef10bb21efb5f3330b32abd92be9012d164647de33",
+          "stderr_line": 6,
+          "operation": "ContextTest.test_context_getset_2",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_getset_3",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "ed02fae1ae5a46b5706224bde70929442ad7c764e31eec783a2e4c088a6647bf",
+          "stderr_line": 7,
+          "operation": "ContextTest.test_context_getset_3",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_getset_4",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "4c504f883ece12810d88c37d9509ff435381f69511e82e8ad335e916b471b2d5",
+          "stderr_line": 8,
+          "operation": "ContextTest.test_context_getset_4",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_getset_5",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "6d7c352b9d8afaaa1e568d75c900b2bffe60b14a1f71f5882daa30bb6e01f757",
+          "stderr_line": 9,
+          "operation": "ContextTest.test_context_getset_5",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_copy_1",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "6d9416997750f33caff8b6277e5dd5d8f6dbe3fd1ec753128775446b0958b464",
+          "stderr_line": 1,
+          "operation": "ContextTest.test_context_copy_1",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_isinstance",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "failure",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "reason": "AssertionError: <_contextvars.Context object at 0x9401> is not an instance of <class 'collections.abc.Mapping'>",
+        "evidence": {
+          "method_sha256": "4159594f79e0aa97419dfb1c9cfa7fca449d0ee6cdc22d0ec42bbc59aa1ad8bb",
+          "stderr_line": 10
+        },
+        "classification": "failed"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_threads_1",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "error",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "reason": "NotImplementedError: this thread target cannot run independently of the boxed Python heap",
+        "evidence": {
+          "method_sha256": "4c4686c158d5f2fb9ff92526f7c9aef6d5e019bf76430b1e1b27b65fedce8bb8",
+          "stderr_line": 22
+        },
+        "classification": "failed"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_thread_inherit",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "error",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "reason": "NotImplementedError: this thread target cannot run independently of the boxed Python heap",
+        "evidence": {
+          "method_sha256": "6c925b38415434dad324a6f3107eca92572a1edaf2ca3a9b11e6291d213345b2",
+          "stderr_line": 21
+        },
+        "classification": "failed"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_token_contextmanager_with_default",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "29f175506531c2eac48a6c59f1e4be3bc80e6eb7948f75decc9748b82653761e",
+          "stderr_line": 29,
+          "operation": "ContextTest.test_token_contextmanager_with_default",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_token_contextmanager_without_default",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "5d6d4bf6f2f492814a16ab962f071dbc012b85eb31cf06025947b7710d4fb250",
+          "stderr_line": 32,
+          "operation": "ContextTest.test_token_contextmanager_without_default",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_token_contextmanager_on_exception",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "f2a11616c7a0032627de6363841a3ab3cc7f641c9ba7c4badcfbf3bb80e9cf96",
+          "stderr_line": 27,
+          "operation": "ContextTest.test_token_contextmanager_on_exception",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_token_contextmanager_reentrant",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "6614bf37c95bbb926bb70bd42a5fd610f5d2a9d1d1f8b240ce0770bb9d15d115",
+          "stderr_line": 28,
+          "operation": "ContextTest.test_token_contextmanager_reentrant",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_token_contextmanager_multiple_c_set",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "b1f13d5b39667629ca922df4cb9aa8b909cdef2c9937d20b4d505f9602607689",
+          "stderr_line": 26,
+          "operation": "ContextTest.test_token_contextmanager_multiple_c_set",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_token_contextmanager_with_explicit_reset_the_same_token",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "2822a25c5dd0ec4286ba53a153b68aa7cc1159e4de7678288a72360d1255e590",
+          "stderr_line": 31,
+          "operation": "ContextTest.test_token_contextmanager_with_explicit_reset_the_same_token",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_token_contextmanager_with_explicit_reset_another_token",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "18d6accb6e6a8c8c29b2ba85c9b5e9bbf8fa50869b87e54d075bd6a53027bb3d",
+          "stderr_line": 30,
+          "operation": "ContextTest.test_token_contextmanager_with_explicit_reset_another_token",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_eq_reentrant_contextvar_set",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "e4adcb140afdb16976a5ddf402f8aa1b68e4a2cfc6c793124d9f0b774f5b3853",
+          "stderr_line": 2,
+          "operation": "ContextTest.test_context_eq_reentrant_contextvar_set",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_eq_reentrant_contextvar_set_in_hash",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "3c3e9575b2eb38c2be38c40138667912448ac34051dd6beb2c08c431391cbe34",
+          "stderr_line": 3,
+          "operation": "ContextTest.test_context_eq_reentrant_contextvar_set_in_hash",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.HamtTest.test_hashkey_helper_1",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.HamtTest",
+        "reference": "pass",
+        "outcome": "skip",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "imre"
+        },
+        "reason": "_testinternalcapi.hamt() not available",
+        "evidence": {
+          "method_sha256": "64c20f6d36de8fa258c9cbe9582fcecb66084ac34dc79df8de1bb6670a65ab8c",
+          "stderr_line": 56
+        },
+        "classification": "unexpected-skip"
+      },
+      {
+        "id": "test.test_context.HamtTest.test_hamt_basics_1",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.HamtTest",
+        "reference": "pass",
+        "outcome": "skip",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "imre"
+        },
+        "reason": "_testinternalcapi.hamt() not available",
+        "evidence": {
+          "method_sha256": "c820a872b17525f81d50f1534a86e0fef81f70e70dda81d915b1e23c45adbc74",
+          "stderr_line": 34
+        },
+        "classification": "unexpected-skip"
+      },
+      {
+        "id": "test.test_context.HamtTest.test_hamt_basics_2",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.HamtTest",
+        "reference": "pass",
+        "outcome": "skip",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "imre"
+        },
+        "reason": "_testinternalcapi.hamt() not available",
+        "evidence": {
+          "method_sha256": "38c3b43643db7ff822ec9c34450b8233a4f6be25b46733c39659bdeb9bdf8c30",
+          "stderr_line": 35
+        },
+        "classification": "unexpected-skip"
+      },
+      {
+        "id": "test.test_context.HamtTest.test_hamt_basics_3",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.HamtTest",
+        "reference": "pass",
+        "outcome": "skip",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "imre"
+        },
+        "reason": "_testinternalcapi.hamt() not available",
+        "evidence": {
+          "method_sha256": "2ffa70cc1899c4738367872072e391f101a89e735885217fbf3eff9141691a43",
+          "stderr_line": 36
+        },
+        "classification": "unexpected-skip"
+      },
+      {
+        "id": "test.test_context.HamtTest.test_hamt_basics_4",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.HamtTest",
+        "reference": "pass",
+        "outcome": "skip",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "imre"
+        },
+        "reason": "_testinternalcapi.hamt() not available",
+        "evidence": {
+          "method_sha256": "102b4dcb284a0ead1294c3826e7e5bf3a859b539480ad0ac0299ad5d6b1d5999",
+          "stderr_line": 37
+        },
+        "classification": "unexpected-skip"
+      },
+      {
+        "id": "test.test_context.HamtTest.test_hamt_collision_1",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.HamtTest",
+        "reference": "pass",
+        "outcome": "skip",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "imre"
+        },
+        "reason": "_testinternalcapi.hamt() not available",
+        "evidence": {
+          "method_sha256": "9b7bd3a96896cbfd0a1284d24ce7553a6ecb422a3c2f090105697538e5ab0013",
+          "stderr_line": 38
+        },
+        "classification": "unexpected-skip"
+      },
+      {
+        "id": "test.test_context.HamtTest.test_hamt_collision_3",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.HamtTest",
+        "reference": "pass",
+        "outcome": "skip",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "imre"
+        },
+        "reason": "_testinternalcapi.hamt() not available",
+        "evidence": {
+          "method_sha256": "92c59fff315c4b186aebf7b9ae068b6ff5b1a911c98091a729a6272f178a619d",
+          "stderr_line": 39
+        },
+        "classification": "unexpected-skip"
+      },
+      {
+        "id": "test.test_context.HamtTest.test_hamt_stress",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.HamtTest",
+        "reference": {
+          "skipped": "resource 'cpu' is not enabled"
+        },
+        "outcome": "skip",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "imre"
+        },
+        "reason": "_testinternalcapi.hamt() not available",
+        "evidence": {
+          "method_sha256": "909233a5b4d32e6f829f6fb0b3691a1b80673d532e384cb61e585e40d95e1a57",
+          "stderr_line": 55
+        },
+        "classification": "unexpected-skip"
+      },
+      {
+        "id": "test.test_context.HamtTest.test_hamt_delete_1",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.HamtTest",
+        "reference": "pass",
+        "outcome": "skip",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "imre"
+        },
+        "reason": "_testinternalcapi.hamt() not available",
+        "evidence": {
+          "method_sha256": "a1e296fad9fd4685e7e4501f8243f35cfa8e9cd42a1a3878f1c94d45d5e4554c",
+          "stderr_line": 40
+        },
+        "classification": "unexpected-skip"
+      },
+      {
+        "id": "test.test_context.HamtTest.test_hamt_delete_2",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.HamtTest",
+        "reference": "pass",
+        "outcome": "skip",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "imre"
+        },
+        "reason": "_testinternalcapi.hamt() not available",
+        "evidence": {
+          "method_sha256": "5317f43640ba28b1783b1ed86bf9654ebd5d78843620bbc5494df79453aa6c86",
+          "stderr_line": 41
+        },
+        "classification": "unexpected-skip"
+      },
+      {
+        "id": "test.test_context.HamtTest.test_hamt_delete_3",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.HamtTest",
+        "reference": "pass",
+        "outcome": "skip",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "imre"
+        },
+        "reason": "_testinternalcapi.hamt() not available",
+        "evidence": {
+          "method_sha256": "c2d5aae7a0321b82a642c9ff92de5485e05ef4bb1eaf7ff1946bc09acb641198",
+          "stderr_line": 42
+        },
+        "classification": "unexpected-skip"
+      },
+      {
+        "id": "test.test_context.HamtTest.test_hamt_delete_4",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.HamtTest",
+        "reference": "pass",
+        "outcome": "skip",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "imre"
+        },
+        "reason": "_testinternalcapi.hamt() not available",
+        "evidence": {
+          "method_sha256": "05fdb93576765ad2b14be3720eb8eeed51ea320e3d34a529bb7a1aa5d758c25b",
+          "stderr_line": 43
+        },
+        "classification": "unexpected-skip"
+      },
+      {
+        "id": "test.test_context.HamtTest.test_hamt_delete_5",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.HamtTest",
+        "reference": "pass",
+        "outcome": "skip",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "imre"
+        },
+        "reason": "_testinternalcapi.hamt() not available",
+        "evidence": {
+          "method_sha256": "d7042034dd3a269e2ab7e6d2a5090bbe29395431ab90f0fc34c7575d4c9fc263",
+          "stderr_line": 44
+        },
+        "classification": "unexpected-skip"
+      },
+      {
+        "id": "test.test_context.HamtTest.test_hamt_items_1",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.HamtTest",
+        "reference": "pass",
+        "outcome": "skip",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "imre"
+        },
+        "reason": "_testinternalcapi.hamt() not available",
+        "evidence": {
+          "method_sha256": "19d3aef8599957e2b00ab9ad4c6476584a897f440c37d8552bf16fbf04b427db",
+          "stderr_line": 51
+        },
+        "classification": "unexpected-skip"
+      },
+      {
+        "id": "test.test_context.HamtTest.test_hamt_items_2",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.HamtTest",
+        "reference": "pass",
+        "outcome": "skip",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "imre"
+        },
+        "reason": "_testinternalcapi.hamt() not available",
+        "evidence": {
+          "method_sha256": "d3e4604363fe5333125f951cf54e20d12baf6e3e3c1f43773dbfa3a47d7ce4e6",
+          "stderr_line": 52
+        },
+        "classification": "unexpected-skip"
+      },
+      {
+        "id": "test.test_context.HamtTest.test_hamt_keys_1",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.HamtTest",
+        "reference": "pass",
+        "outcome": "skip",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "imre"
+        },
+        "reason": "_testinternalcapi.hamt() not available",
+        "evidence": {
+          "method_sha256": "564bce8525fb1f7e452cd418e8c4c71b2520f395041aef1c52fc8567424287a1",
+          "stderr_line": 54
+        },
+        "classification": "unexpected-skip"
+      },
+      {
+        "id": "test.test_context.HamtTest.test_hamt_items_3",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.HamtTest",
+        "reference": "pass",
+        "outcome": "skip",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "imre"
+        },
+        "reason": "_testinternalcapi.hamt() not available",
+        "evidence": {
+          "method_sha256": "718fbc17679e6a237daddff47817c763aeecfef9d99e452c282f79c0239501a0",
+          "stderr_line": 53
+        },
+        "classification": "unexpected-skip"
+      },
+      {
+        "id": "test.test_context.HamtTest.test_hamt_eq_1",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.HamtTest",
+        "reference": "pass",
+        "outcome": "skip",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "imre"
+        },
+        "reason": "_testinternalcapi.hamt() not available",
+        "evidence": {
+          "method_sha256": "3ced05ca93ad23d6ffc46e817880cb6510d130c4001efccbc96ea76c81ee975a",
+          "stderr_line": 45
+        },
+        "classification": "unexpected-skip"
+      },
+      {
+        "id": "test.test_context.HamtTest.test_hamt_eq_2",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.HamtTest",
+        "reference": "pass",
+        "outcome": "skip",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "imre"
+        },
+        "reason": "_testinternalcapi.hamt() not available",
+        "evidence": {
+          "method_sha256": "6f9dc78af3ed921f902537c544eefb5b20b0b619ea3e09e84997a75a09c9ee71",
+          "stderr_line": 46
+        },
+        "classification": "unexpected-skip"
+      },
+      {
+        "id": "test.test_context.HamtTest.test_hamt_gc_1",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.HamtTest",
+        "reference": "pass",
+        "outcome": "skip",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "imre"
+        },
+        "reason": "_testinternalcapi.hamt() not available",
+        "evidence": {
+          "method_sha256": "6317164cada64b061da8941b324c390c44affdd3bd37d175b540aec04b81feb6",
+          "stderr_line": 47
+        },
+        "classification": "unexpected-skip"
+      },
+      {
+        "id": "test.test_context.HamtTest.test_hamt_gc_2",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.HamtTest",
+        "reference": "pass",
+        "outcome": "skip",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "imre"
+        },
+        "reason": "_testinternalcapi.hamt() not available",
+        "evidence": {
+          "method_sha256": "4ed8b1883d6fecd257b4d33e92d7b7dd3be4e3b4071d99f6da8fe7b5fffda162",
+          "stderr_line": 48
+        },
+        "classification": "unexpected-skip"
+      },
+      {
+        "id": "test.test_context.HamtTest.test_hamt_in_1",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.HamtTest",
+        "reference": "pass",
+        "outcome": "skip",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "imre"
+        },
+        "reason": "_testinternalcapi.hamt() not available",
+        "evidence": {
+          "method_sha256": "d3543121ad85becd25350af2bdb8bacec7a4111725e56b833dc24449349d7dc6",
+          "stderr_line": 50
+        },
+        "classification": "unexpected-skip"
+      },
+      {
+        "id": "test.test_context.HamtTest.test_hamt_getitem_1",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "test.test_context.HamtTest",
+        "reference": "pass",
+        "outcome": "skip",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "imre"
+        },
+        "reason": "_testinternalcapi.hamt() not available",
+        "evidence": {
+          "method_sha256": "f33b3e163d5f72ff5efba884981e180f499930a8b79899a2faa59b68fbd182e8",
+          "stderr_line": 49
+        },
+        "classification": "unexpected-skip"
+      }
+    ]
+  },
+  {
+    "schema": "imre.cpython-stdlib.native-evidence/v1",
+    "suite": "test.test_context",
+    "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "platform": "linux",
+    "opt_level": 3,
+    "denominator": 56,
+    "distinct_ids": 56,
+    "counts": {
+      "failed": 8,
+      "fully-native": 25,
+      "unexpected-skip": 23
+    },
+    "records": [
+      {
+        "id": "test.test_context.ContextTest.test_context_var_new_1",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "failure",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "reason": "AssertionError: \"takes exactly 1\" does not match \"invalid arguments to ContextVar\"",
+        "evidence": {
+          "method_sha256": "256f8bb0fd31f95701725d22d556da6528d4f2b0b420600d7468c628ed0a747a",
+          "stderr_line": 24
+        },
+        "classification": "failed"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_var_repr_1",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "2c68152a7bcc1daff3d97123dd1c11d23cebe589becaeae6a67534f29874995f",
+          "stderr_line": 25,
+          "operation": "ContextTest.test_context_var_repr_1",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_token_repr_1",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "eb39c1daaf0c6fdd4f4827587383029e8937ab0f10964ddb1d9e1b2e89047701",
+          "stderr_line": 33,
+          "operation": "ContextTest.test_token_repr_1",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_subclassing_1",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "03b17db9999d09c5d1ec0e292878bf80a803dd583ebc9e98ff41bcea6d127481",
+          "stderr_line": 20,
+          "operation": "ContextTest.test_context_subclassing_1",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_new_1",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "failure",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "reason": "AssertionError: \"any arguments\" does not match \"invalid arguments to Context\"",
+        "evidence": {
+          "method_sha256": "44599f147eb9153c01aacac8e2bcdf013c1142c0ca166de8719225cc2afb58ae",
+          "stderr_line": 11
+        },
+        "classification": "failed"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_new_unhashable_str_subclass",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "failure",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "reason": "AssertionError: \"unhashable type\" does not match \"context variable name must be a str\"",
+        "evidence": {
+          "method_sha256": "6ecbd423f4e6955caa26a4c0cc1b26c29312ba90a798a6fd10842a46a5b932b8",
+          "stderr_line": 12
+        },
+        "classification": "failed"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_typerrors_1",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "bbdad0c8c7fe0cb2c3fdac6daa88a56b7377a2e3043d8e42833f747acecfc537",
+          "stderr_line": 23,
+          "operation": "ContextTest.test_context_typerrors_1",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_get_context_1",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "cd9c8b4c86d94a2e60e1214cf1454d450eb873cf7a8a6a9d84bf3f5cb9f3a8ce",
+          "stderr_line": 4,
+          "operation": "ContextTest.test_context_get_context_1",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_run_1",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "failure",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "reason": "AssertionError: \"missing 1 required\" does not match \"invalid arguments to Context.run\"",
+        "evidence": {
+          "method_sha256": "9dca760176b9d4fdd0f6a7ebb16157979a0afab27e88e284769341cb2d4dde72",
+          "stderr_line": 13
+        },
+        "classification": "failed"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_run_2",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "294eafbe4c318cc6c3cf8659db9c32aa56bdd4bf93e0c95208b8780e99f47f3f",
+          "stderr_line": 14,
+          "operation": "ContextTest.test_context_run_2",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_run_3",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "0176c7cfb0d4f5609777eabfb661a870d7ccc2f6cd83092cedb8750c2eb655a6",
+          "stderr_line": 15,
+          "operation": "ContextTest.test_context_run_3",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_run_4",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "6ead03af8f9569f6098498fb7334da3ee6b7957d11922f124fc4ac7b908cf8b8",
+          "stderr_line": 16,
+          "operation": "ContextTest.test_context_run_4",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_run_5",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "0e265414e60e93df005d834df2112fa18b730da8e083b2ae5f9ad772b57d1d27",
+          "stderr_line": 17,
+          "operation": "ContextTest.test_context_run_5",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_run_6",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "73d7eda9b4fce3866137dcf679fe92ac17a2aa8ca61aaf5b70b99b73c8bff9fb",
+          "stderr_line": 18,
+          "operation": "ContextTest.test_context_run_6",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_run_7",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "8c62ee615931d3c40e06728ed0df5bde315ea12542f90fc9a5baca53c0cb1505",
+          "stderr_line": 19,
+          "operation": "ContextTest.test_context_run_7",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_getset_1",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "error",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "reason": "AttributeError: '_contextvars.Token' object has no attribute 'MISSING'",
+        "evidence": {
+          "method_sha256": "a86f25ea883f37d8522e0fe997face1cd71689c0af34e4d7e4fdad950c8c23fe",
+          "stderr_line": 5
+        },
+        "classification": "failed"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_getset_2",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "6fdd0b948c5ba046061390ef10bb21efb5f3330b32abd92be9012d164647de33",
+          "stderr_line": 6,
+          "operation": "ContextTest.test_context_getset_2",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_getset_3",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "ed02fae1ae5a46b5706224bde70929442ad7c764e31eec783a2e4c088a6647bf",
+          "stderr_line": 7,
+          "operation": "ContextTest.test_context_getset_3",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_getset_4",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "4c504f883ece12810d88c37d9509ff435381f69511e82e8ad335e916b471b2d5",
+          "stderr_line": 8,
+          "operation": "ContextTest.test_context_getset_4",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_getset_5",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "6d7c352b9d8afaaa1e568d75c900b2bffe60b14a1f71f5882daa30bb6e01f757",
+          "stderr_line": 9,
+          "operation": "ContextTest.test_context_getset_5",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_copy_1",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "6d9416997750f33caff8b6277e5dd5d8f6dbe3fd1ec753128775446b0958b464",
+          "stderr_line": 1,
+          "operation": "ContextTest.test_context_copy_1",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_isinstance",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "failure",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "reason": "AssertionError: <_contextvars.Context object at 0x9401> is not an instance of <class 'collections.abc.Mapping'>",
+        "evidence": {
+          "method_sha256": "4159594f79e0aa97419dfb1c9cfa7fca449d0ee6cdc22d0ec42bbc59aa1ad8bb",
+          "stderr_line": 10
+        },
+        "classification": "failed"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_threads_1",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "error",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "reason": "NotImplementedError: this thread target cannot run independently of the boxed Python heap",
+        "evidence": {
+          "method_sha256": "4c4686c158d5f2fb9ff92526f7c9aef6d5e019bf76430b1e1b27b65fedce8bb8",
+          "stderr_line": 22
+        },
+        "classification": "failed"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_thread_inherit",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "error",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "reason": "NotImplementedError: this thread target cannot run independently of the boxed Python heap",
+        "evidence": {
+          "method_sha256": "6c925b38415434dad324a6f3107eca92572a1edaf2ca3a9b11e6291d213345b2",
+          "stderr_line": 21
+        },
+        "classification": "failed"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_token_contextmanager_with_default",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "29f175506531c2eac48a6c59f1e4be3bc80e6eb7948f75decc9748b82653761e",
+          "stderr_line": 29,
+          "operation": "ContextTest.test_token_contextmanager_with_default",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_token_contextmanager_without_default",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "5d6d4bf6f2f492814a16ab962f071dbc012b85eb31cf06025947b7710d4fb250",
+          "stderr_line": 32,
+          "operation": "ContextTest.test_token_contextmanager_without_default",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_token_contextmanager_on_exception",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "f2a11616c7a0032627de6363841a3ab3cc7f641c9ba7c4badcfbf3bb80e9cf96",
+          "stderr_line": 27,
+          "operation": "ContextTest.test_token_contextmanager_on_exception",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_token_contextmanager_reentrant",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "6614bf37c95bbb926bb70bd42a5fd610f5d2a9d1d1f8b240ce0770bb9d15d115",
+          "stderr_line": 28,
+          "operation": "ContextTest.test_token_contextmanager_reentrant",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_token_contextmanager_multiple_c_set",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "b1f13d5b39667629ca922df4cb9aa8b909cdef2c9937d20b4d505f9602607689",
+          "stderr_line": 26,
+          "operation": "ContextTest.test_token_contextmanager_multiple_c_set",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_token_contextmanager_with_explicit_reset_the_same_token",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "2822a25c5dd0ec4286ba53a153b68aa7cc1159e4de7678288a72360d1255e590",
+          "stderr_line": 31,
+          "operation": "ContextTest.test_token_contextmanager_with_explicit_reset_the_same_token",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_token_contextmanager_with_explicit_reset_another_token",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "18d6accb6e6a8c8c29b2ba85c9b5e9bbf8fa50869b87e54d075bd6a53027bb3d",
+          "stderr_line": 30,
+          "operation": "ContextTest.test_token_contextmanager_with_explicit_reset_another_token",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_eq_reentrant_contextvar_set",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "e4adcb140afdb16976a5ddf402f8aa1b68e4a2cfc6c793124d9f0b774f5b3853",
+          "stderr_line": 2,
+          "operation": "ContextTest.test_context_eq_reentrant_contextvar_set",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.ContextTest.test_context_eq_reentrant_contextvar_set_in_hash",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.ContextTest",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "method_sha256": "3c3e9575b2eb38c2be38c40138667912448ac34051dd6beb2c08c431391cbe34",
+          "stderr_line": 3,
+          "operation": "ContextTest.test_context_eq_reentrant_contextvar_set_in_hash",
+          "fixture": "unmodified test_context.py in the linked FILE application"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_context.HamtTest.test_hashkey_helper_1",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.HamtTest",
+        "reference": "pass",
+        "outcome": "skip",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "imre"
+        },
+        "reason": "_testinternalcapi.hamt() not available",
+        "evidence": {
+          "method_sha256": "64c20f6d36de8fa258c9cbe9582fcecb66084ac34dc79df8de1bb6670a65ab8c",
+          "stderr_line": 56
+        },
+        "classification": "unexpected-skip"
+      },
+      {
+        "id": "test.test_context.HamtTest.test_hamt_basics_1",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.HamtTest",
+        "reference": "pass",
+        "outcome": "skip",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "imre"
+        },
+        "reason": "_testinternalcapi.hamt() not available",
+        "evidence": {
+          "method_sha256": "c820a872b17525f81d50f1534a86e0fef81f70e70dda81d915b1e23c45adbc74",
+          "stderr_line": 34
+        },
+        "classification": "unexpected-skip"
+      },
+      {
+        "id": "test.test_context.HamtTest.test_hamt_basics_2",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.HamtTest",
+        "reference": "pass",
+        "outcome": "skip",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "imre"
+        },
+        "reason": "_testinternalcapi.hamt() not available",
+        "evidence": {
+          "method_sha256": "38c3b43643db7ff822ec9c34450b8233a4f6be25b46733c39659bdeb9bdf8c30",
+          "stderr_line": 35
+        },
+        "classification": "unexpected-skip"
+      },
+      {
+        "id": "test.test_context.HamtTest.test_hamt_basics_3",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.HamtTest",
+        "reference": "pass",
+        "outcome": "skip",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "imre"
+        },
+        "reason": "_testinternalcapi.hamt() not available",
+        "evidence": {
+          "method_sha256": "2ffa70cc1899c4738367872072e391f101a89e735885217fbf3eff9141691a43",
+          "stderr_line": 36
+        },
+        "classification": "unexpected-skip"
+      },
+      {
+        "id": "test.test_context.HamtTest.test_hamt_basics_4",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.HamtTest",
+        "reference": "pass",
+        "outcome": "skip",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "imre"
+        },
+        "reason": "_testinternalcapi.hamt() not available",
+        "evidence": {
+          "method_sha256": "102b4dcb284a0ead1294c3826e7e5bf3a859b539480ad0ac0299ad5d6b1d5999",
+          "stderr_line": 37
+        },
+        "classification": "unexpected-skip"
+      },
+      {
+        "id": "test.test_context.HamtTest.test_hamt_collision_1",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.HamtTest",
+        "reference": "pass",
+        "outcome": "skip",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "imre"
+        },
+        "reason": "_testinternalcapi.hamt() not available",
+        "evidence": {
+          "method_sha256": "9b7bd3a96896cbfd0a1284d24ce7553a6ecb422a3c2f090105697538e5ab0013",
+          "stderr_line": 38
+        },
+        "classification": "unexpected-skip"
+      },
+      {
+        "id": "test.test_context.HamtTest.test_hamt_collision_3",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.HamtTest",
+        "reference": "pass",
+        "outcome": "skip",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "imre"
+        },
+        "reason": "_testinternalcapi.hamt() not available",
+        "evidence": {
+          "method_sha256": "92c59fff315c4b186aebf7b9ae068b6ff5b1a911c98091a729a6272f178a619d",
+          "stderr_line": 39
+        },
+        "classification": "unexpected-skip"
+      },
+      {
+        "id": "test.test_context.HamtTest.test_hamt_stress",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.HamtTest",
+        "reference": {
+          "skipped": "resource 'cpu' is not enabled"
+        },
+        "outcome": "skip",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "imre"
+        },
+        "reason": "_testinternalcapi.hamt() not available",
+        "evidence": {
+          "method_sha256": "909233a5b4d32e6f829f6fb0b3691a1b80673d532e384cb61e585e40d95e1a57",
+          "stderr_line": 55
+        },
+        "classification": "unexpected-skip"
+      },
+      {
+        "id": "test.test_context.HamtTest.test_hamt_delete_1",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.HamtTest",
+        "reference": "pass",
+        "outcome": "skip",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "imre"
+        },
+        "reason": "_testinternalcapi.hamt() not available",
+        "evidence": {
+          "method_sha256": "a1e296fad9fd4685e7e4501f8243f35cfa8e9cd42a1a3878f1c94d45d5e4554c",
+          "stderr_line": 40
+        },
+        "classification": "unexpected-skip"
+      },
+      {
+        "id": "test.test_context.HamtTest.test_hamt_delete_2",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.HamtTest",
+        "reference": "pass",
+        "outcome": "skip",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "imre"
+        },
+        "reason": "_testinternalcapi.hamt() not available",
+        "evidence": {
+          "method_sha256": "5317f43640ba28b1783b1ed86bf9654ebd5d78843620bbc5494df79453aa6c86",
+          "stderr_line": 41
+        },
+        "classification": "unexpected-skip"
+      },
+      {
+        "id": "test.test_context.HamtTest.test_hamt_delete_3",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.HamtTest",
+        "reference": "pass",
+        "outcome": "skip",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "imre"
+        },
+        "reason": "_testinternalcapi.hamt() not available",
+        "evidence": {
+          "method_sha256": "c2d5aae7a0321b82a642c9ff92de5485e05ef4bb1eaf7ff1946bc09acb641198",
+          "stderr_line": 42
+        },
+        "classification": "unexpected-skip"
+      },
+      {
+        "id": "test.test_context.HamtTest.test_hamt_delete_4",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.HamtTest",
+        "reference": "pass",
+        "outcome": "skip",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "imre"
+        },
+        "reason": "_testinternalcapi.hamt() not available",
+        "evidence": {
+          "method_sha256": "05fdb93576765ad2b14be3720eb8eeed51ea320e3d34a529bb7a1aa5d758c25b",
+          "stderr_line": 43
+        },
+        "classification": "unexpected-skip"
+      },
+      {
+        "id": "test.test_context.HamtTest.test_hamt_delete_5",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.HamtTest",
+        "reference": "pass",
+        "outcome": "skip",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "imre"
+        },
+        "reason": "_testinternalcapi.hamt() not available",
+        "evidence": {
+          "method_sha256": "d7042034dd3a269e2ab7e6d2a5090bbe29395431ab90f0fc34c7575d4c9fc263",
+          "stderr_line": 44
+        },
+        "classification": "unexpected-skip"
+      },
+      {
+        "id": "test.test_context.HamtTest.test_hamt_items_1",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.HamtTest",
+        "reference": "pass",
+        "outcome": "skip",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "imre"
+        },
+        "reason": "_testinternalcapi.hamt() not available",
+        "evidence": {
+          "method_sha256": "19d3aef8599957e2b00ab9ad4c6476584a897f440c37d8552bf16fbf04b427db",
+          "stderr_line": 51
+        },
+        "classification": "unexpected-skip"
+      },
+      {
+        "id": "test.test_context.HamtTest.test_hamt_items_2",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.HamtTest",
+        "reference": "pass",
+        "outcome": "skip",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "imre"
+        },
+        "reason": "_testinternalcapi.hamt() not available",
+        "evidence": {
+          "method_sha256": "d3e4604363fe5333125f951cf54e20d12baf6e3e3c1f43773dbfa3a47d7ce4e6",
+          "stderr_line": 52
+        },
+        "classification": "unexpected-skip"
+      },
+      {
+        "id": "test.test_context.HamtTest.test_hamt_keys_1",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.HamtTest",
+        "reference": "pass",
+        "outcome": "skip",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "imre"
+        },
+        "reason": "_testinternalcapi.hamt() not available",
+        "evidence": {
+          "method_sha256": "564bce8525fb1f7e452cd418e8c4c71b2520f395041aef1c52fc8567424287a1",
+          "stderr_line": 54
+        },
+        "classification": "unexpected-skip"
+      },
+      {
+        "id": "test.test_context.HamtTest.test_hamt_items_3",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.HamtTest",
+        "reference": "pass",
+        "outcome": "skip",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "imre"
+        },
+        "reason": "_testinternalcapi.hamt() not available",
+        "evidence": {
+          "method_sha256": "718fbc17679e6a237daddff47817c763aeecfef9d99e452c282f79c0239501a0",
+          "stderr_line": 53
+        },
+        "classification": "unexpected-skip"
+      },
+      {
+        "id": "test.test_context.HamtTest.test_hamt_eq_1",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.HamtTest",
+        "reference": "pass",
+        "outcome": "skip",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "imre"
+        },
+        "reason": "_testinternalcapi.hamt() not available",
+        "evidence": {
+          "method_sha256": "3ced05ca93ad23d6ffc46e817880cb6510d130c4001efccbc96ea76c81ee975a",
+          "stderr_line": 45
+        },
+        "classification": "unexpected-skip"
+      },
+      {
+        "id": "test.test_context.HamtTest.test_hamt_eq_2",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.HamtTest",
+        "reference": "pass",
+        "outcome": "skip",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "imre"
+        },
+        "reason": "_testinternalcapi.hamt() not available",
+        "evidence": {
+          "method_sha256": "6f9dc78af3ed921f902537c544eefb5b20b0b619ea3e09e84997a75a09c9ee71",
+          "stderr_line": 46
+        },
+        "classification": "unexpected-skip"
+      },
+      {
+        "id": "test.test_context.HamtTest.test_hamt_gc_1",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.HamtTest",
+        "reference": "pass",
+        "outcome": "skip",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "imre"
+        },
+        "reason": "_testinternalcapi.hamt() not available",
+        "evidence": {
+          "method_sha256": "6317164cada64b061da8941b324c390c44affdd3bd37d175b540aec04b81feb6",
+          "stderr_line": 47
+        },
+        "classification": "unexpected-skip"
+      },
+      {
+        "id": "test.test_context.HamtTest.test_hamt_gc_2",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.HamtTest",
+        "reference": "pass",
+        "outcome": "skip",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "imre"
+        },
+        "reason": "_testinternalcapi.hamt() not available",
+        "evidence": {
+          "method_sha256": "4ed8b1883d6fecd257b4d33e92d7b7dd3be4e3b4071d99f6da8fe7b5fffda162",
+          "stderr_line": 48
+        },
+        "classification": "unexpected-skip"
+      },
+      {
+        "id": "test.test_context.HamtTest.test_hamt_in_1",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.HamtTest",
+        "reference": "pass",
+        "outcome": "skip",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "imre"
+        },
+        "reason": "_testinternalcapi.hamt() not available",
+        "evidence": {
+          "method_sha256": "d3543121ad85becd25350af2bdb8bacec7a4111725e56b833dc24449349d7dc6",
+          "stderr_line": 50
+        },
+        "classification": "unexpected-skip"
+      },
+      {
+        "id": "test.test_context.HamtTest.test_hamt_getitem_1",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "test.test_context.HamtTest",
+        "reference": "pass",
+        "outcome": "skip",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "imre"
+        },
+        "reason": "_testinternalcapi.hamt() not available",
+        "evidence": {
+          "method_sha256": "f33b3e163d5f72ff5efba884981e180f499930a8b79899a2faa59b68fbd182e8",
+          "stderr_line": 49
+        },
+        "classification": "unexpected-skip"
+      }
+    ]
+  }
+]
