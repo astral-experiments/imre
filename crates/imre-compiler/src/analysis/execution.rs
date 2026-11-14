@@ -287,18 +287,10 @@ impl<'ast, 'db> Escape<'ast, 'db> {
         matches!(value.inferred_type(self.model), Some(Type::ModuleLiteral(m)) if m.module(db).name(db).as_str() == name && m.module(db).file(db).is_some_and(|f| f.path(db).is_vendored_path()))
     }
 
-    /// Identify a function obtained from the genuine builtin namespace. Merely
-    /// obtaining or inspecting it does not execute a source operand.
-    fn selected_builtin(&self, value: &'ast Expr) -> Option<SourceCallable> {
-        if !matches!(
-            value,
-            Expr::Call(_) | Expr::Subscript(_) | Expr::Name(_) | Expr::Attribute(_)
-        ) {
-            return None;
-        }
-        let value = self.assigned_value(value)?;
-        if let Some((_, ArgumentFact::Source(target))) = self.parameter_fact(value) {
-            return Some(target);
+    /// A resolved operand can carry a caller's argument or select a function from builtins.
+    fn bound_argument(&self, value: &'ast Expr) -> Option<ArgumentFact> {
+        if let Some((_, fact)) = self.parameter_fact(value) {
+            return Some(fact);
         }
         let key = match value {
             Expr::Call(call)
@@ -363,11 +355,11 @@ impl<'ast, 'db> Escape<'ast, 'db> {
             })
             .map(|(intrinsic, _)| intrinsic);
         let first = possible.next()?;
-        Some(if possible.next().is_some() {
+        Some(ArgumentFact::Source(if possible.next().is_some() {
             SourceCallable::SelectedBuiltin
         } else {
             SourceCallable::Builtin(first)
-        })
+        }))
     }
 
     fn parameter_fact(&self, value: &Expr) -> Option<(TextRange, ArgumentFact)> {
@@ -384,11 +376,8 @@ impl<'ast, 'db> Escape<'ast, 'db> {
     }
 
     fn argument_fact(&self, value: &'ast Expr) -> Option<ArgumentFact> {
-        if let Some(target) = self.selected_builtin(value) {
-            return Some(ArgumentFact::Source(target));
-        }
         let value = self.assigned_value(value)?;
-        if let Some((_, fact)) = self.parameter_fact(value) {
+        if let Some(fact) = self.bound_argument(value) {
             return Some(fact);
         }
         (value.is_string_literal_expr()
@@ -799,9 +788,13 @@ impl<'a> Visitor<'a> for Escape<'a, '_> {
             .then(|| self.captured_target(&call.func))
             .flatten();
         let intrinsic = ExecutionIntrinsic::possible(self.model, &call.func);
+        let callee = self.assigned_value(&call.func);
         let source_callable = intrinsic
             .map(SourceCallable::Builtin)
-            .or_else(|| self.selected_builtin(&call.func))
+            .or_else(|| match self.bound_argument(callee?)? {
+                ArgumentFact::Source(target) => Some(target),
+                ArgumentFact::PlainString => None,
+            })
             .filter(|_| self.reachable(call.range()))
             .filter(|_| {
                 !self
@@ -851,7 +844,7 @@ impl<'a> Visitor<'a> for Escape<'a, '_> {
         if live_import {
             self.update_captured_calls(call, target);
         }
-        if let Some(Expr::Lambda(lambda)) = self.assigned_value(&call.func)
+        if let Some(Expr::Lambda(lambda)) = callee
             && !imre_ast::code_flags::yields_in_expression(&lambda.body)
         {
             self.enter_call(
