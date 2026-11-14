@@ -1533,6 +1533,17 @@ impl<'f> Frame<'f, '_, '_> {
         };
         // Transfer the key to the read; a Python receiver may keep the boxed index.
         self.line(&format!("store i64 1, ptr %int_owner{owner}"));
+        self.read_index_word(base, word, fallback, span)
+    }
+
+    /// Read a Python subscription with a checked integer word or its live Python fallback.
+    fn read_index_word(
+        &mut self,
+        base: &str,
+        word: &str,
+        fallback: &str,
+        span: Option<[usize; 4]>,
+    ) -> String {
         let position = self.output.position(span);
         self.checked(&format!(
             "call i64 @imre_dyn_get_int_item(ptr %ctx, i64 {base}, i64 {word}, i64 {fallback}, ptr {position})"
