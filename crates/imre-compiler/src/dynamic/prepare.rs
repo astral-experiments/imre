@@ -19,6 +19,7 @@ pub(super) enum Shipped<'a> {
 pub(super) struct SourceInputs<'a> {
     pub(super) literal_sites: BTreeMap<usize, super::literal::LiteralSites>,
     pub(super) entry_source: Option<ParsedModule<'a, 'a>>,
+    pub(super) checked_entry: Option<(usize, Box<crate::frontend::RegisteredFunction>)>,
     pub(super) scanned_modules: HashMap<usize, super::ScannedModule>,
     pub(super) shipped_checks: HashMap<usize, Shipped<'a>>,
 }
@@ -60,6 +61,7 @@ pub(super) fn units<'a>(
     (files, builtins): (&'a [ModuleSource<'a>], &'a [ModuleSource<'a>]),
     SourceInputs {
         mut entry_source,
+        mut checked_entry,
         mut literal_sites,
         mut scanned_modules,
         mut shipped_checks,
@@ -187,7 +189,13 @@ pub(super) fn units<'a>(
                     python_optimization,
                     origin,
                     literals.unwrap_or_default(),
-                    (types, checked_source),
+                    (
+                        types,
+                        checked_source,
+                        checked_entry
+                            .take_if(|(id, _)| *id == unit)
+                            .map(|(_, body)| body),
+                    ),
                 )?;
                 if python_optimization < 2
                     && let Some(module) = module_id

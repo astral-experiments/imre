@@ -5,6 +5,42 @@ mod tests {
     use super::*;
 
     #[test]
+    fn module_binds_the_checked_call_after_its_declarations() {
+        let text = concat!(
+            "import json\n",
+            "def render(data: int | None, spec: str) -> str:\n    return f'{data:{spec}}'\n\n",
+            "print(render(17, input()))\n",
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.py");
+        std::fs::write(&path, text).unwrap();
+        let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
+        assert!(matches!(
+            crate::checked_lower(&mut graph).unwrap(),
+            crate::CheckedProgram::Registered(_)
+        ));
+        let module = &graph.modules[graph.entry];
+        let (_, entry) = graph.take_registered_functions();
+        let entry = entry.unwrap();
+        let original = entry.function.body.as_ptr();
+        let operations = HashMap::new();
+        let mut prepare =
+            SuitePreparation::new(&operations, module.registered_values().context(text), true);
+        let suite = prepare.module(&module.parsed.syntax().body, Some((module, entry)));
+        assert_eq!(suite.checked.function.body.as_ptr(), original);
+        assert_eq!(suite.placed_from + 1, suite.checked.function.body.len());
+        let site = suite.checked.fixed_sites[2];
+        assert_eq!(&text[site], "render(17, input())");
+        let Some(FixedAttribute::Call(Some(target), _)) = suite.checked.fixed_attribute(site) else {
+            panic!("expected the checked render call");
+        };
+        let ExprKind::Local(slot) = target.without_location().kind else {
+            panic!("expected the installed module binding");
+        };
+        assert_eq!(suite.checked.local_names[&slot].name, "render");
+    }
+
+    #[test]
     fn discovery_supplies_the_checked_field_and_its_python_receiver() {
         let text = concat!(
             "import argparse, dataclasses\n",

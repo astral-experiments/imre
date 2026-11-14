@@ -177,6 +177,13 @@ pub(crate) fn frame_inputs(
             }
             return !operands.is_empty();
         }
+        // A closed frame can look up its written callee without a parameter or a private slot.
+        if checked.function.params.is_empty()
+            && let Some(crate::frontend::FixedAttribute::Call(Some(target), _)) = attribute
+            && matches!(&target.without_location().kind, ExprKind::Builtin(Builtin::RegisteredName(_), args) if args.is_empty())
+        {
+            return expr.named_call_arguments().is_some();
+        }
         if attribute.is_some() {
             return false;
         }
@@ -549,6 +556,17 @@ impl<'f, 'a, 'p> Frame<'f, 'a, 'p> {
 }
 
 impl<'f> Frame<'f, '_, '_> {
+    /// Emit the source-bound prefix before starting the checked tail's position cursor.
+    pub(super) fn explicit_prefix<'s>(&mut self, body: &'s [Statement]) -> &'s [Statement] {
+        let (prefix, placed) = body.split_at(self.suite.map_or(0, |suite| suite.placed_from));
+        if !prefix.is_empty() {
+            let mut frame = self.reborrow();
+            frame.fixed_sites = None;
+            CheckedBody::registered(frame).emit_block(prefix);
+        }
+        placed
+    }
+
     /// A source callee carries its own positions. Keep the native site cursor on its first argument.
     pub(super) fn source_callee(&mut self, expr: &Expr, next: &mut String) -> String {
         let mut frame = self.reborrow();

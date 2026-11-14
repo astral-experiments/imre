@@ -1389,7 +1389,10 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         let mut statements = function.body.as_slice();
         let list_views = match &mut self.0 {
             Entry::Native(code) => code.int_buffer_region(function),
-            Entry::Registered(_) => None,
+            Entry::Registered(frame) => {
+                statements = frame.explicit_prefix(statements);
+                None
+            }
         };
         if let Some((start, slots)) = list_views {
             self.emit_block(&statements[..start]);

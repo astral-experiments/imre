@@ -351,7 +351,7 @@ impl<'a> PreparedBody<'a> {
             python_optimization,
             origin,
             LiteralSites::default(),
-            (None, None),
+            Default::default(),
         )?;
         use_module(module)
     }
@@ -385,9 +385,10 @@ impl<'a> PreparedBody<'a> {
         python_optimization: i32,
         origin: ModuleOrigin<'a, '_>,
         literal_sites: LiteralSites,
-        (operand_types, checked_source): (
+        (operand_types, checked_source, checked_entry): (
             Option<crate::analysis::OperandTypes<'_>>,
             Option<&'a crate::modules::SourceModule>,
+            Option<Box<crate::frontend::RegisteredFunction>>,
         ),
     ) -> Result<Self, String> {
         let body = Self::prepare(
@@ -397,7 +398,7 @@ impl<'a> PreparedBody<'a> {
             python_optimization,
             origin,
             literal_sites,
-            (operand_types, checked_source),
+            (operand_types, checked_source, checked_entry),
         )?;
         if let Some(refusal) = body.initializer.refusal {
             use crate::frontend::PreparedRefusal;
@@ -429,9 +430,10 @@ impl<'a> PreparedBody<'a> {
         python_optimization: i32,
         origin: ModuleOrigin<'a, '_>,
         exec_literals: LiteralSites,
-        (operand_types, checked_source): (
+        (operand_types, checked_source, checked_entry): (
             Option<crate::analysis::OperandTypes<'_>>,
             Option<&'a crate::modules::SourceModule>,
+            Option<Box<crate::frontend::RegisteredFunction>>,
         ),
     ) -> Result<Self, String> {
         let ParsedModule { text, parsed } = module;
@@ -630,7 +632,7 @@ impl<'a> PreparedBody<'a> {
             } else {
                 &body
             };
-            prepare.suite(statements, crate::frontend::RegisteredScope::Module)
+            prepare.module(statements, checked_source.zip(checked_entry))
         };
         #[cfg(test)]
         let statement_sites = prepare.sites;
