@@ -378,7 +378,7 @@ fn check_file_with(
 fn check_with(
     entry: ProgramEntry<'_>,
     options: &CompileOptions,
-    mut cache: Option<&mut IncrementalCompiler>,
+    cache: Option<&mut IncrementalCompiler>,
     filesystem: watch::FileSystem<'_>,
 ) -> Result<(), String> {
     object_fallback(
@@ -386,10 +386,10 @@ fn check_with(
         entry,
         options,
         filesystem,
-        cache.is_some(),
-        |graph, call_error| {
+        cache,
+        |graph, cache, call_error| {
             graph.session.explicit_check = true;
-            checked_lower_with(graph, cache.as_deref_mut(), call_error)
+            checked_lower_with(graph, cache, call_error)
         },
     )
     .map(drop)
@@ -461,12 +461,14 @@ fn object_fallback(
     entry: ProgramEntry<'_>,
     options: &CompileOptions,
     mut filesystem: watch::FileSystem<'_>,
-    incremental: bool,
+    mut cache: Option<&mut IncrementalCompiler>,
     mut lower: impl FnMut(
         &mut modules::SourceGraph,
+        Option<&mut IncrementalCompiler>,
         Option<&LoweringDiagnostic>,
     ) -> Result<CheckedProgram, String>,
 ) -> Result<SourceInputs, String> {
+    let incremental = cache.is_some();
     for name in &options.include_modules {
         if !modules::valid_module_operand(name) {
             return Err(format!(
@@ -517,7 +519,7 @@ fn object_fallback(
             }
             let baseline = graph.lowering_baseline();
             let refusal = loop {
-                let error = match lower(&mut graph, call_error)? {
+                let error = match lower(&mut graph, cache.as_deref_mut(), call_error)? {
                     CheckedProgram::Registered(reason) => break reason,
                     CheckedProgram::Native(mut fixed) => {
                         let (module, owners) = &mut fixed.ir;
@@ -724,6 +726,7 @@ fn object_fallback(
         }
         Ok(())
     };
+    let checking = output.is_none();
     let check = |mut checked_graph: Option<&mut modules::SourceGraph>,
                  entry_requests_objects,
                  registered: Option<dynamic::RegisteredSources<'_>>| {
@@ -742,6 +745,9 @@ fn object_fallback(
                     .as_deref()
                     .map(|g| (g, &registered.provider_sources)),
                 refusal.as_ref(),
+                cache
+                    .filter(|_| checking)
+                    .map(|compiler| &mut compiler.cache),
             )?;
             registered.layouts.extend(layouts);
             if registered
@@ -779,6 +785,7 @@ fn object_fallback(
                     checked_graph
                         .as_deref()
                         .map(|g| (g, &registered.provider_sources)),
+                    None,
                     None,
                 )?;
                 registered.layouts.extend(layouts);
@@ -862,7 +869,7 @@ fn compile_with_layout(
     entry: ProgramEntry<'_>,
     options: &CompileOptions,
     layout: CodegenLayout,
-    mut cache: Option<&mut IncrementalCompiler>,
+    cache: Option<&mut IncrementalCompiler>,
 ) -> Result<(UnitCompilation, Option<String>), String> {
     let mut output = ProgramOutput::new(layout);
     output.compilation.source_inputs = object_fallback(
@@ -870,8 +877,8 @@ fn compile_with_layout(
         entry,
         options,
         Default::default(),
-        cache.is_some(),
-        |graph, call_error| checked_lower_with(graph, cache.as_deref_mut(), call_error),
+        cache,
+        checked_lower_with,
     )?;
     Ok((output.compilation, output.whole))
 }
@@ -1852,8 +1859,8 @@ print("result", call(b=2, a=1))
                 super::ProgramEntry::File(&path, None),
                 &options,
                 Default::default(),
-                false,
-                |graph, call_error| {
+                None,
+                |graph, _, call_error| {
                     graph.layout_hint.set(super::modules::LayoutHint::Disabled);
                     super::checked_lower_with(graph, None, call_error)
                 },
@@ -1886,8 +1893,8 @@ print("result", call(b=2, a=1))
             super::ProgramEntry::File(&path, None),
             &CompileOptions::default(),
             Default::default(),
-            false,
-            |graph, call_error| {
+            None,
+            |graph, _, call_error| {
                 passes += 1;
                 assert!(graph.layout_hint.get() == super::modules::LayoutHint::Disabled);
                 super::checked_lower_with(graph, None, call_error)
@@ -1922,8 +1929,8 @@ print("result", call(b=2, a=1))
             super::ProgramEntry::File(&path, None),
             &options,
             Default::default(),
-            false,
-            |graph, call_error| {
+            None,
+            |graph, _, call_error| {
                 assert_eq!(graph.modules[graph.entry].original_source(), source);
                 graph.session.explicit_check = true;
                 let result = super::checked_lower_with(graph, None, call_error)?;

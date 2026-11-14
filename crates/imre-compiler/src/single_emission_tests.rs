@@ -581,8 +581,8 @@ fn fixed_file_selects_its_product_for_the_requested_startup() {
             ProgramEntry::File(&path, None),
             &options,
             Default::default(),
-            false,
-            |graph, call_error| {
+            None,
+            |graph, _, call_error| {
                 let product = checked_lower_with(graph, None, call_error)?;
                 if sitecustomize {
                     assert!(matches!(product, CheckedProgram::Registered(None)));

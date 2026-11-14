@@ -402,6 +402,7 @@ pub(crate) fn check_registered_project<'a>(
         &crate::dynamic::ProviderSources<'_>,
     )>,
     refusal: Option<&crate::frontend::phase::Diagnostic>,
+    cache: Option<&mut AnalysisCache>,
 ) -> Result<Option<RegisteredLayouts>, String> {
     let sources = sources.into_iter();
     if sources.len() == 0 {
@@ -563,7 +564,12 @@ pub(crate) fn check_registered_project<'a>(
         }
         paths.push((path, is_program, original));
     }
-    let contracts = session.check_closed_program(&paths, None, &[], refusal);
+    if let Some(cache) = cache {
+        cache.restore_selected_diagnostics(&mut session)?;
+    } else {
+        session.set_closed_program_rules();
+    }
+    let contracts = session.closed_program_errors(&paths, None, &[], refusal);
     let winners = (first_winner..).zip(sources);
     session.check_registered_execution(
         contracts,
@@ -2876,6 +2882,9 @@ impl Session {
             let index = ty_python_core::semantic_index(&self.db, source);
             let parsed = ruff_db::parsed::parsed_module(&self.db, source.python_file(&self.db))
                 .load(&self.db);
+            let excluded = std::cell::LazyCell::new(|| {
+                ty_python_semantic::types::ide_support::unreachable_ranges(&self.db, source)
+            });
             for scope in index.scope_ids() {
                 use ty_python_core::scope::NodeWithScopeKind;
                 let owner = scope.node(&self.db);
@@ -2902,7 +2911,9 @@ impl Session {
                                 ranges[id].iter().any(|r| r.contains_range(operand))
                             })
                             && !index.is_in_type_checking_block(scope, operand)
-                            && dormant_operand(&self.db, source, scope, operand)
+                            && dormant_operand(index, scope, operand, || {
+                                excluded.iter().any(|r| r.range.contains_range(operand))
+                            })
                         {
                             written_return = Some(report);
                         }
@@ -3259,13 +3270,12 @@ struct CheckedError {
 /// The fixed report already has the declaration and the checked operand. Straight-line
 /// dead code has an unconditional constraint in the owner's existing use-def map.
 fn dormant_operand(
-    db: &dyn Db,
-    source: ProgramFile<'_>,
+    index: &ty_python_core::SemanticIndex<'_>,
     scope: FileScopeId,
     operand: TextRange,
+    excluded: impl FnOnce() -> bool,
 ) -> bool {
     use ty_python_core::reachability_constraints::ScopedReachabilityConstraintId as Reachability;
-    let index = ty_python_core::semantic_index(db, source);
     let mut conditional = false;
     for (scope, _) in index.ancestor_scopes(scope) {
         for (range, condition) in index.use_def_map(scope).range_reachability() {
@@ -3277,10 +3287,7 @@ fn dormant_operand(
             }
         }
     }
-    conditional
-        && ty_python_semantic::types::ide_support::unreachable_ranges(db, source)
-            .iter()
-            .any(|r| r.range.contains_range(operand))
+    conditional && excluded()
 }
 
 /// Only the selected scopes of this file participate in its residual result. An edit to
@@ -4174,6 +4181,26 @@ thread_local! {
     static FILE_CHECKS: std::cell::RefCell<Option<Vec<String>>> = const { std::cell::RefCell::new(None) };
 }
 
+impl Session {
+    fn update_source(&mut self, fresh: &Session, index: usize, path: &str) -> Result<(), String> {
+        let source = ruff_db::source::source_text(&fresh.db, fresh.files[index]);
+        let file = self.files[index];
+        self.db
+            .system
+            .fs()
+            .write_file(path, source.as_str())
+            .map_err(|error| error.to_string())?;
+        // The validated source, including an equal-size edit, is the authoritative Salsa input.
+        file.set_source_text_override(&mut self.db).to(Some(source));
+        Ok(())
+    }
+}
+
+enum DiagnosticSession {
+    Native(CachedSession),
+    Registered(Session),
+}
+
 struct CachedSession {
     session: Session,
     inputs: crate::SourceInputs,
@@ -4208,19 +4235,8 @@ impl CachedSession {
             if old.2 == new.2 {
                 continue;
             }
-            let source = ruff_db::source::source_text(&fresh.db, fresh.files[index]);
-            let file = self.session.files[index];
             let path = new.0.to_str().ok_or("module paths must be valid UTF-8")?;
-            self.session
-                .db
-                .system
-                .fs()
-                .write_file(path, source.as_str())
-                .map_err(|error| error.to_string())?;
-            // An equal-size edit can even have the same mtime. Use the normalized source
-            // that passed preflight as the authoritative Salsa input.
-            file.set_source_text_override(&mut self.session.db)
-                .to(Some(source));
+            self.session.update_source(fresh, index, path)?;
             old.2.clone_from(&new.2);
         }
         Ok(())
@@ -4230,7 +4246,7 @@ impl CachedSession {
 #[derive(Default)]
 pub(crate) struct AnalysisCache {
     closed_diagnostics: Option<CachedSession>,
-    diagnostics: Option<CachedSession>,
+    diagnostics: Option<DiagnosticSession>,
     hints: Option<CachedSession>,
 }
 
@@ -4294,6 +4310,35 @@ impl AnalysisCache {
         result
     }
 
+    /// A registered program can select different imports from the fixed checker's graph.
+    /// Reuse the ordinary diagnostic slot only for a previously registered selection.
+    fn restore_selected_diagnostics(&mut self, fresh: &mut Session) -> Result<(), String> {
+        if let Some(DiagnosticSession::Registered(mut prior)) = self.diagnostics.take()
+            && prior.root == fresh.root
+            && prior.extension_roots == fresh.extension_roots
+            && prior.files.len() == fresh.files.len()
+            && prior
+                .files
+                .iter()
+                .zip(&fresh.files)
+                .all(|(a, b)| a.path(&prior.db) == b.path(&fresh.db))
+        {
+            for index in 0..fresh.files.len() {
+                if ruff_db::source::source_text(&prior.db, prior.files[index]).as_str()
+                    != ruff_db::source::source_text(&fresh.db, fresh.files[index]).as_str()
+                {
+                    let path = fresh.files[index].path(&fresh.db).as_str();
+                    prior.update_source(fresh, index, path)?;
+                }
+            }
+            *fresh = prior;
+        } else {
+            fresh.set_closed_program_rules();
+        }
+        self.diagnostics = Some(DiagnosticSession::Registered(fresh.clone()));
+        Ok(())
+    }
+
     pub(crate) fn check_scopes(
         &mut self,
         fresh: &mut Session,
@@ -4301,7 +4346,7 @@ impl AnalysisCache {
         skipped: Option<&[Vec<TextRange>]>,
         overloads: &[Vec<CheckedDiagnostic>],
     ) -> Result<(), String> {
-        if let Some(cached) = &mut self.diagnostics
+        if let Some(DiagnosticSession::Native(cached)) = &mut self.diagnostics
             && cached.same_files(fresh, inputs)
         {
             cached.update(fresh, inputs)?;
@@ -4317,11 +4362,16 @@ impl AnalysisCache {
             // The quiet database must retain its inference with diagnostics disabled.
             let mut session = fresh.diagnostic_copy()?;
             let result = session.check_scopes(skipped, overloads);
-            self.diagnostics = Some(CachedSession::new(session, inputs));
+            self.diagnostics = Some(DiagnosticSession::Native(CachedSession::new(
+                session, inputs,
+            )));
             result
         } else {
             let result = fresh.check_scopes(skipped, overloads);
-            self.diagnostics = Some(CachedSession::new(fresh.clone(), inputs));
+            self.diagnostics = Some(DiagnosticSession::Native(CachedSession::new(
+                fresh.clone(),
+                inputs,
+            )));
             result
         }
     }
