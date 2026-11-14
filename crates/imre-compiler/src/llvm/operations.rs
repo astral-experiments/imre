@@ -940,10 +940,9 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             use crate::frontend::FixedAttribute;
             let position = match attribute {
                 Some(FixedAttribute::Operation { position, .. }) => *position,
-                Some(FixedAttribute::Call(_, site)) => match &site.target {
-                    ir::RegisteredCallTarget::Method { name_start, .. } => *name_start,
-                    ir::RegisteredCallTarget::Callable { .. } => range.start(),
-                },
+                Some(FixedAttribute::Call(_, site)) => {
+                    site.method_name_start().unwrap_or(range.start())
+                }
                 _ => range.start(),
             };
             return frame.at_expression(range, position, |frame| {

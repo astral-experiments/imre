@@ -1631,6 +1631,14 @@ impl RegisteredCall {
         })
     }
 
+    /// Python locates a method lookup at the attribute name in the written call.
+    pub(crate) fn method_name_start(&self) -> Option<ruff_text_size::TextSize> {
+        match &self.target {
+            RegisteredCallTarget::Method { name_start, .. } => Some(*name_start),
+            RegisteredCallTarget::Callable { .. } => None,
+        }
+    }
+
     pub(crate) fn invoke_site(self: Box<Self>) -> InvokeSite {
         InvokeSite {
             call: self,
