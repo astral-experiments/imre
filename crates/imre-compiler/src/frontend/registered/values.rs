@@ -1464,17 +1464,16 @@ impl Checker<'_> {
             // A live Python argument can satisfy an inferred layout only at dispatch.
             // Forward it unchanged and leave the result untyped on that edge.
             let mut fixed_result = true;
-            let mut args = Vec::with_capacity(call.arguments.len());
-            for (position, arg) in imre_ast::argument_values(&call.arguments).enumerate() {
-                let index = indices.get(position).copied().unwrap_or(position);
+            // Positional calls use their written order. Keyword calls already have a slot per operand.
+            let mut indices = indices.into_iter().chain(0..call.arguments.len());
+            let value = callable_target(call).prepare(call, target, |arg| {
+                let index = indices.next().expect("checked parameter for each argument");
                 let parameter = &signature.params[index];
                 let value = self.expr(arg)?;
-                let expected = if let Some(inference) = self.inference {
-                    inference.learn_parameter(signature.id, index, value.checked_operand_type())
-                } else {
-                    parameter.ty
-                };
                 let actual = value.checked_operand_type();
+                let expected = self.inference.map_or(parameter.ty, |inference| {
+                    inference.learn_parameter(signature.id, index, actual)
+                });
                 if let Err(error) = self.expect(expected, actual, arg) {
                     let declaration = signature.parameter_declaration(index);
                     if actual == Type::PythonObject
@@ -1495,10 +1494,9 @@ impl Checker<'_> {
                         }
                     }
                 }
-                args.push(value);
-            }
-            let value = self.call_with_values(call, target, args);
-            let mut located = source.located_operation(node, value);
+                Ok(value)
+            })?;
+            let mut located = source.located_operation(node, self.scoped_call(value));
             if fixed_result
                 && !signature.asynchronous
                 && !self.classes.generators.contains(&signature.id)
