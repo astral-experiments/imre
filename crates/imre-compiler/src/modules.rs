@@ -2969,6 +2969,16 @@ pub(crate) fn boxed_mock_export(name: &str) -> bool {
 }
 
 impl SourceModule {
+    /// Declarations preceding one contiguous executable tail in this source.
+    pub(crate) fn executable_suffix(&self) -> Option<(&[ast::Stmt], &[ast::Stmt])> {
+        let (prefix, tail) = self
+            .parsed
+            .syntax()
+            .body
+            .split_at(*self.executable.first()?);
+        (tail.len() == self.executable.len()).then_some((prefix, tail))
+    }
+
     /// Consecutive executable statements can borrow their original parsed body.
     pub(crate) fn executable_statements(&self) -> std::borrow::Cow<'_, [ast::Stmt]> {
         use std::borrow::Cow;
@@ -3196,6 +3206,8 @@ pub(crate) struct LoweringBaseline {
 
 #[derive(Default)]
 struct RegisteredFunctions {
+    /// The checked executable tail of the graph entry.
+    entry: Option<Box<crate::frontend::RegisteredFunction>>,
     admitted: HashMap<ModuleId, crate::dynamic::CheckedFunctions>,
     /// Completed solved bodies which cannot establish graph admission. Lexical
     /// placement may use them after the selected source passes its own checks.
@@ -3318,6 +3330,11 @@ impl SourceGraph {
         let mut functions = self.registered_functions.borrow_mut();
         functions.admitted.clear();
         functions.lexical.clear();
+        functions.entry = None;
+    }
+
+    pub(crate) fn register_entry(&self, entry: crate::frontend::RegisteredFunction) {
+        self.registered_functions.borrow_mut().entry = Some(Box::new(entry));
     }
 
     pub(crate) fn register_function(
@@ -3369,8 +3386,12 @@ impl SourceGraph {
     /// parameter convention must still be valid with live Python arguments.
     pub(crate) fn take_registered_functions(
         &self,
-    ) -> HashMap<ModuleId, crate::dynamic::CheckedFunctions> {
+    ) -> (
+        HashMap<ModuleId, crate::dynamic::CheckedFunctions>,
+        Option<Box<crate::frontend::RegisteredFunction>>,
+    ) {
         let RegisteredFunctions {
+            entry,
             mut admitted,
             lexical,
         } = self.registered_functions.take();
@@ -3398,7 +3419,7 @@ impl SourceGraph {
                 .entry(start)
                 .or_insert(body);
         }
-        admitted
+        (admitted, entry)
     }
 
     /// The fixed adapter displaced when this source supplies the import.

@@ -2458,6 +2458,10 @@ pub(crate) fn compile(
         Some(EntryStart::Immediate)
     };
     let mut declared_open_paths = HashSet::new();
+    let main_unit = match module_entry {
+        None => Some(0),
+        Some(_) => module_body.filter(|(_, _, package)| !package).map(|(id, _, _)| id),
+    };
     let selected_sources: Vec<_> = selected_sources
         .into_iter()
         .enumerate()
@@ -2485,10 +2489,7 @@ pub(crate) fn compile(
             registration.unit = output.is_some().then_some(id);
             registration.declares_signatures = application;
             registration.check_execution |= application;
-            registration.main_body = match module_entry {
-                None => id == 0,
-                Some(_) => module_body.is_some_and(|(body, _, package)| id == body && !package),
-            };
+            registration.main_body = main_unit == Some(id);
             registration.initial = entry_start.filter(|_| {
                 index < ordinary_registrations.unwrap_or(usize::MAX)
                     && match module_entry {
@@ -2701,9 +2702,13 @@ pub(crate) fn compile(
     inputs.boxed_imports = true;
     // Registration has committed to the selected bodies. Leave the type database
     // and import graph behind before preparing their source initializers.
-    if let Some(graph) = &project {
-        registrations.functions = graph.take_registered_functions();
-    }
+    let checked_entry = project.as_ref().and_then(|graph| {
+        let (functions, entry) = graph.take_registered_functions();
+        registrations.functions = functions;
+        let unit = main_unit?;
+        let owner = registrations.checked_units.get(&unit)?.module;
+        (owner == Some(graph.entry)).then_some((unit, entry?))
+    });
     let modules = project
         .take()
         .map(|graph| graph.modules)
@@ -2716,6 +2721,7 @@ pub(crate) fn compile(
         (&sources, &builtins),
         prepare::SourceInputs {
             entry_source: file_source,
+            checked_entry,
             literal_sites,
             scanned_modules,
             shipped_checks,

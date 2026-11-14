@@ -1596,6 +1596,8 @@ impl NamedBody<'_> {
 }
 
 pub(crate) struct RegisteredSuite {
+    /// Initial statements with explicit Python locations before a placed body.
+    pub(crate) placed_from: usize,
     pub(crate) refusal: Option<PreparedRefusal>,
     falls_through: bool,
     pub(crate) checked: RegisteredFunction,
@@ -1624,6 +1626,7 @@ impl RegisteredSuite {
 
     fn new(checked: RegisteredFunction, operands: Vec<PhysicalOperand>) -> Self {
         Self {
+            placed_from: 0,
             checked,
             operands,
             suites: Vec::new(),
@@ -1875,7 +1878,38 @@ impl<'a> SuitePreparation<'a> {
     }
 
     pub(crate) fn suite(&mut self, stmts: &[ast::Stmt], kind: RegisteredScope) -> RegisteredSuite {
-        self.selected_suite(stmts, kind, SuiteSelection::All, SuiteSelection::All, false)
+        self.selected_suite(
+            stmts,
+            kind,
+            SuiteSelection::All,
+            SuiteSelection::All,
+            false,
+            None,
+        )
+    }
+
+    /// Place the executable tail only in its original module, after the same declarations.
+    pub(crate) fn module(
+        &mut self,
+        stmts: &[ast::Stmt],
+        entry: Option<(&crate::modules::SourceModule, Box<RegisteredFunction>)>,
+    ) -> RegisteredSuite {
+        if let Some((module, entry)) = entry
+            && entry.function.locals.is_empty()
+            && let Some((_, tail)) = module.executable_suffix()
+            && let Some(prefix) = stmts.strip_suffix(tail)
+            && crate::llvm::registered::frame_inputs(&entry, FrameArguments::Python).is_some()
+        {
+            return self.selected_suite(
+                prefix,
+                RegisteredScope::Module,
+                SuiteSelection::All,
+                SuiteSelection::All,
+                false,
+                Some(entry),
+            );
+        }
+        self.suite(stmts, RegisteredScope::Module)
     }
 
     pub(crate) fn interactive(&self, stmts: &[ast::Stmt]) -> Option<RegisteredSuite> {
@@ -1903,7 +1937,7 @@ impl<'a> SuitePreparation<'a> {
         } else {
             SuiteSelection::All
         };
-        self.selected_suite(stmts, kind, SuiteSelection::All, children, suspends)
+        self.selected_suite(stmts, kind, SuiteSelection::All, children, suspends, None)
     }
 
     pub(crate) fn prepare_function<'p>(
@@ -1989,7 +2023,7 @@ impl<'a> SuitePreparation<'a> {
         suspended: bool,
     ) -> RegisteredSuite {
         let physical = SuiteSelection::Physical;
-        self.selected_suite(stmts, kind, physical, physical, suspended)
+        self.selected_suite(stmts, kind, physical, physical, suspended, None)
     }
 
     fn prepare_child(
@@ -2175,7 +2209,7 @@ impl<'a> SuitePreparation<'a> {
         selection: SuiteSelection,
         suspended: bool,
     ) -> RegisteredSuite {
-        let child = self.selected_suite(stmts, kind, selection, selection, suspended);
+        let child = self.selected_suite(stmts, kind, selection, selection, suspended, None);
         self.refusal = self.refusal.or(child.refusal);
         child
     }
@@ -2250,7 +2284,7 @@ impl<'a> SuitePreparation<'a> {
 
         // Preserve the first refusal from the body, entered else, handlers and finally.
         let body = self.physical_suite(&stmt.body, kind, selection, suspended);
-        let otherwise = self.selected_suite(&stmt.orelse, kind, selection, selection, suspended);
+        let otherwise = self.selected_suite(&stmt.orelse, kind, selection, selection, suspended, None);
         if body.falls_through {
             self.refusal = self.refusal.or(otherwise.refusal);
         }
@@ -2283,6 +2317,7 @@ impl<'a> SuitePreparation<'a> {
         let (statement, falls_through) =
             registered_try((body, body_continues), handlers, orelse, finalbody);
         RegisteredSuite {
+            placed_from: 0,
             checked: scope.finish(vec![checkpoint, statement]),
             operands,
             suites,
@@ -2426,6 +2461,7 @@ impl<'a> SuitePreparation<'a> {
         select: SuiteSelection,
         child_selection: SuiteSelection,
         suspended: bool,
+        placed: Option<Box<RegisteredFunction>>,
     ) -> RegisteredSuite {
         let mut scope = self.source_scope(kind);
         let mut body = SuiteBody {
@@ -2725,8 +2761,39 @@ impl<'a> SuitePreparation<'a> {
             body.check_from = body.falls_through.then_some(body.statements.len());
         }
         body.check_run(self);
+        let placed_from = placed.as_ref().map_or(0, |_| body.statements.len());
+        let checked = if let Some(mut entry) = placed {
+            // Bind the saved targets where these declarations installed their names.
+            // The written global lookup stays live when this scope has no local binding.
+            for attribute in entry
+                .fixed_attributes
+                .iter_mut()
+                .flat_map(|attrs| attrs.values_mut())
+            {
+                if let FixedAttribute::Call(Some(target), _) = attribute
+                    && let ExprKind::Builtin(Builtin::RegisteredLocation(..), operands) =
+                        &mut target.kind
+                    && let [binding] = operands.as_mut_slice()
+                    && let ExprKind::Builtin(Builtin::RegisteredName(name), _) = &binding.kind
+                    && let Some(value) = scope.local_read(name)
+                {
+                    *binding = value;
+                }
+            }
+            if body.falls_through && body.refusal.is_none() {
+                body.refusal = self.checked_declaration_refusal(&entry.function.body);
+            }
+            entry.function.body.splice(..0, body.statements);
+            let mut checked = scope.finish(entry.function.body);
+            checked.fixed_sites = entry.fixed_sites;
+            checked.fixed_attributes = entry.fixed_attributes;
+            checked
+        } else {
+            scope.finish(body.statements)
+        };
         RegisteredSuite {
-            checked: scope.finish(body.statements),
+            placed_from,
+            checked,
             operands,
             suites,
             falls_through: body.falls_through,
@@ -3760,6 +3827,16 @@ impl SourceScope<'_> {
         slot
     }
 
+    fn local_read(&self, name: &str) -> Option<Expr> {
+        let names = self
+            .comprehension
+            .as_ref()
+            .map_or(&self.names, |scope| &scope.targets);
+        names
+            .get(name)
+            .map(|&slot| Expr::local(slot, Type::PythonObject))
+    }
+
     fn comprehension_target(&self, name: &str) -> Option<usize> {
         self.comprehension.as_ref()?.targets.get(name).copied()
     }
@@ -3964,17 +4041,10 @@ impl SourceScope<'_> {
                 kind: ExprKind::Bind(self.slot(&target.id), Box::new(value)),
             }
         } else {
-            if let Some(name) = expr.as_name_expr() {
-                let bindings = self
-                    .comprehension
-                    .as_ref()
-                    .map_or(&self.names, |scope| &scope.targets);
-                if let Some(&slot) = bindings.get(name.id.as_str()) {
-                    return Some(
-                        self.source
-                            .located(expr, Expr::local(slot, Type::PythonObject)),
-                    );
-                }
+            if let Some(name) = expr.as_name_expr()
+                && let Some(local) = self.local_read(&name.id)
+            {
+                return Some(self.source.located(expr, local));
             }
             let class = matches!(self.kind, RegisteredScope::Class);
             values::operation(

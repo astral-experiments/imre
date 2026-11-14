@@ -1621,12 +1621,21 @@ fn lower_graph(
         }
     }
     let mut startup = Vec::new();
+    let mut entry_source = None;
     let entry = {
         let module_id = graph.entry;
         let mut checker = checker_for(module_id);
         checker.module_scope = true;
         checker.nonreturning_functions = &completed_calls;
-        let mut fixed_entry = (!needs_registered_entry && unavailable.is_none()).then(Vec::new);
+        let mut fixed_entry = (!needs_registered_entry && unavailable.is_none()).then(|| {
+            if let Some((prefix, tail)) = graph.modules[module_id].executable_suffix() {
+                checker.fixed_sites = Some(fixed_body_source::SourceSites::default());
+                // Leave room for the declarations and their Python statement checkpoints.
+                Vec::with_capacity(tail.len() + 2 * prefix.len())
+            } else {
+                Vec::new()
+            }
+        });
         let result = checker.lower_block(&entry_statements, fixed_entry.as_mut());
         let result = checker.finish_region(result);
         if checked_region(result, graph, module_id, &mut unavailable, |failure| {
@@ -1639,6 +1648,16 @@ fn lower_graph(
         .is_some()
             && let Some(body) = fixed_entry
         {
+            entry_source = checker.fixed_sites.take().and_then(|sites| {
+                sites.finish(
+                    entry_statements.len(),
+                    &body,
+                    std::mem::take(&mut checker.names),
+                    &checker.locals,
+                    None,
+                    FrameArguments::Python,
+                )
+            });
             checker.fault_frame(&mut startup, "<module>", TextSize::default());
             Some(ir::Function {
                 params: Vec::new(),
@@ -1834,6 +1853,9 @@ fn lower_graph(
     let selected = registered_entry(graph, functions, &entry, entry_operations)
         .inspect_err(|_| place_completed(&mut completed, &owners))?;
     if let Some(registered) = selected {
+        if let Some(frame) = entry_source.and_then(|source| source.place(entry).ok()) {
+            graph.register_entry(frame);
+        }
         register(completed, &owners);
         if recover_completed.get() {
             capture();
