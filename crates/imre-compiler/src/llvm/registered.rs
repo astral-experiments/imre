@@ -180,6 +180,11 @@ pub(crate) fn frame_inputs(
         if attribute.is_some() {
             return false;
         }
+        let mut read_scalar_protocol = |value: &Expr| {
+            let reads = protocol_parameter(value);
+            uses_scalar_protocol |= reads != 0;
+            protocol_reads += reads;
+        };
         match &expr.kind {
             ExprKind::Local(slot) => {
                 scalar_reads += usize::from(scalar_parameter(expr));
@@ -198,10 +203,17 @@ pub(crate) fn frame_inputs(
             | ExprKind::Scope { .. } => true,
             ExprKind::Present(_) | ExprKind::Unwrap(_) => true,
             ExprKind::Absent(value) => value.ty == Type::None,
-            ExprKind::Conditional(..) | ExprKind::BooleanValue(..) | ExprKind::Boolean(..) => true,
+            ExprKind::Conditional(test, ..) => {
+                read_scalar_protocol(test);
+                true
+            }
+            ExprKind::BooleanValue(..) | ExprKind::Boolean(..) => true,
             ExprKind::Dict(entries) => expr.ty == Type::PythonObject || entries.is_empty(),
             ExprKind::Builtin(op, args) if let Some(iteration) = op.iteration_operands(args) => {
-                if let Ok(ir::IterationOperands::Iter(value, ir::IteratorOp::Loop(_))) = &iteration
+                if let Ok(ir::IterationOperands::Truth(value)) = &iteration {
+                    read_scalar_protocol(value);
+                } else if let Ok(ir::IterationOperands::Iter(value, ir::IteratorOp::Loop(_))) =
+                    &iteration
                 {
                     protocol_reads += protocol_parameter(value);
                 }
@@ -216,10 +228,8 @@ pub(crate) fn frame_inputs(
                 let Some((value, spec)) = args.split_first() else {
                     return false;
                 };
-                let reads = protocol_parameter(value);
-                uses_scalar_protocol |= reads != 0;
+                read_scalar_protocol(value);
                 uses_python_protocol |= value.ty == Type::PythonObject;
-                protocol_reads += reads;
                 spec.len() <= 1
             }
             ExprKind::Builtin(Builtin::FormatJoin, parts) => parts.len() >= 2,
