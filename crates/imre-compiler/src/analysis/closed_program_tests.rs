@@ -147,7 +147,8 @@ fn registered_parameter_changes_recheck_the_unchanged_caller() {
         ("__main__".into(), entry.clone(), caller.into()),
         ("api".into(), api.clone(), number.into()),
     ];
-    let verify = |sources: &[_]| {
+    let mut cache = AnalysisCache::default();
+    let mut verify = |sources: &[_]| {
         super::check_registered_project(
             root,
             &[],
@@ -155,6 +156,7 @@ fn registered_parameter_changes_recheck_the_unchanged_caller() {
             None,
             Some((&graph, &Default::default())),
             None,
+            Some(&mut cache),
         )
     };
     fs::remove_file(entry).unwrap();
@@ -169,6 +171,9 @@ fn registered_parameter_changes_recheck_the_unchanged_caller() {
         "{error}"
     );
 
+    registered[1].2 = number.into();
+    verify(&registered).unwrap();
+    registered[1].2 = text.into();
     registered[1].1 = root.join("shadow/api.py");
     let shadow_root = root.join("shadow");
     let error = super::check_registered_project(
@@ -181,6 +186,7 @@ fn registered_parameter_changes_recheck_the_unchanged_caller() {
         None,
         Some((&graph, &Default::default())),
         None,
+        Some(&mut cache),
     )
     .unwrap_err();
     assert!(
@@ -212,6 +218,7 @@ fn new_registration_checks_dormant_bodies_against_registered_declarations() {
         None,
         None,
         None,
+        None,
     )
     .unwrap_err();
     assert!(
@@ -226,6 +233,7 @@ fn new_registration_checks_dormant_bodies_against_registered_declarations() {
             .iter()
             .enumerate()
             .map(|(i, s)| RegisteredSource::new(s, i == 1, None)),
+        None,
         None,
         None,
         None,
@@ -258,6 +266,7 @@ fn registered_python_shadow_provides_the_call_signature() {
                 .iter()
                 .enumerate()
                 .map(|(i, s)| RegisteredSource::new(s, i == 1, None)),
+            None,
             None,
             None,
             None,
@@ -658,6 +667,7 @@ fn a_script_named_runpy_does_not_own_the_imported_sdk_function() {
         Some(&|_| false),
         None,
         None,
+        None,
     )
     .unwrap_err();
     assert!(
@@ -716,6 +726,7 @@ fn dormant_lexical_checks_keep_known_parameters_of_partial_calls() {
             root,
             &[],
             [RegisteredSource::new(&source, true, None)],
+            None,
             None,
             None,
             None,
@@ -1028,6 +1039,7 @@ fn a_linked_signature_requires_a_reaching_initializer_call() {
             None,
             None,
             None,
+            None,
         )
     };
     let read = "from __main__ import take as use\nif False: use('x')\n";
@@ -1113,6 +1125,7 @@ fn selected_startup_precedes_the_package_and_main_body() {
             None,
             None,
             None,
+            None,
         )
     };
     let error = check("pass\n", "pass\n", &startup).unwrap_err();
@@ -1135,6 +1148,7 @@ fn registered_program_checks_scalar_locals_across_suspension() {
         None,
         None,
         None,
+        None,
     )
     .unwrap_err();
     assert!(
@@ -1154,6 +1168,7 @@ fn registered_generators_require_a_linked_source_body() {
         project.path(),
         &[],
         std::iter::once(RegisteredSource::new(&module, true, None)),
+        None,
         None,
         None,
         None,
@@ -1216,6 +1231,7 @@ fn captured_generator_keeps_its_source_requirement_through_a_helper() {
             project.path(),
             &[],
             [main, RegisteredSource::new(&provider, true, None)],
+            None,
             None,
             None,
             None,
@@ -1451,6 +1467,7 @@ fn run_path_can_enter_through_implicit_builtins() {
         &[],
         sources.iter().map(|s| RegisteredSource::new(s, true, None)),
         Some(&|_| false),
+        None,
         None,
         None,
     )
