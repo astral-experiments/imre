@@ -113,7 +113,7 @@ impl ModuleLauncher {
     ) {
         let (name, file) = self.module_operands(name, file);
         let message = self.output.data(message.as_bytes());
-        let position = position.map_or_else(|| "null".into(), |span| self.output.position(span));
+        let position = self.output.position(position);
         let text = self.output.data(source.as_bytes());
         let hash = digest.map_or_else(|| "null".into(), |digest| self.output.data(digest));
         let error_kind = if parse_error { 2 } else { u8::from(in_args) };

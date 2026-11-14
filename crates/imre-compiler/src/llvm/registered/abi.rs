@@ -228,18 +228,28 @@ impl Output {
         }
     }
 
-    pub(crate) fn position(&mut self, span: [usize; 4]) -> String {
+    pub(crate) fn position(&mut self, span: Option<[usize; 4]>) -> PositionOperand {
+        let Some(span) = span else {
+            return PositionOperand::Null;
+        };
+        let local = self.position_index(span);
+        if let Some(whole) = &mut self.whole {
+            let whole = whole.position_index(span);
+            if whole != local {
+                return PositionOperand::Split { local, whole };
+            }
+        }
+        PositionOperand::Local(local)
+    }
+
+    fn position_index(&mut self, span: [usize; 4]) -> usize {
         let next = self.positions.len();
         let index = *self.positions.entry(span).or_insert(next);
         if index == next {
             let [line, start, split, end] = span;
             writeln!(self.constants, "@pos{index} = private unnamed_addr constant [4 x i32] [i32 {line}, i32 {start}, i32 {split}, i32 {end}]").unwrap();
         }
-        let local = format!("@pos{index}");
-        match &mut self.whole {
-            Some(whole) => Self::operand(local, whole.position(span)),
-            None => local,
-        }
+        index
     }
 
     pub(crate) fn constant_slot(&mut self, unit: usize, key: Constant) -> String {
@@ -281,6 +291,23 @@ fn place_operands(local: &mut String, start: usize, whole: &mut String) {
     local.push_str(&resolved);
 }
 
+/// The position global used by an instruction in the unit and optional whole-module output.
+pub(crate) enum PositionOperand {
+    Null,
+    Local(usize),
+    Split { local: usize, whole: usize },
+}
+
+impl std::fmt::Display for PositionOperand {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Null => f.write_str("null"),
+            Self::Local(index) => write!(f, "@pos{index}"),
+            Self::Split { local, whole } => write!(f, "\0@pos{local}\0@pos{whole}\0"),
+        }
+    }
+}
+
 /// Pass fixed operands in native storage or pack expanded operands in Python containers.
 pub(crate) enum CallArguments {
     FixedKeywords {
@@ -301,6 +328,6 @@ pub(crate) enum CallArguments {
     PartitionField {
         array: &'static str,
         index: u32,
-        get_position: String,
+        get_position: PositionOperand,
     },
 }

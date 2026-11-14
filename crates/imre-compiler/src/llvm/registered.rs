@@ -1504,7 +1504,7 @@ impl<'f> Frame<'f, '_, '_> {
         let slot = constant.map(|key| self.constant_slot(key));
         self.subscript_at(op, |frame, span| {
             frame.take_matching_check();
-            let position = span.map_or_else(|| "null".into(), |span| frame.output.position(span));
+            let position = frame.output.position(span);
             if let Some(slot) = slot {
                 frame.checked(&format!("call i64 @imre_dyn_get_linked_slice_at(ptr %ctx, i64 {base}, i64 {start}, i64 {stop}, ptr {slot}, ptr {position})"))
             } else {
@@ -1533,7 +1533,7 @@ impl<'f> Frame<'f, '_, '_> {
         };
         // Transfer the key to the read; a Python receiver may keep the boxed index.
         self.line(&format!("store i64 1, ptr %int_owner{owner}"));
-        let position = span.map_or_else(|| "null".into(), |span| self.output.position(span));
+        let position = self.output.position(span);
         self.checked(&format!(
             "call i64 @imre_dyn_get_int_item(ptr %ctx, i64 {base}, i64 {word}, i64 {fallback}, ptr {position})"
         ))

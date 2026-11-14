@@ -29,7 +29,7 @@ impl RegisteredFrame<'_, '_> {
             {
                 self.position = SourcePosition::statement(self.positions.line(previous.start()));
             }
-            "null".into()
+            self.output.position(None)
         };
         self.line(&format!(
             "call void @imre_dyn_definition_position(ptr %ctx, ptr {position})"
