@@ -1155,9 +1155,9 @@ impl Inference {
                     && !self.widened.get()
                     && !discover_returns
                     && !signature.registered_frame()
-                    && matches!(function.body.as_slice(), [ast::Stmt::Return(_)])
                     && !checker.fault_enabled()
-                    && (registered::physical_method(signature, function, classes).is_some()
+                    && (matches!(function.body.as_slice(), [ast::Stmt::Return(_)])
+                        && registered::physical_method(signature, function, classes).is_some()
                         || signature.method.is_none()
                             && physical
                             && signature.physical_frame
@@ -1172,13 +1172,14 @@ impl Inference {
                                 false,
                                 |_| false,
                             ));
-                checker.placement_only = !keep_return;
+                checker.placement_only = true;
                 let method_storage = keep_return.then(|| (helpers.len(), globals.types().len()));
                 let mut return_body = keep_return.then(|| {
                     checker.frame = LexicalFrame::Named(function.name.id.clone());
                     checker.fixed_sites = Some(fixed_body_source::SourceSites::new(true));
                     (Vec::new(), Vec::new())
                 });
+                let statements = checker.function_statements(function);
                 let mut checked_return = false;
                 let mut implicit_none = false;
                 let mut superseded_returns = false;
@@ -1247,9 +1248,9 @@ impl Inference {
                             params.push(slot);
                         }
                     })?;
-                    checker.collect_local_definitions(&function.body)?;
+                    checker.collect_local_definitions(statements)?;
                     let falls_through = checker.lower_block_with_placement(
-                        &function.body,
+                        statements,
                         return_body.as_mut().map(|(_, body)| body),
                         None,
                         Some(function),
@@ -1460,7 +1461,7 @@ impl Inference {
                         && checker.calls.is_empty() && checker.class_reads.borrow().is_empty()
                         && checker.unrepresented.borrow().is_none()
                         && method_storage == Some((helpers.len(), globals.types().len()))
-                        && let Some(source) = checker.fixed_body_source(function, signature, function.body.len(), &body)
+                        && let Some(source) = checker.fixed_body_source(function, signature, statements.len(), &body)
                         // Module storage and method targets belong to the graph that selected them.
                         // A written global callee will be looked up again by the Python frame.
                         && source.attributes.values().all(|attribute| match attribute {
