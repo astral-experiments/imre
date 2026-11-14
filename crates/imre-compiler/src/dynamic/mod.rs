@@ -713,32 +713,48 @@ fn scan_imports(
     kind: SourceKind,
     getter: Option<&mut Imports>,
     file_alternative: Option<(&Path, bool)>,
-) -> Result<Imports, String> {
+    shipped: bool,
+) -> Result<(Imports, Option<imre_ast::Names>), String> {
     let module = match read_import_source(source, kind, None)? {
         ImportSource::Module(module) => module,
         ImportSource::Invalid(error) => {
-            return Ok(Imports {
-                invalid_executable: Some(error),
-                ..Imports::default()
-            });
+            return Ok((
+                Imports {
+                    invalid_executable: Some(error),
+                    ..Imports::default()
+                },
+                None,
+            ));
         }
     };
     if let Some((path, keep_docstrings)) = file_alternative {
         module_source::validate_file(path, &module.text, &module.parsed, keep_docstrings)?;
     }
-    imports_from_body(
+    let mut imports = imports_from_body(
         &module.text,
         &mut module_source::into_body(module.parsed),
         getter,
         file_alternative.map(|(path, _)| path),
-    )
+    )?;
+    // The standalone parser reads the registered bytes in their original coordinates.
+    let names = (shipped
+        && std::ptr::eq(module.text.as_ref(), source)
+        && imports.invalid_executable.is_none()
+        && !imports.private_names.rewritten)
+        .then(|| std::mem::take(&mut imports.private_names));
+    Ok((imports, names))
 }
 
-pub(super) type LoweredRoot = (ast::Suite, imre_ast::Names);
+pub(super) enum LoweredRoot {
+    Complete(ast::Suite, imre_ast::Names),
+    /// The registered parser input already has the names found at discovery.
+    Unchanged(imre_ast::Names),
+}
 
 enum ScannedParser {
     Owned(ruff_python_parser::Parsed<ast::ModModule>),
     Declaration(ruff_db::parsed::ParsedModuleRef),
+    Indexed(crate::analysis::IndexedFileInput),
 }
 
 /// The saved name lowering belongs to this parser's node IDs.
@@ -783,7 +799,7 @@ fn retained_imports<'a, 'p>(
     let lowered = imports
         .invalid_executable
         .is_none()
-        .then(|| (body, std::mem::take(&mut imports.private_names)));
+        .then(|| LoweredRoot::Complete(body, std::mem::take(&mut imports.private_names)));
     Ok((imports, Some((module, lowered))))
 }
 
@@ -1052,12 +1068,22 @@ pub(crate) fn compile(
                 matches!(stmt, Stmt::FunctionDef(function) if function_type_params(function, imports.private_names.string_annotations, false, Some(&imports.private_names)).is_some())
             });
         }
-        if entry_file.is_some() && imports.invalid_executable.is_none() {
+        if let Some((graph, file)) = file_entry.zip(entry_file)
+            && imports.invalid_executable.is_none()
+        {
+            let parsed = entry_identity.map(|_| {
+                ScannedParser::Indexed(
+                    graph
+                        .session
+                        .operand_types(graph.entry)
+                        .indexed_input(&file.module(modules).parsed),
+                )
+            });
             scanned_modules.insert(
                 0,
                 ScannedModule {
-                    parsed: None,
-                    lowered: (body, std::mem::take(&mut imports.private_names)),
+                    parsed,
+                    lowered: LoweredRoot::Complete(body, std::mem::take(&mut imports.private_names)),
                 },
             );
         }
@@ -1351,14 +1377,25 @@ pub(crate) fn compile(
     // Standalone shipped module checks can release their syntax immediately. Application
     // types and physical loader registrations are selected later in registration order.
     let mut shipped_checks = HashMap::new();
-    let mut shipped_imports = |unit: usize,
+    let mut shipped_imports = |scanned_modules: &mut HashMap<usize, ScannedModule>,
+                               unit: usize,
                                name: &str,
                                path: &Path,
                                source: &str,
                                kind: SourceKind,
                                getter: Option<&mut Imports>| {
         if output.is_some() {
-            return scan_imports(source, kind, getter, None);
+            let (imports, names) = scan_imports(source, kind, getter, None, true)?;
+            if let Some(names) = names {
+                scanned_modules.insert(
+                    unit,
+                    ScannedModule {
+                        parsed: None,
+                        lowered: LoweredRoot::Unchanged(names),
+                    },
+                );
+            }
+            return Ok(imports);
         }
         let (imports, scanned) =
             scan_imports_for_preparation(source, kind, None, getter, Some(source))?;
@@ -1747,6 +1784,7 @@ pub(crate) fn compile(
                     let package = path.ends_with("__init__.py");
                     let mut getter = Imports::default();
                     let mut imports = shipped_imports(
+                        &mut scanned_modules,
                         sources.len(),
                         &prefix,
                         &path,
@@ -2115,8 +2153,8 @@ pub(crate) fn compile(
                         } else {
                             kind
                         };
-                        scan_imports(&src, parser_kind, None, alternative)
-                            .map(|imports| (imports, None))
+                        scan_imports(&src, parser_kind, None, alternative, false)
+                            .map(|(imports, _)| (imports, None))
                     };
                     let (mut imports, scanned) = match imports {
                         Ok(imports) => imports,
@@ -2270,6 +2308,7 @@ pub(crate) fn compile(
                         )
                     } else {
                         shipped_imports(
+                            &mut scanned_modules,
                             sources.len(),
                             &prefix,
                             &path,
@@ -3027,7 +3066,9 @@ fn a_shipped_getter_keeps_its_body_and_executable_source_offsets() {
     assert!(imports.names.is_empty());
     assert_eq!(getter.names, [(0, "fractions".to_owned())]);
     let (_, lower) = module.unwrap();
-    let (body, _) = lower.unwrap();
+    let Some(LoweredRoot::Complete(body, _)) = lower else {
+        panic!("expected checked syntax");
+    };
     let [Stmt::FunctionDef(function)] = body.as_slice() else {
         panic!("expected the module's lazy getter");
     };
@@ -3039,6 +3080,16 @@ fn a_shipped_getter_keeps_its_body_and_executable_source_offsets() {
     let (_, module) =
         scan_imports_for_preparation(crlf, SourceKind::File, None, None, Some(crlf)).unwrap();
     assert!(module.is_none());
+}
+
+#[test]
+fn shipped_private_parameter_requires_fresh_lowering() {
+    let names = |source| {
+        scan_imports(source, SourceKind::File, None, None, true).unwrap().1
+    };
+    assert!(names("class C:\n    def f(self, arg): pass\n").is_some());
+    assert!(names("class C:\n    def f(self, __arg): pass\n").is_none());
+    assert!(names("class C:\r\n    pass\r\n").is_none());
 }
 
 #[test]

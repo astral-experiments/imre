@@ -519,15 +519,19 @@ impl<'a> PreparedBody<'a> {
             |values| Cow::Borrowed(&values.method_imports),
         );
         let future_flags = inherited_flags | imre_ast::future_flags(&syntax.body);
-        let (body, private_names) = normalized.unwrap_or_else(|| {
-            let mut body = module_source::into_body(parsed);
-            let names = imre_ast::lower_in(
-                &mut body,
-                "",
-                future_flags & imre_ast::code_flags::FUTURE_ANNOTATIONS != 0,
-            );
-            (body, names)
-        });
+        let (body, private_names) = match normalized {
+            Some(super::LoweredRoot::Complete(body, names)) => (body, names),
+            Some(super::LoweredRoot::Unchanged(names)) => (module_source::into_body(parsed), names),
+            None => {
+                let mut body = module_source::into_body(parsed);
+                let names = imre_ast::lower_in(
+                    &mut body,
+                    "",
+                    future_flags & imre_ast::code_flags::FUTURE_ANNOTATIONS != 0,
+                );
+                (body, names)
+            }
+        };
         module_source::validate_names(&path, source, &body, &private_names)?;
         let values = crate::frontend::RegisteredSource {
             python_optimization,

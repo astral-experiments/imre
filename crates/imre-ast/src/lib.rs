@@ -393,6 +393,8 @@ pub struct Names {
     pub string_annotations: bool,
     pub duplicate_type_parameter: Option<Identifier>,
     pub nonlocal_in_generic_class: bool,
+    /// The mangler changed at least one identifier in the syntax tree.
+    pub rewritten: bool,
     original: HashMap<TextSize, Name>,
     import_roots: HashSet<TextSize>,
 }
@@ -539,7 +541,7 @@ impl Mangler<'_> {
         {
             return None;
         }
-        private_name(self.owner, name)
+        private_name(self.owner, name).inspect(|_| self.names.borrow_mut().rewritten = true)
     }
 
     fn rename(&self, name: &mut Name) {

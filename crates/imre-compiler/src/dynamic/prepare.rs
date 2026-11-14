@@ -86,6 +86,7 @@ pub(super) fn units<'a>(
             let (name, path, source) = original;
             let checked = checked_units.get(&unit);
             let literals = literal_sites.remove(&unit);
+            let scanned = scanned_modules.remove(&unit);
             let discovered = entry_source.take().or_else(|| registrations.parsed(unit));
             let zip = archive_members.get(path);
             let physical = physical_files.get(path).filter(|_| !builtin);
@@ -130,7 +131,8 @@ pub(super) fn units<'a>(
                 let types = types.filter(|types| types.matches_source(&text));
                 let indexed = types.map(|types| types.parsed());
                 let declaration;
-                let (syntax, normalized) = if let Some(scanned) = scanned_modules.remove(&unit) {
+                let mut indexed_input = None;
+                let (syntax, normalized) = if let Some(scanned) = scanned {
                     match (scanned.parsed, syntax) {
                         (Some(super::ScannedParser::Owned(parsed)), None) => {
                             (Some(Cow::Owned(parsed)), Some(scanned.lowered))
@@ -139,19 +141,26 @@ pub(super) fn units<'a>(
                             declaration = parser;
                             (Some(Cow::Borrowed(&*declaration)), Some(scanned.lowered))
                         }
+                        (Some(super::ScannedParser::Indexed(input)), syntax) => {
+                            indexed_input = Some(input);
+                            (syntax, Some(scanned.lowered))
+                        }
                         (None, syntax) => (syntax, Some(scanned.lowered)),
                         (_, syntax) => (syntax, None),
                     }
                 } else {
                     (syntax, None)
                 };
-                // A different checker parser owns different expression and statement IDs.
-                let normalized = normalized.filter(|_| {
-                    syntax.as_deref().is_some_and(|original| {
-                        indexed
-                            .as_deref()
-                            .is_none_or(|indexed| std::ptr::eq(indexed, original))
-                    })
+                let normalized = normalized.filter(|root| match root {
+                    super::LoweredRoot::Unchanged(_) => standalone,
+                    // Indexed parses of one physical Python input share source-order node IDs.
+                    super::LoweredRoot::Complete(..) => syntax.as_deref().is_some_and(|original| {
+                        types.zip(indexed.as_ref()).is_none_or(|(types, indexed)| {
+                            std::ptr::eq(&**indexed, original)
+                                || indexed_input
+                                    .is_some_and(|input| input == types.indexed_input(indexed))
+                        })
+                    }),
                 });
                 let module = match indexed.as_deref().map(Cow::Borrowed).or(syntax) {
                     Some(parsed) => ParsedModule { text, parsed },

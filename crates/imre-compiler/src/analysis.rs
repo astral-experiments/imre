@@ -235,7 +235,25 @@ enum ScalarMatch {
     Exact,
 }
 
+/// Ruff numbers nodes in source order for each indexed parse of a file.
+#[derive(PartialEq)]
+pub(crate) struct IndexedFileInput {
+    path: ruff_db::files::FilePath,
+    version: ruff_python_ast::PythonVersion,
+    source: ruff_db::source::SourceText,
+}
+
 impl OperandTypes<'_> {
+    pub(crate) fn indexed_input(self, parsed: &ParsedModuleRef) -> IndexedFileInput {
+        let db = &self.session.db;
+        let file = parsed.module().file();
+        IndexedFileInput {
+            path: file.path(db).clone(),
+            version: parsed.module().python_version(),
+            source: ruff_db::source::source_text(db, file),
+        }
+    }
+
     pub(crate) fn matches_source(self, text: &str) -> bool {
         self.session.matches_parser_input(self.module, text)
     }
