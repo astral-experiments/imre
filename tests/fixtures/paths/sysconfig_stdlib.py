@@ -32,6 +32,25 @@ raw = {}
 assert sysconfig.get_path("scripts", "posix_user", raw, False) == "{userbase}/bin"
 assert raw == {}
 
+from sysconfig import _expand_vars
+original_preference = sysconfig._get_preferred_schemes
+assert all(name in sysconfig._INSTALL_SCHEMES for name in original_preference().values())
+sysconfig._get_preferred_schemes = lambda: {"prefix": "posix_user", "home": "venv"}
+try:
+    assert sysconfig.get_preferred_scheme("home") == "venv"
+    assert sysconfig.get_default_scheme() == ("venv" if sys.prefix != sys.base_prefix else "posix_user")
+finally:
+    sysconfig._get_preferred_schemes = original_preference
+
+scheme = sysconfig.get_default_scheme()
+assert _expand_vars(scheme, None) == sysconfig.get_paths(scheme)
+sysconfig._expand_vars = lambda selected, values: (selected, values)
+try:
+    assert sysconfig.get_paths(scheme, overrides) == (scheme, overrides)
+    assert sysconfig.get_paths(scheme, expand=False) is sysconfig._INSTALL_SCHEMES[scheme]
+finally:
+    sysconfig._expand_vars = _expand_vars
+
 variables = sysconfig.get_config_vars()
 assert sysconfig.get_config_vars() is variables
 if sys.platform in ("linux", "darwin"):
