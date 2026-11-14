@@ -605,7 +605,6 @@ const RESERVED: &[&str] = &[
     "False",
     "__debug__",
     "__name__",
-    "__doc__",
     "__file__",
 ];
 
@@ -3798,6 +3797,13 @@ impl<'a> Checker<'a> {
     fn parameter_shadows_binding(&self, name: &str, ty: Type, bound: bool) -> bool {
         self.mapping_class_import(name)
             || match self.graph.modules[self.module].bindings.get(name) {
+                Some(Binding::Value(definition))
+                    if self.graph.modules[definition.module]
+                        .implicit_value_name(definition.statement)
+                        .is_some() =>
+                {
+                    true
+                }
                 Some(Binding::Value(_) | Binding::ImportedValue(..) | Binding::TypeAlias(..)) => {
                     bound && !self.module_scope
                 }
@@ -3899,8 +3905,10 @@ impl<'a> Checker<'a> {
         node: &impl Ranged,
         bound: bool,
     ) -> Result<usize, String> {
-        if (name != "__doc__" && reserved(name))
-            || (self.graph.modules[self.module].bindings.contains_key(name)
+        if reserved(name)
+            || (self.graph.modules[self.module].bindings.get(name).is_some_and(|binding| {
+                    !matches!(binding, Binding::Value(def) if self.graph.modules[def.module].implicit_value_name(def.statement).is_some())
+                })
                 && (self.module_scope
                     || !self.parameter_shadows_binding(name, ty, bound)
                     || (self.block_depth != 0 && !self.names.contains_key(name))))
@@ -7065,6 +7073,9 @@ impl<'a> Checker<'a> {
                             continue;
                         }
                     }
+                    if self.module_scope && target.is_name_expr() {
+                        return Err(self.scoped_builtin_error("deleting a module binding", target));
+                    }
                     let ast::Expr::Subscript(target) = target else {
                         return Err(error(
                             self.source,
@@ -9148,7 +9159,33 @@ impl<'a> Checker<'a> {
             return self.shutil_function_value(op, None, expression);
         }
         match binding {
-            Some(Binding::Value(definition)) => {
+            Some(Binding::Value(mut definition)) => {
+                let module = &self.graph.modules[definition.module];
+                if definition.module == self.module
+                    && let ast::Expr::Name(name) = expression
+                    && module.implicit_value_name(0) == Some(name.id.as_str())
+                {
+                    // A deferred load sees the namespace at invocation. An eager load before
+                    // the first explicit assignment still sees the value installed on entry.
+                    if self
+                        .graph
+                        .session
+                        .operand_types(self.module)
+                        .reads_deferred_global(expression)
+                    {
+                        self.require_registered_operation(expression)?;
+                        return Ok(registered::values::name_binding(name.id.clone()));
+                    }
+                    if definition.statement != 0
+                        && self.globals.slot(definition, 0).is_none()
+                        && self
+                            .graph
+                            .session
+                            .is_unbound_module_read(self.module, expression)
+                    {
+                        definition.statement = 0;
+                    }
+                }
                 let value = self.read_module_value(definition, None, expression)?;
                 if let Some(sites) = &mut self.fixed_sites
                     && definition.module == self.module
@@ -9564,20 +9601,6 @@ impl<'a> Checker<'a> {
                 (Type::Bool, value)
             }
             ast::Expr::Name(name)
-                if name.id == "__doc__" && !self.names.contains_key("__doc__") =>
-            {
-                let module = &self.graph.modules[self.module];
-                if self.graph.python_optimization() < 2
-                    && let Some(ast::Stmt::Expr(doc)) = module.parsed.syntax().body.first()
-                    && let ast::Expr::StringLiteral(text) = &*doc.value
-                {
-                    check_string(text, self.source)?;
-                    (Type::Str, ExprKind::Str(text.value.to_string()))
-                } else {
-                    (Type::None, ExprKind::None)
-                }
-            }
-            ast::Expr::Name(name)
                 if name.id == "__file__"
                     && self.module == self.graph.entry
                     && self.graph.virtual_command =>
@@ -9638,6 +9661,9 @@ impl<'a> Checker<'a> {
                         {
                             self.require_registered_operation(expression)?;
                             return Ok(registered::values::name_binding(name));
+                        }
+                        if name == "__doc__" {
+                            return Ok(Expr::none());
                         }
                         if let Some(value) = annotations::builtin_type(name) {
                             return Ok(value);
@@ -11531,11 +11557,12 @@ impl<'a> Checker<'a> {
             return self.call_live_target(call, callee);
         }
         if self.module_scope
-            && self.globals.registered_initializers
             && call.arguments.is_empty()
             && self.unshadowed_builtin(&call.func, "globals")
         {
-            // A registered initializer already owns the namespace returned by globals().
+            if !self.globals.registered_initializers {
+                self.require_registered_operation(call)?;
+            }
             self.namespace_calls.insert(call.range());
             return Ok(registered::values::name_call(call, "globals", vec![]));
         }

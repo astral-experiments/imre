@@ -2827,6 +2827,28 @@ with zipfile.ZipFile('zip-writer-capability.zip', 'w', zipfile.ZIP_DEFLATED) as 
         )
         compare("-B", "-m", "merge_counts")
 
+        module_doc = root / "module_doc.py"
+        module_doc.write_text(
+            '" original"\ndef get():\n    return __doc__\n'
+            'print(get())\n__doc__ = 37\nprint(get())\n'
+        )
+        compare(module_doc)
+        compare("-OO", module_doc)
+
+        module_doc.write_text(
+            '"initial"\ndef take(x: int): return x\n__doc__ = 37\nprint(take(__doc__))\n'
+        )
+        compare(module_doc)
+
+        document_class = root / "document_class.py"
+        document_class.write_text(
+            '"module"\nclass C:\n    " class"\n    before = __doc__\n'
+            "    __doc__ = 37\n    after = __doc__\n"
+            "print(C.before, C.after, C.__doc__)\n"
+        )
+        compare(document_class)
+        compare("-OO", document_class)
+
         tokenize_script = root / "tokenize_entry.py"
         tokenize_script.write_text(
             "from io import StringIO\n"

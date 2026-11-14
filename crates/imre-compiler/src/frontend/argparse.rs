@@ -1577,10 +1577,13 @@ impl Checker<'_> {
         };
         let description = match &parser.description {
             Some(expr) if !matches!(expr, ast::Expr::NoneLiteral(_)) => {
-                let value = self.expr(expr)?;
-                if let ExprKind::Str(text) = &value.kind
-                    && text.contains("%(prog)")
-                    && !template(text, &["prog"])
+                let value = self.typed_expr(expr)?;
+                let invalid = |text: &str| text.contains("%(prog)") && !template(text, &["prog"]);
+                if matches!(&value.kind, ExprKind::Str(text) if invalid(text))
+                    || self
+                        .types
+                        .literal_strings(value.ty)
+                        .is_some_and(|strings| matches!(&*strings, [text] if invalid(text)))
                 {
                     return Err(error(
                         self.source,
@@ -1588,7 +1591,9 @@ impl Checker<'_> {
                         "unsupported argparse description substitution",
                     ));
                 }
-                if value.ty == Type::Str {
+                if matches!(value.ty, Type::StrLiteral(_)) {
+                    literals::view(value, Type::Str)
+                } else if value.ty == Type::Str {
                     value
                 } else if value.ty == Type::None {
                     Expr {

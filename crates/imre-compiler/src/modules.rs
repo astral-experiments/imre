@@ -3008,7 +3008,7 @@ impl SourceModule {
             matches!(
                 self.parsed.syntax().body[index],
                 ast::Stmt::If(_) | ast::Stmt::Expr(_)
-            )
+            ) && self.value_name_at(index).is_none()
         })
     }
 
@@ -3024,14 +3024,23 @@ impl SourceModule {
             .then_some(first)
     }
 
+    // Only the leading docstring introduces a value binding without a written target.
+    pub(crate) fn implicit_value_name(&self, statement: usize) -> Option<&'static str> {
+        (statement == 0 && crate::frontend::docstring_literal(&self.parsed.syntax().body).is_some())
+            .then_some("__doc__")
+    }
+
+    pub(crate) fn value_name_at(&self, index: usize) -> Option<&str> {
+        self.implicit_value_name(index)
+            .or_else(|| value_name(&self.parsed.syntax().body[index]))
+    }
+
     fn local_value(&self, id: ModuleId, statement: &ast::Stmt) -> Option<DefinitionId> {
         let name = value_name(statement)?;
         let Binding::Value(first) = *self.bindings.get(name)? else {
             return None;
         };
-        (first.module == id
-            && value_name(&self.parsed.syntax().body[first.statement]) == Some(name))
-        .then_some(first)
+        (first.module == id && self.value_name_at(first.statement) == Some(name)).then_some(first)
     }
 
     pub(crate) fn rebound_target(
@@ -5630,6 +5639,23 @@ impl<'a> Loader<'a> {
                     .entry_globals
                     .extend(module.executable.drain(..prefix));
                 module.entry_globals.sort_unstable();
+            }
+        }
+        if let Some(name) = self.modules[id].implicit_value_name(0) {
+            let module = &mut self.modules[id];
+            if let std::collections::hash_map::Entry::Vacant(entry) =
+                module.bindings.entry(name.into())
+            {
+                entry.insert(Binding::Value(DefinitionId {
+                    module: id,
+                    statement: 0,
+                }));
+                if global_writes.contains(name) {
+                    module.rebound_values.insert(0);
+                }
+            }
+            if is_entry {
+                module.entry_globals.insert(0, 0);
             }
         }
         // Expose otherwise unbound classes after module initialization. Preserve the

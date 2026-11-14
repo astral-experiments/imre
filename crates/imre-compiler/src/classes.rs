@@ -1212,7 +1212,7 @@ fn collect_class<'syntax>(
                 let protocol = context_method(member);
                 let slots = empty_slots(member, &assign.value);
                 if !names.insert(member.to_owned())
-                    || (member.starts_with("__") && !protocol && !slots)
+                    || (member.starts_with("__") && member != "__doc__" && !protocol && !slots)
                     || base.is_some_and(|(_, b)| {
                         b.fields.iter().any(|f| f.name == member)
                             || (!protocol && b.methods.iter().any(|m| m.name.as_str() == member))
