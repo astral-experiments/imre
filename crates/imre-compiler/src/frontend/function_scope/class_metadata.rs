@@ -122,6 +122,7 @@ impl FunctionScope {
     ) -> Self {
         let mut uses = Uses {
             implicit_class: true,
+            inline_comprehensions: true,
             ..Uses::new(string_annotations)
         };
         let mut locals: indexmap::IndexSet<String> = plan.scope_bindings(|expr| {
@@ -129,10 +130,11 @@ impl FunctionScope {
             uses.visit_expr(expr);
         });
         locals.insert(".0".into());
-        uses.direct.append(&mut uses.nested);
+        uses.direct.extend(uses.nested.iter().cloned());
         let names = ClosureNames {
             locals,
             reads: uses.direct,
+            cell_reads: uses.nested,
             nonlocals: uses.walrus,
             ..ClosureNames::default()
         };
