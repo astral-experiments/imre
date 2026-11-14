@@ -264,6 +264,7 @@ pub(super) struct Assigned {
 pub(super) enum ValueSource {
     Declaration(TypeDeclaration),
     InferredList(DefinitionId),
+    LiteralStrings(Type),
     Function(usize),
     /// A different source method can occupy this captured slot when it is called.
     ReboundMethod,

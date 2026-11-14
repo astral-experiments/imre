@@ -4278,10 +4278,8 @@ impl<'a> Checker<'a> {
                 "field access requires a fixed class instance",
             ));
         };
-        let field = self.classes.declarations.definitions[class]
-            .fields
-            .iter()
-            .position(|field| field.name == attribute.attr.as_str())
+        let (field, ty) = self
+            .declared_field(class, attribute.attr.as_str())
             .ok_or_else(|| {
                 self.missing_class_member(
                     class,
@@ -4290,7 +4288,7 @@ impl<'a> Checker<'a> {
                     "unknown field; dynamic attributes and first-class methods are unsupported",
                 )
             })?;
-        Ok((receiver, field, self.classes.fields[class][field]))
+        Ok((receiver, field, ty))
     }
 
     /// Inferred writable storage keeps its established BinaryIO contract.
@@ -5418,7 +5416,8 @@ impl<'a> Checker<'a> {
     fn value_declaration(&self, value: &Expr) -> Option<TypeDeclaration> {
         match self.value_source(value)? {
             ValueSource::Declaration(declaration) => Some(declaration),
-            ValueSource::InferredList(_)
+            ValueSource::LiteralStrings(_)
+            | ValueSource::InferredList(_)
             | ValueSource::Function(_)
             | ValueSource::ReboundMethod => None,
         }
@@ -5811,6 +5810,7 @@ impl<'a> Checker<'a> {
         {
             return self.tuple_search(loop_, target, iterable.clone(), &fields);
         }
+        let mut item_strings = None;
         if let Iteration::Container {
             iterable,
             items: false,
@@ -5818,13 +5818,18 @@ impl<'a> Checker<'a> {
         } = &mut input
             && let ExprKind::List(values) = &mut iterable.kind
             && (1..=8).contains(&values.len())
-            && values
+            && let Some(strings) = values
                 .iter()
-                .all(|value| matches!(value.kind, ExprKind::Str(_)))
+                .map(|value| match &value.kind {
+                    ExprKind::Str(text) => Some(text.clone()),
+                    _ => None,
+                })
+                .collect::<Option<Vec<_>>>()
         {
             // This fresh, unaliased list has no observable mutations or element
             // effects. Prepared tuple iteration lets scalar replacement remove
             // the container while retaining ordinary loop ownership and exits.
+            item_strings = Some(self.types.string_literal(strings));
             iterable.ty = self.types.tuple(vec![Type::Str; values.len()]);
             iterable.kind = ExprKind::Tuple(std::mem::take(values));
         }
@@ -5852,6 +5857,16 @@ impl<'a> Checker<'a> {
             &loop_.orelse,
             Vec::new(),
             |checker, body| {
+                if let Some(domain) = item_strings
+                    && let Some(name) = loop_.target.as_name_expr()
+                    && let Some(&slot) = checker.names.get(name.id.as_str())
+                    && checker.locals[slot] == Type::Str
+                    && checker.assigned.value_source(slot).is_none()
+                {
+                    checker
+                        .assigned
+                        .set_value_source(slot, Some(ValueSource::LiteralStrings(domain)));
+                }
                 let keep = emit && !checker.discarded_function_body();
                 checker.lower_block(&loop_.body, keep.then_some(body))?;
                 // The loop body can select a Python frame while its source contracts are checked.
@@ -14626,6 +14641,7 @@ impl<'a> Checker<'a> {
                 return Err(self.object_builtin_error("dir", call));
             }
         }
+        let mut field_names = None;
         let mut args = Vec::with_capacity(call.arguments.args.len());
         for arg in &call.arguments.args {
             let value = match self.expr(arg) {
@@ -14643,6 +14659,13 @@ impl<'a> Checker<'a> {
                     .stopped_call_result(call)
             {
                 return Ok(calls::ArgumentScope::stopped(self, args, value, returns));
+            }
+            // A later default expression can rebind the selector local.
+            if name == "getattr"
+                && args.len() == 1
+                && let Some(ValueSource::LiteralStrings(domain)) = self.value_source(&value)
+            {
+                field_names = Some(domain);
             }
             args.push(value);
         }
@@ -15093,6 +15116,12 @@ impl<'a> Checker<'a> {
             && !self.names.contains_key(name)
         {
             return self.errno_builtin(name, call, &args);
+        }
+        if name == "getattr"
+            && self.unshadowed_builtin(&call.func, name)
+            && let Some(value) = self.finite_field_getattr(&args, call, field_names)?
+        {
+            return Ok(value);
         }
         if matches!(name, "vars" | "hasattr" | "getattr")
             && self.unshadowed_builtin(&call.func, name)

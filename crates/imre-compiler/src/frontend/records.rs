@@ -1009,6 +1009,103 @@ impl Checker<'_> {
         })
     }
 
+    pub(super) fn declared_field(&self, class: usize, name: &str) -> Option<(usize, Type)> {
+        let field = self.classes.declarations.definitions[class]
+            .fields
+            .iter()
+            .position(|field| field.name == name)?;
+        Some((field, self.classes.fields[class][field]))
+    }
+
+    /// A generated initializer fills every declared field. The checked class layout
+    /// preserves inherited field types and offsets, including on subclass instances.
+    pub(super) fn finite_field_getattr(
+        &mut self,
+        args: &[Expr],
+        call: &ast::ExprCall,
+        field_names: Option<Type>,
+    ) -> Result<Option<Expr>, String> {
+        let [receiver, key, rest @ ..] = args else {
+            return Ok(None);
+        };
+        let Type::Class(class) = receiver.ty else {
+            return Ok(None);
+        };
+        let declaration = &self.classes.declarations.definitions[class];
+        if self.registered.is_some()
+            || !declaration.generated_initializer
+            || !matches!(key.ty, Type::Str | Type::StrLiteral(_))
+            || self
+                .classes
+                .declarations
+                .exceptions
+                .contains_key(&declaration.definition)
+            || rest.len() > 1
+            || !call.arguments.keywords.is_empty()
+        {
+            return Ok(None);
+        }
+        // Most builtin operands use the ordinary string view. Its input retains
+        // the checked Literal domain and still evaluates the original key.
+        let names = match &key.kind {
+            ExprKind::Str(name) => vec![name.clone()],
+            kind => {
+                let domain = match kind {
+                    ExprKind::Builtin(Builtin::LiteralStringView, args) => Some(args[0].ty),
+                    _ => field_names,
+                };
+                let Some(names) = domain.and_then(|ty| self.types.literal_strings(ty)) else {
+                    return Ok(None);
+                };
+                names.to_vec()
+            }
+        };
+        let Some(fields) = names
+            .into_iter()
+            .map(|name| self.declared_field(class, &name).map(|field| (name, field)))
+            .collect::<Option<Vec<_>>>()
+        else {
+            return Ok(None);
+        };
+        let field_types: Vec<_> = fields.iter().map(|(_, (_, ty))| *ty).collect();
+        let Some(result) = self.types.union(&field_types).or_else(|| {
+            field_types
+                .iter()
+                .all(|ty| matches!(ty, Type::Str | Type::Int))
+                .then(|| self.types.string_or_int())
+        }) else {
+            return Ok(None);
+        };
+        let mut scope = calls::ArgumentScope::default();
+        let receiver = scope.hold(self, receiver.clone());
+        let key = self.coerce(key.clone(), Type::Str, call)?;
+        let key = scope.hold(self, key);
+        if let [default] = rest {
+            scope.hold(self, default.clone());
+        }
+        let mut selected = None;
+        for (name, (index, ty)) in fields.into_iter().rev() {
+            let value = self.coerce(
+                Expr {
+                    ty,
+                    kind: ExprKind::Field(Box::new(receiver.clone()), index),
+                },
+                result,
+                call,
+            )?;
+            selected = Some(if let Some(miss) = selected {
+                let test = pipelines::compare(Compare::Equal, key.clone(), unpacking::string(name));
+                Expr {
+                    ty: result,
+                    kind: ExprKind::Conditional(Box::new(test), Box::new(value), Box::new(miss)),
+                }
+            } else {
+                value
+            });
+        }
+        Ok(selected.map(|value| scope.finish(value)))
+    }
+
     pub(super) fn class_attribute(
         &mut self,
         attribute: &ast::ExprAttribute,
