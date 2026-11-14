@@ -162,7 +162,8 @@ impl<'a> Visitor<'a> for ClosureNames {
             ast::Stmt::ClassDef(c) => {
                 self.needs_discovery = true;
                 self.locals.insert(c.name.to_string());
-                self.incomplete = true;
+                // The declaration collector supplies free reads from the completed class body.
+                self.incomplete |= !self.include_nested_reads;
                 if self.include_nested_reads
                     && let Some(params) = &c.type_params
                 {
@@ -704,7 +705,12 @@ impl<'a> Visitor<'a> for Collector<'_, '_, 'a> {
         visitor::walk_stmt(self, stmt);
         if let ast::Stmt::ClassDef(class) = stmt {
             // Methods and aliases need the bindings on entry. Nested class reads are ready on exit.
-            class_metadata::capture(class, strings, self.scopes);
+            class_metadata::capture(
+                class,
+                strings,
+                self.scopes,
+                matches!(self.scope, Scope::Function { .. }).then_some(&mut self.function_names),
+            );
             if self.yields && !parent_yields {
                 self.yields = imre_ast::class_definition_expressions(class)
                     .any(imre_ast::code_flags::yields_in_expression);

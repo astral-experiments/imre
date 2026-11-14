@@ -15,6 +15,7 @@ pub(super) fn capture(
     class: &ast::StmtClassDef,
     string_annotations: bool,
     scopes: &mut ScopeFacts<'_>,
+    parent: Option<&mut ClosureNames>,
 ) {
     let mut uses = Uses::new(string_annotations);
     let mut fields = Uses::new(string_annotations);
@@ -50,6 +51,17 @@ pub(super) fn capture(
         names.reads.insert(".type_params".to_owned());
     }
     names.finish_scope();
+    if let Some(parent) = parent {
+        for name in &names.reads {
+            if class.type_params.as_deref().is_some_and(|params| {
+                name == ".type_params" || params.iter().any(|p| p.name().as_str() == name)
+            }) {
+                continue;
+            }
+            parent.cell_reads.insert(name.clone());
+            parent.reads.insert(name.clone());
+        }
+    }
 }
 
 /// Reads in a nested lambda or comprehension bypass the enclosing class's namespace.
@@ -322,29 +334,14 @@ impl<'a> Visitor<'a> for BodyUses<'_, '_> {
                     self.visit_expr(expr);
                 }
                 let method = self.scopes.function(f);
-                let mut extra = BTreeSet::new();
-                if !method.metadata.reads_complete() {
-                    // A nested class may pass on reads its enclosing function can't resolve.
-                    let mut child = self.uses.child_scope(false);
-                    BodyUses {
-                        uses: &mut child,
-                        fields: None,
-                        scopes: self.scopes,
-                    }
-                    .visit_body(&f.body);
-                    extra = child.reads.enclosing(None);
-                    extra.retain(|name| !method.metadata.locals.contains(name));
-                    extra.retain(|name| !method.globals.contains(name));
-                }
-                let reads = method
-                    .metadata
-                    .reads()
-                    .chain(extra.iter().map(String::as_str));
                 self.uses.declaration(f.type_params.as_deref(), |scope| {
                     if let Some(annotations) = &method.annotation_reads {
                         scope.reads.include(annotations);
                     }
-                    scope.reads.nested.extend(reads.map(str::to_owned));
+                    scope
+                        .reads
+                        .nested
+                        .extend(method.metadata.reads().map(str::to_owned));
                 });
             }
             ast::Stmt::ClassDef(c) => {
