@@ -4862,6 +4862,8 @@ struct Loader<'a> {
     by_name: HashMap<String, ModuleId>,
     by_path: HashMap<PathBuf, ModuleId>,
     loading: HashSet<ModuleId>,
+    /// Newly discovered class re-exports whose grouped from-import is still loading children.
+    pending_reexports: Vec<(ModuleId, ast::name::Name)>,
     /// A from-import of a still-initializing module observes the value at that point.
     partial_value_imports: HashSet<DefinitionId>,
     ordered_imports: bool,
@@ -4956,6 +4958,7 @@ impl<'a> Loader<'a> {
             by_name: HashMap::new(),
             by_path: HashMap::new(),
             loading: HashSet::new(),
+            pending_reexports: Vec::new(),
             partial_value_imports: HashSet::new(),
             ordered_imports: false,
             import_failure: None,
@@ -5470,8 +5473,10 @@ impl<'a> Loader<'a> {
                         self.initialization.push((id, segment..index));
                         segment = index;
                     }
-                    self.import(id, index, statement)
-                        .map_err(|error| self.modules[id].error(statement, &error))?;
+                    let pending = self.pending_reexports.len();
+                    let imported = self.import(id, index, statement);
+                    self.pending_reexports.truncate(pending);
+                    imported.map_err(|error| self.modules[id].error(statement, &error))?;
                     if errno_import(statement).is_some() {
                         // The target decides which forward symbols exist. A failed from-import
                         // must precede the next imported module, even if its alias is unused.
@@ -6081,7 +6086,7 @@ impl<'a> Loader<'a> {
                     }
                     _ => self.load_module(&name)?,
                 };
-                for alias in &import.names {
+                for (member, alias) in import.names.iter().enumerate() {
                     let binding = if let Some(binding) =
                         self.modules[target].export(alias.name.as_str())
                     {
@@ -6091,10 +6096,23 @@ impl<'a> Loader<'a> {
                                 Binding::Definition(def) => {
                                     let statement = &self.modules[def.module].parsed.syntax().body
                                         [def.statement];
-                                    let ready = def.module == target
-                                        && self.partial_source(target)
+                                    let ready = self.partial_source(target)
                                         && self.initialized(def)
-                                        && matches!(statement, ast::Stmt::FunctionDef(f) if f.decorator_list.is_empty());
+                                        && match statement {
+                                            ast::Stmt::FunctionDef(f) => {
+                                                def.module == target && f.decorator_list.is_empty()
+                                            }
+                                            // This package already imported the class from a
+                                            // module whose initializer has finished.
+                                            ast::Stmt::ClassDef(_) => {
+                                                package
+                                                    && !self.loading.contains(&def.module)
+                                                    && !self.pending_reexports.iter().any(|(id, name)| {
+                                                        *id == target && *name == alias.name.id
+                                                    })
+                                            }
+                                            _ => false,
+                                        };
                                     self.ordered_imports |= ready;
                                     ready
                                 }
@@ -6190,6 +6208,15 @@ impl<'a> Loader<'a> {
                     self.needs_object_imports |= binding == Binding::ConditionalValue;
                     self.imports_runtime_class |= binding == Binding::RuntimeClass;
                     let local = alias.asname.as_ref().unwrap_or(&alias.name);
+                    // IMPORT_NAME resolves the whole fromlist before Python stores its aliases.
+                    if self.modules[id].is_package
+                        && self.modules[target].is_package
+                        && member + 1 < import.names.len()
+                        && matches!(binding, Binding::Definition(_))
+                        && self.modules[id].bindings.get(local.as_str()) != Some(&binding)
+                    {
+                        self.pending_reexports.push((id, local.id.clone()));
+                    }
                     if fresh_child == Some(local.as_str())
                         && let Some(current) = self.modules[id].bindings.get_mut(local.as_str())
                         && *current == Binding::Module(target)

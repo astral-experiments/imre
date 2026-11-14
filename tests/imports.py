@@ -627,6 +627,13 @@ REJECTED = {
         "pkg/http.py": "import pkg.child as child\n",
         "pkg/child.py": "from . import http as partial\nprint(\"child finished\")\n",
     }, "cyclic import through \"pkg.http\""),
+    "unpublished_class_in_same_fromlist": ({
+        "main.py": "import pkg\n",
+        "pkg/__init__.py": "from .api import Item as Published, child\n",
+        "pkg/api/__init__.py": "from .origin import Item\n",
+        "pkg/api/origin.py": "class Item:\n    pass\n",
+        "pkg/api/child.py": "from pkg import Published\n",
+    }, 'cyclic import through "pkg"'),
     "decorated_partial_function": ({
         "main.py": "import pkg.parent\n",
         "pkg/__init__.py": "",
@@ -2055,6 +2062,13 @@ ACCEPTED = {
         "pkg/__init__.py": "",
         "pkg/parent.py": "def increment(n: int) -> int:\n    return n + 1\nfrom . import child\nobserved = child.result\n",
         "pkg/child.py": "from .parent import increment\nresult = increment(41)\n",
+    },
+    "published_class_in_cycle": {
+        "main.py": "import pkg\n",
+        "pkg/__init__.py": "from .api import Item as Published\nfrom .api import Item as Published, child\n",
+        "pkg/api/__init__.py": "from .origin import Item\n",
+        "pkg/api/origin.py": "class Item:\n    def read(self) -> int:\n        return 7\n",
+        "pkg/api/child.py": "from pkg import Published\nfrom .origin import Item\nprint(Published is Item, Published().read())\n",
     },
     "child_export_shadows_module": {
         "package/__init__.py": "from .token import number as token\n",
