@@ -78,7 +78,7 @@ impl<C, E> Fields<C, E> {
         } else {
             field.conversion
         };
-        let mut value = match (self.prepare)(&mut self.context, field, conversion)? {
+        let value = match (self.prepare)(&mut self.context, field, conversion)? {
             FieldValue::Formatted(text) => text,
             FieldValue::Operand(mut value) => {
                 if let Some(flag) = conversion.to_char() {
@@ -98,10 +98,7 @@ impl<C, E> Fields<C, E> {
             }
         };
         if self.result == Type::PythonObject {
-            value = self.operation(
-                Builtin::RegisteredLocation(field.range(), field.start(), None),
-                vec![value],
-            );
+            return Ok(registered::values::located(field.range(), field.start(), value));
         }
         Ok(value)
     }
