@@ -537,11 +537,6 @@ impl<'a> PreparedBody<'a> {
                 .map_or_else(|| stmt.start(), Ranged::start)
             })
             .unwrap_or_default();
-        let class_keywords = tokens
-            .iter()
-            .filter(|token| token.kind() == ast::token::TokenKind::Class)
-            .map(Ranged::start)
-            .collect::<Vec<_>>();
         let method_imports = registered_values.map_or_else(
             || Cow::Owned(imre_ast::module_imports(&syntax.body)),
             |values| Cow::Borrowed(&values.method_imports),
@@ -646,8 +641,7 @@ impl<'a> PreparedBody<'a> {
             let site = match declaration {
                 DeclarationSite::Function(site) => site,
                 DeclarationSite::Class(site) => {
-                    let (start, class) =
-                        prepare.class_suite(site, &class_keywords, &private_names, &scopes);
+                    let (start, class) = prepare.class_suite(site, &private_names, &scopes);
                     class_bodies.insert(start, class);
                     continue;
                 }
@@ -708,8 +702,6 @@ impl<'a> PreparedBody<'a> {
             path,
             python_annotations,
             module_start,
-            #[cfg(test)]
-            class_keywords,
             docs,
             #[cfg(test)]
             template_fields,
@@ -951,8 +943,6 @@ struct SourceInfo<'a> {
     path: Cow<'a, Path>,
     python_annotations: bool,
     module_start: ruff_text_size::TextSize,
-    #[cfg(test)]
-    class_keywords: Vec<ruff_text_size::TextSize>,
     docs: Option<crate::modules::doctest::SealedDocs>,
     #[cfg(test)]
     template_fields: HashMap<TextSize, imre_ast::strings::TemplateFieldText>,
@@ -1996,7 +1986,6 @@ mod tests {
         let initializer = suites.suite(body, RegisteredScope::Module);
         let class_bodies = suites.class_suites(
             classes,
-            &prepared.source.class_keywords,
             &prepared.source.private_names,
             &prepared.source.scopes,
         );
