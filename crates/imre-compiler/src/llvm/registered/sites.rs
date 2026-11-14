@@ -1,9 +1,8 @@
 //! Compiled code identities and operands for declarations in a registered frame.
+use indexmap::IndexMap;
 use ruff_text_size::{TextRange, TextSize};
-use std::collections::HashMap;
 
 use super::RegisteredFrame;
-use crate::frontend::RequiredSite;
 use crate::ir::{RegisteredTypeParameter, TypeParameterKind};
 
 /// The source location of a function created by an expression.
@@ -181,9 +180,9 @@ impl CompiledAlias {
 pub(crate) type CompiledTypeParameters =
     Result<Vec<RegisteredTypeParameter<CompiledDefinition>>, String>;
 
-pub(crate) struct Declaration {
+pub(crate) struct Declaration<'p> {
     pub(crate) definition: CompiledDefinition,
-    pub(crate) decorator_offsets: Vec<TextSize>,
+    pub(crate) decorator_offsets: &'p [TextSize],
     pub(crate) type_params: Option<CompiledTypeParameters>,
 }
 
@@ -194,54 +193,19 @@ pub(crate) struct CompiledExec {
     pub(crate) source: String,
 }
 
-/// Compile a declaration in its lexical scope when the enclosing frame first needs its site.
-pub(crate) trait SiteDefinitions {
-    fn declaration(&mut self, site: TextSize) -> Declaration;
-    fn class_namespace(
-        &mut self,
-        site: TextSize,
-    ) -> (CompiledDefinition, CompiledTypeParameters, TextRange);
-    fn type_alias(&mut self, site: TextSize) -> Result<CompiledAlias, String>;
-}
-
 #[derive(Default)]
-pub(crate) struct CheckedSites {
-    pub(crate) definitions: HashMap<TextSize, Declaration>,
+pub(crate) struct CheckedSites<'p> {
+    pub(crate) definitions: IndexMap<TextSize, Declaration<'p>>,
     pub(crate) class_namespaces:
-        HashMap<TextSize, (CompiledDefinition, CompiledTypeParameters, TextRange)>,
-    pub(crate) aliases: HashMap<TextSize, Result<CompiledAlias, String>>,
+        IndexMap<TextSize, (CompiledDefinition, CompiledTypeParameters, TextRange)>,
+    pub(crate) aliases: IndexMap<TextSize, Result<CompiledAlias, String>>,
 }
 
-impl CheckedSites {
-    pub(crate) fn place(&mut self, site: RequiredSite, definitions: &mut impl SiteDefinitions) {
-        match site {
-            RequiredSite::Definition(site) => {
-                self.definitions
-                    .entry(site)
-                    .or_insert_with(|| definitions.declaration(site));
-            }
-            RequiredSite::DefinitionAfterInputs(_)
-            | RequiredSite::AnnotationString(_)
-            | RequiredSite::ExecLiteral(_)
-            | RequiredSite::Lambda(..)
-            | RequiredSite::Generator(_) => {}
-            RequiredSite::ClassNamespace(site) => {
-                self.class_namespaces
-                    .entry(site)
-                    .or_insert_with(|| definitions.class_namespace(site));
-            }
-            RequiredSite::Alias(site) => {
-                self.aliases
-                    .entry(site)
-                    .or_insert_with(|| definitions.type_alias(site));
-            }
-        }
-    }
-
+impl CheckedSites<'_> {
     pub(crate) fn definition(
         &self,
         frame: &mut RegisteredFrame<'_, '_>,
-        site: TextSize,
+        index: usize,
         decorators: &[(String, String)],
         defaults: &[String],
         class_arguments: Option<(String, String)>,
@@ -250,7 +214,7 @@ impl CheckedSites {
             definition,
             decorator_offsets,
             type_params,
-        } = &self.definitions[&site];
+        } = &self.definitions[index];
         let scope = frame.scope.clone();
         let mut value = if let Some(arguments) = class_arguments {
             definition.instantiate_class(frame, arguments, None)
@@ -275,7 +239,7 @@ impl CheckedSites {
             }
             function
         };
-        for ((mark, decorator), &offset) in decorators.iter().zip(decorator_offsets).rev() {
+        for ((mark, decorator), &offset) in decorators.iter().zip(*decorator_offsets).rev() {
             frame.set_statement_line(frame.positions.line(offset));
             value = frame.invoke_from_mark(decorator, &[&value], mark, None);
         }

@@ -954,7 +954,7 @@ impl SourceMap<'_> {
         in_function: bool,
     ) -> Function<'a, 'p, 'scope> {
         Function {
-            sites: CheckedSites::default(),
+            sites: Default::default(),
             frame,
             source: self,
             in_function,
@@ -1073,63 +1073,99 @@ impl SourceMap<'_> {
     }
 }
 
-/// Lexical inputs for compiling the children of one registered frame.
-struct LexicalDefinitions<'a, 'p> {
-    source: &'a SourceMap<'p>,
-    output: &'a mut Output,
-    prefix: &'a str,
-    declared_globals: &'a std::collections::BTreeSet<String>,
-    in_function: bool,
-    method_scope: bool,
-    class_locals: Option<&'a crate::frontend::function_scope::ClassBindings>,
-}
-
 enum Callable<'a> {
     Lambda(&'a RegisteredLambda, bool),
     Named(&'a NamedFunction<'a>),
     Generator(&'a RegisteredGenerator),
 }
 
-impl<'p> SourceMap<'p> {
-    fn definitions<'a>(
-        &'a self,
-        frame: &'a mut RegisteredFrame<'_, '_>,
-        prefix: &'a str,
-        declared_globals: &'a std::collections::BTreeSet<String>,
-        in_function: bool,
-    ) -> LexicalDefinitions<'a, 'p> {
-        LexicalDefinitions {
-            source: self,
-            output: frame.output,
-            prefix,
-            declared_globals,
-            in_function,
-            class_locals: frame.class_locals,
-            method_scope: frame.class_locals.is_some() && frame.annotation_values.is_none(),
-        }
-    }
-}
-
-impl Function<'_, '_, '_> {
-    fn definitions(&mut self) -> (&mut CheckedSites, LexicalDefinitions<'_, '_>) {
-        let definitions = self.source.definitions(
-            &mut self.frame,
-            self.prefix,
-            self.declared_globals,
-            self.in_function,
-        );
-        (&mut self.sites, definitions)
-    }
-}
-
 impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<'a, 'p, '_> {
-    fn frame_and_sites(&mut self) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites) {
+    fn frame_and_sites(&mut self) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites<'p>) {
         (&mut self.frame, &self.sites)
     }
 
-    fn place_site(&mut self, site: RequiredSite) {
-        let (sites, mut definitions) = self.definitions();
-        sites.place(site, &mut definitions);
+    fn place_definition(&mut self, site: TextSize) -> usize {
+        if let Some(index) = self.sites.definitions.get_index_of(&site) {
+            return index;
+        }
+        let source = self.source;
+        let (definition, decorator_offsets, type_params) = if let Some(class) =
+            source.class_bodies.get(&site)
+        {
+            let definition = if let Some(header) = &class.header {
+                let name = format!("<generic parameters of {}>", class.name);
+                let body = Body::CheckedProvider(&header.body, AnnotationScope::Plain);
+                self.compile_definition(site, DefinitionName::ClassHeader(&name, class), body)
+            } else {
+                self.compile_class_namespace(site, class)
+            };
+            (definition, &class.decorator_offsets, None)
+        } else {
+            let header = &source.scopes.functions[&site];
+            let definition = self.compile_callable(TextRange::empty(site), Callable::Named(header));
+            let parameters = (!header.type_params.is_empty()).then(|| {
+                self.compile_type_parameters(&header.type_params, self.frame.class_locals)
+            });
+            (definition, &header.decorator_offsets, parameters)
+        };
+        let declaration = Declaration {
+            definition,
+            decorator_offsets,
+            type_params,
+        };
+        self.sites.definitions.insert_full(site, declaration).0
+    }
+
+    fn place_class_namespace(&mut self, site: TextSize) -> usize {
+        if let Some(index) = self.sites.class_namespaces.get_index_of(&site) {
+            return index;
+        }
+        let class = &self.source.class_bodies[&site];
+        let namespace = self.compile_class_namespace(site, class);
+        let header = class.header.as_ref().expect("generic class");
+        let parameters = self.compile_scoped_type_parameters(&header.parameters);
+        self.sites
+            .class_namespaces
+            .insert_full(site, (namespace, parameters, class.range))
+            .0
+    }
+
+    fn place_type_alias(&mut self, site: TextSize) -> usize {
+        if let Some(index) = self.sites.aliases.get_index_of(&site) {
+            return index;
+        }
+        let alias = &self.source.type_aliases[&site];
+        // Placement can visit children of a suite that exits before the alias binds.
+        let outer_diagnostic = self.frame.output.diagnostic.take();
+        let compiled = match &alias.body {
+            Ok(code) => Some(CompiledAlias {
+                definition: self.compile_evaluator(
+                    site,
+                    &alias.name,
+                    &alias.scope,
+                    alias.parameters.is_some(),
+                    code,
+                    self.frame.class_locals,
+                ),
+                parameters: alias
+                    .parameters
+                    .as_ref()
+                    .map(|parameters| self.compile_scoped_type_parameters(parameters)),
+            }),
+            Err(range) => {
+                self.frame.output.diagnostic.get_or_insert_with(|| {
+                    self.source
+                        .positions
+                        .diagnostic_at(*range, "type alias value has no checked expression operand")
+                });
+                None
+            }
+        };
+        let result = match std::mem::replace(&mut self.frame.output.diagnostic, outer_diagnostic) {
+            Some(error) => Err(error),
+            None => Ok(compiled.expect("prepared alias evaluator")),
+        };
+        self.sites.aliases.insert_full(site, result).0
     }
 
     fn callable_at(&mut self, site: CallableSite, scoped: bool) -> CompiledDefinition {
@@ -1142,8 +1178,7 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
                 (range, Callable::Generator(&self.source.generators[&range]))
             }
         };
-        let (_, mut definitions) = self.definitions();
-        definitions.compile_callable(range, callable)
+        self.compile_callable(range, callable)
     }
 
     fn annotation_string(&mut self, site: TextSize, spelling: &str) -> String {
@@ -1217,81 +1252,11 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
     }
 }
 
-impl sites::SiteDefinitions for LexicalDefinitions<'_, '_> {
-    fn declaration(&mut self, site: TextSize) -> Declaration {
-        let source = self.source;
-        let (definition, decorator_offsets, type_params) = if let Some(class) =
-            source.class_bodies.get(&site)
-        {
-            let definition = if let Some(header) = &class.header {
-                let name = format!("<generic parameters of {}>", class.name);
-                let body = Body::CheckedProvider(&header.body, AnnotationScope::Plain);
-                self.compile_definition(site, DefinitionName::ClassHeader(&name, class), body)
-            } else {
-                self.compile_class_namespace(site, class)
-            };
-            (definition, &class.decorator_offsets, None)
-        } else {
-            let header = &source.scopes.functions[&site];
-            let definition = self.compile_callable(TextRange::empty(site), Callable::Named(header));
-            let parameters = (!header.type_params.is_empty())
-                .then(|| self.compile_type_parameters(&header.type_params, self.class_locals));
-            (definition, &header.decorator_offsets, parameters)
-        };
-        Declaration {
-            definition,
-            decorator_offsets: decorator_offsets.clone(),
-            type_params,
-        }
+impl Function<'_, '_, '_> {
+    fn is_method_scope(&self) -> bool {
+        self.frame.class_locals.is_some() && self.frame.annotation_values.is_none()
     }
 
-    fn class_namespace(
-        &mut self,
-        site: TextSize,
-    ) -> (CompiledDefinition, CompiledTypeParameters, TextRange) {
-        let class = &self.source.class_bodies[&site];
-        let namespace = self.compile_class_namespace(site, class);
-        let header = class.header.as_ref().expect("generic class");
-        let parameters = self.compile_scoped_type_parameters(&header.parameters);
-        (namespace, parameters, class.range)
-    }
-
-    fn type_alias(&mut self, site: TextSize) -> Result<CompiledAlias, String> {
-        let alias = &self.source.type_aliases[&site];
-        // Placement can visit children of a suite that exits before the alias binds.
-        let outer_diagnostic = self.output.diagnostic.take();
-        let compiled = match &alias.body {
-            Ok(code) => Some(CompiledAlias {
-                definition: self.compile_evaluator(
-                    site,
-                    &alias.name,
-                    &alias.scope,
-                    alias.parameters.is_some(),
-                    code,
-                    self.class_locals,
-                ),
-                parameters: alias
-                    .parameters
-                    .as_ref()
-                    .map(|parameters| self.compile_scoped_type_parameters(parameters)),
-            }),
-            Err(range) => {
-                self.output.diagnostic.get_or_insert_with(|| {
-                    self.source
-                        .positions
-                        .diagnostic_at(*range, "type alias value has no checked expression operand")
-                });
-                None
-            }
-        };
-        match std::mem::replace(&mut self.output.diagnostic, outer_diagnostic) {
-            Some(error) => Err(error),
-            None => Ok(compiled.expect("prepared alias evaluator")),
-        }
-    }
-}
-
-impl LexicalDefinitions<'_, '_> {
     fn compile_callable(&mut self, site: TextRange, callable: Callable<'_>) -> CompiledDefinition {
         let source = self.source;
         let (name, metadata, body, header) = match callable {
@@ -1320,7 +1285,7 @@ impl LexicalDefinitions<'_, '_> {
             format!("{}{name}", self.prefix)
         };
         let doc = header
-            .filter(|_| self.output.keep_docstrings)
+            .filter(|_| self.frame.output.keep_docstrings)
             .and_then(|h| {
                 h.doc
                     .clone()
@@ -1343,7 +1308,7 @@ impl LexicalDefinitions<'_, '_> {
                 format!("{qualname}.<locals>.")
             };
             let code = source.code(
-                self.output,
+                self.frame.output,
                 &prefix,
                 Body::Registered(body, &callable),
                 true,
@@ -1356,7 +1321,7 @@ impl LexicalDefinitions<'_, '_> {
         });
         // A lambda inside a display captures the iteration namespace even in a class body.
         let comprehension = matches!(callable, Callable::Lambda(_, true));
-        let direct_method = self.method_scope && !comprehension && !generic;
+        let direct_method = self.is_method_scope() && !comprehension && !generic;
         let mut flags =
             source.function_flags(self.in_function || comprehension || generic, direct_method);
         if doc.is_some() {
@@ -1364,7 +1329,8 @@ impl LexicalDefinitions<'_, '_> {
         }
         let signature = metadata.signature(flags, direct_method);
         if !matches!(callable, Callable::Generator(_)) {
-            self.output
+            self.frame
+                .output
                 .interned_identifiers
                 .extend(metadata.parameter_names().map(str::to_owned));
         }
@@ -1444,7 +1410,7 @@ impl LexicalDefinitions<'_, '_> {
             if class.annotations.conditional_count != 0 || scope.cells.conditional {
                 signature["conditional_annotations"] = json!(true);
             }
-            scope.write_signature(&mut signature, self.method_scope);
+            scope.write_signature(&mut signature, self.is_method_scope());
         } else if let Some(facts) = evaluator_scope {
             facts.write_signature(&mut signature);
         } else {
@@ -1459,9 +1425,13 @@ impl LexicalDefinitions<'_, '_> {
             }
         }
         let in_function = self.in_function || !matches!(body, Body::Namespace(..));
-        let code = self
-            .source
-            .code(self.output, &prefix, body, in_function, Some((start, 0)));
+        let code = self.source.code(
+            self.frame.output,
+            &prefix,
+            body,
+            in_function,
+            Some((start, 0)),
+        );
         CompiledDefinition {
             class_header,
             format_evaluator: evaluator_scope.is_some(),
@@ -1542,6 +1512,7 @@ impl LexicalDefinitions<'_, '_> {
         let annotations = header.annotations.as_ref()?;
         let start = annotations.start;
         let class = self
+            .frame
             .class_locals
             .filter(|_| !source.private_names.string_annotations);
         let reads = annotations.reads(class);
@@ -1563,7 +1534,7 @@ impl LexicalDefinitions<'_, '_> {
         }
         let scope = class.map_or(AnnotationScope::Plain, AnnotationScope::Method);
         Some(Box::new(source.annotation_provider(
-            self.output,
+            self.frame.output,
             &annotations.body,
             scope,
             start,
@@ -1657,7 +1628,7 @@ impl SourceMap<'_> {
 }
 
 struct Function<'a, 'p, 'scope> {
-    sites: sites::CheckedSites,
+    sites: CheckedSites<'p>,
     frame: RegisteredFrame<'a, 'p>,
     source: &'p SourceMap<'p>,
     prefix: &'scope str,

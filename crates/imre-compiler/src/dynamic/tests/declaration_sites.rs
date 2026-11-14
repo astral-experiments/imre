@@ -1,5 +1,4 @@
 use crate::dynamic::emit::{ModuleOrigin, Output, PreparedBody, RegisteredFrame};
-use ruff_text_size::TextRange;
 use std::path::Path;
 
 #[test]
