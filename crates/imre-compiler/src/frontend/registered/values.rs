@@ -58,19 +58,6 @@ pub(crate) struct RegisteredSource<'a> {
 }
 
 impl RegisteredSource<'_> {
-    /// Escaped braces may join several middle tokens into one literal element.
-    /// Recover replacement code points in their original source order.
-    pub(crate) fn format_replacements(
-        self,
-        literal: &ast::InterpolatedStringLiteralElement,
-    ) -> Option<Vec<u32>> {
-        let range = literal.range();
-        self.replacements
-            .keys()
-            .any(|&r| range.contains_range(r))
-            .then(|| imre_ast::strings::replacements(&self.text[range]).collect())
-    }
-
     pub(crate) fn direct_method(self, call: &ast::ExprCall) -> Option<&ast::ExprAttribute> {
         imre_ast::direct_method(call, self.method_imports, self.private_names)
     }
@@ -217,13 +204,9 @@ impl RegisteredSource<'_> {
         let mut text = String::new();
         let mut encoded = None;
         for piece in pieces {
-            let middle;
             let replacement = match piece {
                 FStringLiteral::Adjacent(lit) => self.replacements.get(&lit.range()),
-                FStringLiteral::Middle(lit, _) => {
-                    middle = self.format_replacements(lit);
-                    middle.as_ref()
-                }
+                FStringLiteral::Middle(lit, _) => self.replacements.get(&lit.range()),
                 FStringLiteral::Text(_) => None,
             };
             if replacement.is_some() || encoded.is_some() {
