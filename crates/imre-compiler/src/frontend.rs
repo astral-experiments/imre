@@ -5716,7 +5716,7 @@ impl<'a> Checker<'a> {
                     && !checker.fault_enabled();
                 checker.lower_block(&loop_.body, (!discard_range_body).then_some(body))?;
                 // The loop body can select a Python frame while its source contracts are checked.
-                Ok(!is_range || !checker.discarded_function_body())
+                Ok(!checker.discarded_function_body())
             },
         )
     }
