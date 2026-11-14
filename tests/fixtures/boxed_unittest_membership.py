@@ -26,3 +26,26 @@ except AssertionError as exc:
 else:
     raise AssertionError("membership assertion did not fail")
 assert events == ["present", "absent", "present", "repr"]
+
+
+class IteratedText(str):
+    @property
+    def __contains__(self):
+        raise AttributeError("no containment method")
+
+    def __iter__(self):
+        return iter(("present",))
+
+
+text = IteratedText("absent")
+case.assertIn("present", text)
+case.assertNotIn("absent", text)
+
+
+class BrokenText(IteratedText):
+    def __contains__(self, member):
+        raise AttributeError("inside containment")
+
+
+with case.assertRaisesRegex(AttributeError, "inside containment"):
+    case.assertIn("present", BrokenText())
