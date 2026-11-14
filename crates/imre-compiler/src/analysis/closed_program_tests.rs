@@ -221,18 +221,14 @@ fn closed_program_keeps_first_party_contracts_across_cached_edits() {
         let lowered = crate::frontend::lower_with_owners(&mut graph);
         let (skipped, proofs) = graph.diagnostic_scopes();
         let native = lowered.as_ref().err();
-        let result = cache.check_closed_program(
-            &mut graph.session,
-            &graph.inputs,
-            &graph.modules,
-            skipped.as_deref(),
-            &proofs,
-            native,
-        );
-        let fresh =
+        let mut check = |cache| {
             graph
                 .session
-                .check_closed_program(&graph.modules, skipped.as_deref(), &proofs, native);
+                .closed_program_session(cache, &graph.inputs)?
+                .closed_program_errors(&graph.modules, skipped.as_deref(), &proofs, native)
+        };
+        let result = check(Some(&mut cache));
+        let fresh = check(None);
         assert_eq!(result, fresh);
         result
     };
