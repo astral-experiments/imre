@@ -3482,33 +3482,8 @@ impl Emitter<'_, '_> {
                 }
             }
             Binary::FloorDivide | Binary::Modulo => {
-                let instruction = if matches!(op, Binary::FloorDivide) {
-                    "sdiv"
-                } else {
-                    "srem"
-                };
-                let result = self.instruction(format!("{instruction} i64 {left}, {right}"));
-                if adjust_floor {
-                    let remainder = if matches!(op, Binary::Modulo) {
-                        result.clone()
-                    } else {
-                        self.instruction(format!("srem i64 {left}, {right}"))
-                    };
-                    let nonzero = self.instruction(format!("icmp ne i64 {remainder}, 0"));
-                    let signs = self.instruction(format!("xor i64 {remainder}, {right}"));
-                    let opposite = self.instruction(format!("icmp slt i64 {signs}, 0"));
-                    let adjust = self.instruction(format!("and i1 {nonzero}, {opposite}"));
-                    if matches!(op, Binary::FloorDivide) {
-                        let adjust = self.instruction(format!("zext i1 {adjust} to i64"));
-                        self.instruction(format!("sub nsw i64 {result}, {adjust}"))
-                    } else {
-                        let adjust =
-                            self.instruction(format!("select i1 {adjust}, i64 {right}, i64 0"));
-                        self.instruction(format!("add nsw i64 {result}, {adjust}"))
-                    }
-                } else {
-                    result
-                }
+                self.body
+                    .small_division(op, &left, &right, adjust_floor, bounds.map(|(_, rhs)| rhs))
             }
             Binary::BitAnd
             | Binary::BitOr
@@ -11606,28 +11581,22 @@ fn remainder_mask(divisor: i64) -> Option<i64> {
 /// division, apply Python's floor/sign rule, and promote MIN_SMALL / -1 rather
 /// than wrapping its result back into a tagged integer.
 fn division_helper(op: Binary) -> String {
-    let (op, number, calculation) = match op {
-        Binary::FloorDivide => (
-            "floordiv",
-            3,
-            r#"  %quotient = sdiv i64 %x, %y
-  %adjustment = zext i1 %adjust to i64
-  %result = sub i64 %quotient, %adjustment
-  %over = icmp sgt i64 %result, 4611686018427387903
-  br i1 %over, label %slow, label %done"#,
-        ),
-        Binary::Modulo => (
-            "mod",
-            4,
-            r#"  %adjustment = select i1 %adjust, i64 %y, i64 0
-  %result = add i64 %remainder, %adjustment
-  br label %done"#,
-        ),
+    let (name, number) = match op {
+        Binary::FloorDivide => ("floordiv", 3),
+        Binary::Modulo => ("mod", 4),
         _ => unreachable!("expected integer floor division or remainder"),
     };
+    let mut fast = body::FunctionBody::new("fast", "slow");
+    let result = fast.small_division(op, "%x", "%y", true, None);
+    if op == Binary::FloorDivide {
+        let over = fast.instruction(format!("icmp sgt i64 {result}, 4611686018427387903"));
+        fast.branch(&over, "slow", "done");
+    } else {
+        fast.jump("done");
+    }
     format!(
         r#"
-define internal i64 @int_{op}(i64 %a, i64 %b) alwaysinline {{
+define internal i64 @int_{name}(i64 %a, i64 %b) alwaysinline {{
 entry:
   %both = and i64 %a, %b
   %tag = and i64 %both, 1
@@ -11638,21 +11607,16 @@ entry:
 fast:
   %x = ashr i64 %a, 1
   %y = ashr i64 %b, 1
-  %remainder = srem i64 %x, %y
-  %nonzero_remainder = icmp ne i64 %remainder, 0
-  %signs = xor i64 %remainder, %y
-  %opposite = icmp slt i64 %signs, 0
-  %adjust = and i1 %nonzero_remainder, %opposite
-{calculation}
-done:
-  %shift = shl i64 %result, 1
+{fast}done:
+  %shift = shl i64 {result}, 1
   %encoded = or i64 %shift, 1
   ret i64 %encoded
 slow:
   %fallback = call i64 @imre_int_binary(i64 %a, i64 %b, i32 {number})
   ret i64 %fallback
 }}
-"#
+"#,
+        fast = fast.code
     )
 }
 

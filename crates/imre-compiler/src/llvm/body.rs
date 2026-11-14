@@ -1,6 +1,6 @@
 //! Instruction output and basic-block state for one LLVM function.
 
-use super::Binary;
+use super::{Binary, IntRange};
 use std::fmt::{Arguments, Display, Write as _};
 
 /// Write a function directly into its owning unit, including both delimiters.
@@ -124,6 +124,48 @@ impl FunctionBody {
 
     pub(super) fn masked_remainder(&mut self, dividend: &str, mask: i64) -> String {
         self.instruction(format!("and i64 {dividend}, {mask}"))
+    }
+
+    /// Divide decoded immediate integers after the caller has excluded zero.
+    pub(super) fn small_division(
+        &mut self,
+        op: Binary,
+        left: &str,
+        right: &str,
+        adjust_floor: bool,
+        divisor: Option<IntRange>,
+    ) -> String {
+        let instruction = match op {
+            Binary::FloorDivide => "sdiv",
+            Binary::Modulo => "srem",
+            _ => unreachable!("expected floor division or remainder"),
+        };
+        let result = self.instruction(format!("{instruction} i64 {left}, {right}"));
+        if !adjust_floor {
+            return result;
+        }
+        let remainder = if op == Binary::Modulo {
+            result.clone()
+        } else {
+            self.instruction(format!("srem i64 {left}, {right}"))
+        };
+        let adjust = if let Some(divisor) = divisor {
+            debug_assert!(divisor.min > 0 || divisor.max < 0);
+            let opposite = if divisor.min > 0 { "slt" } else { "sgt" };
+            self.instruction(format!("icmp {opposite} i64 {remainder}, 0"))
+        } else {
+            let nonzero = self.instruction(format!("icmp ne i64 {remainder}, 0"));
+            let signs = self.instruction(format!("xor i64 {remainder}, {right}"));
+            let opposite = self.instruction(format!("icmp slt i64 {signs}, 0"));
+            self.instruction(format!("and i1 {nonzero}, {opposite}"))
+        };
+        if op == Binary::FloorDivide {
+            let adjust = self.instruction(format!("zext i1 {adjust} to i64"));
+            self.instruction(format!("sub nsw i64 {result}, {adjust}"))
+        } else {
+            let adjust = self.instruction(format!("select i1 {adjust}, i64 {right}, i64 0"));
+            self.instruction(format!("add nsw i64 {result}, {adjust}"))
+        }
     }
 
     /// Both ABIs call the same tagged arithmetic helper after obtaining exact integers.
