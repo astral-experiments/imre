@@ -1685,6 +1685,35 @@ mod tests {
             assert!(graph.doctest_runner().is_some());
             assert!(graph.modules.iter().any(|m| m.is_doctest_case()));
         }
+        let profile = directory.path().join("profile.json");
+        std::fs::write(&profile, "{}").unwrap();
+        let startup = Some((crate::CommandFlags::default(), "imre".into()));
+        for (script_startup, entry_profile, fixed) in [
+            (None, None, true),
+            (startup.clone(), None, false),
+            (startup, Some(profile), true),
+        ] {
+            let options = crate::CompileOptions {
+                module_entry: Some("app".into()),
+                script_startup,
+                entry_profile,
+                extension_paths: vec![directory.path().to_owned()],
+                ..Default::default()
+            };
+            let graph = options
+                .load_graph(
+                    &entry,
+                    None,
+                    Default::default(),
+                    &mut None,
+                    &mut Default::default(),
+                )
+                .unwrap()
+                .unwrap();
+            assert_eq!(graph.doctest_runner().is_some(), fixed);
+            let subject = graph.modules.iter().find(|m| m.name == "subject").unwrap();
+            assert_eq!(subject.doctest_prompts.len(), 2);
+        }
     }
 
     fn interactive<'a>(path: &'a Path, text: &'a str) -> Option<PreparedBody<'a>> {
