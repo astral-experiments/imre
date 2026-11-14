@@ -112,3 +112,11 @@ For complete methods, generate the reference with `suite_inventory.py` on the sa
 The [four original startup modes](canonical-startup-transitions-linux.json) all stopped at line 4 before the shared mock landed. On [#758](https://github.com/astral-sh/imre/pull/758) (`06c089f`), they reached `import errno` at line 11. On [#652](https://github.com/astral-sh/imre/pull/652) (`5ca29ab`), they reached `import random` at line 14. The import and unittest-runner entries were each checked with and without reachability pruning. None executed a test. The independent errno rerun reproduced the coordinator's four checks byte for byte.
 
 The [merged mock](mock-758-landed-startup-linux.json) and [merged errno](errno-652-landed-startup-linux.json) receipts also ran at O0 and O3 with the compiler and runtime from the indicated Git trees. Both recorded actual native Mock calls and resets. The original `no_chdir` patch still failed to compile at both levels; CPython trapped the attempted directory change inside the patch and successfully changed directories after both a normal and an exceptional exit. These startup and fixture checks add no passes to the 223 occurrences.
+
+## Whole suite on public #8087
+
+CPython 3.14.5 and Imre's named entry collected the same 223 original methods. CPython passed 160 and skipped 63. Imre O0 and O3 each passed 172, skipped 49 and errored twice. The same 159 methods passed on all three runs. This CPython build lacked `os.copy_file_range` and skipped all 14 methods in `TestZeroCopyCopyFileRange`. Imre passed 13 of them. [Per-method results](paired-public-8087.tsv) · [Compiler revision](https://github.com/astral-experiments/imre/pull/8087)
+
+Both Imre errors occurred at line 3337 of `test_shutil.py`. Each test tried to evaluate the method-selected expression `self.PATCHPOINT` before invoking its fast-copy operation. Direct FILE stopped at the original `import tarfile` on line 24 before any method ran. An independent FILE import resolved `tarfile.py` in the issued standard-library ZIP.
+
+At each optimization level the saved named executable passed 171, skipped 49 and errored three times after the original source directory and caches were withdrawn. The additional error came from `TestMisc.test_disk_usage`, which calls `disk_usage(os.path.dirname(__file__))` on the directory the test had just lost.

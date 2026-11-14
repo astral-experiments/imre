@@ -116,6 +116,7 @@ These Linux runs started with the unchanged CPython 3.14.5 test files. Each pair
 | --- | ---: | ---: | ---: | ---: | --- |
 | `functools` | 329/329 | 316/329 | 316/329 | 316/329 | The main file passed 316, errored on six and skipped three. All four companion free-threading tests errored. [#8074](https://github.com/astral-experiments/imre/pull/8074) |
 | `json` | 215/216 | 4/216 | 4/216 | 4/216 | Four doctest cases failed. Seventeen child test modules failed to import, leaving 208 original occurrences uncollected. [#8074](https://github.com/astral-experiments/imre/pull/8074) |
+| `shutil` | 160/223 | 172/223 | 172/223 | 159/223 | Named ran all 223. CPython skipped 63 and Imre skipped 49. Two tests errored at `eval(self.PATCHPOINT)` before calling the copy operation. Direct FILE stopped at `import tarfile` before collection. [Methods and source-withdrawn runs](benchmarks/cpython_stdlib/full/shutil/README.md#whole-suite-on-public-8087) |
 | Iterator length hints (`test_iterlen`) | 22/22 | 22/22 | 22/22 | 22/22 | The runtime change in [#8092](https://github.com/astral-experiments/imre/pull/8092) also passed all 22 after the Python inputs were removed. |
 
 The iterator protocol suite sits outside the historical 45 module families.
