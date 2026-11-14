@@ -6,6 +6,7 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use icu_properties::{CodePointMapData, props::EastAsianWidth};
+use ruff_text_size::{Ranged, TextRange, TextSize};
 
 use crate::dynamic::value::{TracebackAnchor, TracebackSpan};
 
@@ -78,6 +79,107 @@ fn display_width(text: &str) -> usize {
         .sum()
 }
 
+/// Use the displayed statement for both decisions when it is complete. A frame
+/// can also start or end inside an enclosing expression on another line.
+fn call_anchor(source: &str, range: TextRange) -> Option<(TextSize, bool)> {
+    let prefix = &source[..range.start().to_usize()];
+    if !prefix.trim().is_empty() {
+        let statement = source.trim_start();
+        let indent = TextSize::try_from(source.len() - statement.len()).ok()?;
+        if let Ok(parsed) = ruff_python_parser::parse_module(statement) {
+            let target = range - indent;
+            let mut opener = None;
+            ruff_python_ast::helpers::any_over_body(parsed.suite(), |expr| {
+                if expr.range() == target {
+                    opener = expr.as_call_expr().map(|call| call.arguments.start());
+                }
+                opener.is_some()
+            });
+            if let Some(opener) = opener {
+                let hidden = parsed
+                    .suite()
+                    .first()
+                    .and_then(imre_ast::unhighlighted_call);
+                return Some((opener + indent, hidden == Some(target)));
+            }
+        }
+    }
+    let parsed = ruff_python_parser::parse_parenthesized_expression_range(source, range).ok()?;
+    let call = parsed.expr().as_call_expr()?;
+    (call.range() == range).then(|| (call.arguments.start(), false))
+}
+
+/// Format a failed call from its recorded byte range. Only inspect the available
+/// source excerpt; delimiters inside a nested receiver do not belong to this call.
+fn multiline_call(
+    out: &mut String,
+    source: &str,
+    lines: &[&str],
+    span: TracebackSpan,
+) -> Option<()> {
+    let first = *lines.first()?;
+    let last = *lines.last()?;
+    let start = span.start as usize;
+    let end = span.end as usize;
+    first.get(..start)?;
+    last.get(..end)?;
+    let source = &source[source.substr_range(first)?.start..source.substr_range(last)?.end];
+    let range = TextRange::new(
+        TextSize::try_from(start).ok()?,
+        TextSize::try_from(source.len() - last.len() + end).ok()?,
+    );
+    let (opener, hidden) = call_anchor(source, range)?;
+    let before = &source[..opener.to_usize()];
+    let opener_line = before.bytes().filter(|&b| b == b'\n').count();
+    let opener = before.rsplit('\n').next()?.len();
+
+    let margin =
+        imre_ast::strings::common_indent(lines.iter().copied().filter(|s| !s.trim().is_empty()));
+    let column = |line: &str, byte| Some(display_width(line.get(margin..byte)?));
+    let start = column(first, start)?;
+    let opener = column(lines.get(opener_line)?, opener)?;
+    let end = column(last, end)?;
+    let last_index = lines.len() - 1;
+    let visible = |i: usize| i == 0 || i.abs_diff(opener_line) <= 1 || last_index - i <= 1;
+    let mut previous = None;
+    for (i, raw) in lines.iter().enumerate() {
+        if !(visible(i) || (i > 0 && i < last_index && visible(i - 1) && visible(i + 1))) {
+            continue;
+        }
+        if let Some(prev) = previous
+            && i > prev + 1
+        {
+            let _ = writeln!(out, "    ...<{} lines>...", i - prev - 1);
+        }
+        previous = Some(i);
+        let text = raw.trim_end().get(margin..).unwrap_or("");
+        let _ = writeln!(out, "    {text}");
+        if hidden {
+            continue;
+        }
+        let right = if i == last_index {
+            end
+        } else {
+            display_width(text)
+        };
+        let indent = text.chars().take_while(|c| c.is_whitespace()).count();
+        let left = indent.max(if i == 0 { start } else { 0 }).min(right);
+        let split = match i.cmp(&opener_line) {
+            std::cmp::Ordering::Less => right,
+            std::cmp::Ordering::Equal => opener.clamp(left, right),
+            std::cmp::Ordering::Greater => left,
+        };
+        let _ = writeln!(
+            out,
+            "    {}{}{}",
+            " ".repeat(left),
+            "~".repeat(split - left),
+            "^".repeat(right - split)
+        );
+    }
+    Some(())
+}
+
 impl<'a> FrameLine<'a> {
     fn new(
         ctx: &'a Context,
@@ -125,6 +227,18 @@ impl<'a> FrameLine<'a> {
             let _ = write!(out, ", in {name}");
         }
         out.push('\n');
+        if let Some(span) = self.span
+            && span.anchor == TracebackAnchor::Call
+            && i128::from(span.end_line) > self.line
+            && let Some(source) = source
+            && let Ok(first) = usize::try_from(self.line - 1)
+        {
+            let count = span.end_line as usize - first;
+            let lines: Vec<_> = source.lines().skip(first).take(count).collect();
+            if lines.len() == count && multiline_call(&mut out, source, &lines, span).is_some() {
+                return out;
+            }
+        }
         let Some(raw) = usize::try_from(self.line)
             .ok()
             .and_then(|line| line.checked_sub(1))
@@ -151,7 +265,7 @@ impl<'a> FrameLine<'a> {
                     TracebackAnchor::Operator(column, width) => {
                         (column as usize, column as usize + usize::from(width))
                     }
-                    TracebackAnchor::Hidden => return None,
+                    TracebackAnchor::Call | TracebackAnchor::Hidden => return None,
                 };
                 Some([s.start as usize, split, caret_end, end])
             })

@@ -2867,7 +2867,7 @@ unsafe fn scoped_call(
     let ctx = unsafe { &mut *context };
     // Ordinary traceback nodes also own the saved call range, including when the
     // emitter supplied no highlight for the traceback printer.
-    finish_operand_position(ctx, &mut result, Some(value::TracebackAnchor::Hidden));
+    finish_operand_position(ctx, &mut result, Some(value::TracebackAnchor::Call));
     finish_at(ctx, result, span)
 }
 
