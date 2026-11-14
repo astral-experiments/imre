@@ -1469,15 +1469,13 @@ fn lower_graph(
         let prepare_sites = !needs_registered_entry
             && (signature.method.is_none() || python_method)
             && signature.physical_frame;
-        let inferred = if signature.method.is_some() && prepare_sites {
-            pending_capture
-                .borrow_mut()
-                .as_mut()
-                .and_then(|prepared| prepared.remove(&signature.id))
-                .and_then(StdResult::ok)
-        } else {
-            None
-        };
+        let inferred = pending_capture.borrow_mut().as_mut().and_then(|prepared| {
+            if prepare_sites && prepared.get(&signature.id)?.is_ok() {
+                prepared.remove(&signature.id)?.ok()
+            } else {
+                None
+            }
+        });
         checker.fixed_sites = (prepare_sites && inferred.is_none())
             .then(|| fixed_body_source::SourceSites::new(python_method));
         checker.placement_only = (named || unavailable.is_some()) && cache.is_none();
