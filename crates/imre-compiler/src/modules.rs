@@ -6240,6 +6240,13 @@ impl<'a> Loader<'a> {
                             .demanded_shipped_declaration(&name, alias.name.as_str())?
                     {
                         binding
+                    } else if !self.loading.contains(&target)
+                        && self.modules[target].archive.is_none()
+                        // A stored binding rejected by export() is deliberately private.
+                        && !self.modules[target].bindings.contains_key(alias.name.as_str())
+                        && self.session.imports_module_member(target, alias.name.as_str())
+                    {
+                        Binding::ConditionalValue
                     } else {
                         return Err(format!(
                             "module {name:?} has no static binding {:?}",
@@ -7771,6 +7778,48 @@ except ImportError:
         );
         assert_eq!(module.export("extra"), None);
         assert_eq!(module.export("missing"), None);
+    }
+
+    #[test]
+    fn from_import_uses_names_bound_on_every_module_exit() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        fs::write(root.join("primary.py"), "value = 1\n").unwrap();
+        fs::write(root.join("fallback.py"), "value = 2\n").unwrap();
+        fs::write(
+            root.join("provider.py"),
+            r#"try:
+    import primary as selected
+except ImportError:
+    import fallback as selected
+else:
+    from primary import value as success_only
+
+if __name__ == "alternate":
+    from primary import value as choice
+    import primary as one_side
+else:
+    from fallback import value as choice
+"#,
+        )
+        .unwrap();
+        let entry = root.join("main.py");
+        fs::write(&entry, "from provider import selected, choice\n").unwrap();
+        let graph = SourceGraph::load(&entry, Some(root), &[]).unwrap();
+        for name in ["selected", "choice"] {
+            assert_eq!(
+                graph.modules[graph.entry].export(name),
+                Some(super::Binding::ConditionalValue)
+            );
+        }
+        for name in ["success_only", "one_side"] {
+            fs::write(&entry, format!("from provider import {name}\n")).unwrap();
+            let error = SourceGraph::load(&entry, Some(root), &[]).err().unwrap();
+            assert!(
+                error.contains(&format!("no static binding {name:?}")),
+                "{error}"
+            );
+        }
     }
 
     #[test]

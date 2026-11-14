@@ -164,6 +164,20 @@ impl Session {
         (defs.next().is_none() && def.file(&self.db) == file).then_some(def)
     }
 
+    /// The initializer selects the object when every binding at normal exit is an import.
+    pub(crate) fn imports_module_member(&self, module: usize, name: &str) -> bool {
+        let mut reaching = bindings(&self.db, self.files[module], name).peekable();
+        reaching.peek().is_some()
+            && reaching.all(|state| {
+                state.is_defined_and(|definition| {
+                    matches!(
+                        definition.kind(&self.db),
+                        DefinitionKind::Import(_) | DefinitionKind::ImportFrom(_)
+                    )
+                })
+            })
+    }
+
     pub(crate) fn demanded_shipped_declaration(
         &mut self,
         owner: &str,
