@@ -15,6 +15,7 @@ use std::borrow::Cow;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 
+use indexmap::IndexSet;
 use ruff_python_ast::name::UnqualifiedName;
 use ruff_python_ast::visitor::{self, Visitor};
 use ruff_python_ast::{self as ast, Expr, Stmt};
@@ -1314,14 +1315,12 @@ pub(crate) fn compile(
         .filter(|p| !startup_paths.contains(p))
         .cloned()
         .collect();
-    let mut roots = initial.clone();
     let explicit_roots: Vec<_> = first
         .explicit_roots
         .iter()
         .filter(|_| !source_entry)
         .map(|path| cwd.join(path))
         .collect();
-    roots.extend(explicit_roots.iter().cloned());
     let mut installed_roots = Vec::new();
     for dir in options.installed_dirs() {
         installed_roots.push(dir.clone());
@@ -1332,15 +1331,12 @@ pub(crate) fn compile(
             installed_roots.extend_from_slice(paths);
         }
     }
-    let implicit_dirs: Vec<_> = installed_roots
-        .iter()
-        .filter(|p| !roots.contains(p))
-        .cloned()
-        .collect();
-    roots.extend(implicit_dirs.iter().cloned());
     // Discover each search directory once even when it appears twice in sys.path.
-    let mut seen_roots = HashSet::new();
-    roots.retain(|root| seen_roots.insert(root.clone()));
+    let mut ordered: IndexSet<_> = initial.iter().chain(&explicit_roots).collect();
+    let first_implicit = ordered.len();
+    ordered.extend(&installed_roots);
+    let mut roots: Vec<_> = ordered.into_iter().cloned().collect();
+    let implicit_dirs = &roots[first_implicit..];
     let bundled_root = BUNDLED_SOURCE_ROOT;
     let mut inputs = SourceInputs::default();
     let mut archives = HashMap::new();
