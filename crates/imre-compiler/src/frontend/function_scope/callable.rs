@@ -1,5 +1,7 @@
 //! Parameter binding and code-object metadata for Python callables.
 
+use serde::{Serialize, Serializer, ser::SerializeMap};
+
 use super::FunctionScope;
 use crate::frontend::{NamedBody, RegisteredBody};
 use imre_ast::code_flags;
@@ -140,6 +142,38 @@ impl NamedFunction<'_> {
     }
 }
 
+/// Serializes a placed callable without copying its lexical scope or parameter names.
+struct PlacedSignature<'a> {
+    layout: &'a serde_json::Map<String, Value>,
+    flags: u32,
+    class_cell: Option<bool>,
+}
+
+impl Serialize for PlacedSignature<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut object = serializer.serialize_map(None)?;
+        let mut fields = self.layout.iter().peekable();
+        let flags = Value::from(self.flags);
+        let class_cell = self.class_cell.map(Value::Bool);
+        // The ordinary JSON object and these two replacements are in key order.
+        for (key, value) in std::iter::once(("code_flags", &flags)).chain(
+            class_cell
+                .as_ref()
+                .map(|value| ("method_class_cell", value)),
+        ) {
+            while let Some((name, field)) = fields.next_if(|(name, _)| name.as_str() < key) {
+                object.serialize_entry(name, field)?;
+            }
+            fields.next_if(|(name, _)| name.as_str() == key);
+            object.serialize_entry(key, value)?;
+        }
+        for (name, field) in fields {
+            object.serialize_entry(name, field)?;
+        }
+        object.end()
+    }
+}
+
 /// Parameter and closure metadata independent of the activation that binds the function.
 pub(crate) struct CallableMetadata {
     layout: serde_json::Value,
@@ -249,17 +283,26 @@ impl CallableMetadata {
         )
     }
 
-    pub(crate) fn signature(
+    pub(crate) fn serialized_signature(
         &self,
         placement_flags: u32,
         method_class_cell: bool,
-    ) -> serde_json::Value {
-        let mut signature = self.layout.clone();
-        if method_class_cell {
-            signature["method_class_cell"] = json!(self.captures_class);
-        }
-        signature["code_flags"] = json!(self.flags | placement_flags);
-        signature
+    ) -> String {
+        let signature = PlacedSignature {
+            layout: self
+                .layout
+                .as_object()
+                .expect("callable signature is an object"),
+            flags: self.flags | placement_flags,
+            class_cell: method_class_cell.then_some(self.captures_class),
+        };
+        serde_json::to_string(&signature).expect("callable signature serializes")
+    }
+
+    #[cfg(test)]
+    pub(crate) fn signature(&self, placement_flags: u32, method_class_cell: bool) -> Value {
+        serde_json::from_str(&self.serialized_signature(placement_flags, method_class_cell))
+            .unwrap()
     }
 }
 
@@ -268,6 +311,36 @@ mod tests {
     use super::super::ScopeFacts;
     use imre_ast::code_flags;
     use ruff_text_size::Ranged;
+
+    #[test]
+    fn placed_signatures_preserve_the_checked_fields_between_placements() {
+        for layout in [
+            serde_json::json!({}),
+            serde_json::json!({
+                "code_flags": 100, "method_class_cell": true,
+                "positional": ["x", "λ"], "scope_locals": {"x": [0, 1]}
+            }),
+        ] {
+            let metadata = super::CallableMetadata {
+                layout: layout.clone(),
+                flags: 2,
+                captures_class: false,
+                defaults: Default::default(),
+            };
+            for method in [true, false] {
+                let mut expected = layout.clone();
+                expected["code_flags"] = serde_json::json!(6);
+                if method {
+                    expected["method_class_cell"] = serde_json::json!(false);
+                }
+                assert_eq!(
+                    metadata.serialized_signature(4, method),
+                    expected.to_string()
+                );
+            }
+            assert_eq!(metadata.layout, layout);
+        }
+    }
 
     #[test]
     fn class_reads_use_the_completed_method_scope() {
