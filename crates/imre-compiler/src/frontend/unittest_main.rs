@@ -60,9 +60,9 @@ impl Checker<'_> {
         let Some(Binding::Value(default)) = unit.bindings.get("defaultTestLoader") else {
             return Err(error(self.source, call, "missing unittest default loader"));
         };
-        let (slot, _) = self
+        let slot = self
             .globals
-            .get(*default)
+            .slot(*default, 0)
             .ok_or("unittest default loader is unavailable")?;
         let suite = self.unittest_suite_from_module(
             call,
