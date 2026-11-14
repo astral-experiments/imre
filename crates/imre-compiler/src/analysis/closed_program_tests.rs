@@ -1129,6 +1129,13 @@ fn initializer_calls_use_original_bindings_and_all_arguments() {
             .error
             .map(|e| e.to_string())
     };
+    let copied = format!("{number}def text(value: str): return value\nsaved = take\ntake = text\n");
+    let error = check(&format!("{copied}saved('x')\n"), "").unwrap();
+    assert!(
+        error.contains("main.py:5:7: Imre: expected int, got str"),
+        "{error}"
+    );
+    assert!(check(&format!("{copied}take('x')\n"), "").is_none());
     let read = "def consume():\n    exec(input('source: '))\n";
     let imported = "from scores import consume\n";
     let error = check(&format!("{imported}consume()\n"), read).unwrap();
