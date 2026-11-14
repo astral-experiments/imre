@@ -135,7 +135,7 @@ pub(crate) use registered::type_alias_body;
 pub(crate) use registered::values::registered_value;
 pub(crate) use registered::values::{
     ModuleSource as RegisteredModuleSource, RegisteredSource, exec_literal_text,
-    exec_source_operand, literal_replacements, packed_arguments, push_codepoints,
+    exec_source_operand, packed_arguments, push_codepoints, scan_literals,
     validate_docstring_literals,
 };
 pub(crate) use registered::{

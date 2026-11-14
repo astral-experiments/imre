@@ -241,7 +241,7 @@ mod tests {
 def dormant(): return f"\ud801{1}", t"{x}"
 "#;
         let parsed = ruff_python_parser::parse_module(text).unwrap();
-        let replacements = crate::frontend::literal_replacements(text, parsed.tokens());
+        let (replacements, _) = crate::frontend::scan_literals(text, parsed.tokens());
         let source = RegisteredSource {
             python_optimization: 0,
             operand_types: None,
