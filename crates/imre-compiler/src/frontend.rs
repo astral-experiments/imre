@@ -208,6 +208,19 @@ impl Signature {
         self.parameter_declarations.get(index).copied().flatten()
     }
 
+    /// An eager source frame reads its declared pack from the tuple bound by the Python caller.
+    fn takes_positional_tuple(
+        &self,
+        source: &Cow<'_, ast::StmtFunctionDef>,
+        session: &crate::analysis::Session,
+    ) -> bool {
+        matches!(source, Cow::Borrowed(def) if !def.is_async)
+            && matches!(self.params.as_slice(), [param] if param.kind == ParameterKind::Variadic)
+            && self.parameter_declaration(0).is_some_and(|declaration| {
+                !session.is_generator_definition(declaration.module, source)
+            })
+    }
+
     fn registered_frame(&self) -> bool {
         self.method.is_none()
             && self
@@ -1379,8 +1392,8 @@ fn lower_graph(
     let mut class_reads = Vec::new();
     let mut recursion_errors = Vec::new();
     let mut body_reports = Vec::new();
-    for (module_id, definition, signature) in &definitions {
-        let definition = definition.as_ref();
+    for (module_id, source, signature) in &definitions {
+        let definition = source.as_ref();
         let module = &graph.modules[*module_id];
         let mut checker = checker_for(*module_id);
         checker.nonreturning_functions = &completed_calls;
@@ -1469,11 +1482,14 @@ fn lower_graph(
         {
             checker.settled_attributes = Some(&mut attributes);
         }
-        let physical_function =
-            cache.is_none() && signature.physical_frame && signature.method.is_none();
-        let named_function = named && physical_function;
+        let source_function = cache.is_none() && signature.method.is_none();
+        let physical_function = source_function && signature.physical_frame;
+        let named_scalar = named
+            && source_function
+            && definition.returns.is_some()
+            && signature.returns.builtin_scalar_name().is_some();
         let mut callable_inputs = pending_capture.borrow_mut().as_mut().and_then(|prepared| {
-            if named_function && matches!(prepared.get(&signature.id), Some(Err(_))) {
+            if named && physical_function && matches!(prepared.get(&signature.id), Some(Err(_))) {
                 prepared.remove(&signature.id)?.err()
             } else {
                 None
@@ -1502,6 +1518,7 @@ fn lower_graph(
                                     *module_id,
                                     definition.range(),
                                 ) == Some(true)))))
+            || named_scalar && signature.takes_positional_tuple(source, &graph.session)
         {
             registered::place_checked_definition(
                 &checker,
@@ -1514,11 +1531,7 @@ fn lower_graph(
             .flatten()
             .map(|body| (body, Default::default()))
             .map_or_else(|| lower_body(checker, definition, signature), Ok)
-        } else if named_function
-            && unavailable.is_none()
-            && definition.returns.is_some()
-            && signature.returns.builtin_scalar_name().is_some()
-        {
+        } else if named_scalar && signature.physical_frame && unavailable.is_none() {
             lower_function(checker, definition, signature, None, Some(&inference))
         } else if let Some(cache) = cache.as_deref_mut().filter(|_| signature.method.is_none()) {
             cache.body(checker, definition, signature)
