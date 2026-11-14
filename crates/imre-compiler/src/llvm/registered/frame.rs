@@ -1121,12 +1121,12 @@ impl<'p> RegisteredFrame<'_, 'p> {
     }
 
     pub(crate) fn import_name(&mut self, name: &str, fromlist: &str, level: u32) -> String {
-        let name = self.code_name(name);
-        // The import helper propagates a pending exception before calling __import__.
+        self.output.intern_identifier(name);
+        let spelling = self.output.data(name.as_bytes());
         self.take_matching_check();
         self.checked(&format!(
-            "call i64 @imre_dyn_import_name(ptr %ctx, i64 {}, i64 {name}, i64 {fromlist}, i32 {level})",
-            self.scope
+            "call i64 @imre_dyn_import_literal(ptr %ctx, i64 {}, ptr {spelling}, i64 {}, i64 {fromlist}, i32 {level})",
+            self.scope, name.len()
         ))
     }
 

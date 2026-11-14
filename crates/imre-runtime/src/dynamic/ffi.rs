@@ -2280,14 +2280,16 @@ pub(super) unsafe extern "C" fn imre_dyn_assign_target(
 
 /// Execute an import statement through the importing frame's builtins.
 #[unsafe(no_mangle)]
-pub(super) unsafe extern "C" fn imre_dyn_import_name(
+pub(super) unsafe extern "C" fn imre_dyn_import_literal(
     ctx: *mut Context,
     scope: Id,
-    name: Id,
+    spelling: *const u8,
+    len: usize,
     fromlist: Id,
     level: u32,
 ) -> Id {
-    // SAFETY: generated code passes its current interpreter and live Python handles.
+    // SAFETY: the frame supplies its context and exactly len linked identifier bytes.
+    let name = unsafe { imre_boxed_guarded_lit(ctx, 6, spelling, len) };
     let ctx = unsafe { &mut *ctx };
     if ctx.heap.execution.pending.is_some() {
         return NONE;
