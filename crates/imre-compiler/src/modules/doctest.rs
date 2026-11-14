@@ -567,6 +567,28 @@ fn case_program(
     Ok(header)
 }
 
+/// Keep direct string entries as candidates. Lift entries out of an unpacked display
+/// only while the subsequent writes to the dictionary are known.
+fn dictionary_strings(
+    dict: &ast::ExprDict,
+    direct: bool,
+    visit: &mut impl FnMut(&str, &ast::Expr),
+) -> bool {
+    let mut known = true;
+    for item in dict.items.iter().rev() {
+        match (&item.key, &item.value) {
+            (Some(ast::Expr::StringLiteral(key)), value) if direct || known => {
+                visit(key.value.to_str(), value);
+            }
+            (None, ast::Expr::Dict(nested)) if known => {
+                known = dictionary_strings(nested, false, visit);
+            }
+            _ => known = false,
+        }
+    }
+    known
+}
+
 impl Loader<'_> {
     fn add_doctest_module(&mut self, name: String, source: &str) -> Result<(), String> {
         let path = self.root.join(format!("{name}.py"));
@@ -613,6 +635,7 @@ impl Loader<'_> {
         }
         let mut cases = std::collections::BTreeMap::new();
         let mut recorded = HashSet::new();
+        let mut string_inputs = Vec::new();
         for variable in uses.variables {
             if let Some(bindings) = uses.assignments.get(&variable) {
                 uses.targets.extend(bindings);
@@ -636,22 +659,41 @@ impl Loader<'_> {
                     _ => continue,
                 };
                 let mut prepared = Vec::new();
+                let mut record = |name: &str, sources: &[String]| {
+                    prepared.extend(sources.iter().enumerate().filter_map(|(index, source)| {
+                        Prompt::new(
+                            format!("<doctest {name}[{index}]>").into(),
+                            source.clone(),
+                            self.python_optimization,
+                        )
+                    }));
+                };
                 for (name, doc, _) in docs.iter() {
                     let sources = prompts(doc);
                     if !sources.is_empty() {
-                        if recorded.insert((module, name.clone())) {
-                            prepared.extend(sources.iter().enumerate().filter_map(
-                                |(index, source)| {
-                                    Prompt::new(
-                                        format!("<doctest {name}[{index}]>").into(),
-                                        source.clone(),
-                                        self.python_optimization,
-                                    )
-                                },
-                            ));
+                        if self.python_optimization < 2 && recorded.insert((module, name.clone())) {
+                            record(name, &sources);
                         }
                         cases.insert(name.clone(), (sources, target));
                     }
+                }
+                // These strings survive -OO. Only the live discovery can select them.
+                if let Some(id) = module
+                    && let Some(Binding::Value(binding)) = self.modules[id].bindings.get("__test__")
+                    && binding.module == id
+                    && let Some(ast::Expr::Dict(dict)) =
+                        module_value(&self.modules[id].parsed.syntax().body[binding.statement])
+                {
+                    dictionary_strings(dict, true, &mut |key, value| {
+                        let name = format!("{owner}.__test__.{key}");
+                        if recorded.insert((module, name.clone()))
+                            && let ast::Expr::StringLiteral(doc) = value
+                        {
+                            let sources = prompts(doc.value.to_str());
+                            record(&name, &sources);
+                            string_inputs.push((sources, target));
+                        }
+                    });
                 }
                 if let Some(id) = module {
                     self.modules[id].doctest_prompts.extend(prepared);
@@ -669,7 +711,7 @@ impl Loader<'_> {
             targets: Default::default(),
             needs_runtime: false,
         };
-        for (sources, target) in cases.values() {
+        for (sources, target) in cases.values().chain(&string_inputs) {
             imports.origin = match target {
                 Binding::Module(id) => Some(*id),
                 _ => None,
@@ -716,6 +758,28 @@ impl Loader<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_winning_dictionary_prompts_enroll_imports() {
+        let dir = tempfile::tempdir().unwrap();
+        let entry = dir.path().join("app.py");
+        std::fs::write(
+            &entry,
+            "import doctest, subject\ndoctest.DocTestSuite(subject).debug()\n",
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("discarded.py"), "broken = )\n").unwrap();
+        std::fs::write(dir.path().join("kept.py"), "value = 42\n").unwrap();
+        std::fs::write(
+            dir.path().join("subject.py"),
+            "__test__ = {'x': '>>> import discarded', 'y': '>>> import discarded', **{'x': '>>> import kept', 'y': 17}}\n",
+        )
+        .unwrap();
+        let graph = SourceGraph::load(&entry, Some(dir.path()), &[]).unwrap();
+        let subject = graph.modules.iter().find(|m| m.name == "subject").unwrap();
+        assert_eq!(subject.doctest_prompts.len(), 1);
+        assert_eq!(graph.doctest_imports, ["kept"]);
+    }
 
     #[test]
     fn physical_doctest_declarations_survive_syntax_withdrawal() {

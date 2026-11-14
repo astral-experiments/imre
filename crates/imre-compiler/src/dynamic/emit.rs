@@ -247,9 +247,6 @@ pub(crate) struct Prompt(PreparedBody<'static>);
 
 impl Prompt {
     pub(crate) fn new(filename: PathBuf, source: String, python_optimization: i32) -> Option<Self> {
-        if python_optimization >= 2 {
-            return None;
-        }
         PreparedBody::interactive(filename, source, python_optimization, 0).map(Self)
     }
 }
