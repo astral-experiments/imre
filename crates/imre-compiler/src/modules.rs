@@ -4863,7 +4863,7 @@ struct Loader<'a> {
     by_name: HashMap<String, ModuleId>,
     by_path: HashMap<PathBuf, ModuleId>,
     loading: HashSet<ModuleId>,
-    /// Newly discovered class re-exports whose grouped from-import is still loading children.
+    /// Newly discovered definition re-exports whose grouped from-import is still loading children.
     pending_reexports: Vec<(ModuleId, ast::name::Name)>,
     /// A from-import of a still-initializing module observes the value at that point.
     partial_value_imports: HashSet<DefinitionId>,
@@ -6112,21 +6112,23 @@ impl<'a> Loader<'a> {
                                 Binding::Definition(def) => {
                                     let statement = &self.modules[def.module].parsed.syntax().body
                                         [def.statement];
+                                    // A completed child may have supplied this name in
+                                    // an earlier from-import of the loading package.
+                                    let published = || {
+                                        package
+                                            && !self.loading.contains(&def.module)
+                                            && !self.pending_reexports.iter().any(|(id, name)| {
+                                                *id == target && *name == alias.name.id
+                                            })
+                                    };
                                     let ready = self.partial_source(target)
                                         && self.initialized(def)
                                         && match statement {
                                             ast::Stmt::FunctionDef(f) => {
-                                                def.module == target && f.decorator_list.is_empty()
+                                                f.decorator_list.is_empty()
+                                                    && (def.module == target || published())
                                             }
-                                            // This package already imported the class from a
-                                            // module whose initializer has finished.
-                                            ast::Stmt::ClassDef(_) => {
-                                                package
-                                                    && !self.loading.contains(&def.module)
-                                                    && !self.pending_reexports.iter().any(|(id, name)| {
-                                                        *id == target && *name == alias.name.id
-                                                    })
-                                            }
+                                            ast::Stmt::ClassDef(_) => published(),
                                             _ => false,
                                         };
                                     self.ordered_imports |= ready;
