@@ -10,21 +10,25 @@ Default Linux regrtest passes 55 and skips the CPU resource stress test.
 
 On Linux, CPython 3.14.5 ran all 56 methods when invoked directly with
 `-B Lib/test/test_context.py -v ContextTest HamtTest`. The ordinary Imre
-FILE command on [#8032](https://github.com/astral-experiments/imre/pull/8032)
+FILE command on [#8050](https://github.com/astral-experiments/imre/pull/8050)
 collected the same 56 at both optimization levels.
 
 | Runtime | Passed | Assertion failures | Errors | Skipped |
 | --- | ---: | ---: | ---: | ---: |
 | CPython 3.14.5 | 56 | 0 | 0 | 0 |
-| Imre O0 | 25 | 5 | 3 | 23 |
-| Imre O3 | 25 | 5 | 3 | 23 |
+| Imre O0 | 26 | 4 | 3 | 23 |
+| Imre O3 | 26 | 4 | 3 | 23 |
+
+The [#8032 run](ordinary-linux-8032.json) passed 25 methods.
+`test_context_run_1` now passes because `Context.run()` reports the missing
+positional argument the method expects. Its [callback binding change](https://github.com/astral-experiments/imre/pull/8045) leaves the other 55 outcomes unchanged.
 
 All 33 public `ContextTest` methods ran. The upstream class guard skipped
 the 23 private `HamtTest` methods because Imre lacks
 `_testinternalcapi.hamt()`. Module execution with `-m test.test_context`
 and both saved executables after source withdrawal reproduced every FILE
 outcome. The [per-method ledger](evidence-linux.json) gives the result and
-source digest for each case. The [launch record](ordinary-linux-8032.json)
+source digest for each case. The [launch record](ordinary-linux-8050.json)
 identifies the shipping products, commands and streams.
 
 The earlier [isolated harness](native-linux.json) ran two complete methods in
