@@ -1677,6 +1677,7 @@ fn lower_graph(
         recursion_errors.push(helper.recursion_error);
     }
     let mut entry = entry.expect("source graph has an entry module");
+    let mut entry_operations = EntryOperations::default();
     let mut names = false;
     let mut uses_builtin_module_names = false;
     let mut generator_sites = 0;
@@ -1701,6 +1702,7 @@ fn lower_graph(
             let checked = callables::validate_storage(function, &types, |value| {
                 callables::record_target(value, &types, &mut callable_targets);
                 record_builtin(value);
+                entry_operations.record(value);
                 if let Some(calls) = call_graph.get_mut(slot) {
                     if let Some(targets) = globals.invoked_functions(value) {
                         calls.extend(targets.iter().copied());
@@ -1766,15 +1768,20 @@ fn lower_graph(
         .inspect_err(|_| place_completed(&mut completed, &owners))?;
     let functions = &mut completed.functions;
     // Fusing adjacent sums also inlines their generator bodies and scalar calls.
-    if !track_frames {
+    if !track_frames && !zip_sums.is_empty() {
         for (id, sums) in zip_sums {
             zip_sums::fuse(functions, id, &sums);
+        }
+        // Fusion can replace checked operands. Frame markers carry no operands.
+        entry_operations = EntryOperations::default();
+        for function in functions.iter().chain([&entry]) {
+            ir::walk_expressions(&function.body, &mut |expr| entry_operations.record(expr));
         }
     }
     if let Some(cache) = cache {
         cache.finish(&types);
     }
-    let selected = registered_entry(graph, functions, &entry)
+    let selected = registered_entry(graph, functions, &entry, entry_operations)
         .inspect_err(|_| place_completed(&mut completed, &owners))?;
     if let Some(registered) = selected {
         register(completed, &owners);
@@ -1876,38 +1883,53 @@ fn lower_graph(
     )))
 }
 
-/// Decide the entry representation from the checked operations before native startup
-/// inserts any instructions. All source, call graph and initializer checks precede this.
-fn registered_entry(
-    graph: &SourceGraph,
-    functions: &[ir::Function],
-    entry: &ir::Function,
-) -> StdResult<Option<crate::CheckedProgram>, Diagnostic> {
-    let mut first: Option<(ir::ObjectCall, usize, TextRange)> = None;
-    let mut orders_strings = false;
-    let mut code_points = Vec::new();
-    for function in functions.iter().chain([entry]) {
-        ir::walk_expressions(&function.body, &mut |expr| match &expr.kind {
+#[derive(Default)]
+struct EntryOperations {
+    first_object: Option<(ir::ObjectCall, usize, TextRange)>,
+    orders_strings: bool,
+    creates_character: bool,
+}
+
+impl EntryOperations {
+    fn record(&mut self, expr: &Expr) {
+        match &expr.kind {
             ExprKind::Builtin(Builtin::ObjectCall(call, module, span), _)
-                if first.is_none_or(|(kind, id, range)| {
+                if self.first_object.is_none_or(|(kind, id, range)| {
                     (*call, *module, span.start()) < (kind, id, range.start())
                 }) =>
             {
-                first = Some((*call, *module, *span));
+                self.first_object = Some((*call, *module, *span));
             }
-            ExprKind::Builtin(Builtin::Chr, args) => code_points.push(&args[0]),
+            ExprKind::Builtin(Builtin::Chr, _) => self.creates_character = true,
             ExprKind::Compare(values, operators) => {
-                orders_strings |= values.iter().zip(operators).any(|(value, op)| {
+                self.orders_strings |= values.iter().zip(operators).any(|(value, op)| {
                     matches!(value.ty, Type::Str | Type::StrLiteral(_))
                         && !matches!(op, CmpOp::Eq | CmpOp::NotEq)
                 });
             }
             _ => {}
-        });
+        }
     }
+}
+
+/// Decide startup from the checked operations before inserting native instructions.
+fn registered_entry(
+    graph: &SourceGraph,
+    functions: &[ir::Function],
+    entry: &ir::Function,
+    operations: EntryOperations,
+) -> StdResult<Option<crate::CheckedProgram>, Diagnostic> {
     // Native text is UTF-8. A possible lone surrogate has priority over a
     // registered initializer or another operation in this graph.
-    if orders_strings && !code_points.is_empty() {
+    if operations.orders_strings && operations.creates_character {
+        let mut code_points = Vec::new();
+        for function in functions.iter().chain([entry]) {
+            ir::walk_expressions(&function.body, &mut |expr| {
+                if let ExprKind::Builtin(Builtin::Chr, args) = &expr.kind {
+                    code_points.push(&args[0]);
+                }
+            });
+        }
         let ranges = crate::ranges::analyze_functions(functions.iter().chain([entry]));
         if code_points.into_iter().any(|value| {
             ranges
@@ -1930,7 +1952,7 @@ fn registered_entry(
         .clone()
         .map(Into::into)
         .or_else(|| {
-            let (call, id, operand) = first?;
+            let (call, id, operand) = operations.first_object?;
             let (name, kind) = match call {
                 ir::ObjectCall::ExecText => ("exec", Kind::ScopedObject),
                 ir::ObjectCall::FormatField => ("this f-string field", Kind::Ordinary),
