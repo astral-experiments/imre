@@ -981,6 +981,8 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         match &expr.kind {
             ExprKind::Builtin(Builtin::RegisteredLocation(range, position, ..), operands) => {
                 self.python().at_expression(*range, *position, |frame| {
+                    // The located operand is emitted directly, with its enclosing source position.
+                    frame.next_fixed_site(ir::Node::Expression(&operands[0]));
                     CheckedBody::registered(frame.reborrow()).emit_operation(
                         &operands[0],
                         OperationSite::Registered(*range),

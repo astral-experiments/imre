@@ -84,6 +84,21 @@ impl<'a> RegisteredSource<'a> {
         imre_ast::direct_method(call, self.method_imports, self.private_names)
     }
 
+    /// Load the original imported module member before evaluating the written arguments.
+    pub(in crate::frontend) fn imported_callable(
+        self,
+        module: &ast::ExprName,
+        call: &ast::ExprCall,
+        types: crate::analysis::OperandTypes<'_>,
+    ) -> Option<Expr> {
+        if !self.method_imports.contains(module.id.as_str())
+            || !types.is_original_operand(&call.func)
+        {
+            return None;
+        }
+        registered_value(&call.func, self)
+    }
+
     fn call_target(self, call: &ast::ExprCall) -> (ir::RegisteredCallTarget, &ast::Expr) {
         if let Some(field) = self.direct_method(call) {
             (method_target(field), field.value.as_ref())

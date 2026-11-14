@@ -480,17 +480,11 @@ impl Checker<'_> {
                 let source = self.graph.modules[self.module]
                     .registered_values()
                     .operands(self.source, self.graph.python_optimization());
-                // An imported module member keeps callable lookup even when arguments change.
-                if !source.method_imports.contains(module.id.as_str())
-                    || !self
-                        .graph
-                        .session
-                        .operand_types(self.module)
-                        .is_original_operand(&call.func)
-                {
-                    return None;
-                }
-                registered::values::registered_value(&call.func, source)
+                source.imported_callable(
+                    module,
+                    call,
+                    self.graph.session.operand_types(self.module),
+                )
             });
         } else {
             self.record_named_call(call, &value);

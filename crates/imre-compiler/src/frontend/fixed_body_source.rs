@@ -98,6 +98,9 @@ pub(crate) enum FixedNode {
     /// The operation keeps its checked slot or operand count, and its native type.
     Indexed(std::mem::Discriminant<ExprKind>, usize, Type),
     NamedCall(std::mem::Discriminant<ExprKind>, usize, usize, Type),
+    Invocation(Box<ir::RegisteredCall>, Type),
+    Located(TextRange, TextSize, Option<Type>, Type),
+    Name(ruff_python_ast::name::Name, Option<TextRange>, Type),
     Integer(i64),
     Scalar(ir::Constant),
     String(Box<str>),
@@ -170,6 +173,28 @@ impl FixedNode {
                         args.values.len(),
                         expr.ty,
                     )
+                }
+                ExprKind::Builtin(
+                    Builtin::RegisteredLocation(range, position, hint),
+                    ref operands,
+                ) if operands.len() == 1 => Self::Located(range, position, hint, expr.ty),
+                ExprKind::Builtin(Builtin::RegisteredName(ref name), ref operands)
+                    if operands.is_empty() =>
+                {
+                    Self::Name(name.clone(), None, expr.ty)
+                }
+                ExprKind::Builtin(
+                    Builtin::RegisteredAttribute {
+                        action: ir::AttributeAction::Load,
+                        ref name,
+                        range,
+                    },
+                    ref operands,
+                ) if operands.len() == 1 => {
+                    Self::Name(ruff_python_ast::name::Name::new(name), Some(range), expr.ty)
+                }
+                ExprKind::Invoke { .. } => {
+                    Self::Invocation(Box::new(expr.python_call()?.clone()), expr.ty)
                 }
                 ExprKind::Local(slot) | ExprKind::Field(_, slot) | ExprKind::Bind(slot, _) => {
                     Self::indexed(&expr.kind, slot, expr.ty)
@@ -288,6 +313,56 @@ impl SourceSites {
                     .iter()
                     .map(Ranged::range))
             })
+    }
+
+    /// Confirm that binding the declared types left each supplied operand at its original site.
+    pub(super) fn has_written_arguments(&self, call: &ast::ExprCall, values: &[Expr]) -> bool {
+        let Some(site) = self.site_at(call.range()) else {
+            return false;
+        };
+        let Some(sites) = self.sites.get(site.index + 1..) else {
+            return false;
+        };
+        sites.len() == call.arguments.len()
+            && values.len() >= sites.len()
+            && imre_ast::argument_values(&call.arguments)
+                .zip(sites.iter().zip(values))
+                .all(|(arg, ((range, node), value))| {
+                    arg.range() == *range
+                        && node
+                            .as_ref()
+                            .is_some_and(|node| node.matches(&ir::Node::Expression(value)))
+                })
+    }
+
+    /// Insert the ordinary callee before the already-checked arguments at this source position.
+    pub(super) fn invoked(&mut self, call: &ast::ExprCall, value: &Expr) {
+        let site = self.site_at(call.range()).unwrap();
+        let ExprKind::Invoke { callable, .. } = &value.kind else {
+            unreachable!()
+        };
+        let end = self.sites.len();
+        ir::all_operand_nodes(callable, None, &mut |node, parent| {
+            if node.has_fixed_site() {
+                let located = |expr: &Expr| match expr.kind {
+                    ExprKind::Builtin(Builtin::RegisteredLocation(range, ..), _) => Some(range),
+                    _ => None,
+                };
+                let range = match node {
+                    ir::Node::Expression(expr) => located(expr),
+                    ir::Node::Statement(_) => None,
+                }
+                .or_else(|| parent.and_then(located))
+                .unwrap_or_else(|| call.func.range());
+                self.sites.push((range, FixedNode::checked(&node)));
+            }
+            true
+        });
+        // The callable is evaluated before the written arguments that were checked first.
+        let count = self.sites.len() - end;
+        self.sites[site.index + 1..].rotate_right(count);
+        self.next_index += count;
+        self.checked_expression(call.range(), value);
     }
 
     /// Place the Python callee beside the native operation. Both entries use its written operands.
