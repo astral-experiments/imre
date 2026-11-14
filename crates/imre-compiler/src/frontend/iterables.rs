@@ -77,6 +77,7 @@ impl Checker<'_> {
             && let Some(filtered) = self.string_list_filter(
                 &imre_ast::comprehension::Plan::generator(generator),
                 element,
+                None,
             )?
         {
             return Ok(filtered);

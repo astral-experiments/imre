@@ -202,6 +202,7 @@ impl Checker<'_> {
         &mut self,
         plan: &Plan<'_>,
         element: Option<Type>,
+        checked: Option<&mut Expr>,
     ) -> Result<Option<Expr>, String> {
         let Some((name, condition)) = filtered_item(plan) else {
             return Ok(None);
@@ -248,10 +249,19 @@ impl Checker<'_> {
             _ if self.invariant_prefix(arg, name) => (arg, None),
             _ => return Ok(None),
         };
-        let list = self.expr(plan.outer)?;
+        // Eager displays already own this operand in their outer iteration.
+        let mut outer;
+        let list = match checked {
+            Some(iterable) => iterable,
+            None => {
+                outer = self.expr(plan.outer)?;
+                &mut outer
+            }
+        };
         if self.types.element(list.ty) != Some(Type::Str) {
             return Ok(None);
         }
+        let list = std::mem::replace(list, Expr::none());
         let ty = list.ty;
         let source = self.hidden(ty);
         let mut optional = |expr: Option<&ast::Expr>| {
