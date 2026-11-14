@@ -798,7 +798,7 @@ fn object_fallback(
             entry,
             site_probes.packaged_file_module.as_deref(),
             filesystem,
-            &mut site_probes.wheel_records,
+            std::mem::take(&mut site_probes.wheel_records),
         ),
         options,
         object_imports,

@@ -2,6 +2,7 @@
 use crate::{SourceInputs, watch::FileSystem};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 pub(crate) fn records(root: &Path) -> Vec<PathBuf> {
     let mut paths: Vec<_> = std::fs::read_dir(root)
@@ -17,18 +18,18 @@ pub(crate) fn records(root: &Path) -> Vec<PathBuf> {
 }
 
 /// Application and installed sources on the search entry selected by the module launcher.
-pub(crate) struct ModuleEntryRoot {
+pub(crate) struct ModuleEntryRoot<'a> {
     root: PathBuf,
     application: bool,
-    installed: HashSet<PathBuf>,
+    installed: &'a HashSet<Rc<Path>>,
 }
 
-impl ModuleEntryRoot {
+impl<'a> ModuleEntryRoot<'a> {
     pub(crate) fn select(
         root: &Path,
         entry: &Path,
         path_zero: bool,
-        records: &mut WheelRecords,
+        records: &'a mut WheelRecords,
         options: &crate::CompileOptions,
         inputs: &mut SourceInputs,
         fs: &mut FileSystem<'_>,
@@ -48,11 +49,8 @@ impl ModuleEntryRoot {
                 return None;
             }
         }
-        let installed: HashSet<_> = records
-            .discover(root, inputs, fs)
-            .into_iter()
-            .flat_map(|wheel| wheel.members.into_iter().map(|(path, _)| path))
-            .collect();
+        let wheels = records.discover(root, inputs, fs);
+        let installed = records.membership(wheels);
         Some(Self {
             application: path_zero || !installed.contains(entry),
             root: root.to_owned(),
@@ -66,22 +64,49 @@ impl ModuleEntryRoot {
 }
 
 pub(crate) struct InstalledWheel {
-    members: Vec<(PathBuf, String)>,
+    root: PathBuf,
+    canonical_root: Option<PathBuf>,
+    members: Vec<(Rc<Path>, String)>,
 }
 
 /// The checked resolver and the module registry read the same installed distribution metadata.
 #[derive(Default)]
-pub(crate) struct WheelRecords(HashMap<PathBuf, Record>);
+pub(crate) struct WheelRecords {
+    records: HashMap<PathBuf, Record>,
+    entry_wheels: Vec<Rc<InstalledWheel>>,
+    entry_paths: HashSet<Rc<Path>>,
+}
 
 struct Record {
     digest: String,
     paths: Vec<PathBuf>,
+    // A RECORD may be reached through more than one spelling of its installation root.
+    wheels: Vec<Rc<InstalledWheel>>,
 }
 
 impl WheelRecords {
-    fn read(&mut self, path: PathBuf, fs: &mut FileSystem<'_>) -> std::io::Result<&Record> {
+    // Both entry classifiers normally see the same wheels. Discovery still records
+    // each phase's dependencies and can omit a wheel whose RECORD is unreadable.
+    fn membership(&mut self, wheels: Vec<Rc<InstalledWheel>>) -> &HashSet<Rc<Path>> {
+        if self.entry_wheels.len() != wheels.len()
+            || !self
+                .entry_wheels
+                .iter()
+                .zip(&wheels)
+                .all(|(a, b)| Rc::ptr_eq(a, b))
+        {
+            self.entry_paths = wheels
+                .iter()
+                .flat_map(|wheel| wheel.members.iter().map(|(path, _)| Rc::clone(path)))
+                .collect();
+            self.entry_wheels = wheels;
+        }
+        &self.entry_paths
+    }
+
+    fn read(&mut self, path: PathBuf, fs: &mut FileSystem<'_>) -> std::io::Result<&mut Record> {
         use std::collections::hash_map::Entry;
-        Ok(match self.0.entry(path) {
+        Ok(match self.records.entry(path) {
             Entry::Occupied(entry) => entry.into_mut(),
             Entry::Vacant(entry) => {
                 let bytes = fs.read(entry.key())?;
@@ -97,6 +122,7 @@ impl WheelRecords {
                 entry.insert(Record {
                     digest: blake3::hash(&bytes).to_hex().to_string(),
                     paths,
+                    wheels: Vec::new(),
                 })
             }
         })
@@ -107,7 +133,7 @@ impl WheelRecords {
         root: &Path,
         inputs: &mut SourceInputs,
         filesystem: &mut FileSystem<'_>,
-    ) -> Vec<InstalledWheel> {
+    ) -> Vec<Rc<InstalledWheel>> {
         let prior = inputs.wheel_records.iter().find(|(dir, _)| dir == root);
         let register = prior.is_none();
         let records = match prior {
@@ -134,23 +160,7 @@ impl WheelRecords {
                     .files
                     .push((path.clone(), identity, record.digest.clone()));
             }
-            let members = record
-                .paths
-                .iter()
-                .filter_map(|member| {
-                    let relative = if member.is_absolute() {
-                        member
-                            .strip_prefix(root)
-                            .ok()
-                            .or_else(|| member.strip_prefix(canonical_root.as_deref()?).ok())?
-                    } else {
-                        member
-                    };
-                    let name = crate::zip_entry::python_module_name(relative.to_str()?)?;
-                    Some((root.join(relative), name))
-                })
-                .collect();
-            wheels.push(InstalledWheel { members });
+            wheels.push(record.wheel(root, canonical_root.as_deref()));
         }
         if register {
             inputs.wheel_records.push((root.to_owned(), records));
@@ -159,9 +169,43 @@ impl WheelRecords {
     }
 }
 
+impl Record {
+    fn wheel(&mut self, root: &Path, canonical_root: Option<&Path>) -> Rc<InstalledWheel> {
+        if let Some(wheel) = self.wheels.iter().find(|wheel| {
+            wheel.root.as_os_str() == root.as_os_str()
+                && wheel.canonical_root.as_deref() == canonical_root
+        }) {
+            return Rc::clone(wheel);
+        }
+        let members = self
+            .paths
+            .iter()
+            .filter_map(|member| {
+                let relative = if member.is_absolute() {
+                    member
+                        .strip_prefix(root)
+                        .ok()
+                        .or_else(|| member.strip_prefix(canonical_root?).ok())?
+                } else {
+                    member
+                };
+                let name = crate::zip_entry::python_module_name(relative.to_str()?)?;
+                Some((Rc::from(root.join(relative)), name))
+            })
+            .collect();
+        let wheel = Rc::new(InstalledWheel {
+            root: root.to_owned(),
+            canonical_root: canonical_root.map(Path::to_owned),
+            members,
+        });
+        self.wheels.push(Rc::clone(&wheel));
+        wheel
+    }
+}
+
 impl InstalledWheel {
     pub(crate) fn take_active(
-        pending: &mut Vec<Self>,
+        pending: &mut Vec<Rc<Self>>,
         sources: &[crate::dynamic::ModuleSource<'_>],
         candidates: &mut HashMap<String, HashSet<PathBuf>>,
     ) -> Option<BTreeSet<String>> {
@@ -181,11 +225,11 @@ impl InstalledWheel {
                 return true;
             }
             for (path, name) in &wheel.members {
-                if !files.contains(path.as_path()) {
+                if !files.contains(path.as_ref()) {
                     candidates
                         .entry(name.clone())
                         .or_default()
-                        .insert(path.clone());
+                        .insert(path.to_path_buf());
                     modules.insert(name.clone());
                 }
             }
@@ -208,12 +252,19 @@ mod tests {
         let record = info.join("RECORD");
         std::fs::write(
             &record,
-            "bad row\ndemo/__init__.py,,\n\"demo/with,comma.py\",,\n../outside.py,,\n",
+            "bad row\ndemo/__init__.py,,\n\"demo/with,comma.py\",,\ndemo/__init__.py,,\n../outside.py,,\n",
         )
         .unwrap();
         let mut inputs = SourceInputs::default();
         let mut catalog = WheelRecords::default();
         let mut wheels = catalog.discover(root, &mut inputs, &mut FileSystem::default());
+        let published = Rc::clone(&wheels[0]);
+        let ordered: Vec<_> = published
+            .members
+            .iter()
+            .map(|(_, name)| name.as_str())
+            .collect();
+        assert_eq!(ordered, ["demo", "demo.with,comma", "demo"]);
         let mut candidates = HashMap::new();
         assert!(InstalledWheel::take_active(&mut wheels, &[], &mut candidates).is_none());
         let files = vec![("demo".to_owned(), root.join("demo/__init__.py"), "".into())];
@@ -230,7 +281,8 @@ mod tests {
         std::fs::write(record, "demo/replacement.py,,\n").unwrap();
         assert!(!inputs.fresh());
         let mut registered = SourceInputs::default();
-        catalog.discover(root, &mut registered, &mut FileSystem::default());
+        let repeated = catalog.discover(root, &mut registered, &mut FileSystem::default());
+        assert!(Rc::ptr_eq(&published, &repeated[0]));
         catalog.discover(root, &mut registered, &mut FileSystem::default());
         assert_eq!(registered.files, inputs.files);
         assert_eq!(registered.wheel_records, inputs.wheel_records);
@@ -248,8 +300,19 @@ mod tests {
         let member = root.join("plugins/one.py");
         std::fs::write(info.join("RECORD"), format!("{},,\n", member.display())).unwrap();
         let mut inputs = SourceInputs::default();
-        let mut wheels =
-            WheelRecords::default().discover(&alias, &mut inputs, &mut FileSystem::default());
+        let mut records = WheelRecords::default();
+        let mut wheels = records.discover(&alias, &mut inputs, &mut FileSystem::default());
+        let physical = records.discover(&root, &mut inputs, &mut FileSystem::default());
+        assert!(records.membership(physical).contains(member.as_path()));
+        assert!(
+            !records
+                .membership(wheels.clone())
+                .contains(member.as_path())
+        );
+        assert!(Rc::ptr_eq(
+            &wheels[0],
+            &records.discover(&alias, &mut inputs, &mut FileSystem::default())[0],
+        ));
         let mut candidates = HashMap::new();
         let sources = vec![("plugins".to_owned(), alias.join("plugins"), "".into())];
         let names = InstalledWheel::take_active(&mut wheels, &sources, &mut candidates).unwrap();
