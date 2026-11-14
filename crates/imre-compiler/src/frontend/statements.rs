@@ -342,13 +342,6 @@ impl StatementLowering for Checker<'_> {
     }
 
     fn for_loop(&mut self, loop_: &ast::StmtFor) -> Result<Block, String> {
-        if loop_.is_async {
-            return Err(self.classified_error(
-                Kind::GeneratorSuspension,
-                loop_,
-                "unsupported statement in the Imre subset",
-            ));
-        }
         self.iteration(loop_)
     }
 

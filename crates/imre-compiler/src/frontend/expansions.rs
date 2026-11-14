@@ -112,7 +112,7 @@ impl Checker<'_> {
             && zip.arguments.args.len() == 2
             && self.unshadowed_builtin(&zip.func, "zip")
         {
-            let input = self.iteration_input(source, None)?;
+            let input = self.iteration_input(source, None, None)?;
             let input = self.prepare_iteration(input, source, false)?;
             let pair =
                 if self.registered.is_some() && self.locals[input.value] == Type::PythonObject {
@@ -822,7 +822,7 @@ impl Checker<'_> {
             }
             if matches!(&*call.func, ast::Expr::Name(name) if name.id == "range") {
                 return self
-                    .iteration_input(expression, None)
+                    .iteration_input(expression, None, None)
                     .map(ExpansionSource::Iteration);
             }
             if let ast::Expr::Attribute(attribute) = &*call.func
