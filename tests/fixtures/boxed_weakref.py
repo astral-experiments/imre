@@ -63,6 +63,31 @@ def proxy_index():
         raise AssertionError("dead proxy supplied an index")
 
 
+def proxy_method_lifetime():
+    from gc import collect
+
+    class Target:
+        def method(self, fail):
+            owners.clear()
+            collect()
+            assert witness() is not None
+            if fail:
+                raise LookupError
+
+    for fail in (False, True):
+        owners = [Target().method]
+        witness = ref(owners[0])
+        invoke = proxy(owners[0])
+        try:
+            invoke(fail)
+        except LookupError:
+            assert fail
+        else:
+            assert not fail
+        collect()
+        assert witness() is None
+
+
 def proxy_repr():
     from gc import collect
 
@@ -146,6 +171,7 @@ def current():
     iterate_proxy()
     saved_bound_method()
     proxy_index()
+    proxy_method_lifetime()
     observed = []
 
     def first(wr):
