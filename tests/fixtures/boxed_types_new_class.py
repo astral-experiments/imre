@@ -159,14 +159,23 @@ def prepared_class_statements():
 
     class Product(metaclass=Meta):
         value = seed
+        field: (value, lambda: marker)
         def owner(self):
             return __class__
 
         def record(self):
             self.value: [0 for self.never in ()] = 1
 
+        def ordered(self, other):
+            ignored: {[self for other in ()]: [other for self in ()] for _ in ()}
+
     assert type(Product) is Meta and Product().owner() is Product and Product.value == 9
+    assert Product.record.__code__.co_cellvars == ("self",)
+    assert Product.ordered.__code__.co_cellvars == ("other",)
     assert Product.__static_attributes__ == ("value",)
+    assert Product.__annotate__.__code__.co_freevars == ("__classdict__", "marker")
+    value, read = Product.__annotations__["field"]
+    assert value == 9 and read() is marker
 
     prepared = {"__name__": "local", "x": "prepared"}
     x = "outer"

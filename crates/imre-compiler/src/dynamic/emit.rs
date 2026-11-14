@@ -1509,7 +1509,7 @@ impl SourceMap<'_> {
         }
         let signature = json!({
             "posonly": ["format"], "scope_locals_complete": true,
-            "scope_complete": !plan.incomplete, "scope_reads": plan.reads,
+            "scope_complete": true, "scope_reads": plan.reads,
             "code_flags": self.function_flags(in_function, false),
         });
         let scope = AnnotationScope::Class {

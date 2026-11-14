@@ -1324,7 +1324,7 @@ pub(crate) enum DeclarationSite<'a> {
 
 pub(crate) struct ClassSite<'a> {
     def: &'a ast::StmtClassDef,
-    annotations: super::ClassAnnotations,
+    annotations: super::ClassAnnotations<super::function_scope::Uses>,
 }
 
 #[derive(Default)]
@@ -1368,7 +1368,7 @@ pub(super) fn collect_sites<'a>(
     use ast::statement_visitor::{StatementVisitor, walk_body, walk_stmt};
     #[derive(Default)]
     struct ClassFields {
-        plan: super::ClassAnnotations,
+        plan: super::ClassAnnotations<super::function_scope::Uses>,
         fields: Vec<(DeferredAnnotation, Option<usize>)>,
         conditional: bool,
     }
@@ -1836,7 +1836,7 @@ impl<'a> SuitePreparation<'a> {
         &mut self,
         ClassSite {
             def: class,
-            mut annotations,
+            annotations,
         }: ClassSite<'_>,
         names: &imre_ast::Names,
         scopes: &super::function_scope::ScopeFacts<'_>,
@@ -1902,7 +1902,7 @@ impl<'a> SuitePreparation<'a> {
         {
             self.declaration_refusals.insert(start, refusal);
         }
-        annotations.resolve(&scopes.classes[&start].bindings);
+        let annotations = annotations.resolve(&scopes.classes[&start].bindings);
         let class = RegisteredClass {
             annotations,
             name: class.name.clone(),

@@ -6,7 +6,7 @@ pub(super) use annotations::ParameterReads;
 mod callable;
 pub(crate) use callable::{CallableMetadata, NamedFunction};
 mod class_metadata;
-pub(super) use class_metadata::{display_bindings, expression_reads, parameter_reads};
+pub(super) use class_metadata::{Uses, display_bindings, expression_reads, parameter_reads};
 pub(crate) mod classes;
 mod type_parameters;
 
@@ -31,6 +31,7 @@ struct ClosureNames {
     // The enclosing statement contains a lexical site or a subtree the binder skips.
     needs_discovery: bool,
     cell_reads: BTreeSet<String>,
+    local_annotations: Option<Box<class_metadata::Uses>>,
     string_annotations: bool,
     incomplete: bool,
     locals_incomplete: bool,
@@ -53,6 +54,9 @@ impl ClosureNames {
     }
 
     fn finish_scope(&mut self) {
+        if let Some(annotations) = self.local_annotations.take() {
+            annotations.finish_annotation(self);
+        }
         for name in self.globals.iter().chain(&self.nonlocals) {
             self.locals.shift_remove(name);
         }
@@ -127,6 +131,11 @@ impl<'a> Visitor<'a> for ClosureNames {
             // Local variable annotations never evaluate in a function's scope.
             ast::Stmt::AnnAssign(a) if self.include_nested_reads => {
                 self.needs_discovery = true;
+                if !self.string_annotations {
+                    self.local_annotations
+                        .get_or_insert_with(class_metadata::Uses::unevaluated)
+                        .visit_expr(&a.annotation);
+                }
                 // A bare parenthesized name with no value has no binding effect.
                 if imre_ast::annotation_visits_target(a) {
                     self.visit_expr(&a.target);
