@@ -334,6 +334,42 @@ handlers = {"first": first, "second": second}
 }
 
 #[test]
+fn a_cold_call_keeps_its_first_party_argument_shape_across_layouts() {
+    let project = tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    fs::write(
+        project.path().join("scores.py"),
+        "def take(value: int) -> int: return value\n",
+    )
+    .unwrap();
+    for (imports, operation) in [
+        ("", "print(set([1, 2]))"),
+        (
+            "from fractions import Fraction\n",
+            "print(Fraction(1, 2) < 1)",
+        ),
+    ] {
+        fs::write(
+            &entry,
+            format!("from scores import take\n{imports}def unused(): return take()\n{operation}\n"),
+        )
+        .unwrap();
+        let error = crate::compile_file_with_layout(
+            &entry,
+            None,
+            &crate::CompileOptions::default(),
+            crate::CodegenLayout::Whole,
+        )
+        .err()
+        .expect("the written call omits value");
+        assert!(
+            error.contains("missing-argument") && error.contains("value"),
+            "{error}"
+        );
+    }
+}
+
+#[test]
 fn computed_factory_preserves_dormant_declared_calls() {
     let tmp = tempdir().unwrap();
     let source = tmp.path().join("main.py");
