@@ -38,7 +38,21 @@ RETURNED_ARGUMENT = (
     "import opcode\n"
 )
 
+WRAPPED_MEASURE = (
+    "from functools import wraps\nimport scores\n"
+    "def wrapper(func):\n"
+    "    @wraps(func)\n"
+    "    def invoke(): return func()\n"
+    "    return invoke\n"
+    "result = wrapper(scores.measure)\n"
+    "print(result(), result.__name__, result.__doc__, result.__wrapped__ is scores.measure)\n"
+)
+
 REJECTED = {
+    "wraps_preserves_imported_return": ({
+        "main.py": WRAPPED_MEASURE,
+        "scores.py": "def measure() -> int:\n    return 'bad'\n",
+    }, "scores.py:2:12: Imre: expected int, got str"),
     "initializer_receives_returned_argument": ({
         "main.py": RETURNED_ARGUMENT,
     }, "main.py:6:12: Imre: expected int, got str"),
@@ -870,6 +884,10 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "wraps_uses_source_defaults": {
+        "main.py": WRAPPED_MEASURE,
+        "scores.py": 'def measure() -> int:\n    """score doc"""\n    return 7\n',
+    },
     "unreached_initializer_local": {
         "main.py": "import child\nprint('after child')\n",
         "child.py": (
