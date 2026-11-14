@@ -87,6 +87,13 @@ IMPORTED_REJECTIONS = {
 }
 
 ERRORS = {
+    "empty_handler_lookup": (
+        IMPORT
+        + 'def argument() -> int:\n    print("argument")\n    return 21\n'
+        + 'def run() -> None:\n    handlers: dict[str, Callable[[int], int]] = {}\n'
+        + '    print("select")\n    print(handlers["missing"](argument()))\nrun()\n',
+        "KeyError",
+    ),
     "argument_failure": (
         IMPORT
         + "def target(value: int) -> int:\n    print(\"must not call\")\n    return value\n"
