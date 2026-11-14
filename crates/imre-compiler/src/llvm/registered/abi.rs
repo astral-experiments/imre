@@ -96,6 +96,13 @@ pub(crate) struct Output {
 }
 
 impl Output {
+    /// Keep the spelling for the module's code objects once per compilation unit.
+    pub(crate) fn intern_identifier(&mut self, name: &str) {
+        if !self.interned_identifiers.contains(name) {
+            self.interned_identifiers.insert(name.to_owned());
+        }
+    }
+
     // Private operands can have different numbers in the standalone unit and whole dump.
     // Source bytes are escaped in data constants. Only compiler-created operands carry NUL.
     fn operand(local: String, whole: String) -> String {

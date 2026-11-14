@@ -1331,10 +1331,9 @@ impl Function<'_, '_, '_> {
         }
         let signature = metadata.serialized_signature(flags, direct_method);
         if !matches!(callable, Callable::Generator(_)) {
-            self.frame
-                .output
-                .interned_identifiers
-                .extend(metadata.parameter_names().map(str::to_owned));
+            for name in metadata.parameter_names() {
+                self.frame.output.intern_identifier(name);
+            }
         }
         CompiledDefinition {
             doc,

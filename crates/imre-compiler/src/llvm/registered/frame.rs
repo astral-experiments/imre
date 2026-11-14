@@ -599,7 +599,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
 
     /// Emit a code-object name, including a Unicode identifier that would not intern as a literal.
     pub(crate) fn code_name(&mut self, name: &str) -> String {
-        self.output.interned_identifiers.insert(name.to_owned());
+        self.output.intern_identifier(name);
         self.lit(6, name.as_bytes())
     }
 
@@ -614,7 +614,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
 
     /// Load a code name and use it as the second operand of a boxed operation.
     pub(crate) fn named_op(&mut self, op: &str, receiver: &str, name: &str, value: &str) -> String {
-        self.output.interned_identifiers.insert(name.to_owned());
+        self.output.intern_identifier(name);
         if matches!(op, "lookup" | "lookup_local") {
             // The runtime lookup propagates a pending exception before reading the scope.
             self.take_matching_check();
@@ -938,7 +938,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
     }
 
     pub(crate) fn assign_owned_name(&mut self, scope: &str, name: &str, value: &str) {
-        self.output.interned_identifiers.insert(name.to_owned());
+        self.output.intern_identifier(name);
         let data = self.output.data(name.as_bytes());
         self.take_matching_check();
         let replaced = self.checked(&format!(
@@ -965,7 +965,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
 impl<'p> RegisteredFrame<'_, 'p> {
     pub(crate) fn text(&mut self, value: &str) -> String {
         if !value.is_empty() && interned_spelling(value) {
-            self.output.interned_identifiers.insert(value.to_owned());
+            self.output.intern_identifier(value);
         }
         self.lit(1, value.as_bytes())
     }
