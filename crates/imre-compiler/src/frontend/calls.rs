@@ -1044,7 +1044,7 @@ impl Checker<'_> {
             });
         }
         let bound_mapping = if let Some(node) = named_mapping {
-            let scope = scope.expect("resolved mapping calls root their operands");
+            let scope = scope.ok_or_else(|| error(self.source, node, UNSUPPORTED_UNPACKING))?;
             Some(self.bind_mapped_keywords(
                 call,
                 node,
