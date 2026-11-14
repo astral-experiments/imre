@@ -7226,9 +7226,22 @@ publish(5, callback)
 
     #[test]
     fn prepared_namespace_assignments_and_loops_stage_the_same_targets() {
-        for source in [
-            "owners[0], (sink.field, *rest) = row\n",
-            "for owners[0], (sink.field, *rest) in rows:\n    publish(rest)\n",
+        #[derive(Clone, Copy, Debug, PartialEq)]
+        enum Stage {
+            PullPair,
+            Unpack(usize, Option<usize>),
+            SetItem,
+            SetAttribute,
+        }
+        for (source, outer) in [
+            (
+                "owners[0], (sink.field, *rest) = row\n",
+                Stage::Unpack(2, None),
+            ),
+            (
+                "for owners[0], (sink.field, *rest) in rows:\n    publish(rest)\n",
+                Stage::PullPair,
+            ),
         ] {
             let graph = SourceGraph::single(source).unwrap();
             let suite = &graph.modules[graph.entry].parsed.syntax().body;
@@ -7244,39 +7257,43 @@ publish(5, callback)
                         .context(&graph.modules[graph.entry].source),
                 )
                 .unwrap();
-                let mut snapshots = Vec::new();
-                let mut attrs = 0;
-                let mut items = 0;
-                ir::walk_expressions(&body.function.body, &mut |expr| match &expr.kind {
-                    ExprKind::Builtin(
-                        Builtin::RegisteredUnpack {
-                            count,
-                            star,
-                            target: Some(target),
-                        },
-                        _,
-                    ) => snapshots.push((*count, *star, &source[*target])),
-                    ExprKind::Builtin(
-                        Builtin::RegisteredAttribute {
-                            action: ir::AttributeAction::Store,
-                            name,
+                let mut stages = Vec::new();
+                ir::walk_nodes(&body.function.body, &mut |node, _| {
+                    stages.push(match node {
+                        ir::Node::Statement(Statement::IterNext {
+                            kind: ir::IterNextKind::Pair(target),
+                            value: Some(_),
                             ..
+                        }) => (Stage::PullPair, &source[*target]),
+                        ir::Node::Statement(Statement::SetItem(..)) => (Stage::SetItem, ""),
+                        ir::Node::Expression(Expr {
+                            kind: ExprKind::Builtin(op, _),
+                            ..
+                        }) => match op {
+                            Builtin::RegisteredUnpack {
+                                count,
+                                star,
+                                target: Some(target),
+                            } => (Stage::Unpack(*count, *star), &source[*target]),
+                            Builtin::RegisteredAttribute {
+                                action: ir::AttributeAction::Store,
+                                range,
+                                ..
+                            } => (Stage::SetAttribute, &source[*range]),
+                            _ => return,
                         },
-                        _,
-                    ) if name == "field" => attrs += 1,
-                    _ => {}
-                });
-                ir::walk_statements(&body.function.body, &mut |stmt| {
-                    items += usize::from(matches!(stmt, Statement::SetItem(..)));
+                        _ => return,
+                    });
                 });
                 assert_eq!(
-                    snapshots,
+                    stages,
                     [
-                        (2, None, "owners[0], (sink.field, *rest)"),
-                        (2, Some(1), "(sink.field, *rest)")
+                        (outer, "owners[0], (sink.field, *rest)"),
+                        (Stage::SetItem, ""),
+                        (Stage::Unpack(2, Some(1)), "(sink.field, *rest)"),
+                        (Stage::SetAttribute, "sink.field"),
                     ]
                 );
-                assert_eq!((items, attrs), (1, 1));
             }
         }
     }
