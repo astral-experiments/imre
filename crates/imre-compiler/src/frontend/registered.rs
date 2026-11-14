@@ -412,7 +412,7 @@ pub(super) fn finish_source_checks(
         });
         SourceChecks::accepts_range(errors, range)
     };
-    for (module, range, source) in checks
+    for ((module, range), source) in checks
         .solved
         .into_iter()
         .flat_map(std::cell::RefCell::into_inner)
@@ -523,7 +523,7 @@ impl CheckedPlacement {
         {
             solved
                 .borrow_mut()
-                .push((self.module, self.range, SourceFrame::Registered));
+                .insert((self.module, self.range), SourceFrame::Registered);
         }
         graph.register_function(self.module, self.range.start(), self.frame);
     }
@@ -639,7 +639,8 @@ pub(super) struct SourceChecks {
     /// Named startup checks these unresolved definitions for a generator body.
     pub(super) unresolved: Vec<DefinitionId>,
     session: std::cell::OnceCell<Option<crate::analysis::RegisteredBodyChecks>>,
-    pub(super) solved: Option<std::cell::RefCell<Vec<(ModuleId, TextRange, SourceFrame)>>>,
+    /// A later placement replaces the frame at the same physical definition.
+    pub(super) solved: Option<std::cell::RefCell<HashMap<(ModuleId, TextRange), SourceFrame>>>,
 }
 
 impl SourceChecks {
@@ -907,7 +908,7 @@ pub(super) fn capture(
                 if let Some(solved) = deferred {
                     solved
                         .borrow_mut()
-                        .push((id, function.range(), SourceFrame::Registered));
+                        .insert((id, function.range()), SourceFrame::Registered);
                     true
                 } else {
                     checks.accepts(graph, id, function.range())
@@ -5562,6 +5563,33 @@ else:
         graph.registered_startup = true;
         crate::checked_lower(&mut graph).unwrap();
         graph
+    }
+
+    #[test]
+    fn a_replaced_named_frame_keeps_its_source_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let entry = dir.path().join("main.py");
+        std::fs::write(
+            &entry,
+            "from scores import add\nclass Dormant:\n    async def __aiter__(self):\n        yield 1\nprint(add(19, 23))\n",
+        )
+        .unwrap();
+        let scores = concat!(
+            "class Item:\n    values: dict[str, int]\n",
+            "    def __init__(self) -> None:\n        self.values = {'a': 1}\n",
+            "def independent(obj: Item) -> None:\n    obj.values['a'] = 'wrong'\n",
+            "print('entry')\ndef add(value: int, increment: int) -> int:\n",
+            "    return value + increment\n",
+        );
+        std::fs::write(dir.path().join("scores.py"), scores).unwrap();
+        let mut graph = SourceGraph::load(&entry, None, &[]).unwrap();
+        graph.registered_startup = true;
+        crate::checked_lower(&mut graph).unwrap();
+        let module = graph.python_file("scores").unwrap();
+        let store = "obj.values['a'] = 'wrong'";
+        let start = TextSize::try_from(scores.find(store).unwrap()).unwrap();
+        let range = TextRange::at(start, TextSize::of(store));
+        assert!(graph.registered_source_errors.borrow()[&module].contains(&Some(range)));
     }
 
     #[test]
