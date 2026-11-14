@@ -1037,15 +1037,26 @@ impl Inference {
                 checker.discover_document_return = document_return;
                 checker.inferred_returns = discover_returns.then(Vec::new);
                 let body_revision = self.revision.get();
-                // A physical method reached after the final signature change can keep the
-                // return it is about to check. Discovery still observes all calls and stores.
+                // Keep a physical return checked after the last signature change. A scalar
+                // function reading only locals is independent of the solver's module bindings.
                 let keep_return = body_revision != before
                     && !self.widened.get()
                     && !discover_returns
                     && !signature.registered_frame()
                     && matches!(function.body.as_slice(), [ast::Stmt::Return(_)])
                     && !checker.fault_enabled()
-                    && registered::physical_method(signature, function, classes).is_some();
+                    && (registered::physical_method(signature, function, classes).is_some()
+                        || signature.method.is_none()
+                            && physical
+                            && signature.physical_frame
+                            && signature.returns.builtin_scalar_name().is_some()
+                            && signature
+                                .params
+                                .iter()
+                                .all(|p| p.ty.builtin_scalar_name().is_some())
+                            && graph
+                                .session
+                                .function_uses_fixed_names(*module, function, false, |_| false));
                 checker.placement_only = !keep_return;
                 let method_storage = keep_return.then(|| (helpers.len(), globals.types().len()));
                 let mut return_body = keep_return.then(|| {
@@ -1924,6 +1935,25 @@ impl Checker<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn named_scalar_leaf_keeps_its_settled_return() {
+        let text = concat!(
+            "def scale(value):\n    return increment(value) * 2\n",
+            "def increment(value):\n    return value + 1\n",
+            "print(scale(4))\n",
+        );
+        let mut graph = SourceGraph::single(text).unwrap();
+        graph.registered_startup = true;
+        let (_, lowered) =
+            caller_cache::observe_lowerings(|| crate::checked_lower(&mut graph).unwrap());
+        assert_eq!(lowered, ["scale"]);
+        let start = TextSize::try_from(text.find("def increment").unwrap()).unwrap();
+        let bodies = graph.registered_functions();
+        let leaf = &bodies[&graph.entry][&start];
+        assert_eq!(leaf.function.returns, Type::Int);
+        assert_eq!(&text[leaf.fixed_sites[0]], "return value + 1");
+    }
 
     #[test]
     fn named_startup_keeps_each_refused_function_operand() {
