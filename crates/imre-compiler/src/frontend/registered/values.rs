@@ -526,27 +526,31 @@ impl Checker<'_> {
         source.located(expr, value)
     }
 
+    /// A refused fixed region still checks the call's type and operands.
+    /// Its registered frame owns the executable call.
+    pub(in crate::frontend) fn discarded_call(&self, result: Type) -> Option<Expr> {
+        self.unrepresented
+            .borrow()
+            .as_ref()
+            .is_some_and(|failure| {
+                if self.module_scope {
+                    self.inference.is_none()
+                } else {
+                    failure.is_object() && self.registered.is_none() && self.fixed_sites.is_none()
+                }
+            })
+            .then(|| super::operation(Builtin::UnrepresentedCall, result, vec![]))
+    }
+
     pub(in crate::frontend) fn call_object_method(
         &mut self,
         call: &ast::ExprCall,
         field: &ast::ExprAttribute,
         receiver: Expr,
     ) -> Result<Expr, String> {
-        // Once the fixed region has failed, its arguments still contribute checks and
-        // inference facts. The registered frame owns the live receiver and operands.
-        if self.unrepresented.borrow().as_ref().is_some_and(|failure| {
-            if self.module_scope {
-                self.inference.is_none()
-            } else {
-                failure.is_object() && self.registered.is_none() && self.fixed_sites.is_none()
-            }
-        }) {
+        if let Some(result) = self.discarded_call(Type::PythonObject) {
             self.check_discarded_arguments(call)?;
-            return Ok(super::operation(
-                Builtin::UnrepresentedCall,
-                Type::PythonObject,
-                vec![],
-            ));
+            return Ok(result);
         }
         self.call_with_target(call, loaded_attribute(field, receiver))
     }

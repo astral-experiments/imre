@@ -1104,6 +1104,9 @@ impl Checker<'_> {
             && conversion == ast::ConversionFlag::None
             && field.format_spec.is_none()
         {
+            if let Some(result) = self.discarded_call(value.ty) {
+                return Ok(Formatted(result));
+            }
             let formatted = Expr {
                 ty: Type::Str,
                 kind: ExprKind::Builtin(Builtin::FormatField(Default::default()), vec![value]),
