@@ -109,6 +109,20 @@ impl Emitter<'_, '_> {
                     "call i64 @imre_union_into_int(i64 {})",
                     value.operand
                 ))
+            } else if self.module.types.payload(returns) == Some(Type::Int) {
+                // Zero is absent. A present integer must recover its canonical key representation.
+                let present = self.instruction(format!("icmp ne i64 {}, 0", value.operand));
+                let absent = self.body.current.clone();
+                let (convert, end) = (self.label(), self.label());
+                self.branch(&present, &convert, &end);
+                self.start(&convert);
+                let integer = self.instruction(format!(
+                    "call i64 @imre_union_into_int(i64 {})",
+                    value.operand
+                ));
+                self.jump(&end);
+                self.start(&end);
+                self.instruction(format!("phi i64 [ 0, %{absent} ], [ {integer}, %{convert} ]"))
             } else if matches!(returns, Type::Enum(_) | Type::IntEnum(_)) {
                 self.instruction(format!("lshr i64 {}, 3", value.operand))
             } else {
