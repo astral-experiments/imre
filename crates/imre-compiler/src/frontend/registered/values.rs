@@ -496,14 +496,7 @@ impl Checker<'_> {
         // arbitrary Python effects. Its registered frame owns the live call.
         if self.module_scope && self.inference.is_none() && self.unrepresented.borrow().is_some() {
             for argument in imre_ast::argument_values(&call.arguments) {
-                if self.registered.is_none()
-                    && let ast::Expr::StringLiteral(literal) = argument
-                {
-                    // Validate each written part here; only the executing frame needs the string.
-                    check_string(literal, self.source)?;
-                } else {
-                    self.expr(argument)?;
-                }
+                self.check_discarded_operand(argument)?;
             }
             return Ok(super::operation(
                 Builtin::UnrepresentedCall,
@@ -512,6 +505,22 @@ impl Checker<'_> {
             ));
         }
         self.call_with_target(call, loaded_attribute(field, receiver))
+    }
+
+    fn check_discarded_operand(&mut self, operand: &ast::Expr) -> Result<(), String> {
+        match (self.registered, operand) {
+            (None, ast::Expr::StringLiteral(literal)) => check_string(literal, self.source)?,
+            // A plain tuple has no check of its own once its elements have been checked.
+            (None, ast::Expr::Tuple(tuple)) if !tuple.iter().any(ast::Expr::is_starred_expr) => {
+                for item in tuple {
+                    self.check_discarded_operand(item)?;
+                }
+            }
+            _ => {
+                self.expr(operand)?;
+            }
+        }
+        Ok(())
     }
 
     pub(in crate::frontend) fn call_with_target(
