@@ -409,6 +409,7 @@ pub(crate) trait PreparedSuiteEmitter<'a, 'p>:
 {
     fn frame_and_sites(&mut self) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites);
     fn place_site(&mut self, site: RequiredSite);
+    fn exec_literal_at(&mut self, site: TextRange) -> Option<sites::CompiledExec>;
 }
 
 /// Evaluate the selected input at its use, placing definitions in the lexical owner.
@@ -1364,13 +1365,7 @@ impl<'f> Frame<'f, '_, '_> {
     }
 
     pub(super) fn exec_literal_at(&mut self, site: TextRange) -> Option<sites::CompiledExec> {
-        self.code.place_site(RequiredSite::ExecLiteral(site));
-        self.code
-            .frame_and_sites()
-            .1
-            .exec_literals
-            .get(&site)
-            .cloned()
+        self.code.exec_literal_at(site)
     }
 
     pub(crate) fn own_word(&mut self, word: &str) -> usize {

@@ -840,7 +840,7 @@ struct SourceMap<'a> {
     info: &'a SourceInfo<'a>,
     /// A duplicated cleanup path still evaluates the same lexical definition.
     callable_code: std::cell::RefCell<HashMap<ruff_text_size::TextSize, String>>,
-    exec_code: std::cell::RefCell<HashMap<TextRange, String>>,
+    exec_code: std::cell::RefCell<HashMap<TextRange, sites::CompiledExec>>,
     unit: usize,
     positions: &'a SourcePositions<'a>,
 }
@@ -1133,54 +1133,51 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
         let (sites, mut definitions) = self.definitions();
         sites.place(site, &mut definitions);
     }
-}
 
-impl<'p> sites::SiteDefinitions<'p> for LexicalDefinitions<'_, 'p> {
-    fn literal_sites(&self) -> &'p LiteralSites {
-        &self.source.info.exec_literals
-    }
-
-    fn exec_literal(&mut self, site: TextRange) -> Option<sites::CompiledExec> {
+    fn exec_literal_at(&mut self, site: TextRange) -> Option<sites::CompiledExec> {
         let child = self.source.exec_literals.body(site)?;
-        if self.output.diagnostic.is_some() {
+        let output = &mut self.frame.output;
+        if output.diagnostic.is_some() {
             return None;
         }
+        let mut entries = self.source.exec_code.borrow_mut();
+        let entry = match entries.entry(site) {
+            std::collections::hash_map::Entry::Occupied(entry) => return Some(entry.get().clone()),
+            std::collections::hash_map::Entry::Vacant(entry) => entry,
+        };
         let child = match child {
             Ok(child) => child,
             Err((operand, reason)) => {
-                self.output.diagnostic = Some(self.source.literal_diagnostic(operand, reason));
+                output.diagnostic = Some(self.source.literal_diagnostic(operand, reason));
                 return None;
             }
         };
-        let mut entries = self.source.exec_code.borrow_mut();
-        let entry = match entries.entry(site) {
-            std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
-            std::collections::hash_map::Entry::Vacant(entry) => {
-                let file = self.output.data(b"<string>");
-                // A decoded module interns its own constants when its prologue runs.
-                let parent_names = std::mem::take(&mut self.output.interned_identifiers);
-                let compiled = child.body.emit(self.output, self.source.unit, &file);
-                self.output.interned_identifiers = parent_names;
-                match compiled {
-                    Ok(symbol) => entry.insert(symbol),
-                    Err(error) => {
-                        self.output.diagnostic = Some(error);
-                        return None;
-                    }
-                }
+        let file = output.data(b"<string>");
+        // A decoded module interns its own constants when its prologue runs.
+        let parent_names = std::mem::take(&mut output.interned_identifiers);
+        let compiled = child.body.emit(output, self.source.unit, &file);
+        output.interned_identifiers = parent_names;
+        let code = match compiled {
+            Ok(code) => code,
+            Err(error) => {
+                output.diagnostic = Some(error);
+                return None;
             }
         };
         let text = child
             .original_text
             .as_deref()
             .unwrap_or(&child.body.source.text);
-        Some(sites::CompiledExec {
-            entry: entry.clone(),
+        let compiled = sites::CompiledExec {
+            entry: code,
             flags: child.body.source.future_flags,
-            source: self.output.data(text.as_bytes()),
-        })
+            source: output.data(text.as_bytes()),
+        };
+        Some(entry.insert(compiled).clone())
     }
+}
 
+impl sites::SiteDefinitions for LexicalDefinitions<'_, '_> {
     fn lambda(&mut self, site: TextSize, comprehension: bool) -> CompiledDefinition {
         let lambda = &self.source.lambdas[&site];
         self.compile_callable(site, Callable::Lambda(lambda, comprehension))
