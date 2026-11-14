@@ -6188,15 +6188,12 @@ impl<'a> Checker<'a> {
         self.placement_only && self.block_depth == 1 && self.fixed_sites.is_none()
     }
 
-    /// A discarded outer loop still needs each suite's binding and exit facts.
-    /// Nested handlers inspect their protected operations.
-    fn loop_suite(&mut self, statements: &[ast::Stmt]) -> Result<(Vec<Statement>, bool), String> {
-        if self.discarded_function_body() {
-            let falls = self.lower_block(statements, None)?;
-            Ok((Vec::new(), falls))
-        } else {
-            self.block(statements)
-        }
+    /// Control flow and bindings are still checked when this frame has lost its output.
+    fn placed_suite(&mut self, statements: &[ast::Stmt]) -> Result<statements::Block, String> {
+        let mut body = Vec::new();
+        let output = (!self.discarded_function_body()).then_some(&mut body);
+        let falls = self.lower_block(statements, output)?;
+        Ok((body, falls))
     }
 
     /// The else suite is outside this loop, so its transfers target an outer loop.
@@ -6209,7 +6206,7 @@ impl<'a> Checker<'a> {
     ) -> Result<(Vec<Statement>, bool), String> {
         let reachable = self.reachable;
         self.reachable &= can_exhaust;
-        let (orelse, falls) = self.loop_suite(orelse)?;
+        let (orelse, falls) = self.placed_suite(orelse)?;
         self.reachable = reachable;
         if can_exhaust && falls {
             self.merge_exit(&mut breaks);
@@ -6381,7 +6378,9 @@ impl<'a> Checker<'a> {
                 // A loop joins its own exits. A later statement can inspect an if for narrowing.
                 let scratch = match statement {
                     ast::Stmt::For(_) => false,
-                    ast::Stmt::If(_) => index + 1 < statements.len(),
+                    ast::Stmt::If(_) => statements
+                        .get(index + 1)
+                        .is_some_and(|next| next.is_return_stmt() || length_guard.is_some()),
                     _ => true,
                 };
                 let output =
@@ -7148,7 +7147,7 @@ impl<'a> Checker<'a> {
                 let before = self.assigned.clone();
                 self.apply_facts(&loop_.test, true);
                 self.loop_breaks.push(None);
-                let (body, _) = self.loop_suite(&loop_.body)?;
+                let (body, _) = self.placed_suite(&loop_.body)?;
                 let breaks = self.loop_breaks.pop().unwrap();
                 self.assigned.after_iteration(before);
                 self.narrowed = facts;
@@ -7829,7 +7828,11 @@ impl<'a> Checker<'a> {
     /// committed. Only incoming definite assignments survive; writes invalidate
     /// incoming optional facts. Finally uses the same conservative entry for all
     /// normal, exceptional, return, and loop exits.
-    fn try_statement(&mut self, try_: &ast::StmtTry) -> Result<(Statement, bool), String> {
+    fn try_statement(
+        &mut self,
+        try_: &ast::StmtTry,
+        output: &mut Vec<Statement>,
+    ) -> Result<bool, String> {
         let before = self.assigned.clone();
         let before_facts = self.narrowed.clone();
         let earlier_returns = self.explicit_return;
@@ -7841,7 +7844,7 @@ impl<'a> Checker<'a> {
         let (body, body_falls) = self.block(&try_.body)?;
         let reachable = self.reachable;
         self.reachable &= body_falls;
-        let (orelse, else_falls) = self.block(&try_.orelse)?;
+        let (orelse, else_falls) = self.placed_suite(&try_.orelse)?;
         self.reachable = reachable;
         let mut normal_exit = (body_falls && else_falls).then(|| self.local_state());
 
@@ -7984,7 +7987,7 @@ impl<'a> Checker<'a> {
                     assigned.extend(writes);
                 }
             }
-            let (handler_body, falls) = self.block(&handler.body)?;
+            let (handler_body, falls) = self.placed_suite(&handler.body)?;
             self.caught_exceptions.truncate(capture_depth);
             if let Some(name) = name {
                 self.assigned.remove(&name);
@@ -7999,16 +8002,20 @@ impl<'a> Checker<'a> {
             if falls {
                 self.merge_exit(&mut normal_exit);
             }
-            handlers.push(ir::ExceptHandler {
-                matcher,
-                name,
-                body: handler_body,
-            });
+            if !self.discarded_function_body() {
+                handlers.push(ir::ExceptHandler {
+                    matcher,
+                    name,
+                    body: handler_body,
+                });
+            }
         }
 
         let has_normal_exit = normal_exit.is_some();
-        let finish =
-            |finalbody| statements::finish_try(body, handlers, orelse, has_normal_exit, finalbody);
+        let finish = |checker: &Self, finalbody| {
+            let output = (!checker.discarded_function_body()).then_some(output);
+            statements::finish_try(output, body, handlers, orelse, has_normal_exit, finalbody)
+        };
         let (mut normal_assigned, normal_facts) = normal_exit
             .map(|exit| (exit.assigned, exit.narrowed))
             .unwrap_or_default();
@@ -8017,7 +8024,7 @@ impl<'a> Checker<'a> {
             self.assigned = normal_assigned;
             self.narrowed = normal_facts;
             self.explicit_return |= earlier_returns;
-            return Ok(finish((Vec::new(), true)));
+            return Ok(finish(self, (Vec::new(), true)));
         }
         self.assigned = before;
         self.narrowed = before_facts;
@@ -8056,7 +8063,7 @@ impl<'a> Checker<'a> {
         let protected_returns = std::mem::replace(&mut self.explicit_return, earlier_returns);
         let outer_finally = self.finally_scope;
         self.finally_scope = FinallyScope::Cleanup;
-        let final_result = self.block(&try_.finalbody);
+        let final_result = self.placed_suite(&try_.finalbody);
         self.finally_scope = outer_finally;
         let (finalbody, final_falls) = final_result?;
         self.explicit_return |= final_falls && protected_returns;
@@ -8094,7 +8101,7 @@ impl<'a> Checker<'a> {
         }
         // Keep the facts established by the shared finally across interrupted paths.
         self.assigned.extend(&normal_assigned);
-        Ok(finish((finalbody, final_falls)))
+        Ok(finish(self, (finalbody, final_falls)))
     }
 
     fn lower_if_suite(

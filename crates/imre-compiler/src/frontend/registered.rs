@@ -2349,11 +2349,18 @@ impl<'a> SuitePreparation<'a> {
             let continues = suite.falls_through;
             (suite.into_child(&mut suites), continues)
         };
-        let (statement, falls_through) =
-            registered_try((body, body_continues), handlers, orelse, finalbody);
+        let mut statements = Vec::with_capacity(2);
+        statements.push(checkpoint);
+        let falls_through = registered_try(
+            &mut statements,
+            (body, body_continues),
+            handlers,
+            orelse,
+            finalbody,
+        );
         RegisteredSuite {
             placed_from: 0,
-            checked: scope.finish(vec![checkpoint, statement]),
+            checked: scope.finish(statements),
             operands,
             suites,
             falls_through,
@@ -2874,13 +2881,14 @@ pub(super) fn exception_matcher<E>(
 
 /// Registered dispatch retains a join after the handlers, including its exceptional entry.
 fn registered_try(
+    output: &mut Vec<Statement>,
     (body, body_falls): statements::Block,
     handlers: Vec<ir::ExceptHandler>,
     orelse: Vec<Statement>,
     finalbody: statements::Block,
-) -> (Statement, bool) {
+) -> bool {
     let normal_exit = body_falls || !handlers.is_empty();
-    statements::finish_try(body, handlers, orelse, normal_exit, finalbody)
+    statements::finish_try(Some(output), body, handlers, orelse, normal_exit, finalbody)
 }
 
 /// A target's Python expression inputs in evaluation order. The receiver is evaluated
@@ -3187,9 +3195,7 @@ impl statements::StatementLowering for SourceScope<'_> {
                 }
                 let orelse = self.suite(&region.orelse)?;
                 let finalbody = self.block(&region.finalbody)?;
-                let (statement, falls) = registered_try(body, handlers, orelse, finalbody);
-                output.push(statement);
-                return Ok(falls);
+                return Ok(registered_try(output, body, handlers, orelse, finalbody));
             }
             ast::Stmt::With(stmt) if !stmt.is_async || self.is_async_function() => Ok((
                 self.with_items(&stmt.items, stmt.is_async, &stmt.body)?,
