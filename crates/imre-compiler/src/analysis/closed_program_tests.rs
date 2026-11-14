@@ -103,6 +103,32 @@ fn dormant_import_preserves_the_next_call_diagnostic() {
 }
 
 #[test]
+fn registered_enum_keeps_its_finite_member_domain() {
+    let project = tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    let client = r#"from enum import Enum
+from unittest.mock import Mock
+
+class Box:
+    class State(Enum):
+        OPEN = 1
+        CLOSED = 2
+
+def read(state: Box.State) -> int:
+    match state:
+        case Box.State.OPEN: return 1
+        case Box.State.CLOSED: return 2
+
+print(Mock(return_value=read(Box.State.OPEN))())
+"#;
+    fs::write(&entry, client).unwrap();
+    crate::check_file(&entry, None).unwrap();
+    fs::write(&entry, client.replace("        case Box.State.CLOSED: return 2\n", "")).unwrap();
+    let error = crate::check_file(&entry, None).unwrap_err();
+    assert!(error.contains("implicitly return") && error.contains("main.py:9:"), "{error}");
+}
+
+#[test]
 fn registered_return_uses_the_selected_abc_metaclass() {
     let project = tempdir().unwrap();
     let entry = project.path().join("main.py");
