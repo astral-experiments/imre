@@ -619,12 +619,16 @@ report('{"packages": [{"id": "a"}]}')
 print(measure())
 "#;
     std::fs::write(&entry, source).unwrap();
-    assert_source_refusal(
-        &entry,
-        &entry,
-        ":12:17: Imre: expected int, got str; annotations are enforced contracts",
-        &[CompileOptions::default()],
-    );
+    let nested = project.path().join("nested");
+    std::fs::create_dir(&nested).unwrap();
+    for spelling in [&entry, &nested.join("../main.py")] {
+        assert_source_refusal(
+            spelling,
+            &entry,
+            ":12:17: Imre: expected int, got str; annotations are enforced contracts",
+            &[CompileOptions::default()],
+        );
+    }
 }
 
 #[test]

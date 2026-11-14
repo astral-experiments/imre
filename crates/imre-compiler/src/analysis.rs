@@ -175,13 +175,13 @@ impl ClosedSource for crate::modules::SourceModule {
     }
 }
 
-impl ClosedSource for (PathBuf, bool, Option<usize>) {
+impl ClosedSource for (PathBuf, bool, Option<(usize, &Path)>) {
     fn project_path(&self) -> Option<&Path> {
         self.1.then_some(&self.0)
     }
 
     fn checked_source(&self, _: usize) -> Option<(usize, &Path)> {
-        Some((self.2?, self.project_path()?))
+        self.2
     }
 }
 
@@ -635,17 +635,15 @@ pub(crate) fn check_registered_project<'a>(
         };
         let source = crate::normalize_source(source, kind)
             .map_err(|error| format!("{}: {error}", path.display()))?;
-        let original = winner.checked_module.filter(|&id| {
-            winner.declares_signatures
+        let original = winner.checked_module.and_then(|id| {
+            let module = &checked?.modules[id];
+            (winner.declares_signatures
                 && is_program
-                && checked.is_some_and(|graph| {
-                    let module = &graph.modules[id];
-                    module.checks_source_contracts()
-                        && module.path == path
-                        && module.original_source() == winner.source
-                })
+                && module.checks_source_contracts()
+                && module.original_source() == winner.source)
+                .then_some((id, module.path.as_path()))
         });
-        if let Some((graph, id)) = checked.zip(original)
+        if let Some((graph, (id, _))) = checked.zip(original)
             && (kind == crate::SourceKind::Command) == (graph.virtual_command && id == graph.entry)
         {
             // The loader checked these original bytes under the same form-feed rules.
