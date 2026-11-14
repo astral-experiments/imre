@@ -55,3 +55,18 @@ def _matching_entries(directory: str, entries: list[str], name: str, legacy_name
     if egg_info:
         matches.append(egg_info)
     return matches
+
+
+def _read_root(directory):
+    """Open one import root and list its immediate distribution candidates."""
+    archive: ZipFile | None = None
+    entries: list[str] | None = None
+    try:
+        if _is_file(directory):
+            archive = _zip_open(directory)
+            entries = _archive_children(_zip_names(archive))
+        else:
+            entries = _filenames(directory)
+    except Exception:
+        pass
+    return archive, entries

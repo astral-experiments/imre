@@ -211,15 +211,8 @@ def _discover(context, resolvers):
 def _path_distributions(paths, normalized, legacy):
     for path in paths:
         directory = path or '.'
-        archive = None
-        try:
-            if _is_file(directory):
-                archive = _zip_open(directory)
-                entries = _archive_children(_zip_names(archive))
-            else:
-                entries = _filenames(directory)
-        except Exception:
-            # A sys.path entry can be unreadable, malformed or an unsupported ZIP.
+        archive, entries = _read_root(directory)
+        if entries is None:
             continue
         for entry in _matching_entries(directory, entries, normalized, legacy):
             if archive is not None:
