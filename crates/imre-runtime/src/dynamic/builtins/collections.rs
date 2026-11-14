@@ -1438,13 +1438,13 @@ pub(in crate::dynamic) fn list_extend(ctx: &mut Context, receiver: Id, source: I
 }
 
 /// Call a builtin slot on the receiver’s native payload, bypassing its override.
-pub(super) fn builtin_slot(
+pub(in crate::dynamic) fn builtin_slot(
     ctx: &mut Context,
     name: &str,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    let (owner, method) = name.split_once('.').expect("builtin slot");
+    let (owner, method) = name.rsplit_once('.').expect("builtin slot");
     let Some((&object, rest)) = args.split_first() else {
         return Err(type_error(format!(
             "descriptor '{method}' of '{owner}' object needs an argument"
@@ -1483,7 +1483,13 @@ pub(super) fn builtin_slot(
     let comparison = super::super::operators::comparison_op(method);
     if matches!(
         method,
-        "__add__" | "__iadd__" | "__contains__" | "__pow__" | "__truediv__" | "__rtruediv__"
+        "__add__"
+            | "__iadd__"
+            | "__contains__"
+            | "__getitem__"
+            | "__pow__"
+            | "__truediv__"
+            | "__rtruediv__"
     ) || set_op.is_some()
         || comparison.is_some()
     {
@@ -1522,6 +1528,16 @@ pub(super) fn builtin_slot(
                 rest.len()
             )));
         };
+        if owner == "_contextvars.Context" {
+            return match method {
+                "__contains__" => ctx.contains(*value, storage).map(boolean),
+                "__getitem__" => ctx.get_item(storage, *value),
+                _ if !matches!(ctx.heap.get(*value), Value::Context(_)) => Ok(NOT_IMPLEMENTED),
+                _ => Ok(boolean(
+                    ctx.checked_equal_impl(storage, *value, false)? == (method == "__eq__"),
+                )),
+            };
+        }
         if method == "__contains__" {
             return Ok(boolean(
                 find_sequence_item(ctx, storage, *value, 0..i64::MAX)?.is_some(),
@@ -1605,6 +1621,9 @@ pub(super) fn builtin_slot(
             };
         }
         if method == "__len__" {
+            if owner == "_contextvars.Context" {
+                return super::call(ctx, "len", &[storage], &[]);
+            }
             let length = match ctx.heap.get(storage) {
                 Value::List(items)
                 | Value::Tuple(items)

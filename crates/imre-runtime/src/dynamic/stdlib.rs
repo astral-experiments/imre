@@ -856,7 +856,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("posixpath", "splitroot") => ctx.builtin("posix._path_splitroot_ex"),
         ("posixpath", "sep") => ctx.text("/"),
         ("posixpath", "altsep") => NONE,
-        ("contextvars" | "_contextvars", "ContextVar" | "Context" | "Token" | "copy_context") => {
+        ("_contextvars", "ContextVar" | "Context" | "Token" | "copy_context") => {
             ctx.builtin(&format!("_contextvars.{name}"))
         }
         ("functools", "Placeholder") => functools::placeholder(ctx),
@@ -2935,6 +2935,20 @@ pub(super) fn call(
         return Ok(super::typing::builtin_alias(ctx, owner, index));
     }
     if let Some(method) = name.strip_prefix("_contextvars.") {
+        if let Some(member) = method.strip_prefix("Context.") {
+            if member.starts_with("__") {
+                return builtins::builtin_slot(ctx, name, args, kwargs);
+            }
+            // Context.run forwards its keywords to the callback.
+            let method_kwargs = if member == "run" { &[][..] } else { kwargs };
+            builtins::method_receiver_args(
+                ctx,
+                "_contextvars.Context",
+                member,
+                args,
+                method_kwargs,
+            )?;
+        }
         return contextvars::call(ctx, method, args, kwargs);
     }
     if name == "getset_descriptor.__get__" {

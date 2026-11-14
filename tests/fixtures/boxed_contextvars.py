@@ -2,6 +2,7 @@
 
 import _contextvars
 import contextvars
+from collections.abc import Mapping
 from contextvars import Context, ContextVar, Token, copy_context
 from operator import length_hint
 from types import ClassMethodDescriptorType, GenericAlias
@@ -44,6 +45,9 @@ def current():
     outer = var.set(req)
     assert type(outer) is Token
     saved = copy_context()
+    assert isinstance(saved, Mapping) and issubclass(Context, Mapping)
+    assert Context.__getitem__(saved, var) is saved.__getitem__(var) is req
+    assert saved.__eq__(saved.copy()) and saved.__ne__({}) is NotImplemented
     try:
         saved.run(saved.run)
     except TypeError as error:

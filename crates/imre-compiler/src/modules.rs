@@ -241,6 +241,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 include_str!("../stdlib/csv/sniffer.py"),
             ),
         )),
+        "contextvars" => bundled_source!("contextvars.py", from "contextvars"),
         "copy" => Some((
             "copy.py",
             include_str!("../../../benchmarks/cpython_stdlib/full/copy/upstream/Lib/copy.py"),

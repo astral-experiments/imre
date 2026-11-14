@@ -20,8 +20,8 @@ mod print;
 mod text;
 mod translation;
 pub(super) use collections::{
-    clear_container, copy_dict, hashable, list_extend, remove_dict_item, remove_dict_item_hashed,
-    set_add, set_member, sort_values, update as update_dict, update_set,
+    builtin_slot, clear_container, copy_dict, hashable, list_extend, remove_dict_item,
+    remove_dict_item_hashed, set_add, set_member, sort_values, update as update_dict, update_set,
 };
 pub(super) use text::{
     bytes_from_iterable, bytes_percent, format_conversion, format_value, hex_group, hex_separator,
@@ -419,6 +419,20 @@ pub(super) fn native_implementation(symbol: &str) -> &str {
 
 pub(super) const ITERATOR_SLOTS: &[&str] = &["__iter__", "__next__"];
 pub(super) const FILTER_METHODS: &[&str] = &["__iter__", "__next__", "__reduce__"];
+pub(super) const CONTEXT_METHODS: &[&str] = &[
+    "__contains__",
+    "__eq__",
+    "__getitem__",
+    "__iter__",
+    "__len__",
+    "__ne__",
+    "copy",
+    "get",
+    "items",
+    "keys",
+    "run",
+    "values",
+];
 
 pub(super) const MAPPING_PROXY_METHODS: &[&str] = &[
     "keys",
@@ -1155,11 +1169,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::ContextVar { .. } if matches!(attr, "get" | "set" | "reset") => {
             "_contextvars.ContextVar"
         }
-        Value::Context(_)
-            if matches!(attr, "copy" | "run" | "get" | "keys" | "values" | "items") =>
-        {
-            "_contextvars.Context"
-        }
+        Value::Context(_) if CONTEXT_METHODS.contains(&attr) => "_contextvars.Context",
         Value::ContextToken { .. } if matches!(attr, "__enter__" | "__exit__") => {
             "_contextvars.Token"
         }

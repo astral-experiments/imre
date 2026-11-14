@@ -593,6 +593,7 @@ impl Context {
             return true;
         }
         match (owner, self.heap.get(self.scalar_value(object))) {
+            ("_contextvars.Context", Value::Context(_)) => true,
             #[cfg(target_os = "linux")]
             ("mmap.mmap", Value::Mmap { .. }) => true,
             ("type", _) => self.is_type_object(object),
@@ -3458,6 +3459,7 @@ impl Context {
                 "__reduce_ex__",
             ],
             "dict" => builtins::DICT_METHODS,
+            "_contextvars.Context" => builtins::CONTEXT_METHODS,
             "module" => {
                 self.install_module_namespace(value);
                 &[]

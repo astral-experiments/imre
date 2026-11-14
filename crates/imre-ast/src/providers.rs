@@ -245,7 +245,6 @@ provider_groups! {
             | "_collections_abc"
             | "enum"
             | "typing"
-            | "contextvars"
             | "_contextvars"
             | "socket"
     ),

@@ -122,6 +122,9 @@ impl BuiltinDescriptor {
             });
         }
         let slots = match symbol.rsplit_once('.') {
+            Some(("_contextvars.Context", attr)) => {
+                Some(("_contextvars.Context", attr, builtins::CONTEXT_METHODS))
+            }
             Some((weakref::CALLABLE_PROXY_TYPE, attr)) => Some((
                 weakref::CALLABLE_PROXY_TYPE,
                 attr,
