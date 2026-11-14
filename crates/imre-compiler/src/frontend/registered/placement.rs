@@ -32,7 +32,8 @@ mod tests {
         assert_eq!(suite.placed_from + 1, suite.checked.function.body.len());
         let site = suite.checked.fixed_sites[2];
         assert_eq!(&text[site], "render(17, input())");
-        let Some(FixedAttribute::Call(Some(target), _)) = suite.checked.fixed_attribute(site) else {
+        let Some(FixedAttribute::Call(Some(target), _)) = suite.checked.fixed_attribute(site)
+        else {
             panic!("expected the checked render call");
         };
         let ExprKind::Local(slot) = target.without_location().kind else {

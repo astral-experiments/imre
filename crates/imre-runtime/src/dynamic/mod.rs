@@ -488,8 +488,7 @@ impl value::CodeDefinition {
         }
         let parameters = decode()?;
         Ok(Arc::clone(
-            self.parsed_parameters
-                .get_or_init(|| Arc::new(parameters)),
+            self.parsed_parameters.get_or_init(|| Arc::new(parameters)),
         ))
     }
 }
@@ -2466,15 +2465,14 @@ impl Context {
     fn comprehension_scope_with_locals(&mut self, parent: Id, locals: value::DeclaredLocals) -> Id {
         let enclosing = self.scope_data(parent);
         let module = enclosing.module.clone();
-        let (parent, kind) =
-            if enclosing.in_class_body || enclosing.class_namespace.is_some() {
-                (
-                    enclosing.parent.expect("class has an enclosing scope"),
-                    ComprehensionKind::ClassBody,
-                )
-            } else {
-                (parent, ComprehensionKind::Ordinary)
-            };
+        let (parent, kind) = if enclosing.in_class_body || enclosing.class_namespace.is_some() {
+            (
+                enclosing.parent.expect("class has an enclosing scope"),
+                ComprehensionKind::ClassBody,
+            )
+        } else {
+            (parent, ComprehensionKind::Ordinary)
+        };
         let scope = self.scope(&module, Some(parent));
         let Value::Scope(frame) = self.heap.get_mut(scope) else {
             unreachable!()

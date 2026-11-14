@@ -19,9 +19,10 @@ fn site_path_files(directory: &Path) -> impl Iterator<Item = PathBuf> {
         .flatten()
         .filter_map(Result::ok)
         .filter(|entry| {
-            entry.file_name().to_str().is_some_and(|name| {
-                !name.starts_with('.') && name.ends_with(".pth")
-            })
+            entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| !name.starts_with('.') && name.ends_with(".pth"))
         })
         .map(|entry| entry.path())
 }
@@ -40,7 +41,8 @@ fn venv_path_inputs(directory: PathBuf) -> Option<(PathBuf, Vec<PathBuf>)> {
         };
         let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
         for line in text.split(|c: char| imre_ast::strings::is_line_boundary(u32::from(c))) {
-            if line.starts_with('#') || line.starts_with("import ") || line.starts_with("import\t") {
+            if line.starts_with('#') || line.starts_with("import ") || line.starts_with("import\t")
+            {
                 continue;
             }
             let path = line.trim_end_matches(imre_ast::strings::python_whitespace);

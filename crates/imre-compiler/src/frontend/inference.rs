@@ -874,7 +874,7 @@ impl Inference {
                 .borrow()
                 .iter()
                 .all(|p| !p.inferred_params.contains(&true)))
-            .then_some(0);
+        .then_some(0);
         let mut before = self.revision.get();
         let fixed_dependencies = loop {
             let widened = self.widened.replace(false);
@@ -1058,9 +1058,12 @@ impl Inference {
                                 .params
                                 .iter()
                                 .all(|p| p.ty.builtin_scalar_name().is_some())
-                            && graph
-                                .session
-                                .function_uses_fixed_names(*module, function, false, |_| false));
+                            && graph.session.function_uses_fixed_names(
+                                *module,
+                                function,
+                                false,
+                                |_| false,
+                            ));
                 checker.placement_only = !keep_return;
                 let method_storage = keep_return.then(|| (helpers.len(), globals.types().len()));
                 let mut return_body = keep_return.then(|| {
@@ -1323,7 +1326,9 @@ impl Inference {
                         && !signature.registered_frame()
                         && self.pending.borrow()[signature.id]
                             .returns
-                            .is_some_and(|ty| ty == Type::None || ty.builtin_scalar_name().is_some())
+                            .is_some_and(|ty| {
+                                ty == Type::None || ty.builtin_scalar_name().is_some()
+                            })
                         && checker.calls.is_empty()
                         && checker.class_reads.borrow().is_empty()
                         && graph.session.function_uses_fixed_names(

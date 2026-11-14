@@ -691,8 +691,12 @@ impl Loader<'_> {
             self.needs_object_imports = true;
             return Ok(targets);
         }
-        let mut source = String::from("from doctest import DocTest, OutputChecker, SKIP, _optionflags\nfrom unittest import SkipTest\n");
-        let mut body = String::from("\ndef _execute(test: DocTest, debug: bool, optionflags: int = 0, checker: OutputChecker | None = None) -> None:\n    if checker is None:\n        checker = OutputChecker()\n    if not test.examples:\n        attempted = 0\n");
+        let mut source = String::from(
+            "from doctest import DocTest, OutputChecker, SKIP, _optionflags\nfrom unittest import SkipTest\n",
+        );
+        let mut body = String::from(
+            "\ndef _execute(test: DocTest, debug: bool, optionflags: int = 0, checker: OutputChecker | None = None) -> None:\n    if checker is None:\n        checker = OutputChecker()\n    if not test.examples:\n        attempted = 0\n",
+        );
         for (i, (name, (prompts, context))) in cases.into_iter().enumerate() {
             let module = format!("{CASE_PREFIX}{i}");
             let program = case_program(&name, &prompts, context, &self.modules)?;

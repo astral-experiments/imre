@@ -161,7 +161,10 @@ impl ProviderBody {
     }
 
     pub(crate) fn llvm_ir(&self, symbol: &str, seal: &str) -> String {
-        let alias = format!("@{symbol} = alias i64 (ptr, i64), ptr {}\n{seal}", self.entry);
+        let alias = format!(
+            "@{symbol} = alias i64 (ptr, i64), ptr {}\n{seal}",
+            self.entry
+        );
         self.parts(&alias).concat()
     }
 }

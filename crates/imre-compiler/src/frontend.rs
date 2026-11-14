@@ -734,8 +734,7 @@ fn lower_current(
 
 /// The file driver checks this graph again before it can place a registered body.
 fn retries_failed_layout(graph: &SourceGraph) -> bool {
-    graph.layout_hint.get() == crate::modules::LayoutHint::Applied
-        && !graph.reachable_only()
+    graph.layout_hint.get() == crate::modules::LayoutHint::Applied && !graph.reachable_only()
 }
 
 /// A body without its native representation still has checked neighbors. Keep its
@@ -10929,8 +10928,7 @@ impl<'a> Checker<'a> {
                 if self.types.payload(receiver.ty).unwrap_or(receiver.ty) == Type::PythonObject {
                     return Ok(registered::values::loaded_attribute(attribute, receiver));
                 }
-                if receiver.ty == Type::Float
-                    && matches!(attribute.attr.as_str(), "real" | "imag")
+                if receiver.ty == Type::Float && matches!(attribute.attr.as_str(), "real" | "imag")
                 {
                     if attribute.attr.as_str() == "real" {
                         return Ok(receiver);

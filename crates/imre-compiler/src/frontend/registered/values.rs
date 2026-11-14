@@ -1563,9 +1563,10 @@ impl Checker<'_> {
         if let Some(sites) = &mut self.settled_attributes
             && let Some(call) = node.as_call_expr()
             && self.namespace.is_none()
-            && let Some(name) = call.func.as_name_expr().or_else(|| {
-                call.func.as_attribute_expr()?.value.as_name_expr()
-            })
+            && let Some(name) = call
+                .func
+                .as_name_expr()
+                .or_else(|| call.func.as_attribute_expr()?.value.as_name_expr())
             && !self.names.contains_key(name.id.as_str())
             && let Some(FixedAttribute::Call(Some(target), mut site)) = sites.remove(&call.range())
             && site.target == callable_target(call)

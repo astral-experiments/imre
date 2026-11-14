@@ -116,11 +116,7 @@ fn receiver_args<'a>(
     Ok((handle.clone(), args))
 }
 
-fn join_ticket(
-    ctx: &mut Context,
-    args: &[Id],
-    kwargs: &[(String, Id)],
-) -> Result<Join> {
+fn join_ticket(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Join> {
     let (handle, args) = receiver_args(ctx, "join", args, kwargs)?;
     let timeout = match args {
         [] | [NONE] => None,

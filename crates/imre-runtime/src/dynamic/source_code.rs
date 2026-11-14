@@ -3106,7 +3106,9 @@ impl Context {
         for name in self.frame_binding_names(scope, code, false)? {
             match self.lookup(scope, &name) {
                 Ok(value) => {
-                    let key = self.heap.code_name(super::code_locals::visible_slot_name(&name));
+                    let key = self
+                        .heap
+                        .code_name(super::code_locals::visible_slot_name(&name));
                     bindings.push((key, value));
                 }
                 Err(error) if self.is_builtin_error(&error, "NameError") => {}

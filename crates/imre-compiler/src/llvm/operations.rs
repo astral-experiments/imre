@@ -832,7 +832,9 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             op,
             Binary::FloorDivide | Binary::Modulo | Binary::RightShift
         ) && checked_ints
-            || op == Binary::FloorDivide && usage.needs_integer() && !matches!(site, OperationSite::Unlocated)
+            || op == Binary::FloorDivide
+                && usage.needs_integer()
+                && !matches!(site, OperationSite::Unlocated)
             || positioned
                 && (matches!(site, OperationSite::Placed(..))
                     || expr.ty == Type::PythonObject
@@ -1109,7 +1111,8 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 }
             },
             ExprKind::Compare(values, ops) => {
-                let truth = matches!(self.0, Entry::Native(_)) || usage == ValueUse::ComparisonTruth;
+                let truth =
+                    matches!(self.0, Entry::Native(_)) || usage == ValueUse::ComparisonTruth;
                 self.comparisons(values, ops, truth)
             }
             ExprKind::Conditional(test, yes, no) => self.conditional_value(test, yes, no),

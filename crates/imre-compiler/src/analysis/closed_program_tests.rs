@@ -99,7 +99,10 @@ fn dormant_import_preserves_the_next_call_diagnostic() {
     )
     .unwrap();
     let error = crate::check_file(&entry, None).unwrap_err();
-    assert!(error.contains("main.py:3:7: Imre: keyword arguments"), "{error}");
+    assert!(
+        error.contains("main.py:3:7: Imre: keyword arguments"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -123,9 +126,16 @@ print(Mock(return_value=read(Box.State.OPEN))())
 "#;
     fs::write(&entry, client).unwrap();
     crate::check_file(&entry, None).unwrap();
-    fs::write(&entry, client.replace("        case Box.State.CLOSED: return 2\n", "")).unwrap();
+    fs::write(
+        &entry,
+        client.replace("        case Box.State.CLOSED: return 2\n", ""),
+    )
+    .unwrap();
     let error = crate::check_file(&entry, None).unwrap_err();
-    assert!(error.contains("implicitly return") && error.contains("main.py:9:"), "{error}");
+    assert!(
+        error.contains("implicitly return") && error.contains("main.py:9:"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -382,7 +392,8 @@ fn registered_sdk_interface_belongs_to_its_original_source() {
         (
             "main".into(),
             root.join("main.py"),
-            "from http import HTTPStatus\ndef code() -> int:\n    return HTTPStatus.CREATED\n".into(),
+            "from http import HTTPStatus\ndef code() -> int:\n    return HTTPStatus.CREATED\n"
+                .into(),
         ),
     ];
     let check = |sources: &[_]| {
@@ -403,7 +414,10 @@ fn registered_sdk_interface_belongs_to_its_original_source() {
     check(&sources).unwrap();
     sources[0].2 = "class HTTPStatus:\n    CREATED = (201, 'Created', 'example')\n".into();
     let error = check(&sources).unwrap_err();
-    assert!(error.contains("invalid-return-type") && error.contains("main.py:3"), "{error}");
+    assert!(
+        error.contains("invalid-return-type") && error.contains("main.py:3"),
+        "{error}"
+    );
 }
 
 #[test]

@@ -175,7 +175,11 @@ impl Checker<'_> {
         site: &impl Ranged,
     ) -> Result<Expr, String> {
         let python_frame = !run && self.registered_local_start.is_some();
-        let operand = if python_frame { value.checked_operand_type() } else { value.ty };
+        let operand = if python_frame {
+            value.checked_operand_type()
+        } else {
+            value.ty
+        };
         let result = if python_frame && operand == Type::PythonObject {
             Type::PythonObject
         } else {
@@ -188,7 +192,11 @@ impl Checker<'_> {
             })?
         };
         if python_frame {
-            return Ok(registered::suspend(ir::SuspendValue::Await, site.range(), value));
+            return Ok(registered::suspend(
+                ir::SuspendValue::Await,
+                site.range(),
+                value,
+            ));
         }
         Ok(operation(
             if run { Op::RunLoop } else { Op::Await },

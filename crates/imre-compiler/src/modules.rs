@@ -3419,7 +3419,10 @@ impl SourceGraph {
     /// parameter convention must still be valid with live Python arguments.
     pub(crate) fn take_registered_functions(
         &self,
-    ) -> (HashMap<ModuleId, crate::dynamic::CheckedFunctions>, CheckedInitializers) {
+    ) -> (
+        HashMap<ModuleId, crate::dynamic::CheckedFunctions>,
+        CheckedInitializers,
+    ) {
         let RegisteredFunctions {
             mut admitted,
             lexical,
@@ -5822,7 +5825,10 @@ impl<'a> Loader<'a> {
         target: ModuleId,
     ) {
         if self.modules[target].registered_namespace {
-            self.modules[importer].registered_imports.entry(index).or_insert(site);
+            self.modules[importer]
+                .registered_imports
+                .entry(index)
+                .or_insert(site);
         }
     }
 
@@ -6065,7 +6071,8 @@ impl<'a> Loader<'a> {
                             }
                         }
                         if matches!(binding, Binding::RegisteredValue(_))
-                            || checked_stdlib_owner(module, alias.name.as_str()) == Some("dataclasses")
+                            || checked_stdlib_owner(module, alias.name.as_str())
+                                == Some("dataclasses")
                         {
                             self.modules[id]
                                 .registered_imports

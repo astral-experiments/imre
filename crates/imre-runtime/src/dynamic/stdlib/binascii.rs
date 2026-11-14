@@ -166,7 +166,7 @@ fn a2b_uu(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id>
             Ok(crate::objects::decode_uu(&bytes)?)
         };
         ctx.with_read_buffer(data, |ctx, buffer| Ok(decode(ctx, buffer)))
-        .map_err(|_| ascii_buffer_error(ctx, data))??
+            .map_err(|_| ascii_buffer_error(ctx, data))??
     };
     Ok(ctx.alloc(Value::Bytes(bytes)))
 }

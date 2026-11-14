@@ -98,7 +98,11 @@ impl<C, E> Fields<C, E> {
             }
         };
         if self.result == Type::PythonObject {
-            return Ok(registered::values::located(field.range(), field.start(), value));
+            return Ok(registered::values::located(
+                field.range(),
+                field.start(),
+                value,
+            ));
         }
         Ok(value)
     }

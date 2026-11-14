@@ -3440,7 +3440,10 @@ impl Context {
         {
             return self.heap.string_literal(member);
         }
-        if matches!(name, "__call__" | "__get__" | "__reduce__" | "__reduce_ex__") {
+        if matches!(
+            name,
+            "__call__" | "__get__" | "__reduce__" | "__reduce_ex__"
+        ) {
             let class = match self.heap.get(obj) {
                 Value::Native(kind)
                     if matches!(

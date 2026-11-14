@@ -122,7 +122,9 @@ impl Emitter<'_, '_> {
                 ));
                 self.jump(&end);
                 self.start(&end);
-                self.instruction(format!("phi i64 [ 0, %{absent} ], [ {integer}, %{convert} ]"))
+                self.instruction(format!(
+                    "phi i64 [ 0, %{absent} ], [ {integer}, %{convert} ]"
+                ))
             } else if matches!(returns, Type::Enum(_) | Type::IntEnum(_)) {
                 self.instruction(format!("lshr i64 {}, 3", value.operand))
             } else {

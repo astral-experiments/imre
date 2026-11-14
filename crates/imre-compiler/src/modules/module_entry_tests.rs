@@ -331,10 +331,9 @@ fn imported_type_variable_uses_its_shipped_assignment() {
     use super::Binding;
     use ruff_text_size::Ranged;
 
-    let graph = SourceGraph::single(
-        "from typing import AnyStr as text\nimport typing\ntyping.AnyStr\n",
-    )
-    .unwrap();
+    let graph =
+        SourceGraph::single("from typing import AnyStr as text\nimport typing\ntyping.AnyStr\n")
+            .unwrap();
     let module = &graph.modules[graph.entry];
     let (file, parsed, _) = graph
         .session
@@ -396,10 +395,15 @@ fn checked_function_preserves_a_user_file_at_the_sdk_path() {
     let (source, site) = session
         .checked_shipped_function("inspect", "cleandoc", &private_path)
         .unwrap();
-    session.add_shipped_declaration(site, &private_path, source).unwrap();
+    session
+        .add_shipped_declaration(site, &private_path, source)
+        .unwrap();
     let copy = session.copy_for_diagnostics(None, None).unwrap();
     assert_eq!(session.selected_file(&sdk_path).unwrap().2.as_str(), user);
-    assert_eq!(copy.selected_file(&private_path).unwrap().2.as_str(), source);
+    assert_eq!(
+        copy.selected_file(&private_path).unwrap().2.as_str(),
+        source
+    );
 }
 
 #[test]

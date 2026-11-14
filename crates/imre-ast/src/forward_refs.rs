@@ -156,7 +156,10 @@ mod tests {
     #[test]
     fn assignment_expressions_use_their_comprehension_scope() {
         for (source, valid) in [
-            ("((callee := capture), tuple(callee(i) for i in items))", true),
+            (
+                "((callee := capture), tuple(callee(i) for i in items))",
+                true,
+            ),
             ("((lambda: (i := 1))() for i in items)", true),
             ("((i := 1) for i in items)", false),
             ("(i for i in (items := values))", false),

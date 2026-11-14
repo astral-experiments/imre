@@ -1126,7 +1126,10 @@ pub(crate) fn compile(
                 0,
                 ScannedModule {
                     parsed,
-                    lowered: LoweredRoot::Complete(body, std::mem::take(&mut imports.private_names)),
+                    lowered: LoweredRoot::Complete(
+                        body,
+                        std::mem::take(&mut imports.private_names),
+                    ),
                 },
             );
         }
@@ -2188,9 +2191,9 @@ pub(crate) fn compile(
                         .and_then(|(graph, id)| CheckedFile::select(graph, id));
                     let mut declaration = None;
                     let imports = if let Some(file) = parsed {
-                        retained_imports(file.parsed(modules), None, None).map(|(imports, input)| {
-                            (imports, input.and_then(ScannedModule::from_input))
-                        })
+                        retained_imports(file.parsed(modules), None, None).map(
+                            |(imports, input)| (imports, input.and_then(ScannedModule::from_input)),
+                        )
                     } else if winner && alternative.is_none() && !file_alternate {
                         if checked.is_none() && kind == SourceKind::DiskFile {
                             declaration = checked_graph
@@ -2494,7 +2497,9 @@ pub(crate) fn compile(
     let mut declared_open_paths = HashSet::new();
     let main_unit = match module_entry {
         None => Some(0),
-        Some(_) => module_body.filter(|(_, _, package)| !package).map(|(id, _, _)| id),
+        Some(_) => module_body
+            .filter(|(_, _, package)| !package)
+            .map(|(id, _, _)| id),
     };
     let selected_sources: Vec<_> = selected_sources
         .into_iter()
@@ -3157,7 +3162,9 @@ fn a_shipped_getter_keeps_its_body_and_executable_source_offsets() {
 #[test]
 fn shipped_private_parameter_requires_fresh_lowering() {
     let names = |source| {
-        scan_imports(source, SourceKind::File, None, None, true).unwrap().1
+        scan_imports(source, SourceKind::File, None, None, true)
+            .unwrap()
+            .1
     };
     assert!(names("class C:\n    def f(self, arg): pass\n").is_some());
     assert!(names("class C:\n    def f(self, __arg): pass\n").is_none());

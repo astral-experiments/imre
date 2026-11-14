@@ -67,7 +67,11 @@ fn prepare_pattern(
     }
     impl Builder<'_> {
         fn capture(&mut self, name: &ast::Identifier) -> usize {
-            if let Some(index) = self.captures.iter().position(|other| other == name.as_str()) {
+            if let Some(index) = self
+                .captures
+                .iter()
+                .position(|other| other == name.as_str())
+            {
                 return index;
             }
             let index = self.captures.len();
