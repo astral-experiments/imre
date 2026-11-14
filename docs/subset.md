@@ -1269,8 +1269,14 @@ integers, strings and booleans.
 An unquoted `Sequence[T]` parameter from `collections.abc` or `typing` accepts
 an exact `list[T]` or an omitted `()` default. Its body may iterate the
 parameter, apply `map(str, parameter)`, or call `len`. Parameters without a
-tuple default also support read-only indexing and slicing.
-It shares the caller’s list, so mutations through existing aliases remain visible.
+tuple default also support read-only indexing and slicing. A list keeps its
+identity, so mutations through existing aliases remain visible.
+
+A module-level function with a required `Sequence[T]` parameter can also accept
+an exact tuple of `T` when it uses the parameter only for iteration, integer
+indexing, or calls to the original built-in `len`. List and tuple callers share
+one compiled body. For example, `def first(xs: Sequence[int]) -> int: return xs[0]`
+accepts both `first([1, 2])` and `first((1, 2))`.
 A function returning `Sequence[T]` can return an exact `list[T]`.
 
 `dict[K, V]` accepts exact `int`, `str`, `bytes`, `Path`, or immutable fixed-tuple keys and one concrete value type. Tuple keys may recursively contain `int`, `bool`, `str`, `bytes`, `Path`, `None`, and nullable forms of those immutable fields. Floats, records, mutable containers, and the `str | bytes` union are excluded from keys. Keys use value equality under one exact type; booleans cannot stand in for integer keys, and a bare `bool` is not a key type. Nonempty literals infer these types from their first entry; `{}` and `dict()` require a concrete contextual type. Duplicate keys keep the first insertion position and the last value. Replacing a value keeps its position, while deletion and reinsertion move the key to the end. `mapping[key]`, assignment, `del mapping[key]`, integer augmented assignment, `len`, and single `in`/`not in` comparisons are supported. Missing required reads and deletes report `KeyError`.
