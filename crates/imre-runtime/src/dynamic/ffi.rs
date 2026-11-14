@@ -1704,20 +1704,6 @@ pub(super) unsafe extern "C" fn imre_dyn_list_cursor_pull(
     }
 }
 
-fn plain_items_cursor(ctx: &Context, iter: Id) -> Option<(Id, DictIterator)> {
-    let Value::LoopIterator {
-        source,
-        peeked: None,
-    } = *ctx.heap.get(iter)
-    else {
-        return None;
-    };
-    let Value::DictIterator(cursor) = *ctx.heap.get(source) else {
-        return None;
-    };
-    cursor.is_plain_items().then_some((source, cursor))
-}
-
 /// Return 2 for two projected handles, 1 for an owned row and 0 for exhaustion or error.
 /// The caller unpacks an ordinary row at the target's source position.
 ///
@@ -1749,7 +1735,17 @@ pub(super) unsafe extern "C" fn imre_dyn_pull_pair(
 }
 
 fn pull_pair(ctx: &mut Context, iter: Id, items: &mut [Id; 2]) -> Result<i32> {
-    if let Some((source, cursor)) = plain_items_cursor(ctx, iter) {
+    // A buffered row belongs to the wrapper. Otherwise advance its source directly.
+    let source = match *ctx.heap.get(iter) {
+        Value::LoopIterator {
+            source,
+            peeked: None,
+        } => source,
+        _ => iter,
+    };
+    if let Value::DictIterator(cursor) = *ctx.heap.get(source)
+        && cursor.is_plain_items()
+    {
         let Some(pair) = cursor.next_entry_pair(ctx, source)? else {
             return Ok(0);
         };
@@ -1759,10 +1755,7 @@ fn pull_pair(ctx: &mut Context, iter: Id, items: &mut [Id; 2]) -> Result<i32> {
         }
         *items = pair;
         Ok(2)
-    } else if ctx.iterator_has_item(iter)? {
-        let row = ctx
-            .next_item(iter)?
-            .ok_or_else(|| Error::new("StopIteration", ""))?;
+    } else if let Some(row) = ctx.next_item(source)? {
         ctx.heap.reserve_temporaries(1)?;
         ctx.heap.keep(row);
         items[0] = row;
