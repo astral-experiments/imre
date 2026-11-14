@@ -262,10 +262,6 @@ impl CallableMetadata {
         self.flags & (code_flags::GENERATOR | code_flags::COROUTINE | code_flags::ASYNC_GENERATOR)
     }
 
-    pub(super) fn reads_complete(&self) -> bool {
-        self.layout["scope_complete"] == true
-    }
-
     pub(super) fn reads(&self) -> impl Iterator<Item = &str> {
         self.layout["scope_reads"]
             .as_array()
@@ -357,10 +353,10 @@ mod tests {
             "    def read[T, V: T = T](self, value: T = default) -> lambda: T:\n",
             "        local: ignored\n",
             "        return T, outside\n",
-            "    def indirect(self):\n",
+            "    def indirect(self, captured, U):\n",
             "        @decorate(D)\n",
             "        class Child[U, D](base[U]):\n",
-            "            value = U, through_class\n",
+            "            value = U, through_class, captured\n",
             "        return Child\n",
         ))
         .unwrap()
@@ -368,6 +364,13 @@ mod tests {
         .body;
         let names = imre_ast::lower(&mut body);
         let (facts, _) = ScopeFacts::prepare(&body, &names, |_, _| {}, |_| {});
+        let class = body[0].as_class_def_stmt().unwrap();
+        let indirect = facts.function(class.body[1].as_function_def_stmt().unwrap());
+        assert_eq!(indirect.metadata.layout["scope_complete"], true);
+        assert_eq!(
+            indirect.metadata.layout["scope_cellvars"],
+            serde_json::json!(["captured"])
+        );
         let reads = &facts.classes[&body[0].start()].namespace.names.reads;
         assert_eq!(
             reads.iter().map(String::as_str).collect::<Vec<_>>(),
