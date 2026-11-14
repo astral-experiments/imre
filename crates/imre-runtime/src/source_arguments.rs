@@ -40,10 +40,12 @@ impl<N: AsRef<str>> Shape<'_, N> {
     ) -> Result<Binding, Error> {
         let npos = self.positional.len();
         let count = npos + self.keyword_only.len();
+        // Positional arguments have already filled a contiguous prefix of the formals.
+        let filled = positional.min(npos);
+        let remaining = count - filled;
         let mut supplied = SmallVec::<[bool; 8]>::new();
-        supplied.try_reserve(count).map_err(|_| Error::Memory)?;
-        supplied.resize(count, false);
-        supplied[..positional.min(npos)].fill(true);
+        supplied.try_reserve(remaining).map_err(|_| Error::Memory)?;
+        supplied.resize(remaining, false);
         let mut targets = SmallVec::new();
         targets
             .try_reserve(keywords.len())
@@ -51,7 +53,7 @@ impl<N: AsRef<str>> Shape<'_, N> {
         while let Some(key) = keywords.next() {
             let slot = (self.positional_only..count).find(|&i| self.parameter(i) == key);
             if let Some(slot) = slot {
-                if std::mem::replace(&mut supplied[slot], true) {
+                if slot < filled || std::mem::replace(&mut supplied[slot - filled], true) {
                     return Err(Error::Type(format!(
                         "{name}() got multiple values for argument '{key}'"
                     )));
@@ -80,7 +82,7 @@ impl<N: AsRef<str>> Shape<'_, N> {
             targets.push(slot);
         }
         if positional > npos && !self.varargs {
-            let named = supplied[npos..].iter().filter(|v| **v).count();
+            let named = supplied.iter().filter(|v| **v).count();
             return Err(Error::Type(excess_positional_message(
                 name,
                 npos,
@@ -91,8 +93,8 @@ impl<N: AsRef<str>> Shape<'_, N> {
         }
         let mut defaults = SmallVec::new();
         let mut missing = SmallVec::<[&str; 4]>::new();
-        for (kind, slots) in [("positional", 0..npos), ("keyword-only", npos..count)] {
-            for slot in slots.filter(|&slot| !supplied[slot]) {
+        for (kind, slots) in [("positional", filled..npos), ("keyword-only", npos..count)] {
+            for slot in slots.filter(|&slot| !supplied[slot - filled]) {
                 let formal = self.parameter(slot);
                 let has_default = if slot < npos {
                     slot >= npos.saturating_sub(positional_defaults)
