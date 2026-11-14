@@ -153,7 +153,14 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         "binascii"
             if matches!(
                 function,
-                "a2b_qp" | "b2a_qp" | "crc32" | "crc_hqx" | "b2a_hex" | "hexlify"
+                "a2b_uu"
+                    | "b2a_uu"
+                    | "a2b_qp"
+                    | "b2a_qp"
+                    | "crc32"
+                    | "crc_hqx"
+                    | "b2a_hex"
+                    | "hexlify"
             ) =>
         {
             Some((module, function))
@@ -3806,6 +3813,18 @@ impl Context {
                             "space at end of lines is.  When istext is not set, \\r and \\n (CR/LF)\n",
                             "are both encoded.  When quotetabs is set, space and tabs are encoded."
                         )));
+                    }
+                    "__text_signature__" if symbol == "binascii.a2b_uu" => {
+                        return Ok(self.text("($module, data, /)"));
+                    }
+                    "__text_signature__" if symbol == "binascii.b2a_uu" => {
+                        return Ok(self.text("($module, data, /, *, backtick=False)"));
+                    }
+                    "__doc__" if symbol == "binascii.a2b_uu" => {
+                        return Ok(self.text("Decode a line of uuencoded data."));
+                    }
+                    "__doc__" if symbol == "binascii.b2a_uu" => {
+                        return Ok(self.text("Uuencode line of data."));
                     }
                     "__text_signature__" if symbol == "binascii.a2b_qp" => {
                         return Ok(self.text("($module, /, data, header=False)"));
