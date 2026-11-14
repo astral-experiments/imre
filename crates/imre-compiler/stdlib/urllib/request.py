@@ -2,6 +2,7 @@
 # Lib/urllib/request.py. See ../docstrings/LICENSE.
 import base64
 import bisect
+import email
 import hashlib
 import http.client
 import io
@@ -1308,9 +1309,7 @@ class FTPHandler(BaseHandler):
                 headers += "Content-type: %s\n" % mtype
             if retrlen is not None and retrlen >= 0:
                 headers += "Content-length: %d\n" % retrlen
-            # Use the same MIME field parser as HTTP responses.
-            message = Message()
-            http.client.HTTPMessage._parse(message, io.StringIO(headers, newline="").readlines())
+            message = email.message_from_string(headers)
             return addinfourl(fp, message, req.full_url)
         except Exception as exp:
             if fw is not None and not fw.keepalive:
