@@ -42,6 +42,31 @@ mod tests {
     }
 
     #[test]
+    fn module_prefix_keeps_the_checked_tails_named_operands() {
+        let text = "def width(text: str) -> int: return len(text)\nsaved = 'é'\nprint(len(saved), width('name'))\n";
+        let project = tempfile::tempdir().unwrap();
+        let path = project.path().join("app.py");
+        std::fs::write(&path, text).unwrap();
+        let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
+        graph.registered_startup = true;
+        crate::checked_lower(&mut graph).unwrap();
+        let module = &graph.modules[graph.entry];
+        let (_, mut initializers) = graph.take_registered_functions();
+        let entry = initializers.remove(&graph.entry).unwrap();
+        let Statement::Assign(saved, _) = entry.function.body[0] else {
+            panic!("expected the checked store to saved");
+        };
+        let original = entry.function.body.as_ptr();
+        let operations = HashMap::new();
+        let mut prepare =
+            SuitePreparation::new(&operations, module.registered_values().context(text), true);
+        let suite = prepare.module(&module.parsed.syntax().body, Some((module, entry)));
+        assert_eq!(suite.checked.function.body.as_ptr(), original);
+        assert_eq!(suite.checked.local_names[&saved].name, "saved");
+        assert!(suite.placed_from > 0);
+    }
+
+    #[test]
     fn imported_initializer_keeps_its_checked_tail_after_the_definition() {
         let dir = tempfile::tempdir().unwrap();
         let main = dir.path().join("main.py");

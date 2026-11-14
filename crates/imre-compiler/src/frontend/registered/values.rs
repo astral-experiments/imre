@@ -134,8 +134,7 @@ impl<'a> RegisteredSource<'a> {
                 let Some(target) = receiver(target, method.is_some(), method)? else {
                     return Ok(None);
                 };
-                let arguments = call_arguments(call, child)?;
-                Ok(Some(bound_call(call, selection, target, arguments)))
+                Ok(Some(selection.prepare(call, target, child)?))
             }
             ast::Expr::Attribute(field) => Ok(receiver(&field.value, true, None)?.map(|value| {
                 let op = attribute.map_or_else(
@@ -282,15 +281,15 @@ pub(in crate::frontend) fn name_binding(id: impl Into<ast::name::Name>) -> Expr 
 
 /// Fixed calls use bounded entry-block scratch. Expanded or larger calls retain
 /// their positional and keyword layout for incremental packing.
-fn fixed_arguments(call: &ast::ExprCall) -> bool {
-    call.arguments.len() <= 64 && !calls::has_unpacking(call)
+fn fixed_arguments(args: &ast::Arguments, expanded: bool) -> bool {
+    args.len() <= 64 && !expanded
 }
 
-fn registered_argument_layout(call: &ast::ExprCall) -> ir::RegisteredArguments {
-    if fixed_arguments(call) {
-        fixed_argument_layout(&call.arguments)
+fn argument_layout(args: &ast::Arguments, expanded: bool) -> ir::RegisteredArguments {
+    if fixed_arguments(args, expanded) {
+        fixed_argument_layout(args)
     } else {
-        ir::RegisteredArguments::Packed(packed_arguments(&call.arguments))
+        ir::RegisteredArguments::Packed(packed_arguments(args))
     }
 }
 
@@ -459,7 +458,8 @@ pub(crate) fn exec_literal_text<'a>(
 }
 
 pub(in crate::frontend) fn fixed_positional_arguments(call: &ast::ExprCall) -> bool {
-    call.arguments.keywords.is_empty() && fixed_arguments(call)
+    call.arguments.keywords.is_empty()
+        && fixed_arguments(&call.arguments, calls::has_unpacking(call))
 }
 
 pub(in crate::frontend) fn call_arguments<E>(
@@ -469,6 +469,21 @@ pub(in crate::frontend) fn call_arguments<E>(
     imre_ast::argument_values(&call.arguments)
         .map(check)
         .collect()
+}
+
+/// Check the written values and select their calling convention in the same visit.
+fn prepared_arguments<E>(
+    call: &ast::ExprCall,
+    mut child: impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
+) -> StdResult<(ir::RegisteredArguments, Vec<Expr>), E> {
+    let mut expanded = false;
+    let values = imre_ast::call_operands(&call.arguments)
+        .map(|(arg, unpack)| {
+            expanded |= unpack;
+            child(arg)
+        })
+        .collect::<StdResult<_, _>>()?;
+    Ok((argument_layout(&call.arguments, expanded), values))
 }
 
 /// Keep the evaluated callable and its argument layout together on the invocation.
@@ -483,6 +498,17 @@ pub(in crate::frontend) fn bound_call(
 }
 
 impl ir::RegisteredCallTarget {
+    fn prepare<E>(
+        self,
+        call: &ast::ExprCall,
+        target: Expr,
+        child: impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
+    ) -> StdResult<Expr, E> {
+        let (layout, arguments) = prepared_arguments(call, child)?;
+        let (site, target) = self.bind(call, target, Some(layout));
+        Ok(invoke_value(site, target, arguments))
+    }
+
     /// Bind the evaluated operand to its source call, reusing a layout established by the checker.
     pub(in crate::frontend) fn bind(
         self,
@@ -492,7 +518,7 @@ impl ir::RegisteredCallTarget {
     ) -> (Box<ir::RegisteredCall>, Box<Expr>) {
         let arguments = layout.unwrap_or_else(|| match self {
             Self::Method { .. } => fixed_argument_layout(&call.arguments),
-            Self::Callable { .. } => registered_argument_layout(call),
+            Self::Callable { .. } => argument_layout(&call.arguments, calls::has_unpacking(call)),
         });
         (
             ir::RegisteredCall::new(call.range(), self, arguments),
@@ -602,12 +628,15 @@ impl Checker<'_> {
         call: &ast::ExprCall,
         target: Expr,
     ) -> Result<Expr, String> {
-        let arguments = call_arguments(call, |arg| self.expr(arg))?;
-        Ok(self.call_with_values(call, target, arguments))
+        let value = callable_target(call).prepare(call, target, |arg| self.expr(arg))?;
+        Ok(self.scoped_call(value))
     }
 
     fn call_with_values(&self, call: &ast::ExprCall, target: Expr, arguments: Vec<Expr>) -> Expr {
-        let mut value = bound_call(call, callable_target(call), target, arguments);
+        self.scoped_call(bound_call(call, callable_target(call), target, arguments))
+    }
+
+    fn scoped_call(&self, mut value: Expr) -> Expr {
         if let Some(slot) = self.namespace {
             in_namespace(&mut value, self.local(slot));
         }
@@ -626,11 +655,7 @@ impl Checker<'_> {
             .operands(self.source, self.graph.python_optimization());
         let (selection, receiver) = source.call_target(call);
         let target = registered_value(receiver, source).map_or_else(|| self.expr(receiver), Ok)?;
-        let mut value = bound_call(call, selection, target, operands);
-        if let Some(slot) = self.namespace {
-            in_namespace(&mut value, self.local(slot));
-        }
-        Ok(value)
+        Ok(self.scoped_call(bound_call(call, selection, target, operands)))
     }
 
     /// Bind the Python method and check its operands in source order. A fixed
@@ -1547,8 +1572,8 @@ impl Checker<'_> {
             && operands.is_original_operand(&call.func)
         {
             // Forwarding can preserve the imported target and replace its arguments.
-            site.arguments = registered_argument_layout(call);
-            let args = call_arguments(call, |arg| self.expr(arg))?;
+            let (layout, args) = prepared_arguments(call, |arg| self.expr(arg))?;
+            site.arguments = layout;
             return Ok(Some(
                 source.located_operation(node, invoke_value(site, target, args)),
             ));
