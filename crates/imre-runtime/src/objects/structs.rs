@@ -616,22 +616,24 @@ pub unsafe extern "C" fn imre_struct_sparse_indexed_count(
                 if at >= n {
                     continue;
                 }
-                if *alternate.get_or_insert(row) != row {
-                    return -1;
-                }
                 let delta = if at >= first {
                     at - first
                 } else {
                     at + n - first
                 };
                 let rank = delta * inverse % n;
-                hits += periods + u64::from(rank < tail);
+                let count = periods + u64::from(rank < tail);
+                if count == 0 {
+                    continue;
+                }
+                if *alternate.get_or_insert(row) != row {
+                    return -1;
+                }
+                hits += count;
             }
-            let Some(alternate) = alternate else {
-                return -1;
-            };
+            let default = base.word as *const usize;
             out.write(BinaryRead {
-                rows: [base.word as *const usize, alternate.as_ptr()],
+                rows: [default, alternate.map_or(default, |row| row.as_ptr())],
                 bits: std::ptr::null(),
                 words: 0,
             });
