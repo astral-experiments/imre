@@ -157,9 +157,9 @@ impl Uses {
     fn child(
         &mut self,
         mut child: Self,
-        bounds: ClosureNames,
         params: Option<&ast::Parameters>,
         class: bool,
+        is_bound: impl Fn(&str) -> bool,
     ) {
         if class {
             self.nested.append(&mut child.nested);
@@ -167,15 +167,13 @@ impl Uses {
             child.direct.append(&mut child.nested);
         }
         for name in child.direct {
-            if !bounds.globals.contains(&name)
-                && !bounds.locals.contains(&name)
+            if !is_bound(&name)
                 && !params
                     .is_some_and(|p| p.iter().any(|arg| arg.as_parameter().name.as_str() == name))
             {
                 self.nested.insert(name);
             }
         }
-        self.nested.extend(bounds.nonlocals);
     }
 
     fn suite(&mut self, body: &[ast::Stmt], params: Option<&ast::Parameters>, class: bool) {
@@ -183,16 +181,16 @@ impl Uses {
         bounds.visit_body(body);
         let mut child = self.child_scope();
         child.visit_body(body);
-        self.child(child, bounds, params, class);
+        self.child(child, params, class, |name| {
+            bounds.globals.contains(name) || bounds.locals.contains(name)
+        });
+        self.nested.extend(bounds.nonlocals);
     }
 
     fn comprehension(&mut self, plan: imre_ast::comprehension::Plan<'_>) {
         self.visit_expr(plan.outer);
         let mut child = self.child_scope();
-        let bounds = ClosureNames {
-            locals: plan.scope_bindings(|expr| child.visit_expr(expr)),
-            ..ClosureNames::default()
-        };
+        let targets: HashSet<String> = plan.scope_bindings(|expr| child.visit_expr(expr));
         // Assignment expressions escape comprehension scopes, but stop at a lambda or function.
         if self.inline_comprehensions {
             if !matches!(plan.output, imre_ast::comprehension::Output::Generator(_)) {
@@ -201,20 +199,20 @@ impl Uses {
                     child
                         .direct
                         .into_iter()
-                        .filter(|name| !bounds.locals.contains(name.as_str())),
+                        .filter(|name| !targets.contains(name.as_str())),
                 );
                 self.nested.extend(
                     child
                         .nested
                         .into_iter()
-                        .filter(|name| !bounds.locals.contains(name.as_str())),
+                        .filter(|name| !targets.contains(name.as_str())),
                 );
                 return;
             }
             self.nested.extend(child.walrus.iter().cloned());
         }
         self.walrus.append(&mut child.walrus);
-        self.child(child, bounds, None, false);
+        self.child(child, None, false, |name| targets.contains(name));
     }
 }
 
@@ -269,11 +267,12 @@ impl<'a> Visitor<'a> for Uses {
                 if let Some(params) = &f.parameters {
                     self.visit_parameters(params);
                 }
-                let mut bounds = ClosureNames::default();
-                bounds.visit_expr(&f.body);
                 let mut child = self.child_scope();
                 child.visit_expr(&f.body);
-                self.child(child, bounds, f.parameters.as_deref(), false);
+                let locals = std::mem::take(&mut child.walrus);
+                self.child(child, f.parameters.as_deref(), false, |name| {
+                    locals.contains(name)
+                });
             }
             expr if let Some(plan) = imre_ast::comprehension::Plan::from_expr(expr) => {
                 self.comprehension(plan);
