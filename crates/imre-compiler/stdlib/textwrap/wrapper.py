@@ -203,14 +203,7 @@ class TextWrapper:
 
         # Arrange in reverse order so items can be efficiently popped
         # from a stack of chucks.
-        left = 0
-        right = len(chunks) - 1
-        while left < right:
-            saved = chunks[left]
-            chunks[left] = chunks[right]
-            chunks[right] = saved
-            left += 1
-            right -= 1
+        chunks.reverse()
 
         while chunks:
 
