@@ -6,9 +6,6 @@ use ruff_python_literal::cformat::{
     CConversionFlags, CFormatContext, CFormatError, CFormatErrorType, CFormatPart,
     CFormatPrecision, CFormatQuantity, CFormatSpec, CFormatString, CFormatType,
 };
-use ruff_python_literal::format::{
-    FieldName, FieldNamePart, FieldType, FormatPart, FormatString, FromTemplate,
-};
 
 use super::super::operators::append_rendered_text;
 use super::super::stdlib::codecs::{decode_named, encode_text_object};
@@ -1028,25 +1025,20 @@ fn format_string(ctx: &mut Context, source: &str, fields: FormatSource<'_>) -> R
         indices: &mut Indices,
         nested: bool,
     ) -> Result<Id> {
-        let parsed =
-            FormatString::from_raw_str(s).map_err(|e| Error::new("ValueError", e.to_string()))?;
-        let single = parsed.format_parts.len() == 1;
+        use crate::format_grammar::{Key, field, first, markup};
+
+        let invalid = |message| Error::new("ValueError", message);
+        let mut pos = 0;
         let mut output = String::new();
         let mut codepoints = Vec::new();
-        for part in parsed.format_parts {
-            let FormatPart::Field {
-                field_name,
-                conversion_spec,
-                format_spec,
-            } = part
-            else {
-                if let FormatPart::Literal(text) = part {
-                    append_rendered_text(&mut output, &text)?;
-                }
+        while let Some(row) = markup(s, &mut pos).map_err(invalid)? {
+            let single = row.literal == (0..0) && pos == s.len();
+            append_rendered_text(&mut output, &s[row.literal])?;
+            let Some(span) = row.field else {
                 continue;
             };
-            let field = FieldName::parse(&field_name)
-                .map_err(|e| Error::new("ValueError", e.to_string()))?;
+            let field_name = &s[span];
+            let (head, mut tail) = first(field_name).map_err(invalid)?;
             let positional = |index| {
                 let FormatSource::Arguments(args, _) = fields else {
                     return Err(Error::new(
@@ -1057,73 +1049,70 @@ fn format_string(ctx: &mut Context, source: &str, fields: FormatSource<'_>) -> R
                 args.get(index).copied().ok_or_else(|| {
                     Error::new(
                         "IndexError",
-                        format!("replacement index {index} out of range"),
+                        format!("Replacement index {index} out of range for positional args tuple"),
                     )
                 })
             };
-            let mixed = || {
-                Error::new(
-                    "ValueError",
-                    "cannot mix automatic and manual field numbering",
-                )
-            };
-            let mut value = match field.field_type {
-                FieldType::Auto => {
+            let mut value = match head {
+                Key::Text(span) if span.is_empty() => {
                     if indices.manual {
-                        return Err(mixed());
+                        return Err(invalid(
+                            "cannot switch from manual field specification to automatic field numbering",
+                        ));
                     }
                     let index = indices.next;
                     indices.next += 1;
                     positional(index)?
                 }
-                FieldType::Index(index) => {
+                Key::Integer(index) => {
                     if indices.next != 0 {
-                        return Err(mixed());
+                        return Err(invalid(
+                            "cannot switch from automatic field numbering to manual field specification",
+                        ));
                     }
                     indices.manual = true;
                     positional(index)?
                 }
-                FieldType::Keyword(key) => match fields {
-                    FormatSource::Arguments(_, kwargs) => kwargs
-                        .iter()
-                        .find(|(k, _)| k == &key)
-                        .map(|(_, id)| *id)
-                        .ok_or_else(|| {
-                            let key = ctx.text(key);
-                            ctx.lookup_error("KeyError", key)
-                        })?,
-                    FormatSource::Mapping(mapping) => {
-                        let key = ctx.text(key);
-                        ctx.get_item(mapping, key)?
+                Key::Text(span) => {
+                    let name = &field_name[span];
+                    match fields {
+                        FormatSource::Arguments(_, kwargs) => kwargs
+                            .iter()
+                            .find(|(key, _)| key == name)
+                            .map(|(_, id)| *id)
+                            .ok_or_else(|| {
+                                let key = ctx.text(name);
+                                ctx.lookup_error("KeyError", key)
+                            })?,
+                        FormatSource::Mapping(mapping) => {
+                            let key = ctx.text(name);
+                            ctx.get_item(mapping, key)?
+                        }
                     }
-                },
+                }
             };
-            for access in field.parts {
-                value = match access {
-                    FieldNamePart::Attribute(name) => ctx.lookup_attr(value, &name)?,
-                    FieldNamePart::Index(index) => {
-                        let index = i64::try_from(index)
-                            .map_err(|_| Error::new("IndexError", "index too large"))?;
-                        let index = ctx.int(index);
+            while let Some((attribute, key)) = field(field_name, &mut tail).map_err(invalid)? {
+                value = match key {
+                    Key::Text(span) if attribute => ctx.lookup_attr(value, &field_name[span])?,
+                    Key::Integer(index) => {
+                        let index = ctx.int(index as i64);
                         ctx.get_item(value, index)?
                     }
-                    FieldNamePart::StringIndex(key) => {
-                        let key = ctx.text(key);
+                    Key::Text(span) => {
+                        let key = ctx.text(&field_name[span]);
                         ctx.get_item(value, key)?
                     }
                 }
             }
-            if let Some(conv) = conversion_spec {
-                value = format_conversion(ctx, value, conv)?;
+            if let Some(span) = row.conversion {
+                value = format_conversion(ctx, value, s[span].chars().next().unwrap())?;
             }
+            let format_spec = row.spec.map_or("", |span| &s[span]);
             let spec = if format_spec.contains(['{', '}']) {
                 if nested {
-                    return Err(Error::new(
-                        "ValueError",
-                        "format specifier nested too deeply",
-                    ));
+                    return Err(invalid("Max string recursion exceeded"));
                 }
-                Some(render(ctx, &format_spec, fields, indices, true)?)
+                Some(render(ctx, format_spec, fields, indices, true)?)
             } else {
                 (!format_spec.is_empty()).then(|| ctx.text(format_spec))
             };
