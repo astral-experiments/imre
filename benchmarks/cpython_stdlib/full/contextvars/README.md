@@ -6,6 +6,22 @@ blobs and upstream commit. The oracle has 56 original test cases: 33 public
 ContextTest methods and 23 methods for CPython's private HAMT implementation.
 Default Linux regrtest passes 55 and skips the CPU resource stress test.
 
+## Mapping and ContextVar name hashing
+
+The unchanged CPython 3.14.5 suite passed 56 of 56 methods on Linux. Imre
+passed 31 at O0 and O3, using the source changes merged in [#8184](https://github.com/astral-experiments/imre/pull/8184)
+and [#8190](https://github.com/astral-experiments/imre/pull/8190). Each
+saved executable reproduced its FILE run after the first-party source and
+build cache were withdrawn. The [per-method table](paired-8190-source.tsv)
+includes both runs and the digest of every original method.
+
+Registering `Context` as a `Mapping` fixed `test_context_isinstance`.
+Hashing a `ContextVar` name at construction fixed
+`test_context_new_unhashable_str_subclass`. The two thread methods errored
+when the callbacks needed the shared Python heap. The 23 HAMT methods
+skipped because Imre lacks CPython's private `_testinternalcapi.hamt()`
+test interface.
+
 ## The unmodified test file
 
 On Linux, CPython 3.14.5 ran all 56 methods when invoked directly with
