@@ -345,6 +345,18 @@ handlers = {"first": first, "second": second}
 }
 
 #[test]
+fn a_source_function_can_gain_a_python_default() {
+    let tmp = tempdir().unwrap();
+    let path = tmp.path().join("main.py");
+    fs::write(&path, "def target(n: int): return n\ndef enter(): return target()\nprint(set([1, 2]))\ntarget.__defaults__ = (37,)\nprint(enter())\n").unwrap();
+    let options = crate::CompileOptions {
+        script_startup: Some((crate::CommandFlags::default(), "imre".into())),
+        ..Default::default()
+    };
+    crate::compile_file(&path, None, &options).unwrap();
+}
+
+#[test]
 fn a_cold_call_keeps_its_first_party_argument_shape_across_layouts() {
     let project = tempdir().unwrap();
     let entry = project.path().join("main.py");

@@ -3048,16 +3048,20 @@ impl Session {
         }
         let mut written_return = None;
         let mut call_shapes = Vec::new();
+        let mut program_files = Vec::new();
         let mut parameters = Vec::new();
         let mut result_scopes = Vec::new();
         let mut class_files = Vec::new();
         for (id, (module, &file)) in modules.iter().zip(&self.files).enumerate() {
-            if !module.supplies_declarations() {
-                continue;
-            }
             let program_source = module
                 .project_path()
                 .is_some_and(|path| path.extension().is_none_or(|ext| ext != "pyi"));
+            if program_source {
+                program_files.push(file);
+            }
+            if !module.supplies_declarations() {
+                continue;
+            }
             let source = self.db.program_file(file);
             let index = ty_python_core::semantic_index(&self.db, source);
             let parsed = ruff_db::parsed::parsed_module(&self.db, source.python_file(&self.db))
@@ -3128,6 +3132,7 @@ impl Session {
             result_scopes,
             class_files,
             call_shapes,
+            program_files,
         );
         let mut errors = Vec::new();
         for (index, (module, &file)) in modules.iter().zip(&self.files).enumerate() {
@@ -3269,6 +3274,8 @@ struct DeclaredSignatures<'db> {
     class_files: Vec<File>,
     /// Undecorated first-party declarations with a parameter or result annotation.
     call_shapes: Vec<ty_python_core::definition::Definition<'db>>,
+    #[returns(ref)]
+    program_files: Vec<File>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -3294,6 +3301,46 @@ pub(crate) enum FallbackCalls {
     All,
     /// A factory must return a callable to decorate the method.
     DecoratorFactories,
+}
+
+/// Replacing the code or defaults of the selected function can change the
+/// arguments Python accepts without changing the binding at the call.
+#[salsa::tracked(returns(ref))]
+fn function_layout_writes<'db>(
+    db: &'db dyn Db,
+    file: File,
+) -> Vec<ty_python_core::definition::Definition<'db>> {
+    use ty_python_core::definition::DefinitionKind;
+    use ty_python_semantic::types::{Type, TypeDefinition};
+
+    let source = db.program_file(file);
+    let index = ty_python_core::semantic_index(db, source);
+    let parsed = ruff_db::parsed::parsed_module(db, source.python_file(db)).load(db);
+    let model = SemanticModel::new(db, source);
+    let mut functions = Vec::new();
+    for scope in index.scope_ids() {
+        for (_, def, _) in index
+            .use_def_map(scope.file_scope_id(db))
+            .definitions_with_usage()
+        {
+            let DefinitionKind::Assignment(assignment) = def.kind(db) else {
+                continue;
+            };
+            let Some(attr) = assignment.target(&parsed).as_attribute_expr() else {
+                continue;
+            };
+            if matches!(
+                attr.attr.as_str(),
+                "__code__" | "__defaults__" | "__kwdefaults__"
+            ) && let Some(ty @ Type::FunctionLiteral(_)) = attr.value.inferred_type(&model)
+                && let Some(TypeDefinition::Function(function)) =
+                    ty.definition(db, &model.program_environment())
+            {
+                functions.push(function);
+            }
+        }
+    }
+    functions
 }
 
 /// Follow an imported name only when it has one source definition.
@@ -4285,6 +4332,10 @@ fn runtime_argument(db: &dyn Db, checked: CheckedFile<'_>, range: TextRange, rul
                 .call_shapes(db)
                 .binary_search(&definition)
                 .is_err()
+                || declarations
+                    .program_files(db)
+                    .iter()
+                    .any(|&file| function_layout_writes(db, file).contains(&definition))
         });
     }
     let Some(callee) = call.func.inferred_type(&model) else {
