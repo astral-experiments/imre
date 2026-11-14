@@ -538,9 +538,15 @@ impl Session {
                 }
             }
         }
-        let binding = binding.filter(|binding| binding.file(&self.db) == file)?;
+        let mut binding = binding.filter(|binding| binding.file(&self.db) == file)?;
         let member = match (binding.kind(&self.db), attr) {
             (DefinitionKind::Function(_), None) => None,
+            (DefinitionKind::Assignment(copy), None) if copy.unpack().is_none() => {
+                let value = copy.value(parsed);
+                value.as_name_expr()?;
+                binding = self.reaching_binding(module, value)?;
+                None
+            }
             (DefinitionKind::Import(import), Some(attr)) => {
                 Some((import.alias(parsed).range(), attr))
             }
