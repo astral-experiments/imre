@@ -359,13 +359,11 @@ impl Callback {
         })
     }
 
-    /// Prepare on the child before publishing its identity. Invoking or dropping the
-    /// returned call consumes its arguments and context on that same thread.
+    /// Prepare on the child. Publication decides whether to invoke or discard its operands.
     pub(super) fn into_call(
         self,
         fault_workers: &Arc<()>,
-        detached_label: Option<String>,
-    ) -> Result<impl FnOnce() -> WorkerStatus + use<>> {
+    ) -> Result<impl FnOnce(bool, Option<String>) -> WorkerStatus + use<>> {
         let heap = super::Heap::with_worker_stack(
             Some(self.frames),
             self.gc_settings,
@@ -377,6 +375,7 @@ impl Callback {
             heap,
             Some(self.interpreter),
         );
+        let mark = ctx.heap.temporary_mark();
         let globals = ctx.scope(&self.module, None);
         // The worker owns this cell and its selected lock before it reports readiness.
         let cell = self.receiver.map(|receiver| {
@@ -449,13 +448,26 @@ impl Callback {
             keywords.push((copy_label(name)?, value));
         }
         ctx.heap.observe_fault_workers(fault_workers);
-        Ok(move || {
-            let result = match ctx.prepare_call(function, slots, keywords) {
-                // SAFETY: the call owns this pthread's Context; preparation's borrow has ended.
-                Ok(call) => unsafe { call.run(&raw mut ctx) },
-                Err(error) => Err(error),
+        Ok(move |published, detached_label| {
+            let result = if published {
+                // SAFETY: the callable, arguments and marked frame belong to this child's context.
+                unsafe {
+                    ffi::run_with_operands(
+                        &raw mut ctx,
+                        mark,
+                        function,
+                        |ctx| ctx.prepare_call(function, slots, keywords),
+                        Context::finish_call_operands,
+                    )
+                }
+            } else {
+                Ok(NONE)
             };
+            let mut status = Ok(());
             if let Err(error) = result {
+                for root in error.roots() {
+                    ctx.heap.keep(root);
+                }
                 if let Some(label) = detached_label {
                     if error.kind != "SystemExit" {
                         let _ = writeln!(
@@ -465,10 +477,11 @@ impl Callback {
                         );
                     }
                 } else {
-                    return Err(error.report(&ctx.heap).to_string());
+                    status = Err(error.report(&ctx.heap).to_string());
                 }
             }
-            Ok(())
+            ctx.unwind_operands(mark);
+            status
         })
     }
 }

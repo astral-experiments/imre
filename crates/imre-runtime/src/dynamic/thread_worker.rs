@@ -693,10 +693,7 @@ fn launch(request: Start) -> Result<(Ready, Entry)> {
         let mut released = None;
         let call = match request.operation {
             Operation::Python(callback) => {
-                match callback.into_call(
-                    fault_workers.as_ref().expect("Python worker"),
-                    detached_label,
-                ) {
+                match callback.into_call(fault_workers.as_ref().expect("Python worker")) {
                     Ok(invoke) => Operation::Python(invoke),
                     Err(error) => {
                         let _ = ready.send(Err(error.to_string()));
@@ -717,11 +714,10 @@ fn launch(request: Start) -> Result<(Ready, Entry)> {
             },
         };
         // All targets publish identity and wait for the creator before any target effects.
-        if !exit.enter(request.count, starting, &ready, released) {
-            return Ok(());
-        }
+        let published = exit.enter(request.count, starting, &ready, released);
         match call {
-            Operation::Python(invoke) => return invoke(),
+            Operation::Python(invoke) => return invoke(published, detached_label),
+            _ if !published => return Ok(()),
             Operation::Empty => {}
             Operation::UpdateHash { hash, data } => {
                 hash.lock()
