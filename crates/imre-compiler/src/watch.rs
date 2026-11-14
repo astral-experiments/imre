@@ -402,6 +402,31 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_later_source_keeps_shadowed_native_candidates_out_of_the_watch() {
+        let project = tempfile::tempdir().unwrap();
+        let vendor = tempfile::tempdir().unwrap();
+        let entry = project.path().join("main.py");
+        let native = project.path().join("helper.so");
+        let source = vendor.path().join("helper.py");
+        std::fs::write(&entry, "import helper\nprint(helper.value)\n").unwrap();
+        std::fs::write(&native, []).unwrap();
+        std::fs::write(&source, "value = 1\n").unwrap();
+        let options = crate::CompileOptions {
+            extension_paths: vec![vendor.path().to_owned()],
+            ..Default::default()
+        };
+        let mut inputs = Inputs::default();
+        crate::check_file_with(&entry, None, &options, None, FileSystem(Some(&mut inputs)))
+            .unwrap();
+
+        std::fs::remove_file(native).unwrap();
+        assert!(inputs.fresh());
+        std::fs::write(source, "value = 2\n").unwrap();
+        assert!(!inputs.fresh());
+    }
+
     #[test]
     fn creating_or_editing_an_entry_profile_invalidates_the_check() {
         let dir = tempfile::tempdir().unwrap();

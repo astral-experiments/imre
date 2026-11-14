@@ -6910,14 +6910,14 @@ impl<'a> Loader<'a> {
         // A regular package owns its subtree. A namespace searches its portions in path order.
         let relative = name.replace('.', "/");
         let mut resolved = None;
-        let mut portions = Vec::new();
-        let mut zip_import = false;
+        let mut filesystem_roots = Vec::new();
+        let mut zip_member = false;
+        let mut zip_namespace = false;
         let mut member_source = None;
         for root_index in 0..=self.search_roots.len() {
-            if root_index == 0 && self.skip_current_root {
-                continue;
-            }
-            if parent.is_some_and(|(id, _)| !self.modules[id].search_roots.contains(root_index)) {
+            if (root_index == 0 && self.skip_current_root)
+                || parent.is_some_and(|(id, _)| !self.modules[id].search_roots.contains(root_index))
+            {
                 continue;
             }
             let root = Self::root_at(&self.root, &self.search_roots, root_index);
@@ -6939,10 +6939,10 @@ impl<'a> Loader<'a> {
                     break;
                 }
                 if archive.package(name).is_some() {
-                    zip_import = true;
+                    zip_member = true;
                     break;
                 }
-                zip_import |= archive.contains_namespace(name);
+                zip_namespace |= archive.contains_namespace(name);
                 continue;
             }
             let base = root.join(&relative);
@@ -6950,18 +6950,19 @@ impl<'a> Loader<'a> {
             if resolved.is_some() {
                 break;
             }
-            if self.fs.is_dir(&base) {
-                portions.push((
-                    root_index,
-                    Self::root_at(&self.root, &self.search_roots, root_index).clone(),
-                    base,
-                ));
-            } else {
+            let directory = self.fs.is_dir(&base);
+            filesystem_roots.push((root_index, directory));
+            if !directory {
                 self.inputs.missing.push(base);
             }
         }
+        let mut portions = filesystem_roots
+            .iter()
+            .filter_map(|&(index, directory)| directory.then_some(index))
+            .peekable();
+        let zip_import = zip_member || zip_namespace;
         if let Some(declaration) = declaration {
-            if resolved.is_some() || (!zip_import && !portions.is_empty()) {
+            if resolved.is_some() || (!zip_import && portions.peek().is_some()) {
                 self.has_checked_only_import = true;
             } else if let Some(file) = if name == first {
                 Some(declaration)
@@ -6974,12 +6975,60 @@ impl<'a> Loader<'a> {
             }
         }
         let Some((path, identity, is_package, root_index, archive)) = resolved else {
+            let has_namespace = zip_namespace || portions.peek().is_some();
+            if !zip_member && !has_namespace {
+                self.import_failure = Some(EntryImportFailure::MissingModule);
+            }
+            #[cfg(target_os = "linux")]
+            if !zip_member {
+                let [tagged, abi3, _, _, shared, _, _] = imre_ast::module_suffixes();
+                // Only a failed AOT lookup needs native filenames. Reuse its eligible
+                // filesystem roots and package-directory observations, in search order.
+                'native: for &(index, directory) in &filesystem_roots {
+                    let root = Self::root_at(&self.root, &self.search_roots, index);
+                    let base = root.join(&relative);
+                    let init = directory.then(|| base.join("__init__"));
+                    for stem in init.iter().chain([&base]) {
+                        for suffix in [&tagged, &abi3, &shared] {
+                            let path = stem.with_added_extension(&suffix[1..]);
+                            if !self.fs.is_file(&path) {
+                                if has_namespace {
+                                    self.inputs.file_checks.insert(path, false);
+                                }
+                                continue;
+                            }
+                            if self
+                                .fs
+                                .canonicalize(&path)
+                                .is_ok_and(|p| p.starts_with(root))
+                            {
+                                let tag = if suffix == &shared {
+                                    "an untagged shared-library filename"
+                                } else {
+                                    "a CPython shared-extension ABI tag"
+                                };
+                                return Err(format!(
+                                    "native import candidate {} for {name:?} has {tag}. Imre AOT requires Python source or a rebuilt static extension with its .pyi declaration",
+                                    path.display()
+                                ));
+                            }
+                            if has_namespace {
+                                return Err(format!(
+                                    "cannot use native import candidate {} for {name:?} in an Imre AOT build",
+                                    path.display()
+                                ));
+                            }
+                            break 'native;
+                        }
+                    }
+                }
+            }
             if zip_import {
                 self.import_failure = Some(EntryImportFailure::ZipImport);
                 return Err(format!("module {name:?} requires the ZIP importer"));
             }
-            if portions.is_empty() {
-                self.import_failure = Some(EntryImportFailure::MissingModule);
+            let indices: Vec<_> = portions.collect();
+            let Some(&first) = indices.first() else {
                 let hint = if name == first {
                     "\n  help: for an installed dependency, pass --extension-path DIRECTORY where DIRECTORY contains the package or module"
                 } else {
@@ -6989,18 +7038,18 @@ impl<'a> Loader<'a> {
                     "cannot resolve first-party module {name:?} under {}{hint}",
                     self.root.display()
                 ));
-            }
-            let path = portions[0].2.clone();
-            let mut indices = Vec::with_capacity(portions.len());
-            for (index, root, dir) in portions {
+            };
+            let path = Self::root_at(&self.root, &self.search_roots, first).join(&relative);
+            for &index in &indices {
+                let root = Self::root_at(&self.root, &self.search_roots, index);
+                let dir = root.join(&relative);
                 let identity = self.fs.canonicalize(&dir).map_err(|e| e.to_string())?;
-                if !identity.starts_with(&root) {
+                if !identity.starts_with(root) {
                     return Err(format!(
                         "namespace {name:?} resolves outside its module root"
                     ));
                 }
                 self.inputs.directories.push((dir, identity));
-                indices.push(index);
             }
             // Give the semantic database an empty module without creating an initializer
             // that would hide portions from later roots.
