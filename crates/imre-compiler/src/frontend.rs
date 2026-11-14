@@ -1873,8 +1873,11 @@ fn lower_graph(
         callables::validate_targets(functions, &types, &callable_targets.constructed)?;
         storage?;
         if !uncalled.is_empty()
-            || dictionaries.into_iter().any(|(ty, display)| {
-                !display
+            || dictionaries.into_iter().any(|(ty, writes)| {
+                if !writes.needs_targets {
+                    return false;
+                }
+                !writes.display
                     || !callable_targets.plain_sources(ty, |id| {
                         callable_definitions
                             .get(id)
