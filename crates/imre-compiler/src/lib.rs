@@ -128,6 +128,8 @@ pub struct CompileOptions {
     pub site_dirs: Vec<PathBuf>,
     /// User directory with .pth files to process during Python startup.
     pub user_site_pth: Option<PathBuf>,
+    /// Active venv site to process at startup and possible import roots in its path files.
+    pub venv_site_pth: Option<(PathBuf, Vec<PathBuf>)>,
     /// A source sitecustomize module is visible before the command path is prepended.
     pub sitecustomize: bool,
     /// An installed stdlib hook can run on object startup without selecting that backend.

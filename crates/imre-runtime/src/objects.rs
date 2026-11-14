@@ -132,7 +132,7 @@ mod structs;
 mod sumprod;
 pub(crate) mod tempdirs;
 mod text;
-pub(crate) use imre_ast::strings::{dedent, python_whitespace};
+pub(crate) use imre_ast::strings::{dedent, is_line_boundary, python_whitespace};
 pub(crate) use text::{codepoint_search_window, hexadecimal, indexed_search_bounds, search_window};
 pub(crate) use text::{translate, zfill};
 pub(crate) mod time;
@@ -1521,11 +1521,6 @@ fn plain_ascii_line(bytes: &[u8]) -> bool {
             & 0x80
             == 0
     }) && tail.iter().all(|byte| (32..128).contains(byte))
-}
-
-/// Recognize the line boundaries used by Python's str.splitlines.
-fn is_line_boundary(point: u32) -> bool {
-    matches!(point, 0x0a..=0x0d | 0x1c..=0x1e | 0x85 | 0x2028 | 0x2029)
 }
 
 /// Split the next field of a string retaining lone Python surrogates.

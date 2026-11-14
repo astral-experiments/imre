@@ -593,7 +593,7 @@ impl Cache {
                 &options.include_modules,
                 &options.python_archive_indices,
                 (&options.stdlib_dir, &options.site_dirs),
-                &options.user_site_pth,
+                (&options.user_site_pth, &options.venv_site_pth),
                 (options.sitecustomize, options.stdlib_sitecustomize),
                 (&options.stdlib_fallback, &options.installed_stdlib_archive),
             ),
