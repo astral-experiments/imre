@@ -2266,6 +2266,9 @@ impl Checker<'_> {
                     .unwrap()
             })
             .collect();
+        // The field checks above own this unpacked argument's type diagnostic.
+        self.graph
+            .checked_argument_type(self.module, keyword.range());
         self.calls.insert(signature.id);
         let ty = Type::Class(class);
         let value = Expr {
