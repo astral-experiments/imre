@@ -89,7 +89,6 @@ pub(crate) fn bundled_module_source(
         // CPython 3.14.5 Lib/shutil.py. See stdlib/docstrings/LICENSE.
         "shutil" => bundled_source!("shutil.py"),
         "socket" => bundled_source!("socket.py"),
-        "ssl" => bundled_source!("ssl.py"),
         "tempfile" => bundled_source!("tempfile.py"),
         "doctest" => Some((
             "doctest.py",
