@@ -935,7 +935,7 @@ impl Checker<'_> {
                 // the next one. Keeping this private target alive could alter
                 // file finalization or make an iterator's tuple cache shared.
                 body.push(Statement::Clear(slot));
-                Ok(())
+                Ok(true)
             })?;
         let target = self.names.remove(&name).unwrap();
         Ok(vec![Statement::Scope {

@@ -5697,19 +5697,23 @@ impl<'a> Checker<'a> {
         orelse: &[ast::Stmt],
         lower_body: impl FnOnce(&mut Self, &mut Vec<Statement>) -> Result<(), String>,
     ) -> Result<(Vec<Statement>, bool), String> {
-        self.lower_iteration_after(target, input, orelse, Vec::new(), lower_body)
+        self.lower_iteration_after(target, input, orelse, Vec::new(), |checker, body| {
+            lower_body(checker, body)?;
+            Ok(true)
+        })
     }
 
     /// A consumer can evaluate its remaining arguments after acquiring an
     /// iterator, preserving `sum(map(int, values), start())` mutation checks.
     /// Supplying extra statements requires already validated range arguments.
+    /// The callback returns whether its checked body needs an executable loop.
     fn lower_iteration_after(
         &mut self,
         target: &ast::Expr,
         input: Iteration,
         orelse: &[ast::Stmt],
         before_iteration: Vec<Statement>,
-        lower_body: impl FnOnce(&mut Self, &mut Vec<Statement>) -> Result<(), String>,
+        lower_body: impl FnOnce(&mut Self, &mut Vec<Statement>) -> Result<bool, String>,
     ) -> Result<(Vec<Statement>, bool), String> {
         if let Iteration::Prepared(input) = input {
             return self.lower_prepared_iteration(
@@ -5731,11 +5735,14 @@ impl<'a> Checker<'a> {
             self.assigned.insert(target);
             self.loop_breaks.push(None);
             let mut body = Vec::new();
-            lower_body(self, &mut body)?;
+            let emit = lower_body(self, &mut body)?;
             let breaks = self.loop_breaks.pop().unwrap();
             self.assigned.after_iteration(before);
             self.narrowed = facts;
             let (orelse, falls) = self.loop_else(orelse, breaks, true)?;
+            if !emit {
+                return Ok((Vec::new(), falls));
+            }
             let cursor = self.hidden(Type::Int);
             let stop = self.hidden(Type::Int);
             let step = self.hidden(Type::Int);
@@ -5969,11 +5976,14 @@ impl<'a> Checker<'a> {
             ));
         }
         self.loop_breaks.push(None);
-        lower_body(self, &mut body)?;
+        let emit = lower_body(self, &mut body)?;
         let breaks = self.loop_breaks.pop().unwrap();
         self.assigned.after_iteration(before);
         self.narrowed = facts;
         let (orelse, falls) = self.loop_else(orelse, breaks, true)?;
+        if !emit {
+            return Ok((Vec::new(), falls));
+        }
         cleanup.extend(counter);
         output.extend(before_iteration);
         let test = match cursor {
