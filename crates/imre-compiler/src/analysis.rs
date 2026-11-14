@@ -510,6 +510,22 @@ pub(crate) fn check_registered_project<'a>(
     // Static SDK declarations can type an import even though there is no Python
     // body to register. An actual same-name registration supplies its own types.
     if let Some(graph) = checked {
+        // Keep the guarded import's stub beside its selected Python implementation.
+        for &file in &graph.session.declarations {
+            let path = file.path(&graph.session.db);
+            let stub = Path::new(path.as_str());
+            if stub.extension().is_some_and(|ext| ext == "pyi") {
+                let implementation = stub.with_extension("py");
+                if sources.clone().any(|s| s.declares_signatures && s.path == implementation)
+                    && !paths.iter().any(|(path, _, _)| path == stub)
+                {
+                    let source = ruff_db::source::source_text(&graph.session.db, file);
+                    let file = session.write_file(path.as_str(), source.as_str())?;
+                    session.files.push(file);
+                    paths.push((stub.to_owned(), false, None));
+                }
+            }
+        }
         let replaced: std::collections::HashSet<_> =
             sources.clone().map(|winner| winner.name).collect();
         for module in &graph.modules {

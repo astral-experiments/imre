@@ -1375,7 +1375,8 @@ fn a_guarded_reexport_resolves_to_its_linked_class_without_running_the_module() 
         crate::checked_lower(&mut graph).unwrap(),
         crate::CheckedProgram::Native(_)
     ));
-    fs::write(&entry, source.replace("return Packet()", "return Other()")).unwrap();
+    let returning_other = source.replace("return Packet()", "return Other()");
+    fs::write(&entry, &returning_other).unwrap();
     let error = crate::check_file(&entry, Some(root)).unwrap_err();
     assert!(
         error.contains("7:12: Imre: expected pkg.model.Packet, got pkg.other.Packet"),
@@ -1384,12 +1385,36 @@ fn a_guarded_reexport_resolves_to_its_linked_class_without_running_the_module() 
 
     let stub = package.join("labels.pyi");
     fs::write(&stub, "from .other import Packet as Packet\n").unwrap();
+    let named = crate::CompileOptions {
+        module_entry: Some("main".into()),
+        script_startup: Some((Default::default(), "imre".into())),
+        extension_paths: vec![root.to_owned()],
+        ..Default::default()
+    };
+    fs::write(&entry, source).unwrap();
+    let error = crate::compile_file_with_boxed_units(&entry, Some(root), &named)
+        .err()
+        .expect("the guarded stub requires pkg.other.Packet");
+    assert!(
+        error.contains("main.py:7:12")
+            && error.contains("expected `pkg.other.Packet`, found `pkg.model.Packet`"),
+        "{error}"
+    );
+
+    fs::write(&entry, returning_other).unwrap();
     let mut graph = crate::modules::SourceGraph::load(&entry, Some(root), &[]).unwrap();
     let (inputs, paths) = graph.disk_inputs(None);
     assert!(paths.contains(&stub.canonicalize().unwrap()));
     assert!(inputs.fresh());
+    crate::check_file(&entry, Some(root)).unwrap();
+    crate::compile_file_with_boxed_units(&entry, Some(root), &named).unwrap();
     fs::write(&stub, "from .model import Packet as Packet\n").unwrap();
     assert!(!inputs.fresh());
+    let error = crate::check_file(&entry, Some(root)).unwrap_err();
+    assert!(
+        error.contains("7:12: Imre: expected pkg.model.Packet, got pkg.other.Packet"),
+        "{error}"
+    );
 }
 
 #[test]
