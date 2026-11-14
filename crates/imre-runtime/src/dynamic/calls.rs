@@ -4512,6 +4512,25 @@ impl Context {
                 callable, receiver, ..
             } => match name {
                 "__self__" => return Ok(receiver),
+                _ if let Value::IoMethod { name: method, .. } = *self.heap.get(callable)
+                    && self.builtin_type_name(obj) == Some("builtin_function_or_method") =>
+                {
+                    match name {
+                        "__module__" => return Ok(NONE),
+                        "__name__" => return Ok(self.text(method)),
+                        "__qualname__" => {
+                            let class = if matches!(self.heap.get(receiver), Value::Class { .. }) {
+                                receiver
+                            } else {
+                                self.exact_type(receiver)?
+                            };
+                            let qualname = self.lookup_attr(class, "__qualname__")?;
+                            let suffix = self.text(format!(".{method}"));
+                            return self.concat_strings(qualname, suffix);
+                        }
+                        _ => {}
+                    }
+                }
                 _ if let Value::HeapTypeMethod {
                     owner,
                     name: method,
