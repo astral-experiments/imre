@@ -2901,6 +2901,23 @@ fn declaration_annotation(
     classes.ids.get(&definition).map(|&id| classes.instance(id))
 }
 
+pub(crate) fn builtin_annotation(name: &str) -> Option<Type> {
+    match name {
+        "int" => Some(Type::Int),
+        "range" => Some(Type::Range),
+        "type" => Some(Type::BuiltinClass),
+        "float" => Some(Type::Float),
+        "bool" => Some(Type::Bool),
+        "str" => Some(Type::Str),
+        "bytes" => Some(Type::Bytes),
+        "bytearray" => Some(Type::ByteArray),
+        "BaseException" | "Exception" => Some(Type::Exception),
+        "ImportError" => Some(Type::ImportException),
+        "object" => Some(Type::ObjectValue),
+        _ => None,
+    }
+}
+
 fn annotation_with_aliases(
     expression: &ast::Expr,
     graph: &SourceGraph,
@@ -2937,6 +2954,11 @@ fn annotation_with_aliases(
     }
     if let Some(class) = graph.session.annotation_class(module, expression) {
         let (origin, name) = match class {
+            crate::analysis::AnnotationClass::Builtin(layout) => {
+                return layout.ok_or_else(|| {
+                    diagnostic_message(source, expression, "unsupported exact type annotation")
+                });
+            }
             crate::analysis::AnnotationClass::Linked(origin, name) => (origin, name),
             crate::analysis::AnnotationClass::Declaration(location) => {
                 return Err(diagnostic_message(
@@ -3078,24 +3100,9 @@ fn annotation_with_aliases(
         )
     };
     match expression {
-        ast::Expr::Name(name) => match name.id.as_str() {
-            "int" => Ok(Type::Int),
-            "range" => Ok(Type::Range),
-            "type" => Ok(Type::BuiltinClass),
-            "float" => Ok(Type::Float),
-            "bool" => Ok(Type::Bool),
-            "str" => Ok(Type::Str),
-            "bytes" => Ok(Type::Bytes),
-            "bytearray" => Ok(Type::ByteArray),
-            "BaseException" | "Exception" => Ok(Type::Exception),
-            "ImportError" => Ok(Type::ImportException),
-            "object" => Ok(Type::ObjectValue),
-            _ => Err(diagnostic_message(
-                source,
-                expression,
-                "unsupported exact type annotation",
-            )),
-        },
+        ast::Expr::Name(name) => builtin_annotation(name.id.as_str()).ok_or_else(|| {
+            diagnostic_message(source, expression, "unsupported exact type annotation")
+        }),
         ast::Expr::NoneLiteral(_) => Ok(Type::None),
         ast::Expr::Subscript(value) if matches!(graph.resolve_type(module, &value.value), Some(Binding::Definition(id)) if graph.is_abstract_context_manager(id)) => {
             nested(&value.value)
