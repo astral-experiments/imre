@@ -6,6 +6,8 @@ use std::borrow::Cow;
 #[derive(Clone, Copy)]
 pub(super) enum AttributeName<'a> {
     Text(&'a str),
+    /// A static method operand whose Python code name is needed only by lookup hooks.
+    Linked(&'a str),
     Python { key: Id, text: Option<&'a str> },
 }
 
@@ -19,14 +21,14 @@ impl<'a> AttributeName<'a> {
 
     pub(super) fn original(self) -> Option<Id> {
         match self {
-            Self::Text(_) => None,
+            Self::Text(_) | Self::Linked(_) => None,
             Self::Python { key, .. } => Some(key),
         }
     }
 
     pub(super) fn key(self, ctx: &mut Context) -> Id {
         match self {
-            Self::Text(text) => ctx.text(text),
+            Self::Text(text) | Self::Linked(text) => ctx.text(text),
             Self::Python { key, .. } => key,
         }
     }
@@ -34,6 +36,7 @@ impl<'a> AttributeName<'a> {
     pub(super) fn text(self, ctx: &Context) -> Result<Cow<'a, str>> {
         match self {
             Self::Text(text)
+            | Self::Linked(text)
             | Self::Python {
                 text: Some(text), ..
             } => Ok(Cow::Borrowed(text)),
