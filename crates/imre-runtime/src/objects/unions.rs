@@ -114,6 +114,22 @@ pub unsafe extern "C" fn imre_union_into_int(word: usize) -> usize {
         .into_raw()
 }
 
+/// Transfer a narrowed list[int] out of its owning union view.
+///
+/// # Safety
+/// The caller transfers an owning int-list view with union tag 2.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_union_into_int_list(value: usize) -> usize {
+    debug_assert_eq!(value & 7, 2);
+    // SAFETY: the union owns this view, which roots the list until acquisition.
+    unsafe {
+        let view = crate::ObjectOwner::from_raw((value & !7) as *const Object);
+        let (kind, word) = super::exceptions::exit_word(crate::ObjectOwner::as_ptr(&view));
+        debug_assert_eq!(kind.raw(), 4);
+        kind.acquire(word).into_word()
+    }
+}
+
 /// # Safety
 /// `value` is zero or a rooted, correctly tagged text union member.
 #[unsafe(no_mangle)]

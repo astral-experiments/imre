@@ -1913,7 +1913,9 @@ impl Checker<'_> {
             self.require_registered_operation(node)?;
             return Ok(self.python_cursor(iterable, node.range()));
         }
+        let sequence_item = self.types.sequence_union_element(iterable.ty);
         let element = self.types.iteration_element(iterable.ty, items)
+            .or(sequence_item)
             .or(tuple_element)
             .ok_or_else(|| error(self.source, node, "iteration requires a concrete container, homogeneous tuple, string, bytes, or range"))?;
         if reverse && (mapping.is_some() || set_element.is_some() || items) {
@@ -1937,16 +1939,24 @@ impl Checker<'_> {
         let mut acquire = vec![Statement::Assign(done, Expr::boolean(false))];
         let mut clear = vec![source, value, ready, done];
         let mut pull = Vec::new();
-        let indexed = self.types.element(ty).is_some()
+        let indexed = sequence_item.is_some()
+            || self.types.element(ty).is_some()
             || self.types.var_tuple_element(ty).is_some()
             || fields.is_some()
             || ty == Type::Bytes;
         if indexed {
             let cursor = self.hidden(Type::Int);
             clear.push(cursor);
-            let length = || Expr {
-                ty: Type::Int,
-                kind: ExprKind::Builtin(Builtin::Len, vec![Expr::local(source, ty)]),
+            let length = || {
+                let source = Expr::local(source, ty);
+                if let Some(item) = sequence_item {
+                    self.sequence_read(&source, item, None)
+                } else {
+                    Expr {
+                        ty: Type::Int,
+                        kind: ExprKind::Builtin(Builtin::Len, vec![source]),
+                    }
+                }
             };
             acquire.push(Statement::Assign(
                 cursor,
@@ -1971,7 +1981,9 @@ impl Checker<'_> {
             } else {
                 in_bounds
             };
-            let item = if let Some(fields) = fields
+            let item = if let Some(item) = sequence_item {
+                self.sequence_read(&self.local(source), item, Some((&self.local(cursor), None)))
+            } else if let Some(fields) = fields
                 && self.types.homogeneous_tuple_element(ty) != Some(element)
             {
                 let mut item = Expr {

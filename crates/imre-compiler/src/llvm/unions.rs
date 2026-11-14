@@ -7,11 +7,11 @@ fn tag(ty: Type) -> u8 {
         Type::Str => 0,
         Type::Bytes => 1,
         // Both are Object owners and occupy separate closed unions with str.
-        Type::List(_) | Type::Dict(_) | Type::FrozenStrings | Type::Float => 2,
+        Type::ListInt | Type::List(_) | Type::Dict(_) | Type::FrozenStrings | Type::Float => 2,
         // These owners share the always-true Object tag. No admitted union
         // contains both an exception and a LogRecord.
         Type::Exception | Type::LogRecord => 3,
-        Type::Class(_) | Type::Tuple(_) => 4,
+        Type::Class(_) | Type::Tuple(_) | Type::VarTuple(_) => 4,
         Type::Enum(_) | Type::IntEnum(_) => 5,
         Type::Path => 6,
         Type::Int => 7,
@@ -42,7 +42,18 @@ impl Emitter<'_, '_> {
         }
         let tag = tag(source);
         let word = self.word(&value);
-        let operand = if source == Type::Float {
+        let operand = if source == Type::ListInt {
+            debug_assert_eq!(value.ty, source);
+            debug_assert_eq!(
+                self.module.types.sequence_union_element(returns),
+                Some(Type::Int)
+            );
+            // Tag 2 owns an Object. The int list keeps its specialized allocation inside that view.
+            let view = self.instruction(format!("call ptr @imre_box_value(i32 4, i64 {word})"));
+            let address = self.instruction(format!("ptrtoint ptr {view} to i64"));
+            self.reference(&value, "release");
+            self.instruction(format!("or i64 {address}, {tag}"))
+        } else if source == Type::Float {
             self.instruction(format!(
                 "call i64 @imre_union_from_float(i64 {word}, i1 {})",
                 value.ty != source
@@ -103,6 +114,19 @@ impl Emitter<'_, '_> {
                     "call i64 @imre_union_into_float(i64 {}, i1 {})",
                     value.operand,
                     returns != Type::Float
+                ))
+            } else if returns == Type::ListInt {
+                debug_assert_eq!(
+                    self.module.types.sequence_union_element(value.ty),
+                    Some(Type::Int)
+                );
+                self.output.local_helper(
+                    "imre_union_into_int_list",
+                    "declare i64 @imre_union_into_int_list(i64)\n",
+                );
+                self.instruction(format!(
+                    "call i64 @imre_union_into_int_list(i64 {})",
+                    value.operand
                 ))
             } else if returns == Type::Int {
                 self.instruction(format!(
