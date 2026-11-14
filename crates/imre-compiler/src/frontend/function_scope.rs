@@ -375,7 +375,6 @@ pub(crate) struct ScopeFacts<'p> {
 }
 
 impl<'p> ScopeFacts<'p> {
-    #[cfg(test)]
     pub(crate) fn function(&self, def: &ast::StmtFunctionDef) -> &NamedFunction<'p> {
         &self.functions[&def
             .decorator_list
@@ -560,7 +559,7 @@ where
         visitor::walk_stmt(self, stmt);
         if let ast::Stmt::ClassDef(class) = stmt {
             // Methods and aliases need the bindings on entry. Nested class reads are ready on exit.
-            class_metadata::capture(class, strings, &mut self.scopes.classes);
+            class_metadata::capture(class, strings, self.scopes);
             if self.yields && !parent_yields {
                 self.yields = imre_ast::class_definition_expressions(class)
                     .any(imre_ast::code_flags::yields_in_expression);

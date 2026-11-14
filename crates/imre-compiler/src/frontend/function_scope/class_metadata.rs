@@ -1,12 +1,11 @@
 //! Class bodies can store their implicit metadata in a cell from an enclosing function.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashSet};
 
 use ruff_python_ast as ast;
 use ruff_python_ast::visitor::{self, Visitor};
-use ruff_text_size::TextSize;
 
-use super::{ClassBindings, ClosureNames, FunctionScope, classes};
+use super::{ClassBindings, ClosureNames, FunctionScope, ScopeFacts, classes};
 
 const GENERATED: [&str; 3] = ["__module__", "__qualname__", "__doc__"];
 
@@ -14,15 +13,16 @@ const GENERATED: [&str; 3] = ["__module__", "__qualname__", "__doc__"];
 pub(super) fn capture(
     class: &ast::StmtClassDef,
     string_annotations: bool,
-    classes: &mut HashMap<TextSize, classes::ClassScope>,
+    scopes: &mut ScopeFacts<'_>,
 ) {
     let mut uses = Uses::new(string_annotations);
     BodyUses {
         uses: &mut uses,
-        classes,
+        scopes,
     }
     .visit_body(&class.body);
-    let scope = classes
+    let scope = scopes
+        .classes
         .get_mut(&classes::site(class))
         .expect("class bindings on entry");
     let names = &mut scope.namespace.names;
@@ -168,6 +168,21 @@ impl Uses {
         }
     }
 
+    /// A generic declaration supplies its own parameters to its body.
+    fn read_child_body<'a>(
+        &mut self,
+        reads: impl Iterator<Item = &'a str>,
+        params: Option<&ast::TypeParams>,
+    ) {
+        self.nested.extend(
+            reads
+                .filter(|&name| {
+                    params.is_none_or(|params| params.iter().all(|p| p.name().as_str() != name))
+                })
+                .map(str::to_owned),
+        );
+    }
+
     /// A function hides its own bindings from its enclosing scope.
     fn child(
         &mut self,
@@ -215,12 +230,12 @@ impl Uses {
     }
 }
 
-struct BodyUses<'s> {
+struct BodyUses<'s, 'p> {
     uses: &'s mut Uses,
-    classes: &'s HashMap<TextSize, classes::ClassScope>,
+    scopes: &'s ScopeFacts<'p>,
 }
 
-impl<'a> Visitor<'a> for BodyUses<'_> {
+impl<'a> Visitor<'a> for BodyUses<'_, '_> {
     fn visit_expr(&mut self, expr: &'a ast::Expr) {
         self.uses.visit_expr(expr);
     }
@@ -242,18 +257,28 @@ impl<'a> Visitor<'a> for BodyUses<'_> {
                 if let Some(result) = &f.returns {
                     self.visit_annotation(result);
                 }
-                let mut bounds = ClosureNames::default();
-                bounds.visit_body(&f.body);
+                let method = self.scopes.function(f);
                 let mut child = self.uses.child_scope();
-                BodyUses {
-                    uses: &mut child,
-                    classes: self.classes,
+                if !method.metadata.reads_complete() {
+                    // A nested class may pass on reads its enclosing function can't resolve.
+                    BodyUses {
+                        uses: &mut child,
+                        scopes: self.scopes,
+                    }
+                    .visit_body(&f.body);
+                    child.direct.append(&mut child.nested);
+                    for local in method.metadata.local_names() {
+                        if let Some(name) = local.as_str() {
+                            child.direct.remove(name);
+                        }
+                    }
+                    child.direct.retain(|name| !method.globals.contains(name));
                 }
-                .visit_body(&f.body);
-                self.uses.child(child, Some(&f.parameters), |name| {
-                    bounds.globals.contains(name) || bounds.locals.contains(name)
-                });
-                self.uses.nested.extend(bounds.nonlocals);
+                let reads = method
+                    .metadata
+                    .reads()
+                    .chain(child.direct.iter().map(String::as_str));
+                self.uses.read_child_body(reads, f.type_params.as_deref());
             }
             ast::Stmt::ClassDef(c) => {
                 for decorator in &c.decorator_list {
@@ -265,9 +290,11 @@ impl<'a> Visitor<'a> for BodyUses<'_> {
                 if let Some(args) = &c.arguments {
                     self.visit_arguments(args);
                 }
-                self.uses
-                    .nested
-                    .extend(self.classes[&classes::site(c)].frame_reads.iter().cloned());
+                let child = &self.scopes.classes[&classes::site(c)];
+                self.uses.read_child_body(
+                    child.frame_reads.iter().map(String::as_str),
+                    c.type_params.as_deref(),
+                );
             }
             _ => visitor::walk_stmt(self, stmt),
         }

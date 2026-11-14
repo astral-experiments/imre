@@ -222,6 +222,18 @@ impl CallableMetadata {
             .unwrap_or_default()
     }
 
+    pub(super) fn reads_complete(&self) -> bool {
+        self.layout["scope_complete"] == true
+    }
+
+    pub(super) fn reads(&self) -> impl Iterator<Item = &str> {
+        self.layout["scope_reads"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+    }
+
     fn non_variadic_parameter_names(&self) -> impl Iterator<Item = &str> {
         ["posonly", "positional", "kwonly"]
             .into_iter()
@@ -256,6 +268,31 @@ mod tests {
     use super::super::ScopeFacts;
     use imre_ast::code_flags;
     use ruff_text_size::Ranged;
+
+    #[test]
+    fn class_reads_use_the_completed_method_scope() {
+        let mut body = ruff_python_parser::parse_module(concat!(
+            "class Owner:\n",
+            "    def read[T](self, value=default):\n",
+            "        local: ignored\n",
+            "        return T, outside\n",
+            "    def indirect(self):\n",
+            "        @decorate\n",
+            "        class Child[U](base):\n",
+            "            value = U, through_class\n",
+            "        return Child\n",
+        ))
+        .unwrap()
+        .into_syntax()
+        .body;
+        let names = imre_ast::lower(&mut body);
+        let (facts, _) = ScopeFacts::prepare(&body, &names, |_, _| {}, |_| {});
+        let reads = &facts.classes[&body[0].start()].frame_reads;
+        assert_eq!(
+            reads.iter().map(String::as_str).collect::<Vec<_>>(),
+            ["base", "decorate", "default", "outside", "through_class"]
+        );
+    }
 
     #[test]
     fn private_method_keeps_its_source_name_and_class_cell() {
