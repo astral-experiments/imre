@@ -477,7 +477,7 @@ pub(crate) fn check_registered_project<'a>(
 ) -> Result<Option<RegisteredLayouts>, String> {
     let sources = sources.into_iter();
     let capacity = sources.len();
-    let sources = sources.filter(|source| !source.uses_typeshed_typing());
+    let sources = sources.filter(|source| !source.uses_typeshed_interface());
     if sources.clone().next().is_none() {
         return Ok(None);
     }
@@ -1911,7 +1911,7 @@ impl Session {
             for winner in registrations
                 .winners
                 .iter()
-                .filter(|s| s.checked_module.is_none() && !s.uses_typeshed_typing())
+                .filter(|s| s.checked_module.is_none() && !s.uses_typeshed_interface())
             {
                 copy.seed(winner.path, winner.source)?;
             }

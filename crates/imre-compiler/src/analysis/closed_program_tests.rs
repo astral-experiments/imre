@@ -75,6 +75,23 @@ fn dormant_import_preserves_the_next_call_diagnostic() {
 }
 
 #[test]
+fn registered_return_uses_the_selected_abc_metaclass() {
+    let project = tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    fs::write(&entry, "from ast import literal_eval\ntry:\n    import suspect\nexcept ImportError:\n    pass\nprint(literal_eval('27'))\n").unwrap();
+    fs::write(
+        project.path().join("suspect.py"),
+        "from abc import ABCMeta\ndef create() -> ABCMeta:\n    return 42\n",
+    )
+    .unwrap();
+    let error = crate::check_file(&entry, None).unwrap_err();
+    assert!(error.contains("suspect.py:3:12"), "{error}");
+
+    fs::write(project.path().join("abc.py"), "ABCMeta = int\n").unwrap();
+    crate::check_file(&entry, None).unwrap();
+}
+
+#[test]
 fn registered_body_checks_its_declared_result() {
     let project = tempdir().unwrap();
     let entry = project.path().join("main.py");
