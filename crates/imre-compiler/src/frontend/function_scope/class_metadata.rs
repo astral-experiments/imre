@@ -43,8 +43,7 @@ pub(super) fn capture(
         uses.direct.remove(name);
     }
     uses.direct.extend(names.nonlocals.iter().cloned());
-    scope.frame_reads = uses.direct;
-    names.reads.clone_from(&scope.frame_reads);
+    names.reads = uses.direct;
     if class.type_params.is_some() {
         // The class body publishes the tuple from its generic header as __type_params__.
         names.reads.insert(".type_params".to_owned());
@@ -176,9 +175,14 @@ impl Uses {
         let mut child = self.child_scope();
         child.visit_type_params(params);
         read(&mut child);
-        for param in params.iter() {
-            child.direct.remove(param.name().as_str());
-            child.nested.remove(param.name().as_str());
+        // The generic header binds its parameter tuple as well as each parameter.
+        for name in params
+            .iter()
+            .map(|p| p.name().as_str())
+            .chain([".type_params"])
+        {
+            child.direct.remove(name);
+            child.nested.remove(name);
         }
         self.direct.append(&mut child.direct);
         self.nested.append(&mut child.nested);
@@ -293,7 +297,9 @@ impl<'a> Visitor<'a> for BodyUses<'_, '_> {
                     if let Some(args) = &c.arguments {
                         scope.visit_arguments(args);
                     }
-                    scope.nested.extend(child.frame_reads.iter().cloned());
+                    scope
+                        .nested
+                        .extend(child.namespace.names.reads.iter().cloned());
                 });
             }
             _ => visitor::walk_stmt(self, stmt),

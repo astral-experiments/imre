@@ -107,6 +107,11 @@ def current():
         view['x'] = 42
         assert Shadow().read() == x == 42 and Shadow.x == 7
 
+        class Generic[T]:
+            frame = sys._getframe()
+
+        assert type(proxy)(Generic.frame)['.type_params'] is Generic.__type_params__
+
     class_cells(13, 1)
 
     def slot_order(flag):
