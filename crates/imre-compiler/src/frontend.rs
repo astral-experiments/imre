@@ -7614,7 +7614,7 @@ impl<'a> Checker<'a> {
     /// committed. Only incoming definite assignments survive; writes invalidate
     /// incoming optional facts. Finally uses the same conservative entry for all
     /// normal, exceptional, return, and loop exits.
-    fn try_statement(&mut self, try_: &ast::StmtTry) -> Result<(Vec<Statement>, bool), String> {
+    fn try_statement(&mut self, try_: &ast::StmtTry) -> Result<(Statement, bool), String> {
         let before = self.assigned.clone();
         let before_facts = self.narrowed.clone();
         let earlier_returns = self.explicit_return;
@@ -7792,11 +7792,8 @@ impl<'a> Checker<'a> {
         }
 
         let has_normal_exit = normal_exit.is_some();
-        let finish = |finalbody| {
-            let (statement, falls) =
-                statements::finish_try(body, handlers, orelse, has_normal_exit, finalbody);
-            (vec![statement], falls)
-        };
+        let finish =
+            |finalbody| statements::finish_try(body, handlers, orelse, has_normal_exit, finalbody);
         let (mut normal_assigned, normal_facts) = normal_exit
             .map(|exit| (exit.assigned, exit.narrowed))
             .unwrap_or_default();
