@@ -93,23 +93,10 @@ pub(super) fn invoked_signature(value: &Expr) -> Option<Type> {
     }
 }
 
-/// A constructed callable is a possible target, even when it occurs after the invocation.
-pub(super) fn record_target(
-    value: &Expr,
-    types: &Types,
-    targets: &mut HashMap<Type, HashSet<usize>>,
-) {
-    if let ExprKind::Callable { function, .. } = &value.kind {
-        for ty in types.source_callable_types(value.ty) {
-            targets.entry(ty).or_default().insert(*function);
-        }
-    }
-}
-
 pub(super) fn validate_targets(
     functions: &[ir::Function],
     types: &Types,
-    targets: &HashMap<Type, HashSet<usize>>,
+    targets: &crate::callables::SourceTargets,
 ) -> std::result::Result<(), Diagnostic> {
     // A cold callback adapter executes an async body and returns the awaited
     // result. An eager factory returns a coroutine object through a different ABI.
@@ -118,7 +105,7 @@ pub(super) fn validate_targets(
         if matches!(returns, Type::Coroutine(_))
             && candidates
                 .iter()
-                .any(|&id| functions[id].returns == returns)
+                .any(|target| functions[target.function].returns == returns)
         {
             return Err(
                 Diagnostic::from("an Awaitable callback must be defined with async def")

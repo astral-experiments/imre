@@ -1553,35 +1553,23 @@ impl Types {
     pub(crate) fn reserve_constructor_globals(
         &self,
         globals: &mut Vec<Type>,
-        functions: &[crate::ir::Function],
-        entry: &crate::ir::Function,
+        classes: &BTreeMap<usize, Type>,
     ) {
-        let mut classes = BTreeMap::new();
-        for function in functions.iter().chain([entry]) {
-            crate::ir::walk_expressions(&function.body, &mut |expr| {
-                if let crate::ir::ExprKind::Callable {
-                    function,
-                    receiver: None,
-                } = &expr.kind
-                    && self.constructor_base(expr.ty).is_some()
-                {
-                    classes
-                        .entry(self.0.borrow().constructor_targets[function])
-                        .or_insert(expr.ty);
-                }
-            });
-        }
         let mut storage = self.0.borrow_mut();
-        for (class, ty) in classes {
+        for (&class, &ty) in classes {
             storage.constructor_slots.insert(class, globals.len());
             globals.push(ty);
         }
     }
 
-    pub(crate) fn constructor_slot(&self, function: usize, ty: Type) -> Option<(usize, usize)> {
+    pub(crate) fn constructor_class(&self, function: usize, ty: Type) -> Option<usize> {
         self.constructor_base(ty)?;
+        Some(self.0.borrow().constructor_targets[&function])
+    }
+
+    pub(crate) fn constructor_slot(&self, function: usize, ty: Type) -> Option<(usize, usize)> {
+        let class = self.constructor_class(function, ty)?;
         let storage = self.0.borrow();
-        let class = storage.constructor_targets[&function];
         Some((storage.constructor_slots[&class], class))
     }
 

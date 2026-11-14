@@ -17,17 +17,34 @@ pub(crate) struct Target {
 }
 
 #[derive(Default)]
-pub(crate) struct Targets(HashMap<Type, Vec<Target>>);
+pub(crate) struct Targets(SourceTargets);
 
-/// Collect closed targets and open runtime entries during the checked module inventory.
+/// The checked call graph follows every constructed source function, even when
+/// a builtin of the same signature also has a runtime entry point.
+pub(crate) type SourceTargets = HashMap<Type, Vec<Target>>;
+
+/// Collect source targets and the extra operands needed by the native calling convention.
 #[derive(Default)]
 pub(crate) struct TargetCollector {
-    targets: Targets,
+    pub(crate) constructed: SourceTargets,
+    wrapped: Vec<(Type, Target)>,
     open: HashSet<Type>,
+    wrapper_owners: Vec<usize>,
+    pub(crate) constructors: BTreeMap<usize, Type>,
 }
 
 impl TargetCollector {
-    pub(crate) fn inspect(&mut self, types: &crate::types::Types, value: &ir::Expr) {
+    pub(crate) fn inspect(&mut self, id: usize, types: &crate::types::Types, value: &ir::Expr) {
+        if matches!(
+            value.kind,
+            ExprKind::Builtin(
+                ir::Builtin::FunctionWrappedSet | ir::Builtin::FunctionWrappedGet(_),
+                _
+            )
+        ) && self.wrapper_owners.last() != Some(&id)
+        {
+            self.wrapper_owners.push(id);
+        }
         if matches!(
             value.kind,
             ExprKind::Builtin(
@@ -45,44 +62,63 @@ impl TargetCollector {
                 bound: receiver.is_some(),
             };
             for ty in types.source_callable_types(value.ty) {
-                self.targets.0.entry(ty).or_default().push(target);
+                self.constructed.entry(ty).or_default().push(target);
+            }
+            if !target.bound
+                && let Some(class) = types.constructor_class(*function, value.ty)
+            {
+                self.constructors.entry(class).or_insert(value.ty);
             }
             if let Some(raw) = types.original_cache_body(*function) {
                 let signature = types.wrapped_signature(value.ty).unwrap_or(value.ty);
-                self.targets.0.entry(signature).or_default().push(Target {
-                    function: raw,
-                    bound: false,
-                });
+                self.wrapped.push((
+                    signature,
+                    Target {
+                        function: raw,
+                        bound: false,
+                    },
+                ));
             }
             if let Some(signature) = types.wrapped_signature(value.ty) {
                 // A wrapper can cross a plain Callable parameter or return
                 // without losing its real invocation target.
-                self.targets.0.entry(signature).or_default().push(target);
+                self.wrapped.push((signature, target));
             }
         }
     }
 
-    pub(crate) fn finish(self) -> Targets {
-        let Self { mut targets, open } = self;
-        targets.0.retain(|ty, _| !open.contains(ty));
-        for values in targets.0.values_mut() {
-            values.sort_unstable();
-            values.dedup();
+    pub(crate) fn deduplicate(&mut self) {
+        for targets in self.constructed.values_mut() {
+            targets.sort_unstable();
+            targets.dedup();
         }
-        targets
+    }
+
+    fn finish(mut self) -> Targets {
+        for (ty, target) in self.wrapped.drain(..) {
+            self.constructed.entry(ty).or_default().push(target);
+        }
+        self.constructed.retain(|ty, _| !self.open.contains(ty));
+        self.deduplicate();
+        Targets(self.constructed)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn analyze(module: &Module) -> Self {
+        let mut collector = Self::default();
+        for (id, function) in module.functions.iter().chain([&module.entry]).enumerate() {
+            ir::walk_expressions(&function.body, &mut |value| {
+                collector.inspect(id, &module.types, value);
+            });
+        }
+        collector
     }
 }
 
 impl Targets {
     #[cfg(test)]
     pub(crate) fn analyze(module: &Module) -> Self {
-        let mut collector = TargetCollector::default();
-        for function in module.functions.iter().chain([&module.entry]) {
-            ir::walk_expressions(&function.body, &mut |value| {
-                collector.inspect(&module.types, value);
-            });
-        }
-        collector.finish()
+        TargetCollector::analyze(module).finish()
     }
 
     /// An empty set is unknown, not proof that an invocation is unreachable.
@@ -142,13 +178,15 @@ pub(crate) struct Layouts {
     pub(crate) linked_functions: HashSet<usize>,
 }
 
-pub(crate) fn layouts(module: &ir::Module) -> Result<Layouts, LoweringDiagnostic> {
+pub(crate) fn layouts(
+    module: &ir::Module,
+    targets: TargetCollector,
+) -> Result<Layouts, LoweringDiagnostic> {
     let mut function_link_types = HashSet::new();
     let mut link_owners = BTreeMap::<usize, Vec<&ir::Expr>>::new();
-    let mut targets = TargetCollector::default();
-    for (id, function) in module.functions.iter().chain([&module.entry]).enumerate() {
+    for &id in &targets.wrapper_owners {
+        let function = module.functions.get(id).unwrap_or(&module.entry);
         ir::walk_expressions(&function.body, &mut |expr| {
-            targets.inspect(&module.types, expr);
             let ExprKind::Builtin(builtin, args) = &expr.kind else {
                 return;
             };

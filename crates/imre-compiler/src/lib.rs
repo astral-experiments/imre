@@ -522,7 +522,7 @@ fn object_fallback(
                     CheckedProgram::Native(mut fixed) => {
                         let (module, owners) = &mut fixed.ir;
                         verify_after(module, "lowering")?;
-                        match callables::layouts(module) {
+                        match callables::layouts(module, std::mem::take(&mut fixed.callables)) {
                             Ok(program) => {
                                 if !options.include_modules.is_empty() {
                                     return Err(
@@ -1085,6 +1085,7 @@ type FixedFrameSources = Vec<(usize, ruff_text_size::TextRange, frontend::FixedB
 
 pub(crate) struct FixedProgram {
     ir: CheckedIr,
+    callables: callables::TargetCollector,
     /// Original binder and operation sites indexed by checked function ID.
     frame_sources: FixedFrameSources,
     uses_builtin_module_names: bool,
