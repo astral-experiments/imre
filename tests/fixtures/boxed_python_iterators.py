@@ -112,6 +112,16 @@ def current():
 
     class Text(str):
         pass
+
+    class IndexedText(str):
+        def __getitem__(self, index):
+            raise AssertionError("inherited str iteration called __getitem__")
+
+    for text in (IndexedText("abc"), IndexedText("é🌍")):
+        cursor = iter(text)
+        assert type(cursor).__name__ == "str_iterator"
+        assert list(cursor) == list(str(text))
+
     class Data(bytes):
         pass
     assert list(reversed(Text("🌓a"))) == ["a", "🌓"]

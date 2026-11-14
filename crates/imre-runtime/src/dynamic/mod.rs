@@ -1426,6 +1426,8 @@ impl Context {
                     ),
                 ));
             }
+            // A str subclass inherits str's iterator even when it overrides __getitem__.
+            Value::Instance { .. } if self.string_storage(id).is_some() => (id, "str_iterator"),
             _ if let Some(kind) = self.binary_iterator_kind(id) => (id, kind),
             Value::Instance { .. } if let Some((storage, _)) = self.sequence_payload(id) => {
                 return self.iterator(storage);
