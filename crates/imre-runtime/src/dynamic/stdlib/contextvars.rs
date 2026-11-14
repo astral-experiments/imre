@@ -5,6 +5,16 @@ use std::rc::Rc;
 use super::{Context, Error, Id, NONE, Result, Value};
 
 impl Context {
+    /// Use the entered context, creating the implicit one on its first copy or set.
+    fn current_context(&mut self) -> Id {
+        if let Some(&current) = self.contexts.last() {
+            return current;
+        }
+        let current = self.alloc(Value::Context(Default::default()));
+        self.contexts.push(current);
+        current
+    }
+
     pub(in super::super) fn context_key(&self, key: Id) -> Result<()> {
         if matches!(self.heap.get(key), Value::ContextVar { .. }) {
             Ok(())
@@ -97,7 +107,6 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    let current = *ctx.contexts.last().expect("initial context");
     match (name, args, kwargs) {
         ("ContextVar", [var_name], [] | [(_, _)]) => {
             if !matches!(ctx.heap.get(*var_name), Value::Str(_)) {
@@ -127,14 +136,16 @@ pub(super) fn call(
             let Value::ContextVar { default, .. } = ctx.heap.get(*variable) else {
                 unreachable!("bound ContextVar.get");
             };
-            ctx.bindings(current)
-                .get(variable)
+            ctx.contexts
+                .last()
+                .and_then(|&current| ctx.bindings(current).get(variable))
                 .copied()
                 .or_else(|| args.get(1).copied())
                 .or(*default)
                 .ok_or_else(|| ctx.lookup_error("LookupError", *variable))
         }
         ("ContextVar.set", [variable, value], []) => {
+            let current = ctx.current_context();
             let old = ctx.replace_binding(current, *variable, Some(*value));
             Ok(ctx.alloc(Value::ContextToken {
                 context: current,
@@ -152,7 +163,10 @@ pub(super) fn call(
         ("Token.__exit__", [token, _, _, _], []) => ctx.reset_binding(None, *token),
         ("Context", [], []) => Ok(ctx.alloc(Value::Context(Default::default()))),
         ("copy_context", [], []) | ("Context.copy", [_], []) => {
-            let source = args.first().copied().unwrap_or(current);
+            let source = args
+                .first()
+                .copied()
+                .unwrap_or_else(|| ctx.current_context());
             Ok(ctx.alloc(Value::Context(Rc::clone(ctx.bindings(source)))))
         }
         ("Context.get", [context, key] | [context, key, _], []) => {
@@ -186,5 +200,30 @@ pub(super) fn call(
             "TypeError",
             format!("invalid arguments to {name}"),
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn foreign_reset_leaves_the_ambient_context_for_the_first_copy() {
+        let mut ctx = crate::dynamic::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let name = ctx.text("key");
+        let var = call(&mut ctx, "ContextVar", &[name], &[]).unwrap();
+        let explicit = call(&mut ctx, "Context", &[], &[]).unwrap();
+        let set = ctx.lookup_attr(var, "set").unwrap();
+        let token = call(&mut ctx, "Context.run", &[explicit, set, name], &[]).unwrap();
+        let error = call(&mut ctx, "ContextVar.reset", &[var, token], &[]).unwrap_err();
+        assert_eq!(error.kind, "ValueError");
+        assert!(ctx.contexts.is_empty());
+
+        let copy = call(&mut ctx, "copy_context", &[], &[]).unwrap();
+        let current = ctx.contexts[0];
+        assert_ne!(copy, current);
+        assert!(Rc::ptr_eq(ctx.bindings(copy), ctx.bindings(current)));
+        call(&mut ctx, "ContextVar.set", &[var, name], &[]).unwrap();
+        assert!(ctx.bindings(copy).is_empty());
     }
 }

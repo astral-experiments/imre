@@ -1014,8 +1014,6 @@ pub(super) fn new_context_with_heap<S: Into<crate::Str>>(
     let args = args.into_iter().map(|s| ctx.text(s)).collect();
     ctx.argv = ctx.alloc(Value::List(args));
     ctx.default_encoding = ctx.heap.code_name(crate::sys::default_encoding().as_str());
-    let current = ctx.alloc(Value::Context(Default::default()));
-    ctx.contexts.push(current);
     ctx.token_missing = ctx.alloc(Value::TokenMissing);
     // Resolving the handler after an allocation failure must not grow the builtin cache.
     ctx.builtin("MemoryError");
