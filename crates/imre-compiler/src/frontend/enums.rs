@@ -925,18 +925,9 @@ impl Checker<'_> {
         while let Some(pattern) = patterns.pop() {
             match pattern {
                 ast::Pattern::MatchValue(value) => {
-                    if let Some(Expr {
-                        kind:
-                            ExprKind::Builtin(
-                                Builtin::StrEnumMember {
-                                    class: owner,
-                                    member,
-                                },
-                                _,
-                            ),
-                        ..
-                    }) = self.qualified_member(&value.value)
-                        && class == owner
+                    if let Some(attr) = value.value.as_attribute_expr()
+                        && self.class_reference(&attr.value) == Some(class)
+                        && let Some(&member) = members.names.get(attr.attr.as_str())
                     {
                         remaining[member] = false;
                     }
