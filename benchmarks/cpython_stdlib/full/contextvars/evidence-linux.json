@@ -8,8 +8,8 @@
     "denominator": 56,
     "distinct_ids": 56,
     "counts": {
-      "failed": 7,
-      "fully-native": 26,
+      "failed": 6,
+      "fully-native": 27,
       "unexpected-skip": 23
     },
     "records": [
@@ -331,19 +331,20 @@
         "opt_level": 0,
         "fixture_variant": "test.test_context.ContextTest",
         "reference": "pass",
-        "outcome": "error",
+        "outcome": "pass",
         "roles": {
           "body": "imre",
           "assertions": "imre",
           "operation": "imre",
           "fixture": "imre"
         },
-        "reason": "AttributeError: '_contextvars.Token' object has no attribute 'MISSING'",
         "evidence": {
           "method_sha256": "a86f25ea883f37d8522e0fe997face1cd71689c0af34e4d7e4fdad950c8c23fe",
-          "stderr_line": 5
+          "stderr_line": 5,
+          "operation": "ContextTest.test_context_getset_1",
+          "fixture": "unmodified test_context.py in the linked FILE application"
         },
-        "classification": "failed"
+        "classification": "fully-native"
       },
       {
         "id": "test.test_context.ContextTest.test_context_getset_2",
@@ -463,7 +464,7 @@
           "operation": "imre",
           "fixture": "imre"
         },
-        "reason": "AssertionError: <_contextvars.Context object at 0x940d> is not an instance of <class 'collections.abc.Mapping'>",
+        "reason": "AssertionError: <_contextvars.Context object at 0x9dd2> is not an instance of <class 'collections.abc.Mapping'>",
         "evidence": {
           "method_sha256": "4159594f79e0aa97419dfb1c9cfa7fca449d0ee6cdc22d0ec42bbc59aa1ad8bb",
           "stderr_line": 10
@@ -1172,8 +1173,8 @@
     "denominator": 56,
     "distinct_ids": 56,
     "counts": {
-      "failed": 7,
-      "fully-native": 26,
+      "failed": 6,
+      "fully-native": 27,
       "unexpected-skip": 23
     },
     "records": [
@@ -1495,19 +1496,20 @@
         "opt_level": 3,
         "fixture_variant": "test.test_context.ContextTest",
         "reference": "pass",
-        "outcome": "error",
+        "outcome": "pass",
         "roles": {
           "body": "imre",
           "assertions": "imre",
           "operation": "imre",
           "fixture": "imre"
         },
-        "reason": "AttributeError: '_contextvars.Token' object has no attribute 'MISSING'",
         "evidence": {
           "method_sha256": "a86f25ea883f37d8522e0fe997face1cd71689c0af34e4d7e4fdad950c8c23fe",
-          "stderr_line": 5
+          "stderr_line": 5,
+          "operation": "ContextTest.test_context_getset_1",
+          "fixture": "unmodified test_context.py in the linked FILE application"
         },
-        "classification": "failed"
+        "classification": "fully-native"
       },
       {
         "id": "test.test_context.ContextTest.test_context_getset_2",
@@ -1627,7 +1629,7 @@
           "operation": "imre",
           "fixture": "imre"
         },
-        "reason": "AssertionError: <_contextvars.Context object at 0x940d> is not an instance of <class 'collections.abc.Mapping'>",
+        "reason": "AssertionError: <_contextvars.Context object at 0x9dd2> is not an instance of <class 'collections.abc.Mapping'>",
         "evidence": {
           "method_sha256": "4159594f79e0aa97419dfb1c9cfa7fca449d0ee6cdc22d0ec42bbc59aa1ad8bb",
           "stderr_line": 10

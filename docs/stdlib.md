@@ -2,7 +2,7 @@
 
 Imre checks every name in the [CPython 3.14.5](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib) top-level module registry (`sys.stdlib_module_names`) on Linux. The first tables cover 194 names without a leading underscore; [the appendix](#names-beginning-with-an-underscore) covers the other 103. Dotted APIs such as `os.path` appear under their parent.
 
-**At a glance:** 154 of 297 modules accept an ordinary import; 1 more accept it only with `--reachable-only`. Across 44 modules with recorded suites, 319 complete test executions pass natively at both optimization levels; 15,152 of 15,426 upstream executions have a classification.
+**At a glance:** 154 of 297 modules accept an ordinary import; 1 more accept it only with `--reachable-only`. Across 44 modules with recorded suites, 320 complete test executions pass natively at both optimization levels; 15,152 of 15,426 upstream executions have a classification.
 
 **Import** checks an otherwise empty file containing `import module`, in ordinary and reachable-only compilation. A successful import does not establish that any function works. Follow the evidence links for the supported operations and their limits.
 
@@ -34,7 +34,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `compression` | Yes | No API example recorded. | — | — | — |
 | `configparser` | Yes | Construct a parser and read section options with `get()`. [Evidence](../tests/fixtures/boxed_configparser.py) | — | — | — |
 | `contextlib` | Yes | `nullcontext` and selected single-yield `@contextmanager` functions. [Evidence](../tests/fixtures/processes/async_resource_arguments.py) | — | — | — |
-| `contextvars` | Yes | Create and copy contexts, set and reset variable bindings, and isolate them in supported asyncio tasks. [Evidence](../benchmarks/cpython_stdlib/full/contextvars/README.md) | [26 / 56](../benchmarks/cpython_stdlib/full/contextvars/) | 0 | 0 |
+| `contextvars` | Yes | Create and copy contexts, set and reset variable bindings, and isolate them in supported asyncio tasks. [Evidence](../benchmarks/cpython_stdlib/full/contextvars/README.md) | [27 / 56](../benchmarks/cpython_stdlib/full/contextvars/) | 0 | 0 |
 | `copy` | Yes | Shallow and deep copies of supported containers and fixed-layout objects. [Evidence](../benchmarks/cpython_stdlib/full/copy/README.md) | [6 / 81](../benchmarks/cpython_stdlib/full/copy/) | 0 | 4 |
 | `copyreg` | Yes | No API example recorded. | — | — | — |
 | `csv` | Yes | Read and write rows and dictionaries, register dialects, and detect delimiters and headers. [Evidence](../benchmarks/cpython_stdlib/full/csv/README.md) | [122 / 128](../benchmarks/cpython_stdlib/full/csv/) | 0 | 0 |
