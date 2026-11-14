@@ -109,6 +109,25 @@ impl Frame<'_, '_, '_> {
         f.pattern_check(&bit, failed);
     }
 
+    /// The matcher already collected the children into a private tuple or unpacking list.
+    /// Each required read has an exact, nonnegative index and wildcards need no read.
+    fn test_collected_items<'t>(
+        &mut self,
+        values: &str,
+        children: impl Iterator<Item = &'t MatchTest>,
+        failed: &str,
+        captures: usize,
+    ) {
+        for (i, child) in children.enumerate() {
+            if !matches!(child, MatchTest::Always) {
+                let index = crate::llvm::small(i as i64);
+                self.take_matching_check();
+                let item = self.read_index_word(values, &index.operand, "0", None);
+                self.test_pattern(child, &item, failed, captures, None);
+            }
+        }
+    }
+
     fn test_pattern(
         &mut self,
         test: &MatchTest,
@@ -177,12 +196,12 @@ impl Frame<'_, '_, '_> {
                 let values = f.op("match_mapping_keys", &[value, &keys]);
                 let ok = f.value(&format!("icmp ne i64 {values}, 0"));
                 f.pattern_check(&ok, failed);
-                for (i, (_, child)) in items.iter().enumerate() {
-                    let f = &mut *self.code;
-                    let i = f.integer(i);
-                    let item = f.op("get", &[&values, &i]);
-                    self.test_pattern(child, &item, failed, captures, None);
-                }
+                self.test_collected_items(
+                    &values,
+                    items.iter().map(|(_, child)| child),
+                    failed,
+                    captures,
+                );
                 if let Some(index) = rest {
                     let f = &mut *self.code;
                     let rest = f.op("dict", &[]);
@@ -215,16 +234,10 @@ impl Frame<'_, '_, '_> {
                 let f = &mut *self.code;
                 let ok = f.value(&format!("icmp ne i64 {fields}, 0"));
                 f.pattern_check(&ok, failed);
-                for (i, child) in positional
+                let children = positional
                     .iter()
-                    .chain(keywords.iter().map(|(_, child)| child))
-                    .enumerate()
-                {
-                    let f = &mut *self.code;
-                    let i = f.integer(i);
-                    let val = f.op("get", &[&fields, &i]);
-                    self.test_pattern(child, &val, failed, captures, None);
-                }
+                    .chain(keywords.iter().map(|(_, child)| child));
+                self.test_collected_items(&fields, children, failed, captures);
             }
         }
     }
@@ -272,12 +285,7 @@ impl Frame<'_, '_, '_> {
                 let count = f.integer(items.len());
                 let star = star.map_or_else(|| "0".into(), |i| f.integer(i));
                 let values = f.op("unpack", &[value, &count, &star]);
-                for (i, child) in items.iter().enumerate() {
-                    let f = &mut *self.code;
-                    let i = f.integer(i);
-                    let item = f.op("get", &[&values, &i]);
-                    self.test_pattern(child, &item, failed, captures, None);
-                }
+                self.test_collected_items(&values, items.iter(), failed, captures);
             }
         }
     }
