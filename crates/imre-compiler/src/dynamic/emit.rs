@@ -818,8 +818,7 @@ enum Body<'a> {
         &'a crate::frontend::function_scope::classes::ClassScope,
     ),
     CheckedProvider(&'a crate::frontend::CheckedProvider, AnnotationScope<'a>),
-    /// The checked body borrows its declaring callable's bindings during emission.
-    Registered(RegisteredBody<'a>, &'a Callable<'a>),
+    Registered(&'a Callable<'a>),
     Operand(
         TextRange,
         &'a crate::frontend::RegisteredOperand,
@@ -940,11 +939,20 @@ impl SourceInfo<'_> {
 impl SourceMap<'_> {
     fn function<'a, 'p, 'scope>(
         &'p self,
-        frame: RegisteredFrame<'a, 'p>,
+        output: &'a mut Output,
+        suspension: u32,
         declared_globals: &'scope BTreeSet<String>,
         prefix: &'scope str,
         in_function: bool,
     ) -> Function<'a, 'p, 'scope> {
+        let mut frame = RegisteredFrame::new(
+            output,
+            self.positions,
+            suspension != 0,
+            self.unit,
+            self.module_start,
+        );
+        frame.async_generator = suspension == imre_ast::code_flags::ASYNC_GENERATOR;
         Function {
             sites: Default::default(),
             frame,
@@ -965,29 +973,8 @@ impl SourceMap<'_> {
     ) -> String {
         let suspension = definition.map_or(0, |(_, flags)| flags);
         let start = definition.map(|(start, _)| start);
-        let mut frame = RegisteredFrame::new(
-            output,
-            self.positions,
-            suspension != 0,
-            self.unit,
-            self.module_start,
-        );
-        frame.async_generator = suspension == imre_ast::code_flags::ASYNC_GENERATOR;
         let empty = BTreeSet::new();
-        let declared_globals = match &body {
-            Body::Registered(_, Callable::Named(header)) => {
-                frame.function_locals = header.metadata.local_names();
-                &header.globals
-            }
-            Body::Registered(_, Callable::Generator(generator)) => {
-                frame.function_locals = generator.metadata.local_names();
-                &empty
-            }
-            Body::Module(_) => &self.scopes.module_globals,
-            Body::Namespace(_, class) => &class.bindings.globals,
-            _ => &empty,
-        };
-        let mut function = self.function(frame, declared_globals, prefix, in_function);
+        let mut function = self.function(output, suspension, &empty, prefix, in_function);
         match body {
             Body::Module(module) => {
                 let frame = &mut function.frame;
@@ -1003,12 +990,27 @@ impl SourceMap<'_> {
                     let name = frame.code_name(module.name);
                     frame.op("bind_doctest_module", &[&frame.scope.clone(), &name]);
                 }
-                frame.declare_globals(declared_globals);
+                function.declared_globals = &self.scopes.module_globals;
+                frame.declare_globals(function.declared_globals);
                 RegisteredBody::Suite(&module.initializer).emit(&mut function);
                 return function.frame.finish_module();
             }
-            Body::Registered(body, _) => {
-                function.frame.declare_globals(function.declared_globals);
+            Body::Registered(callable) => {
+                let body = match callable {
+                    Callable::Named(header) => {
+                        function.frame.function_locals = header.metadata.local_names();
+                        function.declared_globals = &header.globals;
+                        function.frame.declare_globals(function.declared_globals);
+                        header.body()
+                    }
+                    Callable::Lambda(lambda, _) => {
+                        RegisteredBody::Function(lambda.body.as_ref().expect("checked lambda body"))
+                    }
+                    Callable::Generator(generator) => {
+                        function.frame.function_locals = generator.metadata.local_names();
+                        RegisteredBody::Function(&generator.body)
+                    }
+                };
                 body.emit(&mut function);
             }
             Body::Namespace(prepared, class) => {
@@ -1024,8 +1026,8 @@ impl SourceMap<'_> {
                     let value = frame.text(doc);
                     frame.bind("__doc__", &value);
                 }
-                let globals = &class.bindings.globals;
-                frame.declare_globals(globals);
+                function.declared_globals = &class.bindings.globals;
+                frame.declare_globals(function.declared_globals);
                 RegisteredBody::Suite(&prepared.body).emit(&mut function);
                 self.finish_class_annotations(
                     &mut function.frame,
@@ -1249,25 +1251,10 @@ impl Function<'_, '_, '_> {
 
     fn compile_callable(&mut self, site: TextRange, callable: Callable<'_>) -> CompiledDefinition {
         let source = self.source;
-        let (name, metadata, body, header) = match callable {
-            Callable::Named(header) => (
-                header.name.as_str(),
-                &header.metadata,
-                header.body(),
-                Some(header),
-            ),
-            Callable::Lambda(lambda, _) => (
-                "<lambda>",
-                &lambda.metadata,
-                RegisteredBody::Function(lambda.body.as_ref().expect("checked lambda body")),
-                None,
-            ),
-            Callable::Generator(generator) => (
-                "<genexpr>",
-                &generator.metadata,
-                RegisteredBody::Function(&generator.body),
-                None,
-            ),
+        let (name, metadata, header) = match callable {
+            Callable::Named(header) => (header.name.as_str(), &header.metadata, Some(header)),
+            Callable::Lambda(lambda, _) => ("<lambda>", &lambda.metadata, None),
+            Callable::Generator(generator) => ("<genexpr>", &generator.metadata, None),
         };
         let qualname = if header.is_some_and(|h| self.declared_globals.contains(&h.binding)) {
             name.to_owned()
@@ -1300,7 +1287,7 @@ impl Function<'_, '_, '_> {
             let code = source.code(
                 self.frame.output,
                 &prefix,
-                Body::Registered(body, &callable),
+                Body::Registered(&callable),
                 true,
                 Some((site.start(), suspension)),
             );

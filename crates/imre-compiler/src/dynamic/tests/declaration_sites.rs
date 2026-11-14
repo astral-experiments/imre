@@ -1,4 +1,4 @@
-use crate::dynamic::emit::{ModuleOrigin, Output, PreparedBody, RegisteredFrame};
+use crate::dynamic::emit::{ModuleOrigin, Output, PreparedBody};
 use std::path::Path;
 
 #[test]
@@ -32,14 +32,13 @@ fn checked_module_places_class_generator_and_following_lambda() {
         unit: 0,
         positions: &SourcePositions::new(&module.source.path, text, &file),
     };
-    let frame = RegisteredFrame::new(
+    let mut function = location.function(
         &mut output,
-        location.positions,
-        false,
         0,
-        module.source.module_start,
+        &module.source.scopes.module_globals,
+        "",
+        false,
     );
-    let mut function = location.function(frame, &module.source.scopes.module_globals, "", false);
     let body = &module.initializer().checked.function.body;
     let mut required = Vec::new();
     RequiredSite::visit(body, Some(&module.source.exec_literals), &mut |site| {
@@ -101,15 +100,13 @@ fn checked_module_places_both_plain_and_generic_aliases_before_their_following_l
             unit: 0,
             positions: &SourcePositions::new(&module.source.path, &text, &file),
         };
-        let frame = RegisteredFrame::new(
+        let mut function = location.function(
             &mut output,
-            location.positions,
-            false,
             0,
-            module.source.module_start,
+            &module.source.scopes.module_globals,
+            "",
+            false,
         );
-        let mut function =
-            location.function(frame, &module.source.scopes.module_globals, "", false);
         let body = &module.initializer().checked.function.body;
         let mut required = Vec::new();
         RequiredSite::visit(body, Some(&module.source.exec_literals), &mut |site| {
