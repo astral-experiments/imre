@@ -114,4 +114,15 @@ for duplicate in (False, True):
     rescued.clear()
     assert peer() is None
 
+def keep_overlapping_pairs(items):
+    first, second, third = items
+    right = (third, first)
+    left = (first, second)
+    events.append(left[0] is right[1])
+
+
+events.clear()
+keep_overlapping_pairs((Temporary("first"), Temporary("second"), Temporary("third")))
+assert events == [True, "third", "second", "first"]
+
 print("weak frame cleanup ok")

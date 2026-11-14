@@ -7065,10 +7065,17 @@ impl Heap {
                 self.slots[id].value.as_ref().unwrap(),
                 MarkMode::CycleEdges,
                 |child| {
-                    let child = index_of(child);
-                    incoming[child] -= 1;
-                    if incoming[child] == 0 {
-                        unowned.push(child);
+                    let index = index_of(child);
+                    incoming[index] -= 1;
+                    if incoming[index] == 0 {
+                        unowned.push(index);
+                    } else if first_finalizer.is_none()
+                        && let Some((owner, _)) = releasing
+                        && self.slots[child].finalization == Finalization::Pending
+                    {
+                        // A second dead reference postpones the child past its owner's
+                        // branch. Release through the owner while its siblings are live.
+                        first_finalizer = Some(owner);
                     }
                 },
             );
