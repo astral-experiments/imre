@@ -88,20 +88,19 @@ print(", ".join(finalists(results, 8)))  # Ada, Mira
 ```
 
 Imre can resolve `result.name` and `result.score` at compile time. If you add
-the loop below, CPython prints `Mira` and `8`. Imre rejects this use of
-`getattr` because the loop chooses the field by name at runtime.
+the loop below, `imre build` reports an error at `getattr`. Running the same
+module with `imre -m` supports this lookup and prints `Mira` and `8`, as
+CPython does.
 
 ```python
 for field in ["name", "score"]:
     print(getattr(results[0], field))
 ```
 
-At present, Imre doesn't support any of the following:
-
-- Dynamically typed storage (`Any`) and unrestricted unions
-- Dynamic attributes and general-purpose reflection
-- Recursive calls and async generators
-- Most of the Python standard library (see [module coverage](docs/stdlib.md))
+A function with a fixed signature cannot currently call itself. An async
+generator can feed an async comprehension. See the [language subset](docs/subset.md)
+for details on supported operations, and [module coverage](docs/stdlib.md) for
+the standard library.
 
 At the same time, Imre is capable of running scripts like
 [ty’s conformance report](examples/conformance_report/README.md) unchanged,

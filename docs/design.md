@@ -26,7 +26,7 @@ The driver still chooses an entry layout for the module graph. When the entry ne
 
 ## What an ordinary build compiles
 
-Imre compiles executable Python bodies ahead of time. Runtime data can still drive object and method dispatch. A caller can select a handler from a dictionary with `rules[key](value)`, or rebind an attribute to a compiled function with `setattr(obj, name, double)` even when `name` comes from input.
+Imre compiles executable Python bodies ahead of time. Runtime data can still drive object and method dispatch. For example, `handler = double if key == "double" else triple` lets an input value select between two compiled functions. Calling `handler(value)` invokes the selected function.
 
 Modules still initialize on first import, as `selectors` does with its compiled Python initializer. When `json` imports its helpers, the loader passes their linked native code objects to `exec`. [Built-in initializers](../crates/imre-compiler/src/dynamic/mod.rs#L2170) · [Import loader](../crates/imre-compiler/stdlib/importlib/_bootstrap_external.py#L129)
 
