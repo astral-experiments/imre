@@ -3186,6 +3186,7 @@ impl Context {
             .as_u64()
             .and_then(|v| u32::try_from(v).ok());
         let definition = value::CodeDefinition {
+            parsed_parameters: Default::default(),
             module_definition,
             flags: flags.unwrap_or_default(),
             flags_complete: flags.is_some(),
@@ -3214,7 +3215,6 @@ impl Context {
     ) -> Id {
         self.alloc(Value::Code(value::CodeObject {
             compilation_constants: NONE,
-            parsed_parameters: Default::default(),
             varnames: NONE,
             cellvars: NONE,
             freevar_names: NONE,
