@@ -114,11 +114,14 @@ impl Checker<'_> {
         &mut self,
         signature: &Signature,
         result: Type,
-        args: ir::CallArgs,
+        mut args: ir::CallArgs,
     ) -> Expr {
         let context = self.classes.contexts.contains(&signature.id)
             || self.classes.producer_items.contains_key(&signature.id);
         if !signature.asynchronous && !context {
+            if let ir::CallSite::Written(range, end) = args.site {
+                args.site = ir::CallSite::Fixed(self.fixed_origin(range, Some((end, b'('))));
+            }
             return Expr {
                 ty: result,
                 kind: ExprKind::Call(signature.id, args),
