@@ -938,11 +938,14 @@ pub(crate) struct RegisteredSource<'a> {
     pub(crate) declares_signatures: bool,
     pub(crate) name: &'a str,
     pub(crate) path: &'a Path,
+    /// File to register in the semantic filesystem when its search root traversed a parent.
+    pub(crate) semantic_path: Option<&'a Path>,
     pub(crate) source: &'a str,
     pub(crate) kind: SourceKind,
     pub(crate) is_program: bool,
     pub(crate) check_execution: bool,
     pub(crate) checked_module: Option<crate::modules::ModuleId>,
+    pub(crate) guarded_stub: Option<ruff_db::files::File>,
 }
 
 impl<'a> RegisteredSource<'a> {
@@ -978,6 +981,7 @@ impl<'a> RegisteredSource<'a> {
             unit: None,
             name,
             path,
+            semantic_path: None,
             source,
             kind: if path == Path::new("<string>") {
                 SourceKind::Command
@@ -987,6 +991,7 @@ impl<'a> RegisteredSource<'a> {
             is_program,
             check_execution: is_program,
             checked_module,
+            guarded_stub: None,
             initial: None,
             main_body: false,
             declares_signatures: is_program,
@@ -2445,8 +2450,24 @@ pub(crate) fn compile(
     drop(installed_wheels);
     // A runtime path change can select any linked file. Bind its functions using the
     // file's own search root and wheel membership, including for shadowed sources.
+    let mut semantic_roots = HashMap::new();
+    let mut semantic_files = HashMap::new();
     for (id, root) in file_origins {
         let (_, path, _) = &sources[id];
+        if root
+            .components()
+            .any(|c| c == std::path::Component::ParentDir)
+            && let Ok(relative) = path.strip_prefix(root)
+        {
+            let physical = semantic_roots.entry(root.to_path_buf()).or_insert_with(|| {
+                let resolved = filesystem.canonicalize(root).ok();
+                inputs
+                    .declared_file_resolutions
+                    .push((root.to_path_buf(), resolved.clone()));
+                resolved.unwrap_or_else(|| root.to_path_buf())
+            });
+            semantic_files.insert(path.as_path(), physical.join(relative));
+        }
         let application = entry_owner
             .as_ref()
             .and_then(|owner| owner.is_program(root, path))
@@ -2501,6 +2522,9 @@ pub(crate) fn compile(
             .filter(|(_, _, package)| !package)
             .map(|(id, _, _)| id),
     };
+    let command_file = semantic_roots
+        .contains_key(&root)
+        .then(|| root.join("<string>.py"));
     let selected_sources: Vec<_> = selected_sources
         .into_iter()
         .enumerate()
@@ -2527,6 +2551,14 @@ pub(crate) fn compile(
             registration.has_open_exec = literals.open_exec.contains(&id);
             registration.unit = output.is_some().then_some(id);
             registration.declares_signatures = application;
+            if application && let Some(graph) = checked_graph {
+                registration.guarded_stub = graph.session.guarded_stub(
+                    registration.path,
+                    &graph.inputs.declaration_files,
+                    &mut inputs,
+                    &mut filesystem,
+                );
+            }
             registration.check_execution |= application;
             registration.main_body = main_unit == Some(id);
             registration.initial = entry_start.filter(|_| {
@@ -2564,6 +2596,11 @@ pub(crate) fn compile(
             {
                 registration.kind = kind;
             }
+            registration.semantic_path = if registration.kind == SourceKind::Command {
+                command_file.as_deref()
+            } else {
+                semantic_files.get(registration.path).map(PathBuf::as_path)
+            };
             registration
         })
         .collect();
@@ -2639,12 +2676,19 @@ pub(crate) fn compile(
     let mut layouts = Vec::new();
     // Resolve the registered SDK files after the physical search roots in both checkers.
     roots.push(bundled_root.into());
+    // The semantic filesystem interns paths without parent components. Use the selected
+    // disk root and keep its module-relative name, including symlinks within a package.
+    for (spelling, physical) in &semantic_roots {
+        if let Some(root) = roots.iter_mut().find(|root| *root == spelling) {
+            root.clone_from(physical);
+        }
+    }
     check(
         project.as_mut(),
         entry_requests_objects || startup_provider,
         Some(RegisteredSources {
             layouts: &mut layouts,
-            root: &root,
+            root: semantic_roots.get(&root).unwrap_or(&root),
             roots: &roots,
             winners,
             file_alternatives,
