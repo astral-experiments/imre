@@ -256,40 +256,21 @@ impl<'a> Visitor<'a> for Uses<'_> {
 /// supplies expected output, flags and line numbers at run time; each compiled
 /// entry checks its exact source against that parser before executing.
 fn prompts(doc: &str) -> Vec<String> {
-    let lines = doc
+    let expanded = ruff_python_trivia::expand_tabs(doc);
+    let mut lines = expanded
         .split('\n')
-        .map(|line| {
-            let mut expanded = String::new();
-            let mut column = 0;
-            for c in line.chars() {
-                if c == '\t' {
-                    let count = 8 - column % 8;
-                    expanded.extend(std::iter::repeat_n(' ', count));
-                    column += count;
-                } else {
-                    expanded.push(c);
-                    column += 1;
-                }
-            }
-            expanded
-        })
-        .collect::<Vec<_>>();
+        .map(|line| line.trim_start_matches(' '))
+        .peekable();
     let mut result = Vec::new();
-    let mut i = 0;
-    while i < lines.len() {
-        let line = lines[i].trim_start_matches(' ');
-        i += 1;
+    while let Some(line) = lines.next() {
         let Some(first) = line.strip_prefix(">>>") else {
             continue;
         };
         let mut source = String::from(first.strip_prefix(' ').unwrap_or(first));
-        while i < lines.len() {
-            let Some(next) = lines[i].trim_start_matches(' ').strip_prefix("...") else {
-                break;
-            };
+        while let Some(next) = lines.peek().and_then(|line| line.strip_prefix("...")) {
             source.push('\n');
             source.push_str(next.strip_prefix(' ').unwrap_or(next));
-            i += 1;
+            lines.next();
         }
         if !source.ends_with('\n') {
             source.push('\n');
