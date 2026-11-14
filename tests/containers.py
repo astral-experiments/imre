@@ -87,6 +87,7 @@ for row in rows.values():
     rows["second"] = [3]
     print(row[0])
 """,
+    "iteration_heterogeneous_tuple": 'for value in (1, "two"):\n    print(value)\n    print(type(value).__name__)\n',
     "iteration_list_unpacking": "first, second = [1, 2]\nprint(first)\nprint(second)\n",
     "iteration_starred_unpacking": "first, *rest = (1, 2, 3)\nprint(first)\nprint(rest[0])\nprint(rest[1])\n",
     "iteration_mutable_unpacking_leaf": "values = [0]\nvalues[0], other = (1, 2)\nprint(values[0])\nprint(other)\n",
@@ -545,7 +546,6 @@ take({1})
     "iteration_target_type_mismatch": 'value = "text"\nfor value in [1]:\n    pass\n',
     "iteration_tuple_target_arity": "for first, second in [(1, 2, 3)]:\n    pass\n",
     "iteration_range_tuple_target": "for (value,) in range(2):\n    pass\n",
-    "iteration_heterogeneous_tuple": 'for value in (1, "two"):\n    print(value)\n',
     "iteration_optional_iterable": """
         def show(values: list[int] | None) -> None:
             for value in values:
