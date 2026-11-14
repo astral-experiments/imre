@@ -3196,9 +3196,10 @@ impl Context {
         } else {
             scope
         };
-        let root = self.root_scope(scope);
+        let known_closure = self.code_object(code).definition.closure_supported;
+        let (module, environment) = self.new_function_globals(scope, known_closure)?;
         let fields = super::function_fields::FunctionFields::new(
-            self, scope, root, name, qualname, doc, annotate,
+            self, scope, module, name, qualname, doc, annotate,
         );
         let names = self.code_object(code).definition.freevars.clone();
         let names = names.as_deref().unwrap_or_default();
@@ -3289,13 +3290,10 @@ impl Context {
             };
             cells.insert(name.clone(), cell);
         }
-        let scope = if self.code_object(code).definition.closure_supported {
-            let globals = self.new_function_globals(root)?;
-            self.environment_with_cells(globals, cells)
-        } else if self.scope_data(scope).parent.is_none() {
-            self.new_function_globals(scope)?
+        let scope = if known_closure {
+            self.environment_with_cells(environment, cells)
         } else {
-            scope
+            environment
         };
         Ok(self.alloc(Value::Function {
             fields,
@@ -4111,15 +4109,15 @@ mod tests {
         let key = ctx.text("__builtins__");
         let globals = ctx.dict(vec![(key, old)]);
         let first = ctx.function_environment("invoice", globals, old);
-        assert_eq!(ctx.new_function_globals(first).unwrap(), first);
+        assert_eq!(ctx.new_function_globals(first, true).unwrap().1, first);
         ctx.set_dictionary_key(globals, key, updated, None, true)
             .unwrap();
-        let second = ctx.new_function_globals(first).unwrap();
+        let second = ctx.new_function_globals(first, true).unwrap().1;
         assert_ne!(first, second);
         assert_eq!(ctx.module_globals(second).unwrap(), globals);
         assert_eq!(ctx.function_builtins(first).unwrap(), old);
         assert_eq!(ctx.function_builtins(second).unwrap(), updated);
-        assert_eq!(ctx.new_function_globals(second).unwrap(), second);
+        assert_eq!(ctx.new_function_globals(second, true).unwrap().1, second);
 
         // sys.modules is mutable and cannot identify a function's original builtins.
         let original = ctx.module("builtins").unwrap();
@@ -4129,7 +4127,7 @@ mod tests {
             .unwrap();
         let ordinary = ctx.scope("app", None);
         ctx.bind(ordinary, "__builtins__", alternate);
-        let captured = ctx.new_function_globals(ordinary).unwrap();
+        let captured = ctx.new_function_globals(ordinary, true).unwrap().1;
         assert_ne!(captured, ordinary);
         let expected = ctx.definition_builtins(alternate).unwrap();
         assert_eq!(ctx.function_builtins(captured).unwrap(), expected);

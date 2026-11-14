@@ -2672,23 +2672,51 @@ impl Context {
         scope
     }
 
-    /// Reuse the defining root when the new function would capture the same builtins.
-    pub(super) fn new_function_globals(&mut self, root: Id) -> Result<Id> {
-        let Some(value) = self.scope_name(root, "__builtins__") else {
-            return Ok(root);
+    /// Read the function's module before its builtins, using the defining namespace's keys.
+    pub(super) fn capture_function_namespace(
+        &mut self,
+        lookup: impl Fn(&mut Self, &str) -> Result<Option<Id>>,
+        capture_builtins: bool,
+    ) -> Result<(Id, Option<Id>)> {
+        let module = lookup(self, "__name__")?.unwrap_or(NONE);
+        // A key comparison can remove the module before the function takes ownership.
+        self.heap.keep(module);
+        let builtins = if capture_builtins {
+            lookup(self, "__builtins__")?
+                .map(|value| self.definition_builtins(value))
+                .transpose()?
+        } else {
+            None
         };
-        let chosen = self.definition_builtins(value)?;
+        Ok((module, builtins))
+    }
+
+    /// Retain the lexical environment for code whose closure layout is unavailable.
+    pub(super) fn new_function_globals(
+        &mut self,
+        scope: Id,
+        known_closure: bool,
+    ) -> Result<(Id, Id)> {
+        let root = self.root_scope(scope);
+        let environment = if known_closure { root } else { scope };
+        let (module, builtins) = self.capture_function_namespace(
+            |ctx, name| ctx.lookup_scope_name(root, name),
+            environment == root,
+        )?;
+        let Some(chosen) = builtins else {
+            return Ok((module, environment));
+        };
         let previous = self
             .scope_data(root)
             .exec_globals
             .map(|globals| globals.builtins)
             .or(self.source_builtins);
         if previous == Some(chosen) {
-            return Ok(root);
+            return Ok((module, root));
         }
         let globals = self.module_globals(root)?;
-        let module = self.scope_data(root).module.clone();
-        Ok(self.function_environment(&module, globals, chosen))
+        let label = self.scope_data(root).module.clone();
+        Ok((module, self.function_environment(&label, globals, chosen)))
     }
 
     /// Return the builtins captured by a function's defining environment.

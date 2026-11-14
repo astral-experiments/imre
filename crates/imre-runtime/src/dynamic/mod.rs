@@ -2958,6 +2958,7 @@ impl Context {
 
     /// Read a live namespace key, including equality with keys installed by Python.
     fn lookup_dict_name(&mut self, dict: Id, name: &str) -> Result<Option<Id>> {
+        let dict = self.dict_storage(dict).unwrap_or(dict);
         if let Some(value) = self.scalar_dict_name(dict, name) {
             return Ok(value);
         }

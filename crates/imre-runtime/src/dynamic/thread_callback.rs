@@ -399,7 +399,7 @@ impl Callback {
         );
         let function = ctx.function_with_closure(
             code,
-            globals,
+            (globals, ctx.root_module_name(globals)),
             super::source_code::FunctionClosure::Cells(cell.as_slice()),
             (name, qualname),
             NONE,

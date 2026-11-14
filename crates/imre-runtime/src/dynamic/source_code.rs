@@ -2895,14 +2895,16 @@ impl Context {
                 ));
             }
         }
-        let builtins = match self.dict_named_item(globals, "__builtins__") {
-            Some(value) => self.definition_builtins(value)?,
+        let (module, builtins) =
+            self.capture_function_namespace(|ctx, name| ctx.lookup_dict_name(globals, name), true)?;
+        let builtins = match builtins {
+            Some(builtins) => builtins,
             None => self.caller_builtins()?,
         };
         let scope = self.function_environment("", globals, builtins);
         Ok(self.function_with_closure(
             code,
-            scope,
+            (scope, module),
             FunctionClosure::Tuple(closure),
             (name, qualname),
             defaults,
@@ -2914,7 +2916,7 @@ impl Context {
     pub(super) fn function_with_closure(
         &mut self,
         code: Id,
-        globals: Id,
+        (globals, module): (Id, Id),
         closure: FunctionClosure<'_>,
         (name, qualname): (Id, Id),
         defaults: Id,
@@ -2939,7 +2941,7 @@ impl Context {
             .map(|index| cells[index]);
         let scope = self.closure_environment(globals, freevars, &cells);
         let fields = super::function_fields::FunctionFields::new(
-            self, scope, globals, name, qualname, code_doc, NONE,
+            self, scope, module, name, qualname, code_doc, NONE,
         );
         self.alloc(Value::Function {
             fields,
@@ -3352,7 +3354,7 @@ impl Context {
                 let name = code.name;
                 self.function_with_closure(
                     code_id,
-                    scope,
+                    (scope, self.root_module_name(scope)),
                     FunctionClosure::Tuple(cells),
                     (name, name),
                     NONE,
