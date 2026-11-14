@@ -1236,6 +1236,10 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
     }
 
     pub(crate) fn emit_statement(&mut self, stmt: &Statement) {
+        self.statement_with_tail(stmt, &mut [].as_slice());
+    }
+
+    fn statement_with_tail(&mut self, stmt: &Statement, tail: &mut &[Statement]) {
         if let Entry::Registered(frame) = &mut self.0 {
             match (stmt, frame.next_fixed_site(ir::Node::Statement(stmt))) {
                 (Statement::Position(range, simple), _) => frame.statement_site(*range, *simple),
@@ -1329,7 +1333,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 value,
                 ready,
                 kind,
-            } => self.pull(*iterator, *key, *value, *ready, *kind),
+            } => self.pull(*iterator, *key, *value, *ready, *kind, tail),
             Statement::Break(_) | Statement::Continue(_) | Statement::Exhaust => {
                 self.loop_transfer(stmt)
             }
@@ -1402,21 +1406,19 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             Entry::Native(emitter) => Some(emitter.temporaries.clone()),
             Entry::Registered(_) => None,
         };
-        while let Some((stmt, tail)) = remaining.split_first() {
+        while let Some((stmt, mut tail)) = remaining.split_first() {
             let fused = match &mut self.0 {
                 Entry::Native(emitter) if !emitter.body.terminated => {
                     emitter.fused_statements(remaining)
                 }
-                Entry::Registered(frame) if !frame.terminated() => {
-                    frame.pull_and_exhaust(remaining)
-                }
+                Entry::Registered(frame) if !frame.terminated() => 0,
                 _ => break,
             };
-            if fused == 0 {
-                self.emit_statement(stmt);
-                remaining = tail;
-            } else {
+            if fused != 0 {
                 remaining = &remaining[fused..];
+            } else {
+                self.statement_with_tail(stmt, &mut tail);
+                remaining = tail;
             }
             if let (Entry::Native(emitter), Some(incoming)) = (&self.0, &incoming) {
                 debug_assert!(

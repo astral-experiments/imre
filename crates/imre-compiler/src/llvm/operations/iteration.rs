@@ -332,12 +332,13 @@ impl CheckedBody<'_, '_, '_, '_> {
         value: Option<usize>,
         ready: usize,
         kind: IterNextKind,
+        tail: &mut &[Statement],
     ) {
         if let Entry::Native(e) = &mut self.0 {
             e.iter_next(iterator, key, value, ready, kind);
             return;
         }
-        self.python().pull(iterator, key, value, ready, kind, None);
+        self.python().pull(iterator, key, value, ready, kind, tail);
     }
 
     pub(in crate::llvm) fn loop_transfer(&mut self, statement: &Statement) {
