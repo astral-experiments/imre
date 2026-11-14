@@ -268,12 +268,27 @@ pub(super) fn prepare_stdlib_archive(path: &Path) -> io::Result<()> {
 /// lets parallel builds safely finish the same action in either order.
 struct ObjectEntry {
     directory: PathBuf,
-    index: PathBuf,
+    action: blake3::Hash,
 }
 
 impl ObjectEntry {
+    fn index(&self) -> PathBuf {
+        self.directory.join(format!("{}.key", self.action))
+    }
+
+    // Bind the blob digest to this action, even if a complete record is misplaced.
+    fn record(&self, digest: blake3::Hash) -> String {
+        let check = blake3::keyed_hash(self.action.as_bytes(), digest.as_bytes());
+        format!("{digest} {check}")
+    }
+
     fn restore(&self, staged: &Path) -> Option<()> {
-        let expected = blake3::Hash::from_hex(fs::read_to_string(&self.index).ok()?).ok()?;
+        let record = fs::read_to_string(self.index()).ok()?;
+        let (digest, _) = record.split_once(' ')?;
+        let expected = blake3::Hash::from_hex(digest).ok()?;
+        if record != self.record(expected) {
+            return None;
+        }
         let bytes = fs::read(self.directory.join(format!("{}.o", expected.to_hex()))).ok()?;
         if blake3::hash(&bytes) != expected {
             return None;
@@ -283,9 +298,9 @@ impl ObjectEntry {
 
     fn publish(&self, staged: &Path) -> io::Result<()> {
         let bytes = fs::read(staged)?;
-        let digest = blake3::hash(&bytes).to_hex();
+        let digest = blake3::hash(&bytes);
         atomic_write(&self.directory.join(format!("{digest}.o")), &bytes)?;
-        atomic_write(&self.index, digest.as_bytes())
+        atomic_write(&self.index(), self.record(digest).as_bytes())
     }
 }
 
@@ -317,7 +332,7 @@ pub fn compile_objects(
             action.update(unit.llvm_ir.as_bytes());
             ObjectEntry {
                 directory: dir.clone(),
-                index: dir.join(format!("{}.key", action.finalize().to_hex())),
+                action: action.finalize(),
             }
         });
         let hit = entry.as_ref().is_some_and(|e| e.restore(&staged).is_some());
