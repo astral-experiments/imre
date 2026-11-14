@@ -415,3 +415,15 @@ def report_pull(items):
 
 
 report_pull(map(int, ("7", "bad")))
+
+
+def report_display(items):
+    try:
+        return tuple(
+            [*items, 1]
+        )
+    except Exception as error:
+        print(error.__traceback__.tb_lineno)
+
+
+report_display(map(int, ("7", "bad")))

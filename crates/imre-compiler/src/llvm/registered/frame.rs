@@ -1752,12 +1752,16 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
                 container
             };
             let append = |code: &mut Self, list: &String, _, value: String, extend| {
-                if extend && code.native_suspension {
+                let append = |code: &mut Self| {
+                    code.take_matching_check();
+                    code.checked(&format!("call i64 @imre_dyn_display_item(ptr %ctx, i64 {list}, i64 {value}, i64 {mark}, i1 {extend})"));
+                };
+                if extend {
                     let range = code.current_range;
-                    code.call_position(range);
+                    code.with_source_range(range, append);
+                } else {
+                    append(code);
                 }
-                code.take_matching_check();
-                code.checked(&format!("call i64 @imre_dyn_display_item(ptr %ctx, i64 {list}, i64 {value}, i64 {mark}, i1 {extend})"));
             };
             let (mut result, complete) = crate::llvm::operations::sequences::build(
                 code, items, crate::llvm::operations::sequences::STACK_USE_GUIDELINE, Expr::spread_operand, Self::evaluate_handle, initial, append,
