@@ -191,11 +191,10 @@ impl<'ast> Visitor<'ast> for Reads<'_, 'ast> {
             ast::Expr::Call(call)
                 if matches!(&*call.func, ast::Expr::Name(name) if name.id == "map")
                     && let [ast::Expr::Name(convert), arg] = call.arguments.args.as_ref()
-                    && convert.id == "str" =>
+                    && convert.id == "str"
+                    && self.allow(arg) =>
             {
-                if self.allow(arg) {
-                    self.tuple_reads = false;
-                }
+                self.tuple_reads = false;
             }
             _ => {}
         }
