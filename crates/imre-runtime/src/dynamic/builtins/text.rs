@@ -252,7 +252,11 @@ pub(super) fn construct(
                 }
                 _ => {
                     let source = value.unwrap();
-                    let bytes = bytes_from_source(ctx, source, name == "bytes")?;
+                    let bytes = if name == "bytes" {
+                        bytes_from_source(ctx, source, ByteConsumer::Bytes)?
+                    } else {
+                        bytes_from_iterable(ctx, source)?
+                    };
                     // An exact tuple or buffer fills newly allocated bytes. The iterable
                     // writer instead finishes from known byte data and can return a singleton.
                     if name == "bytes"
@@ -623,6 +627,40 @@ pub(super) fn bytearray_method(
         }
         return Ok(NONE);
     }
+    if method == "extend"
+        && receiver != argument
+        && let Some(export) = ctx.buffer_slot(argument, "__buffer__")
+    {
+        // A buffer is inserted at the end observed before acquisition, while still exported.
+        let position = data.len() as i64;
+        let insert = |ctx: &mut Context, view| {
+            let end = ctx.int(position);
+            let slice = ctx.alloc(Value::Slice([end, end, NONE]));
+            ctx.put_item(storage, slice, view).map(|()| NONE)
+        };
+        if let Some(method) = export {
+            return ctx
+                .with_contiguous_python_buffer(argument, method, 0, |ctx, view| {
+                    Ok(insert(ctx, view))
+                })
+                .map_err(|_| {
+                    type_error(format!(
+                        "can't set bytearray slice from {:.100}",
+                        ctx.type_name(argument)
+                    ))
+                })?;
+        }
+        if matches!(
+            ctx.heap.get(ctx.scalar_value(argument)),
+            Value::Bytes(_) | Value::ByteArray(_)
+        ) && ctx
+            .buffer_slot(argument, "__release_buffer__")
+            .flatten()
+            .is_some()
+        {
+            return ctx.with_native_bytes_export(argument, insert);
+        }
+    }
     let byte;
     let extra = if method == "append" {
         byte = [ctx.byte_value(argument)?];
@@ -640,7 +678,7 @@ pub(super) fn bytearray_method(
         })?;
         Cow::Owned(super::super::copy_ids(bytes)?)
     } else {
-        Cow::Owned(bytes_from_iterable(ctx, argument)?)
+        Cow::Owned(bytes_from_source(ctx, argument, ByteConsumer::Extend)?)
     };
     if !extra.is_empty() {
         ctx.check_bytearray_resize(storage)?;
@@ -671,7 +709,7 @@ pub(super) fn call_bytes_method(ctx: &mut Context, source: Id) -> Result<Option<
 }
 
 pub(in super::super) fn bytes_from_iterable(ctx: &mut Context, obj: Id) -> Result<Vec<u8>> {
-    bytes_from_source(ctx, obj, false)
+    bytes_from_source(ctx, obj, ByteConsumer::Iterable)
 }
 
 /// The count form allocates distinct single-byte results, unlike the iterable writer.
@@ -698,12 +736,21 @@ fn bytes_count(ctx: &mut Context, source: Id) -> Result<Option<Vec<u8>>> {
     }
 }
 
-fn bytes_from_source(ctx: &mut Context, obj: Id, bytes_constructor: bool) -> Result<Vec<u8>> {
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ByteConsumer {
+    Bytes,
+    Extend,
+    Iterable,
+}
+
+fn bytes_from_source(ctx: &mut Context, obj: Id, consumer: ByteConsumer) -> Result<Vec<u8>> {
     #[cfg(target_os = "linux")]
     if matches!(ctx.heap.get(obj), Value::Mmap { .. }) {
         return Ok(ctx.read_buffer_bytes(obj)?.into_owned());
     }
-    if bytes_constructor && let Value::Array(array) = ctx.heap.get(ctx.scalar_value(obj)) {
+    if consumer == ByteConsumer::Bytes
+        && let Value::Array(array) = ctx.heap.get(ctx.scalar_value(obj))
+    {
         return super::super::copy_ids(array.as_bytes());
     }
     if matches!(ctx.heap.get(obj), Value::MemoryView { .. }) {
@@ -716,28 +763,54 @@ fn bytes_from_source(ctx: &mut Context, obj: Id, bytes_constructor: bool) -> Res
     ) {
         return super::super::copy_ids(ctx.bytes_like(obj)?);
     }
-    // PyBytes_FromObject replaces TypeError only while acquiring the iterator.
     let iter = ctx.iterator(obj).map_err(|error| {
         let ty = ctx.builtin("TypeError");
-        if bytes_constructor && ctx.raised_error_matches(&error, ty) {
-            type_error(format!(
+        if !ctx.raised_error_matches(&error, ty) {
+            return error;
+        }
+        match consumer {
+            ByteConsumer::Bytes => type_error(format!(
                 "cannot convert '{:.200}' object to bytes",
                 ctx.type_name(obj)
-            ))
-        } else {
-            error
+            )),
+            ByteConsumer::Extend => type_error(format!(
+                "can't extend bytearray with {:.100}",
+                ctx.type_name(obj)
+            )),
+            ByteConsumer::Iterable => error,
         }
     })?;
     ctx.heap.keep(iter);
-    let mark = ctx.heap.temporary_mark();
     let mut bytes = Vec::new();
+    if consumer == ByteConsumer::Extend {
+        let default = ctx.int(32);
+        let hint = ctx.length_hint(obj, Some(default))?;
+        let size = ctx.as_integer(hint)? as usize;
+        // CPython's temporary bytearray needs room for a trailing NUL.
+        if size == isize::MAX as usize {
+            return Err(Error::new("MemoryError", ""));
+        }
+        bytes
+            .try_reserve_exact(size)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+    }
+    let mark = ctx.heap.temporary_mark();
     while let Some(item) = ctx.next_item(iter)? {
         ctx.heap.keep(item);
-        let byte = ctx
-            .index_integer(item)?
-            .to_i64()
-            .and_then(|n| u8::try_from(n).ok())
-            .ok_or_else(|| Error::new("ValueError", "bytes must be in range(0, 256)"))?;
+        let byte = if consumer == ByteConsumer::Extend {
+            ctx.byte_value(item).map_err(|error| {
+                if ctx.string_storage(obj).is_some() && ctx.is_builtin_error(&error, "TypeError") {
+                    type_error("expected iterable of integers; got: 'str'")
+                } else {
+                    error
+                }
+            })?
+        } else {
+            ctx.index_integer(item)?
+                .to_i64()
+                .and_then(|n| u8::try_from(n).ok())
+                .ok_or_else(|| Error::new("ValueError", "bytes must be in range(0, 256)"))?
+        };
         bytes
             .try_reserve(1)
             .map_err(|_| Error::new("MemoryError", ""))?;
