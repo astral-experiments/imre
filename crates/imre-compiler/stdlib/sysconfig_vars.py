@@ -52,8 +52,22 @@ def get_scheme_names():
     return tuple(sorted(_INSTALL_SCHEMES))
 
 
+def _get_preferred_schemes():
+    # InterpreterLayout uses these scheme names on all Imre targets.
+    return {'prefix': 'posix_prefix', 'user': 'posix_user'}
+
+
+# CPython 3.14.5 Lib/sysconfig/__init__.py. See licenses/CPython.txt.
 def get_preferred_scheme(key):
-    return {'prefix': 'posix_prefix', 'user': 'posix_user'}[key]
+    if key == 'prefix' and sys.prefix != sys.base_prefix:
+        return 'venv'
+    scheme = _get_preferred_schemes()[key]
+    if scheme not in _INSTALL_SCHEMES:
+        raise ValueError(
+            f"{key!r} returned {scheme!r}, which is not a valid scheme "
+            f"on this platform"
+        )
+    return scheme
 
 
 def get_default_scheme():
@@ -71,9 +85,7 @@ def _subst_vars(s, local_vars):
             raise AttributeError(f'{var}') from None
 
 
-def get_paths(scheme=get_default_scheme(), vars=None, expand=True):
-    if not expand:
-        return _INSTALL_SCHEMES[scheme]
+def _expand_vars(scheme, vars):
     if vars is None:
         fields = {key: value for key, value in get_config_vars().items() if isinstance(key, str)}
     else:
@@ -84,6 +96,12 @@ def get_paths(scheme=get_default_scheme(), vars=None, expand=True):
         fields = {key: vars[key] for key in vars.keys() if isinstance(key, str)}
     return {name: os.path.normpath(_subst_vars(os.path.expanduser(template), fields))
             for name, template in _INSTALL_SCHEMES[scheme].items()}
+
+
+def get_paths(scheme=get_default_scheme(), vars=None, expand=True):
+    if expand:
+        return _expand_vars(scheme, vars)
+    return _INSTALL_SCHEMES[scheme]
 
 
 def get_path(name, scheme=get_default_scheme(), vars=None, expand=True):
