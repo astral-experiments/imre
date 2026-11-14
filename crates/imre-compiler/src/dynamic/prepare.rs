@@ -85,13 +85,21 @@ pub(super) fn units<'a>(
         .map(move |(unit, (original, builtin))| {
             let (name, path, source) = original;
             let checked = checked_units.get(&unit);
+            let file = checked.and_then(|unit| unit.source);
+            let module_id = checked.and_then(|unit| unit.module);
             let literals = literal_sites.remove(&unit);
             let scanned = scanned_modules.remove(&unit);
-            let discovered = entry_source.take().or_else(|| registrations.parsed(unit));
+            let discovered = entry_source
+                .take()
+                .or_else(|| file.map(|file| file.parsed(registrations.modules)));
             let zip = archive_members.get(path);
             let physical = physical_files.get(path).filter(|_| !builtin);
             let types = layouts.iter_mut().find_map(|facts| facts.take(unit));
-            let origin = registrations.origin(unit, path.starts_with(bundled_root));
+            let origin = registrations
+                .provider_origin(unit, path.starts_with(bundled_root))
+                .unwrap_or_else(|| {
+                    ModuleOrigin::Program(module_id.and_then(|id| registrations.functions.get(&id)))
+                });
             let standalone = unit != 0
                 && matches!(origin, ModuleOrigin::Bundled)
                 && physical.is_none()
@@ -169,9 +177,7 @@ pub(super) fn units<'a>(
                     None => ParsedModule::parse(path, text)?,
                 };
                 let checked_source = match origin {
-                    ModuleOrigin::Program(_) => checked
-                        .and_then(|unit| unit.source)
-                        .map(|file| file.module(registrations.modules)),
+                    ModuleOrigin::Program(_) => file.map(|file| file.module(registrations.modules)),
                     _ => None,
                 };
                 let mut body = PreparedBody::from_parsed(
@@ -184,7 +190,7 @@ pub(super) fn units<'a>(
                     (types, checked_source),
                 )?;
                 if python_optimization < 2
-                    && let Some(module) = checked.and_then(|unit| unit.module)
+                    && let Some(module) = module_id
                 {
                     body.prompts = &registrations.modules[module].doctest_prompts;
                 }

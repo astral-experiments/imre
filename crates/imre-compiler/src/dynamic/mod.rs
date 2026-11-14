@@ -2421,12 +2421,14 @@ pub(crate) fn compile(
     }
     // A nested literal belongs to the same source slot as its outermost caller.
     let literal_sites = syntax.as_ref().map_or_else(Default::default, |session| {
-        literals.forest.finish(session, python_optimization, |unit| {
-            let (name, path, _) = &sources[unit];
-            registrations
-                .origin(unit, path.starts_with(bundled_root))
-                .python_annotations(name)
-        })
+        literals
+            .forest
+            .finish(session, python_optimization, |unit| {
+                let (name, path, _) = &sources[unit];
+                registrations
+                    .provider_origin(unit, path.starts_with(bundled_root))
+                    .is_some_and(|origin| origin.python_annotations(name))
+            })
     });
     let sdk_runpy = sources
         .iter()

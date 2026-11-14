@@ -56,25 +56,14 @@ pub(super) struct RegisteredBodies<'a> {
 }
 
 impl RegisteredBodies<'_> {
-    pub(super) fn origin(&self, unit: usize, bundled: bool) -> ModuleOrigin<'_> {
+    pub(super) fn provider_origin(&self, unit: usize, bundled: bool) -> Option<ModuleOrigin<'_>> {
         if bundled {
-            ModuleOrigin::Bundled
-        } else if self.python_providers.contains(&unit) {
-            ModuleOrigin::Provider
+            Some(ModuleOrigin::Bundled)
         } else {
-            ModuleOrigin::Program(
-                self.checked_units
-                    .get(&unit)
-                    .and_then(|unit| self.functions.get(&unit.module?)),
-            )
+            self.python_providers
+                .contains(&unit)
+                .then_some(ModuleOrigin::Provider)
         }
-    }
-
-    pub(super) fn parsed(&self, unit: usize) -> Option<ParsedModule<'_, '_>> {
-        self.checked_units
-            .get(&unit)?
-            .source
-            .map(|file| file.parsed(self.modules))
     }
 }
 
