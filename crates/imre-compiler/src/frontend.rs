@@ -15227,7 +15227,8 @@ impl<'a> Checker<'a> {
 
     fn registered_builtin_call(&self, call: &ast::ExprCall, name: &str, args: Vec<Expr>) -> Expr {
         self.require_builtin_scope(name, call);
-        registered::values::name_call(call, name, args)
+        self.discarded_call(Type::PythonObject)
+            .unwrap_or_else(|| registered::values::name_call(call, name, args))
     }
 
     /// Text uses UTF-8 and defaults to reading; explicit modes stay literal.
