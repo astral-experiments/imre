@@ -41,3 +41,10 @@ def current():
     match Lists():
         case Lists(pair=_):
             print("matched the list")
+
+    older = Field("previous older")
+    newer = Field("previous newer")
+    match Pair():
+        case Pair(first=_, second=older, third=_, fourth=newer):
+            print("bound", older.name, newer.name)
+    del newer, older

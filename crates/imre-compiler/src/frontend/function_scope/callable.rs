@@ -262,6 +262,14 @@ impl CallableMetadata {
         self.flags & (code_flags::GENERATOR | code_flags::COROUTINE | code_flags::ASYNC_GENERATOR)
     }
 
+    /// Fast local stores can take effect as soon as a flat pattern has matched.
+    pub(crate) fn is_fast_local(&self, name: &str) -> bool {
+        self.locals.contains(name)
+            && self.layout["scope_cellvars"]
+                .as_array()
+                .is_some_and(|cells| cells.iter().all(|cell| cell.as_str() != Some(name)))
+    }
+
     pub(super) fn reads(&self) -> impl Iterator<Item = &str> {
         self.layout["scope_reads"]
             .as_array()
