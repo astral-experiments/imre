@@ -127,6 +127,30 @@ def check_header_pressure():
             gc.disable()
 
 
+def check_garbage():
+    from gc import garbage
+
+    flags = gc.get_debug()
+    try:
+        gc.set_debug(0)
+        gc.collect()
+        events = []
+        released = cycle(events)
+        assert gc.collect() == 1 and events == [released] and garbage == []
+
+        gc.garbage = []
+        gc.set_debug(gc.DEBUG_SAVEALL)
+        saved = cycle(events)
+        identity = id(saved())
+        assert gc.collect() == 1 and saved() is None and events == [released, saved]
+        assert gc.garbage == [] and len(garbage) == 1
+        assert id(garbage[0]) == identity and garbage[0].link is garbage[0]
+    finally:
+        gc.set_debug(flags)
+        gc.garbage = garbage
+        garbage.clear()
+
+
 def current():
     check_thresholds()
     check_header_pressure()
@@ -136,6 +160,7 @@ def current():
         assert gc.disable() is None and gc.disable() is None
         assert gc.isenabled() is False
         check_tracking()
+        check_garbage()
         delayed = cycle(events)
         node = Node()
         immediate = ref(node, events.append)

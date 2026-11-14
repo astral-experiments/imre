@@ -313,11 +313,16 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
         ),
         M::Gc => exports!(
             "gc",
+            "DEBUG_LEAK",
+            "DEBUG_SAVEALL",
             "collect",
             "disable",
             "enable",
+            "garbage",
+            "get_debug",
             "get_threshold",
             "isenabled",
+            "set_debug",
             "set_threshold"
         ),
         M::Grp => exports!("grp", "getgrall", "getgrgid", "getgrnam", "struct_group"),
