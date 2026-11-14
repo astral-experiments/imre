@@ -802,7 +802,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         (
             "binascii",
             "Error" | "Incomplete" | "a2b_base64" | "b2a_base64" | "a2b_hex" | "unhexlify"
-            | "b2a_hex" | "hexlify" | "a2b_qp" | "b2a_qp" | "crc32",
+            | "b2a_hex" | "hexlify" | "a2b_qp" | "b2a_qp" | "crc32" | "crc_hqx",
         ) => ctx.builtin(&format!("binascii.{name}")),
         ("sys", "base_prefix" | "base_exec_prefix") => path_text(ctx, &layout(ctx)?.base_prefix)?,
         ("sys", "prefix" | "exec_prefix") => path_text(ctx, &layout(ctx)?.prefix)?,

@@ -19,8 +19,8 @@ pub unsafe extern "C" fn imre_zlib_adler32(data: *const Bytes, seed: usize) -> u
     crate::Int::from_usize(adler32(data, &seed) as usize).into_raw()
 }
 
-/// Apply the unsigned 32-bit mask used by both zlib checksum seeds.
-fn checksum_seed(seed: &crate::Int) -> u32 {
+/// Return the low 32 bits of a Python integer checksum seed.
+pub(crate) fn checksum_seed(seed: &crate::Int) -> u32 {
     if let Some(small) = seed.as_small() {
         small as u32
     } else {

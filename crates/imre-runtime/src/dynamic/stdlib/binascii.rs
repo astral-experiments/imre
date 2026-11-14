@@ -1,5 +1,6 @@
 //! Binary-to-text codecs and zlib checksums for runtime-loaded callers.
 use super::{Context, Error, Id, Result, Value};
+use crate::dynamic::memoryview::Storage;
 
 fn input(ctx: &Context, value: Id, decode: bool) -> Result<&[u8]> {
     if !decode {
@@ -26,6 +27,65 @@ fn ascii_buffer_error(ctx: &Context, value: Id) -> Error {
         "TypeError",
         format!("argument should be bytes, buffer or ASCII string, not '{name}'"),
     )
+}
+
+fn update_crc_hqx(mut crc: u16, bytes: &[u8]) -> u16 {
+    for &byte in bytes {
+        crc ^= u16::from(byte) << 8;
+        for _ in 0..8 {
+            crc = if crc & 0x8000 != 0 {
+                (crc << 1) ^ 0x1021
+            } else {
+                crc << 1
+            };
+        }
+    }
+    crc
+}
+
+// Keep the mapping scratch off the stack of ordinary inputs and Python seed callbacks.
+#[cfg(target_os = "linux")]
+#[inline(never)]
+fn crc_hqx_mapped(
+    region: &super::mmap::Region,
+    mut range: std::ops::Range<usize>,
+    mut crc: u16,
+) -> Result<u16> {
+    let mut scratch = [0u8; 4096];
+    while !range.is_empty() {
+        let count = range.len().min(scratch.len());
+        let bytes = &mut scratch[..count];
+        region.read_into(range.start, bytes)?;
+        crc = update_crc_hqx(crc, bytes);
+        range.start += count;
+    }
+    Ok(crc)
+}
+
+fn crc_hqx(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "binascii.crc_hqx() takes no keyword arguments",
+        ));
+    }
+    let [data, seed] = args else {
+        return Err(Error::new(
+            "TypeError",
+            format!("crc_hqx expected 2 arguments, got {}", args.len()),
+        ));
+    };
+    let crc = ctx.with_read_buffer(*data, |ctx, buffer| {
+        let seed = crate::objects::checksum_seed(&ctx.index_integer(*seed)?) as u16;
+        match buffer.storage(ctx)? {
+            Storage::Native(bytes) => Ok(update_crc_hqx(seed, bytes)),
+            #[cfg(target_os = "linux")]
+            Storage::Mapped(_, range) if range.is_empty() => Ok(seed),
+            #[cfg(target_os = "linux")]
+            Storage::Mapped(region, range) => crc_hqx_mapped(region, range, seed),
+        }
+    })?;
+    Ok(ctx.int(i64::from(crc)))
 }
 
 /// Acquire the ASCII string or contiguous buffer before calling the header flag's truth test.
@@ -191,6 +251,9 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "crc_hqx" {
+        return crc_hqx(ctx, args, kwargs);
+    }
     if name == "a2b_qp" {
         return a2b_qp(ctx, args, kwargs);
     }

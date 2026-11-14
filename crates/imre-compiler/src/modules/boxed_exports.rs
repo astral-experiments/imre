@@ -59,7 +59,7 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
         };
     }
     let qualified = match module {
-        M::Binascii => exports!("binascii", "a2b_qp", "b2a_qp", "crc32"),
+        M::Binascii => exports!("binascii", "a2b_qp", "b2a_qp", "crc32", "crc_hqx"),
         M::Blake2 => exports!(
             "_blake2",
             "BLAKE2B_MAX_DIGEST_SIZE",
