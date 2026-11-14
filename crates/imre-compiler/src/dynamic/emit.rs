@@ -758,7 +758,7 @@ impl<'a> PreparedBody<'a> {
             unit,
             positions: &positions,
         };
-        let code = location.code(output, String::new(), Body::Module(self), false, None);
+        let code = location.code(output, "", Body::Module(self), false, None);
         match output.diagnostic.take() {
             Some(diagnostic) => Err(diagnostic),
             None => Ok(code),
@@ -972,7 +972,7 @@ impl SourceMap<'_> {
     fn code(
         &self,
         output: &mut Output,
-        prefix: String,
+        prefix: &str,
         body: Body<'_>,
         in_function: bool,
         definition: Option<(TextSize, u32)>,
@@ -1001,7 +1001,7 @@ impl SourceMap<'_> {
             Body::Namespace(_, class) => &class.bindings.globals,
             _ => &empty,
         };
-        let mut function = self.function(frame, declared_globals, &prefix, in_function);
+        let mut function = self.function(frame, declared_globals, prefix, in_function);
         match body {
             Body::Module(module) => {
                 let frame = &mut function.frame;
@@ -1043,7 +1043,7 @@ impl SourceMap<'_> {
                 RegisteredBody::Suite(&prepared.body).emit(&mut function);
                 self.finish_class_annotations(
                     &mut function.frame,
-                    &prefix,
+                    prefix,
                     in_function,
                     &prepared.annotations,
                     &class.bindings,
@@ -1277,7 +1277,7 @@ impl sites::SiteDefinitions for LexicalDefinitions<'_, '_> {
         };
         location.code(
             self.output,
-            String::new(),
+            "",
             Body::Operand(body.code.range, &body.code.operand, None),
             false,
             None,
@@ -1330,13 +1330,14 @@ impl LexicalDefinitions<'_, '_> {
         };
         let existing = cache.and_then(|cache| cache.borrow().get(&site).cloned());
         let code = existing.unwrap_or_else(|| {
+            let prefix = if matches!(callable, Callable::Generator(_)) {
+                format!("{qualname}.")
+            } else {
+                format!("{qualname}.<locals>.")
+            };
             let code = source.code(
                 self.output,
-                if matches!(callable, Callable::Generator(_)) {
-                    format!("{qualname}.")
-                } else {
-                    format!("{qualname}.<locals>.")
-                },
+                &prefix,
                 Body::Registered(body, &callable),
                 true,
                 Some((site, suspension)),
@@ -1457,7 +1458,7 @@ impl LexicalDefinitions<'_, '_> {
         let in_function = self.in_function || !matches!(body, Body::Namespace(..));
         let code = self
             .source
-            .code(self.output, prefix, body, in_function, Some((start, 0)));
+            .code(self.output, &prefix, body, in_function, Some((start, 0)));
         CompiledDefinition {
             class_header,
             format_evaluator: evaluator_scope.is_some(),
@@ -1564,7 +1565,7 @@ impl LexicalDefinitions<'_, '_> {
             scope,
             start,
             metadata,
-            format!("{qualname}.__annotate__"),
+            (self.prefix, format!("{qualname}.__annotate__")),
         )))
     }
 }
@@ -1599,7 +1600,7 @@ impl SourceMap<'_> {
             scope,
             class_start,
             signature,
-            format!("{prefix}__annotate__"),
+            (prefix, format!("{prefix}__annotate__")),
         );
         let environment = frame.op("class_annotation_environment", &[&frame.scope.clone()]);
         let function = compiled.bind_defaults(frame, &environment, &[]);
@@ -1613,16 +1614,17 @@ impl SourceMap<'_> {
         scope: AnnotationScope<'_>,
         start: TextSize,
         signature: serde_json::Value,
-        qualname: String,
+        (lexical_prefix, qualname): (&str, String),
     ) -> CompiledDefinition {
         // Class annotations already have an explicit class environment. A method's provider
         // instead captures the class namespace of the function it annotates.
         let annotation_scope = !matches!(&scope, AnnotationScope::Class { .. });
+        // Annotation expressions keep the enclosing name and run inside the provider function.
         let code = self.code(
             output,
-            String::new(),
+            lexical_prefix,
             Body::CheckedProvider(body, scope),
-            false,
+            true,
             Some((start, 0)),
         );
         CompiledDefinition::new(code, signature, "__annotate__", qualname, annotation_scope)
@@ -1642,7 +1644,7 @@ impl SourceMap<'_> {
                 "posonly": ["format"], "scope_complete": true, "scope_locals_complete": true,
                 "code_flags": self.function_flags(false, false),
             }),
-            "__annotate__".into(),
+            ("", "__annotate__".into()),
         );
         let scope = frame.scope.clone();
         let provider = compiled.bind_defaults(frame, &scope, &[]);
