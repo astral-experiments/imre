@@ -11,10 +11,21 @@ pub(crate) struct ModuleSource {
 
 impl ModuleSource {
     pub(crate) fn new(module: &crate::modules::SourceModule) -> Self {
-        let tokens = module.parsed.tokens();
+        Self::from_tokens(
+            &module.source,
+            module.parsed.tokens(),
+            imre_ast::module_imports(&module.parsed.syntax().body),
+        )
+    }
+
+    pub(crate) fn from_tokens(
+        text: &str,
+        tokens: &ast::token::Tokens,
+        method_imports: BTreeSet<String>,
+    ) -> Self {
         Self {
-            method_imports: imre_ast::module_imports(&module.parsed.syntax().body),
-            replacements: literal_replacements(&module.source, tokens),
+            method_imports,
+            replacements: literal_replacements(text, tokens),
             has_templates: tokens
                 .iter()
                 .any(|token| token.kind() == ast::token::TokenKind::TStringStart),
@@ -25,7 +36,7 @@ impl ModuleSource {
         self.operands(text, 0)
     }
 
-    pub(in crate::frontend) fn operands<'a>(
+    pub(crate) fn operands<'a>(
         &'a self,
         text: &'a str,
         python_optimization: i32,
@@ -57,7 +68,19 @@ pub(crate) struct RegisteredSource<'a> {
     pub(crate) private_names: Option<&'a imre_ast::Names>,
 }
 
-impl RegisteredSource<'_> {
+impl<'a> RegisteredSource<'a> {
+    pub(crate) fn with_children(
+        self,
+        lambdas: &'a HashMap<TextSize, RegisteredLambda>,
+        generators: &'a HashMap<TextRange, RegisteredGenerator>,
+    ) -> Self {
+        Self {
+            lambdas: Some(lambdas),
+            generators: Some(generators),
+            ..self
+        }
+    }
+
     pub(crate) fn direct_method(self, call: &ast::ExprCall) -> Option<&ast::ExprAttribute> {
         imre_ast::direct_method(call, self.method_imports, self.private_names)
     }

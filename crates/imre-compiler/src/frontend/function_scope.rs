@@ -408,9 +408,23 @@ impl<'p> ScopeFacts<'p> {
         alias_site: impl FnMut(&'a ast::StmtTypeAlias, Option<TextSize>),
         expression: impl FnMut(LexicalSite<'a, '_>),
     ) -> (Self, FunctionChildren<'a>) {
+        Self::collect(
+            |visitor| visitor.visit_body(body),
+            names,
+            alias_site,
+            expression,
+        )
+    }
+
+    pub(crate) fn collect<'a>(
+        visit_root: impl FnOnce(&mut dyn Visitor<'a>),
+        names: &imre_ast::Names,
+        mut alias_site: impl FnMut(&'a ast::StmtTypeAlias, Option<TextSize>),
+        mut expression: impl FnMut(LexicalSite<'a, '_>),
+    ) -> (Self, FunctionChildren<'a>) {
         let mut scopes = Self::default();
         let mut children = Vec::new();
-        Collector {
+        visit_root(&mut Collector {
             children: &mut children,
             function_names: ClosureNames::default(),
             scopes: &mut scopes,
@@ -419,10 +433,9 @@ impl<'p> ScopeFacts<'p> {
             suite_scope: None,
             yields: false,
             body_yields: false,
-            alias_site,
-            expression,
-        }
-        .visit_body(body);
+            alias_site: &mut alias_site,
+            expression: &mut expression,
+        });
         (scopes, children)
     }
 }
@@ -453,7 +466,7 @@ impl Scope {
     }
 }
 
-struct Collector<'s, 'p, 'a, A, G> {
+struct Collector<'s, 'p, 'a> {
     children: &'s mut FunctionChildren<'a>,
     // Nested declarations finish before the enclosing function binds its own body.
     function_names: ClosureNames,
@@ -463,15 +476,11 @@ struct Collector<'s, 'p, 'a, A, G> {
     suite_scope: Option<Scope>,
     yields: bool,
     body_yields: bool,
-    alias_site: A,
-    expression: G,
+    alias_site: &'s mut dyn FnMut(&'a ast::StmtTypeAlias, Option<TextSize>),
+    expression: &'s mut dyn FnMut(LexicalSite<'a, '_>),
 }
 
-impl<'a, A, G> Visitor<'a> for Collector<'_, '_, 'a, A, G>
-where
-    A: FnMut(&'a ast::StmtTypeAlias, Option<TextSize>),
-    G: FnMut(LexicalSite<'a, '_>),
-{
+impl<'a> Visitor<'a> for Collector<'_, '_, 'a> {
     fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
         let strings = self.names.string_annotations;
         let parent_yields = self.yields;
