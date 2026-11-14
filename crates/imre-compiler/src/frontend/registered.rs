@@ -3057,11 +3057,7 @@ impl statements::StatementLowering for SourceScope<'_> {
                 return Ok(falls || continues);
             };
             let condition = self.condition_operand(test).ok_or(())?;
-            let Statement::If(_, body, otherwise) =
-                output.push_mut(Statement::If(condition, Vec::new(), Vec::new()))
-            else {
-                unreachable!()
-            };
+            let (body, otherwise) = statements::push_if(output, condition);
             falls |= self.block_into(suite, body)?;
             output = otherwise;
         }

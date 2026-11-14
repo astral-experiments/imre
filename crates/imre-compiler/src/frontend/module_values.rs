@@ -900,7 +900,7 @@ impl Initialization {
                     }
                 }
             } else {
-                let falls_through = checker.statement(statement, &mut body)?;
+                let falls_through = checker.statement(statement, Some(&mut body))?;
                 // An imported module's __main__ block must type-check, but it
                 // cannot read definitions that are still being initialized.
                 if checker.module != checker.graph.entry

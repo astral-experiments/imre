@@ -6206,7 +6206,14 @@ impl<'a> Checker<'a> {
             } else {
                 let depth = self.present_fields.len();
                 self.guard_return_field(std::slice::from_ref(statement), fallthrough_field);
-                let result = self.statement(statement, body);
+                // A later statement can inspect these instructions for narrowing.
+                let output = (emitting
+                    || !statement.is_if_stmt()
+                    || !self.module_scope
+                    || index + 1 < statements.len()
+                    || self.fixed_sites.is_some())
+                .then_some(&mut *body);
+                let result = self.statement(statement, output);
                 self.present_fields.truncate(depth);
                 result?
             };
@@ -6321,13 +6328,15 @@ impl<'a> Checker<'a> {
     fn statement(
         &mut self,
         statement: &ast::Stmt,
-        body: &mut Vec<Statement>,
+        output: Option<&mut Vec<Statement>>,
     ) -> Result<bool, String> {
         if self.bound_function_imports
             && self.graph.session.sole_local_import(self.module, statement)
         {
+            let mut discarded = Vec::new();
+            let body = output.unwrap_or(&mut discarded);
             let start = body.len();
-            let falls_through = self.lower_statement(statement, body)?;
+            let falls_through = self.lower_statement(statement, Some(body))?;
             // A native intrinsic may have consumed the import without producing its
             // Python namespace operation. Keep its original prepared function in that case.
             if !matches!(
@@ -6382,7 +6391,7 @@ impl<'a> Checker<'a> {
             &mut self.unhighlighted_call,
             imre_ast::unhighlighted_call(statement),
         );
-        let result = self.lower_statement(statement, body);
+        let result = self.lower_statement(statement, output);
         self.unhighlighted_call = enclosing;
         if let Err(error) = &result {
             // A boxed operation in a checked source file must not hide a bad call in
@@ -6436,8 +6445,11 @@ impl<'a> Checker<'a> {
     fn lower_statement(
         &mut self,
         statement: &ast::Stmt,
-        body: &mut Vec<Statement>,
+        output: Option<&mut Vec<Statement>>,
     ) -> Result<bool, String> {
+        let checking = output.is_none();
+        let mut discarded = Vec::new();
+        let body = output.unwrap_or(&mut discarded);
         if self.graph.local_static_import(self.module, statement) {
             return Ok(true);
         }
@@ -6510,6 +6522,9 @@ impl<'a> Checker<'a> {
                 }
             }
             return Ok(true);
+        }
+        if checking && let ast::Stmt::If(branch) = statement {
+            return self.if_chain(branch, None);
         }
         statements::StatementLowering::source_statement(self, statement, self.module_scope, body)
     }
@@ -7904,11 +7919,15 @@ impl<'a> Checker<'a> {
         Ok(finish((finalbody, final_falls)))
     }
 
-    fn if_chain(&mut self, branch: &ast::StmtIf) -> Result<(Vec<Statement>, bool), String> {
+    fn if_chain(
+        &mut self,
+        branch: &ast::StmtIf,
+        mut arm: Option<&mut Vec<Statement>>,
+    ) -> Result<bool, String> {
         let clauses = &branch.elif_else_clauses;
         let conditions =
             statements::if_clauses(branch).map_while(|(test, body)| Some((test?, body)));
-        let mut arms = Vec::with_capacity(clauses.len() + 1);
+        let mut else_field = None;
         let mut joined = None;
         let mut falls_at_cutoff = None;
         let mut exit_fixed = false;
@@ -7932,10 +7951,11 @@ impl<'a> Checker<'a> {
                 // cannot constrain the slots initialized by the reachable suite.
                 self.apply_facts(test, taken);
                 let selected = if taken { body } else { &other.body };
-                let (mut statements, falls) = self.block(selected)?;
                 // A type test can still evaluate a call or raise on its operand.
-                statements.insert(0, Statement::Expr(condition));
-                return Ok((statements, falls));
+                if let Some(body) = arm.as_deref_mut() {
+                    body.push(Statement::Expr(condition));
+                }
+                return self.lower_block(selected, arm);
             }
             let before = self.local_state();
             self.apply_facts(test, true);
@@ -7952,18 +7972,29 @@ impl<'a> Checker<'a> {
             self.guard_return_field(body, records::present_field(&condition, true));
             // In a reachable-only profile, an impossible compatibility guard's
             // expression-only body contains no local declarations to preserve.
+            if clauses
+                .get(index)
+                .is_some_and(|clause| clause.test.is_none())
+            {
+                else_field = records::present_field(&condition, false);
+            }
+            let yes = arm.take().map(|output| {
+                let (yes, no) = statements::push_if(output, condition);
+                arm = Some(no);
+                yes
+            });
             let yes = if self.graph.reachable_only()
                 && known == Some(false)
                 && body.iter().all(|stmt| matches!(stmt, ast::Stmt::Expr(s) if narrowing::expression_assignments(&s.value).is_empty()))
             {
-                Ok((Vec::new(), false))
+                Ok(false)
             } else {
-                self.block(body)
+                self.lower_block(body, yes)
             };
             self.present_fields.truncate(field_depth);
             self.regex_guards.truncate(guard_depth);
             self.present_subscripts.truncate(subscript_depth);
-            let (yes, yes_falls) = yes?;
+            let yes_falls = yes?;
             if yes_falls && known != Some(false) && !exit_fixed {
                 self.merge_exit(&mut joined);
             }
@@ -7975,20 +8006,16 @@ impl<'a> Checker<'a> {
                 falls_at_cutoff.get_or_insert(joined.is_some());
                 exit_fixed = joined.is_some();
             }
-            arms.push((condition, yes));
         }
-        let (no, no_falls) = if let Some(tail) = clauses.last().filter(|c| c.test.is_none()) {
+        let no_falls = if let Some(tail) = clauses.last().filter(|c| c.test.is_none()) {
             let guards = self.present_fields.len();
             self.enter_namespace_guards(last_test, false, &tail.body);
-            let field = arms
-                .last()
-                .and_then(|(test, _)| records::present_field(test, false));
-            self.guard_return_field(&tail.body, field);
-            let result = self.block(&tail.body);
+            self.guard_return_field(&tail.body, else_field);
+            let result = self.lower_block(&tail.body, arm);
             self.present_fields.truncate(guards);
             result?
         } else {
-            (Vec::new(), true)
+            true
         };
         if no_falls && !exit_fixed {
             self.merge_exit(&mut joined);
@@ -7997,13 +8024,7 @@ impl<'a> Checker<'a> {
         if let Some(joined) = joined {
             self.restore_state(joined);
         }
-        let body = statements::if_arms(arms, no);
-        if let Some(sites) = &mut self.fixed_sites
-            && let [statement @ Statement::If(..)] = body.as_slice()
-        {
-            sites.statement(branch.test.range(), statement);
-        }
-        Ok((body, falls))
+        Ok(falls)
     }
 
     /// A call or expression can supply its own concrete collection layout.

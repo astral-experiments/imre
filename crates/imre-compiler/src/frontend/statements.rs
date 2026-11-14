@@ -72,6 +72,18 @@ pub(super) fn if_arms(
     otherwise
 }
 
+pub(super) fn push_if(
+    output: &mut Vec<Statement>,
+    condition: Expr,
+) -> (&mut Vec<Statement>, &mut Vec<Statement>) {
+    let Statement::If(_, yes, no) =
+        output.push_mut(Statement::If(condition, Vec::new(), Vec::new()))
+    else {
+        unreachable!()
+    };
+    (yes, no)
+}
+
 pub(super) trait StatementLowering {
     type Error;
 
@@ -145,9 +157,16 @@ impl StatementLowering for Checker<'_> {
     type Error = Failure<String>;
 
     fn branch(&mut self, branch: &ast::StmtIf, body: &mut Vec<Statement>) -> Result<bool, String> {
-        let (arms, falls) = self.if_chain(branch)?;
-        append_block(body, arms);
-        Ok(falls)
+        let start = body.len();
+        let result = self.if_chain(branch, Some(body));
+        if result.is_err() {
+            body.truncate(start);
+        } else if let Some(sites) = &mut self.fixed_sites
+            && let [statement @ Statement::If(..)] = &body[start..]
+        {
+            sites.statement(branch.test.range(), statement);
+        }
+        result
     }
 
     fn assignment(
