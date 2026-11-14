@@ -15,8 +15,7 @@ impl RegisteredLambda {
         source: values::RegisteredSource<'_>,
     ) -> Option<RegisteredFunction> {
         let expr = &lambda.body;
-        let operations = HashMap::new();
-        let mut scope = SourceScope::new(RegisteredScope::Lambda, source, &operations, false);
+        let mut scope = SourceScope::new(RegisteredScope::Lambda, source, None, false);
         let value = scope.operand(expr)?;
         Some(scope.finish(RegisteredFunction::returning(expr.range(), value)))
     }
@@ -30,8 +29,7 @@ impl RegisteredLambda {
     ) -> Self {
         let body = Self::body(lambda, source);
         let binding = if body.is_some() {
-            let operations = HashMap::new();
-            let mut scope = SourceScope::new(owner, source, &operations, false);
+            let mut scope = SourceScope::new(owner, source, None, false);
             scope.report_child_refusals = true;
             match scope.with_suspending_operands(|scope| scope.lambda_binding(lambda)) {
                 Ok(value) if scope.locals.is_empty() => ExpressionSelection::Checked(value),
@@ -51,6 +49,42 @@ impl RegisteredLambda {
             binding: std::rc::Rc::new(binding),
             body,
         }
+    }
+}
+
+impl SourceScope<'_> {
+    pub(super) fn checked_lambda_binding(&mut self, lambda: &ast::ExprLambda) -> Option<Expr> {
+        let has_body = match self.source.lambdas {
+            Some(sites) => {
+                let site = sites
+                    .get(&lambda.start())
+                    .filter(|site| site.body.is_some());
+                // A source suite evaluates these defaults in their declaring frame. A synthetic
+                // provider or an enclosing private slot needs its own operand lowering.
+                if let Some(site) = site
+                    && self.suite_operations.is_some()
+                    && self.locals.is_empty()
+                    && self.suspending_operands
+                    && let ExpressionSelection::Checked(binding) = site.binding.as_ref()
+                {
+                    return Some(binding.clone());
+                }
+                site.is_some()
+            }
+            None => RegisteredLambda::body(lambda, self.source).is_some(),
+        };
+        if !has_body {
+            if self.report_child_refusals {
+                self.refusal = Some((
+                    lambda.range(),
+                    "cannot compile this lambda body ahead of time",
+                ));
+            }
+            return None;
+        }
+        self.lambda_binding(lambda)
+            .inspect_err(|&error| self.refusal = Some(error))
+            .ok()
     }
 }
 
@@ -266,7 +300,7 @@ async def factory(seed, rows, mark):
         let source = literals.context(&module.source);
         let expr = &module.parsed.syntax().body[0].as_expr_stmt().unwrap().value;
         let lambda = expr.as_lambda_expr().unwrap();
-        assert!(values::has_checked_lambda_body(lambda, source));
+        assert!(RegisteredLambda::body(lambda, source).is_some());
         let mut lexical = LexicalOperands::default();
         crate::frontend::function_scope::ScopeFacts::prepare(
             &module.parsed.syntax().body,
