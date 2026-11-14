@@ -9170,7 +9170,7 @@ impl Context {
                     .into_iter()
                     .find(|kind| self.has_base(callable, kind));
                 let rlock_subclass = self.has_base(callable, super::thread_rlock::CLASS);
-                let collection_kind = ["set", "frozenset", "bytearray"]
+                let collection_kind = imre_ast::class_attributes::COLLECTION_STORAGE_BASES
                     .into_iter()
                     .find(|kind| self.has_base(callable, kind));
                 let instance = if let Some(new) = new {

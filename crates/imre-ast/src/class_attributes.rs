@@ -1,6 +1,9 @@
 use ruff_python_ast as ast;
 use std::collections::BTreeSet;
 
+/// Builtin bases whose Python subclass allocator installs separate collection storage.
+pub const COLLECTION_STORAGE_BASES: [&str; 3] = ["set", "frozenset", "bytearray"];
+
 /// CPython records self.X stores from code units immediately enclosed by a class.
 pub fn static_attributes(body: &[ast::Stmt], spellings: &crate::Names) -> BTreeSet<String> {
     use ast::visitor::{self, Visitor};
