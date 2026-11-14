@@ -346,6 +346,41 @@ fn resolved_bundled_source_keeps_its_declaration() {
 }
 
 #[test]
+fn registered_sdk_interface_belongs_to_its_original_source() {
+    let project = tempdir().unwrap();
+    let root = project.path();
+    let sdk = std::path::PathBuf::from(crate::dynamic::BUNDLED_SOURCE_ROOT);
+    let (path, original) = crate::modules::bundled_runtime_source("http").unwrap();
+    let mut sources = [
+        ("http".into(), sdk.join(path), original.into()),
+        (
+            "main".into(),
+            root.join("main.py"),
+            "from http import HTTPStatus\ndef code() -> int:\n    return HTTPStatus.CREATED\n".into(),
+        ),
+    ];
+    let check = |sources: &[_]| {
+        super::check_registered_project(
+            root,
+            std::slice::from_ref(&sdk),
+            sources
+                .iter()
+                .enumerate()
+                .map(|(i, source)| RegisteredSource::new(source, i == 1, None)),
+            None,
+            None,
+            None,
+            None,
+        )
+    };
+
+    check(&sources).unwrap();
+    sources[0].2 = "class HTTPStatus:\n    CREATED = (201, 'Created', 'example')\n".into();
+    let error = check(&sources).unwrap_err();
+    assert!(error.contains("invalid-return-type") && error.contains("main.py:3"), "{error}");
+}
+
+#[test]
 fn functions_selected_from_a_mapping_keep_python_argument_binding() {
     let project = tempdir().unwrap();
     let entry = project.path().join("main.py");

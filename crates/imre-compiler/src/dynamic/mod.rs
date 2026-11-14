@@ -949,8 +949,16 @@ impl<'a> RegisteredSource<'a> {
     /// Native initialization supplies typing's special forms and abc.ABCMeta.
     /// Use their typeshed declarations for calls into the unchanged SDK modules.
     pub(crate) fn uses_typeshed_interface(&self) -> bool {
-        matches!(self.name, "typing" | "abc")
-            && !self.main_body
+        matches!(self.name, "typing" | "abc") && self.is_original_bundled_source()
+    }
+
+    /// Pair a checked declaration only with its own selected SDK file.
+    pub(crate) fn matches_bundled_source(&self, path: &Path) -> bool {
+        self.path.strip_prefix(BUNDLED_SOURCE_ROOT) == Ok(path) && self.is_original_bundled_source()
+    }
+
+    fn is_original_bundled_source(&self) -> bool {
+        !self.main_body
             && !self.declares_signatures
             && !self.check_execution
             && crate::modules::bundled_runtime_source(self.name).is_some_and(|(filename, body)| {

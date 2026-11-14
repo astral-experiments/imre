@@ -574,8 +574,12 @@ pub(crate) fn check_registered_project<'a>(
         }
     }
 
-    let mut session =
-        Session::with_storage(root, extension_roots, salsa::Storage::default(), true)?;
+    let mut session = Session::with_storage(
+        root,
+        extension_roots,
+        salsa::Storage::default(),
+        Some(&|path| sources.clone().any(|winner| winner.matches_bundled_source(path))),
+    )?;
     let mut paths = Vec::with_capacity(capacity);
     for (path, source) in declarations {
         session.register_file(path, source, crate::SourceKind::File)?;
@@ -1101,7 +1105,7 @@ impl Session {
                 root,
                 roots,
                 salsa::Storage::default(),
-                true,
+                Some(&|_| false),
             )?),
         })
     }
@@ -1286,7 +1290,7 @@ impl Session {
                 std::panic::resume_unwind(Box::new(LayoutHintLimit));
             }
         })));
-        Self::with_storage(root, extension_roots, storage, false)
+        Self::with_storage(root, extension_roots, storage, None)
     }
 
     /// Initialize the project inputs and rule set over independent Salsa storage.
@@ -1294,7 +1298,7 @@ impl Session {
         root: &Path,
         extension_roots: &[PathBuf],
         storage: salsa::Storage<Database>,
-        registered_project: bool,
+        registered: Option<&dyn Fn(&Path) -> bool>,
     ) -> Result<Self, String> {
         let root = root.to_str().ok_or("module paths must be valid UTF-8")?;
         let system = InMemorySystem::default();
@@ -1308,65 +1312,58 @@ impl Session {
         let project = SystemPathBuf::from(root);
         let intrinsic = project.join("imre");
         let stdlib_stubs = intrinsic.join(".stdlib-stubs");
-        // Resolved graphs pair compiler-bundled bodies with their declarations.
-        // A manifest of winning project sources uses those declarations as fallbacks.
-        let provider_stubs = if registered_project {
-            &stdlib_stubs
-        } else {
-            &project
+        // Keep each paired declaration beside the SDK body that actually won. Other
+        // registered sources retain their own interface and normal search precedence.
+        let provider_stub = |name: &str| match registered {
+            None => project.join(name),
+            Some(selected) if selected(&Path::new(name).with_extension("py")) => {
+                SystemPath::new(crate::dynamic::BUNDLED_SOURCE_ROOT).join(name)
+            }
+            Some(_) => stdlib_stubs.join(name),
         };
-        for (directory, name, stub) in [
+        for (path, stub) in [
             (
-                &project,
-                "imre/_zipimport",
+                project.join("imre/_zipimport.pyi"),
                 "from zipfile import ZipFile as _ZipFile\ndef open_index(path: str) -> _ZipFile: ...\n",
             ),
             (
-                &project,
-                "_imre_mock",
+                project.join("_imre_mock.pyi"),
                 "def mark_call_list(values: list, /) -> bool: ...\ndef is_call_list(values: list, /) -> bool: ...\n",
             ),
             (
-                &project,
-                "_imre_doctest",
+                project.join("_imre_doctest.pyi"),
                 "def capture_start() -> None: ...\ndef capture_take() -> str: ...\ndef display(value: object, /) -> None: ...\ndef exception_name(exc: BaseException, /) -> str: ...\ndef execute(test: object, debug: bool, optionflags: int = ..., checker: object = ...) -> None: ...\n",
             ),
             (
-                provider_stubs,
-                "hashlib",
+                provider_stub("hashlib.pyi"),
                 include_str!("analysis/hashlib.pyi"),
             ),
             // The pinned typeshed stub admits integer shell flags and the check_output
             // keywords whose conflicts are reported at runtime (see licenses/typeshed.txt).
             (
-                provider_stubs,
-                "subprocess",
+                provider_stub("subprocess.pyi"),
                 include_str!("stubs/subprocess.pyi"),
             ),
             (
-                provider_stubs,
-                "tomli",
+                provider_stub("tomli.pyi"),
                 "from tomllib import load as load, loads as loads\n",
             ),
             (
-                provider_stubs,
-                "unittest/mock",
+                provider_stub("unittest/mock.pyi"),
                 include_str!("../stdlib/unittest/mock.pyi"),
             ),
             (
-                provider_stubs,
-                "unidiff",
+                provider_stub("unidiff.pyi"),
                 include_str!("analysis/unidiff.pyi"),
             ),
             (
-                provider_stubs,
-                "tomli_w",
+                provider_stub("tomli_w.pyi"),
                 "from typing import Any, BinaryIO\ndef dumps(obj: dict[str, Any]) -> str: ...\ndef dump(obj: dict[str, Any], fp: BinaryIO) -> None: ...\n",
             ),
         ] {
             system
                 .fs()
-                .write_file_all(directory.join(format!("{name}.pyi")), stub)
+                .write_file_all(path, stub)
                 .map_err(|error| error.to_string())?;
         }
         system
@@ -1422,7 +1419,7 @@ impl Session {
             .map_err(|e| e.to_string())?;
         system
             .fs()
-            .write_file_all(provider_stubs.join("http/__init__.pyi"), http)
+            .write_file_all(provider_stub("http/__init__.pyi"), http)
             .map_err(|e| e.to_string())?;
         // Refresh from the locked ty_vendored's vendor/typeshed/stdlib/inspect.pyi,
         // retaining the private _sentinel: object declaration for inspect.getattr_static.
@@ -1438,7 +1435,7 @@ impl Session {
         system
             .fs()
             .write_file_all(
-                provider_stubs.join("shutil.pyi"),
+                provider_stub("shutil.pyi"),
                 include_str!("stubs/shutil.pyi"),
             )
             .map_err(|error| error.to_string())?;
@@ -1900,11 +1897,16 @@ impl Session {
         script_entry: Option<File>,
         registrations: Option<&crate::dynamic::RegisteredSources<'_>>,
     ) -> Result<Self, String> {
+        let selected = |path: &Path| {
+            registrations.is_some_and(|sources| {
+                sources.winners.iter().any(|winner| winner.matches_bundled_source(path))
+            })
+        };
         let mut copy = Self::with_storage(
             &self.root,
             registrations.map_or(&self.extension_roots, |sources| sources.roots),
             salsa::Storage::default(),
-            script_entry.is_some(),
+            script_entry.map(|_| &selected as &dyn Fn(&Path) -> bool),
         )?;
         copy.explicit_check = self.explicit_check;
         if let Some(registrations) = registrations {
