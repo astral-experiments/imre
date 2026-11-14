@@ -32,10 +32,17 @@ pub(crate) fn native_thread_id() -> u64 {
     id
 }
 
+#[derive(Default)]
+struct LockState {
+    held: bool,
+    // Like CPython's _Py_HAS_PARKED bit, this survives a waiter's timeout.
+    parked: bool,
+}
+
 pub(crate) struct PrimitiveLock {
     // A child cannot acquire Rust synchronization left locked by a vanished thread.
     creator_pid: u32,
-    held: Mutex<bool>,
+    state: Mutex<LockState>,
     available: Condvar,
 }
 
@@ -43,7 +50,7 @@ impl Default for PrimitiveLock {
     fn default() -> Self {
         Self {
             creator_pid: std::process::id(),
-            held: Mutex::new(false),
+            state: Mutex::default(),
             available: Condvar::new(),
         }
     }
@@ -53,46 +60,54 @@ impl PrimitiveLock {
     #[cfg(unix)]
     pub(crate) fn at_fork_reinit(lock: &mut Arc<Self>) {
         if lock.creator_pid == std::process::id() {
-            // Keep the state shared by existing native holders of this Python lock.
-            *lock.held.lock().unwrap() = false;
+            // Keep aliases, but do not wake waiters parked before the reset.
+            *lock.state.lock().unwrap() = LockState::default();
         } else {
             *lock = Arc::default();
         }
     }
 
     pub(crate) fn locked(&self) -> bool {
-        *self.held.lock().unwrap()
+        self.state.lock().unwrap().held
     }
 
     /// Wait for an unlocked state and claim it under the same mutex.
     pub(crate) fn acquire(&self, blocking: bool, timeout: Option<Duration>) -> bool {
-        let mut held = self.held.lock().unwrap();
-        if *held && blocking {
-            held = match timeout {
+        let mut state = self.state.lock().unwrap();
+        if state.held {
+            if !blocking || timeout == Some(Duration::ZERO) {
+                return false;
+            }
+            state.parked = true;
+            let must_wait = |state: &mut LockState| state.held || !state.parked;
+            state = match timeout {
                 Some(limit) => {
-                    self.available
-                        .wait_timeout_while(held, limit, |v| *v)
-                        .unwrap()
-                        .0
+                    let (state, wait) = self
+                        .available
+                        .wait_timeout_while(state, limit, must_wait)
+                        .unwrap();
+                    if wait.timed_out() {
+                        return false;
+                    }
+                    state
                 }
-                None => self.available.wait_while(held, |v| *v).unwrap(),
+                None => self.available.wait_while(state, must_wait).unwrap(),
             };
         }
-        if *held {
-            return false;
-        }
-        *held = true;
+        state.held = true;
         true
     }
 
     /// The thread releasing a primitive lock need not be the acquiring thread.
     pub(crate) fn release(&self) -> Result<()> {
-        let mut held = self.held.lock().unwrap();
-        if !*held {
+        let mut state = self.state.lock().unwrap();
+        if !state.held {
             return Err(Error::new(Kind::RuntimeError, "release unlocked lock"));
         }
-        *held = false;
-        self.available.notify_one();
+        state.held = false;
+        if state.parked {
+            self.available.notify_one();
+        }
         Ok(())
     }
 }
@@ -216,6 +231,41 @@ mod tests {
         events.recv_timeout(limit).unwrap();
         worker.join().unwrap();
         assert!(!lock.locked());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn only_a_new_blocking_wait_reenables_waiters_parked_before_reset() {
+        for (probe_timeout, old_waiter_acquires) in
+            [(Duration::ZERO, false), (Duration::from_millis(10), true)]
+        {
+            let mut lock = Arc::new(PrimitiveLock::default());
+            assert!(lock.acquire(false, None));
+            thread::scope(|scope| {
+                let shared = Arc::clone(&lock);
+                let waiter = scope.spawn(move || {
+                    let acquired = shared.acquire(true, Some(Duration::from_secs(1)));
+                    if acquired {
+                        assert!(shared.release().is_ok());
+                    }
+                    acquired
+                });
+                let deadline = std::time::Instant::now() + Duration::from_secs(2);
+                while !lock.state.lock().unwrap().parked {
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "waiter failed to park"
+                    );
+                    thread::yield_now();
+                }
+                PrimitiveLock::at_fork_reinit(&mut lock);
+                assert!(lock.acquire(false, None));
+                assert!(!lock.acquire(true, Some(probe_timeout)));
+                assert!(lock.release().is_ok());
+                assert_eq!(waiter.join().unwrap(), old_waiter_acquires);
+            });
+            assert!(!lock.locked());
+        }
     }
 
     #[test]
