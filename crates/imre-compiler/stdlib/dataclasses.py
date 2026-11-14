@@ -706,7 +706,16 @@ def make_dataclass(cls_name, fields, *, bases=(), namespace=None, init=True,
 def _convert(obj, factory, named):
     if hasattr(type(obj), '__dataclass_fields__'):
         if named:
-            return factory([(f.name, _convert(getattr(obj, f.name), factory, named)) for f in fields(obj)])
+            plain_dict = factory is dict
+            result = {} if plain_dict else []
+            for f in fields(obj):
+                name = f.name
+                value = _convert(getattr(obj, f.name), factory, named)
+                if plain_dict:
+                    result[name] = value
+                else:
+                    result.append((name, value))
+            return result if plain_dict else factory(result)
         return factory([_convert(getattr(obj, f.name), factory, named) for f in fields(obj)])
     if isinstance(obj, tuple) and hasattr(obj, '_fields'):
         return type(obj)(*[_convert(x, factory, named) for x in obj])
