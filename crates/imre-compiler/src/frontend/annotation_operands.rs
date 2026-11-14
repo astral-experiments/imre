@@ -309,7 +309,7 @@ def dormant(): return f"\ud801{1}", t"{x}"
 @decorator
 class C:
     field: C[D]
-    def f(self, arg: E[F], *rest: *Items):
+    def f(self, arg: E[F], *rest: *Items) -> None:
         local: G[H]
         class Nested:
             field: I[J]
@@ -330,9 +330,9 @@ after: K[L]
         let site = |spelling| TextSize::try_from(text.find(spelling).unwrap()).unwrap();
         for bundled in [false, true] {
             let sites = observe(&parsed.syntax().body, source, true, bundled);
-            assert_eq!(sites.values.len(), 6);
-            assert_eq!(sites.children.len(), if bundled { 0 } else { 6 });
-            for spelling in ["A[B]", "C[D]", "E[F]", "*Items", "I[J]", "K[L]"] {
+            assert_eq!(sites.values.len(), 7);
+            assert_eq!(sites.children.len(), if bundled { 0 } else { 7 });
+            for spelling in ["A[B]", "C[D]", "E[F]", "*Items", "None", "I[J]", "K[L]"] {
                 let location = site(spelling);
                 let value = &sites.values[&location].kind;
                 if bundled {
