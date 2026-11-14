@@ -70,15 +70,7 @@ impl<'f, 'a, 'p, 'm> CheckedBody<'f, 'a, 'p, 'm> {
                     self.python()
                         .literal_sequence_membership(id, expr, op == CmpOp::NotIn)
             {
-                // Membership has already tested each rich comparison and returned a Python bool.
-                return if truth {
-                    let bit = self
-                        .python()
-                        .value(&format!("icmp eq i64 {result}, {}", permanent::TRUE));
-                    CheckedValue::condition(bit)
-                } else {
-                    CheckedValue::handle(result)
-                };
+                return self.comparison_result(op, CheckedValue::handle(result), truth);
             }
             // An identity test cannot run Python, and a permanent right operand has no root to release.
             let right_scope = (root.is_some()
@@ -109,7 +101,7 @@ impl<'f, 'a, 'p, 'm> CheckedBody<'f, 'a, 'p, 'm> {
                     self.release_comparison(&right);
                 }
                 let tested_handle = truth && handle.is_some();
-                let value = self.comparison_result(value, truth);
+                let value = self.comparison_result(op, value, truth);
                 if tested_handle && let Some((mark, _)) = &root {
                     // A branch keeps the truth bit. Release the rich result before the next operand.
                     self.python().discard_truth(mark);
@@ -133,7 +125,7 @@ impl<'f, 'a, 'p, 'm> CheckedBody<'f, 'a, 'p, 'm> {
                 None
             };
             let bit = match handle {
-                Some(id) => self.python().comparison_truth(id, middle.as_deref()),
+                Some(id) => self.python().comparison_truth(op, id, middle.as_deref()),
                 None => value.fixed_value().operand.clone(),
             };
             if truth && handle.is_some() {
@@ -179,13 +171,13 @@ impl<'f, 'a, 'p, 'm> CheckedBody<'f, 'a, 'p, 'm> {
         unreachable!("checked comparisons end with a result")
     }
 
-    fn comparison_result(&mut self, value: CheckedValue, truth: bool) -> CheckedValue {
+    fn comparison_result(&mut self, op: CmpOp, value: CheckedValue, truth: bool) -> CheckedValue {
         match (&value, truth) {
             (CheckedValue::Native(_, None), false) => {
                 self.python().boolean_result(&value.into_condition(), false)
             }
             (CheckedValue::Handle { id, .. }, true) => {
-                CheckedValue::condition(self.python().comparison_truth(id, None))
+                CheckedValue::condition(self.python().comparison_truth(op, id, None))
             }
             _ => value,
         }
