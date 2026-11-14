@@ -101,8 +101,13 @@ def current():
             frame = sys._getframe()
             def read(self):
                 return x
+            def classes(self):
+                return __class__, Captured
 
         view = type(proxy)(Shadow.frame)
+        assert tuple(view) == ('__class__', '__classdict__', 'Captured', 'x')
+        assert Shadow.frame.f_code.co_freevars == ('Captured', 'x')
+        assert Shadow().classes() == (Shadow, Captured)
         assert view['x'] == 99 and Shadow.frame.f_locals['x'] == 7
         view['x'] = 42
         assert Shadow().read() == x == 42 and Shadow.x == 7

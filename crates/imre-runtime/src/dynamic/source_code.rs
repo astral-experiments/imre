@@ -3150,7 +3150,10 @@ impl Context {
             let frame = self.scope_data(local);
             names.extend(frame.names.keys().map(|name| name.as_str().to_owned()));
             let mut cells: Vec<_> = frame.closure.cells.keys().cloned().collect();
-            cells.sort_unstable();
+            // A class proxy's closure environment already has its owned cells before its free cells.
+            if code != NONE || !frame.closure.environment {
+                cells.sort_unstable();
+            }
             names.extend(cells);
             let Some(parent) = frame.parent else { break };
             if frame.comprehension != Some(ComprehensionKind::Ordinary)
