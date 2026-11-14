@@ -103,7 +103,11 @@ pub(super) trait StatementLowering {
     fn for_loop(&mut self, loop_: &ast::StmtFor) -> StdResult<Block, Self::Error>;
     /// Record a reachable exit when this scope has an enclosing loop.
     fn record_loop_transfer(&mut self, transfer: &Statement) -> bool;
-    fn other_statement(&mut self, stmt: &ast::Stmt) -> StdResult<Block, Self::Error>;
+    fn other_statement(
+        &mut self,
+        stmt: &ast::Stmt,
+        output: &mut Vec<Statement>,
+    ) -> StdResult<bool, Self::Error>;
 
     fn source_statement(
         &mut self,
@@ -111,10 +115,6 @@ pub(super) trait StatementLowering {
         module: bool,
         body: &mut Vec<Statement>,
     ) -> StdResult<bool, Self::Error> {
-        let append = |body: &mut Vec<Statement>, (statements, continues)| {
-            append_block(body, statements);
-            continues
-        };
         let (statement, continues) = match stmt {
             ast::Stmt::Assign(assign) => return self.assignment(assign, body),
             ast::Stmt::If(branch) => return self.branch(branch, body),
@@ -122,7 +122,9 @@ pub(super) trait StatementLowering {
             ast::Stmt::Expr(expr) => self.effect(&expr.value)?,
             ast::Stmt::Return(ret) if !module => (Some(self.returned(ret)?), false),
             ast::Stmt::For(loop_) => {
-                return Ok(append(body, self.for_loop(loop_)?));
+                let (statements, continues) = self.for_loop(loop_)?;
+                append_block(body, statements);
+                return Ok(continues);
             }
             ast::Stmt::Raise(raise) => (
                 Some(raised(raise, |value| self.raised_value(raise, value))?),
@@ -131,7 +133,7 @@ pub(super) trait StatementLowering {
             ast::Stmt::Pass(_) => (self.position_only(stmt.range()), true),
             _ => match loop_transfer(stmt) {
                 Some(transfer) if self.record_loop_transfer(&transfer) => (Some(transfer), false),
-                _ => return Ok(append(body, self.other_statement(stmt)?)),
+                _ => return self.other_statement(stmt, body),
             },
         };
         body.extend(statement);
@@ -377,7 +379,11 @@ impl StatementLowering for Checker<'_> {
         true
     }
 
-    fn other_statement(&mut self, stmt: &ast::Stmt) -> Result<Block, String> {
+    fn other_statement(
+        &mut self,
+        stmt: &ast::Stmt,
+        output: &mut Vec<Statement>,
+    ) -> Result<bool, String> {
         // A nested try keeps this frame live while its protected and cleanup suites are checked.
         match stmt {
             ast::Stmt::Try(_)
@@ -387,7 +393,7 @@ impl StatementLowering for Checker<'_> {
             {
                 let error = self.scoped_builtin_error("an optional standard-library import", stmt);
                 self.defer_object_error(&error);
-                Ok((Vec::new(), true))
+                Ok(true)
             }
             ast::Stmt::Try(try_) if !try_.is_star => {
                 let outer = self.finally_scope;
@@ -396,9 +402,15 @@ impl StatementLowering for Checker<'_> {
                 }
                 let result = self.try_statement(try_);
                 self.finally_scope = outer;
-                result
+                let (statement, continues) = result?;
+                output.push(statement);
+                Ok(continues)
             }
-            _ => self.specialized_statement(stmt),
+            _ => {
+                let (statements, continues) = self.specialized_statement(stmt)?;
+                append_block(output, statements);
+                Ok(continues)
+            }
         }
     }
 }

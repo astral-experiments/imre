@@ -3043,8 +3043,12 @@ impl statements::StatementLowering for SourceScope<'_> {
         self.loop_scope != LoopScope::Outside
     }
 
-    fn other_statement(&mut self, stmt: &ast::Stmt) -> StdResult<statements::Block, ()> {
-        match stmt {
+    fn other_statement(
+        &mut self,
+        stmt: &ast::Stmt,
+        output: &mut Vec<Statement>,
+    ) -> StdResult<bool, ()> {
+        let (statements, continues) = match stmt {
             ast::Stmt::AugAssign(assign) => {
                 if let Some(effect) = attribute_write(stmt) {
                     let values = effect
@@ -3053,13 +3057,15 @@ impl statements::StatementLowering for SourceScope<'_> {
                         .collect::<Option<_>>()
                         .ok_or(())?;
                     let statement = attribute_statement(effect.action, effect.field, values);
-                    return Ok((vec![statement], true));
+                    output.push(statement);
+                    return Ok(true);
                 }
                 if let Some(name) = assign.target.as_name_expr() {
                     let left = self.ordinary_operand(&assign.target).ok_or(())?;
                     let right = self.ordinary_operand(&assign.value).ok_or(())?;
                     let value = in_place(assign.op, left, right);
-                    return Ok((vec![self.store(name.id.as_str(), value)], true));
+                    output.push(self.store(name.id.as_str(), value));
+                    return Ok(true);
                 }
                 let target = assign.target.as_subscript_expr().ok_or(())?;
                 let receiver = TargetInput::Receiver(&target.value).lower(self).ok_or(())?;
@@ -3113,7 +3119,8 @@ impl statements::StatementLowering for SourceScope<'_> {
                 let orelse = self.suite(&region.orelse)?;
                 let finalbody = self.block(&region.finalbody)?;
                 let (statement, falls) = registered_try(body, handlers, orelse, finalbody);
-                Ok((vec![statement], falls))
+                output.push(statement);
+                return Ok(falls);
             }
             ast::Stmt::With(stmt) if !stmt.is_async || self.is_async_function() => Ok((
                 self.with_items(&stmt.items, stmt.is_async, &stmt.body)?,
@@ -3144,7 +3151,8 @@ impl statements::StatementLowering for SourceScope<'_> {
                         .collect::<Option<_>>()
                         .ok_or(())?;
                     let effect = operation(Builtin::RegisteredDiscard, Type::None, operands);
-                    return Ok((vec![Statement::Expr(effect)], true));
+                    output.push(Statement::Expr(effect));
+                    return Ok(true);
                 }
                 let mut body = if let Some(value) = &ann.value {
                     let value = self.frame_value(value).ok_or(())?;
@@ -3177,7 +3185,9 @@ impl statements::StatementLowering for SourceScope<'_> {
             _ => registered_import(stmt, self.source.private_names)
                 .map(|import| (vec![Statement::Expr(import)], true))
                 .ok_or(()),
-        }
+        }?;
+        statements::append_block(output, statements);
+        Ok(continues)
     }
 }
 
