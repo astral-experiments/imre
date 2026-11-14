@@ -1721,12 +1721,10 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
                 } else {
                     code.build_sequence(&values, tuple && complete, slot)
                 };
-                if !complete {
-                    code.keep_operands(&mark, &container, "0");
-                }
-                container
+                let retained = code.keep_operands(&mark, &container, "0");
+                (container, retained)
             };
-            let append = |code: &mut Self, list: &String, _, value: String, extend| {
+            let append = |code: &mut Self, (list, _): &(String, String), _, value: String, extend| {
                 let append = |code: &mut Self| {
                     code.take_matching_check();
                     code.checked(&format!("call i64 @imre_dyn_display_item(ptr %ctx, i64 {list}, i64 {value}, i64 {mark}, i1 {extend})"));
@@ -1738,7 +1736,7 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
                     append(code);
                 }
             };
-            let (mut result, complete) = crate::llvm::operations::sequences::build(
+            let ((mut result, retained), complete) = crate::llvm::operations::sequences::build(
                 code, items, crate::llvm::operations::sequences::STACK_USE_GUIDELINE, Expr::spread_operand, Self::evaluate_handle, initial, append,
             );
             if !complete && tuple {
@@ -1747,8 +1745,11 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
                 if let Some(slot) = slot {
                     result = code.checked(&format!("call i64 @imre_dyn_linked_value(ptr %ctx, ptr {slot}, i64 {result})"));
                 }
+                // The tuple replaces the mutable list that held its elements.
+                code.keep_operands(&mark, &result, "0");
             }
-            usage.keep_operand(code, &mark, &result);
+            // Each append or extension restores the original container at this boundary.
+            usage.retained_operand(retained);
             result
         })
     }

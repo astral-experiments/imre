@@ -59,14 +59,8 @@ impl<'a> ValueUse<'a> {
         }
     }
 
-    /// Keep the result at this boundary and let the enclosing call continue above it.
-    pub(super) fn keep_operand(
-        self,
-        frame: &mut CheckedFrame<'_, '_, '_>,
-        mark: &str,
-        value: &str,
-    ) {
-        let next = frame.keep_operands(mark, value, "0");
+    /// Tell the enclosing call where the producer kept its completed operand.
+    pub(super) fn retained_operand(self, next: String) {
         if let Self::CallOperand(_, retained) = self {
             retained.set(next).expect("one result per call operand");
         }
@@ -1234,7 +1228,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 let receiver = self.rooted_operand(receiver);
                 let frame = self.python();
                 let value = frame.attribute_value(receiver.rooted_handle(), name, *range);
-                usage.keep_operand(frame, &mark, &value);
+                usage.retained_operand(frame.keep_operands(&mark, &value, "0"));
                 frame.finish_operand_scope(&mark, unwind);
                 CheckedValue::handle(value)
             }
