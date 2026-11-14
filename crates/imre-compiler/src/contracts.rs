@@ -356,7 +356,7 @@ impl Builtin {
                 ),
                 PreservesLists,
             ),
-            Self::Process(operation) => match operation {
+            Self::Process(operation, _) => match operation {
                 ProcessOperation::DescriptorConstant(_)
                 | ProcessOperation::SelectorClass(_)
                 | ProcessOperation::SetSelector

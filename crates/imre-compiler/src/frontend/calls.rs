@@ -1080,7 +1080,7 @@ impl Checker<'_> {
         Ok(ControlFlow::Continue(ir::CallArgs {
             values,
             order,
-            site: ir::CallSite::None,
+            site: ir::CallSite::Written(call.range(), call.func.end()),
             exhaustive_enum_match: false,
         }))
     }
@@ -1301,10 +1301,16 @@ impl Checker<'_> {
     /// and acquired independent roots. Identity order needs no extra scope.
     pub(super) fn ordered_builtin(
         &mut self,
-        operation: Builtin,
+        mut operation: Builtin,
         returns: Type,
         mut arguments: ir::CallArgs,
     ) -> Expr {
+        if let Builtin::Process(op, origin @ None) = &mut operation
+            && let ir::CallSite::Written(range, callee_end) = arguments.site
+            && Builtin::process(*op).contract(&arguments.values).may_raise
+        {
+            *origin = Some(self.fixed_origin(range, Some((callee_end, b'('))));
+        }
         if arguments
             .order
             .iter()

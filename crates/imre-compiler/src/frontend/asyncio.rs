@@ -7,7 +7,7 @@ use crate::ir::ProcessOperation as Op;
 fn operation(op: Op, ty: Type, args: Vec<Expr>) -> Expr {
     Expr {
         ty,
-        kind: ExprKind::Builtin(Builtin::Process(op), args),
+        kind: ExprKind::Builtin(Builtin::process(op), args),
     }
 }
 

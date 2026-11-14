@@ -4304,7 +4304,7 @@ impl<'a> Checker<'a> {
             return Ok(Expr {
                 ty: expected,
                 kind: ExprKind::Builtin(
-                    Builtin::Process(ir::ProcessOperation::ExceptionView),
+                    Builtin::process(ir::ProcessOperation::ExceptionView),
                     vec![value],
                 ),
             });
@@ -6890,7 +6890,7 @@ impl<'a> Checker<'a> {
                             statements.push(Statement::Expr(Expr {
                                 ty: Type::None,
                                 kind: ExprKind::Builtin(
-                                    Builtin::Process(ir::ProcessOperation::PopenDeletePoll),
+                                    Builtin::process(ir::ProcessOperation::PopenDeletePoll),
                                     vec![receiver],
                                 ),
                             }));
@@ -6926,7 +6926,7 @@ impl<'a> Checker<'a> {
                         statements.push(Statement::Expr(Expr {
                             ty: Type::None,
                             kind: ExprKind::Builtin(
-                                Builtin::Process(ir::ProcessOperation::EnvironDelete {
+                                Builtin::process(ir::ProcessOperation::EnvironDelete {
                                     bytes: ty == Type::Bytes,
                                 }),
                                 vec![key],
@@ -7275,7 +7275,7 @@ impl<'a> Checker<'a> {
         } else if temporary.is_some() {
             Builtin::Path(ir::PathOperation::CleanupTemporaryDirectory)
         } else if popen {
-            Builtin::Process(ir::ProcessOperation::PopenExit)
+            Builtin::process(ir::ProcessOperation::PopenExit)
         } else if token {
             Builtin::ContextVar(ir::ContextOperation::ExitToken)
         } else if socket {
@@ -7519,7 +7519,7 @@ impl<'a> Checker<'a> {
         raised: Expr,
         cause: &ast::Expr,
     ) -> Result<(Expr, Option<Expr>), String> {
-        if let ExprKind::Builtin(Builtin::Process(ir::ProcessOperation::ExceptionAt), args) =
+        if let ExprKind::Builtin(Builtin::Process(ir::ProcessOperation::ExceptionAt, _), args) =
             &raised.kind
             && matches!(
                 &args[1].kind,
@@ -7533,7 +7533,7 @@ impl<'a> Checker<'a> {
             let member = Expr {
                 ty: Type::Exception,
                 kind: ExprKind::Builtin(
-                    Builtin::Process(ir::ProcessOperation::MemberCause),
+                    Builtin::process(ir::ProcessOperation::MemberCause),
                     vec![raised, group],
                 ),
             };
@@ -7549,7 +7549,7 @@ impl<'a> Checker<'a> {
                     _
                 )
         ) && !matches!(&raised.kind,
-            ExprKind::Builtin(Builtin::Process(ir::ProcessOperation::ExceptionView),args)
+            ExprKind::Builtin(Builtin::Process(ir::ProcessOperation::ExceptionView, _),args)
                 if matches!(args[0].kind, ExprKind::Builtin(Builtin::NamedException { .. } | Builtin::ImportErrorNew { .. }, _)))
         {
             return Err(error(
@@ -8760,11 +8760,16 @@ impl<'a> Checker<'a> {
             }
             ast::Expr::Call(call) => {
                 let mut result = self.call(call)?;
-                if let ExprKind::Call(_, args) | ExprKind::Invoke { args, .. } = &mut result.kind
+                if let ExprKind::Call(_, args) | ExprKind::Invoke { args, .. } = &mut result.kind {
                     // A conversion can return an unchanged, already positioned operand.
-                    && matches!(args.site, ir::CallSite::None)
-                {
-                    args.site = ir::CallSite::Fixed(self.call_origin(call));
+                    let origin = match args.site {
+                        ir::CallSite::Written(range, end) => {
+                            self.fixed_origin(range, Some((end, b'(')))
+                        }
+                        ir::CallSite::None => self.call_origin(call),
+                        _ => return Ok(result),
+                    };
+                    args.site = ir::CallSite::Fixed(origin);
                 }
                 Ok(result)
             }
@@ -8789,7 +8794,7 @@ impl<'a> Checker<'a> {
             return Ok(Expr {
                 ty: self.types.list(Type::ActivePopen),
                 kind: ExprKind::Builtin(
-                    Builtin::Process(ir::ProcessOperation::PopenActive),
+                    Builtin::process(ir::ProcessOperation::PopenActive),
                     Vec::new(),
                 ),
             });
@@ -8838,7 +8843,7 @@ impl<'a> Checker<'a> {
             return Ok(Expr {
                 ty: Type::ProcessSelectorClass,
                 kind: ExprKind::Builtin(
-                    Builtin::Process(ir::ProcessOperation::SelectorClass(mode)),
+                    Builtin::process(ir::ProcessOperation::SelectorClass(mode)),
                     Vec::new(),
                 ),
             });
@@ -9205,7 +9210,7 @@ impl<'a> Checker<'a> {
                     return Ok(Expr {
                         ty: Type::Int,
                         kind: ExprKind::Builtin(
-                            Builtin::Process(ir::ProcessOperation::DescriptorConstant(name)),
+                            Builtin::process(ir::ProcessOperation::DescriptorConstant(name)),
                             vec![],
                         ),
                     });
@@ -9322,7 +9327,7 @@ impl<'a> Checker<'a> {
                 | Intrinsic::OsPathsep { posix: false } => {
                     let operation = match symbol {
                         Intrinsic::SysExecutable => {
-                            Builtin::Process(ir::ProcessOperation::Executable)
+                            Builtin::process(ir::ProcessOperation::Executable)
                         }
                         Intrinsic::OsName => Builtin::OsName,
                         Intrinsic::OsLinesep => Builtin::OsLinesep,
@@ -10310,7 +10315,7 @@ impl<'a> Checker<'a> {
                     return Ok(Expr {
                         ty,
                         kind: ExprKind::Builtin(
-                            Builtin::Process(ir::ProcessOperation::EnvironIndex {
+                            Builtin::process(ir::ProcessOperation::EnvironIndex {
                                 bytes: ty == Type::Bytes,
                             }),
                             vec![key],
@@ -10329,7 +10334,7 @@ impl<'a> Checker<'a> {
                         return Ok(Expr {
                             ty: Type::Exception,
                             kind: ExprKind::Builtin(
-                                Builtin::Process(ir::ProcessOperation::ExceptionAt),
+                                Builtin::process(ir::ProcessOperation::ExceptionAt),
                                 vec![value, index],
                             ),
                         });
@@ -11101,7 +11106,7 @@ impl<'a> Checker<'a> {
                         return Ok(Expr {
                             ty: self.types.tuple(vec![self.types.list(issue)]),
                             kind: ExprKind::Builtin(
-                                Builtin::Process(ir::ProcessOperation::TreeErrorArgs),
+                                Builtin::process(ir::ProcessOperation::TreeErrorArgs),
                                 vec![receiver],
                             ),
                         });
@@ -11117,7 +11122,7 @@ impl<'a> Checker<'a> {
                     let (ty, builtin) = match attribute.attr.as_str() {
                         "characters_written" => (
                             Type::Int,
-                            Builtin::Process(ir::ProcessOperation::OsErrorField(4)),
+                            Builtin::process(ir::ProcessOperation::OsErrorField(4)),
                         ),
                         name @ ("errno" | "strerror" | "filename" | "filename2") => {
                             let (index, ty) = match name {
@@ -11132,7 +11137,7 @@ impl<'a> Checker<'a> {
                             };
                             (
                                 self.types.optional(ty),
-                                Builtin::Process(ir::ProcessOperation::OsErrorField(index)),
+                                Builtin::process(ir::ProcessOperation::OsErrorField(index)),
                             )
                         }
                         field @ ("args" | "msg" | "name" | "path" | "name_from")
@@ -12618,7 +12623,7 @@ impl<'a> Checker<'a> {
             {
                 return Ok(Expr {
                     ty: Type::Int,
-                    kind: ExprKind::Builtin(Builtin::Process(ir::ProcessOperation::GetPid), vec![]),
+                    kind: ExprKind::Builtin(Builtin::process(ir::ProcessOperation::GetPid), vec![]),
                 });
             }
             Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport("itertools.accumulate")))
@@ -12686,7 +12691,7 @@ impl<'a> Checker<'a> {
                 return Ok(Expr {
                     ty: Type::Str,
                     kind: ExprKind::Builtin(
-                        Builtin::Process(ir::ProcessOperation::Strerror),
+                        Builtin::process(ir::ProcessOperation::Strerror),
                         vec![self.expr_expected(code, Type::Int)?],
                     ),
                 });
@@ -12720,7 +12725,7 @@ impl<'a> Checker<'a> {
                 let op = ir::ProcessOperation::GetCwd { bytes };
                 return Ok(Expr {
                     ty: if bytes { Type::Bytes } else { Type::Str },
-                    kind: ExprKind::Builtin(Builtin::Process(op), vec![]),
+                    kind: ExprKind::Builtin(Builtin::process(op), vec![]),
                 });
             }
             Some(Binding::Intrinsic(Intrinsic::Popen)) => return self.popen(call, None),
@@ -12729,7 +12734,7 @@ impl<'a> Checker<'a> {
                 return Ok(Expr {
                     ty: Type::None,
                     kind: ExprKind::Builtin(
-                        Builtin::Process(ir::ProcessOperation::PopenCleanup),
+                        Builtin::process(ir::ProcessOperation::PopenCleanup),
                         vec![],
                     ),
                 });
@@ -14941,7 +14946,7 @@ impl<'a> Checker<'a> {
                 && matches!(args[0].ty, Type::Popen(..) | Type::ActivePopen) =>
             {
                 (
-                    Builtin::Process(ir::ProcessOperation::PopenIdentity),
+                    Builtin::process(ir::ProcessOperation::PopenIdentity),
                     Type::Int,
                 )
             }

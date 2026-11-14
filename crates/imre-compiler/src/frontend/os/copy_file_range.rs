@@ -24,7 +24,7 @@ impl Checker<'_> {
         let arg = |i: usize| args.values[args.order[i]].clone();
         let fd_op = |op, ty, args| Expr {
             ty,
-            kind: ExprKind::Builtin(Builtin::Process(ProcessOperation::Fd(op)), args),
+            kind: ExprKind::Builtin(Builtin::process(ProcessOperation::Fd(op)), args),
         };
         let mut descriptor = |value| {
             let value = self.index_word(value, &call.func, false)?;

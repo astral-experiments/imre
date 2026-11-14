@@ -8,7 +8,7 @@ use ruff_python_ast::visitor::{Visitor, walk_expr};
 fn operation(operation: ProcessOperation, ty: Type, args: Vec<Expr>) -> Expr {
     Expr {
         ty,
-        kind: ExprKind::Builtin(Builtin::Process(operation), args),
+        kind: ExprKind::Builtin(Builtin::process(operation), args),
     }
 }
 
@@ -159,12 +159,12 @@ pub(super) fn process_error_view(
     let mut other_shutil = false;
     ir::walk_expressions(body, &mut |value| {
         let (origin, command) = match &value.kind {
-            ExprKind::Builtin(Builtin::Process(ProcessOperation::CopyTree(issue)), _) => {
+            ExprKind::Builtin(Builtin::Process(ProcessOperation::CopyTree(issue), _), _) => {
                 tree_issue = Some(*issue);
                 return;
             }
             ExprKind::Builtin(
-                Builtin::Process(ProcessOperation::Copy(_) | ProcessOperation::Move(_)),
+                Builtin::Process(ProcessOperation::Copy(_) | ProcessOperation::Move(_), _),
                 _,
             ) => {
                 other_shutil = true;
@@ -184,6 +184,7 @@ pub(super) fn process_error_view(
                     | ProcessOperation::ContextEnter
                     | ProcessOperation::ContextExit
                     | ProcessOperation::ContextThrow,
+                    _,
                 ),
                 _,
             ) => {
@@ -191,16 +192,19 @@ pub(super) fn process_error_view(
                 return;
             }
             ExprKind::Builtin(
-                Builtin::Process(ProcessOperation::CheckOutput { capture, .. }),
+                Builtin::Process(ProcessOperation::CheckOutput { capture, .. }, _),
                 args,
             ) => {
                 timed = true;
                 (*capture, args[0].ty)
             }
             ExprKind::Builtin(
-                Builtin::Process(ProcessOperation::Run {
-                    timed: deadline, ..
-                }),
+                Builtin::Process(
+                    ProcessOperation::Run {
+                        timed: deadline, ..
+                    },
+                    _,
+                ),
                 _,
             ) => {
                 timed |= *deadline;
@@ -210,7 +214,7 @@ pub(super) fn process_error_view(
                 (capture, types.completed_command(cmd))
             }
             ExprKind::Builtin(
-                Builtin::Process(ProcessOperation::PopenCommunicate { .. }),
+                Builtin::Process(ProcessOperation::PopenCommunicate { .. }, _),
                 args,
             ) => {
                 timed = true;
@@ -222,6 +226,7 @@ pub(super) fn process_error_view(
             ExprKind::Builtin(
                 Builtin::Process(
                     op @ (ProcessOperation::PopenWait | ProcessOperation::Call { .. }),
+                    _,
                 ),
                 args,
             ) => {
@@ -245,7 +250,7 @@ pub(super) fn process_error_view(
                     command,
                 )
             }
-            ExprKind::Builtin(Builtin::Process(ProcessOperation::CheckReturnCode), args) => {
+            ExprKind::Builtin(Builtin::Process(ProcessOperation::CheckReturnCode, _), args) => {
                 let Type::CompletedProcess(capture, cmd) = args[0].ty else {
                     unreachable!()
                 };
@@ -676,7 +681,7 @@ impl Checker<'_> {
             }
         })?;
         let returns = self.types.optional(args.values[args.order[0]].ty);
-        Ok(self.ordered_builtin(Builtin::Process(ProcessOperation::Which), returns, args))
+        Ok(self.ordered_builtin(Builtin::process(ProcessOperation::Which), returns, args))
     }
 
     /// Consume the original iterable and quote each fsdecoded path as a Windows argument.
@@ -909,7 +914,7 @@ impl Checker<'_> {
             Type::Str
         };
         Ok(self.ordered_builtin(
-            Builtin::Process(ProcessOperation::ShellOutput { status }),
+            Builtin::process(ProcessOperation::ShellOutput { status }),
             ty,
             args,
         ))
@@ -1237,7 +1242,7 @@ impl Checker<'_> {
                 return Ok(value);
             }
         }
-        Ok(self.ordered_builtin(Builtin::Process(op), ty, args))
+        Ok(self.ordered_builtin(Builtin::process(op), ty, args))
     }
 
     pub(super) fn popen_attribute(
@@ -1337,7 +1342,7 @@ impl Checker<'_> {
                     .types
                     .tuple(vec![capture.stream(true), capture.stream(false)]);
                 return Ok(self.ordered_builtin(
-                    Builtin::Process(ProcessOperation::PopenCommunicate { text: capture.text }),
+                    Builtin::process(ProcessOperation::PopenCommunicate { text: capture.text }),
                     pair,
                     values,
                 ));
@@ -1350,7 +1355,7 @@ impl Checker<'_> {
                         checker.deadline_value(argument)
                     })?;
                 return Ok(self.ordered_builtin(
-                    Builtin::Process(ProcessOperation::PopenWait),
+                    Builtin::process(ProcessOperation::PopenWait),
                     Type::Int,
                     values,
                 ));
@@ -1359,7 +1364,7 @@ impl Checker<'_> {
                 let param = parameter("sig", Type::Int, None);
                 let values = self.arguments(call, &[param], args.pop())?;
                 return Ok(self.ordered_builtin(
-                    Builtin::Process(ProcessOperation::PopenSignal),
+                    Builtin::process(ProcessOperation::PopenSignal),
                     Type::None,
                     values,
                 ));
@@ -1473,7 +1478,7 @@ impl Checker<'_> {
         })?;
         let returns = args.values[args.order[1]].ty;
         Ok(self.ordered_builtin(
-            Builtin::Process(ProcessOperation::EnvironGet),
+            Builtin::process(ProcessOperation::EnvironGet),
             returns,
             args,
         ))
@@ -1771,7 +1776,7 @@ mod tests {
         let mut calls = 0;
         for function in &fixed.ir.0.functions {
             ir::walk_expressions(&function.body, &mut |expr| {
-                if let ExprKind::Builtin(Builtin::Process(ProcessOperation::Run { .. }), args) =
+                if let ExprKind::Builtin(Builtin::Process(ProcessOperation::Run { .. }, _), args) =
                     &expr.kind
                 {
                     calls += 1;

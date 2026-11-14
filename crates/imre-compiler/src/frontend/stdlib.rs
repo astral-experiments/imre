@@ -763,7 +763,7 @@ impl Checker<'_> {
                                 Ok(Expr {
                                     ty: Type::Str,
                                     kind: ExprKind::Builtin(
-                                        Builtin::Process(
+                                        Builtin::process(
                                             ir::ProcessOperation::QuoteCommandArgument,
                                         ),
                                         vec![path],

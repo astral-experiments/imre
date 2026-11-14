@@ -1149,6 +1149,7 @@ impl Emitter<'_, '_> {
 
     fn at_builtin_origin<R>(&mut self, builtin: &Builtin, emit: impl FnOnce(&mut Self) -> R) -> R {
         let origin = match builtin {
+            Builtin::Process(_, origin) => origin.clone().map(CheckedFaultOrigin::Single),
             Builtin::Int(origin)
             | Builtin::Float(origin)
             | Builtin::ListGet(origin)
@@ -5102,7 +5103,7 @@ impl Emitter<'_, '_> {
                     }
                 }
             }
-            Builtin::Process(operation) => self.process_builtin(*operation, &args, returns),
+            Builtin::Process(operation, _) => self.process_builtin(*operation, &args, returns),
             Builtin::WarningFormat { entry, environment } => {
                 let line = self.optional_object_pointer(&args[5].value);
                 let layout = self.output.record_layout(*entry);

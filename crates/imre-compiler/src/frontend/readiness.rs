@@ -7,7 +7,7 @@ fn op(operation: Readiness, ty: Type, args: Vec<Expr>) -> Expr {
     Expr {
         ty,
         kind: ExprKind::Builtin(
-            Builtin::Process(ProcessOperation::Readiness(operation)),
+            Builtin::process(ProcessOperation::Readiness(operation)),
             args,
         ),
     }

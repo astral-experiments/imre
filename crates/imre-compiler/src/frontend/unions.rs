@@ -219,7 +219,7 @@ impl Checker<'_> {
             return Expr {
                 ty,
                 kind: ExprKind::Builtin(
-                    Builtin::Process(ir::ProcessOperation::ExceptionView),
+                    Builtin::process(ir::ProcessOperation::ExceptionView),
                     vec![value],
                 ),
             };

@@ -1118,6 +1118,7 @@ fn collect(
             Builtin::Process(
                 ir::ProcessOperation::Coroutine { function: id, .. }
                 | ir::ProcessOperation::ContextNew { function: id },
+                _,
             ),
             _,
         )
