@@ -8275,7 +8275,7 @@ impl Context {
                     return stdlib::socket::prepare_descriptor(self, owner, name, &args, &kwargs);
                 }
                 Value::Native(ref name) => {
-                    let method = match name.as_str() {
+                    let wait = match name.as_str() {
                         "_imre_thread.start" => {
                             return thread_worker::prepare_start(self, &args, &kwargs)
                                 .map(|start| RegisteredCall::Start(Box::new(start)))
@@ -8298,11 +8298,21 @@ impl Context {
                             return thread_lock::prepare_release(self, &args, &kwargs)
                                 .map(RegisteredCall::Release);
                         }
-                        "_thread.lock.acquire" => "acquire",
-                        "_thread.lock.__enter__" => "__enter__",
+                        "_thread.lock.acquire" => {
+                            thread_lock::Acquire::prepare(self, "acquire", &args, &kwargs)
+                        }
+                        "_thread.lock.__enter__" => {
+                            thread_lock::Acquire::prepare(self, "__enter__", &args, &kwargs)
+                        }
+                        "_thread.RLock.acquire" => {
+                            thread_rlock::prepare_acquire(self, "acquire", &args, &kwargs)
+                        }
+                        "_thread.RLock.__enter__" => {
+                            thread_rlock::prepare_acquire(self, "__enter__", &args, &kwargs)
+                        }
                         _ => break,
                     };
-                    return thread_lock::Acquire::prepare(self, method, &args, &kwargs)
+                    return wait
                         .map(RegisteredCall::Acquire)
                         .map_err(|error| stdlib::io::qualify_error(self, error, None));
                 }

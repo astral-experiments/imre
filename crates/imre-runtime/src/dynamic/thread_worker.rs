@@ -1,7 +1,7 @@
 //! Native worker startup and creator-heap ownership for joinable and detached calls.
 
 use super::thread_callback::Callback;
-use super::thread_lock::{Acquire, NativeWait};
+use super::thread_lock::NativeWait;
 use super::value::Heap;
 use std::sync::{
     Arc, Condvar, Mutex, MutexGuard, Weak,
@@ -273,7 +273,8 @@ impl Handle {
     ) -> Result<bool> {
         // SAFETY: the handle retains no Python values and the wait drops its mutex on return.
         unsafe {
-            NativeWait::Join(deadline).run(context, |limit| self.wait(limit, State::join_pending))
+            NativeWait::Join(deadline)
+                .run(context, |limit, _| self.wait(limit, State::join_pending))
         }
     }
 }
@@ -548,7 +549,7 @@ pub(super) enum Operation {
         data: Vec<u8>,
     },
     Acquire {
-        wait: Acquire,
+        wait: Arc<PrimitiveLock>,
         release: Option<Arc<PrimitiveLock>>,
     },
 }
@@ -736,7 +737,7 @@ fn launch(request: Start) -> Result<(Ready, Entry)> {
                 release: None,
             } => wait,
         };
-        wait.run();
+        wait.acquire(true, None);
         Ok(())
     })?;
     let entry = Entry {
@@ -810,7 +811,7 @@ fn worker_target(ctx: &Context, target: Id, args: Id, kwargs: Id) -> Result<(Ope
         let operation = match (ctx.heap.get(storage), pos.as_slice()) {
             (Value::PrimitiveLock(lock), []) if symbol == "_thread.lock.acquire" => {
                 Some(Operation::Acquire {
-                    wait: Acquire::blocking(lock),
+                    wait: Arc::clone(lock),
                     release: None,
                 })
             }

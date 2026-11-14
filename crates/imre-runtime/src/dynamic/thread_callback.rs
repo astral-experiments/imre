@@ -1,7 +1,6 @@
 //! Move executable code and lock ownership into a fresh boxed context.
 //! Only the compiler can certify that the function needs no surrounding heap.
 
-use super::thread_lock::Acquire;
 use super::thread_worker::{Operation, WorkerStatus};
 use super::value::{Body, Code, CodeDefinition, CodeObject, WorkerStack};
 use super::{CallParameters, Context, Error, Id, NONE, Result, Value, copy_label, ffi};
@@ -133,7 +132,7 @@ impl Callback {
             let roots = super::concat_ids(roots, &[operand])?;
             return Ok(Some((
                 Operation::Acquire {
-                    wait: Acquire::blocking(lock),
+                    wait: Arc::clone(lock),
                     release: None,
                 },
                 roots,
@@ -211,7 +210,7 @@ impl Callback {
                 let roots = super::concat_ids(roots, &[id])?;
                 return Ok(Some((
                     Operation::Acquire {
-                        wait: Acquire::blocking(lock),
+                        wait: Arc::clone(lock),
                         release: Some(Arc::clone(release)),
                     },
                     roots,
