@@ -112,25 +112,22 @@ def DocTestSuite(module=None, globs=None, extraglobs=None, *, optionflags=0, set
     found = {}
     _boxed_docs(module, module.__name__, module, found, set())
     parser = DocTestParser()
-    suite = _DocTestSuite()
+    tests = []
     filename = getattr(module, "__file__", None) or module.__name__
     if filename.endswith(".pyc"):
         filename = filename[:-1]
     lines = None if filename.endswith((".py", ".pyw")) else []
     for name in sorted(found):
         obj, doc = found[name]
-        examples = parser.get_examples(doc, name)
-        if examples:
-            test = DocTest(name, doc, examples)
-            test.globs = namespace.copy()
-            test.filename = filename
+        test = parser.get_doctest(doc, namespace, name, filename, None)
+        if test.examples:
             bind_doctest(test, module)
             if lines is None:
                 import linecache
                 lines = linecache.getlines(filename, module.__dict__)
             test.lineno = _docstring_lineno(obj, lines, filename)
-            suite.addTest(DocTestCase(test, optionflags, setUp, tearDown, checker))
-    return suite
+        tests.append(test)
+    return _suite_from_tests(tests, lambda test: DocTestCase(test, optionflags, setUp, tearDown, checker))
 
 
 # Object cases store hooks on each instance, including their absence after deletion.

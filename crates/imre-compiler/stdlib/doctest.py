@@ -374,3 +374,12 @@ class _DocTestCase(unittest.TestCase):
         self.setUp()
         execute(self._dt_test, True, self._dt_optionflags, self._dt_checker)
         self.tearDown()
+
+
+def _suite_from_tests(tests: list[DocTest], make_case: Callable[[DocTest], DocTestCase]) -> _DocTestSuite:
+    suite = _DocTestSuite()
+    for test in tests:
+        if len(test.examples) == 0:
+            continue
+        suite.addTest(make_case(test))
+    return suite
