@@ -253,6 +253,7 @@ pub(super) enum RegisteredCall {
     },
     Start(Box<thread_worker::Start>),
     Join(thread_worker::Join),
+    ShutdownWorkers,
     Acquire(thread_lock::Acquire),
     /// Condition.notify has already selected the waiter's bound release method.
     Release(Arc<crate::objects::locks::PrimitiveLock>),
@@ -280,6 +281,7 @@ impl RegisteredCall {
             }
             // SAFETY: the interrupted caller remains rooted in this exclusively executing context.
             Self::Join(join) => unsafe { join.run(context) },
+            Self::ShutdownWorkers => unsafe { thread_worker::shutdown_workers(context) },
             // SAFETY: the native worker takes no reference into its creator's heap.
             Self::Start(start) => unsafe { start.run(context) },
             // SAFETY: the caller owns the context and its interrupted frame on this thread.
@@ -8327,6 +8329,11 @@ impl Context {
                             return super::lowlevel_threads::prepare_start(self, &args, &kwargs)
                                 .map(|start| RegisteredCall::Start(Box::new(start)))
                                 .map_err(|error| stdlib::io::qualify_error(self, error, None));
+                        }
+                        "_thread._shutdown" | "_imre_thread.shutdown"
+                            if args.is_empty() && kwargs.is_empty() =>
+                        {
+                            return Ok(RegisteredCall::ShutdownWorkers);
                         }
                         "_thread._ThreadHandle.join" => {
                             return thread_handle::prepare_join(self, &args, &kwargs);

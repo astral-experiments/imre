@@ -603,10 +603,10 @@ fn detached_handle_keeps_the_non_daemon_worker_registered_until_exit() {
         assert_eq!(ctx.workers.entries.len(), 1);
         Arc::clone(&ctx.workers.entries[0].handle)
     });
-    ctx.workers.join_non_daemon();
+    let shutdown = ctx.builtin("_thread._shutdown");
+    assert_eq!(ctx.call(shutdown, vec![], vec![]).unwrap(), NONE);
     assert!(!active.awaiting_exit());
     assert!(!handle.awaiting_exit());
-    ctx.reap_thread_operands();
     assert!(ctx.workers.entries.is_empty());
 }
 
