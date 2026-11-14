@@ -22,7 +22,7 @@ impl RegisteredFrame<'_, '_> {
         );
         let position = if let Some(range) = range {
             self.position = SourcePosition::Implicit(range);
-            self.position_constant(range)
+            self.output.position(Some(self.source_span(range)))
         } else {
             if let SourcePosition::Implicit(previous) | SourcePosition::Expression(previous) =
                 self.position
