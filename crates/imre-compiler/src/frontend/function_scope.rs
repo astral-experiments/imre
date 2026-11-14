@@ -28,6 +28,8 @@ struct ClosureNames {
     globals: BTreeSet<String>,
     nonlocals: BTreeSet<String>,
     include_nested_reads: bool,
+    // The enclosing statement contains a lexical site or a subtree the binder skips.
+    needs_discovery: bool,
     cell_reads: BTreeSet<String>,
     string_annotations: bool,
     incomplete: bool,
@@ -112,6 +114,7 @@ impl<'a> Visitor<'a> for ClosureNames {
     fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
         match stmt {
             ast::Stmt::FunctionDef(f) => {
+                self.needs_discovery = true;
                 self.locals.insert(f.name.to_string());
                 // The declaration collector has already propagated this child's reads.
                 if !self.include_nested_reads {
@@ -123,6 +126,7 @@ impl<'a> Visitor<'a> for ClosureNames {
             }
             // Local variable annotations never evaluate in a function's scope.
             ast::Stmt::AnnAssign(a) if self.include_nested_reads => {
+                self.needs_discovery = true;
                 // A bare parenthesized name with no value has no binding effect.
                 if imre_ast::annotation_visits_target(a) {
                     self.visit_expr(&a.target);
@@ -132,6 +136,7 @@ impl<'a> Visitor<'a> for ClosureNames {
                 }
             }
             ast::Stmt::ClassDef(c) => {
+                self.needs_discovery = true;
                 self.locals.insert(c.name.to_string());
                 self.incomplete = true;
                 if self.include_nested_reads
@@ -180,6 +185,7 @@ impl<'a> Visitor<'a> for ClosureNames {
                 }
             }
             ast::Stmt::TypeAlias(alias) => {
+                self.needs_discovery = true;
                 self.visit_expr(&alias.name);
                 if self.include_nested_reads {
                     // The delayed callable closes over its own parameters before this frame.
@@ -229,6 +235,7 @@ impl<'a> Visitor<'a> for ClosureNames {
                 _ => {}
             },
             ast::Expr::Lambda(lambda) => {
+                self.needs_discovery = true;
                 if self.include_nested_reads {
                     let reads = self.child_reads(lambda.parameters.as_deref(), |child| {
                         child.visit_expr(&lambda.body)
@@ -248,6 +255,7 @@ impl<'a> Visitor<'a> for ClosureNames {
             | ast::Expr::SetComp(_)
             | ast::Expr::DictComp(_)
             | ast::Expr::Generator(_) => {
+                self.needs_discovery = true;
                 let (reads, bindings, captured) =
                     class_metadata::comprehension_scope(expr, self.string_annotations);
                 self.reads.extend(reads);
@@ -257,6 +265,10 @@ impl<'a> Visitor<'a> for ClosureNames {
                     self.incomplete = true;
                     self.locals_incomplete = true;
                 }
+            }
+            ast::Expr::Yield(_) | ast::Expr::YieldFrom(_) | ast::Expr::TString(_) => {
+                self.needs_discovery = true;
+                visitor::walk_expr(self, expr);
             }
             _ => visitor::walk_expr(self, expr),
         }
@@ -311,12 +323,7 @@ impl FunctionScope {
         }
     }
 
-    fn function(
-        def: &ast::StmtFunctionDef,
-        mut names: ClosureNames,
-        may_capture_class: bool,
-    ) -> Self {
-        names.visit_body(&def.body);
+    fn function(def: &ast::StmtFunctionDef, names: ClosureNames, may_capture_class: bool) -> Self {
         let parameters = Some(def.parameters.as_ref());
         let captures_class = may_capture_class
             && imre_ast::class_cell::function_needed(
@@ -469,7 +476,7 @@ impl Scope {
 
 struct Collector<'s, 'p, 'a> {
     children: &'s mut FunctionChildren<'a>,
-    // Nested declarations finish before the enclosing function binds its own body.
+    // Nested declarations propagate their free reads before this frame is finalized.
     function_names: ClosureNames,
     scopes: &'s mut ScopeFacts<'p>,
     names: &'s imre_ast::Names,
@@ -605,7 +612,16 @@ impl<'a> Visitor<'a> for Collector<'_, '_, 'a> {
             self.attribute_class = Some(site);
         }
         let parent_yields = std::mem::take(&mut self.yields);
-        visitor::walk_body(self, body);
+        if matches!(scope, Scope::Function { .. }) {
+            for stmt in body {
+                self.function_names.visit_stmt(stmt);
+                if std::mem::take(&mut self.function_names.needs_discovery) {
+                    self.visit_stmt(stmt);
+                }
+            }
+        } else {
+            visitor::walk_body(self, body);
+        }
         self.body_yields = std::mem::replace(&mut self.yields, parent_yields);
         self.scope = parent;
         self.attribute_class = outer_class;
