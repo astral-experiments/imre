@@ -61,6 +61,20 @@ fn selector_file_objects_use_the_registered_provider_and_integer_fds_stay_native
 }
 
 #[test]
+fn dormant_import_preserves_the_next_call_diagnostic() {
+    let project = tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    fs::write(project.path().join("child.py"), "value = 17\n").unwrap();
+    fs::write(
+        &entry,
+        "if False:\n    import child\nprint(__import__('child', bogus=1))\n",
+    )
+    .unwrap();
+    let error = crate::check_file(&entry, None).unwrap_err();
+    assert!(error.contains("main.py:3:7: Imre: keyword arguments"), "{error}");
+}
+
+#[test]
 fn registered_body_checks_its_declared_result() {
     let project = tempdir().unwrap();
     let entry = project.path().join("main.py");
