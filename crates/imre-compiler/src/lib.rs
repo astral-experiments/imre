@@ -472,16 +472,6 @@ fn object_fallback(
             ));
         }
     }
-    let native_includes = || {
-        if options.include_modules.is_empty() {
-            Ok(())
-        } else {
-            Err(
-                "--include-module requires a runtime module loader; this entry is fully typed"
-                    .to_owned(),
-            )
-        }
-    };
     let checked_file = options.python_startup().is_none();
     // A Python module launch enters through the runtime registration. Other callers
     // can return a native diagnostic before registration, including profiled entries.
@@ -532,8 +522,13 @@ fn object_fallback(
                         verify_after(module, "lowering")?;
                         match callables::layouts(module) {
                             Ok(program) => {
+                                if !options.include_modules.is_empty() {
+                                    return Err(
+                                        "--include-module requires a runtime module loader; this entry is fully typed"
+                                            .to_owned(),
+                                    );
+                                }
                                 let Some(output) = output.as_deref_mut() else {
-                                    native_includes()?;
                                     return Ok(graph.inputs);
                                 };
                                 for original in specialize(module)? {
@@ -545,7 +540,6 @@ fn object_fallback(
                                     options.address_sanitizer,
                                     program,
                                 );
-                                native_includes()?;
                                 return Ok(match entry {
                                     ProgramEntry::Source(_) => SourceInputs::default(),
                                     ProgramEntry::File(..) => output

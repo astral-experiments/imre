@@ -558,6 +558,18 @@ fn fixed_file_selects_its_product_for_the_requested_startup() {
     )
     .unwrap();
 
+    let options = CompileOptions {
+        include_modules: ["decimal".to_owned()].into(),
+        ..Default::default()
+    };
+    let (diagnostic, events) =
+        observe_preparation(|| compile_file(&path, None, &options).err().unwrap());
+    assert_eq!(
+        diagnostic,
+        "--include-module requires a runtime module loader; this entry is fully typed"
+    );
+    assert!(!events.iter().any(|event| matches!(event, Phase::Llvm(_))));
+
     for sitecustomize in [false, true] {
         let options = CompileOptions {
             sitecustomize,
