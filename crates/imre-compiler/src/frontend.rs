@@ -5323,8 +5323,7 @@ impl<'a> Checker<'a> {
         method: &ast::ExprAttribute,
         receiver: Expr,
     ) -> Result<Iteration, String> {
-        let target = registered::values::loaded_attribute(method, receiver);
-        let value = self.call_with_target(call, target)?;
+        let value = self.call_object_method(call, method, receiver)?;
         self.iteration_value(value, false, call)
     }
 
