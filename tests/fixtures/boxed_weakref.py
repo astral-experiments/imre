@@ -81,9 +81,40 @@ def proxy_repr():
         assert repr(handle) == bound_repr() == prefix + "dead>"
 
 
+def proxy_attribute_result():
+    released = []
+
+    class Result:
+        def __del__(self):
+            released.append("result")
+
+    class Attribute:
+        def __get__(self, instance, owner):
+            owners.clear()
+            del instance
+            assert target_ref() is not None
+            return Result()
+
+    class Target:
+        value = Attribute()
+
+        def __del__(self):
+            released.append("target")
+
+    owners = [Target()]
+    target_ref = ref(owners[0])
+    handle = proxy(owners[0])
+    result, at_delivery = handle.value, tuple(released)
+    assert at_delivery == ("target",) and type(result) is Result
+    del result
+    assert released == ["target", "result"]
+
+
 def current():
     import _datetime
     from gc import collect
+
+    proxy_attribute_result()
 
     argument_refs = []
 

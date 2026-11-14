@@ -2768,7 +2768,16 @@ impl Context {
     ) -> Result<Id> {
         let spelling = attr.text(self)?;
         let name = spelling.as_ref();
-        let obj = self.weak_proxy_target(obj)?;
+        let target = self.weak_proxy_target(obj)?;
+        if target != obj {
+            let attr = match attr {
+                AttributeName::Python { key, .. } => AttributeName::from_lookup(name, Some(key)),
+                attr => attr,
+            };
+            return self.with_weak_target(target, |ctx| {
+                ctx.lookup_attribute_operand(target, attr, report_missing, original)
+            });
+        }
         let obj = super::typing::generic_attr_target(self, obj, name, false)?;
         if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
             return self.local_attribute(obj, attr);
