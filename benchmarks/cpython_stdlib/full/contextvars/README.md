@@ -10,14 +10,14 @@ Default Linux regrtest passes 55 and skips the CPU resource stress test.
 
 On Linux, CPython 3.14.5 ran all 56 methods when invoked directly with
 `-B Lib/test/test_context.py -v ContextTest HamtTest`. The ordinary Imre
-FILE command on [#8066](https://github.com/astral-experiments/imre/pull/8066)
+FILE command on [#8074](https://github.com/astral-experiments/imre/pull/8074)
 collected the same 56 at both optimization levels.
 
 | Runtime | Passed | Assertion failures | Errors | Skipped |
 | --- | ---: | ---: | ---: | ---: |
 | CPython 3.14.5 | 56 | 0 | 0 | 0 |
-| Imre O0 | 27 | 4 | 2 | 23 |
-| Imre O3 | 27 | 4 | 2 | 23 |
+| Imre O0 | 29 | 2 | 2 | 23 |
+| Imre O3 | 29 | 2 | 2 | 23 |
 
 The [#8032 run](ordinary-linux-8032.json) passed 25 methods.
 `test_context_run_1` now passes because `Context.run()` reports the missing
@@ -26,12 +26,14 @@ positional argument the method expects. Its [callback binding change](https://gi
 The [#8050 run](ordinary-linux-8050.json) passed 26 methods.
 In `test_context_getset_1`, the token now exposes [`Token.MISSING`](https://github.com/astral-experiments/imre/pull/8062). The other 55 outcomes matched #8050.
 
+The [#8066 run](ordinary-linux-8066.json) passed 27 methods. The two constructor tests now pass because `Context` and `ContextVar` report argument errors in the same order as CPython. The other 54 outcomes matched.
+
 All 33 public `ContextTest` methods ran. The upstream class guard skipped
 the 23 private `HamtTest` methods because Imre lacks
 `_testinternalcapi.hamt()`. Module execution with `-m test.test_context`
 and both saved executables after source withdrawal reproduced every FILE
 outcome. The [per-method ledger](evidence-linux.json) gives the result and
-source digest for each case. The [launch record](ordinary-linux-8066.json)
+source digest for each case. The [launch record](ordinary-linux-8074.json)
 identifies the shipping products, commands and streams.
 
 The earlier [isolated harness](native-linux.json) ran two complete methods in
