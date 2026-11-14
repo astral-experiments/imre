@@ -8,6 +8,8 @@ use serde_json::{Value, json};
 use super::{ClassBindings, ClosureNames, FunctionScope};
 
 pub(crate) struct ClassScope {
+    /// Selected after the class's lexical children have been prepared.
+    pub(crate) body: Option<crate::frontend::RegisteredClass>,
     pub(crate) enclosing_class: Option<ruff_text_size::TextSize>,
     pub(crate) bindings: ClassBindings,
     pub(crate) namespace: FunctionScope,
@@ -23,6 +25,10 @@ pub(super) fn site(class: &ast::StmtClassDef) -> TextSize {
 }
 
 impl ClassScope {
+    pub(crate) fn prepared(&self) -> &crate::frontend::RegisteredClass {
+        self.body.as_ref().expect("prepared class namespace")
+    }
+
     pub(crate) fn write_signature(&self, signature: &mut Value, method_scope: bool) {
         signature["needs_class_cell"] = json!(self.cells.class);
         signature["needs_dict_cell"] = json!(self.cells.dict);
@@ -47,6 +53,7 @@ impl ClassScope {
         let string_annotations = names.string_annotations;
         let declarations = ClosureNames::class_declarations(body);
         Self {
+            body: None,
             enclosing_class,
             bindings: ClassBindings {
                 locals: declarations.locals,
