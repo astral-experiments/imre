@@ -808,7 +808,7 @@ fn worker_target(ctx: &Context, target: Id, args: Id, kwargs: Id) -> Result<(Ope
         } else {
             &operands[..1]
         };
-    if let Some(captured) = Callback::capture(ctx, target, roots, pos, Some(kwargs), true)? {
+    if let Some(captured) = Callback::capture(ctx, target_value, roots, pos, Some(kwargs), true)? {
         return Ok(captured);
     }
     if let Value::Method {

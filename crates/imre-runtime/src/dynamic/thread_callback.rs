@@ -50,23 +50,24 @@ pub(super) fn unsupported_target() -> Error {
 impl Callback {
     pub(super) fn capture(
         ctx: &Context,
-        target: Id,
+        target: &Value,
         roots: &[Id],
         pos: &[Id],
         kwargs: Option<Id>,
         high_level: bool,
     ) -> Result<Option<(Operation, Vec<Id>)>> {
-        let (function, receiver) = match *ctx.heap.get(target) {
+        let (callable, method) = match *target {
             Value::Method {
                 callable, receiver, ..
-            } => (callable, Some(receiver)),
+            } => {
+                // Reaping the last receiver reference on the creator would invoke __del__ there.
+                if ctx.heap.is_pending_finalizer(receiver) {
+                    return Ok(None);
+                }
+                (ctx.heap.get(callable), Some((callable, receiver)))
+            }
             _ => (target, None),
         };
-        // The worker cannot run Python when it drops this bound method's receiver.
-        // Reaping its last reference on the creator would invoke __del__ there.
-        if receiver.is_some_and(|id| ctx.heap.is_pending_finalizer(id)) {
-            return Ok(None);
-        }
         let Value::Function {
             code: code_id,
             ref fields,
@@ -74,7 +75,7 @@ impl Callback {
             defaults,
             kwdefaults,
             ..
-        } = *ctx.heap.get(function)
+        } = *callable
         else {
             return Ok(None);
         };
@@ -89,7 +90,7 @@ impl Callback {
         let signature = ctx.str_value(code.parameters)?;
         let mut meta: serde_json::Value = serde_json::from_str(signature)
             .map_err(|e| Error::new("SystemError", e.to_string()))?;
-        if let Some(receiver) = receiver
+        if let Some((function, receiver)) = method
             && let Some(serde_json::Value::String(field)) = meta
                 .get_mut("thread_bound_lock_field")
                 .map(serde_json::Value::take)
@@ -137,6 +138,7 @@ impl Callback {
                 roots,
             )));
         }
+        let receiver = method.map(|(_, receiver)| receiver);
         if receiver.is_some() && !code.definition.freevars().is_empty() {
             return Ok(None);
         }
