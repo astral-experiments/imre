@@ -1452,39 +1452,20 @@ impl Context {
 
     /// Keep lookahead separate from acquiring the Python iterator.
     fn loop_cursor(&mut self, source: Id) -> Id {
-        let value = self.heap.get(source);
-        if matches!(
-            value,
-            Value::TemplateIter { .. }
-                | Value::GenericAliasIterator(_)
-                | Value::MemoryIterator { .. }
-                | Value::StructUnpackIterator { .. }
-                | Value::SequenceIterator { .. }
-                | Value::ReverseSequence { .. }
-                | Value::DequeIterator { .. }
-                | Value::Scandir(_)
-                | Value::DictIterator(_)
-                | Value::SetIterator(_)
-                | Value::CallableIterator(_)
-                | Value::Map { .. }
-                | Value::Filter { .. }
-                | Value::Zip { .. }
-                | Value::Generator { .. }
-                | Value::CoroutineWrapper(_)
-                | Value::ANextAwaitable { .. }
-                | Value::AsyncGeneratorOperation { .. }
-                | Value::BufferedRandom(..)
-                | Value::File(_)
-                | Value::Enumerate { .. }
-        ) || value.instance_class().is_some()
-            || value.is_weak_proxy()
-        {
-            return self.alloc(Value::LoopIterator {
+        match self.heap.get(source) {
+            // These cursors can test for exhaustion without consuming an item.
+            Value::Iterator { .. }
+            | Value::RangeIterator(_)
+            | Value::FormatIterator { .. }
+            | Value::Count { .. }
+            | Value::Repeat(_)
+            | Value::AstWalk { .. }
+            | Value::LoopIterator { .. } => source,
+            _ => self.alloc(Value::LoopIterator {
                 source,
                 peeked: None,
-            });
+            }),
         }
-        source
     }
 
     /// Borrows the unconsumed part of the iterator's current sequence.
