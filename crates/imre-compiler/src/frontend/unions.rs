@@ -394,11 +394,13 @@ impl Checker<'_> {
         if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::StatResult)) {
             return Ok(vec![InstanceType::Exact(self.types.stat_result())]);
         }
-        match self.resolve(expression) {
-            Some(Binding::Intrinsic(Intrinsic::BytesIo)) => return Ok(vec![Exact(Type::BytesIO)]),
-            Some(Binding::Intrinsic(Intrinsic::StringIo)) => {
-                return Ok(vec![Exact(Type::StringIO)]);
-            }
+        let binding = self.resolve(expression);
+        if let Some(ty) = annotations::fixed_instance_type(binding)
+            && self.graph.session.is_class_object(self.module, expression)
+        {
+            return Ok(vec![Exact(ty)]);
+        }
+        match binding {
             Some(Binding::Intrinsic(Intrinsic::Calendar(CalendarType::Date))) => {
                 return Ok(vec![
                     Exact(Type::Calendar(CalendarType::Date)),
@@ -407,12 +409,6 @@ impl Checker<'_> {
             }
             Some(Binding::Intrinsic(Intrinsic::Calendar(kind))) => {
                 return Ok(vec![Exact(Type::Calendar(kind))]);
-            }
-            Some(Binding::Intrinsic(Intrinsic::ClockTime)) => {
-                return Ok(vec![Exact(Type::ClockTime)]);
-            }
-            Some(Binding::Intrinsic(Intrinsic::Context)) => {
-                return Ok(vec![InstanceType::Exact(Type::Context)]);
             }
             Some(Binding::Intrinsic(Intrinsic::ContextVar)) => {
                 return Ok(vec![InstanceType::ContextVar]);
@@ -482,12 +478,6 @@ impl Checker<'_> {
         }
         if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::StrEnum)) {
             return Ok(vec![InstanceType::StrEnum]);
-        }
-        if matches!(
-            self.resolve(expression),
-            Some(Binding::Intrinsic(Intrinsic::Path))
-        ) {
-            return Ok(vec![InstanceType::Exact(Type::Path)]);
         }
         if matches!(
             self.resolve(expression),

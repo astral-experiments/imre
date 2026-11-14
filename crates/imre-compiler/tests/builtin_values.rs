@@ -78,3 +78,23 @@ def unused():
     let error = imre_compiler::check_file(&entry, Some(root.path())).unwrap_err();
     assert!(error.contains("int") && error.contains("str"), "{error}");
 }
+
+#[test]
+fn isinstance_narrows_an_imported_log_record() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("main.py");
+    std::fs::write(
+        &path,
+        r#"from logging import LogRecord as Entry
+
+def message(value: Entry | bool | None) -> str:
+    if isinstance(value, Entry):
+        return value.getMessage()
+    return "veto"
+
+print(message(Entry("root", 20, "log.py", 1, "ok", (), None)), message(False), message(None))
+"#,
+    )
+    .unwrap();
+    imre_compiler::check_file(&path, None).unwrap();
+}

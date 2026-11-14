@@ -3158,6 +3158,9 @@ fn annotation_with_aliases(
             )
         });
     }
+    if let Some(ty) = annotations::fixed_instance_type(binding) {
+        return Ok(ty);
+    }
     match binding {
         Some(Binding::Definition(definition)) => {
             if let Some(ty) = declaration_annotation(definition, graph, classes, types) {
@@ -3188,9 +3191,6 @@ fn annotation_with_aliases(
         Some(Binding::Intrinsic(Intrinsic::Socket)) => return Ok(Type::Socket),
         Some(Binding::Intrinsic(Intrinsic::ZipFile)) => return Ok(Type::ZipFile),
         Some(Binding::Intrinsic(Intrinsic::ZipInfo)) => return Ok(Type::ZipInfo),
-        Some(Binding::Intrinsic(Intrinsic::BytesIo)) => return Ok(Type::BytesIO),
-        Some(Binding::Intrinsic(Intrinsic::StringIo)) => return Ok(Type::StringIO),
-        Some(Binding::Intrinsic(Intrinsic::Context)) => return Ok(Type::Context),
         Some(Binding::Intrinsic(Intrinsic::ContextVar)) => {
             return Ok(types.context_var(Type::ObjectValue));
         }
@@ -3198,11 +3198,9 @@ fn annotation_with_aliases(
         Some(Binding::Intrinsic(Intrinsic::HandlerLevelType)) => return Ok(types.string_or_int()),
         Some(Binding::Intrinsic(Intrinsic::TextOutputType)) => return Ok(Type::TextOutput),
         Some(Binding::Intrinsic(Intrinsic::HandlerLock)) => return Ok(Type::HandlerLock),
-        Some(Binding::Intrinsic(Intrinsic::LogRecord)) => return Ok(Type::LogRecord),
         Some(Binding::Intrinsic(Intrinsic::Logger)) => return Ok(Type::Logger),
         Some(Binding::Intrinsic(Intrinsic::LogManager)) => return Ok(Type::LogManager),
         Some(Binding::Intrinsic(Intrinsic::TimedFileHandler)) => return Ok(Type::TimedFileHandler),
-        Some(Binding::Intrinsic(Intrinsic::ClockTime)) => return Ok(Type::ClockTime),
         Some(Binding::Intrinsic(Intrinsic::Calendar(kind))) => return Ok(Type::Calendar(kind)),
         Some(Binding::Intrinsic(Intrinsic::ModuleType)) => return Ok(Type::NativeModule),
         Some(Binding::Intrinsic(Intrinsic::PatchSet)) => {
@@ -3212,7 +3210,6 @@ fn annotation_with_aliases(
             return Ok(Type::Patch(ir::PatchKind::File));
         }
         Some(Binding::Intrinsic(Intrinsic::Hunk)) => return Ok(Type::Patch(ir::PatchKind::Hunk)),
-        Some(Binding::Intrinsic(Intrinsic::Path)) => return Ok(Type::Path),
         Some(Binding::Intrinsic(Intrinsic::StructTime)) => return Ok(types.struct_time()),
         Some(Binding::Intrinsic(Intrinsic::StatResult)) => return Ok(types.stat_result()),
         Some(Binding::Intrinsic(Intrinsic::SplitResult { bytes })) => {
