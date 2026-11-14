@@ -8,7 +8,7 @@ pub(super) use parameter_value::{
 };
 
 use crate::dynamic::value::SlotStorage;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use super::source_code::CONDITIONAL;
 use super::value::EMPTY_TUPLE;
@@ -256,7 +256,6 @@ pub(super) struct Registry {
     pub(super) abc_callable_reducer: Option<Id>,
     no_default: Option<Id>,
     no_default_doc: Option<Id>,
-    overloads: HashMap<(String, String), Vec<(u32, Id)>>,
 }
 
 impl Registry {
@@ -268,7 +267,6 @@ impl Registry {
             .chain(self.abc_callable_reducer.iter())
             .chain(self.no_default.iter())
             .chain(self.no_default_doc.iter())
-            .chain(self.overloads.values().flatten().map(|(_, value)| value))
     }
 }
 
@@ -2743,31 +2741,6 @@ pub(super) fn call(
             ))
         }
         ("alias_mro_entries", [id, bases]) => alias_bases(ctx, *id, *bases),
-        ("overload", [v]) => {
-            if let Some((key, line)) = ctx.overload_key(*v) {
-                let group = ctx.typing.overloads.entry(key).or_default();
-                crate::objects::register_overload(group, line, *v);
-            }
-            Ok(ctx.builtin("typing._overload_dummy"))
-        }
-        ("get_overloads", [v]) => {
-            let functions = ctx
-                .overload_key(*v)
-                .and_then(|(key, _)| ctx.typing.overloads.get(&key))
-                .into_iter()
-                .flatten()
-                .map(|&(_, f)| f)
-                .collect();
-            Ok(ctx.alloc(Value::List(functions)))
-        }
-        ("clear_overloads", []) => {
-            ctx.typing.overloads.clear();
-            Ok(NONE)
-        }
-        ("_overload_dummy", _) => Err(Error::new(
-            "NotImplementedError",
-            crate::objects::OVERLOAD_DUMMY_ERROR,
-        )),
         _ => Err(Error::new(
             "TypeError",
             format!("invalid call to typing.{operation}"),
@@ -3519,24 +3492,5 @@ impl Context {
             self.bind_local(scope, &field, descriptor);
         }
         Ok(class)
-    }
-
-    fn overload_key(&self, function: Id) -> Option<((String, String), u32)> {
-        let value = match self.heap.get(function) {
-            Value::Method { callable, .. } | Value::StaticMethod { callable, .. } => {
-                self.heap.get(*callable)
-            }
-            value => value,
-        };
-        let Value::Function { fields, code, .. } = value else {
-            return None;
-        };
-        Some((
-            (
-                self.str_value(fields.module).ok()?.to_owned(),
-                self.str_value(fields.qualname).ok()?.to_owned(),
-            ),
-            self.code_object(*code).first_line,
-        ))
     }
 }

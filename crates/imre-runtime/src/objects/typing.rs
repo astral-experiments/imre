@@ -21,10 +21,10 @@ static ATTRIBUTES: AttributeLayout = AttributeLayout(RecordDescriptor {
 });
 
 type Groups = HashMap<String, HashMap<String, Vec<(usize, OwnedWord)>>>;
-pub(crate) const OVERLOAD_DUMMY_ERROR: &str = "You should not call an overloaded function. A series of @overload-decorated functions outside a stub module should always be followed by an implementation that is not @overload-ed.";
+const OVERLOAD_DUMMY_ERROR: &str = "You should not call an overloaded function. A series of @overload-decorated functions outside a stub module should always be followed by an implementation that is not @overload-ed.";
 
 /// Re-executing a source site replaces its function without reordering other overloads.
-pub(crate) fn register_overload<L: Eq, F>(group: &mut Vec<(L, F)>, line: L, function: F) {
+fn register_overload(group: &mut Vec<(usize, OwnedWord)>, line: usize, function: OwnedWord) {
     if let Some((_, previous)) = group.iter_mut().find(|(existing, _)| *existing == line) {
         *previous = function;
     } else {

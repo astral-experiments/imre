@@ -183,6 +183,14 @@ try:
 finally:
     t._overload_registry = registry
 
+for name in ("overload", "get_overloads", "clear_overloads", "_overload_dummy"):
+    original = getattr(t, name)
+    delattr(t, name)
+    try:
+        assert not hasattr(t, name)
+    finally:
+        setattr(t, name, original)
+
 old = t.get_overloads(Left.select)
 print(len(old), old[0](None, 1), old[1](None, 2), old[0] is t.get_overloads(Left().select)[0])
 print(len(t.get_overloads(Right.select)), t.get_overloads(Right.select)[0](None, 3))
