@@ -240,6 +240,11 @@ impl StatementLowering for Checker<'_> {
             return Ok((Some(Statement::Expr(value)), true));
         }
         let mut value = self.expr(expr)?;
+        // Only a direct call selects one implementation; a dispatched override may return.
+        let continues = !self.terminating_call(&value);
+        if self.inference.is_some() && self.discarded_function_body() {
+            return Ok((None, continues));
+        }
         // A discarded run forwarding stdout to stderr needs only its exit status.
         let result = match &mut value.kind {
             ExprKind::Scope { value, .. } => value.as_mut(),
@@ -264,8 +269,6 @@ impl StatementLowering for Checker<'_> {
             result.ty = Type::Int;
             value.ty = Type::Int;
         }
-        // Only a direct call selects one implementation; a dispatched override may return.
-        let continues = !self.terminating_call(&value);
         Ok((
             Some(self.statement_at(expr, Statement::Expr(value))),
             continues,
