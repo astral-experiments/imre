@@ -166,6 +166,13 @@ pub fn range_constructor_error(positional: usize, keywords: bool) -> Option<Stri
     }
 }
 
+/// Context.run takes its callable positionally and forwards the remaining arguments.
+pub fn context_run_arguments<T>(positional: &[T]) -> Result<(&T, &[T]), &'static str> {
+    positional
+        .split_first()
+        .ok_or("run() missing 1 required positional argument")
+}
+
 /// A pattern that neither inspects nor captures its operand.
 pub fn wildcard_pattern(pattern: &ast::Pattern) -> bool {
     matches!(pattern, ast::Pattern::MatchAs(p) if p.pattern.is_none() && p.name.is_none())

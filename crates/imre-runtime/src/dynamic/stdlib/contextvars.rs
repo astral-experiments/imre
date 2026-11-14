@@ -177,7 +177,9 @@ pub(super) fn call(
         ("Context.keys" | "Context.values" | "Context.items", [context], []) => {
             Ok(ctx.context_iterator(*context, name))
         }
-        ("Context.run", [context, callable, rest @ ..], kwargs) => {
+        ("Context.run", [context, args @ ..], kwargs) => {
+            let (callable, rest) = imre_ast::context_run_arguments(args)
+                .map_err(|message| Error::new("TypeError", message))?;
             if ctx.contexts.contains(context) {
                 return Err(Error::new(
                     "RuntimeError",

@@ -44,6 +44,12 @@ def current():
     outer = var.set(req)
     assert type(outer) is Token
     saved = copy_context()
+    try:
+        saved.run(saved.run)
+    except TypeError as error:
+        assert str(error) == "run() missing 1 required positional argument"
+    else:
+        raise AssertionError("entered a context without a callback")
     inner = var.set(None)
     print(var.name, isinstance(var, ContextVar), isinstance(inner, Token))
     print(outer.var is var, outer.old_value is Token.MISSING, inner.old_value is req)
