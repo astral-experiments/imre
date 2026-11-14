@@ -9,9 +9,13 @@ pub(super) fn write_definition(
     signature: Arguments<'_>,
     write_body: impl FnOnce(&mut String),
 ) {
-    writeln!(output, "define {signature} {{").unwrap();
+    begin_definition(output, signature);
     write_body(output);
     output.push_str("}\n");
+}
+
+fn begin_definition(output: &mut String, signature: Arguments<'_>) {
+    writeln!(output, "define {signature} {{").unwrap();
 }
 
 /// Definitions referenced by the checked instructions written to one LLVM unit.
@@ -51,15 +55,16 @@ impl IntegerFunctions {
     }
 }
 
-/// Complete the C entry with the argument ABI its body uses and the
-/// runtime operation that supplies the process exit status.
-pub(super) fn write_main(output: &mut String, body: &str, argv: bool, attrs: &str, finish: &str) {
+/// Open the executable entry with the argument ABI its body uses.
+pub(super) fn begin_main(output: &mut String, argv: bool, attrs: &str) {
     let params = if argv { "i32 %argc, ptr %argv" } else { "" };
-    write_definition(output, format_args!("i32 @main({params}){attrs}"), |unit| {
-        unit.push_str(body);
-        writeln!(unit, "  %status = call i32 {finish}").unwrap();
-        unit.push_str("  ret i32 %status\n");
-    });
+    begin_definition(output, format_args!("i32 @main({params}){attrs}"));
+}
+
+/// Finish the executable entry with the runtime's exit status.
+pub(super) fn end_main(output: &mut String, finish: &str) {
+    writeln!(output, "  %status = call i32 {finish}").unwrap();
+    output.push_str("  ret i32 %status\n}\n");
 }
 
 #[derive(Clone)]

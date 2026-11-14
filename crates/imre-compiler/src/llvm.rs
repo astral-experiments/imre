@@ -839,13 +839,10 @@ fn emit_program(
     emitter.enum_table();
     emitter.literal_pool();
     emitter.output.common().push('\n');
-    body::write_main(
-        emitter.output.entry_buffer(),
-        &emitter.body.code,
-        emitter.uses_sys_argv,
-        attrs,
-        "@imre_finish_stdio()",
-    );
+    let entry = emitter.output.entry_buffer();
+    body::begin_main(entry, emitter.uses_sys_argv, attrs);
+    entry.push_str(&emitter.body.code);
+    body::end_main(entry, "@imre_finish_stdio()");
     // Layout hints never replace the representation, overflow, or error guards.
     emitter.output.common().push_str(BRANCH_WEIGHTS);
 }
