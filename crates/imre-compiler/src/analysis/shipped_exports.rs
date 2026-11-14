@@ -73,12 +73,11 @@ impl Session {
         Ok(file)
     }
 
-    /// The checked ABI uses the leading declarations of the same module that boxed callers import.
-    pub(crate) fn checked_shipped_prefix(
+    fn checked_shipped_file(
         &mut self,
         owner: &str,
-        last: &str,
-    ) -> Result<&'static str, String> {
+        private_path: Option<&Path>,
+    ) -> Result<(&'static str, File), String> {
         let (filename, source) = crate::modules::bundled_runtime_source(owner)
             .ok_or_else(|| format!("no checked runtime provider selected for {owner:?}"))?;
         let file = self.prepare_shipped_file(owner, filename, source)?;
@@ -86,9 +85,65 @@ impl Session {
         // immutable provider in a separate file before using offsets in its bytes.
         let file = if self.file_matches_parser_input(file, source) {
             file
+        } else if let Some(path) = private_path {
+            let path = path.to_str().ok_or("module paths must be valid UTF-8")?;
+            self.write_file(path, source)?
         } else {
             self.virtual_source(&format!("imre/stdlib/{filename}"), source)
         };
+        Ok((source, file))
+    }
+
+    pub(crate) fn checked_shipped_function(
+        &mut self,
+        owner: &str,
+        name: &str,
+        private_path: &Path,
+    ) -> Result<(&'static str, FileRange), String> {
+        let (source, file) = self.checked_shipped_file(owner, Some(private_path))?;
+        let Some(Binding::RegisteredValue(site)) = self.shipped_declaration_at(file, owner, name)
+        else {
+            return Err(format!("missing checked definition {owner}.{name}"));
+        };
+        if site.file() != file {
+            return Err(format!(
+                "checked function {owner}.{name} belongs to another module"
+            ));
+        }
+        Ok((source, site))
+    }
+
+    /// Register the immutable module under the original top-level statement index.
+    pub(crate) fn add_shipped_function(
+        &mut self,
+        site: FileRange,
+        path: &Path,
+        source: &str,
+    ) -> Result<(ParsedModuleRef, usize), String> {
+        Self::with_checked_input(path, source, |path, input| {
+            let (parsed, spreads) =
+                self.checked_parse(site.file(), path, source, input, crate::SourceKind::File)?;
+            let suite = parsed.suite();
+            let index = suite.partition_point(|stmt| stmt.end() <= site.range().start());
+            let function = suite.get(index).and_then(Stmt::as_function_def_stmt);
+            if function.is_none_or(|f| f.name.range() != site.range()) {
+                return Err(format!(
+                    "{path}: checked binding is not a module-level function"
+                ));
+            }
+            self.files.push(site.file());
+            self.tuple_spreads.push(spreads);
+            Ok((parsed, index))
+        })
+    }
+
+    /// The checked ABI uses the leading declarations of the same module that boxed callers import.
+    pub(crate) fn checked_shipped_prefix(
+        &mut self,
+        owner: &str,
+        last: &str,
+    ) -> Result<&'static str, String> {
+        let (source, file) = self.checked_shipped_file(owner, None)?;
         let definition = self
             .final_module_binding(file, last)
             .ok_or_else(|| format!("missing checked definition {owner}.{last}"))?;

@@ -1533,13 +1533,23 @@ impl Session {
         source: &str,
         kind: crate::SourceKind,
     ) -> Result<(ParsedModuleRef, HashMap<TextSize, usize>), String> {
+        Self::with_checked_input(path, source, |path, input| {
+            let file = self.write_file(path, &input.text)?;
+            let checked = self.checked_parse(file, path, source, input, kind)?;
+            self.files.push(file);
+            Ok(checked)
+        })
+    }
+
+    fn with_checked_input<T>(
+        path: &Path,
+        source: &str,
+        check: impl FnOnce(&str, &imre_ast::indentation::Source<'_>) -> Result<T, String>,
+    ) -> Result<T, String> {
         let path = path.to_str().ok_or("module paths must be valid UTF-8")?;
         let input = imre_ast::indentation::prepare(source);
         check_source_complexity(&input.text).map_err(|error| format!("{path}: {error}"))?;
-        let file = self.write_file(path, &input.text)?;
-        let checked = self.checked_parse(file, path, source, &input, kind)?;
-        self.files.push(file);
-        Ok(checked)
+        check(path, &input)
     }
 
     fn checked_parse(
