@@ -1364,14 +1364,10 @@ pub(crate) fn compile(
     });
     let mut installed_wheels = Vec::new();
     let mut wheel_files = HashMap::new();
+    // A distribution can also be imported from the script directory or the launcher's cwd.
     let mut wheel_roots: Vec<_> = roots
         .iter()
-        .filter(|root| {
-            !archives.contains_key(*root)
-                && (startup_paths.contains(root)
-                    || implicit_dirs.contains(root)
-                    || explicit_roots.contains(root))
-        })
+        .filter(|root| !archives.contains_key(*root))
         .collect();
     // The runtime executes the first FILE body in __main__. Its finder and
     // relative imports use the qualified name belonging to that same file.

@@ -2149,11 +2149,18 @@ def check_unittest_module_main(imre, root, run):
     assert local_line in with_locals.stderr.splitlines(), with_locals
 
     (package / "other.py").write_text("raise AssertionError('outside discovery pattern')\n")
-    discovered = run(imre, "-m", "unittest", "discover", "-v", "-s", package.name, "-t", ".",
-                     "-p", "sample.py", "-k", "Passing.test_one", extra=declared)
+    discovery = ("-m", "unittest", "discover", "-v", "-s", package.name, "-t", ".",
+                 "-p", "sample.py", "-k", "Passing.test_one")
+    discovered = run(imre, *discovery, extra=declared)
     assert discovered.returncode == 0 and discovered.stdout == (passing + ".test_one\n").encode(), discovered
     assert f"test_one ({passing}.test_one) ... ok".encode() in discovered.stderr.splitlines(), discovered
     assert b"Ran 1 test in " in discovered.stderr, discovered
+
+    metadata = root / "cli_test_package-1.dist-info"
+    metadata.mkdir()
+    (metadata / "RECORD").write_text("cli_test_package/__init__.py,,\ncli_test_package/sample.py,,\n")
+    installed = run(imre, "--include-module", package.name, *discovery)
+    assert installed.returncode == 0 and installed.stdout == discovered.stdout, installed
 
 
 def check_unittest_file_discovery(imre, root, run):

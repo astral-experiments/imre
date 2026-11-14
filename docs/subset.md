@@ -613,6 +613,8 @@ imre --include-module tests.test_rates -m unittest discover -s tests -t . -p 'te
 
 For a larger suite, repeat `--include-module` for each module that discovery will import by name. Declaring a package links its initializer. Its ordinary imports follow the usual dependency rules.
 
+When an imported package belongs to an installed distribution, its wheel's `RECORD` also supplies Python modules for runtime imports. This works when the distribution is in the script directory or the current directory used by `-m`. Filesystem discovery still requires the directory being enumerated.
+
 To build an application that uses a pure-Python wheel, install the dependency in a directory and pass that directory to `imre build`. For example, a caller of `packaging.version` can use:
 
 ```sh
