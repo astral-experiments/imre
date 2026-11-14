@@ -147,6 +147,20 @@ def current():
     assert original.fdel is None and type(replaced) is Sub
     assert replaced.fget is original.fget and replaced.fset is original.fset
     assert replaced is not original and replaced.fdel is discard
+
+    def read(owner):
+        "replacement doc"
+        return owner
+
+    class Alias:
+        field = replaced.getter(read)
+
+    field = Alias.field
+    assert type(field) is Sub and field.fget is field.accessor is read
+    assert field.__name__ == "field" and replaced.__name__ == "replaced"
+    assert field.fset is replaced.fset and field.fdel is discard
+    assert field.__doc__ == "replacement doc" and Alias().field.__class__ is Alias
+    assert property.getter(field, None).fget is read
     assert replaced.deleter(None).fdel is discard
     managed = Managed()
     managed.replaced = 8

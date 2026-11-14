@@ -8,6 +8,7 @@ pub(super) const METHODS: &[&str] = &[
     "__set__",
     "__delete__",
     "__set_name__",
+    "getter",
     "setter",
     "deleter",
 ];
@@ -190,7 +191,7 @@ pub(super) fn method(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    let wrapper = !matches!(name, "setter" | "deleter" | "__set_name__");
+    let wrapper = !matches!(name, "getter" | "setter" | "deleter" | "__set_name__");
     let Some((&receiver, args)) = args.split_first() else {
         let msg = if wrapper {
             format!("descriptor '{name}' of 'property' object needs an argument")
@@ -223,10 +224,10 @@ pub(super) fn method(
     }
     let count = args.len();
     match (name, args) {
-        ("setter" | "deleter", [accessor]) => {
+        ("getter" | "setter" | "deleter", [accessor]) => {
             copy_accessor(ctx, receiver, property, name, *accessor)
         }
-        ("setter" | "deleter", _) => Err(Error::new(
+        ("getter" | "setter" | "deleter", _) => Err(Error::new(
             "TypeError",
             format!("property.{name}() takes exactly one argument ({count} given)"),
         )),
@@ -285,6 +286,7 @@ fn copy_accessor(
 ) -> Result<Id> {
     if accessor != NONE {
         match name {
+            "getter" => property.get = accessor,
             "setter" => property.set = accessor,
             "deleter" => property.delete = accessor,
             _ => unreachable!(),
