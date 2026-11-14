@@ -1513,8 +1513,9 @@ impl Parsers {
                         schema,
                         description: description.cloned(),
                     };
-                    for operation in operations {
-                        parsers.calls.insert((module_id, operation), parser.clone());
+                    let layouts = std::iter::repeat_n(parser, operations.len());
+                    for (operation, layout) in operations.into_iter().zip(layouts) {
+                        parsers.calls.insert((module_id, operation), layout);
                     }
                     Ok(())
                 };
