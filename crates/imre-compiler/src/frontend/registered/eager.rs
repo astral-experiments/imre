@@ -58,9 +58,8 @@ impl SourceScope<'_> {
             &plan,
             input,
             Collector::Display(None),
-            result,
-            Some(&mut prefix),
-            |_, _| false,
+            Some((result, &mut prefix)),
+            |_, _, _| false,
         );
         self.comprehension = outer;
         checked.ok()?;
@@ -110,10 +109,6 @@ impl ClauseLowering for SourceScope<'_> {
 }
 
 impl EagerDisplay for SourceScope<'_> {
-    fn collection_locals(&self) -> &[Type] {
-        &self.locals
-    }
-
     fn collection_key(
         &mut self,
         key: &ast::Expr,
@@ -127,16 +122,16 @@ impl EagerDisplay for SourceScope<'_> {
         &mut self,
         output: Output<'_>,
         _: Collector,
-        _: usize,
         key: Option<&Expr>,
         _: Option<(usize, usize)>,
-    ) -> StdResult<Expr, ()> {
-        if key.is_some() {
+    ) -> StdResult<(Expr, Type), ()> {
+        let item = if key.is_some() {
             self.ordinary_operand(output.value()).ok_or(())
         } else {
             values::collection_item(output.value(), |value| {
                 self.ordinary_operand(value).ok_or(())
             })
-        }
+        }?;
+        Ok((item, Type::PythonObject))
     }
 }

@@ -183,7 +183,6 @@ pub(super) trait ClauseLowering: Sized {
 }
 
 pub(super) trait EagerDisplay: ClauseLowering<Body = Vec<Statement>> {
-    fn collection_locals(&self) -> &[Type];
     fn collection_guard(_: &[Expr]) -> Option<(usize, usize)> {
         None
     }
@@ -197,10 +196,9 @@ pub(super) trait EagerDisplay: ClauseLowering<Body = Vec<Statement>> {
         &mut self,
         output: Output<'_>,
         collector: Collector,
-        result: usize,
         key: Option<&Expr>,
         guarded: Option<(usize, usize)>,
-    ) -> StdResult<Expr, Self::Error>;
+    ) -> StdResult<(Expr, Type), Self::Error>;
 
     /// Seed the accumulator before its first pull and update it only after the filters pass.
     fn comprehension_body(
@@ -208,10 +206,10 @@ pub(super) trait EagerDisplay: ClauseLowering<Body = Vec<Statement>> {
         plan: &Plan<'_>,
         input: Self::Input,
         collector: Collector,
-        result: usize,
-        mut body: Option<&mut Vec<Statement>>,
-        mut replaces_loop: impl FnMut(&Self, &Expr) -> bool,
+        mut destination: Option<(usize, &mut Vec<Statement>)>,
+        mut replaces_loop: impl FnMut(&Self, &Expr, Type) -> bool,
     ) -> StdResult<Type, Self::Error> {
+        let mut result_type = Type::None;
         let loops = self.comprehension_loop(plan, 0, input, &mut |scope, output, conditions| {
             let guarded = Self::collection_guard(conditions);
             let key = match (collector, output) {
@@ -220,11 +218,12 @@ pub(super) trait EagerDisplay: ClauseLowering<Body = Vec<Statement>> {
                 }
                 _ => None,
             };
-            let item = scope.collection_value(output, collector, result, key.as_ref(), guarded)?;
-            if replaces_loop(scope, &item) {
-                body = None;
+            let (item, ty) = scope.collection_value(output, collector, key.as_ref(), guarded)?;
+            result_type = ty;
+            if replaces_loop(scope, &item, ty) {
+                destination = None;
             }
-            let Some(body) = body.as_deref_mut() else {
+            let Some((result, ref mut body)) = destination else {
                 return Ok(Vec::new());
             };
             let (empty, store) = match (collector, output, key) {
@@ -232,13 +231,12 @@ pub(super) trait EagerDisplay: ClauseLowering<Body = Vec<Statement>> {
                     ExprKind::Dict(Vec::new()),
                     Statement::SetItem(
                         ir::ItemOrder::Display,
-                        Expr::local(result, scope.collection_locals()[result]),
+                        Expr::local(result, ty),
                         key,
                         item,
                     ),
                 ),
                 (Collector::Display(_), Output::List(_) | Output::Set(_), None) => {
-                    let ty = scope.collection_locals()[result];
                     let (empty, operation) = if matches!(output, Output::Set(_)) {
                         let element = if ty == Type::PythonObject {
                             ty
@@ -279,14 +277,13 @@ pub(super) trait EagerDisplay: ClauseLowering<Body = Vec<Statement>> {
                 ),
                 _ => unreachable!("invalid eager comprehension collector"),
             };
-            let ty = scope.collection_locals()[result];
             body.push(Statement::Assign(result, Expr { ty, kind: empty }));
             Ok(vec![store])
         })?;
-        if let Some(body) = body {
+        if let Some((_, body)) = destination {
             body.extend(loops);
         }
-        Ok(self.collection_locals()[result])
+        Ok(result_type)
     }
 }
 
@@ -346,10 +343,6 @@ impl ClauseLowering for Checker<'_> {
 }
 
 impl EagerDisplay for Checker<'_> {
-    fn collection_locals(&self) -> &[Type] {
-        &self.locals
-    }
-
     fn collection_guard(conditions: &[Expr]) -> Option<(usize, usize)> {
         conditions
             .last()
@@ -374,12 +367,11 @@ impl EagerDisplay for Checker<'_> {
         &mut self,
         output: Output<'_>,
         collector: Collector,
-        result: usize,
         key: Option<&Expr>,
         guarded: Option<(usize, usize)>,
-    ) -> Result<Expr, String> {
+    ) -> Result<(Expr, Type), String> {
         let item = output.value();
-        let (value, ty) = match (collector, key) {
+        Ok(match (collector, key) {
             (Collector::IntegerSum, _) => (
                 self.guarded_element(item, Some(Type::Int), guarded)?,
                 Type::Int,
@@ -423,9 +415,7 @@ impl EagerDisplay for Checker<'_> {
                 };
                 (value, ty)
             }
-        };
-        self.locals[result] = ty;
-        Ok(value)
+        })
     }
 }
 
@@ -748,7 +738,6 @@ impl Checker<'_> {
         let gather_input = plain_iterable
             .filter(|value| value.ty == Type::Str)
             .cloned();
-        let result = helper.hidden(Type::None);
         let list_binding = if self.inference.is_none()
             && matches!(collector, Collector::Display(_))
             && matches!(display.output, Output::List(_))
@@ -771,22 +760,22 @@ impl Checker<'_> {
                 .first()
                 .is_some_and(|arg| matches!(arg.kind, ExprKind::Builtin(Builtin::Slice, _)));
         let mut body = Vec::new();
-        let emit_loop = self.inference.is_none() || slice;
+        let first_private = helper.locals.len();
+        let result = (self.inference.is_none() || slice).then(|| helper.hidden(Type::None));
         let mut mapping = None;
         let ty = helper.comprehension_body(
             display,
             input,
             collector,
-            result,
-            emit_loop.then_some(&mut body),
-            |checker, item| {
-                if gather_input.is_some() && checker.locals[result] == Type::ListInt {
+            result.map(|slot| (slot, &mut body)),
+            |checker, item, ty| {
+                if gather_input.is_some() && ty == Type::ListInt {
                     mapping = checker.dictionary_gather_mapping(display, item);
                 }
                 mapping.is_some()
             },
         )?;
-        if let Some((iterable, target)) = list_binding {
+        if let (Some(result), Some((iterable, target))) = (result, list_binding) {
             self.helpers.list_builds.borrow_mut().insert(
                 id,
                 ir::ListBuild {
@@ -837,9 +826,10 @@ impl Checker<'_> {
                 ),
             };
             // The gather uses only the incoming iterable and a captured or global mapping.
-            helper.locals.truncate(result);
+            helper.locals.truncate(first_private);
             body.push(Statement::Return(gather));
-        } else if emit_loop {
+        } else if let Some(result) = result {
+            helper.locals[result] = ty;
             body.push(Statement::Return(helper.local(result)));
         }
         if slice {
@@ -979,13 +969,12 @@ impl Checker<'_> {
             display,
             input,
             collector,
-            result,
-            Some(&mut prefix),
-            |_, _| false,
+            Some((result, &mut prefix)),
+            |_, _, _| false,
         );
         self.namespace = enclosing;
         let exports = self.leave_comprehension(scope);
-        checked?;
+        self.locals[result] = checked?;
         if first_pull && !writes.is_empty() {
             // A filter runs before it can suppress the output or the next clause.
             let mut bind = |expression| {
