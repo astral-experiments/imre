@@ -4437,7 +4437,11 @@ impl SourceGraph {
         matches!(
             self.resolve(module, origin),
             Some(Binding::Intrinsic(Intrinsic::TYPING_PROTOCOL))
-        ) && self.session.is_typing_protocol(module, origin)
+        ) && self.session.is_special_form(
+            module,
+            origin,
+            ty_python_semantic::types::SpecialFormType::Protocol,
+        )
     }
 
     /// An import binds its name throughout the function, even before the import executes.

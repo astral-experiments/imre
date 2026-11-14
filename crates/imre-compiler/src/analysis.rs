@@ -2332,13 +2332,18 @@ impl Session {
             && static_member_type_for_attribute(&model, attribute).is_none()
     }
 
-    pub(crate) fn is_typing_protocol(&self, module: usize, expression: &Expr) -> bool {
-        use ty_python_semantic::types::{SpecialFormType, Type as Ty};
+    pub(crate) fn is_special_form(
+        &self,
+        module: usize,
+        expression: &Expr,
+        form: ty_python_semantic::types::SpecialFormType,
+    ) -> bool {
+        use ty_python_semantic::types::Type as Ty;
         self.hint_reads.set(self.hint_reads.get() + 1);
         let model = SemanticModel::new(&self.db, self.db.program_file(self.files[module]));
         matches!(
             expression.inferred_type(&model),
-            Some(Ty::SpecialForm(SpecialFormType::Protocol))
+            Some(Ty::SpecialForm(found)) if found == form
         )
     }
 

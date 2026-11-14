@@ -168,7 +168,13 @@ pub(super) fn resolve<'syntax>(
                     }
                     binding
                         if matches!(binding, Some(Binding::RegisteredClass(_)))
-                            || argument.is_call_expr() =>
+                            || argument.is_call_expr()
+                            || (!graph.entry_profile.requires_fixed_entry()
+                                && graph.session.is_special_form(
+                                    definition.module,
+                                    argument,
+                                    ty_python_semantic::types::SpecialFormType::NamedTuple,
+                                )) =>
                     {
                         // The Python class statement consumes the evaluated base object.
                         layouts.registered.insert(definition);
