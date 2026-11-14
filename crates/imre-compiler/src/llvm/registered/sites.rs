@@ -15,28 +15,15 @@ pub(crate) enum CallableSite {
 pub(crate) struct CompiledDefinition {
     pub(crate) code: String,
     pub(crate) signature: String,
-    pub(crate) name: String,
     pub(crate) qualname: String,
+    /// Byte offset of the unqualified name within the qualified name.
+    pub(crate) name_start: usize,
     pub(crate) doc: Option<String>,
     pub(crate) provider: Option<Box<Self>>,
     pub(crate) annotation_scope: bool,
     pub(crate) default_names: std::sync::Arc<[String]>,
     pub(crate) format_evaluator: bool,
     pub(crate) class_header: Option<TextRange>,
-}
-
-pub(crate) struct DefinitionOperands {
-    doc: String,
-    annotate: String,
-    qualname: String,
-    defaults: String,
-}
-
-impl DefinitionOperands {
-    pub(crate) fn default(&self, frame: &mut RegisteredFrame<'_, '_>, name: &str, value: &str) {
-        let name = frame.code_name(name);
-        frame.op("put", &[&self.defaults, &name, value]);
-    }
 }
 
 impl CompiledDefinition {
@@ -50,7 +37,10 @@ impl CompiledDefinition {
         Self {
             code,
             signature,
-            name: name.to_owned(),
+            name_start: qualname
+                .strip_suffix(name)
+                .expect("qualified name ends with its name")
+                .len(),
             qualname,
             annotation_scope,
             doc: None,
@@ -59,6 +49,10 @@ impl CompiledDefinition {
             format_evaluator: false,
             class_header: None,
         }
+    }
+
+    pub(crate) fn name(&self) -> &str {
+        &self.qualname[self.name_start..]
     }
 
     pub(crate) fn instantiate_class(
@@ -82,41 +76,6 @@ impl CompiledDefinition {
         frame.op(operation, &[&kwargs, &bases, &namespace])
     }
 
-    pub(crate) fn doc(&self, frame: &mut RegisteredFrame<'_, '_>) -> String {
-        self.doc
-            .as_ref()
-            .map_or_else(|| "0".into(), |s| frame.text(s))
-    }
-
-    pub(crate) fn operands(
-        &self,
-        frame: &mut RegisteredFrame<'_, '_>,
-        scope: &str,
-        doc: String,
-    ) -> DefinitionOperands {
-        let annotate = self.provider.as_ref().map_or_else(
-            || "0".into(),
-            |provider| provider.bind_defaults(frame, scope, &[]),
-        );
-        let qualname = frame.text(&self.qualname);
-        let defaults = if self.format_evaluator || !self.default_names.is_empty() {
-            frame.op("dict", &[])
-        } else {
-            "0".into()
-        };
-        if self.format_evaluator {
-            let format = frame.text(".format");
-            let value = frame.integer(1);
-            frame.op("put", &[&defaults, &format, &value]);
-        }
-        DefinitionOperands {
-            doc,
-            annotate,
-            qualname,
-            defaults,
-        }
-    }
-
     pub(crate) fn bind_defaults(
         &self,
         frame: &mut RegisteredFrame<'_, '_>,
@@ -124,31 +83,43 @@ impl CompiledDefinition {
         defaults: &[String],
     ) -> String {
         assert_eq!(self.default_names.len(), defaults.len());
-        let doc = self.doc(frame);
-        let operands = self.operands(frame, scope, doc);
-        for (name, value) in self.default_names.iter().zip(defaults) {
-            operands.default(frame, name, value);
+        let doc = self
+            .doc
+            .as_ref()
+            .map_or_else(|| "0".into(), |doc| frame.text(doc));
+        let annotate = self.provider.as_ref().map_or_else(
+            || "0".into(),
+            |provider| provider.bind_defaults(frame, scope, &[]),
+        );
+        let unqualified = self.name_start == 0;
+        let qualname = if unqualified {
+            frame.code_name(&self.qualname)
+        } else {
+            frame.text(&self.qualname)
+        };
+        let defaults_object = if self.format_evaluator || !defaults.is_empty() {
+            frame.op("dict", &[])
+        } else {
+            "0".into()
+        };
+        if self.format_evaluator {
+            let format = frame.text(".format");
+            let value = frame.integer(1);
+            frame.op("put", &[&defaults_object, &format, &value]);
         }
-        self.instantiate(frame, scope, operands)
-    }
-
-    pub(crate) fn instantiate(
-        &self,
-        frame: &mut RegisteredFrame<'_, '_>,
-        scope: &str,
-        operands: DefinitionOperands,
-    ) -> String {
+        for (name, value) in self.default_names.iter().zip(defaults) {
+            let name = frame.code_name(name);
+            frame.op("put", &[&defaults_object, &name, value]);
+        }
         let signature = frame.text(&self.signature);
-        let name = frame.code_name(&self.name);
-        let DefinitionOperands {
-            doc,
-            annotate,
-            qualname,
-            defaults,
-        } = operands;
+        let name = if unqualified {
+            &qualname
+        } else {
+            &frame.code_name(self.name())
+        };
         let code = &self.code;
         let annotation_scope = self.annotation_scope;
-        frame.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {scope}, i64 {name}, i64 {signature}, i64 {defaults}, i64 {qualname}, i64 {doc}, i64 {annotate}, i1 {annotation_scope})"))
+        frame.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {scope}, i64 {name}, i64 {signature}, i64 {defaults_object}, i64 {qualname}, i64 {doc}, i64 {annotate}, i1 {annotation_scope})"))
     }
 }
 
@@ -226,7 +197,7 @@ impl CheckedSites {
             (outer, "0".into())
         };
         let evaluator = alias.definition.bind_defaults(frame, &scope, &[]);
-        let name = frame.code_name(&alias.definition.name);
+        let name = frame.code_name(alias.definition.name());
         frame.op("type_alias", &[&name, &evaluator, &parameters])
     }
 

@@ -59,7 +59,7 @@ fn checked_module_places_class_generator_and_following_lambda() {
     assert_eq!(sites.declarations.len(), 2);
     assert_eq!(location.callable_code.borrow().len(), 3);
     assert_eq!(sites.declaration(*class).definition.qualname, "C");
-    assert_eq!(sites.declaration(*read).definition.name, "read");
+    assert_eq!(sites.declaration(*read).definition.name(), "read");
     for site in [
         RequiredSite::Lambda(*first),
         RequiredSite::Generator(*generator),
