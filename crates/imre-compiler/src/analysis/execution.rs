@@ -899,6 +899,50 @@ fn captures_initial_builtins(parsed: &ParsedModuleRef, function: &StmtFunctionDe
         })
 }
 
+/// Resolve a source operand in the active module namespace.
+pub(super) fn selected_module_exec_literal<'a>(
+    model: &SemanticModel<'_>,
+    file: File,
+    parsed: &'a ParsedModuleRef,
+    call: &'a ExprCall,
+) -> Option<&'a ruff_python_ast::ExprStringLiteral> {
+    let operand = crate::frontend::exec_source_operand(call)?;
+    if ExecutionIntrinsic::resolve(model, &call.func) != Some(ExecutionIntrinsic::Exec) {
+        return None;
+    }
+    assigned_value(model.db(), file, parsed, operand, Expr::is_name_expr)?.as_string_literal_expr()
+}
+
+/// Give resolution and lowering the same checked virtual file for this decoded operand.
+pub(super) fn checked_literal_source<'a>(
+    db: &dyn super::LiteralSourceDb,
+    parent: File,
+    site: TextSize,
+    original: &'a str,
+) -> Result<(File, std::borrow::Cow<'a, str>, ParsedModuleRef), String> {
+    let text = crate::normalize_source(original, crate::SourceKind::Command)?;
+    let input = imre_ast::indentation::prepare(&text);
+    super::check_source_complexity(&input.text).map_err(|error| format!("<string>: {error}"))?;
+    // Virtual files do not introduce importable modules into the application's search
+    // path. Only this parent occurrence at this exact source revision can reuse its File.
+    let mut identity = blake3::Hasher::new();
+    let parent_path = parent.path(db).as_str().as_bytes();
+    identity.update(&(parent_path.len() as u64).to_le_bytes());
+    identity.update(parent_path);
+    identity.update(&u32::from(site).to_le_bytes());
+    identity.update(text.as_bytes());
+    let key = format!("imre/exec/{}.py", identity.finalize().to_hex());
+    let file = db.virtual_source(&key, &input.text);
+    let (parsed, _) = Session::checked_parse(
+        ruff_db::parsed::parsed_module(db, db.program_file(file).python_file(db)).load(db),
+        "<string>",
+        &text,
+        &input,
+        crate::SourceKind::Command,
+    )?;
+    Ok((file, text, parsed))
+}
+
 impl Session {
     /// A function captures its defining namespace's __builtins__ at creation.
     /// A lexical builtin type alone cannot establish lookup through a replacement.
@@ -974,14 +1018,10 @@ impl Session {
         model: &SemanticModel<'_>,
         call: &'a ExprCall,
     ) -> Option<&'a ruff_python_ast::ExprStringLiteral> {
-        let operand = crate::frontend::exec_source_operand(call)?;
-        if ExecutionIntrinsic::resolve(model, &call.func) != Some(ExecutionIntrinsic::Exec)
-            || self.reads_custom_builtins(file, parsed, &call.func)
-        {
+        if self.reads_custom_builtins(file, parsed, &call.func) {
             return None;
         }
-        assigned_value(&self.db, file, parsed, operand, Expr::is_name_expr)?
-            .as_string_literal_expr()
+        selected_module_exec_literal(model, file, parsed, call)
     }
 
     pub(crate) fn fixed_exec_call(&self, module: usize, call: &ExprCall) -> bool {
@@ -1027,7 +1067,17 @@ impl Session {
                 let operand = call.arguments.args.first()?.start();
                 let module = crate::frontend::exec_literal_text(literal, source)
                     .map_err(str::to_owned)
-                    .and_then(|text| self.parse_literal(parent, operand, text, inherited_flags));
+                    .and_then(|original| {
+                        let (file, text, parsed) =
+                            checked_literal_source(&self.db, parent, operand, original)?;
+                        Ok(ParsedLiteral::new(
+                            file,
+                            text,
+                            original,
+                            parsed,
+                            inherited_flags,
+                        ))
+                    });
                 Some((
                     LiteralSite {
                         call: range,
@@ -1037,38 +1087,6 @@ impl Session {
                 ))
             })
             .collect()
-    }
-
-    fn parse_literal(
-        &self,
-        parent: File,
-        site: TextSize,
-        original: &str,
-        inherited_flags: u32,
-    ) -> Result<ParsedLiteral, String> {
-        let text = crate::normalize_source(original, crate::SourceKind::Command)?;
-        let input = imre_ast::indentation::prepare(&text);
-        super::check_source_complexity(&input.text)
-            .map_err(|error| format!("<string>: {error}"))?;
-        // Virtual files do not introduce importable modules into the application's search
-        // path. Only this parent occurrence at this exact source revision can reuse its File.
-        let mut identity = blake3::Hasher::new();
-        let parent_path = parent.path(&self.db).as_str().as_bytes();
-        identity.update(&(parent_path.len() as u64).to_le_bytes());
-        identity.update(parent_path);
-        identity.update(&u32::from(site).to_le_bytes());
-        identity.update(text.as_bytes());
-        let key = format!("imre/exec/{}.py", identity.finalize().to_hex());
-        let file = self.virtual_source(&key, &input.text);
-        let (parsed, _) =
-            self.checked_parse(file, "<string>", &text, &input, crate::SourceKind::Command)?;
-        Ok(ParsedLiteral::new(
-            file,
-            text,
-            original,
-            parsed,
-            inherited_flags,
-        ))
     }
 
     /// Check the resolved nested operations in their originating project database.

@@ -89,7 +89,8 @@ impl Session {
             let path = path.to_str().ok_or("module paths must be valid UTF-8")?;
             self.write_file(path, source)?
         } else {
-            self.virtual_source(&format!("imre/stdlib/{filename}"), source)
+            self.db
+                .virtual_source(&format!("imre/stdlib/{filename}"), source)
         };
         Ok((source, file))
     }
@@ -121,8 +122,13 @@ impl Session {
         source: &str,
     ) -> Result<(ParsedModuleRef, usize), String> {
         Self::with_checked_input(path, source, |path, input| {
-            let (parsed, spreads) =
-                self.checked_parse(site.file(), path, source, input, crate::SourceKind::File)?;
+            let (parsed, spreads) = Self::checked_parse(
+                self.parsed(site.file()),
+                path,
+                source,
+                input,
+                crate::SourceKind::File,
+            )?;
             let suite = parsed.suite();
             let index = suite.partition_point(|stmt| stmt.end() <= site.range().start());
             let name = suite.get(index).and_then(crate::modules::declaration_name);
