@@ -25,6 +25,10 @@ for x in range(1, 100):
     if pow(x, prime - 1, prime) != 1:
         raise AssertionError(x)
 
+# Squaring a 32-bit residue can use all 64 bits of the product.
+assert pow(4294967293, (1 << 75) + 3, 4294967295) == 4294967287
+assert pow(-17, (1 << 75) + 3, -4294967294) == -963318497
+
 for modulus in [0, -4, 18]:
     try:
         print(pow(6, -1, modulus))
