@@ -903,9 +903,22 @@ impl Checker<'_> {
         target: &ast::Expr,
         rhs: Option<&ast::Expr>,
     ) -> Option<(Type, Option<TypeDeclaration>)> {
+        let receiver = match target {
+            ast::Expr::Attribute(attribute) => &*attribute.value,
+            ast::Expr::Subscript(subscript) => &*subscript.value,
+            _ => return None,
+        };
+        // A local Python object supplies no fixed field or item type to its RHS.
+        if let Some(name) = receiver.as_name_expr()
+            && let Some(&slot) = self.names.get(name.id.as_str())
+            && self.locals[slot] == Type::PythonObject
+            && !self.narrowed.contains_key(&slot)
+            && !self.is_class_receiver(receiver)
+            && self.graph.resolve(self.module, receiver).is_none()
+        {
+            return None;
+        }
         let helpers = Helpers::new(0);
-        let omitted_locals = self.omitted_assert_locals.clone();
-        let omitted_free = self.omitted_assert_free.clone();
         let mut probe = Checker::new(
             self.graph,
             self.module,
@@ -915,8 +928,8 @@ impl Checker<'_> {
             &helpers,
             self.globals,
         );
-        probe.omitted_assert_locals = omitted_locals;
-        probe.omitted_assert_free = omitted_free;
+        probe.omitted_assert_locals = self.omitted_assert_locals.clone();
+        probe.omitted_assert_free = self.omitted_assert_free.clone();
         probe.returns = self.returns;
         probe.class = self.class;
         probe.class_receiver = self.class_receiver.clone();
