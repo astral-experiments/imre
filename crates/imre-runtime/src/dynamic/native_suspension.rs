@@ -14,6 +14,8 @@ use super::{Context, Error, Id, NONE, Result, Value};
 
 enum Step {
     Yield(Id, usize),
+    AsyncYield(Id, usize),
+    Failed(fn() -> Error),
     YieldFrom(Id, usize),
     AwaitIterator(Id, usize),
     Return(Id),
@@ -233,6 +235,11 @@ impl Context {
                 Ok(Step::Yield(value, mark)) => {
                     return self.park_native(generator, owner, saved, mark, Ok(value));
                 }
+                Ok(Step::AsyncYield(value, mark)) => {
+                    let item = self.wrap_async_generator_yield(value);
+                    return self.park_native(generator, owner, saved, mark, Ok(item));
+                }
+                Ok(Step::Failed(error)) => break Err(error()),
                 Ok(Step::YieldFrom(value, mark)) => (self.iterator(value), mark),
                 Ok(Step::AwaitIterator(iter, mark)) => (Ok(iter), mark),
                 Ok(Step::Return(value)) => break Ok(value),
@@ -331,8 +338,7 @@ pub(super) unsafe extern "C" fn imre_dyn_coro_alloc(
         data.allocation = Some((memory, layout));
         return memory.as_ptr().cast();
     }
-    // SAFETY: resume installed the active Context for the duration of this entry.
-    unsafe { &mut *data.context }.heap.execution.pending = Some(crate::Error::allocation().into());
+    data.step = Some(Step::Failed(|| crate::Error::allocation().into()));
     std::ptr::null_mut()
 }
 
@@ -360,21 +366,10 @@ pub(super) unsafe extern "C" fn imre_dyn_suspend_operands(
     let data = unsafe { &mut *activation };
     data.step = Some(match kind {
         0 => Step::Yield(value, mark),
-        1 => {
-            // The async generator operation unwraps an item, while a delegated
-            // await suspension returns its actual event to the event loop.
-            // SAFETY: the running activation borrows this context.
-            let item = unsafe { &mut *data.context }.wrap_async_generator_yield(value);
-            Step::Yield(item, mark)
-        }
+        1 => Step::AsyncYield(value, mark),
         2 => Step::AwaitIterator(value, mark),
         3 => Step::YieldFrom(value, mark),
-        _ => {
-            // SAFETY: this callback runs within the activation that borrowed the Context.
-            unsafe { &mut *data.context }.heap.execution.pending =
-                Some(Error::new("SystemError", "invalid suspension operation"));
-            return;
-        }
+        _ => Step::Failed(|| Error::new("SystemError", "invalid suspension operation")),
     });
 }
 
