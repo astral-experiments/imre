@@ -150,26 +150,30 @@ impl<'a> RegisteredSource<'a> {
     /// Ordinary object calls select their own source target before evaluating the operands.
     pub(super) fn located_operation(self, node: &ast::Expr, value: Expr) -> Expr {
         let range = node.range();
-        if value.python_call().is_some_and(|call| {
-            call.range == range && matches!(call.target, ir::RegisteredCallTarget::Callable { .. })
-        }) {
-            located(range, range.start(), value)
-        } else {
-            self.located(node, value)
-        }
+        let position = self.position(node, range, &value, Some(range.start()));
+        located(range, position, value)
     }
 
     pub(in crate::frontend) fn located(self, node: &ast::Expr, value: Expr) -> Expr {
         let range = node.range();
-        let position = match value.python_call() {
-            Some(ir::RegisteredCall {
-                target: ir::RegisteredCallTarget::Method { name_start, .. },
-                range: selected,
-                ..
-            }) if *selected == range => *name_start,
-            _ => imre_ast::expression_position(node, self.method_imports, self.private_names),
-        };
+        let position = self.position(node, range, &value, None);
         located(range, position, value)
+    }
+
+    fn position(
+        self,
+        node: &ast::Expr,
+        range: TextRange,
+        value: &Expr,
+        callable_start: Option<TextSize>,
+    ) -> TextSize {
+        value
+            .python_call()
+            .filter(|call| call.range == range)
+            .and_then(|call| call.method_name_start().or(callable_start))
+            .unwrap_or_else(|| {
+                imre_ast::expression_position(node, self.method_imports, self.private_names)
+            })
     }
 }
 
