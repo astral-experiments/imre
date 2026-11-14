@@ -1049,7 +1049,7 @@ fn empty_field(
     };
     let mut options = HashSet::new();
     root.is_some_and(|name| !shadowed.contains(name))
-        && graph.resolve(module, &call.func) == Some(Binding::Intrinsic(Intrinsic::DataclassField))
+        && graph.resolve(module, &call.func) == Some(Binding::Intrinsic(Intrinsic::DATACLASS_FIELD))
         && call.arguments.args.is_empty()
         && call.arguments.keywords.iter().all(|kw| {
             kw.arg.as_ref().is_some_and(|arg| {
