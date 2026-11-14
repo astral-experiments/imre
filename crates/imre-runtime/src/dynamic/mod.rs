@@ -359,6 +359,7 @@ impl ScalarHint {
 /// Immutable parameter lists used to bind calls to the same code object.
 #[derive(Debug)]
 struct CallParameters {
+    argcount: i64,
     positional: Vec<String>,
     positional_only: usize,
     keyword_only: Vec<String>,
@@ -426,6 +427,10 @@ impl CallParameters {
             }
         }
         Ok(Self {
+            argcount: metadata["co_argcount"].as_i64().unwrap_or_else(|| {
+                (metadata["posonly"].as_array().map_or(0, Vec::len)
+                    + metadata["positional"].as_array().map_or(0, Vec::len)) as i64
+            }),
             positional,
             positional_only,
             keyword_only: names("kwonly")?,
