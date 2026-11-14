@@ -31,12 +31,6 @@ pub(super) type Code = unsafe extern "C" fn(*mut Context, Id) -> Id;
 pub(super) type ResumeCode =
     unsafe extern "C" fn(*mut super::native_suspension::Activation, Id) -> *mut std::ffi::c_void;
 
-/// Sibling code objects share the literal slots for their compilation.
-#[derive(Default)]
-pub(super) struct CompilationConstants {
-    slots: RefCell<HashMap<usize, Id>>,
-}
-
 #[derive(Clone)]
 pub(super) struct CodeObject {
     pub body: Body,
@@ -56,7 +50,8 @@ pub(super) struct CodeObject {
     pub first_line: u32,
     pub definition: CodeDefinition,
     pub nested: Vec<(usize, Id)>,
-    pub compilation_constants: Option<std::rc::Rc<CompilationConstants>>,
+    /// Heap-owned literal slots shared with sibling code objects; NONE until first use.
+    pub compilation_constants: Id,
 }
 
 /// Heap-independent lexical layout resolved at the Python definition site.
@@ -1658,6 +1653,7 @@ pub(super) enum Value {
     ThreadHandle(std::sync::Arc<super::thread_worker::Handle>),
     PrimitiveLock(std::sync::Arc<crate::objects::locks::PrimitiveLock>),
     Raised(Error),
+    CompilationConstants(HashMap<usize, Id>),
     SyntaxMembers([Id; 9]),
     Traceback {
         frame: Id,
@@ -2144,6 +2140,7 @@ impl Value {
             | Self::Code(_)
             | Self::Native(_)
             | Self::Scope(_)
+            | Self::CompilationConstants(_)
             | Self::SyntaxMembers(_)
             | Self::LoopIterator { .. }
             | Self::PythonBufferLease { .. }
@@ -2231,10 +2228,6 @@ impl Value {
 
     /// Changing a traced child of these values requires a mutable borrow of the heap slot.
     fn directly_stores_children(&self) -> bool {
-        // A sibling can publish another literal through the same compilation pool.
-        if matches!(self, Self::Code(code) if code.compilation_constants.is_some()) {
-            return false;
-        }
         matches!(
             self,
             Self::List(_)
@@ -2245,6 +2238,7 @@ impl Value {
                 | Self::Code(_)
                 | Self::Scope(_)
                 | Self::Cell(_)
+                | Self::CompilationConstants(_)
                 | Self::SyntaxMembers(_)
                 | Self::Class { .. }
                 | Self::Method { .. }
@@ -2271,6 +2265,7 @@ impl Value {
         visit: &mut impl VisitReferences,
     ) -> std::result::Result<(), std::cell::BorrowError> {
         match self {
+            Self::CompilationConstants(slots) => visit.extend(slots.values().copied()),
             Self::SyntaxMembers(fields) => visit.extend(fields),
             Self::Deque(ring) => visit.extend(&ring.items),
             Self::StructUnpackIterator {
@@ -2506,9 +2501,7 @@ impl Value {
                 fields.children(visit);
             }
             Self::Code(code) => {
-                if let Some(keys) = &code.compilation_constants {
-                    visit.extend(keys.slots.borrow().values().copied());
-                }
+                visit.push(code.compilation_constants);
 
                 visit.push(code.name);
                 visit.push(code.qualname);
@@ -4404,18 +4397,31 @@ impl Heap {
         )
     }
 
+    /// Allocate the shared literal table lazily. Each linked code object roots it directly.
+    pub(super) fn compilation_constants(&mut self, owner: Id) -> Result<Id> {
+        let Value::Code(code) = self.get(owner) else {
+            unreachable!("linked code owner")
+        };
+        if code.compilation_constants != NONE {
+            return Ok(code.compilation_constants);
+        }
+        let pool = self.try_alloc_slot(Value::CompilationConstants(HashMap::new()), false)?;
+        let Value::Code(code) = self.get_mut(owner) else {
+            unreachable!("linked code owner")
+        };
+        code.compilation_constants = pool;
+        Ok(pool)
+    }
+
     pub(super) fn constant_at(&self, key: &ConstantSlot) -> Option<Id> {
         if let ConstantSlot::Linked(slot) = key
             && let Some(frame) = self.execution.frames.last()
             && let Value::Code(code) = self.get(frame.code)
         {
-            return code
-                .compilation_constants
-                .as_ref()?
-                .slots
-                .borrow()
-                .get(slot)
-                .copied();
+            return match self.get(code.compilation_constants) {
+                Value::CompilationConstants(slots) => slots.get(slot).copied(),
+                _ => None,
+            };
         }
         self.linked_constants.get(key).copied()
     }
@@ -4429,19 +4435,21 @@ impl Heap {
             return Ok(value);
         }
         if let ConstantSlot::Linked(slot) = key
-            && let Some(code) = self.execution.frames.last().map(|frame| frame.code)
-            && let Value::Code(code) = self.get_mut(code)
+            && let Some(owner) = self.execution.frames.last().map(|frame| frame.code)
+            && matches!(self.get(owner), Value::Code(_))
         {
-            let pool = code
-                .compilation_constants
-                .get_or_insert_with(Default::default)
-                .clone();
-            pool.slots
-                .borrow_mut()
+            let pool = self.compilation_constants(owner)?;
+            let Value::CompilationConstants(slots) = self.get_mut(pool) else {
+                unreachable!("linked literal table")
+            };
+            slots
                 .try_reserve(1)
                 .map_err(|_| Error::new("MemoryError", ""))?;
             let value = build(self)?;
-            pool.slots.borrow_mut().insert(slot, value);
+            let Value::CompilationConstants(slots) = self.get_mut(pool) else {
+                unreachable!("linked literal table")
+            };
+            slots.insert(slot, value);
             return Ok(value);
         }
         self.linked_constants

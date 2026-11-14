@@ -2914,18 +2914,18 @@ pub(super) unsafe extern "C" fn imre_dyn_define(
             (qualname, doc),
             (filename, definition.first_line),
         );
+        let constants = match ctx.heap.compilation_constants(owner) {
+            Ok(constants) => constants,
+            Err(error) => return finish(ctx, Err(error)),
+        };
         let Value::Code(parent) = ctx.heap.get_mut(owner) else {
             unreachable!()
         };
         parent.nested.push((key, code));
-        let constants = parent
-            .compilation_constants
-            .get_or_insert_with(Default::default)
-            .clone();
         let Value::Code(child) = ctx.heap.get_mut(code) else {
             unreachable!()
         };
-        child.compilation_constants = Some(constants);
+        child.compilation_constants = constants;
         code
     };
     let result = ctx.define_function(
@@ -3138,7 +3138,7 @@ impl Context {
         (filename, first_line): (Id, u32),
     ) -> Id {
         self.alloc(Value::Code(value::CodeObject {
-            compilation_constants: Default::default(),
+            compilation_constants: NONE,
             parsed_parameters: Default::default(),
             varnames: NONE,
             cellvars: NONE,
