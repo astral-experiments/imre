@@ -45,6 +45,7 @@ pub(crate) use codecs::{
 };
 mod contexts;
 mod contextvars;
+pub(crate) use contextvars::consume_context_token;
 mod copying;
 pub(crate) mod csv;
 mod deferred_diff;

@@ -3,6 +3,7 @@
 use std::rc::Rc;
 
 use super::{Context, Error, Id, NONE, Result, Value};
+use crate::objects::consume_context_token;
 
 impl Context {
     /// Use the entered context, creating the implicit one on its first copy or set.
@@ -74,29 +75,24 @@ impl Context {
             variable: key,
             old,
             used,
-        } = *self.heap.get(token)
+        } = self.heap.get(token)
         else {
             return Err(Error::new(
                 "TypeError",
-                format!("expected an instance of Token, got {}", self.repr(token)),
+                format!(
+                    "expected an instance of Token, got {}",
+                    self.checked_format(token, true)?
+                ),
             ));
         };
-        let reason = if used {
-            Some(("RuntimeError", "has already been used once"))
-        } else if variable.is_some_and(|var| var != key) {
-            Some(("ValueError", "was created by a different ContextVar"))
-        } else if Some(&context) != self.contexts.last() {
-            Some(("ValueError", "was created in a different Context"))
-        } else {
-            None
-        };
-        if let Some((kind, reason)) = reason {
-            return Err(Error::new(kind, format!("{} {reason}", self.repr(token))));
+        let same_variable = variable.is_none_or(|var| var == *key);
+        if let Err((kind, reason)) = consume_context_token(used, same_variable, || {
+            Some(context) == self.contexts.last()
+        }) {
+            let token_repr = self.checked_format(token, true)?;
+            return Err(Error::new(kind.name(), format!("{token_repr} {reason}")));
         }
-        self.replace_binding(context, key, old);
-        if let Value::ContextToken { used, .. } = self.heap.get_mut(token) {
-            *used = true;
-        }
+        self.replace_binding(*context, *key, *old);
         Ok(NONE)
     }
 }
@@ -151,7 +147,7 @@ pub(super) fn call(
                 context: current,
                 variable: *variable,
                 old,
-                used: false,
+                used: Default::default(),
             }))
         }
         ("ContextVar.reset", [variable, token], []) => ctx.reset_binding(Some(*variable), *token),
