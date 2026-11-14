@@ -6,17 +6,31 @@ blobs and upstream commit. The oracle has 56 original test cases: 33 public
 ContextTest methods and 23 methods for CPython's private HAMT implementation.
 Default Linux regrtest passes 55 and skips the CPU resource stress test.
 
-At each optimization level, two original methods execute entirely in Imre:
-`test_context_run_1` and `test_context_typerrors_1`, including their actual
-native unittest regex assertions. Another 12 original methods execute their
-context operations in Imre. For those 12, the methods, decorators, callbacks, and assertions run in
-CPython. A fresh native process per method owns the contexts, variables, and
-tokens. Its public `Context.run` and token `with` blocks actually enter and
-leave context while the original callback executes. When that callback raises a
-`ValueError`, the fixture raises it inside the native callback as well.
-`native-linux.json` identifies the execution role, byte digest, and operation
-counts for each method, and accounts for all 56: two fully native, 12 with
-host-driven native operations, 41 reference-only, and one upstream resource skip.
+## The unmodified test file
+
+On Linux, CPython 3.14.5 ran all 56 methods when invoked directly with
+`-B Lib/test/test_context.py -v ContextTest HamtTest`. The ordinary Imre
+FILE command on [#8032](https://github.com/astral-experiments/imre/pull/8032)
+collected the same 56 at both optimization levels.
+
+| Runtime | Passed | Assertion failures | Errors | Skipped |
+| --- | ---: | ---: | ---: | ---: |
+| CPython 3.14.5 | 56 | 0 | 0 | 0 |
+| Imre O0 | 25 | 5 | 3 | 23 |
+| Imre O3 | 25 | 5 | 3 | 23 |
+
+All 33 public `ContextTest` methods ran. The upstream class guard skipped
+the 23 private `HamtTest` methods because Imre lacks
+`_testinternalcapi.hamt()`. Module execution with `-m test.test_context`
+and both saved executables after source withdrawal reproduced every FILE
+outcome. The [per-method ledger](evidence-linux.json) gives the result and
+source digest for each case. The [launch record](ordinary-linux-8032.json)
+identifies the shipping products, commands and streams.
+
+The earlier [isolated harness](native-linux.json) ran two complete methods in
+Imre. For a further 12, CPython ran the test and its assertions against native
+context operations. The ordinary FILE command above includes the original
+decorators, callbacks and assertions in the compiled application.
 
 `focused.py` separately compares complete native programs to CPython in both
 whole-module and reachable-only compilation at O0 and O3. They exercise
