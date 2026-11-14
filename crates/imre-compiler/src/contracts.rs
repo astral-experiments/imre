@@ -788,7 +788,6 @@ impl Builtin {
             | Self::BinaryTell
             | Self::ZipOpenFile
             | Self::ZipGetInfo
-            | Self::ZipImportData
             | Self::ZipInfoList
             | Self::ZipMember
             | Self::ZipRead

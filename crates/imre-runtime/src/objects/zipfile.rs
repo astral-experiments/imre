@@ -127,6 +127,7 @@ impl Object {
 }
 
 pub(crate) struct Archive {
+    mode: DirectoryMode,
     source: Option<Source>,
     filename: Option<StrOwner>,
     filelist: ObjectOwner,
@@ -219,6 +220,7 @@ impl Archive {
             list.values.push(ObjectOwner::into_raw(object) as usize);
         }
         Ok(Self {
+            mode,
             source: Some(source),
             filename,
             filelist: store(list.into_storage())?,
@@ -459,7 +461,7 @@ pub unsafe extern "C" fn imre_zip_member(
     )
 }
 
-/// Read one complete member, including validation of its full uncompressed CRC.
+/// Read a member according to the mode used to construct its central directory.
 ///
 /// # Safety
 /// Root both handles. The discriminator selects a str (0) or ZipInfo (1) key.
@@ -469,9 +471,16 @@ pub unsafe extern "C" fn imre_zip_read(
     key: *const c_void,
     is_info: u32,
 ) -> *const Bytes {
-    let result =
-        // SAFETY: the caller supplies an archive that stays live for the metadata query.
-        unsafe { with_archive(archive, |a| a.member(key, is_info)) }.and_then(|mut m| m.read(None));
+    // SAFETY: both handles stay rooted and the discriminator selects the key representation.
+    let result = unsafe {
+        with_archive(archive, |a| {
+            if is_info == 0 && matches!(a.mode, DirectoryMode::ZipImport) {
+                a.import_data(&*key.cast::<Str>())
+            } else {
+                a.member(key, is_info)?.read(None)
+            }
+        })
+    };
     finish(
         result.map(|b| crate::BytesOwner::into_raw(crate::BytesOwner::new(b))),
         std::ptr::null(),

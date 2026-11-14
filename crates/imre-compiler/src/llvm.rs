@@ -6894,11 +6894,6 @@ impl Emitter<'_, '_> {
                 returns,
                 &[&args[0].value, &args[1].value],
             ),
-            Builtin::ZipImportData => self.call(
-                "imre_zipimport_data",
-                returns,
-                &[&args[0].value, &args[1].value],
-            ),
             Builtin::ZipInfoList => self.call("imre_zip_infolist", returns, &[&args[0].value]),
             Builtin::ZipMember | Builtin::ZipRead => {
                 let name = if matches!(builtin, Builtin::ZipMember) {
