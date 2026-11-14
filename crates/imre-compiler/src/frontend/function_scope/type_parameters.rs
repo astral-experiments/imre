@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use ruff_python_ast as ast;
 use ruff_python_ast::visitor::{self, Visitor};
 
-use super::{ClosureNames, class_locals};
+use super::ClosureNames;
 
 #[derive(Clone, Copy)]
 enum Binding {
@@ -39,7 +39,7 @@ pub(crate) fn check_nonlocals(source: &str, body: &[ast::Stmt]) -> Result<(), St
                     if !self.bindings.is_empty() {
                         // CPython removes ordinary class-local bindings from its type-parameter
                         // set for nested scopes, but a class still doesn't bind a closure cell.
-                        let locals = class_locals(&class.body).locals;
+                        let locals = ClosureNames::class_declarations(&class.body).locals;
                         self.bindings.retain(|name, binding| {
                             !matches!(binding, Binding::Parameter) || !locals.contains(name)
                         });

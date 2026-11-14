@@ -34,19 +34,22 @@ struct ClosureNames {
     locals_incomplete: bool,
 }
 
-#[derive(Clone)]
 pub(crate) struct ClassBindings {
-    pub(crate) locals: BTreeSet<String>,
+    pub(crate) locals: indexmap::IndexSet<String>,
     pub(crate) globals: BTreeSet<String>,
 }
 
-fn class_locals(body: &[ast::Stmt]) -> ClassBindings {
-    let mut names = ClosureNames::default();
-    names.visit_body(body);
-    ClassBindings::from_names(&names)
-}
-
 impl ClosureNames {
+    fn class_declarations(body: &[ast::Stmt]) -> Self {
+        let mut names = Self::default();
+        names.visit_body(body);
+        for name in names.globals.iter().chain(&names.nonlocals) {
+            // Class namespace lookups only need membership, so removal can reorder names.
+            names.locals.swap_remove(name);
+        }
+        names
+    }
+
     fn finish_scope(&mut self) {
         for name in self.globals.iter().chain(&self.nonlocals) {
             self.locals.shift_remove(name);
