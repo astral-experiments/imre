@@ -68,8 +68,8 @@ REJECTED = {
 }
 
 IMPORTED_REJECTIONS = {
-    "callable_imported_global": {
-        "main.py": "import callbacks\n",
+    "callable_imported_argument": {
+        "main.py": "import callbacks\nprint(callbacks.fn('wrong'))\n",
         "callbacks.py": IMPORT + FUNCTION + "fn: Callable[[int], int] = identity\n",
     },
 }

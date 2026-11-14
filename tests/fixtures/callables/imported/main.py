@@ -16,6 +16,7 @@ def from_wrapper(value: int) -> int:
 def main() -> None:
     selected: Callable[[int], int] = operations.increment
     print(selected(1 << 100))
+    print(operations.callback(41), operations.callback is operations.increment)
     selected = down
     overload(selected)
     registered = get_overloads(operations.decrement)
