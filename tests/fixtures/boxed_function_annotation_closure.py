@@ -184,6 +184,10 @@ def current():
     assert local(2) == {"x": ["outer"], "y": ["class"]}
     values = declared_global(2)
     assert values["x"] is bytes and values["y"]() == "outer"
+    callback = values["y"]
+    assert callback.__qualname__ == "nested_expressions.<locals>.Global.<lambda>"
+    assert callback.__code__.co_qualname == callback.__qualname__
+    assert callback.__code__.co_flags & 0x10  # CO_NESTED
     class Variadic:
         options = (float,)
 
