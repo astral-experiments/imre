@@ -3113,7 +3113,8 @@ impl Context {
         let fields = super::function_fields::FunctionFields::new(
             self, scope, root, name, qualname, doc, annotate,
         );
-        let names = self.code_object(code).definition.freevars().to_vec();
+        let names = self.code_object(code).definition.freevars.clone();
+        let names = names.as_deref().unwrap_or_default();
         let entries = if defaults == NONE {
             Vec::new()
         } else {
@@ -3172,39 +3173,38 @@ impl Context {
         } else {
             self.dict(keyword)
         };
-        let mut cells = Vec::new();
+        let mut cells = indexmap::IndexMap::with_capacity(names.len());
         let class_reads = in_class
             && (signature["annotation_class"] == true
                 || signature["method_class_cell"].is_boolean());
-        for name in &names {
-            if name == "__classdict__" && (class_reads || signature["annotation_class"] == true) {
+        for name in names {
+            let cell = if name == "__classdict__"
+                && (class_reads || signature["annotation_class"] == true)
+            {
                 let owner = if class_reads { defining_scope } else { scope };
-                cells.push(self.class_annotation_dict_cell(owner));
-                continue;
-            }
-            if name == CONDITIONAL
+                self.class_annotation_dict_cell(owner)
+            } else if name == CONDITIONAL
                 && class_reads
                 && let Some(cell) = conditional_cell
             {
-                cells.push(cell);
-                continue;
-            }
-            if name == "__class__"
+                cell
+            } else if name == "__class__"
                 && in_class
                 && (signature["method_class_cell"] == true || signature["annotation_class"] == true)
             {
-                cells.push(class_cell.expect("class scope"));
-                continue;
-            }
-            let cell = self.capture_free_cell(scope, name);
-            if name == "__class__" {
-                class_cell = Some(cell);
-            }
-            cells.push(cell);
+                class_cell.expect("class scope")
+            } else {
+                let cell = self.capture_free_cell(scope, name);
+                if name == "__class__" {
+                    class_cell = Some(cell);
+                }
+                cell
+            };
+            cells.insert(name.clone(), cell);
         }
         let scope = if self.code_object(code).definition.closure_supported {
             let globals = self.new_function_globals(root)?;
-            self.closure_environment(globals, names, &cells)
+            self.environment_with_cells(globals, cells)
         } else if self.scope_data(scope).parent.is_none() {
             self.new_function_globals(scope)?
         } else {

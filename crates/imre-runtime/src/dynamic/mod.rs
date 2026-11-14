@@ -2567,8 +2567,13 @@ impl Context {
         )
     }
 
-    /// Link a function's free-variable cells to its globals without retaining its caller's frame.
     fn closure_environment(&mut self, globals: Id, names: Vec<String>, cells: &[Id]) -> Id {
+        let cells = names.into_iter().zip(cells.iter().copied()).collect();
+        self.environment_with_cells(globals, cells)
+    }
+
+    /// Link a function's free-variable cells to its globals without retaining its caller's frame.
+    fn environment_with_cells(&mut self, globals: Id, cells: indexmap::IndexMap<String, Id>) -> Id {
         if cells.is_empty() {
             return globals;
         }
@@ -2579,10 +2584,7 @@ impl Context {
         };
         frame.closure.environment = true;
         frame.closure.declared_complete = true;
-        frame
-            .closure
-            .cells
-            .extend(names.into_iter().zip(cells.iter().copied()));
+        frame.closure.cells = cells;
         environment
     }
 
