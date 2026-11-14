@@ -1519,15 +1519,18 @@ fn lower_graph(
         {
             prepared.insert(signature.id, Err(attributes));
         }
-        let (body, sums) = match checked_region(
-            result,
+        let cannot_return = match &result {
+            Ok((body, _)) => body.cannot_return,
+            Err(refusal) => refusal.cannot_return,
+        };
+        let placed = match checked_region(
+            result.map_err(|refusal| refusal.failure),
             graph,
             *module_id,
             &mut unavailable,
             request_recovery,
         ) {
-            Ok(Some(body)) => body,
-            Ok(None) => continue,
+            Ok(body) => body,
             Err(report) => {
                 if refused(report) {
                     continue;
@@ -1538,9 +1541,10 @@ fn lower_graph(
         if !body_reports.is_empty() {
             continue;
         }
-        if body.cannot_return && completed_calls.insert(signature.id) && !needs_registered_entry {
+        if cannot_return && completed_calls.insert(signature.id) && !needs_registered_entry {
             body_checks = None;
         }
+        let Some((body, sums)) = placed else { continue };
         has_wrapper_link |= body.wrapper_link;
         if needs_registered_entry || (unavailable.is_some() && body.source.is_none()) {
             // After a fixed layout fails, only bodies with a source frame can be placed.
@@ -2073,7 +2077,21 @@ struct LoweredBody {
 }
 
 type CompletedBody = (LoweredBody, HashMap<usize, zip_sums::Sum>);
-type BodyResult = Result<CompletedBody, String>;
+struct BodyRefusal {
+    failure: Failure,
+    cannot_return: bool,
+}
+
+impl From<Failure> for BodyRefusal {
+    fn from(failure: Failure) -> Self {
+        Self {
+            failure,
+            cannot_return: false,
+        }
+    }
+}
+
+type BodyResult = StdResult<CompletedBody, BodyRefusal>;
 type PreparedBody = StdResult<CompletedBody, HashMap<TextRange, FixedAttribute>>;
 
 type FunctionDefinition<'a> = (ModuleId, Cow<'a, ast::StmtFunctionDef>, Signature);
@@ -2206,7 +2224,7 @@ fn lower_function(
                 cannot_return = checker.checked_call_cannot_return(definition, falls);
                 (body, falls)
             }
-            Err(failure) => return checker.finish_region(Err(failure)),
+            Err(failure) => return checker.finish_region(Err(failure)).map_err(Into::into),
         }
     };
     if let Some(context) = signature.method
@@ -2233,14 +2251,21 @@ fn lower_function(
                     &module.source,
                     definition,
                     "not every path returns the declared type",
-                ));
+                )
+                .into());
             }
         }
     }
     if classes.generators.contains(&signature.id) {
         body = checker.generator_body(body);
     }
-    checker.finish_region(Ok(()))?;
+    // Placement can require a Python frame after the entire suite has been checked.
+    checker
+        .finish_region(Ok(()))
+        .map_err(|failure| BodyRefusal {
+            cannot_return,
+            failure,
+        })?;
     let mut source = None;
     if let Some(names) = registered_locals {
         names.extend(checker.namespace_bindings.drain());

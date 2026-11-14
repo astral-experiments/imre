@@ -609,7 +609,8 @@ fn checked_definition(
     let helpers = checker.helpers;
     let first_helper = helpers.len();
     let mut local_names = HashMap::new();
-    let (body, _) = lower_function(checker, definition, signature, Some(&mut local_names), None)?;
+    let (body, _) = lower_function(checker, definition, signature, Some(&mut local_names), None)
+        .map_err(|refusal| refusal.failure)?;
     if !source_calls && !body.calls.is_empty() || helpers.len() != first_helper {
         return Err(error(
             source,
