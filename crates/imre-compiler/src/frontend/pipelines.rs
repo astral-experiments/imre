@@ -2470,6 +2470,9 @@ impl Checker<'_> {
         // those mutable slots must be proved again inside the lazy body.
         self.narrowed = assignments::Narrowed::new();
         first.evaluate.append(&mut first.acquire);
+        // Only the outer iterable runs in the defining frame. The generator owns
+        // the source sites for its filters, inner iterables and yielded value.
+        let enclosing_sites = self.fixed_sites.take();
         let mut clauses = GeneratorClauses {
             checker: self,
             pulls: Vec::with_capacity(plan.clauses.len()),
@@ -2480,7 +2483,9 @@ impl Checker<'_> {
                 Some(ty) => scope.checker.expr_expected(item, ty),
                 None => scope.checker.expr(item),
             }
-        })?;
+        });
+        clauses.checker.fixed_sites = enclosing_sites;
+        let yielded = yielded?;
         let mut pulls = clauses.pulls;
         // The nested scopes finish inside out. Resume PCs are numbered in source order.
         pulls.reverse();
