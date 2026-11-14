@@ -540,11 +540,17 @@ impl Drop for Registry {
     }
 }
 
-pub(super) enum Operation<P = Box<Callback>, R = Arc<PrimitiveLock>> {
-    Python(P),
+pub(super) enum Operation {
+    Python(Box<Callback>),
     Empty,
-    UpdateHash { hash: SharedHash, data: Vec<u8> },
-    Acquire { wait: Acquire, release: Option<R> },
+    UpdateHash {
+        hash: SharedHash,
+        data: Vec<u8>,
+    },
+    Acquire {
+        wait: Acquire,
+        release: Option<Arc<PrimitiveLock>>,
+    },
 }
 
 enum Registration {
@@ -689,55 +695,48 @@ fn launch(request: Start) -> Result<(Ready, Entry)> {
     handle.spawn(move |exit| {
         let (fault_workers, interpreter) = request.fault_workers.unzip();
         let _publication = interpreter.map(crate::fault_handler::FramePublication::enter);
-        // Only this pthread owns the prepared Python context, even if startup is cancelled.
-        let mut released = None;
-        let call = match request.operation {
+        let enter = |released| exit.enter(request.count, starting, &ready, released);
+        let wait = match request.operation {
             Operation::Python(callback) => {
-                match callback.into_call(fault_workers.as_ref().expect("Python worker")) {
-                    Ok(invoke) => Operation::Python(invoke),
+                // Preparation and cancellation both belong to this pthread.
+                return match callback.into_call(fault_workers.as_ref().expect("Python worker")) {
+                    Ok(invoke) => invoke(enter(None), detached_label),
                     Err(error) => {
                         let _ = ready.send(Err(error.to_string()));
-                        return Ok(());
+                        Ok(())
                     }
-                }
+                };
             }
-            Operation::Empty => Operation::Empty,
-            Operation::UpdateHash { hash, data } => Operation::UpdateHash { hash, data },
-            Operation::Acquire { wait, release } => Operation::Acquire {
+            Operation::Acquire {
                 wait,
-                release: release.map(|lock| {
-                    // start() waits for the outcome of this prefix before returning.
-                    let (ack, receiver) = mpsc::channel();
-                    released = Some(receiver);
-                    (lock, ack)
-                }),
-            },
-        };
-        // All targets publish identity and wait for the creator before any target effects.
-        let published = exit.enter(request.count, starting, &ready, released);
-        match call {
-            Operation::Python(invoke) => return invoke(published, detached_label),
-            _ if !published => return Ok(()),
-            Operation::Empty => {}
-            Operation::UpdateHash { hash, data } => {
-                hash.lock()
-                    .update(&data)
-                    .map_err(|error| error.to_string())?;
-            }
-            Operation::Acquire { wait, release } => {
-                if let Some((lock, ack)) = release {
-                    let result = lock
-                        .release()
-                        .map_err(|error| Error::from(error).to_string());
-                    let failed = result.is_err();
-                    let _ = ack.send(result);
-                    if failed {
-                        return Ok(());
-                    }
+                release: Some(release),
+            } => {
+                // start() waits for the outcome of the release before returning.
+                let (ack, released) = mpsc::channel();
+                if !enter(Some(released)) {
+                    return Ok(());
                 }
-                wait.run();
+                let result = release
+                    .release()
+                    .map_err(|error| Error::from(error).to_string());
+                let failed = result.is_err();
+                let _ = ack.send(result);
+                if failed {
+                    return Ok(());
+                }
+                wait
             }
-        }
+            _ if !enter(None) => return Ok(()),
+            Operation::Empty => return Ok(()),
+            Operation::UpdateHash { hash, data } => {
+                return hash.lock().update(&data).map_err(|error| error.to_string());
+            }
+            Operation::Acquire {
+                wait,
+                release: None,
+            } => wait,
+        };
+        wait.run();
         Ok(())
     })?;
     let entry = Entry {
