@@ -203,7 +203,7 @@ impl<'f, 'a, 'p, 'm> CheckedBody<'f, 'a, 'p, 'm> {
                 let op = Compare::from_operator(op).expect("checked native comparison");
                 CheckedValue::owned(self.fixed().compare(op, &a.value, &b.value))
             }
-            (CheckedValue::Handle { id: a, .. }, CheckedValue::Handle { id: b, .. }) => {
+            (CheckedValue::Handle { id: a, .. }, CheckedValue::Handle { id: b, exact_word }) => {
                 if matches!(op, CmpOp::Is | CmpOp::IsNot) {
                     let relation = if op == CmpOp::Is { "eq" } else { "ne" };
                     CheckedValue::condition(
@@ -216,6 +216,10 @@ impl<'f, 'a, 'p, 'm> CheckedBody<'f, 'a, 'p, 'm> {
                     self.integer_relation(order, &x, &y, |code| {
                         CheckedValue::handle(code.python().op(op.as_str(), &[a, b]))
                     })
+                } else if let Some(word) = exact_word
+                    && Compare::from_operator(op).is_some()
+                {
+                    CheckedValue::handle(self.python().compare_integer_rhs(op.as_str(), a, b, word))
                 } else {
                     CheckedValue::handle(self.python().op(op.as_str(), &[a, b]))
                 }

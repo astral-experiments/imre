@@ -530,6 +530,21 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         &self.body.current
     }
 
+    /// Compare a Python operand with the exact integer supplied by its producer.
+    pub(crate) fn compare_integer_rhs(
+        &mut self,
+        op: &str,
+        left: &str,
+        right: &str,
+        word: &str,
+    ) -> String {
+        self.take_matching_check();
+        let name = self.output.data(op.as_bytes());
+        self.checked(&format!(
+            "call i64 @imre_dyn_compare_integer_rhs(ptr %ctx, ptr {name}, i64 {left}, i64 {right}, i64 {word})"
+        ))
+    }
+
     pub(crate) fn masked_remainder(&mut self, left: &str, divisor: u64) -> String {
         // The operation propagates an already pending exception before reading left.
         self.take_matching_check();
