@@ -7,13 +7,9 @@ def _baseAssertEqual(self, first, second, msg=None):
         raise self.failureException(msg)
 
 
-_text_equal = TestCase.assertMultiLineEqual
-
-
-def assertMultiLineEqual(self, first, second, msg=None):
-    self.assertIsInstance(first, str, "First argument is not a string")
-    self.assertIsInstance(second, str, "Second argument is not a string")
-    return _text_equal(self, first, second, msg)
+assertMultiLineEqual = TestCase.assertMultiLineEqual
+# Keep the public Python signature while fixed callers use the class declaration.
+assertMultiLineEqual.__annotations__ = {}
 
 
 def addTypeEqualityFunc(self, typeobj, function):
@@ -221,7 +217,6 @@ addTypeEqualityFunc.__qualname__ = "TestCase.addTypeEqualityFunc"
 TestCase.addTypeEqualityFunc = addTypeEqualityFunc
 TestCase._getAssertEqualityFunc = _getAssertEqualityFunc
 TestCase._baseAssertEqual = _baseAssertEqual
-TestCase.assertMultiLineEqual = assertMultiLineEqual
 TestCase.assertEqual = assertEqual
 assertDictEqual.__qualname__ = "TestCase.assertDictEqual"
 TestCase.assertDictEqual = assertDictEqual
