@@ -1114,7 +1114,8 @@ impl Checker<'_> {
                     )
                 })?;
                 order[index + offset] = values.len();
-                values.push(self.call_default(default, default_owner, index));
+                self.record_default_read(default, default_owner, index);
+                values.push(self.default_value(default, parameter.ty, &call.func)?);
             }
         }
         Ok(ControlFlow::Continue(ir::CallArgs {
@@ -1125,12 +1126,12 @@ impl Checker<'_> {
         }))
     }
 
-    fn call_default(
+    fn record_default_read(
         &mut self,
         default: &Expr,
         default_owner: Option<(usize, usize)>,
         index: usize,
-    ) -> Expr {
+    ) {
         let value = match &default.kind {
             ExprKind::Present(value) => &**value,
             _ => default,
@@ -1154,7 +1155,16 @@ impl Checker<'_> {
                 self.default_reads = None;
             }
         }
-        default.clone()
+    }
+
+    fn default_value(&mut self, default: &Expr, ty: Type, at: &ast::Expr) -> Result<Expr, String> {
+        if default.ty == Type::BuiltinClass
+            && let Some(class) = self.types.constructor_base(ty)
+        {
+            self.record_constructor_value(class, class, ty, at)
+        } else {
+            Ok(default.clone())
+        }
     }
 
     /// Bind a live mapping after all earlier operands have acquired roots. The native
@@ -1272,7 +1282,7 @@ impl Checker<'_> {
                     kind: ExprKind::Conditional(
                         Box::new(has),
                         Box::new(mapped),
-                        Box::new(default.clone()),
+                        Box::new(self.default_value(default, parameter.ty, &call.func)?),
                     ),
                 }
             } else {

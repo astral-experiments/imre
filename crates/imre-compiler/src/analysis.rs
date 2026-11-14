@@ -2470,6 +2470,26 @@ impl Session {
         })
     }
 
+    /// Verify that this eager name reads the class declaration selected by the source graph.
+    pub(crate) fn captures_class(
+        &self,
+        module: usize,
+        expression: &Expr,
+        class: crate::modules::DefinitionId,
+    ) -> bool {
+        use ty_python_semantic::types::{Type, TypeDefinition};
+        if !expression.is_name_expr() || self.sole_binding(module, expression).is_none() {
+            return false;
+        }
+        let model = SemanticModel::new(&self.db, self.db.program_file(self.files[module]));
+        let Some(ty @ Type::ClassLiteral(_)) = expression.inferred_type(&model) else {
+            return false;
+        };
+        matches!(ty.definition(&self.db, &model.program_environment()),
+            Some(definition @ TypeDefinition::StaticClass(_))
+                if definition.focus_range(&self.db) == Some(self.class_declaration(class)))
+    }
+
     /// Check the class definition at the use site, including aliases and local shadowing.
     pub(crate) fn is_stdlib_class(
         &self,

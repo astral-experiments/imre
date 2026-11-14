@@ -2501,19 +2501,29 @@ fn signature(
             matches!(value, ast::Expr::Subscript(subscript) if annotations::sequence_annotation(graph.resolve(module, &subscript.value))));
         let empty_sequence = sequence
             && matches!(parameter.default.as_deref(), Some(ast::Expr::Tuple(tuple)) if tuple.elts.is_empty());
-        let mut fixed_default =
-            parameter
-                .default
-                .as_deref()
-                .and_then(|value| match graph.resolve(module, value) {
-                    Some(Binding::Intrinsic(Intrinsic::Fnmatch(ir::FnmatchOperation::Match {
-                        normcase,
-                    }))) => Some(fnmatch::function(types, normcase)),
-                    Some(Binding::Intrinsic(Intrinsic::WrapperAttributes(fields))) => {
-                        Some(functools::wrapper_attributes(fields, types))
-                    }
-                    _ => None,
-                });
+        let binding = parameter
+            .default
+            .as_deref()
+            .and_then(|value| graph.resolve(module, value));
+        let class_default = parameter.default.as_deref().and_then(|value| {
+            let Some(Binding::Definition(id)) = binding else {
+                return None;
+            };
+            classes
+                .ids
+                .get(&id)
+                .copied()
+                .filter(|_| graph.session.captures_class(module, value, id))
+        });
+        let mut fixed_default = match binding {
+            Some(Binding::Intrinsic(Intrinsic::Fnmatch(ir::FnmatchOperation::Match {
+                normcase,
+            }))) => Some(fnmatch::function(types, normcase)),
+            Some(Binding::Intrinsic(Intrinsic::WrapperAttributes(fields))) => {
+                Some(functools::wrapper_attributes(fields, types))
+            }
+            _ => None,
+        };
         let annotation = parameter.annotation().filter(|value| {
             graph.resolve(module, value) != Some(Binding::Intrinsic(Intrinsic::ArgparseNamespace))
                 && namedtuples::annotation(graph, module, value, types).is_none()
@@ -2575,6 +2585,8 @@ fn signature(
                     .map(|value| {
                         if inspect::is_sentinel(graph, module, value) {
                             Ok(Type::PlainObject)
+                        } else if let Some(class) = class_default {
+                            record_constructor_type(class, value, graph, source, classes, types, 0)
                         } else if let Some(default) = &fixed_default {
                             Ok(default.ty)
                         } else {
@@ -2631,6 +2643,17 @@ fn signature(
                     })
                 } else if ty == Type::PlainObject && inspect::is_sentinel(graph, module, value) {
                     Ok(inspect::sentinel())
+                } else if let Some(class) = class_default {
+                    // Record the declaration-time identity. Constructor adapters require the
+                    // checked initializer and are created by the ordinary call binder.
+                    if ty != Type::BuiltinClass && types.constructor_base(ty) != Some(class) {
+                        return Err(diagnostic_message(
+                            source,
+                            value,
+                            "default requires its exact type",
+                        ));
+                    }
+                    Ok(records::class_object(graph, &classes.definitions[class]))
                 } else if let Some(default) = fixed_default {
                     if default.ty != ty {
                         return Err(diagnostic_message(
@@ -2922,6 +2945,57 @@ pub(crate) fn builtin_annotation(name: &str) -> Option<Type> {
     }
 }
 
+fn record_constructor_type(
+    base: usize,
+    expression: &ast::Expr,
+    graph: &SourceGraph,
+    source: &str,
+    classes: &Classes,
+    types: &Types,
+    alias_depth: usize,
+) -> StdResult<Type, String> {
+    let class = &classes.definitions[base];
+    let index = class.initializer.ok_or_else(|| {
+        diagnostic_message(
+            source,
+            expression,
+            "type[T] requires a declared initializer",
+        )
+    })?;
+    let params = &class.methods[index].parameters;
+    if params.vararg.is_some() || params.kwarg.is_some() || !params.kwonlyargs.is_empty() {
+        return Err(diagnostic_message(
+            source,
+            expression,
+            "class factories require positional parameters",
+        ));
+    }
+    let origin = class.method_origins[index].module;
+    let args = params
+        .iter_non_variadic_params()
+        .skip(1)
+        .map(|p| {
+            let annotation = p.annotation().ok_or_else(|| {
+                diagnostic_message(
+                    source,
+                    expression,
+                    "class factory parameters require exact annotations",
+                )
+            })?;
+            annotation_with_aliases(
+                annotation,
+                graph,
+                (origin, &graph.modules[origin].source),
+                classes,
+                types,
+                Some(base),
+                alias_depth + 1,
+            )
+        })
+        .collect::<StdResult<Vec<_>, _>>()?;
+    Ok(types.record_constructor(base, args))
+}
+
 fn annotation_with_aliases(
     expression: &ast::Expr,
     graph: &SourceGraph,
@@ -3122,46 +3196,7 @@ fn annotation_with_aliases(
                     "type[T] requires a fixed record class",
                 ));
             };
-            let class = &classes.definitions[base];
-            let index = class.initializer.ok_or_else(|| {
-                diagnostic_message(
-                    source,
-                    expression,
-                    "type[T] requires a declared initializer",
-                )
-            })?;
-            let params = &class.methods[index].parameters;
-            if params.vararg.is_some() || params.kwarg.is_some() || !params.kwonlyargs.is_empty() {
-                return Err(diagnostic_message(
-                    source,
-                    expression,
-                    "class factories require positional parameters",
-                ));
-            }
-            let origin = class.method_origins[index].module;
-            let args = params
-                .iter_non_variadic_params()
-                .skip(1)
-                .map(|p| {
-                    let annotation = p.annotation().ok_or_else(|| {
-                        diagnostic_message(
-                            source,
-                            expression,
-                            "class factory parameters require exact annotations",
-                        )
-                    })?;
-                    annotation_with_aliases(
-                        annotation,
-                        graph,
-                        (origin, &graph.modules[origin].source),
-                        classes,
-                        types,
-                        Some(base),
-                        alias_depth + 1,
-                    )
-                })
-                .collect::<StdResult<Vec<_>, _>>()?;
-            Ok(types.record_constructor(base, args))
+            record_constructor_type(base, expression, graph, source, classes, types, alias_depth)
         }
         ast::Expr::Subscript(subscript)
             if matches!(
