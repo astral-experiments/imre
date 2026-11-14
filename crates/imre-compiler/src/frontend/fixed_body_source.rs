@@ -513,6 +513,32 @@ mod tests {
     }
 
     #[test]
+    fn a_signed_float_keeps_its_value_and_the_whole_expression_range() {
+        let text = concat!(
+            "class Receiver:\n    def read(self, value: int) -> int: return value\n",
+            "def signed() -> float: return -0.0\nprint(signed())\n",
+        );
+        let mut graph = SourceGraph::single(text).unwrap();
+        let crate::CheckedProgram::Native(fixed) = crate::checked_lower(&mut graph).unwrap() else {
+            panic!("expected a fixed float return");
+        };
+        let (_, _, source) = fixed
+            .frame_sources
+            .into_iter()
+            .find(|(id, ..)| *id == 0)
+            .unwrap();
+        let function = fixed.ir.0.functions.into_iter().next().unwrap();
+        let placed = source.place(function).ok().unwrap();
+        let [Statement::Return(value)] = placed.function.body.as_slice() else {
+            panic!("expected a float return");
+        };
+        assert!(
+            matches!(value.without_location().kind, ExprKind::Float(value) if value.to_bits() == (-0.0_f64).to_bits())
+        );
+        assert_eq!(&text[*placed.fixed_sites.last().unwrap()], "-0.0");
+    }
+
+    #[test]
     fn list_method_keeps_its_receiver_and_declines_a_rewritten_operation() {
         let text = concat!(
             "class Receiver:\n    def read(self, value: int) -> int: return value\n",

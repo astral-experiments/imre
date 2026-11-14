@@ -583,44 +583,6 @@ pub(in crate::frontend) fn name_call(
     bound_call(call, callable_target(call), name_binding(name), arguments)
 }
 
-pub(super) fn number_literal(number: &ast::Number, minus: bool) -> ExprKind {
-    match number {
-        ast::Number::Int(n) => {
-            let mut text = n.to_string();
-            if minus && text != "0" {
-                text.insert(0, '-');
-            }
-            ExprKind::Int(text)
-        }
-        ast::Number::Float(n) => ExprKind::Float(if minus { -*n } else { *n }),
-        ast::Number::Complex { real, imag } => {
-            let (real, imag) = if minus {
-                (-*real, -*imag)
-            } else {
-                (*real, *imag)
-            };
-            ExprKind::Builtin(Builtin::RegisteredComplex(real, imag), vec![])
-        }
-    }
-}
-
-/// A literal sign cannot dispatch to a Python override.
-fn signed_number(node: &ast::Expr) -> Option<Expr> {
-    let unary = node.as_unary_op_expr()?;
-    if !matches!(unary.op, ast::UnaryOp::UAdd | ast::UnaryOp::USub) {
-        return None;
-    }
-    let literal = unary.operand.as_number_literal_expr()?;
-    Some(Expr {
-        ty: match literal.value {
-            ast::Number::Int(_) => Type::Int,
-            ast::Number::Float(_) => Type::Float,
-            ast::Number::Complex { .. } => Type::PythonObject,
-        },
-        kind: number_literal(&literal.value, unary.op == ast::UnaryOp::USub),
-    })
-}
-
 fn display_elements(node: &ast::Expr) -> Option<(&[ast::Expr], DisplayKind)> {
     match node {
         ast::Expr::List(list) => Some((&list.elts, DisplayKind::List)),
@@ -657,7 +619,7 @@ pub(in crate::frontend) fn index_key<E>(
             (value, constant)
         }
         _ => {
-            let value = if let Some(literal) = signed_number(node) {
+            let value = if let Some(literal) = literals::signed_number(node, |_| true) {
                 Expr {
                     ty: Type::PythonObject,
                     ..literal
@@ -838,7 +800,7 @@ fn display_operands<E>(
     items
         .iter()
         .map(|item| {
-            if let Some(literal) = signed_number(item) {
+            if let Some(literal) = literals::signed_number(item, |_| true) {
                 Ok(source.located(item, literal))
             } else if item.is_slice_expr() {
                 // An extended subscript key can mix a slice with other tuple elements.
@@ -923,7 +885,7 @@ pub(super) fn operation<E>(
         }));
     }
     if let ast::Expr::UnaryOp(unary) = node {
-        if let Some(literal) = signed_number(node) {
+        if let Some(literal) = literals::signed_number(node, |_| true) {
             return Ok(Some(literal));
         }
         if unary.op == ast::UnaryOp::Not {
@@ -1006,7 +968,7 @@ pub(super) fn operation<E>(
             value
         }
         ast::Expr::Name(name) => return Ok(Some(name_binding(name.id.clone()))),
-        ast::Expr::NumberLiteral(lit) => number_literal(&lit.value, false),
+        ast::Expr::NumberLiteral(lit) => literals::number_literal(&lit.value, false),
         ast::Expr::StringLiteral(lit) => {
             return Ok(Some(
                 source.string(lit.value.iter().map(FStringLiteral::Adjacent)),

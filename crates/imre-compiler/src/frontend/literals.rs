@@ -1,6 +1,45 @@
 use super::*;
 use std::result::Result;
 
+pub(super) fn number_literal(number: &ast::Number, minus: bool) -> ExprKind {
+    match number {
+        ast::Number::Int(n) => {
+            let mut text = n.to_string();
+            if minus && text != "0" {
+                text.insert(0, '-');
+            }
+            ExprKind::Int(text)
+        }
+        ast::Number::Float(n) => ExprKind::Float(if minus { -*n } else { *n }),
+        ast::Number::Complex { real, imag } => {
+            let (real, imag) = if minus {
+                (-*real, -*imag)
+            } else {
+                (*real, *imag)
+            };
+            ExprKind::Builtin(Builtin::RegisteredComplex(real, imag), vec![])
+        }
+    }
+}
+
+/// A literal sign cannot dispatch to a Python override.
+pub(super) fn signed_number(node: &ast::Expr, accepts: impl FnOnce(Type) -> bool) -> Option<Expr> {
+    let unary = node.as_unary_op_expr()?;
+    if !matches!(unary.op, ast::UnaryOp::UAdd | ast::UnaryOp::USub) {
+        return None;
+    }
+    let literal = unary.operand.as_number_literal_expr()?;
+    let ty = match literal.value {
+        ast::Number::Int(_) => Type::Int,
+        ast::Number::Float(_) => Type::Float,
+        ast::Number::Complex { .. } => Type::PythonObject,
+    };
+    accepts(ty).then(|| Expr {
+        ty,
+        kind: number_literal(&literal.value, unary.op == ast::UnaryOp::USub),
+    })
+}
+
 pub(super) fn annotation(slice: &ast::Expr, types: &Types, source: &str) -> Result<Type, String> {
     let arguments = match slice {
         ast::Expr::Tuple(tuple) => tuple.elts.as_slice(),

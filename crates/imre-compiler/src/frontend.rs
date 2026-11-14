@@ -9450,6 +9450,9 @@ impl<'a> Checker<'a> {
                 (ty, ExprKind::Tuple(values))
             }
             ast::Expr::UnaryOp(unary) => {
+                if let Some(literal) = literals::signed_number(expression, |ty| ty == Type::Float) {
+                    return Ok(self.expression_at(expression.range(), literal));
+                }
                 let value = if unary.op == ast::UnaryOp::Not {
                     self.condition_at(&unary.operand, None)?
                 } else {
