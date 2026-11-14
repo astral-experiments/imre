@@ -331,7 +331,6 @@ impl Context {
 /// The pushed frame owns the function and local scope until completion.
 pub(super) struct RegisteredFrame {
     entry: Code,
-    scope: Id,
     returning: Option<FunctionReturn>,
 }
 
@@ -341,11 +340,10 @@ impl RegisteredFrame {
     /// It must stay in place on this thread until the linked entry and finalization return.
     pub(super) unsafe fn run(self, context: *mut Context) -> Result<Id> {
         stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
-            // SAFETY: the caller owns this execution and keeps the linked entry loaded.
-            let value = unsafe { (self.entry)(context, self.scope) };
+            // SAFETY: the caller owns the entered frame and keeps the linked entry loaded.
+            let result = unsafe { Context::run_code_frame(context, self.entry, false) };
             // SAFETY: the entry has returned, leaving the live Context exclusively with the caller.
             let ctx = unsafe { &mut *context };
-            let result = ctx.finish_native_frame(value);
             ctx.finish_function(self.returning, result)
         })
     }
@@ -9462,11 +9460,7 @@ impl Context {
         let owner = FrameOwner::Function(callable);
         if let value::Body::Native(entry, _) = self.code_object(code).body {
             self.heap.enter(local, code, owner);
-            return Ok(RegisteredCall::Native(RegisteredFrame {
-                entry,
-                scope: local,
-                returning,
-            }));
+            return Ok(RegisteredCall::Native(RegisteredFrame { entry, returning }));
         }
         let result = stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
             self.execute(code, local, owner)
