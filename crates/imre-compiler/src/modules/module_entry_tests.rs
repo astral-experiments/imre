@@ -372,6 +372,12 @@ fn checked_cleandoc_keeps_the_complete_shipped_inspect_namespace() {
         panic!("expected the fixed declaration");
     };
     let module = &graph.modules[id.module];
+    let (_, physical) = crate::modules::bundled_runtime_source("inspect").unwrap();
+    assert_eq!(module.original_source(), physical);
+    assert_eq!(
+        module.source,
+        crate::normalize_source(physical, crate::SourceKind::File).unwrap()
+    );
     assert!(std::ptr::eq(parsed.syntax(), module.parsed.syntax()));
     assert_eq!(module.checked_statements(), id.statement..id.statement + 1);
     let selected = parsed.suite()[id.statement].as_function_def_stmt().unwrap();
@@ -395,14 +401,68 @@ fn checked_function_preserves_a_user_file_at_the_sdk_path() {
     let (source, site) = session
         .checked_shipped_function("inspect", "cleandoc", &private_path)
         .unwrap();
+    let normalized = crate::normalize_source(source, crate::SourceKind::File).unwrap();
     session
-        .add_shipped_declaration(site, &private_path, source)
+        .add_shipped_declaration(site, &private_path, &normalized)
         .unwrap();
     let copy = session.copy_for_diagnostics(None, None).unwrap();
     assert_eq!(session.selected_file(&sdk_path).unwrap().2.as_str(), user);
     assert_eq!(
         copy.selected_file(&private_path).unwrap().2.as_str(),
-        source
+        normalized
+    );
+}
+
+#[test]
+fn checked_shipped_files_reuse_equivalent_inputs_and_preserve_sdk_shadows() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut session = crate::analysis::Session::new(dir.path(), &[]).unwrap();
+    for owner in ["inspect", "dataclasses"] {
+        let (filename, shipped) = crate::modules::bundled_runtime_source(owner).unwrap();
+        let sdk_path = Path::new(crate::dynamic::BUNDLED_SOURCE_ROOT).join(filename);
+        let private = dir.path().join(filename);
+        let normalized = crate::normalize_source(shipped, crate::SourceKind::File).unwrap();
+        session
+            .seed(&sdk_path, &normalized.replace('\n', "\r\n"))
+            .unwrap();
+        let (sdk, _, _) = session.selected_file(&sdk_path).unwrap();
+        let (source, selected) = session.checked_shipped_file(owner, Some(&private)).unwrap();
+        assert_eq!(source, shipped);
+        assert_eq!(sdk, selected);
+
+        let shadow = "user = 'λ'\n";
+        session.seed(&sdk_path, shadow).unwrap();
+        let (source, selected) = session.checked_shipped_file(owner, Some(&private)).unwrap();
+        assert_eq!(source, shipped);
+        assert_ne!(sdk, selected);
+        assert_eq!(session.selected_file(&sdk_path).unwrap().2.as_str(), shadow);
+        assert_eq!(session.selected_file(&private).unwrap().0, selected);
+    }
+}
+
+#[test]
+fn checked_shipped_prefix_keeps_the_physical_source() {
+    use ruff_text_size::Ranged;
+
+    let root = tempfile::tempdir().unwrap();
+    let mut session = crate::analysis::Session::new(root.path(), &[]).unwrap();
+    let owner = "http.server";
+    let last = "BaseHTTPRequestHandler";
+    let (filename, physical) = crate::modules::bundled_runtime_source(owner).unwrap();
+    let prefix = session.checked_shipped_prefix(owner, last).unwrap();
+    let path = Path::new(crate::dynamic::BUNDLED_SOURCE_ROOT).join(filename);
+    let (_, parsed, source) = session.selected_file(&path).unwrap();
+    let handler = parsed
+        .suite()
+        .iter()
+        .filter_map(ruff_python_ast::Stmt::as_class_def_stmt)
+        .find(|class| class.name.as_str() == last)
+        .unwrap();
+    let end = handler.end().to_usize();
+    assert!(physical.starts_with(prefix));
+    assert_eq!(
+        crate::normalize_source(prefix, crate::SourceKind::File).unwrap(),
+        &source.as_str()[..end + 1]
     );
 }
 
@@ -423,6 +483,12 @@ fn checked_missing_uses_the_declared_class_and_the_live_module_value() {
     let path = Path::new(crate::dynamic::BUNDLED_SOURCE_ROOT).join("dataclasses.py");
     let (_, parsed, _) = graph.session.selected_file(&path).unwrap();
     let module = &graph.modules[id.module];
+    let (_, physical) = crate::modules::bundled_runtime_source("dataclasses").unwrap();
+    assert_eq!(module.original_source(), physical);
+    assert_eq!(
+        module.source,
+        crate::normalize_source(physical, crate::SourceKind::File).unwrap()
+    );
     assert!(std::ptr::eq(parsed.syntax(), module.parsed.syntax()));
     assert_eq!(module.checked_statements(), id.statement..id.statement + 1);
     let class = parsed.suite()[id.statement].as_class_def_stmt().unwrap();

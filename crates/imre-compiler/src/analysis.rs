@@ -1121,6 +1121,10 @@ impl Session {
     pub(crate) fn seed(&mut self, path: &Path, source: &str) -> Result<(), String> {
         let source = crate::normalize_source(source, crate::SourceKind::DecodedFile)?;
         let text = imre_ast::indentation::prepare(&source);
+        self.seed_parser_input(path, &text.text)
+    }
+
+    fn seed_parser_input(&mut self, path: &Path, text: &str) -> Result<(), String> {
         let origin = SystemPath::new(path.to_str().ok_or("module paths must be valid UTF-8")?);
         let fs = self.db.system.fs();
         let missing: Vec<_> = origin
@@ -1129,7 +1133,7 @@ impl Session {
             .flat_map(SystemPath::ancestors)
             .take_while(|dir| !fs.is_directory(dir))
             .collect();
-        fs.write_file_all(origin, text.text.as_bytes())
+        fs.write_file_all(origin, text.as_bytes())
             .map_err(|error| error.to_string())?;
         for directory in missing.into_iter().rev() {
             File::sync_path(&mut self.db, directory);
