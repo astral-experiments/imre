@@ -337,3 +337,23 @@ def current():
             call()
         except (TypeError, AttributeError) as exc:
             print(exc.args)
+
+
+class ReboundFallback:
+    def __getattr__(self, name):
+        return name
+
+    @property
+    def field(self):
+        type(self).__getattr__ = lambda self, name: "replacement"
+        raise AttributeError("field")
+
+
+class FieldName(str):
+    pass
+
+
+obj = ReboundFallback()
+field_name = FieldName("field")
+assert getattr(obj, field_name) is field_name
+assert obj.field == "replacement"
