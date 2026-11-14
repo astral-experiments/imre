@@ -225,8 +225,12 @@ impl Handle {
         !pending(*state)
     }
 
+    pub(super) fn wait_for_exit(&self, timeout: Option<Duration>) -> bool {
+        self.wait(timeout, State::join_pending)
+    }
+
     fn join(&self, timeout: Option<Duration>) -> Result<()> {
-        self.join_result(self.wait(timeout, State::join_pending))
+        self.join_result(self.wait_for_exit(timeout))
     }
 
     fn join_result(&self, completed: bool) -> Result<()> {
@@ -268,10 +272,7 @@ impl Handle {
         deadline: Option<Deadline>,
     ) -> Result<bool> {
         // SAFETY: the handle retains no Python values and the wait drops its mutex on return.
-        unsafe {
-            NativeWait::Join(deadline)
-                .run(context, |limit, _| self.wait(limit, State::join_pending))
-        }
+        unsafe { NativeWait::Join(deadline, self).run(context) }
     }
 }
 
