@@ -73,24 +73,21 @@ fn frame_scope(ctx: &mut Context, frame: Id) -> Result<(Id, Id, bool)> {
         return Ok((scope, code, unoptimized_locals.is_none()));
     }
     let layout = ctx.code_object(code);
-    let mut names: std::collections::HashSet<_> =
-        layout.definition.freevars().iter().cloned().collect();
-    if let Value::Str(parameters) = ctx.heap.get(layout.parameters) {
-        #[derive(serde::Deserialize)]
-        struct Layout {
-            #[serde(default)]
-            scope_locals: Vec<String>,
-        }
-        let layout: Layout = serde_json::from_str(parameters)
-            .map_err(|error| Error::new("SystemError", error.to_string()))?;
-        names.extend(layout.scope_locals);
+    let mut declared = if matches!(ctx.heap.get(layout.parameters), Value::Str(_)) {
+        ctx.parsed_parameters(code)?.locals.clone()
+    } else {
+        Default::default()
+    };
+    let freevars = layout.definition.freevars();
+    if !freevars.is_empty() {
+        declared.extend(freevars.iter().cloned());
     }
     let empty = ctx.scope("", None);
     let Value::Scope(data) = ctx.heap.get_mut(empty) else {
         unreachable!()
     };
     data.closure.cleared = true;
-    data.closure.declared = names.into();
+    data.closure.declared = declared;
     let Value::PythonFrame { scope, .. } = ctx.heap.get_mut(frame) else {
         unreachable!()
     };
