@@ -31,7 +31,7 @@ pub(crate) fn write(directory: &Path) -> Result<(), String> {
         let checked = crate::analysis::check_native_syntax(
             Path::new("/"),
             &mut syntax,
-            None,
+            (None, &[]),
             &module,
             true,
             |_| false,

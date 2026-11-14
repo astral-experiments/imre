@@ -2586,10 +2586,12 @@ pub(crate) fn compile(
             continue;
         }
         let check_runtime = unit >= first_runtime_unit && output.is_none();
+        let physical = registrations.physical_files.contains_key(path)
+            || registrations.archive_members.contains_key(path);
         if let Some(parsed) = crate::analysis::check_native_syntax(
             &root,
             &mut syntax,
-            project.as_ref(),
+            (project.as_ref(), if physical { &layouts } else { &[] }),
             module,
             check_runtime,
             is_alternative,

@@ -205,6 +205,15 @@ impl RegisteredLayouts {
         })
     }
 
+    /// Reuse the registered checker's syntax only for a file it parsed with this input.
+    fn syntax_file(&self, path: &Path, input: &str) -> Option<(&Session, File)> {
+        let session = &self.session;
+        let file = session.file_at_path(path, &session.files)?;
+        session
+            .file_matches_parser_input(file, input)
+            .then_some((session, file))
+    }
+
     pub(crate) fn is_empty(&self) -> bool {
         self.modules.is_empty()
     }
@@ -1013,7 +1022,7 @@ impl Session {
 pub(crate) fn check_native_syntax(
     root: &Path,
     scratch: &mut Option<Session>,
-    checked: Option<&crate::modules::SourceGraph>,
+    (checked, layouts): (Option<&crate::modules::SourceGraph>, &[RegisteredLayouts]),
     (name, path, source): &crate::dynamic::ModuleSource<'_>,
     keep_parser: bool,
     is_alternative: impl Fn(&Path) -> bool,
@@ -1030,11 +1039,20 @@ pub(crate) fn check_native_syntax(
         let file = if let Some(id) = module {
             (graph.modules[id].path == *path).then_some(session.files[id])?
         } else {
-            session.declaration_file(path)?
+            session.file_at_path(path, &session.declarations)?
         };
         session
             .file_matches_parser_input(file, &input.text)
             .then_some((session, file))
+    });
+    let cached = cached.or_else(|| {
+        let selected = layouts
+            .iter()
+            .find_map(|layout| layout.syntax_file(path, &input.text))?;
+        // Native syntax diagnostics use only the current file. Once a registered
+        // file supplies it, the previous scratch session has no remaining reader.
+        *scratch = None;
+        Some(selected)
     });
     let (session, file) = if let Some(cached) = cached {
         cached
@@ -1593,9 +1611,9 @@ impl Session {
         self.file_matches_parser_input(self.files[module], text)
     }
 
-    /// Match the parser input of a selected physical file, including a declaration-only module.
-    fn declaration_file(&self, path: &Path) -> Option<File> {
-        self.declarations.iter().copied().find(|file| {
+    /// Find a physical path among the files registered for this check.
+    fn file_at_path(&self, path: &Path, files: &[File]) -> Option<File> {
+        files.iter().copied().find(|file| {
             file.path(&self.db)
                 .as_system_path()
                 .is_some_and(|origin| origin.as_std_path() == path)
@@ -1604,7 +1622,7 @@ impl Session {
 
     /// Borrow the declaration's indexed syntax while its physical parser input still matches.
     pub(crate) fn declaration_parser(&self, path: &Path, source: &str) -> Option<ParsedModuleRef> {
-        let file = self.declaration_file(path)?;
+        let file = self.file_at_path(path, &self.declarations)?;
         let text = crate::normalize_source(source, crate::SourceKind::DiskFile).ok()?;
         let input = imre_ast::indentation::prepare(&text);
         self.file_matches_parser_input(file, &input.text)
