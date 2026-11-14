@@ -3028,6 +3028,7 @@ pub(super) fn method(
     let mapping = match name {
         "lower" if owner == "str" => Some(Case::Lower),
         "casefold" if owner == "str" => Some(Case::Fold),
+        "capitalize" if owner == "str" => Some(Case::Capitalize),
         "title" => Some(Case::Title),
         "swapcase" => Some(Case::Swap),
         _ => None,
@@ -3303,13 +3304,10 @@ pub(super) fn method(
             };
             format_string(ctx, &source, FormatSource::Mapping(*mapping))
         }
-        "capitalize" | "upper" => {
+        "upper" => {
             positional(name, kwargs)?;
             arity(name, args, 0, 0)?;
-            Ok(ctx.text(match name {
-                "capitalize" => crate::objects::capitalize(&source)?.into_string(),
-                _ => source.to_uppercase(),
-            }))
+            Ok(ctx.text(source.to_uppercase()))
         }
         _ => Err(type_error(format!("unsupported string method {name}"))),
     }
