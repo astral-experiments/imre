@@ -738,10 +738,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "_finish_field_ref"
             | "Any"
             | "Callable"
-            | "overload"
-            | "get_overloads"
-            | "clear_overloads"
-            | "_overload_dummy"
             | "_GenericAlias"
             | "_CallableGenericAlias"
             | "_LiteralGenericAlias",
