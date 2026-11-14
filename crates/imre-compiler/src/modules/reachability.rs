@@ -911,31 +911,20 @@ fn known_decorator(graph: &SourceGraph, module: ModuleId, expr: &ast::Expr) -> b
     ) || matches!(expr, ast::Expr::Name(name) if matches!(name.id.as_str(), "property" | "classmethod" | "staticmethod") && graph.resolve(module, expr).is_none())
 }
 
-pub(crate) fn definition_effect(
-    graph: &SourceGraph,
-    module: ModuleId,
-    func: &ast::StmtFunctionDef,
-) -> bool {
+fn definition_effect(graph: &SourceGraph, module: ModuleId, func: &ast::StmtFunctionDef) -> bool {
     func.decorator_list
         .iter()
         .any(|d| !known_decorator(graph, module, &d.expression))
-        || func
-            .parameters
-            .iter_non_variadic_params()
-            .any(|p| p.default.as_deref().is_some_and(|d| !inert_default(d)))
+        || !inert_defaults(&func.parameters)
 }
 
 /// Creating a lambda does not execute its body, but its own parameter defaults
 /// still run immediately, even on a function that is never called.
-fn inert_default(expr: &ast::Expr) -> bool {
-    if let ast::Expr::Lambda(lambda) = expr {
-        return lambda
-            .parameters
-            .iter()
-            .flat_map(|p| p.iter_non_variadic_params())
-            .all(|p| p.default.as_deref().is_none_or(inert_default));
-    }
-    literal(expr)
+pub(crate) fn inert_defaults(parameters: &ast::Parameters) -> bool {
+    imre_ast::parameter_defaults(parameters).all(|default| match default {
+        ast::Expr::Lambda(lambda) => lambda.parameters.as_deref().is_none_or(inert_defaults),
+        _ => literal(default),
+    })
 }
 
 /// A bare dataclass with ordinary marker bases can create its fields without
@@ -1118,7 +1107,7 @@ fn inert_platform_methods(graph: &SourceGraph, module: ModuleId, branch: &ast::S
     };
     let methods_only = |body: &[ast::Stmt]| {
         body.iter().all(|stmt| {
-        matches!(stmt, ast::Stmt::FunctionDef(f) if f.decorator_list.is_empty() && !definition_effect(graph, module, f))
+        matches!(stmt, ast::Stmt::FunctionDef(f) if f.decorator_list.is_empty() && inert_defaults(&f.parameters))
     })
     };
     matches!(test.ops.as_ref(), [ast::CmpOp::Eq | ast::CmpOp::NotEq])
