@@ -10,7 +10,7 @@ from _thread import allocate_lock as _allocate_lock
 
 from _imre_tempfile import abspath as _abspath
 from _imre_tempfile import finalize_at_shutdown as _finalize_at_shutdown
-from _imre_tempfile import mkdir as _mkdir, random_name as _random_name
+from _imre_tempfile import random_name as _random_name
 
 TMP_MAX = 20
 template = "tmp"
@@ -234,7 +234,7 @@ def mkdtemp(suffix=None, prefix=None, dir=None):
         path = _candidate_path(dir, prefix, suffix, next(names), output_type)
         _sys.audit("tempfile.mkdtemp", path)
         try:
-            _mkdir(path)
+            _os.mkdir(path, 0o700)
         except FileExistsError:
             continue
         return _abspath(path)
