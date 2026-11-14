@@ -9,15 +9,33 @@ use imre_ast::{SequencePatternItems, SequencePatternPlan};
 /// Temporary Python captures in the order the current alternative obtained them.
 struct PatternCaptures {
     slots: Range<usize>,
+    pending: usize,
     names: Vec<usize>,
 }
 
 impl PatternCaptures {
+    /// A failed branch can still expose earlier captures. Initialize the whole
+    /// range before branching, or when the first unconditional binding needs it.
+    fn stage(&mut self, frame: &mut RegisteredFrame<'_, '_>) {
+        let count = std::mem::take(&mut self.pending);
+        if count == 0 {
+            return;
+        }
+        self.slots.end += count;
+        frame.private_slot_count = frame.private_slot_count.max(self.slots.end);
+        self.names.reserve(count);
+        for slot in self.slots.clone() {
+            frame.store_frame_slot(slot, "0");
+        }
+        frame.live_slots.extend(self.slots.clone());
+    }
+
     fn slot(&self, ordinal: usize) -> usize {
         self.slots.end - 1 - ordinal
     }
 
     fn bind(&mut self, frame: &mut RegisteredFrame<'_, '_>, name: usize, value: &str) {
+        self.stage(frame);
         frame.store_frame_slot(self.slot(self.names.len()), value);
         self.names.push(name);
     }
@@ -77,11 +95,6 @@ impl CheckedBody<'_, '_, '_, '_> {
         // Cases are tested one at a time. Their temporary captures share these
         // frame slots until the pattern succeeds and installs its lexical bindings.
         let captures = frame.private_slot_count;
-        frame.private_slot_count += cases
-            .iter()
-            .map(|case| case.captures.len())
-            .max()
-            .unwrap_or(0);
         let count = cases.len();
         let default = count > 1 && matches!(cases[count - 1].pattern.test, MatchTest::Always);
         let tested = count - usize::from(default);
@@ -98,15 +111,11 @@ impl CheckedBody<'_, '_, '_, '_> {
             let scope = frame.begin_operand_scope();
             if index < tested {
                 frame.live.push(subject.clone());
-                let slots = captures..captures + case.captures.len();
                 let enclosing = frame.live_slots.len();
-                for slot in slots.clone() {
-                    frame.store_frame_slot(slot, "0");
-                }
-                frame.live_slots.extend(slots.clone());
                 let mut bindings = PatternCaptures {
-                    slots: slots.clone(),
-                    names: Vec::with_capacity(slots.len()),
+                    slots: captures..captures,
+                    pending: case.captures.len(),
+                    names: Vec::new(),
                 };
                 frame.test_pattern(
                     &pattern.test,
@@ -118,7 +127,7 @@ impl CheckedBody<'_, '_, '_, '_> {
                 );
                 // Captures are stacked in reverse binding order. A failed alternative
                 // drops its first captured value first. A successful one binds in source order.
-                for (capture, name) in slots.rev().zip(bindings.names) {
+                for (capture, name) in bindings.slots.rev().zip(bindings.names) {
                     let value = frame.load_frame_slot(capture);
                     frame.assign(case.captures[name], CheckedValue::handle(value));
                 }
@@ -199,6 +208,9 @@ impl Frame<'_, '_, '_> {
                         })
                 })
         });
+        if fast_targets.is_none() {
+            captures.stage(self.code);
+        }
         let mut operands = Vec::with_capacity(children.size_hint().0);
         for (i, _) in children.clone().enumerate() {
             let index = crate::llvm::small(i as i64);
@@ -277,6 +289,7 @@ impl Frame<'_, '_, '_> {
                 f.pattern_check(&ok, failed);
             }
             MatchTest::Or(tests) => {
+                captures.stage(self.code);
                 let mark = self.temporary_mark();
                 let first = captures.names.len();
                 let mut matched_names = Vec::new();
