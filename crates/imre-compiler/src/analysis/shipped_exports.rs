@@ -186,8 +186,14 @@ impl Session {
         &self,
         interface: &str,
         function: &ruff_python_ast::StmtFunctionDef,
+        types: &crate::types::Types,
     ) -> Option<Vec<crate::ir::Type>> {
         let db = &self.db;
+        let source = &function.parameters;
+        let positional = source.posonlyargs.iter().chain(&source.args);
+        if positional.clone().all(|p| p.annotation().is_some()) {
+            return None;
+        }
         let file = ruff_db::files::vendored_path_to_file(db, interface).ok()?;
         let definition = self.final_module_binding(file, function.name.as_str())?;
         let DefinitionKind::Function(declaration) = definition.kind(db) else {
@@ -195,27 +201,44 @@ impl Session {
         };
         let parsed = self.parsed(file);
         let stub = &declaration.node(&parsed).parameters;
-        let source = &function.parameters;
         if source.posonlyargs.len() != stub.posonlyargs.len()
             || source.args.len() != stub.args.len()
         {
             return None;
         }
         let model = SemanticModel::new(db, db.program_file(file));
-        let env = model.program_environment();
-        source
-            .posonlyargs
-            .iter()
-            .chain(&source.args)
+        positional
             .zip(stub.posonlyargs.iter().chain(&stub.args))
             .map(|(parameter, declared)| {
                 if parameter.name().as_str() != declared.name().as_str() {
                     return None;
                 }
-                let ty = annotation_type(db, &model, declared.annotation()?)?;
-                Self::scalar_layout(db, &env, ty, ScalarMatch::Exact)
+                Self::contract_layout(&model, declared.annotation()?, types)
             })
             .collect()
+    }
+
+    fn contract_layout(
+        model: &SemanticModel<'_>,
+        expression: &Expr,
+        types: &crate::types::Types,
+    ) -> Option<crate::ir::Type> {
+        use ty_python_semantic::types::Type;
+
+        let db = model.db();
+        let ty = annotation_type(db, model, expression)?;
+        let nested = |expr: &Expr| Self::contract_layout(model, expr, types).ok_or(());
+        match (ty, expression) {
+            (Type::Callable(_), Expr::Subscript(subscript)) => {
+                crate::frontend::callable_annotation(types, &subscript.slice, nested, |_| ()).ok()
+            }
+            (Type::Union(_), Expr::BinOp(union))
+                if union.op == ruff_python_ast::Operator::BitOr =>
+            {
+                crate::frontend::union_annotation(types, union, nested, || ()).ok()
+            }
+            _ => Self::scalar_layout(db, &model.program_environment(), ty, ScalarMatch::Exact),
+        }
     }
 
     pub(super) fn final_module_binding(&self, file: File, name: &str) -> Option<Definition<'_>> {

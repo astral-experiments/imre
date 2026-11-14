@@ -2480,9 +2480,9 @@ fn signature(
         }
     };
     let positional_contract = graph.modules[module]
-        .forwarder_stub()
-        .filter(|_| method.is_none() && defaults.forwarded.is_some())
-        .and_then(|stub| graph.session.positional_contract(stub, function));
+        .implementation_stub()
+        .filter(|_| method.is_none())
+        .and_then(|stub| graph.session.positional_contract(stub, function, types));
     let mut none_defaults = Vec::new();
     let mut document_parameters = Vec::new();
     for (index, parameter) in function.parameters.iter_non_variadic_params().enumerate() {
@@ -2839,6 +2839,52 @@ fn error(source: &str, node: &impl Ranged, message: &str) -> Failure {
 
 pub(crate) fn diagnostic_message(source: &str, node: &impl Ranged, message: &str) -> String {
     Diagnostic::at(source, node, message).to_string()
+}
+
+/// Lower a fixed callable after resolving the annotation in its defining scope.
+pub(crate) fn callable_annotation<E>(
+    types: &Types,
+    slice: &ast::Expr,
+    nested: impl Fn(&ast::Expr) -> StdResult<Type, E>,
+    invalid: impl Fn(&'static str) -> E,
+) -> StdResult<Type, E> {
+    let ast::Expr::Tuple(arguments) = slice else {
+        return Err(invalid(
+            "Callable requires an exact parameter list and return type",
+        ));
+    };
+    let [ast::Expr::List(parameters), returns] = arguments.elts.as_slice() else {
+        return Err(invalid(
+            "Callable requires Callable[[T, ...], R]; ellipsis is unsupported",
+        ));
+    };
+    let parameters = parameters
+        .elts
+        .iter()
+        .map(&nested)
+        .collect::<StdResult<Vec<_>, _>>()?;
+    Ok(types.callable(parameters, nested(returns)?))
+}
+
+/// Lower all union arms together; an intermediate pair can lack a fixed layout.
+pub(crate) fn union_annotation<E>(
+    types: &Types,
+    union: &ast::ExprBinOp,
+    nested: impl Fn(&ast::Expr) -> StdResult<Type, E>,
+    invalid: impl FnOnce() -> E,
+) -> StdResult<Type, E> {
+    let mut pending = vec![union.right.as_ref(), union.left.as_ref()];
+    let mut members = Vec::new();
+    while let Some(arm) = pending.pop() {
+        if let ast::Expr::BinOp(part) = arm
+            && part.op == ast::Operator::BitOr
+        {
+            pending.extend([part.right.as_ref(), part.left.as_ref()]);
+        } else {
+            members.push(nested(arm)?);
+        }
+    }
+    types.union(&members).ok_or_else(invalid)
 }
 
 fn annotation(
@@ -3306,26 +3352,9 @@ fn annotation_with_aliases(
                 Some(Binding::Intrinsic(Intrinsic::Callable))
             ) =>
         {
-            let ast::Expr::Tuple(arguments) = &*value.slice else {
-                return Err(diagnostic_message(
-                    source,
-                    expression,
-                    "Callable requires an exact parameter list and return type",
-                ));
-            };
-            let [ast::Expr::List(parameters), returns] = arguments.elts.as_slice() else {
-                return Err(diagnostic_message(
-                    source,
-                    expression,
-                    "Callable requires Callable[[T, ...], R]; ellipsis is unsupported",
-                ));
-            };
-            let parameters = parameters
-                .elts
-                .iter()
-                .map(nested)
-                .collect::<StdResult<Vec<_>, _>>()?;
-            Ok(types.callable(parameters, nested(returns)?))
+            callable_annotation(types, &value.slice, nested, |reason| {
+                diagnostic_message(source, expression, reason)
+            })
         }
         ast::Expr::Subscript(value)
             if graph.resolve_type(module, &value.value)
@@ -3522,20 +3551,7 @@ fn annotation_with_aliases(
             )),
         },
         ast::Expr::BinOp(union) if union.op == ast::Operator::BitOr => {
-            // Check the complete annotation before deciding whether its arms have a layout.
-            // An intermediate str | int alone has no general representation.
-            let mut pending = vec![union.right.as_ref(), union.left.as_ref()];
-            let mut members = Vec::new();
-            while let Some(arm) = pending.pop() {
-                if let ast::Expr::BinOp(part) = arm
-                    && part.op == ast::Operator::BitOr
-                {
-                    pending.extend([part.right.as_ref(), part.left.as_ref()]);
-                } else {
-                    members.push(nested(arm)?);
-                }
-            }
-            types.union(&members).ok_or_else(|| {
+            union_annotation(types, union, nested, || {
                 diagnostic_message(
                     source,
                     expression,

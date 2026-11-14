@@ -3088,8 +3088,8 @@ impl SourceModule {
     }
 
     /// The public stub for this private fixed implementation, after import selection.
-    pub(crate) fn forwarder_stub(&self) -> Option<&'static str> {
-        self.is_bundled(TEXTWRAP_WRAPPER)
+    pub(crate) fn implementation_stub(&self) -> Option<&'static str> {
+        (self.is_bundled(TEXTWRAP_WRAPPER) || self.is_bundled(TEXTWRAP_FUNCTIONS))
             .then_some("stdlib/textwrap.pyi")
     }
 
@@ -6487,7 +6487,12 @@ impl<'a> Loader<'a> {
             )),
             needs_textwrap(TEXTWRAP_FUNCTIONS).then_some((
                 TEXTWRAP_FUNCTIONS,
-                include_str!("../stdlib/textwrap/functions.py"),
+                concat!(
+                    // Preserve this module's namespace and the source lines shown in fixed frames.
+                    "\"\"\"Text wrapping functions compiled from CPython 3.14.5 Lib/textwrap.py (PSF-2.0).\"\"\"\n",
+                    "from typing import Callable\n\n\n",
+                    include_str!("../stdlib/textwrap/functions.py"),
+                ),
             )),
             needs_textwrap(TEXTWRAP_WRAPPER).then_some((
                 TEXTWRAP_WRAPPER,

@@ -450,6 +450,20 @@ run()
 }
 
 #[test]
+fn textwrap_indent_keeps_its_fixed_optional_predicate() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("main.py");
+    std::fs::write(
+        &path,
+        "from textwrap import indent\ndef blank(line: str) -> bool: return line.isspace()\n\
+         print(indent('x', '>'), indent(' ', '+', predicate=blank))\n",
+    )
+    .unwrap();
+    let program = compile_file(&path, None, &CompileOptions::default()).unwrap();
+    assert!(!program.source_inputs.boxed_imports);
+}
+
+#[test]
 fn an_escaping_bound_method_keeps_its_default_and_fixed_callable() {
     let project = tempfile::tempdir().unwrap();
     let path = project.path().join("capture.py");

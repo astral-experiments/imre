@@ -1,8 +1,4 @@
-"""Text wrapping functions compiled from CPython 3.14.5 Lib/textwrap.py (PSF-2.0)."""
-from typing import Callable
-
-
-def indent(text: str, prefix: str, predicate: Callable[[str], bool] | None = None) -> str:
+def indent(text, prefix, predicate=None):
     """Adds 'prefix' to the beginning of selected lines in 'text'.
 
     If 'predicate' is provided, 'prefix' will only be added to the lines
