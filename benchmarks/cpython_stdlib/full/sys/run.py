@@ -99,6 +99,8 @@ def select(toolchain, work, source, module):
          "sys.exception() returns the caught ValueError(42) instance"),
         ("ActiveExceptionTests", "test_sys_exception_with_exception_type", sys_fixture,
          "sys.exception() returns the instance created by raising the ValueError class"),
+        ("SysModuleTest", "test_recursionlimit_recovery", sys_fixture,
+         "nested recursive calls raise RecursionError twice at each configured limit"),
         ("SysModuleTest", "test_no_duplicates_in_meta_path", sys_fixture,
          "sys.meta_path contains distinct finder objects"),
     ]:
